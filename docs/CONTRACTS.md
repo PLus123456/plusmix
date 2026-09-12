@@ -1,0 +1,256 @@
+# SwitcherContracts 契约（P1 冻结）
+
+代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
+测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
+
+**改契约的规矩**：任何公开类型、JSON 字段名、测试图案布局、C 结构布局的改动，先在 `docs/contract-changes/` 写提案，用户批了才改（铁律 1）。
+加 case / 加字段也算改（下游的 switch 和快照测试会红）。只有文档注释和实现细节（不改公开签名与 JSON）可以直接改。
+
+---
+
+## 1. 术语 → 标识符（设计方案 §1.1）
+
+| 术语 | 标识符 | 备注 |
+|---|---|---|
+| Input（输入） | `InputConfig`（配置）/ `Input` 协议（运行对象）/ `InputKind` / `InputSource` | 编号从 1 起，`MixerState.noInput = 0` 表示黑场 |
+| Program / PGM | `MixerState.program`（输入编号） | |
+| Preview / PVW | `MixerState.preview` | |
+| Transition（转场） | `TransitionType` {cut, fade, wipe, zoom, stinger}、`TransitionState` | 只在拍点边界发生；Cut 无中间态 |
+| T-bar | `Command.tbar(progress:)`、`TransitionSource.tbar` | |
+| FTB | `FadeToBlack`（`MixerState.ftb`）、`Command.ftb(on:)` | |
+| Overlay 1–4 | `OverlayState`（`MixerState.overlays`，恰好 4 个）、`Command.overlay(channel:on:input:)` | channel 1–4 |
+| Bus（音频总线） | `Bus` {master, busA, busB, headphones}、`BusState`、`BusRouting` | |
+| Output（输出） | `OutputState`、`OutputKind` {record, stream, ndi, externalDisplay, virtualCamera, multiview} | 编号从 1 起 |
+| Tally | `Tally {program, preview}`、`MixerState.tally(ofInput:)` | 全系统只算这一处 |
+| Show（节目文件） | `Show`（schemaVersion = 1） | |
+| Tick | `Tick`（Int64）、`TickClockSpec` | |
+
+---
+
+## 2. 类型总表：是什么、谁写、谁读、线程归属
+
+"写"= 产生 / 修改；"读"= 消费。线程：**渲染** = 渲染线程（每拍零分配）、**音频** = 音频实时回调（无锁无分配无 ARC，C）、**输入** = 各输入自己的线程、**状态机** = 持有状态的 actor、**普通** = 任意非实时线程。
+
+### 2.1 时间（Time.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `MachTimebase` | mach 时基 numer/denom；`HostClock.timebase` 进程内读一次 | HostClock | 所有换算 | 任意 |
+| `HostTime` | mach_absolute_time 的 tick 数，唯一的时间戳类型（铁律 5） | 入口打戳的人 | 所有人 | 任意，值类型 |
+| `HostDuration` | 有符号的 tick 差；`HostTime - HostTime` | 同上 | 同上 | 任意 |
+| `Rational` | 整数分子分母，永远约分、分母为正 | — | 时钟、帧率 | 任意 |
+| `FrameRate` | 每秒帧数的 Rational；预设 24/25/29.97/30/50/59.94/60；`nominalFramesPerSecond` 四舍五入（59.94 → 60） | 配置 | 时钟、合成源、闪光节奏 | 任意 |
+| `Tick` | 拍序号 Int64，第 0 拍在 t0，可为负 | 时钟（W1-B） | 状态机、脚本、Stats | 任意 |
+| `TickClockSpec` | {t0, frameDuration}；`time(of:)`、`tick(at:)`、`duration(ofTicks:)` 全是 128 位整数运算 | 引擎启动时 | 时钟、编码 PTS、合成源 | 任意 |
+
+拍点数学：`time(of: n) = t0 + floor(n × p × 10⁹ × denom / (q × numer))`，一次乘除，不累加；`tick(at:)` 是它的严格逆（最大的 n 使 time(of: n) ≤ t）。测试证明 59.94 fps 第 216000 拍误差 0、浮点累加 1 h 差 7 ns / 8 h 差 1.3 µs。
+
+### 2.2 视频（Video.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `PixelFormat` | {nv12, bgra, uyvy} ↔ CoreVideo 类型（nv12 按 range 分 '420v'/'420f'） | 输入 | 渲染、编码 | 任意 |
+| `ColorInfo` | {primaries, transfer, matrix, range}；默认 `.bt709Limited`（引擎输出永远是它，V9） | 输入 | 渲染、编码 | 任意 |
+| `RGB8` / `YCbCr` | 8-bit RGB / BT.709 limited YCbCr 实数；调色板、抠像键色 | 配置、图案 | 图案解码 | 任意 |
+| `Frame` | {pixelBuffer, pts, duration, color, inputNumber, sequence, ingressTime}；`@unchecked Sendable`：push 之后像素只读，池回收靠引用计数 | 输入线程 | 渲染（挑帧）、编码（PGM 帧 inputNumber = 0） | 输入 → 渲染 → 消费者 |
+| `ProgramFormat` | {width, height, frameRate}；预设 1080p60 / 1080p59.94 / 1080p30 / 720p60 / 2160p30 | Show / 命令 | 引擎、渲染、编码 | 任意 |
+
+`Frame.pts` = 采集时刻换算成 host time（挑帧比它）；`ingressTime` = 进帧槽那一刻（L1 = 编码器入口 − ingressTime）。
+
+### 2.3 帧槽与音频环（Slots.swift + sw_audio_ring.h）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `FrameSlot` 协议 | 每路一个，容量 2–3；`push` / `latest(atOrBefore:)` / `stats`。实现在 SwitcherEngine（W1-B） | 输入线程 push | 渲染线程 latest | SPSC，无锁零分配 |
+| `FrameSlotStats` | pushed / consumed / dropped / reused，累计 | 帧槽 | Stats.per_input、测试 | 原子读 |
+| `AudioRing` 协议 | 每路一个 SPSC 环，float32 非交错 48 kHz，每块带 host time；`write` / `read` / `availableFrames` / `stats` / `raw`。实现在 SwitcherAudio（W1-D，C） | 输入线程 write | 混音回调经 `raw` 直接读 | SPSC，无锁零分配 |
+| `sw_audio_ring`（C） | 环头布局，256 字节，layout_version 1；生产者计数在偏移 128、消费者计数在 192（各占一条缓存线） | W1-D 的实现 | 混音 C 热路径、Swift 包装 | 音频 |
+| `AudioFormat` | sampleRate 48000、maxChannels 8、defaultBlockFrames 256 | — | 所有音频代码 | — |
+
+帧槽统计口径（V4 的依据）：`consumed` = latest 返回了帧的次数；`reused` = 返回的是上次同一帧的次数（30 进 60 → reused/consumed = 50%，设计内）；`dropped` = 从未被返回就被淘汰的帧数（槽满被挤、或被更新帧跳过）。
+`sw_audio_ring` 的偏移由 `layout.c` 的 `_Static_assert` 和 `LayoutTests` 双重钉死；改布局要升 `SW_AUDIO_RING_LAYOUT_VERSION`。
+**注入规则**：输入实现不 new 帧槽 / 环（Inputs 包看不到 SwitcherAudio），init 接收 `any FrameSlot` / `any AudioRing`，由组装方（headless / App / 测试）创建。
+
+### 2.4 输入（Input.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `InputKind` | {camera, decklink, screen, file, image, ndi, audio, synthetic} | 由 `InputSource` 推出 | UI、引擎 | — |
+| `InputState` | {live, noSignal, error(message:)}；未 start / 已 stop = noSignal | 输入线程 | UI、引擎 | 实现保证原子 |
+| `InputSource` | 每种 kind 的来源参数（设备 ID、路径、屏幕目标、NDI 源名、合成源设置） | Show / addInput | 输入实现 | 普通 |
+| `SyntheticSourceSettings` | 合成源：帧率、尺寸、底色、patternID、抖动、丢帧、时钟漂移、音频及其漂移 | Show / 脚本 | TestKit（W1-A） | 普通 |
+| `InputSettings` | {crop, transform, audio: `InputAudioSettings`, effects 占位, keyer 占位}；`clamped()` 钳范围 | 状态机（setInputSettings） | 渲染（crop/transform/keyer）、混音（audio） | 从快照读 |
+| `InputAudioSettings` | {routing: `BusRouting`, gainDb, muted, solo, pan, delayMs 0–500} | 同上 | 混音（W2-E 转成 C 参数） | 从快照读 |
+| `InputConfig` | {number, name, source, settings}；`MixerState.inputs` 和 `Show.inputs` 的元素 | 状态机 | 所有人 | 值类型 |
+| `Input` 协议 | 运行对象：number / name / kind / state / videoSlot / audioRing / start / stop | 输入实现 | 引擎、UI | start/stop 普通线程 |
+
+每路输入的音频参数只存一份，在 `inputs[i].settings.audio`（prompt 里的 "audio.perInput"）；`AudioState` 里只有总线、AFV、监听。
+
+### 2.5 状态（MixerState.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `MixerState` | 不可变快照：format, inputs, program, preview, transition, ftb, overlays[4], audio, outputs；`validate()`、`tally(ofInput:)`、`tallies` | 状态机（reduce / advance） | 渲染（每拍一次）、音频、UI、API、录制 | 值类型；经 `MixerSnapshot` 发布 |
+| `MixerSnapshot` | final class {state, sequence, tick}，不可变；状态机用原子指针交换发布 | 状态机 | 渲染、音频、控制 | 读方只 retain，不进 actor |
+| `TransitionState` | {type, durationTicks, progress 0–1, source auto/tbar, startTick, wipe, stinger}；空闲时 type/duration 就是"下一次转场"的选择 | 状态机 | 渲染 | — |
+| `FadeToBlack` | {on 目标, durationTicks, level 当前黑比例, startTick} | 状态机 | 渲染、音频（可选淡出 Master） | — |
+| `OverlayState` | {input?, on 目标, rect, animProgress 0–1, animation, startTick}；`isVisible` | 状态机 | 渲染 | — |
+| `AudioState` | {buses[4] 顺序 = Bus.allCases, afv, monitorMode} | 状态机 | 混音、UI | — |
+| `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`} | 状态机 | 输出实现、UI | — |
+| `OutputSettings` | {source, video?, audio?, record?, stream?, extra 占位} | Show / 命令 | 编码、录制、推流 | — |
+| `Tally` | {program, preview}，由快照推导 | 契约代码 | UI、API、多画面、外部 tally | — |
+
+progress 的意义：新画面（= preview 输入）盖在旧画面上的比例。auto 转场第 s 拍应用命令，第 s + k 拍 progress = k / durationTicks，到 1 时状态机对调 program/preview 并回空闲（W1-B）。运行时统计（帧数、丢帧、码率）**不在** OutputState 里，在 Stats（铁律 4）。
+
+### 2.6 命令（Command.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `Command` | 枚举，27 个 case（对照见 §8）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}` | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
+| `IssuedCommand` | {sequence, issuedAt, command}：命令总线（W2-C）加信封 | 命令总线 | 状态机（按 sequence 严格顺序） | 普通 |
+| `CommandReceipt` | {sequence, appliedTick} | 状态机 | 总线、API | 普通 |
+| `MixerReducing` 协议 | `reduce(state, command, at tick)`、`advance(state, to tick)`，纯函数，实现在 W1-B | W1-B | 状态机、Control 的测试 | 纯函数 |
+
+### 2.7 统计（Stats.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop}, encoder[{skipped,bitrate}], audio{dropouts,underruns}, rss_mb, cpu_pct, gpu_pct | 引擎每秒汇总一次（W1-B），写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
+
+口径：`render_ms` = 窗口内"拍点时刻 → GPU 完成"平均 ms（V1）；`jitter_ms` = 窗口内 |派发时刻 − 理想拍点| 最大值（V3）；计数类（missed_render, dup, drop, skipped, dropouts, underruns）全是自启动累计，相邻两行相减得窗口增量；`fps` = 窗口内该输入 push 帧数 / 秒；`bitrate` = 窗口平均 bit/s；`ts` = Unix 秒。`Stats.jsonLine()` / `parse(line:)` 是唯一的编解码入口。
+
+### 2.8 文件与脚本（Show.swift、Scenario.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 |
+|---|---|---|---|
+| `Show` | {schemaVersion = 1, name, inputs, mixer: `MixerSettings`, audio, outputs, layout: `ShowLayout`}；`save()` / `load(from:)` / `migrate(from:schemaVersion:)` 占位 | App、命令 loadShow | 引擎启动、App |
+| `MixerSettings` | Show 里的切换部分 = MixerState 去掉 inputs/audio/outputs | `Show(name:state:)` | `makeState()` |
+| `ShowLayout` | 界面布局，`[String: JSONValue]` 原样存取，契约不解释 | App（W2-B / W3-E） | App |
+| `Scenario` | {durationTicks, events: [{tick, command}]}；`sortedEvents` | 测试脚本 | ScenarioRunner（W1-A） |
+| `JSONValue` | 占位字段用的通用 JSON | — | — |
+
+`Show ↔ MixerState`：`Show(name:state:layout:)` 和 `show.makeState()`；makeState 清瞬态（进度、startTick），目标值直接到位。
+
+### 2.9 渲染协议草案（Render.swift）见 §7。
+
+### 2.10 测试工装（TestPattern.swift、TestSignal.swift）见 §4、§5。
+
+---
+
+## 3. 关键口径速查
+
+- **时间戳**：只有 host time。所有帧、音频块入口换算；编码 PTS = 拍点时刻 `RenderedFrame.tickTime`（决策 10）。
+- **挑帧**：渲染线程每拍对每路 `latest(atOrBefore: 拍点时刻)`，30 进 60 自然重复、59.94 进 60 每 1000 拍重复一次，没有别的机制。
+- **切换**：`reduce` 只在拍点边界应用；Cut 原子换号。每拍先 `advance` 再 `reduce` 该拍命令，命令按 sequence 严格顺序。
+- **音频块**：`AudioRing.write` 的 hostTime 是块首帧时刻；混音输出块的首样本 host time 作音频 PTS，与视频同一时基。
+- **编号**：输入 / 输出编号从 1 起，0 = 无；overlay channel 1–4；`Bus.rawValue` = `AudioState.buses` 下标。
+- **范围**：tbar/progress 0–1；pan −1…1；gainDb −96…+24；delayMs 0–500；crop 各边 0–1 且对边之和 ≤ 1（`InputSettings.clamped()`）。
+- **无信号**：`InputState.noSignal`，帧槽保留最后一帧；渲染不阻塞。
+
+---
+
+## 4. 测试图案 `TestPattern`（CPU 参考实现，BGRA 与 NV12 都能写能读）
+
+以 1920×1080 定义，其他尺寸每个坐标按 `v × width / 1920` 向下取偶（`Geometry`；4:2:0 色度永远对齐）。
+
+| 元素 | 位置（1080p） | 编码 |
+|---|---|---|
+| 行 1 帧号 | y = 16，x = 16 起 32 个 32×32 块 | 32 位码字 = 28 位数据 ≪ 4 ∣ CRC-4；块 0（最左）= 最高位；白 = 1 |
+| 行 2 时间戳 | y = 64，同上 | 生成时 host time 的毫秒 mod 2²⁸ |
+| 输入 ID | (16, 112) 64×64 纯色 | 16 色 `palette[inputID]`，两两 BT.709 limited YCbCr 距离 ≥ 48（实测最小 56.6），不含纯黑、纯白和任何灰 |
+| 闪光 | 右上 (1840, 16) 64×64 | `isFlashTick`: tick % 整数帧率 == 0 → 全白，否则全黑（59.94 → 每 60 拍 = 1.001 s） |
+| 底色 | 其余 | `.gray(level)`（full-range RGB 电平；V7 用 64/192，NV12 写成 limited Y 71/181）或 `.gradient` |
+
+解码：每块取中心一半区域（1080p 下 16×16）均值，limited Y > 128 记 1；CRC 不对返回 nil；输入 ID 取最近调色板色，距离 > 24 返回 nil；全黑 / 全白 / 纯灰画面三项都是 nil。
+CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`）。任意单块翻转都能发现；全 0 / 全 1 码字都无效。
+
+**与测试标准 §2.1 的唯一偏离**：帧号 16 块 12 位 → 32 块 28 位。12 位 68 秒回绕，8 小时长稳会歧义；28 位 60 fps 下 51 天。这是 P1 唯一允许偏离测试标准的地方（落地方案 §1.3 第 4 条）。
+
+测试证明：码字层 10 万随机值往返恒等；单块翻转 5000 × 32 位全部捕获；图像层 1080p BGRA 1500 帧 + NV12 600 帧 + 720p/2160p/640×360/1366×768 各 100 帧往返恒等；高斯模糊 σ = 1.5 + 4:2:0 + ±10 噪声后 60 帧 100% 正确。
+
+## 5. 合成音频 `TestSignal`
+
+1 kHz 正弦 −20 dBFS（峰值 0.1）；第 k 个 click 落在 host time t0 + k × clickPeriod（clickPeriod = `TestPattern.flashPeriod(frameRate:)`，与闪光共用 t0），持续 48 样本（1 ms），窗口内样本置 +1.0（满幅，不与正弦相加）。
+采样率漂移：样本 i 的 host time = t0 + i / (48000 × (1 + ppm/10⁶))；click 样本序号 = round(k × period × 有效采样率)。
+`render(into:frameCount:startingAt:)` 无状态，任意分块结果相同；`sampleIndex(at:)` 给合成源算"现在该产到第几个样本"。
+
+---
+
+## 6. 线程规则检查表（复审时逐条对，来源设计方案 §3.2、§3.5）
+
+| # | 规则 | 契约里怎么落 | 谁负责证明 |
+|---|---|---|---|
+| T1 | 渲染线程每帧零分配 | `Renderer.render` 只收值类型 / 预分配的 `RenderInputTable` / `MixerSnapshot` 引用；无闭包参数 | W1-C（Instruments 10 s 0 分配） |
+| T2 | 渲染线程不等 drawable | `Renderer` 只画离屏纹理；显示由 `MetalDisplayView` 的 displayLink 自己 blit | W1-C |
+| T3 | CPU 领先 GPU ≤ 2 帧 | `render` 返回 `.skipped` 时引擎记 missed_render，不阻塞 | W1-C / W1-B |
+| T4 | 音频回调无锁无分配无日志无系统调用无 ARC | 混音只碰 `sw_audio_ring` 裸指针与 C 参数；Swift `AudioRing` 协议只在写端 / 离线工装用 | W1-D（check-rt-symbols） |
+| T5 | 跨线程只用 SPSC 环与原子量 | `FrameSlot` / `AudioRing` 都是 SPSC；统计结构是原子读的快照 | W1-B / W1-D |
+| T6 | 状态只读快照，靠原子指针交换 | `MixerSnapshot` 不可变 final class；渲染 / 音频线程不进 actor | W1-B |
+| T7 | 消费者不拖渲染线程 | `FrameConsumer.consume` 必须立即返回，自己的有界队列满了丢自己的 | W1-E |
+| T8 | 入口打 host time 戳 | `Frame.pts` / `ingressTime`、`AudioRing.write(hostTime:)` | 每个输入会话 |
+| T9 | 编码 PTS 用拍点时刻 | `RenderedFrame.tickTime` | W1-E |
+| T10 | 统计只有一份 | 所有数字进 `Stats`，UI / API / 测试读它 | 所有会话 |
+
+---
+
+## 7. Renderer 与 FrameConsumer 协议草案
+
+每拍调用链（引擎 W1-B 驱动）：
+
+```
+时钟到期 tick n（拍点时刻 t_n）
+  → 引擎读最新 MixerSnapshot（原子指针）
+  → 引擎对每路输入 videoSlot.latest(atOrBefore: t_n) 填进 RenderInputTable（预分配，下标 = 输入编号）
+  → renderer.render(tick: n, at: t_n, snapshot:, inputs:) -> .submitted | .skipped
+       渲染线程内，零分配；按 §5 顺序：PGM 底 → 转场混合 → Overlay 1→4 → FTB → PVW → 多画面 → RGB→NV12 写 IOSurface
+  → GPU 完成回调：sink.renderer(_, didComplete: RenderedFrame{tick, tickTime, program(NV12, pts = t_n), preview?, multiview?, submitTime, gpuStart, gpuEnd})
+  → 引擎（RenderSink）：更新 Stats（render_ms、jitter）→ 对每个 FrameConsumer 调 consume(frame)（立即返回，各自入队）
+```
+
+- `Renderer`：`sink`（设置一次）、`prepare(format:maxInputs:)`（建池，允许分配）、`render(...)`、`shutdown()`。W1-C 实现；与 W1-B 有分歧写进各自报告。
+- `RenderSink`：引擎实现；在 GPU 回调线程被调，只做派发和统计。
+- `FrameConsumer`：`consumerName`、`consume(_:)`。W1-E 的编码器 / 录制器实现；每个消费者自己的线程和有界队列（深度 2–3），满了丢最旧并 `Stats.encoder[i].skipped += 1`。
+- `RenderedFrame.renderMs` = gpuEnd − tickTime（V1 口径）。
+- 显示窗口不走 FrameConsumer：`MetalDisplayView` 直接从渲染器拿"最新完成的纹理"。
+
+---
+
+## 8. Command ↔ 设计方案 §9.1
+
+| §9.1 | 契约 case | 备注 |
+|---|---|---|
+| cut | `.cut` | PGM/PVW 原子对调 |
+| fade(duration) | `.fade(durationTicks:)` | = setTransition(.fade, d) + autoTransition |
+| — | `.setTransition(type:durationTicks:)`、`.autoTransition` | 加的：Wipe/Zoom/Stinger 和 T-bar 需要"选类型"与"开始"分开 |
+| setPreview(input) | `.setPreview(input:)` | |
+| setProgram(input) | `.setProgram(input:)` | 硬切 PGM，PVW 不变 |
+| tbar(progress) | `.tbar(progress:)` | 到 1 提交 |
+| ftb | `.ftb(on:)` | 显式开关，脚本可重放 |
+| overlay(n, on, input) | `.overlay(channel:on:input:)` | input nil = 不换输入 |
+| — | `.setOverlay(channel:rect:animation:)` | 加的：W3-B 位置 / 动画 |
+| audioGain(input, dB) | `.audioGain(input:dB:)` | |
+| mute | `.mute(input:on:)` | |
+| — | `.busGain(bus:dB:)`、`.busMute(bus:on:)`、`.setAFV(on:)` | 加的：Master 推子（W2-B）、AFV 开关 |
+| startRecord / stopRecord | `.startRecord(output:)` / `.stopRecord(output:)` | output = 录制输出编号；ISO = 同一拍发多条 |
+| startStream(dest) / stopStream | `.startStream(output:)` / `.stopStream(output:)` | dest = 编号为 output 的 stream 输出，url/key 在其设置里 |
+| setInputSetting(...) | `.setInputSettings(input:settings:)` | 整体替换，reducer 先 clamped() |
+| — | `.renameInput(input:name:)` | 加的 |
+| addInput / removeInput | `.addInput(config:)` / `.removeInput(input:)` | |
+| — | `.addOutput(config:)` / `.removeOutput(output:)` / `.setOutputSettings(output:settings:)` | 加的：输出表要能改 |
+| loadShow | `.loadShow(show:)` | 整体替换状态 |
+
+每条命令在总线上加信封 `IssuedCommand{sequence, issuedAt}`（prompt 的"每条命令带 sequence 和 issuedAt"）；`Scenario` 和 HTTP API 只有 `Command`。
+
+---
+
+## 9. 与 prompt / 设计方案的偏离（G1 复审请逐条看）
+
+1. **Command 与信封分离**：`Command` 是纯操作枚举，`IssuedCommand` 带 sequence / issuedAt。原因：场景脚本和 API 请求里没有 host time；reduce 签名按 prompt 收 `Command`。
+2. **MixerState 多了 `format` 和 `inputs`**：addInput / removeInput / setInputSettings 要能在 reduce 里落地，渲染每拍要读裁切变换。相应地 `Show.mixer` 只是切换部分（`MixerSettings`），避免 inputs/audio/outputs 在 Show 里存两份。
+3. **每路输入音频参数存在 `InputSettings.audio`**，`AudioState` 没有 perInput（只存一份）。
+4. **`ftb` 是结构不是 Bool**：`FadeToBlack{on, durationTicks, level}`，因为 §5 第 4 步是"乘一个黑色比例"，需要进度。
+5. **命令比 §9.1 多 8 个**（setTransition、autoTransition、setOverlay、busGain、busMute、setAFV、renameInput、addOutput/removeOutput/setOutputSettings）：都是 W2/W3 prompt 里已经写明要做的事，现在加进去避免五个分支各自提案。
+6. **`InputState.error(message:)` 带标签**、`ColorInfo` 多了 `matrix`：JSON 可读性 / 601 摄像头。
+7. **`RGB8`、`ShowLayout` 的命名**：`RGBColor` 与 ApplicationServices（QuickDraw）的同名类型冲突，`Layout` 与 SwiftUI 冲突，改名避开。
+8. **C 结构不用 `_Alignas(64)`**：Swift 不导入过度对齐的结构；用显式 padding，分配方负责 64 字节对齐。
+9. **Stats.render_ms / jitter_ms 是窗口平均 / 窗口最大值**（一个数），每帧 p99 由 W1-C 在测试内直接测。
