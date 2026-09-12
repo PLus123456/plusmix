@@ -19,6 +19,7 @@
 //   TestSignal.swift  合成音频信号（CPU 参考实现）
 //   JSONValue.swift   占位字段用的通用 JSON 值
 //   Version.swift     产品版本号（G5 改）
+//   C/                CSwitcherContracts target：sw_audio_ring.h（音频环布局）+ layout.c（布局断言）
 
 /// C 侧布局随 SwitcherContracts 一起导出：`import SwitcherContracts` 就能看到 `sw_audio_ring`。
 @_exported import CSwitcherContracts

@@ -1,6 +1,6 @@
 # SwitcherContracts 契约（P1 冻结）
 
-代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/CSwitcherContracts/include/sw_audio_ring.h`（C 布局）。
+代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
 
 **改契约的规矩**：任何公开类型、JSON 字段名、测试图案布局、C 结构布局的改动，先在 `docs/contract-changes/` 写提案，用户批了才改（铁律 1）。

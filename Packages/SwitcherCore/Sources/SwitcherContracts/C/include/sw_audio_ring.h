@@ -21,7 +21,7 @@
 //      用显式 padding 而不是 _Alignas(64)：Swift 不导入过度对齐的 C 结构（"record is over aligned"，P1 实测）。
 //      结构自然对齐是 8；实现分配时必须自己保证 64 字节对齐（posix_memalign 或 allocate(byteCount:alignment: 64)）。
 //   6. 任何字段的增删、顺序、对齐改动都是契约变更：改 SW_AUDIO_RING_LAYOUT_VERSION，并走 docs/contract-changes/。
-//      Sources/CSwitcherContracts/layout.c 里的 _Static_assert 和 SwitcherContractsTests 各自钉死 offset。
+//      Sources/SwitcherContracts/C/layout.c 里的 _Static_assert 和 SwitcherContractsTests 各自钉死 offset。
 #ifndef SW_AUDIO_RING_H
 #define SW_AUDIO_RING_H
 
