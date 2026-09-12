@@ -1,0 +1,37 @@
+# ---- Xcode ----
+# Switcher.xcodeproj 由 `make gen`（XcodeGen）生成，不入库
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.xcresult
+DerivedData/
+build/
+
+# ---- SwiftPM ----
+.build/
+.swiftpm/
+*.swiftpm
+Package.pins
+.netrc
+
+# ---- 运行产物 ----
+# stats.jsonl 之类的采集数据只留在本机，报告里写路径即可
+reports/*.jsonl
+reports/**/*.jsonl
+*.trace
+# 录制文件不入库；Tests/Fixtures 下 ≤ 5 MB 的小样例除外（W1-A、W1-E 产出）
+*.mov
+!Tests/Fixtures/**/*.mov
+!Packages/*/Tests/Fixtures/**/*.mov
+*.mp4
+!Tests/Fixtures/**/*.mp4
+!Packages/*/Tests/Fixtures/**/*.mp4
+
+# ---- 系统 / 编辑器 ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
