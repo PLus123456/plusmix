@@ -3,6 +3,7 @@
 
 /// 一拍渲染完成的产物。`program` 是 NV12（BT.709 limited）IOSurface 背后的 CVPixelBuffer，pts = 拍点时刻（决策 10）。
 public struct RenderedFrame: Sendable {
+    /// 哪一拍。
     public let tick: Tick
     /// 这一拍的理想拍点时刻；编码 PTS 用它。
     public let tickTime: HostTime
@@ -10,11 +11,13 @@ public struct RenderedFrame: Sendable {
     public let program: Frame
     /// PVW / 多画面，第一版可为 nil（外部显示与 NDI 用得着时再填）。
     public let preview: Frame?
+    /// 多画面。
     public let multiview: Frame?
     /// 命令缓冲区提交时刻。
     public let submitTime: HostTime
     /// GPU 开始 / 结束时刻（MTLCommandBuffer 的 GPUStartTime / GPUEndTime 换算成 host time）。
     public let gpuStart: HostTime
+    /// GPU 结束时刻。
     public let gpuEnd: HostTime
 
     public init(tick: Tick, tickTime: HostTime, program: Frame, preview: Frame? = nil, multiview: Frame? = nil,
@@ -36,6 +39,7 @@ public struct RenderedFrame: Sendable {
 /// 引擎每拍为渲染器准备的输入帧表：下标 = 输入编号。引擎拥有，容量在启动时定，之后每拍复用，零分配。
 /// 引擎在调 `render` 前填好，渲染器只在 `render` 里读；`render` 返回后内容可能被覆盖，渲染器要留的东西自己 retain。
 public final class RenderInputTable {
+    /// 容量 = 最大输入编号 + 1。
     public let capacity: Int
     private var frames: [Frame?]
 
@@ -44,6 +48,7 @@ public final class RenderInputTable {
         frames = Array(repeating: nil, count: capacity)
     }
 
+    /// 按输入编号读写；越界读返回 nil，越界写是编程错误。
     public subscript(inputNumber number: Int) -> Frame? {
         get { (number >= 0 && number < capacity) ? frames[number] : nil }
         set {

@@ -12,12 +12,14 @@ public enum TransitionSource: String, Codable, Sendable {
     case auto, tbar
 }
 
+/// Wipe 的方向。
 public enum WipeDirection: String, Codable, Sendable {
     case leftToRight, rightToLeft, topToBottom, bottomToTop, diagonal
 }
 
 /// Wipe 参数（W3-B 用）。
 public struct WipeParams: Hashable, Codable, Sendable {
+    /// 擦除方向。
     public var direction: WipeDirection
     /// 软边宽度，占画面的比例 0–1。
     public var softness: Double
@@ -29,7 +31,9 @@ public struct WipeParams: Hashable, Codable, Sendable {
 
 /// Stinger 参数（W3-B 用）：带 alpha 的输入叠上去，在它的第 cutAtTick 拍换底。
 public struct StingerParams: Hashable, Codable, Sendable {
+    /// 作 stinger 的输入（带 alpha 的文件 / 图片）；nil = 未设置。
     public var input: Int?
+    /// 在 stinger 的第几拍换底。
     public var cutAtTick: Int
     public init(input: Int? = nil, cutAtTick: Int = 0) {
         self.input = input
@@ -45,13 +49,19 @@ public struct StingerParams: Hashable, Codable, Sendable {
 /// - tbar：progress 直接等于推杆位置；推到 1 提交（对调 + 回到 0）。
 /// 渲染器只看 `progress` 和 `type`；Cut 没有中间态（durationTicks 对它无意义）。
 public struct TransitionState: Hashable, Codable, Sendable {
+    /// 转场类型。
     public var type: TransitionType
+    /// 转场时长（拍）。
     public var durationTicks: Int
+    /// 进度 0–1，含义见类型说明。
     public var progress: Double
+    /// 进度由谁推。
     public var source: TransitionSource
     /// auto 转场开始的那一拍（应用命令的拍）；空闲或 tbar 为 nil。
     public var startTick: Tick?
+    /// Wipe 参数。
     public var wipe: WipeParams
+    /// Stinger 参数。
     public var stinger: StingerParams
 
     public init(type: TransitionType = .fade, durationTicks: Int = 30, progress: Double = 0, source: TransitionSource = .auto,
@@ -71,8 +81,11 @@ public struct TransitionState: Hashable, Codable, Sendable {
 
 /// FTB（§1.1）。`on` 是目标，`level` 是当前黑的比例（渲染器乘 1 − level）；状态机每拍把 level 向目标推 1 / durationTicks。
 public struct FadeToBlack: Hashable, Codable, Sendable {
+    /// 目标：是否黑。
     public var on: Bool
+    /// 淡入 / 淡出黑的时长（拍）。
     public var durationTicks: Int
+    /// 当前黑的比例 0–1。
     public var level: Double
     /// 最近一次 on 变化的拍；空闲为 nil。
     public var startTick: Tick?
@@ -88,9 +101,13 @@ public struct FadeToBlack: Hashable, Codable, Sendable {
 
 /// 节目画面里的位置尺寸，全部是 0–1 的比例（原点左上）。
 public struct NormalizedRect: Hashable, Codable, Sendable {
+    /// 左上 x（占宽比例）。
     public var x: Double
+    /// 左上 y（占高比例）。
     public var y: Double
+    /// 宽（占宽比例）。
     public var width: Double
+    /// 高（占高比例）。
     public var height: Double
     public init(x: Double, y: Double, width: Double, height: Double) {
         self.x = x
@@ -98,18 +115,22 @@ public struct NormalizedRect: Hashable, Codable, Sendable {
         self.width = width
         self.height = height
     }
+    /// 整个画面。
     public static let full = NormalizedRect(x: 0, y: 0, width: 1, height: 1)
     /// 画中画默认位置：右下 1/4（V8 的固定状态用它）。
     public static let bottomRightQuarter = NormalizedRect(x: 0.5, y: 0.5, width: 0.5, height: 0.5)
 }
 
+/// 叠加进出动画的方式。
 public enum OverlayAnimationKind: String, Codable, Sendable {
     case cut, fade, slide, zoom
 }
 
 /// 叠加通道的进出动画（W3-B 细化）。durationTicks = 0 等于 cut。
 public struct OverlayAnimation: Hashable, Codable, Sendable {
+    /// 动画方式。
     public var kind: OverlayAnimationKind
+    /// 动画时长（拍）；0 = cut。
     public var durationTicks: Int
     public init(kind: OverlayAnimationKind = .cut, durationTicks: Int = 0) {
         self.kind = kind
@@ -122,9 +143,13 @@ public struct OverlayAnimation: Hashable, Codable, Sendable {
 public struct OverlayState: Hashable, Codable, Sendable {
     /// 叠在上面的输入；nil = 该通道没有指定输入。
     public var input: Int?
+    /// 目标：是否显示。
     public var on: Bool
+    /// 位置尺寸。
     public var rect: NormalizedRect
+    /// 当前显示比例 0–1。
     public var animProgress: Double
+    /// 进出动画。
     public var animation: OverlayAnimation
     /// 最近一次 on 变化的拍；空闲为 nil。
     public var startTick: Tick?
@@ -150,9 +175,13 @@ public enum Bus: Int, Codable, Sendable, CaseIterable {
     case master = 0, busA, busB, headphones
 }
 
+/// 一条总线的状态。
 public struct BusState: Hashable, Codable, Sendable {
+    /// 哪条总线。
     public var bus: Bus
+    /// 总线增益（dB）。
     public var gainDb: Double
+    /// 总线静音。
     public var muted: Bool
     /// 总线效果链占位（ParametricEQ / DynamicsProcessor / PeakLimiter）。
     public var effects: [EffectSlot]
@@ -175,6 +204,7 @@ public struct AudioState: Hashable, Codable, Sendable {
     public var buses: [BusState]
     /// 音频跟随视频：转场时相关输入交叉淡变，长度 = 转场时长，起点同一拍（§7）。
     public var afv: Bool
+    /// 耳机监听方式。
     public var monitorMode: MonitorMode
 
     public init(buses: [BusState] = Bus.allCases.map { BusState(bus: $0) }, afv: Bool = false, monitorMode: MonitorMode = .afl) {
@@ -199,20 +229,27 @@ public enum OutputSource: Hashable, Codable, Sendable {
     case input(number: Int)
 }
 
+/// 视频编码器。ProRes 走硬件。
 public enum VideoCodec: String, Codable, Sendable {
     case h264, hevc, prores422, prores422HQ, prores4444
 }
 
+/// 音频编码器。
 public enum AudioCodec: String, Codable, Sendable {
     case aac, pcm
 }
 
 /// 视频编码参数（设计方案 §8 编码行）。width / height nil = 节目分辨率。
 public struct VideoEncodeSettings: Hashable, Codable, Sendable {
+    /// 编码器。
     public var codec: VideoCodec
+    /// 目标码率（bit/s）。
     public var bitrateBps: Int
+    /// 关键帧间隔（帧）。
     public var keyframeIntervalFrames: Int
+    /// 输出宽；nil = 节目宽。
     public var width: Int?
+    /// 输出高；nil = 节目高。
     public var height: Int?
     public init(codec: VideoCodec = .h264, bitrateBps: Int = 6_000_000, keyframeIntervalFrames: Int = 120, width: Int? = nil, height: Int? = nil) {
         self.codec = codec
@@ -223,8 +260,11 @@ public struct VideoEncodeSettings: Hashable, Codable, Sendable {
     }
 }
 
+/// 音频编码参数。
 public struct AudioEncodeSettings: Hashable, Codable, Sendable {
+    /// 编码器。
     public var codec: AudioCodec
+    /// 码率（bit/s）。
     public var bitrateBps: Int
     public init(codec: AudioCodec = .aac, bitrateBps: Int = 160_000) {
         self.codec = codec
@@ -232,15 +272,18 @@ public struct AudioEncodeSettings: Hashable, Codable, Sendable {
     }
 }
 
+/// 录制容器。
 public enum RecordContainer: String, Codable, Sendable {
     case mov, mp4
 }
 
 /// 录制参数（设计方案 §8 录制行）。
 public struct RecordSettings: Hashable, Codable, Sendable {
+    /// 录制目录。
     public var directory: String
     /// 文件名模板，支持 {show} {date} {time} {output}。
     public var fileNamePattern: String
+    /// 容器格式。
     public var container: RecordContainer
     /// movieFragmentInterval，秒；崩溃可恢复到最后一个片段。
     public var fragmentIntervalSeconds: Double
@@ -258,7 +301,9 @@ public struct RecordSettings: Hashable, Codable, Sendable {
 
 /// 推流目的地（RTMP / RTMPS / SRT 由 url 的 scheme 决定）。
 public struct StreamSettings: Hashable, Codable, Sendable {
+    /// 推流地址（rtmp:// / rtmps:// / srt://）。
     public var url: String
+    /// 推流密钥。
     public var streamKey: String
     /// 指数退避重连的上限（秒）。
     public var reconnectMaxSeconds: Double
@@ -271,11 +316,17 @@ public struct StreamSettings: Hashable, Codable, Sendable {
 
 /// 一个输出的设置。按 kind 取用相关的子结构，其他留 nil；`extra` 给各输出会话放自己的附加项（占位）。
 public struct OutputSettings: Hashable, Codable, Sendable {
+    /// 送什么画面。
     public var source: OutputSource
+    /// 视频编码参数；不编码的输出为 nil。
     public var video: VideoEncodeSettings?
+    /// 音频编码参数；不编码的输出为 nil。
     public var audio: AudioEncodeSettings?
+    /// 录制参数（kind = record）。
     public var record: RecordSettings?
+    /// 推流参数（kind = stream）。
     public var stream: StreamSettings?
+    /// 各输出会话的附加设置（占位）。
     public var extra: [String: JSONValue]
     public init(source: OutputSource = .program, video: VideoEncodeSettings? = nil, audio: AudioEncodeSettings? = nil,
                 record: RecordSettings? = nil, stream: StreamSettings? = nil, extra: [String: JSONValue] = [:]) {
@@ -292,10 +343,13 @@ public struct OutputSettings: Hashable, Codable, Sendable {
 public struct OutputState: Hashable, Codable, Sendable, Identifiable {
     /// 输出编号，从 1 起。
     public var number: Int
+    /// 输出类型。
     public var kind: OutputKind
+    /// 显示名。
     public var name: String
     /// 目标状态：true = 应该在跑（startRecord / startStream 置它）。
     public var enabled: Bool
+    /// 设置。
     public var settings: OutputSettings
 
     public init(number: Int, kind: OutputKind, name: String, enabled: Bool = false, settings: OutputSettings = OutputSettings()) {
@@ -305,6 +359,7 @@ public struct OutputState: Hashable, Codable, Sendable, Identifiable {
         self.enabled = enabled
         self.settings = settings
     }
+    /// Identifiable：就是编号。
     public var id: Int { number }
 }
 
@@ -312,17 +367,21 @@ public struct OutputState: Hashable, Codable, Sendable, Identifiable {
 
 /// §1.1 Tally：每个输入"在 PGM / 在 PVW / 都不在"。由 `MixerState.tally(ofInput:)` 推导，全系统只算这一次。
 public struct Tally: Hashable, Codable, Sendable {
+    /// 在 PGM 上。
     public var program: Bool
+    /// 在 PVW 上。
     public var preview: Bool
     public init(program: Bool, preview: Bool) {
         self.program = program
         self.preview = preview
     }
+    /// 都不在。
     public static let off = Tally(program: false, preview: false)
 }
 
 // MARK: - MixerState
 
+/// `validate()` 抛出的不变量错误。
 public enum MixerStateError: Error, Equatable {
     case overlayCount(Int)
     case busOrder
@@ -334,6 +393,7 @@ public enum MixerStateError: Error, Equatable {
 /// 不可变快照（设计方案 §4）。相比 §4 多了 `format` 和 `inputs`：addInput / removeInput / setInputSettings 要在 reduce 里落地，
 /// 输入表必须在状态里；渲染器每拍要读裁切 / 变换，也得从快照拿。
 public struct MixerState: Hashable, Codable, Sendable {
+    /// 节目格式。
     public var format: ProgramFormat
     /// 按编号升序；编号从 1 起。
     public var inputs: [InputConfig]
@@ -341,13 +401,18 @@ public struct MixerState: Hashable, Codable, Sendable {
     public var program: Int
     /// PVW 输入编号；0 = 黑场。
     public var preview: Int
+    /// 转场状态。
     public var transition: TransitionState
+    /// FTB 状态。
     public var ftb: FadeToBlack
     /// 恰好 4 个。
     public var overlays: [OverlayState]
+    /// 音频状态。
     public var audio: AudioState
+    /// 输出表，按编号升序。
     public var outputs: [OutputState]
 
+    /// 叠加通道数。
     public static let overlayCount = 4
     /// "无输入 / 黑场"的编号。
     public static let noInput = 0
@@ -383,7 +448,9 @@ public struct MixerState: Hashable, Codable, Sendable {
         }
     }
 
+    /// 按编号找输入。
     public func input(_ number: Int) -> InputConfig? { inputs.first { $0.number == number } }
+    /// 按编号找输出。
     public func output(_ number: Int) -> OutputState? { outputs.first { $0.number == number } }
 
     /// 一路输入的 tally。规则：
@@ -424,6 +491,7 @@ public struct MixerState: Hashable, Codable, Sendable {
 /// 状态机发布出来的快照：不可变对象，渲染线程 / 音频线程通过原子指针交换拿到最新的一个（§4、§9.1）。
 /// 读的一方只 retain 这个对象，不进 actor、不加锁。
 public final class MixerSnapshot: Sendable {
+    /// 快照内容。
     public let state: MixerState
     /// 产生这个快照的最后一条命令的 sequence（0 = 初始状态）。
     public let sequence: UInt64

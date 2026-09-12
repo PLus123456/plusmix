@@ -5,7 +5,9 @@ import Darwin
 /// mach 时基（numer / denom）：1 个 host tick = numer / denom 纳秒。Apple Silicon 上是 125 / 3（24 MHz），Intel 上是 1 / 1。
 /// 单独定义成 Swift 结构而不用 `mach_timebase_info_data_t`，是为了 Sendable 和可以在测试里伪造时基。
 public struct MachTimebase: Hashable, Sendable {
+    /// 1 个 host tick = numer / denom 纳秒：分子。
     public var numer: UInt32
+    /// 分母。
     public var denom: UInt32
     public init(numer: UInt32, denom: UInt32) {
         precondition(numer > 0 && denom > 0, "时基分子分母必须为正")
@@ -31,11 +33,13 @@ public enum HostClock {
 /// 绝对 host time：mach_absolute_time 的原始 tick 数。整个系统只有这一种时间戳；
 /// 和秒 / 纳秒的换算走 `MachTimebase`，用 128 位整数，不用浮点。
 public struct HostTime: Hashable, Comparable, Sendable {
+    /// mach_absolute_time 原始 tick 数。
     public var ticks: UInt64
 
     @inline(__always)
     public init(ticks: UInt64) { self.ticks = ticks }
 
+    /// tick 0。
     public static let zero = HostTime(ticks: 0)
 
     /// 现在。
@@ -87,16 +91,19 @@ extension HostTime: Codable {
 }
 
 extension HostTime: CustomStringConvertible {
+    /// 调试用描述。
     public var description: String { "HostTime(\(ticks))" }
 }
 
 /// host tick 计的时长，有符号。`HostTime - HostTime` 得到它。
 public struct HostDuration: Hashable, Comparable, Sendable {
+    /// host tick 数，有符号。
     public var ticks: Int64
 
     @inline(__always)
     public init(ticks: Int64) { self.ticks = ticks }
 
+    /// 0。
     public static let zero = HostDuration(ticks: 0)
 
     /// 由纳秒换算（向零取整）。
@@ -112,12 +119,17 @@ public struct HostDuration: Hashable, Comparable, Sendable {
         self.init(seconds: milliseconds / 1e3, timebase: timebase)
     }
 
+    /// 换算成纳秒（向零取整）。
     public func nanoseconds(timebase: MachTimebase = HostClock.timebase) -> Int64 {
         Int64(Int128(ticks) * Int128(timebase.numer) / Int128(timebase.denom))
     }
+    /// 纳秒（进程时基）。
     public var nanoseconds: Int64 { nanoseconds() }
+    /// 换算成毫秒。
     public func milliseconds(timebase: MachTimebase = HostClock.timebase) -> Double { Double(nanoseconds(timebase: timebase)) / 1e6 }
+    /// 毫秒（进程时基）。
     public var milliseconds: Double { milliseconds() }
+    /// 秒。
     public var seconds: Double { Double(nanoseconds) / 1e9 }
 
     public static func < (lhs: HostDuration, rhs: HostDuration) -> Bool { lhs.ticks < rhs.ticks }
@@ -126,7 +138,8 @@ public struct HostDuration: Hashable, Comparable, Sendable {
     public static prefix func - (d: HostDuration) -> HostDuration { HostDuration(ticks: -d.ticks) }
     public static func * (lhs: HostDuration, rhs: Int) -> HostDuration { HostDuration(ticks: lhs.ticks * Int64(rhs)) }
     public static func / (lhs: HostDuration, rhs: Int) -> HostDuration { HostDuration(ticks: lhs.ticks / Int64(rhs)) }
-    public var magnitude: HostDuration { HostDuration(ticks: ticks.magnitude > Int64.max.magnitude ? Int64.max : Int64(ticks.magnitude)) }
+    /// 绝对值（Int64.min 钳到 Int64.max）。
+    public var magnitude: HostDuration { HostDuration(ticks: ticks == .min ? .max : abs(ticks)) }
 }
 
 extension HostDuration: Codable {
@@ -135,6 +148,7 @@ extension HostDuration: Codable {
 }
 
 extension HostDuration: CustomStringConvertible {
+    /// 调试用描述。
     public var description: String { "HostDuration(\(ticks))" }
 }
 
@@ -143,7 +157,9 @@ extension HostDuration: CustomStringConvertible {
 /// 整数分子分母的有理数。永远是约分后的形式，分母为正，所以 `==` 和 `Hashable` 直接按字段比。
 /// 帧率、帧时长、闪光周期都用它；乘除走 128 位中间值不溢出。
 public struct Rational: Hashable, Comparable, Sendable {
+    /// 分子（带符号）。
     public let numerator: Int64
+    /// 分母（> 0）。
     public let denominator: Int64
 
     /// 分母不能为 0；负号归到分子；自动约分。
@@ -158,16 +174,21 @@ public struct Rational: Hashable, Comparable, Sendable {
     }
     public init(_ integer: Int64) { self.init(integer, 1) }
 
+    /// 0/1。
     public static let zero = Rational(0, 1)
+    /// 1/1。
     public static let one = Rational(1, 1)
 
+    /// 倒数。
     public var reciprocal: Rational {
         precondition(numerator != 0, "0 没有倒数")
         return Rational(denominator, numerator)
     }
     /// 浮点近似值，只给显示和粗略估算用。
     public var doubleValue: Double { Double(numerator) / Double(denominator) }
+    /// 分母是否为 1。
     public var isInteger: Bool { denominator == 1 }
+    /// 是否为 0。
     public var isZero: Bool { numerator == 0 }
 
     public static func < (lhs: Rational, rhs: Rational) -> Bool {
@@ -225,6 +246,7 @@ extension Rational: Codable {
 }
 
 extension Rational: CustomStringConvertible {
+    /// "n" 或 "n/d"。
     public var description: String { isInteger ? "\(numerator)" : "\(numerator)/\(denominator)" }
 }
 
@@ -232,6 +254,7 @@ extension Rational: CustomStringConvertible {
 
 /// 帧率 = 每秒帧数的有理数。59.94 就是 60000/1001，不是 59.94。
 public struct FrameRate: Hashable, Sendable {
+    /// 每秒帧数。
     public let framesPerSecond: Rational
 
     public init(_ framesPerSecond: Rational) {
@@ -240,12 +263,19 @@ public struct FrameRate: Hashable, Sendable {
     }
     public init(_ integerFramesPerSecond: Int64) { self.init(Rational(integerFramesPerSecond)) }
 
+    /// 24 fps。
     public static let fps24 = FrameRate(24)
+    /// 25 fps。
     public static let fps25 = FrameRate(25)
+    /// 29.97 fps = 30000/1001。
     public static let fps2997 = FrameRate(Rational(30_000, 1_001))
+    /// 30 fps。
     public static let fps30 = FrameRate(30)
+    /// 50 fps。
     public static let fps50 = FrameRate(50)
+    /// 59.94 fps = 60000/1001。
     public static let fps5994 = FrameRate(Rational(60_000, 1_001))
+    /// 60 fps。
     public static let fps60 = FrameRate(60)
     /// 测试标准 §2.1 要求合成源支持的三档。
     public static let standard: [FrameRate] = [.fps30, .fps5994, .fps60]
@@ -267,6 +297,7 @@ extension FrameRate: Codable {
 }
 
 extension FrameRate: CustomStringConvertible {
+    /// "60" 或 "59.94"。
     public var description: String {
         isFractional ? String(format: "%.2f", approximateFramesPerSecond) : "\(framesPerSecond.numerator)"
     }
@@ -276,7 +307,9 @@ extension FrameRate: CustomStringConvertible {
 
 /// 节目时钟的一拍（§1.1：Tick = 一帧的时间）。第 0 拍在 t0，可以为负（t0 之前）。
 public struct Tick: RawRepresentable, Hashable, Comparable, Sendable, Codable, Strideable {
+    /// 步长是拍数。
     public typealias Stride = Int
+    /// 拍序号。
     public var rawValue: Int64
 
     @inline(__always)
@@ -284,9 +317,12 @@ public struct Tick: RawRepresentable, Hashable, Comparable, Sendable, Codable, S
     @inline(__always)
     public init(_ value: Int64) { rawValue = value }
 
+    /// 第 0 拍。
     public static let zero = Tick(0)
 
+    /// Strideable。
     public func advanced(by n: Int) -> Tick { Tick(rawValue + Int64(n)) }
+    /// Strideable。
     public func distance(to other: Tick) -> Int { Int(other.rawValue - rawValue) }
 
     @inline(__always)
@@ -299,6 +335,7 @@ public struct Tick: RawRepresentable, Hashable, Comparable, Sendable, Codable, S
 }
 
 extension Tick: CustomStringConvertible {
+    /// "#n"。
     public var description: String { "#\(rawValue)" }
 }
 
@@ -322,6 +359,7 @@ public struct TickClockSpec: Hashable, Sendable, Codable {
         self.init(t0: t0, frameDuration: frameRate.frameDuration)
     }
 
+    /// 帧率视图（frameDuration 的倒数）。
     public var frameRate: FrameRate { FrameRate(frameDuration.reciprocal) }
 
     /// 第 n 拍的理想时刻 = t0 + floor(n × frameDuration)，单位 host tick。

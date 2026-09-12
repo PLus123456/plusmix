@@ -2,11 +2,17 @@ import Foundation
 
 /// 节目文件里"切换"那一块：MixerState 里除 inputs / audio / outputs 之外的字段（它们在 Show 顶层各自一节）。
 public struct MixerSettings: Hashable, Codable, Sendable {
+    /// 节目格式。
     public var format: ProgramFormat
+    /// PGM 输入编号。
     public var program: Int
+    /// PVW 输入编号。
     public var preview: Int
+    /// 转场选择与状态。
     public var transition: TransitionState
+    /// FTB。
     public var ftb: FadeToBlack
+    /// 叠加通道，恰好 4 个。
     public var overlays: [OverlayState]
 
     public init(format: ProgramFormat, program: Int, preview: Int, transition: TransitionState, ftb: FadeToBlack, overlays: [OverlayState]) {
@@ -26,6 +32,7 @@ public struct MixerSettings: Hashable, Codable, Sendable {
 
 /// 界面布局（窗口位置、面板开关……）。契约不解释它的内容，原样存取；App 会话自己定义键。JSON 里就是一个对象。
 public struct ShowLayout: Hashable, Sendable {
+    /// 原样存取的键值。
     public var values: [String: JSONValue]
     public init(values: [String: JSONValue] = [:]) { self.values = values }
 }
@@ -35,6 +42,7 @@ extension ShowLayout: Codable {
     public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(values) }
 }
 
+/// 读节目文件的错误。
 public enum ShowError: Error, Equatable {
     case unsupportedSchemaVersion(Int)
     case malformed(String)
@@ -43,14 +51,22 @@ public enum ShowError: Error, Equatable {
 /// 节目文件（§1.1 Show）：一个 JSON，保存输入、切换、音频、输出、布局。schemaVersion = 1。
 /// 与 MixerState 的关系：Show 是持久化形态，MixerState 是运行时快照，字段一一对应（`init(name:state:layout:)` / `makeState()`）。
 public struct Show: Hashable, Codable, Sendable {
+    /// 当前文件格式版本。
     public static let currentSchemaVersion = 1
 
+    /// 文件格式版本。
     public var schemaVersion: Int
+    /// 节目名。
     public var name: String
+    /// 输入表。
     public var inputs: [InputConfig]
+    /// 切换部分。
     public var mixer: MixerSettings
+    /// 音频状态。
     public var audio: AudioState
+    /// 输出表。
     public var outputs: [OutputState]
+    /// 界面布局。
     public var layout: ShowLayout
 
     public init(schemaVersion: Int = Show.currentSchemaVersion, name: String, inputs: [InputConfig], mixer: MixerSettings,
@@ -83,8 +99,10 @@ public struct Show: Hashable, Codable, Sendable {
         e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return e
     }()
+    /// 文件解码器。
     public static let fileDecoder = JSONDecoder()
 
+    /// 编码成文件内容。
     public func save() throws -> Data { try Show.fileEncoder.encode(self) }
 
     /// 读文件：先看 schemaVersion，当前版本直接解，旧版本走 `migrate`，缺字段或未知版本抛错。

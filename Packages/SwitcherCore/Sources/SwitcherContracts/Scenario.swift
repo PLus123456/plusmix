@@ -2,6 +2,7 @@
 public struct Scenario: Hashable, Codable, Sendable {
     /// 脚本总长（拍）；跑到这一拍结束。
     public var durationTicks: Int
+    /// 事件列表（文件顺序）。
     public var events: [ScenarioEvent]
 
     public init(durationTicks: Int, events: [ScenarioEvent]) {
@@ -15,8 +16,11 @@ public struct Scenario: Hashable, Codable, Sendable {
     }
 }
 
+/// 在某一拍发一条命令。
 public struct ScenarioEvent: Hashable, Codable, Sendable {
+    /// 哪一拍。
     public var tick: Tick
+    /// 发什么。
     public var command: Command
     public init(tick: Tick, command: Command) {
         self.tick = tick

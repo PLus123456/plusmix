@@ -65,6 +65,7 @@ public struct IssuedCommand: Hashable, Codable, Sendable {
     public var sequence: UInt64
     /// 发出时刻（host time）。C1 命令延迟 = 生效拍点时刻 − issuedAt。
     public var issuedAt: HostTime
+    /// 命令内容。
     public var command: Command
     public init(sequence: UInt64, issuedAt: HostTime, command: Command) {
         self.sequence = sequence
@@ -75,6 +76,7 @@ public struct IssuedCommand: Hashable, Codable, Sendable {
 
 /// 状态机对一条命令的回执。
 public struct CommandReceipt: Hashable, Codable, Sendable {
+    /// 对应命令的 sequence。
     public var sequence: UInt64
     /// 命令落在哪一拍（切换永远在拍点边界生效）。
     public var appliedTick: Tick

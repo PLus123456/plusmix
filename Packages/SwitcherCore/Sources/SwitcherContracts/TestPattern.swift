@@ -14,13 +14,19 @@ import CoreVideo
 /// 与测试标准 §2.1 的唯一偏离：帧号从 16 块 12 位扩到 32 块 28 位。12 位 68 秒就回绕，8 小时长稳会歧义；
 /// 28 位在 60 fps 下能撑 51 天。这是 P1 唯一允许偏离测试标准的地方（落地方案 §1.3 第 4 条）。
 public enum TestPattern {
+    /// 定义布局用的参考宽。
     public static let referenceWidth = 1920
+    /// 参考高。
     public static let referenceHeight = 1080
+    /// 每行块数。
     public static let blockCount = 32
+    /// 数据位数。
     public static let dataBits = 28
+    /// 校验位数。
     public static let checkBits = 4
     /// 28 位数据掩码。
     public static let dataMask: UInt32 = (1 << 28) - 1
+    /// 调色板颜色数。
     public static let paletteSize = 16
     /// 调色板两两 YCbCr 距离的下限；解码时离最近颜色超过它的一半就判 nil。
     public static let minimumPaletteDistance: Double = 48
@@ -43,7 +49,9 @@ public enum TestPattern {
         public var hostTimeMs: UInt32
         /// 调色板索引 0–15。
         public var inputID: Int
+        /// 是否闪光帧。
         public var flash: Bool
+        /// 底色。
         public var background: Background
 
         public init(frameNumber: UInt32, hostTimeMs: UInt32, inputID: Int, flash: Bool, background: Background = .gray(level: 128)) {
@@ -65,9 +73,13 @@ public enum TestPattern {
 
     /// 解码结果；解不出的字段为 nil。
     public struct Decoded: Hashable, Sendable {
+        /// 帧号；CRC 不对为 nil。
         public var frameNumber: UInt32?
+        /// 时间戳毫秒；CRC 不对为 nil。
         public var hostTimeMs: UInt32?
+        /// 输入 ID；离调色板太远为 nil。
         public var inputID: Int?
+        /// 闪光块是否为白。
         public var flash: Bool
         public init(frameNumber: UInt32?, hostTimeMs: UInt32?, inputID: Int?, flash: Bool) {
             self.frameNumber = frameNumber
@@ -79,10 +91,15 @@ public enum TestPattern {
 
     // MARK: 几何
 
+    /// 像素矩形。
     public struct Rect: Hashable, Sendable {
+        /// 左上 x（像素）。
         public var x: Int
+        /// 左上 y（像素）。
         public var y: Int
+        /// 宽（像素）。
         public var width: Int
+        /// 高（像素）。
         public var height: Int
         public init(x: Int, y: Int, width: Int, height: Int) {
             self.x = x
@@ -94,13 +111,21 @@ public enum TestPattern {
 
     /// 某个尺寸下的实际坐标。1080p 单位值 v 映射为 (v × width / 1920) 向下取偶，所以 4:2:0 的色度块永远对齐。
     public struct Geometry: Hashable, Sendable {
+        /// 画面宽。
         public let width: Int
+        /// 画面高。
         public let height: Int
+        /// 块边长。
         public let blockSize: Int
+        /// 每行第一块的 x。
         public let originX: Int
+        /// 帧号行的 y。
         public let row1Y: Int
+        /// 时间戳行的 y。
         public let row2Y: Int
+        /// 输入 ID 色块。
         public let idRect: Rect
+        /// 闪光块。
         public let flashRect: Rect
         /// 采样时每边收进的像素数（块的 1/4）。
         public let sampleInset: Int
@@ -189,6 +214,7 @@ public enum TestPattern {
                      cb: 128 + 224 * (b - y) / 1.8556 / 255,
                      cr: 128 + 224 * (r - y) / 1.5748 / 255)
     }
+    /// RGB8 → BT.709 limited YCbCr。
     public static func ycbcr(of c: RGB8) -> YCbCr { ycbcr(r: Double(c.red), g: Double(c.green), b: Double(c.blue)) }
 
     /// 最近的调色板索引；离最近颜色超过 minimumPaletteDistance / 2 返回 nil。
@@ -250,6 +276,7 @@ public enum TestPattern {
 
     // MARK: 读
 
+    /// 读整幅图案；解不出的字段为 nil。
     public static func decode(_ planes: PixelPlanes, width: Int, height: Int) -> Decoded {
         let g = Geometry(width: width, height: height)
         let frameNumber = decodeWord(readWord(planes, g, row: 0))

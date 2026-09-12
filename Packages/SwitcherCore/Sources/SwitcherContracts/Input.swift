@@ -30,8 +30,11 @@ public enum FileEndAction: String, Codable, Sendable {
 
 /// 合成测试源（引擎内置输入，测试标准 §2.1）的配置。TestKit 的 SyntheticVideoInput / SyntheticAudioInput 读它。
 public struct SyntheticSourceSettings: Hashable, Codable, Sendable {
+    /// 合成源帧率（30 / 59.94 / 60）。
     public var frameRate: FrameRate
+    /// 画面宽（像素）。
     public var width: Int
+    /// 画面高（像素）。
     public var height: Int
     /// 图案底色：纯灰（V7 用 64 / 192）或渐变。
     public var background: TestPattern.Background
@@ -82,6 +85,7 @@ public enum InputSource: Hashable, Codable, Sendable {
     case audio(deviceUID: String)
     case synthetic(settings: SyntheticSourceSettings)
 
+    /// 对应的输入类型。
     public var kind: InputKind {
         switch self {
         case .camera: .camera
@@ -100,9 +104,13 @@ public enum InputSource: Hashable, Codable, Sendable {
 
 /// 四边裁切，各边是占宽 / 高的比例（0–1）。
 public struct CropInsets: Hashable, Codable, Sendable {
+    /// 左边裁掉的比例。
     public var left: Double
+    /// 上边裁掉的比例。
     public var top: Double
+    /// 右边裁掉的比例。
     public var right: Double
+    /// 下边裁掉的比例。
     public var bottom: Double
     public init(left: Double = 0, top: Double = 0, right: Double = 0, bottom: Double = 0) {
         self.left = left
@@ -110,16 +118,23 @@ public struct CropInsets: Hashable, Codable, Sendable {
         self.right = right
         self.bottom = bottom
     }
+    /// 不裁。
     public static let none = CropInsets()
 }
 
 /// 放进节目画面时的变换：缩放、平移（占节目宽 / 高的比例）、旋转、翻转。
 public struct Transform2D: Hashable, Codable, Sendable {
+    /// 缩放倍数，1 = 原样。
     public var scale: Double
+    /// 水平平移，占节目宽的比例。
     public var offsetX: Double
+    /// 垂直平移，占节目高的比例。
     public var offsetY: Double
+    /// 旋转角度（度，顺时针）。
     public var rotationDegrees: Double
+    /// 水平翻转。
     public var flipHorizontal: Bool
+    /// 垂直翻转。
     public var flipVertical: Bool
     public init(scale: Double = 1, offsetX: Double = 0, offsetY: Double = 0, rotationDegrees: Double = 0,
                 flipHorizontal: Bool = false, flipVertical: Bool = false) {
@@ -130,14 +145,19 @@ public struct Transform2D: Hashable, Codable, Sendable {
         self.flipHorizontal = flipHorizontal
         self.flipVertical = flipVertical
     }
+    /// 不变换。
     public static let identity = Transform2D()
 }
 
 /// 送哪些总线（§1.1 Bus：Master、Bus A、Bus B、Headphones）。
 public struct BusRouting: Hashable, Codable, Sendable {
+    /// 送 Master。
     public var master: Bool
+    /// 送 Bus A。
     public var busA: Bool
+    /// 送 Bus B。
     public var busB: Bool
+    /// 送 Headphones。
     public var headphones: Bool
     public init(master: Bool = true, busA: Bool = false, busB: Bool = false, headphones: Bool = false) {
         self.master = master
@@ -145,8 +165,10 @@ public struct BusRouting: Hashable, Codable, Sendable {
         self.busB = busB
         self.headphones = headphones
     }
+    /// 只送 Master（默认）。
     public static let masterOnly = BusRouting()
 
+    /// 按总线读写。
     public subscript(bus: Bus) -> Bool {
         get {
             switch bus {
@@ -169,9 +191,11 @@ public struct BusRouting: Hashable, Codable, Sendable {
 
 /// 一路输入的音频参数（设计方案 §7"每路输入"那一行）。
 public struct InputAudioSettings: Hashable, Codable, Sendable {
+    /// 送哪些总线。
     public var routing: BusRouting
     /// 增益，dB。
     public var gainDb: Double
+    /// 静音。
     public var muted: Bool
     /// 独听（送耳机）。
     public var solo: Bool
@@ -180,7 +204,9 @@ public struct InputAudioSettings: Hashable, Codable, Sendable {
     /// 延迟补偿（§3.6）：把这路音频相对视频推迟 0–500 ms，修采集卡自身的 A/V 偏差。由混音器的延迟线实现。
     public var delayMs: Int
 
+    /// 延迟补偿的合法范围（ms）。
     public static let delayRangeMs = 0...500
+    /// 增益的合法范围（dB）。
     public static let gainRangeDb = -96.0...24.0
 
     public init(routing: BusRouting = .masterOnly, gainDb: Double = 0, muted: Bool = false, solo: Bool = false,
@@ -196,8 +222,11 @@ public struct InputAudioSettings: Hashable, Codable, Sendable {
 
 /// 效果链里的一格（占位）。`id` 是效果标识（例如 "parametricEQ"），参数是自由 JSON；具体定义由音频 / 合成会话给。
 public struct EffectSlot: Hashable, Codable, Sendable {
+    /// 效果标识，例如 "parametricEQ"。
     public var id: String
+    /// 是否启用。
     public var enabled: Bool
+    /// 效果参数（自由 JSON，占位）。
     public var params: [String: JSONValue]
     public init(id: String, enabled: Bool = true, params: [String: JSONValue] = [:]) {
         self.id = id
@@ -208,7 +237,9 @@ public struct EffectSlot: Hashable, Codable, Sendable {
 
 /// 抠像参数（占位，W3-B 细化时走契约提案）。YCbCr 颜色距离 + 溢色抑制（设计方案 §5）。
 public struct KeyerSettings: Hashable, Codable, Sendable {
+    /// 是否抠像。
     public var enabled: Bool
+    /// 键色。
     public var keyColor: RGB8
     /// 颜色距离容差 0–1。
     public var tolerance: Double
@@ -228,8 +259,11 @@ public struct KeyerSettings: Hashable, Codable, Sendable {
 
 /// 一路输入的全部可调设置（设计方案 §4 `Input.settings`）。存在 MixerState.inputs 里，只此一份。
 public struct InputSettings: Hashable, Codable, Sendable {
+    /// 四边裁切。
     public var crop: CropInsets
+    /// 放进节目画面的变换。
     public var transform: Transform2D
+    /// 音频参数（路由 / 增益 / 静音 / 独听 / 声像 / 延迟补偿）。
     public var audio: InputAudioSettings
     /// 效果链占位。
     public var effects: [EffectSlot]
@@ -271,8 +305,11 @@ public struct InputSettings: Hashable, Codable, Sendable {
 public struct InputConfig: Hashable, Codable, Sendable, Identifiable {
     /// 输入编号，从 1 起；0 保留给"无输入 / 黑场"。
     public var number: Int
+    /// 显示名。
     public var name: String
+    /// 来源。
     public var source: InputSource
+    /// 可调设置。
     public var settings: InputSettings
 
     public init(number: Int, name: String, source: InputSource, settings: InputSettings = InputSettings()) {
@@ -282,7 +319,9 @@ public struct InputConfig: Hashable, Codable, Sendable, Identifiable {
         self.settings = settings
     }
 
+    /// 由 source 推出的类型。
     public var kind: InputKind { source.kind }
+    /// Identifiable：就是编号。
     public var id: Int { number }
 }
 

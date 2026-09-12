@@ -16,47 +16,71 @@ import Foundation
 /// - `rss_mb`：进程 RSS（MB）；`cpu_pct`：进程 CPU（100 = 一个核）；`gpu_pct`：GPU 占用。
 /// 累计值单调不减，任意两行相减就是窗口内的增量。
 public struct Stats: Hashable, Codable, Sendable {
+    /// JSON 键 ts：Unix 时间（秒）。
     public var ts: Double
+    /// JSON 键 tick。
     public var tick: Tick
+    /// JSON 键 render_ms。
     public var renderMs: Double
+    /// JSON 键 missed_render。
     public var missedRender: UInt64
+    /// JSON 键 jitter_ms。
     public var jitterMs: Double
+    /// JSON 键 per_input，键是输入编号。
     public var perInput: [Int: PerInput]
+    /// JSON 键 encoder。
     public var encoder: [EncoderEntry]
+    /// JSON 键 audio。
     public var audio: AudioCounters
+    /// JSON 键 rss_mb。
     public var rssMb: Double
+    /// JSON 键 cpu_pct。
     public var cpuPct: Double
+    /// JSON 键 gpu_pct。
     public var gpuPct: Double
 
+    /// per_input 的元素。
     public struct PerInput: Hashable, Codable, Sendable {
+        /// 窗口内该输入 push 的帧数 / 秒。
         public var fps: Double
+        /// FrameSlotStats.reused 累计。
         public var dup: UInt64
+        /// FrameSlotStats.dropped 累计。
         public var drop: UInt64
         public init(fps: Double, dup: UInt64, drop: UInt64) {
             self.fps = fps
             self.dup = dup
             self.drop = drop
         }
+        /// JSON 键名。
         public static let jsonKeys = ["fps", "dup", "drop"]
     }
 
+    /// encoder 的元素，与带编码器的输出同序。
     public struct EncoderEntry: Hashable, Codable, Sendable {
+        /// E1 编码滞后跳帧累计。
         public var skipped: UInt64
+        /// 窗口平均输出码率（bit/s）。
         public var bitrate: Double
         public init(skipped: UInt64, bitrate: Double) {
             self.skipped = skipped
             self.bitrate = bitrate
         }
+        /// JSON 键名。
         public static let jsonKeys = ["skipped", "bitrate"]
     }
 
+    /// audio 一节。
     public struct AudioCounters: Hashable, Codable, Sendable {
+        /// 输出回调超时累计。
         public var dropouts: UInt64
+        /// 缓冲欠载累计。
         public var underruns: UInt64
         public init(dropouts: UInt64, underruns: UInt64) {
             self.dropouts = dropouts
             self.underruns = underruns
         }
+        /// JSON 键名。
         public static let jsonKeys = ["dropouts", "underruns"]
     }
 
@@ -96,6 +120,7 @@ public struct Stats: Hashable, Codable, Sendable {
         e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return e
     }()
+    /// 读 jsonl 用的解码器。
     public static let lineDecoder = JSONDecoder()
 
     /// 一行 JSON（不带换行）。

@@ -14,9 +14,13 @@ import CSwitcherContracts
 /// - `reused`：其中返回的是"上一次已经返回过的同一帧"的次数。30 fps 进 60 fps 节目 → reused / consumed = 50%（设计内）。
 /// - `dropped`：从未被 `latest` 返回过就被淘汰的帧数（槽满被挤掉，或被更新的帧跳过）。
 public struct FrameSlotStats: Hashable, Sendable, Codable {
+    /// push 进来的帧数。
     public var pushed: UInt64
+    /// latest 返回了帧的次数。
     public var consumed: UInt64
+    /// 从未被消费就被淘汰的帧数。
     public var dropped: UInt64
+    /// 返回的是上一次同一帧的次数。
     public var reused: UInt64
     public init(pushed: UInt64 = 0, consumed: UInt64 = 0, dropped: UInt64 = 0, reused: UInt64 = 0) {
         self.pushed = pushed
@@ -48,14 +52,19 @@ public protocol FrameSlot: AnyObject {
 
 /// 音频常量。采样格式：float32、非交错、48 kHz（sw_audio_ring.h 里的宏是同一组数）。
 public enum AudioFormat {
+    /// 内部采样率 48000。
     public static let sampleRate = Int(SW_AUDIO_SAMPLE_RATE)
+    /// 一个环最多的声道数 8。
     public static let maxChannels = Int(SW_AUDIO_MAX_CHANNELS)
+    /// 默认混音块大小 256。
     public static let defaultBlockFrames = Int(SW_AUDIO_DEFAULT_BLOCK_FRAMES)
 }
 
 /// 音频环统计（累计，原子读）。
 public struct AudioRingStats: Hashable, Sendable, Codable {
+    /// 累计写入帧数。
     public var framesWritten: UInt64
+    /// 累计读出帧数。
     public var framesRead: UInt64
     /// 环满被丢的帧数（生产者侧）。
     public var overruns: UInt64
