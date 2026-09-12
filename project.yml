@@ -1,0 +1,103 @@
+# Switcher.xcodeproj 由本文件生成：`make gen`（XcodeGen）。生成物不入库。
+# 归属：P0 建骨架；W3-C 加 CameraExtension target；W4-B 做签名 / 公证 / 版本（docs/OWNERSHIP.md）。
+name: Switcher
+
+options:
+  bundleIdPrefix: com.example            # 占位；正式 bundle id 由 W4-B 定
+  deploymentTarget:
+    macOS: "15.0"                        # 落地方案 §7 第 8 条：NSView.displayLink 需要 14+，矩阵取当前和上一个大版本
+  xcodeVersion: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"           # 必须与 Packages/SwitcherCore/Sources/SwitcherContracts/Version.swift 一致（lint 校验）
+    CURRENT_PROJECT_VERSION: "1"
+    # Team ID 走环境变量：`DEVELOPMENT_TEAM=XXXXXXXXXX make gen`。不设则为空，走 ad-hoc 签名（"Sign to Run Locally"）。
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      ONLY_ACTIVE_ARCH: YES
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+
+packages:
+  SwitcherCore:
+    path: Packages/SwitcherCore
+  SwitcherInputs:
+    path: Packages/SwitcherInputs
+  SwitcherAudio:
+    path: Packages/SwitcherAudio
+  SwitcherOutputs:
+    path: Packages/SwitcherOutputs
+  SwitcherControl:
+    path: Packages/SwitcherControl
+  SwitcherTestKit:
+    path: Packages/SwitcherTestKit
+
+targets:
+  Switcher:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+        optional: true
+    settings:
+      base:
+        PRODUCT_NAME: Switcher
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.switcher
+        INFOPLIST_FILE: App/Info.plist   # 手写，见文件内注释；不用 XcodeGen 生成（它会把版本写死成 1.0）
+        GENERATE_INFOPLIST_FILE: NO
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+    dependencies:
+      - package: SwitcherCore
+        product: SwitcherContracts
+      - package: SwitcherCore
+        product: SwitcherEngine
+      - package: SwitcherCore
+        product: SwitcherRender
+      - package: SwitcherInputs
+      - package: SwitcherAudio
+      - package: SwitcherOutputs
+      - package: SwitcherControl
+      - package: SwitcherTestKit
+
+  SwitcherTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: App/Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.switcher.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Switcher
+
+schemes:
+  Switcher:
+    build:
+      targets:
+        Switcher: all
+        SwitcherTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - SwitcherTests
+    profile:
+      config: Release
+    archive:
+      config: Release
