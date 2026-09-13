@@ -39,16 +39,26 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
         public var dataRateLimitFactor: Double
         /// 剩余空间低于此值（字节）就停止并报错。
         public var minimumFreeBytes: UInt64
-        /// 音频硬校正阈值；nil = 不校正只监控。默认一帧。
-        public var audioResyncThreshold: HostDuration?
+        /// 音频块 host time 与样本计数时间轴偏差超过多少就硬校正一次（插静音 / 丢样本）。
+        public var audioResync: AudioResync
         /// 名字（消费者名 / 线程名）。
         public var name: String
+
+        /// 音频硬校正策略。
+        public enum AudioResync: Hashable, Sendable {
+            /// 只监控（RecorderCounters.audioDrift），不校正。
+            case off
+            /// 阈值 = 一帧时长（默认）。
+            case oneFrame
+            /// 自定阈值。
+            case threshold(HostDuration)
+        }
 
         public init(url: URL, format: ProgramFormat, video: VideoEncodeSettings = VideoEncodeSettings(),
                     audio: AudioEncodeSettings? = AudioEncodeSettings(), audioChannels: Int = 2,
                     fragmentIntervalSeconds: Double = 1, remuxToMP4: Bool = false, queueDepth: Int = 3,
                     dataRateLimitFactor: Double = 1.5, minimumFreeBytes: UInt64 = 200 * 1024 * 1024,
-                    audioResyncThreshold: HostDuration? = nil, name: String = "record") {
+                    audioResync: AudioResync = .oneFrame, name: String = "record") {
             self.url = url
             self.format = format
             self.video = video
@@ -59,8 +69,17 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
             self.queueDepth = queueDepth
             self.dataRateLimitFactor = dataRateLimitFactor
             self.minimumFreeBytes = minimumFreeBytes
-            self.audioResyncThreshold = audioResyncThreshold ?? HostDuration(seconds: format.frameDuration.doubleValue)
+            self.audioResync = audioResync
             self.name = name
+        }
+
+        /// 实际阈值；nil = 不校正。
+        public var audioResyncThreshold: HostDuration? {
+            switch audioResync {
+            case .off: nil
+            case .oneFrame: HostDuration(seconds: format.frameDuration.doubleValue)
+            case .threshold(let d): d
+            }
         }
     }
 
@@ -106,7 +125,6 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
     private var audioFramesAppended: Int64 = 0
     private var lastDiskCheck: HostTime = .zero
     private var finishRequested = false
-    private var pendingVideo: [EncodedVideoSample] = []
     private var completion: (@Sendable (Result<RecordingResult, Swift.Error>) -> Void)?
     private var failure: String?
 
@@ -229,9 +247,13 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
     // MARK: AudioBlockConsumer
 
     public func consumeAudio(planes: UnsafePointer<UnsafePointer<Float>>, channelCount: Int, frameCount: Int, hostTime: HostTime) {
-        guard let audioRing, channelCount == configuration.audioChannels else { return }
+        guard let audioRing else { return }
         let s = stateLock.withLock { stateValue }
         guard s == .recording || s == .stopping else { return }
+        guard channelCount == configuration.audioChannels else {
+            atomicCounters.audioBlocksDropped.add(1, ordering: .relaxed)
+            return
+        }
         if audioRing.push(planes: planes, frameCount: frameCount, hostTime: hostTime) {
             atomicCounters.audioBlocksDropped.add(1, ordering: .relaxed)
         }

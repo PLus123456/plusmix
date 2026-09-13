@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import SwitcherContracts
 
 /// 视频编码器 = FrameConsumer（契约 §7）：有界队列 + 自己的线程 + 一个后端会话。
@@ -48,11 +49,12 @@ public final class VideoEncoder: FrameConsumer, @unchecked Sendable {
     private let atomicCounters = AtomicEncoderCounters()
     private let stateLock = NSLock()
     private var thread: Thread?
-    private var running = false          // stateLock
+    private var running = false          // stateLock：start 到线程退出、会话释放为止
     private var stopRequested = false    // stateLock
     private var keyframeRequested = false // stateLock
     private var firstFrame = true
-    private let finished = DispatchSemaphore(value: 0)
+    private let acceptingFrames = Atomic<Bool>(false)   // consume 的快速门：只有 start 后、stop 前才收帧
+    private let threadGroup = DispatchGroup()           // 线程退出的等待点（多个 stop 调用都能等）
     private var outputHandler: (@Sendable (EncodedVideoSample) -> Void)?
 
     /// 用 VT 后端。
@@ -101,26 +103,36 @@ public final class VideoEncoder: FrameConsumer, @unchecked Sendable {
                 dropped: { [counters] in counters.droppedByEncoder.add(1, ordering: .relaxed) })
             running = true
             stopRequested = false
-            let t = Thread { [weak self] in self?.encodeLoop() }
+            firstFrame = true
+            threadGroup.enter()
+            let t = Thread { [weak self] in
+                self?.encodeLoop()
+                self?.threadGroup.leave()
+            }
             t.name = "switcher.encoder.\(consumerName)"
             t.qualityOfService = .userInteractive
             thread = t
+            acceptingFrames.store(true, ordering: .releasing)
             t.start()
         }
     }
 
-    /// 停：把队列里剩下的帧编完、flush 在途帧、释放会话。阻塞到线程退出。
+    /// 停：不再收帧，把队列里剩下的帧编完、flush 在途帧、释放会话。阻塞到线程退出；重复调用安全（后来的调用一起等）。
     public func stop() {
-        let wasRunning: Bool = stateLock.withLock {
-            guard running else { return false }
+        let firstStopper: Bool? = stateLock.withLock {
+            guard running else { return nil }
+            let first = !stopRequested
             stopRequested = true
-            return true
+            return first
         }
-        guard wasRunning else { return }
+        guard let firstStopper else { return }
+        acceptingFrames.store(false, ordering: .releasing)
         wakeup.signal()
-        finished.wait()
-        backend.invalidate()
-        stateLock.withLock { running = false; thread = nil }
+        threadGroup.wait()
+        if firstStopper {
+            backend.invalidate()
+            stateLock.withLock { running = false; thread = nil }
+        }
     }
 
     /// 下一帧强制关键帧（推流重连后起步用）。
@@ -131,6 +143,7 @@ public final class VideoEncoder: FrameConsumer, @unchecked Sendable {
     // MARK: FrameConsumer
 
     public func consume(_ frame: RenderedFrame) {
+        guard acceptingFrames.load(ordering: .acquiring) else { return }
         atomicCounters.pushed.add(1, ordering: .relaxed)
         let evicted = queue.push(frame)
         if let evicted {
@@ -167,7 +180,6 @@ public final class VideoEncoder: FrameConsumer, @unchecked Sendable {
             }
             if stopping {
                 backend.flush()
-                finished.signal()
                 return
             }
         }

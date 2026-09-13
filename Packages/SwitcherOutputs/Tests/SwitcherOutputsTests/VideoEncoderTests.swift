@@ -123,6 +123,32 @@ final class VideoEncoderTests: XCTestCase {
         }
     }
 
+    // MARK: 生命周期
+
+    /// start 前 / stop 后 consume 是空操作；stop 可以并发重复调用，都能返回。
+    func testLifecycle_consumeOutsideRunIsNoop_stopIsIdempotent() throws {
+        let backend = GatedBackend()
+        let encoder = VideoEncoder(configuration: .init(name: "life", format: format, settings: VideoEncodeSettings(), queueDepth: 2), backend: backend)
+        let feeder = try PatternFeeder(configuration: .init(format: .init(width: 640, height: 360, frameRate: .fps60)))
+        let clock = TickClockSpec(t0: HostClock.now(), frameRate: .fps60)
+        encoder.consume(try feeder.makeFrame(tick: .zero, clock: clock))
+        XCTAssertEqual(encoder.counters.pushed, 0, "start 前的帧不计数")
+        try encoder.start()
+        for i in 0..<5 { encoder.consume(try feeder.makeFrame(tick: Tick(Int64(i)), clock: clock)) }
+        XCTAssertEqual(encoder.counters.pushed, 5)
+        // 两个线程同时 stop，一个负责放行后端
+        let group = DispatchGroup()
+        for _ in 0..<2 { group.enter(); DispatchQueue.global().async { encoder.stop(); group.leave() } }
+        XCTAssertTrue(waitUntil(2) { encoder.counters.submitted >= 1 })
+        for _ in 0..<8 { backend.gate.signal() }
+        XCTAssertEqual(group.wait(timeout: .now() + 10), .success, "两个 stop 都必须返回")
+        XCTAssertFalse(encoder.isRunning)
+        encoder.consume(try feeder.makeFrame(tick: Tick(9), clock: clock))
+        XCTAssertEqual(encoder.counters.pushed, 5, "stop 后的帧不计数")
+        XCTAssertEqual(encoder.counters.queueDepth, 0)
+        XCTAssertEqual(encoder.counters.pushed, encoder.counters.accountedFrames)
+    }
+
     // MARK: 编码延迟 H.264 vs HEVC（报告要求）
 
     func testLatency_h264VersusHEVC_1080p60() throws {
