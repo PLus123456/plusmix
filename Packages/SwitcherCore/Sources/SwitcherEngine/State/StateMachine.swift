@@ -174,7 +174,8 @@ public actor StateMachine {
             trimHistory()
         }
         emitEvents(from: before, to: current, tick: target)
-        publishIfChanged()
+        // 每条命令都发布一个新快照（即使被拒、状态没变）：快照的 sequence 就是"已处理到哪条命令"，API / WS 靠它确认
+        publish()
         return CommandReceipt(sequence: sequence ?? lastSequence, appliedTick: target)
     }
 
@@ -205,11 +206,14 @@ public actor StateMachine {
         publishIfChanged()
     }
 
+    /// 空闲拍不发布新对象（渲染线程按 preparedTick 判断新旧），只有状态变了才换指针。
     private func publishIfChanged() {
-        if current != publishedState {
-            publishedState = current
-            publisher.publish(MixerSnapshot(state: current, sequence: lastSequence, tick: currentTick))
-        }
+        if current != publishedState { publish() } else { preparedTickValue.store(currentTick.rawValue, ordering: .releasing) }
+    }
+
+    private func publish() {
+        publishedState = current
+        publisher.publish(MixerSnapshot(state: current, sequence: lastSequence, tick: currentTick))
         preparedTickValue.store(currentTick.rawValue, ordering: .releasing)
     }
 

@@ -206,6 +206,8 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
 
     public func programClock(_ clock: ProgramClock, didSkipTicks count: Int, upTo tick: Tick) {
         counters.ticksSkippedValue.add(UInt64(count), ordering: .relaxed)
+        // 下一拍要渲染的是 tick + 1，提前让状态机准备，免得到时候等
+        stateMachine.requestPrepare(tick + 1)
     }
 
     // MARK: GPU 完成线程（RenderSink）
