@@ -3,9 +3,9 @@
 日期 2026-09-14。机器 Apple M5 Max / macOS 26.6.2 / Xcode 26.6 / Swift 6.3.3。
 worktree `.claude/worktrees/w1-testkit-synthetic-stats-6414d0`，从 `main`（bdab613，P1 合入后）开。
 分支实际名是 harness 给的 `claude/w1-testkit-synthetic-stats-6414d0`；为了跑 `check-ownership.sh`，另打了一个指向同一提交的 `w1-testkit` 引用（`git branch -f w1-testkit HEAD`），报告按 prompt 的分支名叫 `w1-testkit.md`。
-提交：`git log main..w1-testkit`，9 个（testkit × 7、frameprobe + 样例 × 1、fixtures README × 1），33 个文件 +7692 行。
+提交：`git log main..w1-testkit`，12 个（testkit × 8、frameprobe + 样例 × 1、fixtures README × 1、报告 × 2），34 个文件约 +7700 行。
 
-`make lint BRANCH=w1-testkit` 绿（禁词 / 版本 / Package.swift / 依赖方向 / 归属 33 个文件全在范围内）；整仓 `make build` 绿；`make test` 绿（六包 + 两工具冒烟 + App xcodebuild test）。SwitcherTestKitTests 49 个测试 75 s（debug；大头见 §5）。
+`make lint BRANCH=w1-testkit` 绿（禁词 / 版本 / Package.swift / 依赖方向 / 归属 34 个文件全在范围内）；整仓 `make build` 绿；`make test` 绿（六包 + 两工具冒烟 + App xcodebuild test）。SwitcherTestKitTests 49 个测试 75 s（debug；大头见 §5）。
 
 ## 1. 做了什么
 
