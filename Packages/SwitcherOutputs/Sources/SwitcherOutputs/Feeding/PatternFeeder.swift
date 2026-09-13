@@ -114,22 +114,28 @@ public final class PatternFeeder: @unchecked Sendable {
             case .gray(let level): base = Int(TestPattern.limitedLumaPublic(level))
             case .gradient: base = 128
             }
+            // 先用 8 字节一次的 PRNG 填满，再查表映射到 [base − amp, base + amp]（debug 下每平面约 30 ms）
             let planes = 8
+            func fill(_ p: UnsafeMutablePointer<UInt8>, count: Int, center: Int, amplitude: Int, lo: Int, hi: Int) {
+                var table = [UInt8](repeating: 0, count: 256)
+                for b in 0..<256 { table[b] = UInt8(clamping: max(lo, min(hi, center + (b % (2 * amplitude + 1)) - amplitude))) }
+                let words = count / 8
+                p.withMemoryRebound(to: UInt64.self, capacity: words) { wp in
+                    for i in 0..<words { wp[i] = g.next() }
+                }
+                for i in (words * 8)..<count { p[i] = UInt8(truncatingIfNeeded: g.next()) }
+                table.withUnsafeBufferPointer { t in
+                    for i in 0..<count { p[i] = t[Int(p[i])] }
+                }
+            }
             noiseLuma = (0..<planes).map { _ in
                 let p = UnsafeMutablePointer<UInt8>.allocate(capacity: w * h)
-                for i in 0..<(w * h) {
-                    let v = base + Int(g.next() % UInt64(2 * amp + 1)) - amp
-                    p[i] = UInt8(clamping: max(16, min(235, v)))
-                }
+                fill(p, count: w * h, center: base, amplitude: amp, lo: 16, hi: 235)
                 return p
             }
             noiseChroma = (0..<planes).map { _ in
                 let p = UnsafeMutablePointer<UInt8>.allocate(capacity: w * h / 2)
-                let camp = max(0, amp / 2)
-                for i in 0..<(w * h / 2) {
-                    let v = 128 + Int(g.next() % UInt64(2 * camp + 1)) - camp
-                    p[i] = UInt8(clamping: max(16, min(240, v)))
-                }
+                fill(p, count: w * h / 2, center: 128, amplitude: max(0, amp / 2), lo: 16, hi: 240)
                 return p
             }
             rng = g

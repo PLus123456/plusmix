@@ -133,8 +133,9 @@ public final class VideoEncoder: FrameConsumer, @unchecked Sendable {
     public func consume(_ frame: RenderedFrame) {
         atomicCounters.pushed.add(1, ordering: .relaxed)
         let evicted = queue.push(frame)
-        if evicted != nil {
+        if let evicted {
             atomicCounters.skipped.add(1, ordering: .relaxed)
+            atomicCounters.recordSkip(tick: evicted.tick)
         }
         atomicCounters.queueDepth.store(queue.depth, ordering: .relaxed)
         wakeup.signal()
@@ -148,6 +149,7 @@ public final class VideoEncoder: FrameConsumer, @unchecked Sendable {
             wakeup.wait()
             let stopping = stateLock.withLock { stopRequested }
             while let frame = queue.pop() {
+                atomicCounters.submitted.add(1, ordering: .relaxed)
                 atomicCounters.queueDepth.store(queue.depth, ordering: .relaxed)
                 let force: Bool = stateLock.withLock {
                     let f = keyframeRequested || firstFrame
@@ -155,11 +157,13 @@ public final class VideoEncoder: FrameConsumer, @unchecked Sendable {
                     firstFrame = false
                     return f
                 }
+                let t0 = HostClock.now()
                 do {
                     try backend.encode(frame, forceKeyframe: force)
                 } catch {
                     atomicCounters.failed.add(1, ordering: .relaxed)
                 }
+                atomicCounters.recordEncodeCall(HostClock.now() - t0)
             }
             if stopping {
                 backend.flush()

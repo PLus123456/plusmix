@@ -96,7 +96,8 @@ do {
                         pacing: realTime ? .realTime : .fastest(readyToAccept: { !recorder.isQueueFull })) { tick, tickTime in
         signalFeeder.feed(upTo: tickTime, to: [recorder])
         if tick.rawValue % Int64(nominal) == 0 {
-            print("tick \(tick.rawValue) \(HostClock.now().ticks)")
+            let c = recorder.counters
+            print("tick \(tick.rawValue) \(HostClock.now().ticks) skipped \(c.encoder.skipped) queue \(c.encoder.queueDepth) lat \(String(format: "%.1f", c.encoder.lastLatency.milliseconds))/\(String(format: "%.1f", c.encoder.maxLatency.milliseconds)) ms frames \(c.videoFrames) audio \(c.audioFrames) drift \(String(format: "%.2f", c.audioDrift.milliseconds)) ms free \(c.diskFreeBytes / 1_000_000) MB")
             fflush(stdout)
         }
     }
