@@ -3,8 +3,7 @@
 // AudioOutputDevice / AudioInputDevice（CoreAudio 设备层）、LoudnessMeter（离线分析）、RealtimeGuard（A7）。
 import SwitcherContracts
 
-/// P0 骨架占位。TestKit 的 P0 骨架仍引用它；W1-A 删掉那个引用之后这里可以删。
-@available(*, deprecated, message: "P0 占位，W1-A 删掉 TestKit 里的引用后删除")
+/// P0 骨架占位。TestKit 的 P0 骨架仍引用它，W1-A 删掉那个引用之后这里可以删（不标 deprecated：别让别的包的构建出警告）。
 public enum SwitcherAudioSkeleton {
     public static let contractsVersion = SwitcherVersion.current
 }

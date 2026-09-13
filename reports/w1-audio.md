@@ -2,7 +2,7 @@
 
 日期 2026-09-14。机器 Apple M5 Max / macOS 26.6.2 (25G83) / Xcode 26.6 / Swift 6.3.3 / Apple clang 21.0.0，电源适配器，室温。
 worktree `.claude/worktrees/w1-audio-612658`，从 `main`（bdab613）开；分支已按 prompt 改名为 `w1-audio`。
-提交：见 `git log main..w1-audio`（audio × 6、reports × 1）。
+提交：见 `git log main..w1-audio`（9 个 audio 提交，小步；报告在最后两个里）。
 
 ## 1. 做了什么
 
@@ -22,7 +22,7 @@ worktree `.claude/worktrees/w1-audio-612658`，从 `main`（bdab613）开；分�
 
 另外：`BusEffectChain.swift`（AU 创建 / 配格式 / 装回调 / initialize / 调参）、`LoudnessMeter`（同一算法的非实时包装，给离线分析与 5.1 用例）、`AudioMixer.apply(_ InputAudioSettings, toSlot:)`（契约参数一次落地）。
 
-代码量：热路径 C 1070 行（sw_mix.c 840）、Host C 480、Swift 1540、测试 52 个（9 个文件）。
+代码量：热路径 C 1070 行（sw_mix.c 840）、Host C 520、Swift 1540、测试 52 个（9 个文件）。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
@@ -92,7 +92,7 @@ A1 第一次 10 分钟跑出过 **20 次欠载**（dropouts 0）：归因是测�
 | 项 | 数值 | 阈值 | 通过 |
 |---|---|---|---|
 | 中点 from / to | −3.01 / −3.01 dB | 各 −3 dB | ✅ |
-| 起点前 / 终点后 | from 1.0 / 0.0，to 0.0 / 1.0（1e-7 内） | 精确 | ✅ |
+| 起点前 / 终点后 | from 1.0 / 0.0，to 0.0 / 1.0（1e-6 内；直流经 sinc 重采样器 Σh = 1 − 1.2e-7） | 精确 | ✅ |
 | 全程功率和 l² + r² | 1.0 ± 1e-3，单调 | 等幅 | ✅ |
 | 起点定位 | startHostTime 落在第 5 块第 100 样本：s0−1 仍 1.0，s0+k 处 = cos(π/2·k/dur)（k = 64 / 640 / 2048，2e-6 内） | 样本级 | ✅ |
 
@@ -120,7 +120,7 @@ A1 第一次 10 分钟跑出过 **20 次欠载**（dropouts 0）：归因是测�
 | `MixerTests` 其余 | 命令确认（attach / detach 序号）；声像律（单声道等功率、立体声平衡不抬升）；增益 / 静音 / 总线静音数值与无爆音平滑；消费者队列带首样本 host time、序号连续、满了丢块计数 | ✅ |
 | `EffectChainTests` × 4 | 四总线 12 个 AU 建好并 initialize；关闭 = 精确旁路；EQ +12 dB @ 1 kHz 实测 +12 ±0.5、10 kHz 处不变；压缩把 −13 dBFS 压低 > 6 dB；限幅后峰值 < 0.5 dBFS；全链 2000 块 0 违规。延迟：EQ 0、DynamicsProcessor 256、PeakLimiter 96 帧 | ✅ |
 | `IOProcTests` × 3 | 直接调 `sw_device_ioproc`：交错立体声散布、非交错 4 声道（未映射通道清零）、输入收集（通道映射、stamp = inInputTime、无 HostTimeValid 时兜底并计数、环满溢出计数、摘环后不写） | ✅ |
-| `DeviceTests` 其余 | 空输出设备 6 s：1126 块（期望 1125）、跳块 0、醒来最晚 0.040 ms；私有聚合设备上 IOProc 376 回调、抖动 15 µs；运行中 rebuild 到聚合设备再回来：0 dropouts、0 违规、混音不断；默认设备变更监听：把系统默认输出改成一台（非私有）聚合设备再改回，监听触发、重建 2 次、0 dropouts、上下文不动（SW_AUDIO_FULL=1 时才跑，会让系统默认输出切走约 2 s） | ✅ |
+| `DeviceTests` 其余 | 空输出设备 6 s：1127 块（期望 1125）、跳块 0、醒来最晚 0.057 ms；私有聚合设备上 IOProc 376 回调、抖动 57 µs；运行中 rebuild 到聚合设备再回来：0 dropouts、0 违规、混音不断；默认设备变更监听：把系统默认输出改成一台（非私有）聚合设备再改回，监听触发、重建 2 次、0 dropouts、上下文不动（SW_AUDIO_FULL=1 时才跑，会让系统默认输出切走约 2 s） | ✅ |
 
 ### BLOCKED
 
@@ -162,8 +162,8 @@ A1 第一次 10 分钟跑出过 **20 次欠载**（dropouts 0）：归因是测�
 - **HAL 事实（探针 + 测试）**：内置扬声器 1 个 buffer 2 声道交错；`inOutputTime.mHostTime` 比回调进入早 buffer + safety offset（256 + 48 帧 = 6.33 ms）；buffer size 范围 15…4096；时间戳标志 0x7（Sample / Host / RateScalar 都有效）；输出 latency 60 + safety 48 帧。
 - **真麦克风要 TCC**：`AudioDeviceStart` 在没权限时会等弹窗（本会话 140 s 后 0x10000003）。W2-A / W2-E 跑输入设备前先给 Terminal / Xcode 授权。
 - **`.unsafeFlags(["-O2"])`（debug 下 C target 优化）对本地路径依赖是允许的**（TestKit 能解析）；但若哪天某包改成 git 依赖会炸。-O0 的 sinc + K 加权每块 2 ms（8 路），真设备 debug 跑会贴近预算，所以留着。
-- **`SwitcherAudioSkeleton` 还在**（标 deprecated）：TestKit 的 P0 骨架引用它，W1-A 删掉引用后可删。
-- **默认设备变更测试会改系统默认输出设备约 2 s**（改到私有聚合再改回），只在 `SW_AUDIO_FULL=1` 时跑。
+- **`SwitcherAudioSkeleton` 还在**：TestKit 的 P0 骨架引用它（删了整仓 `make build` 会红），W1-A 删掉引用后可删。没标 deprecated，免得 TestKit / Tools / App 的构建出警告。
+- **默认设备变更测试会改系统默认输出设备约 2 s**（改到一台非私有聚合设备再改回；私有聚合设备设不成默认，探针实测设了不生效），只在 `SW_AUDIO_FULL=1` 时跑。
 - **设定点与交付抖动**：稳态下混音位置落后"已写入的最新帧"约 target + P/2 + hf + chunk/2（默认 512 + 128 + 47 + 16 = 703 帧），每块要用掉 256 + hf + chunk ≈ 335 帧，所以生产者最坏相位下只能迟到 ~2.4 ms（P = 256 时）。HAL 输入 IOProc（实时线程、采完即交）没问题；NDI / 文件 / 非实时线程的合成源要把 `attach(..., targetFrames:)` 设成 ≥ 它的最坏交付抖动（例如 4–6 块）。生产者块大得多（文件读 4096 帧一块）时门限里的 P/2 会自动给出余量。
 - **给 W2-E 的延迟核算**：某路输入在块 T 送出的音频，采样时刻 ≈ T − `InputSlotStats.ageSetpoint`（帧）− 该路延迟补偿 − 输入设备自身延迟（`AudioInputDevice.inputLatencyFrames`）；输出到扬声器再加 buffer + `AudioOutputDevice.outputLatencyFrames`（内置扬声器 256 + 108 帧）。效果链里 DynamicsProcessor +256、PeakLimiter +96 帧。
 - 内存：一个 `AudioMixer`（32 槽位、max block 4096）约 26 MB（延迟线 8 MB、重采样器 4.5 MB、四条总线的 libebur128 3 s 窗口 9 MB）。
