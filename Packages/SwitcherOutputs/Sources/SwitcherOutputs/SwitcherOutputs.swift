@@ -18,3 +18,10 @@ public enum SwitcherOutputsInfo {
     /// 与 `SwitcherVersion.current` 相同。
     public static let version = SwitcherVersion.current
 }
+
+/// P0 占位的兼容别名：SwitcherTestKit 的 P0 骨架还引用它（W1-A 删掉那边之后这里就能删；G2 合并时哪个先进都不会断编译）。
+@available(*, deprecated, message: "P0 占位，用 SwitcherOutputsInfo.version")
+public enum SwitcherOutputsSkeleton {
+    /// 同 SwitcherOutputsInfo.version。
+    public static let contractsVersion = SwitcherVersion.current
+}
