@@ -83,12 +83,23 @@ enum LabelPainter {
         input.name.isEmpty ? "\(input.number)" : "\(input.number)  \(input.name)"
     }
 
-    /// 把状态里每路输入的名字画进这套切片（只画变了的）。
-    static func update(_ set: LabelSet, from state: MixerState, scratch: UnsafeMutableRawPointer) {
-        var wanted = Array(repeating: "", count: set.slices)
-        for input in state.inputs where input.number > 0 && input.number < set.slices {
+    /// 状态里每个切片该显示的文字。
+    static func wantedTexts(for state: MixerState, slices: Int) -> [String] {
+        var wanted = Array(repeating: "", count: slices)
+        for input in state.inputs where input.number > 0 && input.number < slices {
             wanted[input.number] = labelText(for: input)
         }
+        return wanted
+    }
+
+    /// 这套切片和状态里的名字是否有出入。
+    static func needsUpdate(_ set: LabelSet, from state: MixerState) -> Bool {
+        wantedTexts(for: state, slices: set.slices) != set.texts
+    }
+
+    /// 把状态里每路输入的名字画进这套切片（只画变了的）。
+    static func update(_ set: LabelSet, from state: MixerState, scratch: UnsafeMutableRawPointer) {
+        let wanted = wantedTexts(for: state, slices: set.slices)
         for slice in 0..<set.slices where wanted[slice] != set.texts[slice] {
             paint(wanted[slice], into: set, slice: slice, scratch: scratch)
         }
@@ -102,7 +113,7 @@ final class LabelRenderer: @unchecked Sendable {
     let published = Atomic<Int>(0)
     private let lock = NSLock()
     private var pendingSnapshot: MixerSnapshot?
-    private var lastSeenSnapshot: ObjectIdentifier?
+    private var lastSeenSequence: UInt64 = .max
     private let wake = DispatchSemaphore(value: 0)
     private let finished = DispatchSemaphore(value: 0)
     private let stopped = Atomic<Bool>(false)
@@ -121,11 +132,11 @@ final class LabelRenderer: @unchecked Sendable {
 
     deinit { scratch.deallocate() }
 
-    /// 渲染线程每帧调：快照对象变了就交给后台线程（比较对象标识，零分配；锁只在变了时拿一次）。
+    /// 渲染线程每帧调：快照的 sequence 变了（有命令生效过）才交给后台线程。
+    /// 不比对象标识：引擎可能每拍发布一个新快照对象（tick 变了），那样标签线程会每拍空转。零分配；锁只在变了时拿一次。
     func noteSnapshot(_ snapshot: MixerSnapshot) {
-        let id = ObjectIdentifier(snapshot)
-        if id == lastSeenSnapshot { return }
-        lastSeenSnapshot = id
+        if snapshot.sequence == lastSeenSequence { return }
+        lastSeenSequence = snapshot.sequence
         lock.lock()
         pendingSnapshot = snapshot
         lock.unlock()
@@ -165,6 +176,8 @@ final class LabelRenderer: @unchecked Sendable {
             lock.unlock()
             guard let snap else { continue }
             let active = published.load(ordering: .acquiring)
+            // 名字没变就不翻缓冲
+            if !LabelPainter.needsUpdate(sets[active], from: snap.state) { continue }
             let next = 1 - active
             // 另一套可能还被在途帧读着：等它们完成
             let fence = submittedFrames()

@@ -10,7 +10,11 @@ import SwitcherContracts
 public final class MetalDisplayView: NSView {
     /// 从哪里拿纹理。
     public weak var source: (any DisplayFrameSource)? {
-        didSet { pipeline = nil; lastVersion = 0 }
+        didSet {
+            pipeline = nil
+            lastVersion = 0
+            if let source { metalLayer.device = source.displayCommandQueue.device }   // drawable 必须和 blit 用的队列同一台设备
+        }
     }
     /// 显示 PGM / PVW / 多画面。
     public var target: DisplayTarget = .program {
