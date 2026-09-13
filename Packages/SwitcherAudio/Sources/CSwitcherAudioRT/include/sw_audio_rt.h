@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <CoreAudio/CoreAudio.h>
 #include "sw_audio_ring.h"
 #include "sw_rt_attr.h"
 #include "sw_rt_guard.h"
@@ -221,10 +222,50 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
 
 /// 混音块的大小上限（创建时定）。
 uint32_t sw_mix_ctx_max_block_frames(const sw_mix_ctx *ctx) SW_NONBLOCKING;
+/// 每帧 host tick（实时侧可调）。
+double sw_mix_ctx_host_ticks_per_frame_rt(const sw_mix_ctx *ctx) SW_NONBLOCKING;
 /// 已应用的命令数（release 发布；控制侧 acquire 读）。
 uint64_t sw_mix_ctx_commands_applied(const sw_mix_ctx *ctx) SW_NONBLOCKING;
 /// 设备层报告一次 overload（kAudioDeviceProcessorOverload），计进 dropouts。任何线程。
 void sw_mix_ctx_note_overload(sw_mix_ctx *ctx) SW_NONBLOCKING;
+
+// ============================================================================
+// 6. 设备 IOProc（CoreAudio HAL；设备层 Swift 用 AudioDeviceCreateIOProcID 把它挂到设备上）
+// ============================================================================
+
+/// 设备通道在 AudioBufferList 里的位置：mBuffers[buffer].mData 的第 offset 个 float 起、每帧跨 stride 个 float。
+/// HAL 给的是设备原生布局（内置扬声器是 1 个 buffer 2 声道交错；有些接口每声道一个 buffer），Swift 从 StreamConfiguration 算好。
+typedef struct sw_channel_location {
+    uint32_t buffer;
+    uint32_t offset;
+    uint32_t stride;
+} sw_channel_location;
+
+/// 一个 IOProc 客户端：可同时带输出（混音 → 设备）与输入（设备 → 环，聚合设备 / 带输入的接口）。Host target 创建 / 配置。
+typedef struct sw_device_client sw_device_client;
+
+/// IOProc 本体。输出：调 sw_mix_block（host_time = inOutputTime->mHostTime，首样本呈现时刻）后按布局散到设备缓冲；
+/// 输入：按布局收集到非交错缓冲后 sw_audio_ring_write（host_time = inInputTime->mHostTime）。
+/// 参数可空性照 CoreAudio 的 AudioDeviceIOProc typedef 标（Swift 才能把它当 AudioDeviceIOProc 传）。
+OSStatus sw_device_ioproc(AudioObjectID device, const AudioTimeStamp *_Nonnull now, const AudioBufferList *_Nonnull input,
+                          const AudioTimeStamp *_Nonnull input_time, AudioBufferList *_Nonnull output,
+                          const AudioTimeStamp *_Nonnull output_time, void *_Nullable client) SW_NONBLOCKING;
+
+/// 客户端统计（RT 写，快照读）。
+typedef struct sw_device_client_stats {
+    uint64_t callbacks;             ///< 回调次数
+    uint64_t frames;                ///< 输出帧数
+    uint32_t last_frames;           ///< 最近一次回调的帧数（= 实际 buffer size）
+    uint32_t reserved0;
+    uint64_t nominal_period_ticks;  ///< 按最近帧数算的名义回调周期
+    uint64_t max_jitter_ticks;      ///< |两次回调间隔 − 名义周期| 的最大值
+    uint64_t jitter_hist[32];       ///< 直方图：每桶 100 µs（桶 31 = ≥ 3.1 ms）
+    uint64_t max_lead_ticks;        ///< 回调进入时刻到 inOutputTime 的最大提前量
+    uint64_t min_lead_ticks;        ///< 最小提前量（越小越接近欠载）
+    uint64_t input_frames_written;  ///< 写进环的输入帧数
+    uint64_t input_overruns;        ///< 环满被丢
+    uint64_t timestamp_fallbacks;   ///< 时间戳没有 HostTimeValid、用 mach_absolute_time 兜底的次数
+} sw_device_client_stats;
 
 #ifdef __cplusplus
 }

@@ -75,6 +75,38 @@ uint32_t sw_mix_ctx_resampler_latency_frames(const sw_mix_ctx *ctx);
 /// 是否用真实时钟检查"块处理时间 > 块时长"（记 dropouts）。实时驱动开，离线驱动关。
 void sw_mix_ctx_set_timing_check(sw_mix_ctx *ctx, bool on);
 
+// ---- 设备 IOProc 客户端 ----
+
+/// 创建（ctx 可为 NULL：纯输入客户端）。
+sw_device_client *sw_device_client_create(sw_mix_ctx *ctx, uint32_t max_block_frames);
+void sw_device_client_destroy(sw_device_client *c);
+/// 输出：设备通道布局（从 kAudioDevicePropertyStreamConfiguration 算）与逻辑通道 → 设备通道映射（8 个，−1 不输出）。
+void sw_device_client_set_output_layout(sw_device_client *c, const sw_channel_location *locs, uint32_t count);
+void sw_device_client_set_output_map(sw_device_client *c, const int32_t *map8);
+/// 输入：设备输入通道布局、环声道 → 设备输入通道映射、目标环（原子换，NULL 关）。
+void sw_device_client_set_input_layout(sw_device_client *c, const sw_channel_location *locs, uint32_t count);
+void sw_device_client_set_input_map(sw_device_client *c, const int32_t *map, uint32_t count);
+void sw_device_client_set_input_ring(sw_device_client *c, sw_audio_ring *ring);
+void sw_device_client_copy_stats(const sw_device_client *c, sw_device_client_stats *out);
+void sw_device_client_reset_stats(sw_device_client *c);
+
+// ---- 空输出设备驱动（timer 驱动的假设备时钟）----
+
+typedef struct sw_null_driver sw_null_driver;
+typedef struct sw_null_driver_stats {
+    uint64_t blocks;
+    uint64_t skipped_blocks;        ///< 线程被抢占太久、跳过的块
+    uint64_t max_wake_late_ticks;   ///< mach_wait_until 醒来比目标晚的最大值
+    uint64_t wake_hist[32];         ///< 每桶 100 µs
+} sw_null_driver_stats;
+
+sw_null_driver *sw_null_driver_create(sw_mix_ctx *ctx, uint32_t block_frames);
+void sw_null_driver_destroy(sw_null_driver *d);
+int  sw_null_driver_start(sw_null_driver *d);
+void sw_null_driver_stop(sw_null_driver *d);
+void sw_null_driver_copy_stats(const sw_null_driver *d, sw_null_driver_stats *out);
+uint64_t sw_null_driver_period_ticks(const sw_null_driver *d);
+
 // ---- 实时守卫的非实时封装（本仓库里所有会分配 / 加锁 / 打日志的 C 代码都走它们）----
 
 /// malloc 的封装：在实时块内被调到记违规。

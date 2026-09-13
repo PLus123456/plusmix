@@ -835,5 +835,6 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
 }
 
 uint32_t sw_mix_ctx_max_block_frames(const sw_mix_ctx *ctx) SW_NONBLOCKING { return ctx->max_block_frames; }
+double sw_mix_ctx_host_ticks_per_frame_rt(const sw_mix_ctx *ctx) SW_NONBLOCKING { return ctx->host_ticks_per_frame; }
 uint64_t sw_mix_ctx_commands_applied(const sw_mix_ctx *ctx) SW_NONBLOCKING { return __atomic_load_n(&ctx->stats.commands_applied, __ATOMIC_ACQUIRE); }
 void sw_mix_ctx_note_overload(sw_mix_ctx *ctx) SW_NONBLOCKING { __atomic_fetch_add(&ctx->overloads, 1u, __ATOMIC_RELAXED); }
