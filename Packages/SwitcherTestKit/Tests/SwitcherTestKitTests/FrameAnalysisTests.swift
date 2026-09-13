@@ -218,3 +218,25 @@ final class FrameAnalysisTests: XCTestCase {
         XCTAssertNil(FrameAnalysis.nearest([], to: 0))
     }
 }
+
+extension FrameAnalysisTests {
+    /// 节目输出里某路切走再切回来，中间那段不是它的丢帧；切回来后帧号从新段起算。
+    func testV4_stats_offAirGapIsNotADrop() {
+        var spec: [(Int?, UInt32?, Double, Bool)] = []
+        for n in 0..<10 { spec.append((0, UInt32(n), 64, false)) }        // A 0–9
+        for n in 5..<15 { spec.append((1, UInt32(n), 192, false)) }       // B 上 10 帧
+        spec.append((nil, nil, 128, false))                                 // 一帧读不出 ID（混合）
+        for n in 20..<30 { spec.append((0, UInt32(n), 64, false)) }       // A 回来：20 起，10–19 是它不在播时的帧
+        let r = FrameAnalysis.stats(frames: frames(spec), programFps: 60, inputFps: [0: 60, 1: 60])
+        let a = r.inputs[0]
+        XCTAssertEqual(a.frames, 20); XCTAssertEqual(a.uniqueFrames, 20); XCTAssertEqual(a.droppedFrames, 0); XCTAssertTrue(a.dropGaps.isEmpty)
+        XCTAssertEqual(a.passV4, true)
+        XCTAssertEqual(r.unidentifiedFrames, 1)
+        // 同一段里真丢的还是要报：A 的第二段里跳过 25
+        var spec2 = spec
+        spec2.removeAll { $0.0 == 0 && $0.1 == 25 }
+        let r2 = FrameAnalysis.stats(frames: frames(spec2), programFps: 60)
+        XCTAssertEqual(r2.inputs[0].droppedFrames, 1)
+        XCTAssertEqual(r2.inputs[0].dropGaps.first?.from, 24)
+    }
+}

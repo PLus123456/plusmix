@@ -82,60 +82,60 @@ public enum FrameAnalysis {
     ///   - inputFps: 每路输入的帧率（键 = 输入 ID），用来区分设计内 / 设计外。
     ///   - maxEvents: 每路最多列出多少段重复 / 缺口（防止 1 小时文件输出几十万条）。
     public static func stats(frames: [ProbeFrame], programFps: Double, inputFps: [Int: Double] = [:], maxEvents: Int = 200) -> StatsReport {
-        var byInput: [Int: [ProbeFrame]] = [:]
+        // 按输入分组，但切走再切回来算新的一段：节目输出里某路不在播的那段不是它"丢帧"。
+        // 规则：只有相邻输出帧（中间最多隔着读不出 ID 的帧）且同一输入，帧号才连着比。
+        var byInput: [Int: [[ProbeFrame]]] = [:]
         var undecodable = 0, unidentified = 0
+        var lastID: Int?
         for f in frames {
             if f.frameNumber == nil { undecodable += 1 }
             guard let id = f.inputID else { unidentified += 1; continue }
+            if lastID != id || byInput[id] == nil { byInput[id, default: []].append([]) }
+            lastID = id
             guard f.frameNumber != nil else { continue }
-            byInput[id, default: []].append(f)
+            byInput[id]![byInput[id]!.count - 1].append(f)
         }
         var truncated = false
         var inputs: [InputStats] = []
         for id in byInput.keys.sorted() {
-            let list = byInput[id]!
-            var unique = 0, dupFrames = 0, dropped = 0, backward = 0
+            var frames = 0, unique = 0, dupFrames = 0, dropped = 0, backward = 0
             var runs: [DuplicateRun] = [], gaps: [DropGap] = []
-            var prev: UInt32?
-            var runStart = -1, runLength = 0
-            for f in list {
-                let n = f.frameNumber!
-                if let p = prev {
-                    if n == p {
-                        dupFrames += 1
-                        if runLength == 0 { runStart = f.index - 1; runLength = 2 } else { runLength += 1 }
-                    } else {
-                        if runLength > 0 {
-                            if runs.count < maxEvents { runs.append(DuplicateRun(index: runStart, length: runLength, frameNumber: p)) } else { truncated = true }
-                            runLength = 0
-                        }
-                        unique += 1
-                        let delta = Int64(n) - Int64(p)
-                        if delta > 1 {
-                            dropped += Int(delta - 1)
-                            if gaps.count < maxEvents { gaps.append(DropGap(index: f.index, from: p, to: n, missing: Int(delta - 1))) } else { truncated = true }
-                        } else if delta < 0 {
-                            // 28 位回绕：从接近 2^28 跳回接近 0 算正常；否则算倒退
-                            let wrapped = delta + Int64(TestPattern.dataMask) + 1
-                            if wrapped >= 1 && wrapped < 1_000_000 {
-                                if wrapped > 1 {
-                                    dropped += Int(wrapped - 1)
-                                    if gaps.count < maxEvents { gaps.append(DropGap(index: f.index, from: p, to: n, missing: Int(wrapped - 1))) } else { truncated = true }
-                                }
-                            } else {
-                                backward += 1
+            for segment in byInput[id]! {
+                var prev: UInt32?
+                var runStart = -1, runLength = 0
+                for f in segment {
+                    frames += 1
+                    let n = f.frameNumber!
+                    if let p = prev {
+                        if n == p {
+                            dupFrames += 1
+                            if runLength == 0 { runStart = f.index - 1; runLength = 2 } else { runLength += 1 }
+                        } else {
+                            if runLength > 0 {
+                                if runs.count < maxEvents { runs.append(DuplicateRun(index: runStart, length: runLength, frameNumber: p)) } else { truncated = true }
+                                runLength = 0
+                            }
+                            unique += 1
+                            var delta = Int64(n) - Int64(p)
+                            if delta < 0 {
+                                // 28 位回绕：从接近 2^28 跳回接近 0 算正常；否则算倒退
+                                let wrapped = delta + Int64(TestPattern.dataMask) + 1
+                                if wrapped >= 1 && wrapped < 1_000_000 { delta = wrapped } else { backward += 1; delta = 1 }
+                            }
+                            if delta > 1 {
+                                dropped += Int(delta - 1)
+                                if gaps.count < maxEvents { gaps.append(DropGap(index: f.index, from: p, to: n, missing: Int(delta - 1))) } else { truncated = true }
                             }
                         }
+                    } else {
+                        unique += 1
                     }
-                } else {
-                    unique = 1
+                    prev = n
                 }
-                prev = n
+                if runLength > 0, let p = prev {
+                    if runs.count < maxEvents { runs.append(DuplicateRun(index: runStart, length: runLength, frameNumber: p)) } else { truncated = true }
+                }
             }
-            if runLength > 0, let p = prev {
-                if runs.count < maxEvents { runs.append(DuplicateRun(index: runStart, length: runLength, frameNumber: p)) } else { truncated = true }
-            }
-            let frames = list.count
             let dupRatio = frames > 0 ? Double(dupFrames) / Double(frames) : 0
             let dropRatio = (unique + dropped) > 0 ? Double(dropped) / Double(unique + dropped) : 0
             var s = InputStats(inputID: id, frames: frames, uniqueFrames: unique, duplicateFrames: dupFrames, duplicateRuns: runs,
@@ -162,6 +162,7 @@ public enum FrameAnalysis {
                            durationSeconds: duration, programFps: programFps, expectedFrames: expected,
                            frameCountDelta: frames.count - expected, inputs: inputs, truncated: truncated)
     }
+
 
     // MARK: - V6
 
