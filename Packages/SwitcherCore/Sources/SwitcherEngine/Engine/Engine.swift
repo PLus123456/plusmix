@@ -46,6 +46,8 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
     public var encoderStatsProvider: (@Sendable () -> [Stats.EncoderEntry])?
     /// 音频统计来源（W2-E 接线）。
     public var audioStatsProvider: (@Sendable () -> Stats.AudioCounters)?
+    /// GPU 占用来源（没有公开 API；G2 若用 powermetrics / IOKit 采到就从这里灌，否则 0）。
+    public var gpuPercentProvider: (@Sendable () -> Double)?
 
     /// 输入表：下标 = 输入编号，不可变，整表替换。
     final class SlotTable: Sendable {
@@ -242,7 +244,8 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         let jitter = clock?.jitter ?? JitterRecorder(capacity: 1)
         return assembler.make(now: now, wallClock: wallClock, jitter: jitter, inputs: inputs,
                               encoder: encoderStatsProvider?() ?? [],
-                              audio: audioStatsProvider?() ?? Stats.AudioCounters(dropouts: 0, underruns: 0))
+                              audio: audioStatsProvider?() ?? Stats.AudioCounters(dropouts: 0, underruns: 0),
+                              gpuPct: gpuPercentProvider?() ?? 0)
     }
 
     /// 派发抖动（GPU 完成回调时刻 − 理想拍点）的窗口最大值，读后清零。V3 的另一种口径，给 G2 对照。
