@@ -65,13 +65,15 @@ final class OutputBufferRing {
     /// 下一个空闲的缓冲。渲染线程调用；稳态零分配。
     func next() -> CVPixelBuffer? {
         let n = buffers.count
-        for step in 0..<n {
+        var step = 0
+        while step < n {   // 显式循环：-Onone 下 for-in 会分配
             let i = (cursor + step) % n
             // 只有环自己持有 → 可以复用；消费者还拿着 → 跳过
             if retainCount(at: i) == idleRetainCount {
                 cursor = (i + 1) % n
                 return buffers[i]
             }
+            step += 1
         }
         // 全被消费者占着：退回池子（分配）
         fallbackCount += 1

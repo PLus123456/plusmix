@@ -36,23 +36,27 @@ final class SurfaceTextureTable {
         var freeIndex = -1
         var oldestIndex = 0
         var oldestUsed = UInt64.max
-        for i in entries.indices {
-            let e = entries[i]
-            if e.key == key {
+        // 显式下标循环（不用 for-in）：-Onone 下泛型迭代器会装箱分配，这里是每帧热路径
+        let n = entries.count
+        var i = 0
+        while i < n {
+            let k = entries[i].key
+            if k == key {
                 // 尺寸不同的同一个 IOSurface（理论上不会发生）：重建
-                if let t = e.texture, t.width == width, t.height == height {
+                if let t = entries[i].texture, t.width == width, t.height == height {
                     entries[i].lastUsed = frame
                     return t
                 }
                 freeIndex = i
                 break
             }
-            if e.key == 0 {
+            if k == 0 {
                 if freeIndex < 0 { freeIndex = i }
-            } else if e.lastUsed < oldestUsed {
-                oldestUsed = e.lastUsed
+            } else if entries[i].lastUsed < oldestUsed {
+                oldestUsed = entries[i].lastUsed
                 oldestIndex = i
             }
+            i += 1
         }
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
         d.usage = usage
@@ -72,9 +76,13 @@ final class SurfaceTextureTable {
 
     /// 释放很久没用的条目（在渲染线程调也只会 release，不会 malloc）。
     func evictIdle(frame: UInt64) {
-        for i in entries.indices where entries[i].key != 0 && frame &- entries[i].lastUsed > idleFrames {
-            entries[i] = Entry()
-            evictCount += 1
+        var i = 0
+        while i < entries.count {
+            if entries[i].key != 0 && frame &- entries[i].lastUsed > idleFrames {
+                entries[i] = Entry()
+                evictCount += 1
+            }
+            i += 1
         }
     }
 

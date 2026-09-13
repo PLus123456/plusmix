@@ -137,6 +137,12 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     }
 
     public func render(tick: Tick, at tickTime: HostTime, snapshot: MixerSnapshot, inputs: RenderInputTable) -> RenderVerdict {
+        // Metal 的 makeCommandBuffer / make…Encoder 返回 autoreleased 对象；渲染线程若从不 drain，自动释放池每几百帧就新开一页（分配）。
+        // 这里每拍 drain 一次（pop 只释放，不 malloc；线程的热页会被 objc 缓存复用）。W1-B 的渲染线程每拍也应包一层 autoreleasepool。
+        autoreleasepool { renderInsidePool(tick: tick, at: tickTime, snapshot: snapshot, inputs: inputs) }
+    }
+
+    private func renderInsidePool(tick: Tick, at tickTime: HostTime, snapshot: MixerSnapshot, inputs: RenderInputTable) -> RenderVerdict {
         guard let resources, let table, let ring, let labels, !slots.isEmpty else { return .skipped }
         RenderSignposts.begin(.frame)
         defer { RenderSignposts.end(.frame) }
@@ -167,7 +173,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
             RenderSignposts.event("skip-resource")
             return .skipped
         }
-        cb.label = "switcher.frame"
+        cb.label = "frame"   // 短 ASCII 字面量是 tagged pointer，不分配；"switcher.frame" 这种长度会分配
         slot.tick = tick
         slot.tickTime = tickTime
         slot.frameIndex = frameIndex

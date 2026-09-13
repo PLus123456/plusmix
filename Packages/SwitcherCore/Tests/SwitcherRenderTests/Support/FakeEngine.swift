@@ -8,19 +8,27 @@ import Synchronization
 import SwitcherContracts
 @testable import SwitcherRender
 
-/// 收完成回调。
+/// 收完成回调。只存时间戳（存 RenderedFrame 会把输出缓冲全部扣住，环就空了）；要帧的话设 holdDepth。
 final class CollectingSink: RenderSink, @unchecked Sendable {
+    struct Sample {
+        let tick: Tick
+        let tickTime: HostTime
+        let submitTime: HostTime
+        let gpuStart: HostTime
+        let gpuEnd: HostTime
+        var renderMs: Double { (gpuEnd - tickTime).milliseconds }
+    }
     private let lock = NSLock()
-    private(set) var frames: [RenderedFrame] = []
+    private(set) var samples: [Sample] = []
     /// 派发时刻（V3 抖动口径要它）。
     private(set) var dispatchTimes: [HostTime] = []
-    /// 模拟一个慢消费者：持有最近 N 帧的输出缓冲。
+    /// 模拟一个慢消费者：持有最近 N 帧（含输出缓冲）。
     var holdDepth = 0
-    private var held: [RenderedFrame] = []
+    private(set) var held: [RenderedFrame] = []
 
     func renderer(_ renderer: any Renderer, didComplete frame: RenderedFrame) {
         lock.lock()
-        frames.append(frame)
+        samples.append(Sample(tick: frame.tick, tickTime: frame.tickTime, submitTime: frame.submitTime, gpuStart: frame.gpuStart, gpuEnd: frame.gpuEnd))
         dispatchTimes.append(HostClock.now())
         if holdDepth > 0 {
             held.append(frame)
@@ -29,8 +37,9 @@ final class CollectingSink: RenderSink, @unchecked Sendable {
         lock.unlock()
     }
 
-    var renderMs: [Double] { lock.lock(); defer { lock.unlock() }; return frames.map(\.renderMs) }
-    var count: Int { lock.lock(); defer { lock.unlock() }; return frames.count }
+    var renderMs: [Double] { lock.lock(); defer { lock.unlock() }; return samples.map(\.renderMs) }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return samples.count }
+    var lastHeld: RenderedFrame? { lock.lock(); defer { lock.unlock() }; return held.last }
 }
 
 /// 一路合成输入：几张轮换的像素缓冲。
@@ -128,7 +137,10 @@ final class FakeEngine: @unchecked Sendable {
             wakeLagCount.wrappingAdd(1, ordering: .relaxed)
             let snap = snapshot.withLock { $0 }
             // 挑帧：每路取当前轮换到的缓冲（内容不变、IOSurface 轮换，等价于池子回收）
-            for input in inputs {
+            var n = 0
+            while n < inputs.count {   // 下标循环：-Onone 下 for-in 会分配，污染零分配测试的直方图
+                let input = inputs[n]
+                n += 1
                 let pb = input.buffers[frameCursor % input.buffers.count]
                 table[inputNumber: input.number] = Frame(pixelBuffer: pb, pts: tickTime, duration: HostDuration(ticks: Int64(period)),
                                                         color: input.color, inputNumber: input.number,

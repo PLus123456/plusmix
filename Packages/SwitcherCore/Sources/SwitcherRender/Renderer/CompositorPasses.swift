@@ -52,7 +52,7 @@ enum CompositorPasses {
         if let outputLuma, let outputChroma {
             RenderSignposts.begin(.nv12)
             if let enc = commandBuffer.makeComputeCommandEncoder() {
-                enc.label = "RGB→NV12"
+                enc.label = "NV12"   // 编码器标签只用短 ASCII：长于 9 字节或非 ASCII 的字面量桥接成 NSString 会分配
                 encodeNV12(source: t.program, luma: outputLuma, chroma: outputChroma, context: context, encoder: enc)
                 enc.endEncoding()
             }
@@ -70,7 +70,19 @@ enum CompositorPasses {
         let lite = ColorInfoLite(fullRange: frame.color.range == .full, matrix: matrixID(frame.color.matrix))
         guard let tex = context.table.inputTextures(for: frame.pixelBuffer, color: lite, frame: context.frameIndex) else { return nil }
         if number < slot.heldFrames.count { slot.heldFrames[number] = frame }
-        return (tex, state.input(number))
+        return (tex, inputConfig(number, in: state))
+    }
+
+    /// 按编号找输入配置。等价于 MixerState.input(_:)，但用下标循环：契约里的 first(where:) 在 -Onone 下会分配。
+    @inline(__always)
+    static func inputConfig(_ number: Int, in state: MixerState) -> InputConfig? {
+        let n = state.inputs.count
+        var i = 0
+        while i < n {
+            if state.inputs[i].number == number { return state.inputs[i] }
+            i += 1
+        }
+        return nil
     }
 
     @inline(__always)
@@ -188,9 +200,13 @@ enum CompositorPasses {
                 drawSolid(SIMD4(0, 0, 0, blendAmount), dest: full, width: width, height: height, context: context, encoder: encoder)
             }
         }
-        // 3. Overlay 1 → 4
-        for o in state.overlays where o.isVisible {
-            guard let input = o.input else { continue }
+        // 3. Overlay 1 → 4（下标循环，见 inputConfig 的说明）
+        let overlayCount = state.overlays.count
+        var k = 0
+        while k < overlayCount {
+            let o = state.overlays[k]
+            k += 1
+            guard o.isVisible, let input = o.input else { continue }
             let opacity = OverlayRenderer.opacity(o)
             guard opacity > 0 else { continue }
             guard let (tex, cfg) = lookup(input, state: state, inputs: inputs, slot: slot, context: context) else { continue }
@@ -260,7 +276,8 @@ enum CompositorPasses {
         let cellW = (w - Float(columns + 1) * margin) / Float(columns)
         let cellH = (areaH - Float(rows - 1) * margin) / Float(rows)
         var i = 0
-        for input in state.inputs {
+        while i < count {
+            let input = state.inputs[i]
             let col = i % columns, row = i / columns
             i += 1
             let cell = PixelRect(x: margin + Float(col) * (cellW + margin), y: areaY + Float(row) * (cellH + margin),

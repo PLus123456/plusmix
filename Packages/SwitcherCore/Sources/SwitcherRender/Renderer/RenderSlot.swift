@@ -67,7 +67,8 @@ final class RenderSlot: @unchecked Sendable {
 
     /// 完成后释放这一帧持有的东西（release 不是 malloc，完成线程上做）。
     func releaseFrame() {
-        for i in heldFrames.indices { heldFrames[i] = nil }
+        var i = 0
+        while i < heldFrames.count { heldFrames[i] = nil; i += 1 }
         outputBuffer = nil
         commandBuffer = nil
     }
