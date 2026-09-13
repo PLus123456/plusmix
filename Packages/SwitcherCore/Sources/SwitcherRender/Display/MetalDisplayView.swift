@@ -23,6 +23,14 @@ public final class MetalDisplayView: NSView {
     /// 统计：实际 blit 了多少帧、display link 触发了多少次（测试看刷新率上限用）。
     public private(set) var presentedFrames: UInt64 = 0
     public private(set) var linkCallbacks: UInt64 = 0
+    /// 每次没画的原因计数（调试用）。
+    public struct SkipCounters: Sendable {
+        public var notVisible: UInt64 = 0
+        public var noFrame: UInt64 = 0
+        public var sameVersion: UInt64 = 0
+        public var noDrawable: UInt64 = 0
+    }
+    public private(set) var skipCounters = SkipCounters()
 
     private let metalLayer = CAMetalLayer()
     private var link: CADisplayLink?
@@ -101,10 +109,10 @@ public final class MetalDisplayView: NSView {
     @objc private func displayLinkFired(_ link: CADisplayLink) {
         linkCallbacks &+= 1
         // 被遮住 / 最小化：不画（display link 本身也会暂停，这里再兜一层）
-        guard let window, window.occlusionState.contains(.visible), !isHiddenOrHasHiddenAncestor else { return }
-        guard let source, let frame = source.latestDisplayFrame(for: target) else { return }
-        if frame.version == lastVersion { return }   // 没有新帧就不重复 blit
-        guard let drawable = metalLayer.nextDrawable() else { return }
+        guard let window, window.occlusionState.contains(.visible), !isHiddenOrHasHiddenAncestor else { skipCounters.notVisible &+= 1; return }
+        guard let source, let frame = source.latestDisplayFrame(for: target) else { skipCounters.noFrame &+= 1; return }
+        if frame.version == lastVersion { skipCounters.sameVersion &+= 1; return }   // 没有新帧就不重复 blit
+        guard let drawable = metalLayer.nextDrawable() else { skipCounters.noDrawable &+= 1; return }
         let queue = source.displayCommandQueue
         guard let pso = pipelineState(for: queue) else { return }
         guard let cb = queue.makeCommandBuffer() else { return }

@@ -20,6 +20,7 @@ public final class PreviewWindow: NSWindowController {
         window.contentView = view
         window.contentAspectRatio = NSSize(width: 16, height: 9)
         window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert(.fullScreenPrimary)   // 允许切全屏（显示解耦测试要切）
         super.init(window: window)
         window.center()
         window.onKey = { [weak self] event in self?.handleKey(event) ?? false }
