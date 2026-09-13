@@ -209,3 +209,20 @@ final class StateMachineTests: XCTestCase {
         ])
     }
 }
+
+extension StateMachineTests {
+    /// 没 start 或已 stop 的状态机：await 不会挂起（job 在调用方线程串行执行），行为与线程模式一致。
+    func testW1B_stateMachine_usableWithoutExecutorThread() async {
+        let sm = StateMachine(initialState: ReducerTests.baseState())
+        _ = await sm.apply(.cut)
+        let program = await sm.state.program
+        XCTAssertEqual(program, 2)
+        sm.start()
+        _ = await sm.apply(.cut)
+        sm.stop()
+        let after = await sm.state.program
+        XCTAssertEqual(after, 1)
+        await sm.prepare(upTo: Tick(5))
+        XCTAssertEqual(sm.preparedTick, Tick(5))
+    }
+}

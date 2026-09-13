@@ -18,6 +18,8 @@ final class StateThreadExecutor: SerialExecutor, @unchecked Sendable {
     private let jobs = Mutex<[UnownedJob]>([])
     private let semaphore = DispatchSemaphore(value: 0)
     private let running = Atomic<Bool>(false)
+    /// 线程没在跑时（未 start / 已 stop）job 在调用方线程上串行执行，用这把锁保证串行；不然 await 会永远挂起。
+    private let inlineLock = Mutex<Void>(())
     private var thread: NativeThread?
     private let requestedTick = Atomic<Int64>(Int64.min)
     private var servedTick = Int64.min
@@ -27,21 +29,26 @@ final class StateThreadExecutor: SerialExecutor, @unchecked Sendable {
 
     init(name: String = "switcher.state-machine") { self.name = name }
 
+    /// 起线程。持 inlineLock：正在调用方线程上跑的 job 先跑完，之后的 job 才进队列。
     func start() {
-        guard !running.load(ordering: .acquiring) else { return }
-        running.store(true, ordering: .releasing)
-        let t = NativeThread(config: NativeThreadConfig(name: name, qos: QOS_CLASS_USER_INTERACTIVE)) { [self] in loop() }
-        do { try t.start() } catch { running.store(false, ordering: .releasing); return }
-        thread = t
+        inlineLock.withLock { _ in
+            guard !running.load(ordering: .acquiring) else { return }
+            running.store(true, ordering: .releasing)
+            let t = NativeThread(config: NativeThreadConfig(name: name, qos: QOS_CLASS_USER_INTERACTIVE)) { [self] in loop() }
+            do { try t.start() } catch { running.store(false, ordering: .releasing); return }
+            thread = t
+        }
     }
 
-    /// 停线程（先把队列里剩下的 job 跑完）。
+    /// 停线程（先把队列里剩下的 job 跑完）。持 inlineLock：线程完全退出前，新 job 不会在别的线程上开跑。
     func stop() {
-        guard running.load(ordering: .acquiring) else { return }
-        running.store(false, ordering: .releasing)
-        semaphore.signal()
-        thread?.join()
-        thread = nil
+        inlineLock.withLock { _ in
+            guard running.load(ordering: .acquiring) else { return }
+            running.store(false, ordering: .releasing)
+            semaphore.signal()
+            thread?.join()
+            thread = nil
+        }
     }
 
     var isRunning: Bool { running.load(ordering: .acquiring) }
@@ -70,14 +77,20 @@ final class StateThreadExecutor: SerialExecutor, @unchecked Sendable {
 
     func enqueue(_ job: consuming ExecutorJob) {
         let unowned = UnownedJob(job)
-        jobs.withLock { $0.append(unowned) }
-        semaphore.signal()
+        if running.load(ordering: .acquiring) {
+            jobs.withLock { $0.append(unowned) }
+            semaphore.signal()
+        } else {
+            // 线程不在：在调用方线程上串行跑（测试直接 await 状态机、或 stop 之后的收尾调用）
+            inlineLock.withLock { _ in unowned.runSynchronously(on: asUnownedSerialExecutor()) }
+        }
     }
 
     func asUnownedSerialExecutor() -> UnownedSerialExecutor { UnownedSerialExecutor(ordinary: self) }
 
     func checkIsolated() {
-        precondition(isCurrentThread, "不在状态机线程上")
+        // 线程在跑时必须是它；没在跑时 job 在调用方线程上串行执行（inlineLock），也算隔离内
+        precondition(!running.load(ordering: .acquiring) || isCurrentThread, "不在状态机线程上")
     }
 
     var isCurrentThread: Bool { thread?.isCurrent ?? false }
