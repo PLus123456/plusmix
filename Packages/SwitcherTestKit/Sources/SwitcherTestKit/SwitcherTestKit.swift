@@ -18,3 +18,10 @@ public enum SwitcherTestKitInfo {
     /// 等于 `SwitcherVersion.current`。
     public static let version = SwitcherVersion.current
 }
+
+/// P0 占位的残留：`App/Tests/SkeletonTests.swift`（App 归 W2-B，W1-A 不能动）还在读 `SwitcherTestKitSkeleton.contractsVersion`，
+/// 删掉它 `make test` 的 App 部分就编不过。只保留这一个成员；W2-B 换成 UI 冒烟测试后整段删除。
+public enum SwitcherTestKitSkeleton {
+    /// 等于 `SwitcherVersion.current`。
+    public static let contractsVersion = SwitcherVersion.current
+}
