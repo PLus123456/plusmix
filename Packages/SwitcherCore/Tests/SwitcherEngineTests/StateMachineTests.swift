@@ -226,3 +226,32 @@ extension StateMachineTests {
         XCTAssertEqual(sm.preparedTick, Tick(5))
     }
 }
+
+extension StateMachineTests {
+    /// 每拍观察者（场景执行器的挂点）：在状态机线程上按拍被调，能把命令加进当前拍，效果与预先 schedule 相同。
+    func testV6_tickObserver_canInjectCommandsForTheCurrentTick() async {
+        final class Runner: TickObserver, @unchecked Sendable {
+            let events: [(Tick, Command)]
+            let seen = Mutex<[Int64]>([])
+            init(events: [(Tick, Command)]) { self.events = events }
+            func stateMachine(_ machine: isolated StateMachine, willApplyTick tick: Tick) {
+                seen.withLock { $0.append(tick.rawValue) }
+                for (t, c) in events where t == tick { machine.schedule(c, at: tick) }
+            }
+        }
+        let sm = makeMachine()
+        defer { sm.stop() }
+        let runner = Runner(events: [(Tick(1000), .cut), (Tick(3000), .fade(durationTicks: 30))])
+        await sm.addTickObserver(runner)
+        await sm.prepare(upTo: Tick(999))
+        XCTAssertEqual(sm.publisher.latest!.state.program, 1)
+        await sm.prepare(upTo: Tick(1000))
+        XCTAssertEqual(sm.publisher.latest!.state.program, 2, "第 1000 拍 Cut 生效")
+        XCTAssertEqual(sm.publisher.latest!.tick, Tick(1000))
+        await sm.prepare(upTo: Tick(3015))
+        let s = await sm.state
+        XCTAssertEqual(s.transition.progress, 0.5)
+        XCTAssertEqual(s.transition.startTick, Tick(3000))
+        XCTAssertEqual(runner.seen.withLock { $0 }, Array(1...3015), "每一拍都被观察一次、按序")
+    }
+}

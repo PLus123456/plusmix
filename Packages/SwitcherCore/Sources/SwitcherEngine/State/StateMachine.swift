@@ -41,6 +41,13 @@ public protocol TransitionEventSink: AnyObject, Sendable {
     func stateMachine(_ machine: StateMachine, didEmit event: TransitionEvent, afv: Bool)
 }
 
+/// 每拍观察者（场景执行器 / 录制脚本这类"按拍发命令"的东西挂这里）。
+/// 状态机线程上、第 tick 拍 advance 之后、应用该拍排程命令之前同步调用；参数是隔离的状态机，
+/// 可以直接 `machine.schedule(cmd, at: tick)` 把命令加进这一拍（tick == 当前准备中的拍时立即应用）。不是实时线程，但要快。
+public protocol TickObserver: AnyObject, Sendable {
+    func stateMachine(_ machine: isolated StateMachine, willApplyTick tick: Tick)
+}
+
 /// 持有 MixerState 的 actor。
 public actor StateMachine {
     /// 选项。
@@ -69,6 +76,7 @@ public actor StateMachine {
     private var receipts: [UInt64: CommandReceipt] = [:]
     private var applied: [UInt64] = []
     private var sinks: [any TransitionEventSink] = []
+    private var tickObservers: [any TickObserver] = []
     private nonisolated let preparedTickValue: Atomic<Int64>
     private nonisolated let renderedTickValue = Atomic<Int64>(Int64.min)
 
@@ -126,6 +134,8 @@ public actor StateMachine {
 
     public func addTransitionSink(_ sink: any TransitionEventSink) { sinks.append(sink) }
     public func removeTransitionSink(_ sink: any TransitionEventSink) { sinks.removeAll { $0 === sink } }
+    public func addTickObserver(_ observer: any TickObserver) { tickObservers.append(observer) }
+    public func removeTickObserver(_ observer: any TickObserver) { tickObservers.removeAll { $0 === observer } }
 
     // MARK: 命令
 
@@ -196,11 +206,12 @@ public actor StateMachine {
         while t <= tick {
             let before = current
             current = reducer.advance(current, to: t)
+            currentTick = t
+            for observer in tickObservers { observer.stateMachine(self, willApplyTick: t) }
             if let commands = scheduled.removeValue(forKey: t) {
                 for c in commands { current = reducer.reduce(current, c, at: t) }
             }
             emitEvents(from: before, to: current, tick: t)
-            currentTick = t
             t += 1
         }
         publishIfChanged()
