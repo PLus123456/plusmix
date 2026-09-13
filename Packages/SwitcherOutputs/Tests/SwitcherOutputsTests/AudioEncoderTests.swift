@@ -31,10 +31,11 @@ final class AudioEncoderTests: XCTestCase {
         let beforeFinish = packets.values.count
         enc.finish()
         let all = packets.values
-        // 3 s = 144000 帧 + 2112 priming = 146112 → 142 个整包（flush 前），finish 后补到 143 包（尾部 + 编码器延迟）
-        XCTAssertEqual(beforeFinish, 142, "finish 前应当有 floor(144000 / 1024) 个包；实际 \(beforeFinish)")
-        XCTAssertGreaterThanOrEqual(all.count, 143)
-        XCTAssertLessThanOrEqual(all.count, 145)
+        // 3 s = 144000 帧：finish 前 AudioConverter 内部还压着 1–3 包的输入（它按自己的节奏取），
+        // 所以 flush 前 138–142 包；finish 后总数 = ceil((144000 + 2112) / 1024) = 143（尾部 + 编码器延迟）
+        XCTAssertGreaterThanOrEqual(beforeFinish, 138, "finish 前的包数 \(beforeFinish)")
+        XCTAssertLessThanOrEqual(beforeFinish, 142)
+        XCTAssertEqual(all.count, 143)
         XCTAssertEqual(enc.framesIn, totalFrames)
         // 包 k 首样本序号 = 1024k − 2112；前两个包全是预卷
         for (k, p) in all.enumerated() {
@@ -48,11 +49,11 @@ final class AudioEncoderTests: XCTestCase {
             XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(p.sampleBuffer).value, Int64(p.hostTime.nanoseconds))
             XCTAssertGreaterThan(p.byteCount, 0)
         }
-        // 码率量级：160 kbps × 3 s ≈ 60 KB（±50%）
+        // 恒定码率：160 kbps × 3 s = 60 000 字节（±15%）
         let bytes = all.reduce(0) { $0 + $1.byteCount }
-        XCTAssertGreaterThan(bytes, 30_000)
-        XCTAssertLessThan(bytes, 90_000)
-        print("AudioEncoder：\(all.count) 包，\(bytes) 字节，priming \(enc.primingFrames)")
+        XCTAssertGreaterThan(bytes, 51_000)
+        XCTAssertLessThan(bytes, 69_000)
+        print("AudioEncoder：\(all.count) 包，\(bytes) 字节 = \(bytes * 8 / seconds / 1000) kbps，priming \(enc.primingFrames)")
     }
 
     /// 把 AudioEncoder 挂成 AudioBlockConsumer 用的小适配器。

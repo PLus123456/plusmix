@@ -34,10 +34,14 @@ public final class AudioEncoder: @unchecked Sendable {
         public var channelCount: Int
         /// 码率（bit/s）。
         public var bitrateBps: Int
-        public init(sampleRate: Int = AudioFormat.sampleRate, channelCount: Int = 2, bitrateBps: Int = 160_000) {
+        /// 恒定码率。macOS 26 实测：AudioConverter 默认是 LongTermAverage 模式，1 kHz 正弦只出 26 kbps；
+        /// 推流要可预期的带宽，所以默认恒定（正弦实测 162 kbps）。
+        public var constantBitrate: Bool
+        public init(sampleRate: Int = AudioFormat.sampleRate, channelCount: Int = 2, bitrateBps: Int = 160_000, constantBitrate: Bool = true) {
             self.sampleRate = sampleRate
             self.channelCount = channelCount
             self.bitrateBps = bitrateBps
+            self.constantBitrate = constantBitrate
         }
     }
 
@@ -93,6 +97,12 @@ public final class AudioEncoder: @unchecked Sendable {
         let st = AudioConverterNew(&inASBD, &outASBD, &c)
         guard st == noErr, let c else { throw Error.converterCreateFailed(st) }
         converter = c
+        if configuration.constantBitrate {
+            // 模式要在码率之前设，否则码率会被模式重置
+            var mode = UInt32(kAudioCodecBitRateControlMode_Constant)
+            let mst = AudioConverterSetProperty(c, kAudioCodecPropertyBitRateControlMode, UInt32(MemoryLayout<UInt32>.size), &mode)
+            guard mst == noErr else { AudioConverterDispose(c); throw Error.propertyFailed("BitRateControlMode", mst) }
+        }
         var br = UInt32(configuration.bitrateBps)
         let brSt = AudioConverterSetProperty(c, kAudioConverterEncodeBitRate, UInt32(MemoryLayout<UInt32>.size), &br)
         guard brSt == noErr else { AudioConverterDispose(c); throw Error.propertyFailed("EncodeBitRate", brSt) }
