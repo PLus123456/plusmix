@@ -135,4 +135,5 @@ worktree `.claude/worktrees/w1-testkit-synthetic-stats-6414d0`，从 `main`（bd
 - **`fade` 自动模式量不出整体滞后**（晚 2 拍开始看起来就是晚 2 拍开始），V6 / V7 的"恰好第 n 拍"要用 `--fade-at S --duration D` 指定模式；容差默认 2 级（D = 30 相邻帧差 4.3 级，6 会吃掉头尾帧）。
 - **测试时长**：SwitcherTestKitTests 75 s（debug）——两条 10 s 的真跑、click 三条各 3 s（4.8 M 样本 debug 渲染）、两次 1200 帧编码往返各 8–15 s、样例解码 12 s（两个快照测试共用一次）。想快就把秒数改小，别改阈值。
 - `frameprobe` 的 release 二进制：`swift build -c release --package-path Tools/frameprobe`，1200 帧 1080p 解码 + 分析约 2 s；debug 慢 6 倍。
+- **像素池大小**：W1-B 报告说引擎侧每路最多同时引用 8 帧，`SyntheticVideoInput` 的 `poolBuffers` 默认改成 12（8 + 在画 1 + 下游 3）；不够时那帧跳过并计 `counters.poolStarved`，G2 集成时看这个计数是不是 0。
 - 本会话没有 W1-B 的帧槽，`Tests/Fixtures/w1a-sample-20s.mov` 的 Cut / Fade 是离线合成的"参考答案"，G2 拿引擎真录一份后用同一套子命令比。

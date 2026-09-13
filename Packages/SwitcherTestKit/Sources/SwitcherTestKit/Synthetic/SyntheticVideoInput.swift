@@ -110,10 +110,11 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
     ///   - audioRing: 注入的音频环；settings.audio 为 true 且非 nil 时自带合成音频。
     ///   - timeline: 共用时间线；nil = start() 时取"现在 + 20 ms"。多路要同步就传同一个。
     ///   - seed: 抖动随机序列的种子（同 seed 同序列）。
-    ///   - poolBuffers: 像素池上限（帧槽 3 + 在画 1 + 下游暂存）。
+    ///   - poolBuffers: 像素池大小。W1-B 的引擎侧每路最多同时引用 8 帧（传输环 3 + 候选表 3 + 上一帧 1 + 渲染表 1），
+    ///     加正在画的 1 和下游暂存 3，默认 12；不够时帧被跳过并计 `poolStarved`，不阻塞。
     public init(number: Int, name: String? = nil, settings: SyntheticSourceSettings, videoSlot: any FrameSlot,
                 audioRing: (any AudioRing)? = nil, timeline: SyntheticTimeline? = nil, seed: UInt64 = 1,
-                poolBuffers: Int = 8) throws {
+                poolBuffers: Int = 12) throws {
         precondition(number >= 1, "输入编号从 1 起")
         self.number = number
         self.name = name ?? "Synthetic \(number)"
