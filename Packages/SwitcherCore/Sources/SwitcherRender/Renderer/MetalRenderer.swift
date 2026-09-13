@@ -112,8 +112,8 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         let tbl = SurfaceTextureTable(device: device, capacity: max(1, maxInputs) * 16 + options.outputRingSize * 2 + 8)
         let rng = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize)
         let lbl = try LabelRenderer(device: device, slices: max(1, maxInputs),
-                                    submittedFrames: { [unowned self] in submitted.load(ordering: .acquiring) },
-                                    completedFrames: { [unowned self] in completed.load(ordering: .acquiring) })
+                                    submittedFrames: { [weak self] in self?.submitted.load(ordering: .acquiring) ?? 0 },
+                                    completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
         stateLock.lock()
         resources = res
         slots = newSlots

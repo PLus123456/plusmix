@@ -10,8 +10,11 @@ final class RealtimeRendererTests: XCTestCase {
     /// V1：1080p60、8 路 1080p 输入、4 个 overlay 开 + Fade 进行中 + 多画面，跑 30 秒（SWITCHER_V1_SECONDS 可改），
     /// render_ms 平均和 p99 写进报告；断言用测试标准 §4 的"必须"档（平均 ≤ 6 ms，p99 ≤ 12 ms）。
     func testV1_1080p60EightInputsFourOverlays_renderMs() throws {
-        let seconds = Double(ProcessInfo.processInfo.environment["SWITCHER_V1_SECONDS"] ?? "30") ?? 30
-        let renderer = try MetalRenderer()
+        let env = ProcessInfo.processInfo.environment
+        let seconds = Double(env["SWITCHER_V1_SECONDS"] ?? "30") ?? 30
+        var options = MetalRendererOptions()
+        options.multiview = env["SWITCHER_V1_NO_MULTIVIEW"] != "1"   // 诊断用：看多画面占多少
+        let renderer = try MetalRenderer(options: options)
         try renderer.prepare(format: .hd1080p60, maxInputs: 9)
         let engine = FakeEngine(renderer: renderer, format: .hd1080p60, inputs: FakeInputs.nv12(count: 8), state: LoadStates.eightInputsFourOverlays())
         engine.run(seconds: seconds)
@@ -26,8 +29,10 @@ final class RealtimeRendererTests: XCTestCase {
         let gpuMean = gpu.reduce(0, +) / Double(gpu.count)
         let submitLag = engine.sink.frames.dropFirst(60).map { ($0.submitTime - $0.tickTime).milliseconds }
         let submitMean = submitLag.reduce(0, +) / Double(submitLag.count)
-        print(String(format: "V1 render_ms：帧数 %d，平均 %.3f ms，p50 %.3f，p99 %.3f，最大 %.3f；GPU 执行平均 %.3f ms；拍点→提交平均 %.3f ms；skipped %d",
-                     ms.count, mean, p50, p99, maxV, gpuMean, submitMean, Int(engine.skipped.load(ordering: .relaxed))))
+        let gpuStartLag = engine.sink.frames.dropFirst(60).map { ($0.gpuStart - $0.submitTime).milliseconds }
+        let gpuStartMean = gpuStartLag.reduce(0, +) / Double(gpuStartLag.count)
+        print(String(format: "V1 render_ms（多画面 %@）：帧数 %d，平均 %.3f ms，p50 %.3f，p99 %.3f，最大 %.3f；唤醒延迟平均 %.3f ms；拍点→提交平均 %.3f ms；提交→GPU 开始平均 %.3f ms；GPU 执行平均 %.3f ms；skipped %d",
+                     options.multiview ? "开" : "关", ms.count, mean, p50, p99, maxV, engine.meanWakeLagMs, submitMean, gpuStartMean, gpuMean, Int(engine.skipped.load(ordering: .relaxed))))
         XCTAssertLessThanOrEqual(mean, 6, "V1 平均 render_ms 超过必须档 6 ms")
         XCTAssertLessThanOrEqual(p99, 12, "V1 p99 render_ms 超过必须档 12 ms")
         XCTAssertEqual(engine.skipped.load(ordering: .relaxed), 0, "标准负载下不该跳拍")
@@ -84,16 +89,19 @@ final class RealtimeRendererTests: XCTestCase {
         renderer.sink = sink
         var maxInflight = 0
         var submitted = 0, skipped = 0
-        // 不等拍点，尽可能快地调 2000 次
+        // 每 0.5 ms 调一次（比任何节目时钟都快得多），共 2000 次：GPU 画一帧 4K + 16 路要好几毫秒，必然压不住
         for i in 0..<2000 {
             let v = renderer.render(tick: Tick(Int64(i)), at: HostClock.now(), snapshot: snap, inputs: table)
             maxInflight = max(maxInflight, renderer.inflight.load(ordering: .acquiring))
             if v == .submitted { submitted += 1 } else { skipped += 1 }
+            usleep(500)
         }
+        Thread.sleep(forTimeInterval: 0.2)
         renderer.shutdown()
         print("T3：提交 \(submitted)，跳过 \(skipped)，观察到的最大在途 \(maxInflight)，完成 \(sink.count)")
         XCTAssertLessThanOrEqual(maxInflight, 2)
         XCTAssertGreaterThan(skipped, 0, "全速调用时应该出现 .skipped（否则说明 GPU 比 CPU 编码还快，测试没制造出压力）")
+        XCTAssertGreaterThan(submitted, 20, "GPU 完成一帧后应能再提交，否则完成线程没在放行")
         XCTAssertEqual(sink.count, submitted, "每个提交的帧都要有完成回调")
     }
 

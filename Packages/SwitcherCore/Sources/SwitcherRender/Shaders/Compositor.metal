@@ -101,31 +101,78 @@ static inline float4 fetch(float2 uv, constant DrawUniforms &u,
     }
 }
 
+// MARK: - 下采样用的 half 精度版（缩略图 / 画中画的 taps×taps 盒式滤波；1:1 的路径保持 float 以保证 V9 的电平精度）
+// 实测（reports/w1-compositor.md）：60 fps 节奏下 GPU 时钟很低，8 个 1/4 缩略图 4×4 taps 用 float 要 1.2 ms，half 0.4 ms。
+
+static inline half3 ycbcrToRGBHalf(half3 codes, int fullRange, int matrixID) {
+    half kr, kb;
+    if (matrixID == 1)      { kr = 0.299h;  kb = 0.114h;  }
+    else if (matrixID == 2) { kr = 0.2627h; kb = 0.0593h; }
+    else                    { kr = 0.2126h; kb = 0.0722h; }
+    half kg = 1.0h - kr - kb;
+    half y, cb, cr;
+    if (fullRange != 0) {
+        y  = codes.x;
+        cb = codes.y - (128.0h / 255.0h);
+        cr = codes.z - (128.0h / 255.0h);
+    } else {
+        y  = (codes.x * 255.0h - 16.0h) / 219.0h;
+        cb = (codes.y * 255.0h - 128.0h) / 224.0h;
+        cr = (codes.z * 255.0h - 128.0h) / 224.0h;
+    }
+    half r = y + 2.0h * (1.0h - kr) * cr;
+    half b = y + 2.0h * (1.0h - kb) * cb;
+    half g = (y - kr * r - kb * b) / kg;
+    return saturate(half3(r, g, b));
+}
+
+static inline half4 fetchHalf(float2 uv, constant DrawUniforms &u,
+                              texture2d<half> tex0, texture2d<half> tex1) {
+    switch (u.format) {
+    case DrawFormatBGRA:
+        return tex0.sample(linearSampler, uv);
+    case DrawFormatNV12: {
+        half y = tex0.sample(linearSampler, uv).r;
+        float2 cuv = float2(uv.x + 0.25 / u.chromaSize.x, uv.y);
+        half2 c = tex1.sample(linearSampler, cuv).rg;
+        return half4(ycbcrToRGBHalf(half3(y, c.x, c.y), u.fullRange, u.matrix), 1.0h);
+    }
+    case DrawFormatUYVY: {
+        half3 s = tex0.sample(linearSampler, uv).rgb;
+        return half4(ycbcrToRGBHalf(half3(s.g, s.b, s.r), u.fullRange, u.matrix), 1.0h);
+    }
+    default:
+        return half4(0.0h);
+    }
+}
+
 // MARK: - 片段：输入 / 纯色
 
 fragment float4 quadFragment(QuadOut in [[stage_in]],
                              constant DrawUniforms &u [[buffer(0)]],
                              texture2d<float> tex0 [[texture(0)]],
-                             texture2d<float> tex1 [[texture(1)]]) {
+                             texture2d<float> tex1 [[texture(1)]],
+                             texture2d<half> tex0h [[texture(2)]],
+                             texture2d<half> tex1h [[texture(3)]]) {
     if (u.format == DrawFormatSolid) {
         return u.tint;
     }
     int taps = clamp(u.taps, 1, 4);
-    float4 acc = float4(0.0);
     if (taps == 1) {
-        acc = fetch(in.uv, u, tex0, tex1);
-    } else {
-        // 下采样：在目标像素的足迹内均匀取 taps×taps 个点做盒式滤波（第一版代替 mipmap，见报告）
-        float inv = 1.0 / float(taps);
-        for (int j = 0; j < taps; ++j) {
-            for (int i = 0; i < taps; ++i) {
-                float2 o = (float2(float(i), float(j)) + 0.5) * inv - 0.5;
-                acc += fetch(in.uv + o * u.sampleStep, u, tex0, tex1);
-            }
-        }
-        acc *= inv * inv;
+        // 1:1 或放大：float 精度，采样点正好落在纹素中心时逐电平精确
+        return fetch(in.uv, u, tex0, tex1) * u.tint;
     }
-    return acc * u.tint;   // 预乘颜色整体乘不透明度
+    // 下采样：在目标像素的足迹内均匀取 taps×taps 个点做盒式滤波（第一版代替 mipmap，见报告），half 精度
+    float inv = 1.0 / float(taps);
+    half4 acc = half4(0.0h);
+    for (int j = 0; j < taps; ++j) {
+        for (int i = 0; i < taps; ++i) {
+            float2 o = (float2(float(i), float(j)) + 0.5) * inv - 0.5;
+            acc += fetchHalf(in.uv + o * u.sampleStep, u, tex0h, tex1h);
+        }
+    }
+    acc *= half(inv * inv);
+    return float4(acc) * u.tint;   // 预乘颜色整体乘不透明度
 }
 
 // MARK: - 片段：标签（预渲染的文字纹理数组）

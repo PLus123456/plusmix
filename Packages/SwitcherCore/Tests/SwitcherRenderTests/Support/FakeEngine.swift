@@ -53,6 +53,13 @@ final class FakeEngine: @unchecked Sendable {
     /// render 的结果计数。
     let submitted = Atomic<UInt64>(0)
     let skipped = Atomic<UInt64>(0)
+    /// mach_wait_until 醒来时刻 − 拍点时刻，累计（host tick）和次数：看渲染线程的唤醒延迟占 render_ms 多少。
+    let wakeLagTicks = Atomic<UInt64>(0)
+    let wakeLagCount = Atomic<UInt64>(0)
+    var meanWakeLagMs: Double {
+        let n = wakeLagCount.load(ordering: .relaxed)
+        return n == 0 ? 0 : HostDuration(ticks: Int64(wakeLagTicks.load(ordering: .relaxed) / n)).milliseconds
+    }
     /// 渲染线程的 pthread（分配探针要它）。
     let renderThread = Mutex<pthread_t?>(nil)
     /// 每拍在 render 前后可以做点别的（测试挂钩），在渲染线程上跑。
@@ -117,6 +124,8 @@ final class FakeEngine: @unchecked Sendable {
         while !stop.load(ordering: .acquiring) {
             let tickTime = spec.time(of: tick)
             mach_wait_until(tickTime.ticks)
+            wakeLagTicks.wrappingAdd(HostClock.now().ticks &- tickTime.ticks, ordering: .relaxed)
+            wakeLagCount.wrappingAdd(1, ordering: .relaxed)
             let snap = snapshot.withLock { $0 }
             // 挑帧：每路取当前轮换到的缓冲（内容不变、IOSurface 轮换，等价于池子回收）
             for input in inputs {
@@ -146,7 +155,7 @@ enum FakeInputs {
             let buffers = (0..<poolDepth).map { k -> CVPixelBuffer in
                 let pb = PixelBuffers.nv12(width: width, height: height)
                 TestPattern.draw(TestPattern.Content(frameNumber: UInt32(k), hostTimeMs: 0, inputID: (n - 1) % 16, flash: k == 0,
-                                                     background: .gray(level: UInt8(40 + n * 20))), into: pb)
+                                                     background: .gray(level: UInt8(min(220, 40 + n * 11)))), into: pb)
                 return pb
             }
             return FakeInput(number: n, buffers: buffers, color: .bt709Limited)

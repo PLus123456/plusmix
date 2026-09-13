@@ -84,10 +84,12 @@ enum CompositorPasses {
 
     // MARK: - 画一个 quad
 
-    /// 把一路输入按 crop / transform 画进 dest。opacity < 1 或 blend 时走混合管线。
+    /// 把一路输入按 crop / transform 画进 dest。blend = false 只对 NV12 / UYVY 生效（它们 alpha 恒 1）；
+    /// BGRA 源可能带 alpha，永远走混合，让底下清好的不透明黑透出来，输出纹理的 alpha 才恒为 1。
     @inline(__always)
     static func drawInput(_ tex: InputTextures, config: InputConfig?, dest: PixelRect, opacity: Float, blend: Bool,
                           width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+        let blend = blend || tex.format == .bgra || opacity < 1
         var u = DrawUniforms()
         let crop = config?.settings.crop ?? .none
         let transform = config?.settings.transform ?? .identity
@@ -99,8 +101,11 @@ enum CompositorPasses {
         u.chromaSize = SIMD2(Float(tex.chromaWidth), Float(tex.chromaHeight))
         u.tint = SIMD4(repeating: opacity)
         encoder.setRenderPipelineState(blend ? context.resources.quadBlend : context.resources.quadOpaque)
+        // 0/1 是 float 采样路径，2/3 是 half 采样路径（同一张纹理，着色器按 taps 选一条）
         encoder.setFragmentTexture(tex.tex0, index: 0)
         encoder.setFragmentTexture(tex.tex1 ?? tex.tex0, index: 1)
+        encoder.setFragmentTexture(tex.tex0, index: 2)
+        encoder.setFragmentTexture(tex.tex1 ?? tex.tex0, index: 3)
         withUnsafeBytes(of: &u) { raw in
             encoder.setVertexBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)
             encoder.setFragmentBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)
@@ -120,6 +125,8 @@ enum CompositorPasses {
         encoder.setRenderPipelineState(blend ? context.resources.quadBlend : context.resources.quadOpaque)
         encoder.setFragmentTexture(texture, index: 0)
         encoder.setFragmentTexture(texture, index: 1)
+        encoder.setFragmentTexture(texture, index: 2)
+        encoder.setFragmentTexture(texture, index: 3)
         withUnsafeBytes(of: &u) { raw in
             encoder.setVertexBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)
             encoder.setFragmentBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)
@@ -243,11 +250,11 @@ enum CompositorPasses {
         drawCell(texture: targets.program, cell: pgmCell, borderColor: tallyProgramColor, border: border,
                  width: width, height: height, context: context, encoder: encoder)
 
-        // 下半：输入
+        // 下半：输入。格子数固定成 4×2 / 6×3 / 8×4，让每格接近 16:9（没用到的格子留黑）
         let count = state.inputs.count
         guard count > 0 else { return }
-        let columns = 4
-        let rows = (count + columns - 1) / columns
+        let columns = count <= 8 ? 4 : (count <= 18 ? 6 : 8)
+        let rows = count <= 8 ? 2 : (count <= 18 ? 3 : 4)
         let areaY = h / 2 + margin / 2
         let areaH = h / 2 - 1.5 * margin
         let cellW = (w - Float(columns + 1) * margin) / Float(columns)

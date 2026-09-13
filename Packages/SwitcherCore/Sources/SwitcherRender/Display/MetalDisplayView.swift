@@ -123,6 +123,8 @@ public final class MetalDisplayView: NSView {
         enc.setRenderPipelineState(pso)
         enc.setFragmentTexture(frame.texture, index: 0)
         enc.setFragmentTexture(frame.texture, index: 1)
+        enc.setFragmentTexture(frame.texture, index: 2)
+        enc.setFragmentTexture(frame.texture, index: 3)
         withUnsafeBytes(of: &u) { raw in
             enc.setVertexBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)
             enc.setFragmentBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)

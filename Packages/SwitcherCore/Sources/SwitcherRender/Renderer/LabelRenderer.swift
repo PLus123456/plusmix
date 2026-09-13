@@ -69,27 +69,13 @@ enum LabelPainter {
         let truncated = CTLineCreateTruncatedLine(line, Double(w - 16), .end, nil) ?? line
         var ascent: CGFloat = 0, descent: CGFloat = 0
         _ = CTLineGetTypographicBounds(truncated, &ascent, &descent, nil)
-        // CoreGraphics 原点在左下；纹理 (0,0) 是左上，所以按行倒着写进纹理：这里先画到"上下颠倒"的坐标，再翻转
+        // CGBitmapContext 内存第 0 行就是图像顶行（CG 坐标原点在左下只是坐标系的事），与纹理的行序一致，不用翻转
         ctx.textPosition = CGPoint(x: 12, y: (CGFloat(h) - ascent - descent) / 2 + descent)
         ctx.setTextDrawingMode(.fill)
         CTLineDraw(truncated, ctx)
-        // 翻转行序：CG 的第 0 行是底部
-        flipRows(scratch, bytesPerRow: bpr, height: h)
         set.texture.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, slice: slice,
                             withBytes: scratch, bytesPerRow: bpr, bytesPerImage: bpr * h)
         set.texts[slice] = text
-    }
-
-    private static func flipRows(_ p: UnsafeMutableRawPointer, bytesPerRow: Int, height: Int) {
-        var tmp = [UInt8](repeating: 0, count: bytesPerRow)
-        for y in 0..<(height / 2) {
-            let a = p + y * bytesPerRow, b = p + (height - 1 - y) * bytesPerRow
-            tmp.withUnsafeMutableBytes { t in
-                memcpy(t.baseAddress!, a, bytesPerRow)
-                memcpy(a, b, bytesPerRow)
-                memcpy(b, t.baseAddress!, bytesPerRow)
-            }
-        }
     }
 
     /// 多画面格子里显示的文字。
@@ -118,6 +104,7 @@ final class LabelRenderer: @unchecked Sendable {
     private var pendingSnapshot: MixerSnapshot?
     private var lastSeenSnapshot: ObjectIdentifier?
     private let wake = DispatchSemaphore(value: 0)
+    private let finished = DispatchSemaphore(value: 0)
     private let stopped = Atomic<Bool>(false)
     private var thread: Thread?
     private let scratch: UnsafeMutableRawPointer
@@ -156,12 +143,17 @@ final class LabelRenderer: @unchecked Sendable {
         t.start()
     }
 
+    /// 停线程并等它退出（之后再释放 MetalRenderer 才安全：闭包里引用着它的计数器）。
     func stop() {
+        guard thread != nil else { return }
         stopped.store(true, ordering: .releasing)
         wake.signal()
+        finished.wait()
+        thread = nil
     }
 
     private func loop() {
+        defer { finished.signal() }
         while !stopped.load(ordering: .acquiring) {
             wake.wait()
             if stopped.load(ordering: .acquiring) { return }
