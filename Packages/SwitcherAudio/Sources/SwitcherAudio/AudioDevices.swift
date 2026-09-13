@@ -159,12 +159,14 @@ public enum AudioHAL {
         ((try? get(id, kAudioDevicePropertyDeviceIsAlive, as: UInt32.self, initial: 0)) ?? 0) != 0
     }
 
-    /// 创建一个私有聚合设备（不出现在系统设置里、不持久），返回它的 ID。测试聚合设备路径用。
-    public static func createPrivateAggregateDevice(name: String, subDeviceUIDs: [String], masterUID: String? = nil) throws -> AudioDeviceID {
+    /// 创建一个聚合设备（默认私有：不出现在系统设置里、不持久、**不能被设为系统默认设备**——W1-D 探针实测设了不生效），
+    /// 返回它的 ID。测试聚合设备路径用；要测"默认设备变更"得用 isPrivate: false（会在系统里可见直到销毁）。
+    public static func createPrivateAggregateDevice(name: String, subDeviceUIDs: [String], masterUID: String? = nil,
+                                                    isPrivate: Bool = true) throws -> AudioDeviceID {
         var desc: [String: Any] = [
             kAudioAggregateDeviceNameKey: name,
             kAudioAggregateDeviceUIDKey: "switcher.test.aggregate.\(UUID().uuidString)",
-            kAudioAggregateDeviceIsPrivateKey: 1,
+            kAudioAggregateDeviceIsPrivateKey: isPrivate ? 1 : 0,
             kAudioAggregateDeviceSubDeviceListKey: subDeviceUIDs.map { [kAudioSubDeviceUIDKey: $0] },
         ]
         if let m = masterUID { desc[kAudioAggregateDeviceMainSubDeviceKey] = m }

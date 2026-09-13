@@ -7,28 +7,55 @@ import SwitcherContracts
 /// 时长：默认短跑（真设备 10 s）；SW_AUDIO_FULL=1 时按 prompt（A1 10 分钟、A7 真设备 1 分钟）；报告里的数字是 FULL 跑出来的。
 final class DeviceTests: XCTestCase {
 
-    /// 实时喂源：一个线程按 host time 把合成信号写进环（模拟输入设备的交付节奏）。
-    final class Feeder {
+    /// 实时喂源：一个 time-constraint 线程（和设备交付线程同类调度）每 1 ms 按 host time 把合成信号写进环。
+    /// 记录循环最大间隔：普通线程偶尔睡过头 3–10 ms 会把环喂空（默认设定点 2 块在最坏相位只剩 ~2.4 ms 余量），那是喂源的问题不是混音器的。
+    final class Feeder: @unchecked Sendable {
         let sources: [OfflineAudioSource]
         private var thread: Thread?
-        private let stop = NSLock()
+        private let lock = NSLock()
         private var stopping = false
+        private var maxGapTicks: UInt64 = 0
+        private var gapsOver2ms = 0
         init(sources: [OfflineAudioSource]) { self.sources = sources }
+        var maxGapMs: Double { lock.lock(); defer { lock.unlock() }; return HostDuration(ticks: Int64(maxGapTicks)).milliseconds }
+        var gapCountOver2ms: Int { lock.lock(); defer { lock.unlock() }; return gapsOver2ms }
+        /// 清零并返回这一段的最大间隔
+        func takeMaxGapMs() -> Double { lock.lock(); defer { lock.unlock() }; let v = HostDuration(ticks: Int64(maxGapTicks)).milliseconds; maxGapTicks = 0; return v }
         func start() {
             let t = Thread { [self] in
+                // 与 sw_null_driver 相同的调度策略：周期 1 ms
+                let tpms = Double(HostClock.timebase.denom) * 1e6 / Double(HostClock.timebase.numer)
+                // computation 要盖住一次交付的工作量（debug 下 TestSignal.render 两路立体声 ≈ 0.3–0.5 ms），否则线程会被降级
+                var pol = thread_time_constraint_policy(period: UInt32(tpms), computation: UInt32(tpms * 0.6), constraint: UInt32(tpms * 0.9), preemptible: 1)
+                let count = mach_msg_type_number_t(MemoryLayout<thread_time_constraint_policy>.size / MemoryLayout<integer_t>.size)  // THREAD_TIME_CONSTRAINT_POLICY_COUNT 宏 Swift 导不进来
+                let kr = withUnsafeMutablePointer(to: &pol) { p in
+                    p.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                        thread_policy_set(pthread_mach_thread_np(pthread_self()), thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY), $0, count)
+                    }
+                }
+                if kr != KERN_SUCCESS { print("[feeder] thread_policy_set 失败 \(kr)") }
+                var last = HostClock.now().ticks
+                var next = last + UInt64(tpms)
                 while true {
-                    stop.lock(); let s = stopping; stop.unlock()
+                    lock.lock(); let s = stopping; lock.unlock()
                     if s { break }
+                    mach_wait_until(next)
                     let now = HostClock.now()
+                    let gap = now.ticks - last
+                    last = now.ticks
+                    lock.lock()
+                    if gap > maxGapTicks { maxGapTicks = gap }
+                    if Double(gap) > 2 * tpms { gapsOver2ms += 1 }
+                    lock.unlock()
                     for src in sources { src.deliver(upTo: now) }
-                    Thread.sleep(forTimeInterval: 0.001)
+                    next += UInt64(tpms)
+                    if now.ticks > next + UInt64(tpms) { next = now.ticks + UInt64(tpms) }
                 }
             }
-            t.qualityOfService = .userInteractive
             thread = t
             t.start()
         }
-        func end() { stop.lock(); stopping = true; stop.unlock(); Thread.sleep(forTimeInterval: 0.01) }
+        func end() { lock.lock(); stopping = true; lock.unlock(); Thread.sleep(forTimeInterval: 0.01) }
     }
 
     func requireOutputDevice() throws -> AudioDeviceID {
@@ -37,14 +64,22 @@ final class DeviceTests: XCTestCase {
     }
 
     /// 标准搭台：混音器 + 两路实时合成输入（一路 +100 ppm、一路 −100 ppm）+ 全效果，Master 静音（不出声）。
+    /// 信号用查表正弦：debug 下 TestSignal.render 一块立体声要 ~1 ms，两路同时交付时喂源线程一次循环 2.7 ms，
+    /// 超过默认设定点（2 块）在最坏相位的 ~2.4 ms 交付余量，10 分钟里会出十几次欠载——那是喂源的问题，不是被测对象。
+    static let sineTable: [Float] = (0..<48_000).map { Float(0.1 * sin(2 * Double.pi * Double($0) / 48_000)) }
     func makeRealtimeRig(inputs: Int = 2) throws -> (AudioMixer, Feeder) {
         let mixer = AudioMixer()
         try mixer.installStandardEffects()
         for e in BusEffect.allCases { mixer.setEffectEnabled(.master, e, true) }
         let t0 = HostClock.now()
         var sources = [OfflineAudioSource]()
+        let table = DeviceTests.sineTable
         for i in 0..<inputs {
-            let src = OfflineAudioSource(channels: 2, t0: t0, driftPpm: i % 2 == 0 ? 100 : -100)
+            let step = 3 * (i + 1)    // 3 kHz × (i+1) 的整数步进，查表无插值
+            let src = OfflineAudioSource(channels: 2, t0: t0, driftPpm: i % 2 == 0 ? 100 : -100, generator: { _, start, n, buf in
+                var idx = Int((start * Int64(step)) % 48_000)
+                for k in 0..<n { buf[k] = table[idx]; idx += step; if idx >= 48_000 { idx -= 48_000 } }
+            })
             sources.append(src)
             mixer.attach(ring: src.ring, toSlot: i)
             mixer.setGain(slot: i, dB: -12)
@@ -74,12 +109,27 @@ final class DeviceTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.0)     // 就绪
         mixer.resetStats()
         out.resetCallbackStats()
-        Thread.sleep(forTimeInterval: seconds)
+        _ = feeder.takeMaxGapMs()
+        // 每秒看一次：欠载增量与喂源线程这一秒的最大间隔，方便把欠载归因
+        var lastUnder: UInt64 = 0
+        var events = [String]()
+        var feederMax = 0.0
+        let end = Date().addingTimeInterval(seconds)
+        var sec = 0
+        while Date() < end {
+            Thread.sleep(forTimeInterval: 1.0)
+            sec += 1
+            let u = mixer.stats.underruns
+            let gap = feeder.takeMaxGapMs()
+            feederMax = max(feederMax, gap)
+            if u != lastUnder { events.append("t=\(sec)s 欠载 +\(u - lastUnder)（喂源最大间隔 \(String(format: "%.2f", gap)) ms）"); lastUnder = u }
+        }
         let st = mixer.stats
         let cb = out.callbackStats
         out.stop()
         XCTAssertEqual(st.dropouts, 0, "A1 dropouts")
-        XCTAssertEqual(st.underruns, 0, "A1 underruns")
+        XCTAssertEqual(st.underruns, 0, "A1 underruns；欠载事件：\(events)")
+        print("[A1] 喂源线程最大间隔 \(String(format: "%.2f", feederMax)) ms，> 2 ms 的次数 \(feeder.gapCountOver2ms)，欠载事件 \(events)")
         XCTAssertEqual(st.rtViolations, 0)
         XCTAssertGreaterThan(cb.callbacks, UInt64(seconds * 48_000 / 256 * 0.9))
         for i in 0..<2 { XCTAssertTrue(st.inputs[i].primed) }
@@ -201,7 +251,8 @@ final class DeviceTests: XCTestCase {
         guard T.fullRuns else { throw XCTSkip("会改系统默认输出设备几秒；SW_AUDIO_FULL=1 时才跑") }
         let dev = try requireOutputDevice()
         let uid = AudioHAL.info(dev).uid
-        let agg = try AudioHAL.createPrivateAggregateDevice(name: "Switcher 测试聚合 3", subDeviceUIDs: [uid], masterUID: uid)
+        // 私有聚合设备不能被设为系统默认（探针实测设了不生效）：这里用非私有的，测试期间在系统里可见几秒
+        let agg = try AudioHAL.createPrivateAggregateDevice(name: "Switcher 测试聚合 3", subDeviceUIDs: [uid], masterUID: uid, isPrivate: false)
         defer { AudioHAL.destroyAggregateDevice(agg) }
         Thread.sleep(forTimeInterval: 0.3)
         let (mixer, feeder) = try makeRealtimeRig()
