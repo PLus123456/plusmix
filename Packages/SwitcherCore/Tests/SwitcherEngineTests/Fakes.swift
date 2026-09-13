@@ -35,6 +35,9 @@ final class FakeRenderer: Renderer, @unchecked Sendable {
     let renderCalls = Atomic<UInt64>(0)
     let submitted = Atomic<UInt64>(0)
     let completed = Atomic<UInt64>(0)
+    /// 渲染线程 / 完成线程的 mach 端口（第一次被调时记下，给分配探针用）。
+    let renderThread = Atomic<UInt32>(0)
+    let completionThread = Atomic<UInt32>(0)
     /// 每拍记录输入 1 的帧序号（-1 = 没有帧），给挑帧测试看。预分配，渲染路径不分配。
     let input1Sequence: UnsafeMutablePointer<Int64>
     let recordCapacity = 4096
@@ -61,6 +64,7 @@ final class FakeRenderer: Renderer, @unchecked Sendable {
         programBuffer = pb
         running.store(true, ordering: .releasing)
         let t = NativeThread(config: NativeThreadConfig(name: "fake-gpu", qos: QOS_CLASS_USER_INITIATED)) { [self] in
+            completionThread.store(pthread_mach_thread_np(pthread_self()), ordering: .relaxed)
             while running.load(ordering: .acquiring) {
                 semaphore.wait()
                 while let p = queue.pop() {
@@ -80,6 +84,7 @@ final class FakeRenderer: Renderer, @unchecked Sendable {
 
     func render(tick: Tick, at tickTime: HostTime, snapshot: MixerSnapshot, inputs: RenderInputTable) -> RenderVerdict {
         let n = renderCalls.add(1, ordering: .relaxed).oldValue
+        if n == 0 { renderThread.store(pthread_mach_thread_np(pthread_self()), ordering: .relaxed) }
         let idx = Int(tick.rawValue)
         if idx >= 0 && idx < recordCapacity {
             input1Sequence[idx] = inputs[inputNumber: 1].map { Int64($0.sequence) } ?? -1

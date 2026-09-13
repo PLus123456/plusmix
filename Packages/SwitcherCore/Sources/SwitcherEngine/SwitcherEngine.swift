@@ -24,3 +24,9 @@ public enum SwitcherEngineInfo {
     /// 与 SwitcherContracts 同一个版本号。
     public static let version = SwitcherVersion.current
 }
+
+/// P0 占位的兼容别名：SwitcherTestKit 的 P0 占位（`SwitcherTestKitSkeleton.linkedVersions`）还引用它，
+/// 单独在本分支上 `make build` 也要绿。W1-A 删掉那边的占位后，G2 把这个别名一起删。
+public enum SwitcherEngineSkeleton {
+    public static let contractsVersion = SwitcherEngineInfo.version
+}

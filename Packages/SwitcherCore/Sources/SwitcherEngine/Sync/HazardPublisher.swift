@@ -78,8 +78,10 @@ public final class HazardPublisher<Object: AnyObject & Sendable>: @unchecked Sen
 
     private func isHazarded(_ u: Unmanaged<Object>) -> Bool {
         let p = u.toOpaque()
-        for k in 0..<readerCapacity {
+        var k = 0
+        while k < readerCapacity {
             if hazards[k].load(ordering: .sequentiallyConsistent)?.toOpaque() == p { return true }
+            k += 1
         }
         return false
     }

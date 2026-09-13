@@ -176,16 +176,19 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         let snapshotRef = snapshotReader.borrow()
         stateMachine.noteRendered(tick)
         stateMachine.requestPrepare(tick + 1)
-        // 2. 挑帧
+        // 2. 挑帧。热路径上不用 for-in：-Onone 下 Range 的 IndexingIterator 走未特化泛型，每次迭代会堆分配装箱
+        //    （分配探针抓到的：每拍 32 次 malloc）；整数 while 循环在 debug 下也零分配。
         let tableRef = slotsReader.borrow()
         if let tableRef {
             let table = tableRef.takeUnretainedValue()
-            for number in 1...maxInputs {
+            var number = 1
+            while number <= maxInputs {
                 if let box = table.slots[number] {
                     inputTable[inputNumber: number] = box.slot.latest(atOrBefore: ideal)
                 } else {
                     inputTable[inputNumber: number] = nil
                 }
+                number += 1
             }
         }
         // 3. 渲染
@@ -216,11 +219,13 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         _ = counters.dispatchJitterMaxNsValue.max((now - frame.tickTime).magnitude.nanoseconds, ordering: .relaxed)
         let threshold = options.slowConsumeThreshold
         consumers.withLock { list in
-            for box in list {
+            var i = 0
+            while i < list.count {
                 let before = HostClock.now()
-                box.consumer.consume(frame)
+                list[i].consumer.consume(frame)
                 if HostClock.now() - before > threshold { counters.slowConsumeCallsValue.add(1, ordering: .relaxed) }
                 counters.framesDispatchedValue.add(1, ordering: .relaxed)
+                i += 1
             }
         }
     }

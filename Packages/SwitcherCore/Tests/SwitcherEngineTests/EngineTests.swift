@@ -158,6 +158,62 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(try Stats.parse(line: line), stats)
     }
 
+    /// 渲染路径零分配（设计方案 §3.2）：用 malloc_logger 钩子盯渲染线程与 GPU 完成线程，稳态 3 秒内 malloc 次数必须为 0。
+    /// 路径覆盖：时钟等待 → 抖动记录 → 快照借用 → requestPrepare → 两路帧槽 latest → 假渲染器 → 完成回调派发给两个消费者。
+    func testW1B_renderPath_zeroAllocationsInSteadyState() async throws {
+        let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 2))
+        let engine = makeEngine(renderer: renderer)
+        engine.addConsumer(CountingConsumer(name: "a"))
+        engine.addConsumer(CountingConsumer(name: "b"))
+        let slots = [LockFreeFrameSlot(capacity: 3), LockFreeFrameSlot(capacity: 3)]
+        engine.registerInput(number: 1, slot: slots[0])
+        engine.registerInput(number: 2, slot: slots[1])
+        let t0 = HostClock.now() + HostDuration(milliseconds: 20)
+        let running = Atomic<Bool>(true)
+        // 两路 60 fps 生产者，让每拍都有新帧进槽（retain / release 有，malloc 不该有）
+        let inputSpec = TickClockSpec(t0: t0 - HostDuration(milliseconds: 6), frameRate: .fps60)
+        let producers = try (0..<2).map { i -> NativeThread in
+            let slot = slots[i]
+            let t = NativeThread(config: NativeThreadConfig(name: "producer\(i)", qos: QOS_CLASS_USER_INITIATED)) {
+                var k: Int64 = 0
+                while running.load(ordering: .acquiring) {
+                    let pts = inputSpec.time(of: Tick(k))
+                    mach_wait_until((pts + HostDuration(milliseconds: 1)).ticks)
+                    slot.push(TestFrames.frame(input: i + 1, sequence: UInt64(k), pts: pts, ingress: HostClock.now()))
+                    k += 1
+                }
+            }
+            try t.start()
+            return t
+        }
+        try await engine.start(t0: t0, lastTick: Tick(299))
+        // 预热 60 拍（首次路径允许惰性初始化），再盯 3 秒
+        XCTAssertTrue(waitUntil(timeout: 5) { engine.counters.ticksDispatched >= 60 })
+        let renderThread = renderer.renderThread.load(ordering: .relaxed)
+        let completionThread = renderer.completionThread.load(ordering: .relaxed)
+        XCTAssertNotEqual(renderThread, 0)
+        guard AllocationProbe.start(watching: renderThread, second: completionThread) else {
+            throw XCTSkip("BLOCKED-SDK：本系统没有 malloc_logger 导出符号")
+        }
+        let startTick = engine.counters.ticksDispatched
+        // 盯到第 280 拍就停探针：线程退出时的 _pthread_tsd_cleanup 会 free 一次，那不是渲染路径
+        XCTAssertTrue(waitUntil(timeout: 6) { engine.counters.ticksDispatched >= 280 })
+        let endTick = engine.counters.ticksDispatched
+        let probe = AllocationProbe.stop()
+        engine.clock!.join()
+        running.store(false, ordering: .releasing)
+        producers.forEach { $0.join() }
+        renderer.waitForCompletion()
+        await engine.stop()
+        let observedTicks = endTick - startTick
+        XCTAssertGreaterThanOrEqual(observedTicks, 200)
+        XCTAssertEqual(probe.allocations, 0, "渲染线程稳态 \(observedTicks) 拍内有 malloc")
+        XCTAssertEqual(probe.deallocations, 0, "渲染线程稳态 \(observedTicks) 拍内有 free")
+        XCTAssertEqual(probe.secondAllocations, 0, "GPU 完成线程（派发路径）稳态内有 malloc")
+        XCTAssertEqual(engine.counters.missedRender, 0)
+        XCTAssertEqual(engine.counters.snapshotStale, 0)
+    }
+
     /// 动态增删输入：渲染线程读的输入表是不可变对象，换表走原子指针。
     func testW1B_engine_registerInputWhileRunning() async throws {
         let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 1))

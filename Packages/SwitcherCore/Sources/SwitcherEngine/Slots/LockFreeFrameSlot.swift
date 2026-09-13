@@ -55,14 +55,22 @@ public final class LockFreeFrameSlot: FrameSlot, @unchecked Sendable {
     public func latest(atOrBefore time: HostTime) -> Frame? {
         // 1. 搬运
         while let f = ring.pop() { append(f) }
-        // 2. 挑：候选表里最后一个 pts ≤ time 的
+        // 2. 挑：候选表里最后一个 pts ≤ time 的（整数 while 而不是 for-in：-Onone 下 Range 迭代会堆分配）
         var pick = -1
-        for k in 0..<pendingCount where pending[(pendingStart + k) % capacity]!.pts <= time { pick = k }
+        var k = 0
+        while k < pendingCount {
+            if pending[(pendingStart + k) % capacity]!.pts <= time { pick = k }
+            k += 1
+        }
         if pick >= 0 {
             // pick 之前的从未被返回就被更新的帧跳过 → dropped
             if pick > 0 { droppedCount.add(UInt64(pick), ordering: .relaxed) }
             let frame = pending[(pendingStart + pick) % capacity]!
-            for k in 0...pick { pending[(pendingStart + k) % capacity] = nil }
+            k = 0
+            while k <= pick {
+                pending[(pendingStart + k) % capacity] = nil
+                k += 1
+            }
             pendingStart = (pendingStart + pick + 1) % capacity
             pendingCount -= pick + 1
             lastReturned = frame
