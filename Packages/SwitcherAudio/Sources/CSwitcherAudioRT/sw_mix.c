@@ -24,7 +24,6 @@
 #include <math.h>
 #include "sw_rt_pragma.h"
 
-#define SW_GAIN_SMOOTH_TAU_S   0.003   ///< 增益 / AFV 目标的一阶平滑时间常数（3 ms：无 zipper 噪声，21 ms 内到 0.1%）
 #define SW_PAN_SMOOTH_PER_BLOCK 0.3f   ///< 声像每块向目标走 30%
 #define SW_STALL_BLOCKS_LIMIT  190u    ///< write_index 连续 ~1 s（190 × 5.3 ms）没动 → 视为源停了，回到未就绪
 #define SW_PI_F 3.14159265358979323846f
@@ -538,7 +537,7 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
 
     // 4. 增益 / 静音 / AFV / 声像 → post（立体声）
     const float gt = slot->muted ? 0.0f : slot->gain_target;
-    const float k = (float)(1.0 - exp(-1.0 / (SW_GAIN_SMOOTH_TAU_S * (double)ctx->sample_rate)));
+    const float k = ctx->gain_smooth_k;
     float g = slot->gain;
     float afv = slot->afv;
     const float afv_t = slot->afv_target;
@@ -564,8 +563,9 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
         if (al > pk0) pk0 = al;
         if (ar > pk1) pk1 = ar;
     }
-    if (fabsf(g - gt) < 1e-7f) g = gt;
-    if (!xfade_gain && fabsf(afv - afv_t) < 1e-7f) afv = afv_t;
+    // 一阶平滑到目标 1e-6（−120 dB）以内就吸到目标：float32 在 1.0 附近一个 ulp 是 1.19e-7，增量早已加不进去
+    if (fabsf(g - gt) < 1e-6f) g = gt;
+    if (!xfade_gain && fabsf(afv - afv_t) < 1e-6f) afv = afv_t;
     slot->gain = g;
     slot->afv = afv;
     slot->peak_block[0] = pk0; slot->peak_block[1] = pk1;
@@ -661,7 +661,7 @@ static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, 
 
     // 总线增益 / 静音（平滑）
     const float gt = bus->muted ? 0.0f : bus->gain_target;
-    const float k = (float)(1.0 - exp(-1.0 / (SW_GAIN_SMOOTH_TAU_S * (double)ctx->sample_rate)));
+    const float k = ctx->gain_smooth_k;
     float g = bus->gain;
     float *l = cur[0], *r = cur[1];
     float pk0 = 0, pk1 = 0;
@@ -672,7 +672,7 @@ static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, 
         if (al > pk0) pk0 = al;
         if (ar > pk1) pk1 = ar;
     }
-    if (fabsf(g - gt) < 1e-7f) g = gt;
+    if (fabsf(g - gt) < 1e-6f) g = gt;
     bus->gain = g;
 
     // 表：采样峰值 + libebur128（交错输入）
@@ -714,7 +714,7 @@ static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, 
             if (!sw_block_queue_push(q, planes, SW_MIX_BUS_CHANNELS, frames, ctx->stats.last_host_time, ctx->block_sequence)) ctx->stats.tap_drops++;
         }
     }
-    // 留给下一块：cur 里是最终信号（sum 或 work），把它记在 sum 上没必要——每块 sum 都会清零
+    // cur（sum 或 work）里是本块的最终信号；下一块开始时 sum 会被清零，不用收拾
 }
 
 // ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ worktree `.claude/worktrees/w1-audio-612658`，从 `main`（bdab613）开；分�
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
-跑法：`swift test --package-path Packages/SwitcherAudio`（debug；三个 C target 在 debug 下也 -O2，见 §5）。全套约 6 分钟，其中 ±100 ppm 各 5 分钟音频（40 s 墙钟 / 个）、A7 离线 10 分钟音频（70 s 墙钟）、A6 用例合计 ~100 s。
+跑法：`swift test --package-path Packages/SwitcherAudio`（debug；三个 C target 在 debug 下也 -O2，见 §5）。52 个测试全套 182 s，其中 ±100 ppm 各 5 分钟音频（40 s 墙钟 / 个）、A7 离线 10 分钟音频（66 s 墙钟）、A6 用例合计 ~31 s、真设备短跑 ~34 s。时长可用环境变量缩短：`SW_AUDIO_RESAMPLE_SECONDS`、`SW_AUDIO_A7_SECONDS`、`SW_AUDIO_A1_SECONDS`、`SW_AUDIO_A7_DEVICE_SECONDS`。
 真设备长跑默认短跑（10 s），`SW_AUDIO_FULL=1` 时按 prompt 时长；下表真设备行的数字是 FULL 跑出来的（命令：`SW_AUDIO_FULL=1 swift test --filter DeviceTests`）。
 
 ### A6 表的准确度（`MeterTests`；阈值：响度 ±0.1 LU，真峰值 +0.2 / −0.4 dB，LRA ±1 LU）
@@ -156,7 +156,7 @@ A1 第一次 10 分钟跑出过 **20 次欠载**（dropouts 0）：归因是测�
 - **libsamplerate 的取样回调不能返回 0**：`src_callback_read` 会把 end_of_input 传给 sinc，进入终止态直到 `src_reset`。环空时交零块（`slot->zeros`）。
 - **libsamplerate 取一段就整段拷进内部缓冲，只在手里 ≤ hf 帧时再取**（hf = sinc 半长：FASTEST 20、MEDIUM 47、BEST 144）。用"已交出的帧数"当环读位置会有幅度 = chunk 的锯齿；估计器用按 frames/ratio 积分的连续位置，再钳到 [copied − hf − chunk, copied − hf + 1]。
 - **libebur128 只能用 EBUR128_MODE_HISTOGRAM**：非直方图模式每个门限块在 `add_frames` 里 malloc 链表节点。`add_frames_float` 要交错输入。它每秒对 3 s 音频求一次和（短期块进直方图），是每块耗时的 p99.9 尖峰来源。
-- **单样本脉冲经 sinc 重采样器峰值只剩 ~0.93**（90% 带宽限带）：测峰值 / 对齐用 `.locked`（比率 1.0，仍经重采样，无对齐延迟）或 `.bypass`。
+- **单样本脉冲经 sinc 重采样器峰值只剩 ~0.93**（90% 带宽限带）：测峰值 / 对齐用 `.locked`（比率 1.0，仍经重采样，无对齐延迟）或 `.bypass`。直流经它的增益是 Σh = 1 − 1.2e-7（float32 一个 ulp），断言别写 1e-7。
 - **AudioUnitRender 在自有线程**：输入回调是 C 函数、同一线程同步调；StreamFormat 输入输出都要设 48 k float32 非交错 2 声道；MaximumFramesPerSlice ≥ 一次 render 的帧数（这里 4096）；AudioTimeStamp 至少带 mSampleTime 并每块递增；不能与 Uninitialize / 设属性并发（拓扑只在实时线程未跑或该格关闭时改）；参数 `AudioUnitSetParameter` 可以别的线程改；首次 render 不分配（malloc 钩子实测 0）；DynamicsProcessor 有 256 帧前瞻、PeakLimiter 96 帧（`EffectUnit.latencyFrames`），W2-E 算 A/V 偏移时要加上。
 - **AU 关闭 = 跳过 render**（不用 kAudioUnitProperty_BypassEffect）：重新打开时 AU 内部状态是旧的（限幅器前瞻缓冲里是关闭前的数据），前 256 帧可能有一小段过渡。
 - **HAL 事实（探针 + 测试）**：内置扬声器 1 个 buffer 2 声道交错；`inOutputTime.mHostTime` 比回调进入早 buffer + safety offset（256 + 48 帧 = 6.33 ms）；buffer size 范围 15…4096；时间戳标志 0x7（Sample / Host / RateScalar 都有效）；输出 latency 60 + safety 48 帧。

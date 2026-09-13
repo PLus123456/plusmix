@@ -166,6 +166,7 @@ struct sw_mix_ctx {
     uint32_t meter_interval_frames;
     uint32_t monitor_mode;
     double   host_ticks_per_frame;
+    float    gain_smooth_k;       ///< 增益 / AFV 一阶平滑每样本系数 1 − exp(−1 / (τ · fs))，τ = 3 ms，创建时算好
     sw_rate_params rate_defaults;
     sw_input_slot inputs[SW_MIX_MAX_INPUTS];
     sw_bus_state buses[SW_MIX_BUS_COUNT];

@@ -140,9 +140,9 @@ final class MixerTests: XCTestCase {
             XCTAssertEqual(Double(l[s0 + k]), cos(Double.pi / 2 * Double(k) / Double(dur)), accuracy: 2e-6, "s0+\(k)")
             XCTAssertEqual(Double(r[s0 + k]), sin(Double.pi / 2 * Double(k) / Double(dur)), accuracy: 2e-6, "s0+\(k)")
         }
-        // 起点错一个样本就对不上：s0 − 1 仍是 1.0 / 0.0
-        XCTAssertEqual(Double(l[s0 - 1]), 1.0, accuracy: 1e-7)
-        XCTAssertEqual(Double(r[s0 - 1]), 0.0, accuracy: 1e-7)
+        // 起点错一个样本就对不上：s0 − 1 仍是 1.0 / 0.0（1e-6：直流经 sinc 重采样器的增益是 Σh = 1 − 1.2e-7，float32 一个 ulp）
+        XCTAssertEqual(Double(l[s0 - 1]), 1.0, accuracy: 1e-6)
+        XCTAssertEqual(Double(r[s0 - 1]), 0.0, accuracy: 1e-6)
     }
 
     /// 延迟补偿：设 100 ms，click 在输出里正好晚 4800 样本（对比 0 ms 的同一输入）。

@@ -174,6 +174,8 @@ sw_mix_ctx *sw_mix_ctx_create(const sw_mix_ctx_config *config) {
     if (ctx->resampler_chunk > ctx->max_block_frames) ctx->resampler_chunk = ctx->max_block_frames;
     ctx->resampler_converter_saved = config->resampler_converter;
     ctx->host_ticks_per_frame = config->host_ticks_per_frame;
+    // 增益 / AFV 目标的一阶平滑：τ = 3 ms（无 zipper 噪声，21 ms 内到 0.1%）
+    ctx->gain_smooth_k = (float)(1.0 - exp(-1.0 / (0.003 * (double)ctx->sample_rate)));
     ctx->rate_defaults = config->rate.loop_tau_s > 0 ? config->rate : sw_rate_params_default(ctx->default_block_frames);
     if (ctx->rate_defaults.target_frames == 0) ctx->rate_defaults.target_frames = 2u * ctx->default_block_frames;
     const uint32_t interval_ms = config->meter_interval_ms ? config->meter_interval_ms : 100;
