@@ -2,11 +2,11 @@
 
 日期 2026-09-14。机器 Apple M5 Max（6P + 12E）/ macOS 26.6.2 (25G83) / Xcode 26.6 / Swift 6.3.3；电源、温度未记录（桌面机，测试全程无其他负载）。
 worktree `.claude/worktrees/w1-core-f4b7cf`，从 `main`（bdab613）开；分支 `claude/w1-core-f4b7cf`，另打了同一提交的 `w1-core` 引用给 `make lint BRANCH=w1-core` 和 G2 合并用。
-提交：`git log main..w1-core`，9 个（engine × 9）。`make lint BRANCH=w1-core` 绿（禁词 / 版本 / 依赖方向 / 归属 23 个文件全在范围内）；`make build-packages build-tools` 绿；SwitcherCore `swift test` 95 个全过（其中 SwitcherEngineTests 47 个，约 110 s，大头是实跑）。
+提交：`git log main..w1-core`，11 个（engine × 9 + reports × 2）。`make lint BRANCH=w1-core` 绿（禁词 / 版本 / 依赖方向 / 归属 23 个文件全在范围内）；`make build-packages build-tools` 绿；SwitcherCore `swift test` 96 个全过（其中 SwitcherEngineTests 47 个，约 70 s；整包 110 s，大头是实跑）。
 
 ## 1. 做了什么
 
-全部在 `Packages/SwitcherCore/Sources/SwitcherEngine/`（13 个文件，约 1900 行）+ `Tests/SwitcherEngineTests/`（9 个文件，约 1550 行）。没动 `Package.swift`（`Synchronization` 是标准库，不需要 swift-atomics，也没加 C target）。
+全部在 `Packages/SwitcherCore/Sources/SwitcherEngine/`（13 个文件，1899 行）+ `Tests/SwitcherEngineTests/`（9 个文件，1575 行）。没动 `Package.swift`（`Synchronization` 是标准库，不需要 swift-atomics，也没加 C target）。
 
 | prompt 交付 | 落点 | 备注 |
 |---|---|---|
