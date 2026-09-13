@@ -23,7 +23,20 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
         public var poolStarved: UInt64 = 0
         /// push 时刻比 pts + 抖动幅度 + 一帧还晚的帧数（线程被抢占 / 画得太慢）。
         public var late: UInt64 = 0
+        /// 唤醒延迟（实际醒来 − 目标时刻）的累计纳秒；除以 generated + droppedByDesign + poolStarved 得平均。
+        public var wakeLatencySumNs: UInt64 = 0
+        /// 最大唤醒延迟（纳秒）。
+        public var wakeLatencyMaxNs: UInt64 = 0
+        /// 画一帧图案的累计纳秒（除以 generated 得平均）。
+        public var drawSumNs: UInt64 = 0
         public init() {}
+        /// 平均唤醒延迟（ms）。
+        public var meanWakeLatencyMs: Double {
+            let n = generated + droppedByDesign + poolStarved
+            return n == 0 ? 0 : Double(wakeLatencySumNs) / Double(n) / 1e6
+        }
+        /// 平均画帧耗时（ms）。
+        public var meanDrawMs: Double { generated == 0 ? 0 : Double(drawSumNs) / Double(generated) / 1e6 }
     }
 
     /// 每帧内容的纯函数，线程和离线素材生成共用同一份。
@@ -88,6 +101,9 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
     private let droppedCount = Atomic<UInt64>(0)
     private let starvedCount = Atomic<UInt64>(0)
     private let lateCount = Atomic<UInt64>(0)
+    private let wakeSum = Atomic<UInt64>(0)
+    private let wakeMax = Atomic<UInt64>(0)
+    private let drawSum = Atomic<UInt64>(0)
 
     /// - Parameters:
     ///   - videoSlot: 组装方注入的帧槽（契约 §2.3 注入规则）。
@@ -124,6 +140,9 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
         c.droppedByDesign = droppedCount.load(ordering: .relaxed)
         c.poolStarved = starvedCount.load(ordering: .relaxed)
         c.late = lateCount.load(ordering: .relaxed)
+        c.wakeLatencySumNs = wakeSum.load(ordering: .relaxed)
+        c.wakeLatencyMaxNs = wakeMax.load(ordering: .relaxed)
+        c.drawSumNs = drawSum.load(ordering: .relaxed)
         return c
     }
 
@@ -169,6 +188,10 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
             if jitterMs > 0 { arrival = pts + HostDuration(milliseconds: rng.nextSymmetric(jitterMs)) }
             RealtimeThread.wait(until: arrival)
             if thread.isStopRequested { break }
+            let woke = HostClock.now()
+            let wakeNs = UInt64(max(0, (woke - arrival).nanoseconds))
+            wakeSum.wrappingAdd(wakeNs, ordering: .relaxed)
+            if wakeNs > wakeMax.load(ordering: .relaxed) { wakeMax.store(wakeNs, ordering: .relaxed) }
             if g.isDropped(n) {
                 droppedCount.wrappingAdd(1, ordering: .relaxed)
                 n += 1
@@ -181,6 +204,7 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
             }
             TestPattern.draw(g.content(of: n), into: pb)
             let now = HostClock.now()
+            drawSum.wrappingAdd(UInt64(max(0, (now - woke).nanoseconds)), ordering: .relaxed)
             if now - pts > lateBudget { lateCount.wrappingAdd(1, ordering: .relaxed) }
             slot.push(Frame(pixelBuffer: pb, pts: pts, duration: frameDuration, color: .bt709Limited,
                             inputNumber: number, sequence: UInt64(n), ingressTime: now))

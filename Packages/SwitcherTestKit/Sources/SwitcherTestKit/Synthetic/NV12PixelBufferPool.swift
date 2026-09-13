@@ -1,4 +1,5 @@
 import CoreVideo
+import Darwin
 import SwitcherContracts
 
 /// IOSurface 背后的 NV12 像素缓冲池，创建时预热到 `maximumBuffers` 个；之后 `take()` 只回收复用，不再分配。
@@ -29,13 +30,22 @@ public final class NV12PixelBufferPool: @unchecked Sendable {
         guard r == kCVReturnSuccess, let p else { throw PoolError.createFailed(r) }
         pool = p
         auxAttributes = [kCVPixelBufferPoolAllocationThresholdKey: maximumBuffers] as CFDictionary
-        // 预热：把 maximumBuffers 个都分配出来再放回去，之后 take 不再触发分配。
+        // 预热：把 maximumBuffers 个都分配出来、把每一页都摸一遍（IOSurface 内存是懒映射的，不摸的话第一帧画进去
+        // 会缺页几毫秒——实测 1080p 第一帧 12 ms）、再放回去；之后 take 既不分配也不缺页。
         var warm: [CVPixelBuffer] = []
         warm.reserveCapacity(maximumBuffers)
         for _ in 0..<maximumBuffers {
             var pb: CVPixelBuffer?
             let rr = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(nil, pool, auxAttributes, &pb)
             guard rr == kCVReturnSuccess, let pb else { throw PoolError.createFailed(rr) }
+            CVPixelBufferLockBaseAddress(pb, [])
+            for plane in 0..<CVPixelBufferGetPlaneCount(pb) {
+                if let base = CVPixelBufferGetBaseAddressOfPlane(pb, plane) {
+                    let bytes = CVPixelBufferGetBytesPerRowOfPlane(pb, plane) * CVPixelBufferGetHeightOfPlane(pb, plane)
+                    memset(base, plane == 0 ? 16 : 128, bytes) // 合法黑场
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(pb, [])
             warm.append(pb)
         }
         warm.removeAll()
