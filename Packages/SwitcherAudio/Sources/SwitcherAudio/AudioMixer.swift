@@ -227,7 +227,8 @@ public final class AudioMixer: @unchecked Sendable {
     private var pendingRelease: [(sequence: UInt64, ring: any AudioRing)] = []
     private var taps: [Int: AudioBlockTap] = [:]
     private var pendingTapRelease: [(sequence: UInt64, tap: AudioBlockTap)] = []
-    private var effectUnits: [ObjectIdentifier: AnyObject] = [:]
+    /// 12 格效果的 AU 包装（下标 = 总线 × 3 + 格）。
+    var effectUnitsStorage: [Int: EffectUnit] = [:]
     /// 命令入队失败（队列满）的次数。
     public private(set) var commandsDropped: UInt64 = 0
 
@@ -249,6 +250,9 @@ public final class AudioMixer: @unchecked Sendable {
     }
 
     deinit {
+        // 先摘效果（AU 在上下文之后销毁也行，但顺序清楚些），再销毁上下文
+        for (_, eu) in effectUnitsStorage { sw_mix_ctx_remove_effect(context, UInt32(eu.bus.rawValue), UInt32(eu.effect.rawValue)) }
+        effectUnitsStorage.removeAll()
         sw_mix_ctx_destroy(context)
         for (_, tap) in taps { sw_block_queue_destroy(tap.queue) }
         for p in pendingTapRelease { sw_block_queue_destroy(p.tap.queue) }
