@@ -70,8 +70,10 @@ void sw_mix_ctx_prepare_slot(sw_mix_ctx *ctx, uint32_t slot);
 uint32_t sw_mix_ctx_input_capacity(const sw_mix_ctx *ctx);
 double   sw_mix_ctx_host_ticks_per_frame(const sw_mix_ctx *ctx);
 uint32_t sw_mix_ctx_sample_rate(const sw_mix_ctx *ctx);
-/// 重采样器固有延迟（帧）：sinc 半长；给延迟核算用。
+/// 重采样器需要预先看到的帧数（sinc 半长）；对齐延迟为 0（libsamplerate 前补零），这个数给就绪门限说明用。
 uint32_t sw_mix_ctx_resampler_latency_frames(const sw_mix_ctx *ctx);
+/// 是否用真实时钟检查"块处理时间 > 块时长"（记 dropouts）。实时驱动开，离线驱动关。
+void sw_mix_ctx_set_timing_check(sw_mix_ctx *ctx, bool on);
 
 // ---- 实时守卫的非实时封装（本仓库里所有会分配 / 加锁 / 打日志的 C 代码都走它们）----
 

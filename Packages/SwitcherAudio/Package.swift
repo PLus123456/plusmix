@@ -50,7 +50,11 @@ let package = Package(
         ),
         .target(
             name: "CSwitcherAudioHost",
-            dependencies: ["CSwitcherAudioRT", "CLibSamplerate", "CLibEBUR128"]
+            dependencies: ["CSwitcherAudioRT", "CLibSamplerate", "CLibEBUR128"],
+            cSettings: [
+                // sw_mix_internal.h 故意不放进 RT 的 include/：Swift 不该看到上下文内部布局（对 Swift 是 OpaquePointer）
+                .headerSearchPath("../CSwitcherAudioRT"),
+            ]
         ),
         .target(
             name: "SwitcherAudio",
