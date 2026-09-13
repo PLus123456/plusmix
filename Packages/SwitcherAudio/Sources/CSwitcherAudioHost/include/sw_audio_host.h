@@ -85,6 +85,10 @@ void sw_rt_probe_install_malloc_hook(void);
 void sw_rt_probe_remove_malloc_hook(void);
 /// 钩子记到的分配次数（与 violations 分开计，便于定位）。
 uint64_t sw_rt_probe_allocations_in_rt(void);
+/// 清零钩子计数与守卫违规计数。
+void sw_rt_probe_reset(void);
+/// 自检：守卫区内故意 malloc / free，返回钩子记到的次数（期望 ≥ 2）。
+uint64_t sw_rt_probe_selftest(void);
 
 #ifdef __cplusplus
 }

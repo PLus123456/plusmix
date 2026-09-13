@@ -11,6 +11,10 @@
 //   CSwitcherAudioHost 非实时侧的 C：分配 / 释放环与混音上下文、命令入队、统计快照。允许 malloc，不允许被回调调用。
 //   SwitcherAudio      Swift：AudioRing 实现包装、AudioMixer 控制 API、AudioUnit 效果链搭建、CoreAudio 设备层、离线 / 空设备驱动。
 // W2-E 之后会加 Sources/Integration/（docs/OWNERSHIP.md），这里不预留。
+//
+// 三个 C target 在 debug 配置下也用 -O2（unsafeFlags；SwiftPM 对本地路径依赖允许，W1-D 实测 TestKit 能解析）：
+// -O0 的 sinc 重采样 + K 加权滤波每块 2 ms（8 路），debug 下跑真设备会贴近 5.3 ms 预算，离线 10 分钟要 9 分钟；
+// -O2 后 ≈ 十分之一。热路径规则与优化级别无关（符号检查两种配置都跑）。
 import PackageDescription
 
 let package = Package(
@@ -28,10 +32,14 @@ let package = Package(
             cSettings: [
                 .define("HAVE_CONFIG_H"),
                 .define("NDEBUG", .when(configuration: .release)),
+                .unsafeFlags(["-O2"], .when(configuration: .debug)),
             ]
         ),
         .target(
-            name: "CLibEBUR128"
+            name: "CLibEBUR128",
+            cSettings: [
+                .unsafeFlags(["-O2"], .when(configuration: .debug)),
+            ]
         ),
         .target(
             name: "CSwitcherAudioRT",
@@ -42,6 +50,7 @@ let package = Package(
             ],
             cSettings: [
                 .define("SW_AUDIO_RT_TARGET"),
+                .unsafeFlags(["-O2"], .when(configuration: .debug)),
             ],
             linkerSettings: [
                 .linkedFramework("AudioToolbox"),

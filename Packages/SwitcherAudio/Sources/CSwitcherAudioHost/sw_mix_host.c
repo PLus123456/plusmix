@@ -52,6 +52,7 @@ void sw_rt_probe_remove_malloc_hook(void) {
     if (malloc_logger == sw_rt_probe_logger) malloc_logger = sw_rt_probe_prev_logger;
 }
 uint64_t sw_rt_probe_allocations_in_rt(void) { return __atomic_load_n(&sw_rt_probe_alloc_count, __ATOMIC_RELAXED); }
+void sw_rt_probe_reset(void) { __atomic_store_n(&sw_rt_probe_alloc_count, (uint64_t)0, __ATOMIC_RELAXED); sw_rt_guard_reset(); }
 
 // ---------------------------------------------------------------------------
 // 块队列
@@ -214,6 +215,8 @@ sw_mix_ctx *sw_mix_ctx_create(const sw_mix_ctx_config *config) {
         if (!bus->meter) { sw_mix_ctx_destroy(ctx); return NULL; }
         bus->m.momentary_lufs = bus->m.short_term_lufs = bus->m.integrated_lufs = -HUGE_VAL;
         bus->m.loudness_range_lu = 0;
+        // 四条总线的响度读数错开 1/4 个间隔更新：S 要对 3 s 音频求和（≈ 0.3 ms），四条挤在同一块会出 1.2 ms 的尖峰
+        bus->frames_since_meter_update = (uint32_t)((uint64_t)ctx->meter_interval_frames * b / SW_MIX_BUS_COUNT);
         for (uint32_t t = 0; t < SW_MIX_MAX_TAPS; t++) ctx->taps[t].source = -1;
     }
     return ctx;
@@ -307,3 +310,17 @@ double sw_mix_ctx_host_ticks_per_frame(const sw_mix_ctx *ctx) { return ctx->host
 uint32_t sw_mix_ctx_sample_rate(const sw_mix_ctx *ctx) { return ctx->sample_rate; }
 uint32_t sw_mix_ctx_resampler_latency_frames(const sw_mix_ctx *ctx) { return ctx->resampler_latency; }
 void sw_mix_ctx_set_timing_check(sw_mix_ctx *ctx, bool on) { __atomic_store_n(&ctx->timing_check, on ? 1u : 0u, __ATOMIC_RELAXED); }
+
+// ---------------------------------------------------------------------------
+// 守卫自检（测试用）：在守卫区里故意 malloc，钩子应记到；返回记到的次数（期望 ≥ 1）
+// ---------------------------------------------------------------------------
+uint64_t sw_rt_probe_selftest(void) {
+    const uint64_t before = sw_rt_probe_allocations_in_rt();
+    sw_rt_guard_enter();
+    void *p = malloc(64);
+    void *q = sw_host_alloc(1);   // 封装：记违规 + 分配（钩子也记）
+    free(p);
+    sw_host_free(q);
+    sw_rt_guard_exit();
+    return sw_rt_probe_allocations_in_rt() - before;
+}
