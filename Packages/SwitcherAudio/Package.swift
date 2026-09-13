@@ -62,6 +62,7 @@ let package = Package(
                 .product(name: "SwitcherContracts", package: "SwitcherCore"),
                 "CSwitcherAudioRT",
                 "CSwitcherAudioHost",
+                "CLibEBUR128",
             ],
             linkerSettings: [
                 .linkedFramework("AudioToolbox"),
