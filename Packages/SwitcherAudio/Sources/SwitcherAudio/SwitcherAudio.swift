@@ -1,7 +1,9 @@
-// SwitcherAudio —— 混音循环（C 热路径）、重采样、效果链、表、设备层（W1-D / W2-E 填）。
+// SwitcherAudio —— 混音循环（C 热路径）、重采样、效果链、表、设备层（W1-D）。
+// 模块入口：AudioMixer（控制面）、CAudioRing（契约 AudioRing 的实现）、OfflineAudioDriver / NullOutputDevice（无声卡驱动）、
+// AudioOutputDevice / AudioInputDevice（CoreAudio 设备层）、LoudnessMeter（离线分析）、RealtimeGuard（A7）。
 import SwitcherContracts
 
-/// P0 占位：证明模块能编译并链接到 SwitcherContracts。W1-D / W2-E 开工时删掉。
+/// P0 骨架占位。TestKit 的 P0 骨架仍引用它，W1-A 删掉那个引用之后这里可以删（不标 deprecated：别让别的包的构建出警告）。
 public enum SwitcherAudioSkeleton {
     public static let contractsVersion = SwitcherVersion.current
 }
