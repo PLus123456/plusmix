@@ -7,6 +7,10 @@
 #
 # 规则来源：docs/OWNERSHIP.md 的表（第 3 列分支、第 4 列路径 token）。token 语义见该文件"表格格式"一节。
 # 所有分支另外允许：reports/<分支名>.md（/ 换 -）、reports/issues/、docs/contract-changes/。
+#
+# 合并提交（检查点会话 G2–G5 把功能分支合进来）：被合进来的内容不算本分支的改动。分支上只要有合并提交，就沿第一父链
+# 逐个提交结算：普通提交 = 相对父提交的 diff；合并提交 = 相对"自动合并结果"（git merge-tree --write-tree）的 diff，
+# 也就是只剩冲突解决 / 合并时手改的部分（这正是检查点的"胶水"）。同一文件在多个提交里改动的行数相加。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -65,18 +69,48 @@ match_glob() { # $1=path $2=glob
 
 # ---- 取改动 ----
 mb=$(git merge-base "$base" "$branch") || { red "[check-ownership] 找不到 $base 与 $branch 的 merge-base"; exit 2; }
-changes=$(git diff --numstat --no-renames "$mb" "$branch")
+
+# 已提交的改动，numstat 三列：增 / 删 / 路径。
+# 没有合并提交：一次 diff（merge-base → 分支顶）。有合并提交：沿第一父链逐个提交结算（见文件头注释）。
+collect_committed() {
+  if [ -z "$(git rev-list --merges --first-parent "$mb..$branch" | head -1)" ]; then
+    git diff --numstat --no-renames "$mb" "$branch"
+    return
+  fi
+  local c p1 p2 tree
+  for c in $(git rev-list --first-parent --reverse "$mb..$branch"); do
+    p1=$(git rev-parse --verify --quiet "$c^1")
+    p2=$(git rev-parse --verify --quiet "$c^2" || true)
+    if [ -n "$p2" ]; then
+      # 自动合并的树；有冲突时 merge-tree 退出 1 但仍写出带冲突标记的树，diff 出来的就是解决冲突的改动
+      tree=$(git merge-tree --write-tree "$p1" "$p2" 2>/dev/null | head -1)
+      [ -n "$tree" ] || tree=$p1
+      git diff --numstat --no-renames "$tree" "$c"
+    else
+      git diff --numstat --no-renames "$p1" "$c"
+    fi
+  done
+}
+merged_note=""
+if [ -n "$(git rev-list --merges --first-parent "$mb..$branch" | head -1)" ]; then
+  merged_note="（含合并提交：被合入分支的内容不算本分支改动，只算合并时的手改）"
+fi
+changes=$(collect_committed)
 if [ "$include_wt" = 1 ]; then
-  changes+=$'\n'$(git diff --numstat --no-renames "$mb")
+  # 未提交的改动：工作树相对分支顶（只在该分支已 checkout 时有意义）；未跟踪文件按行数全算新增
+  changes+=$'\n'$(git diff --numstat --no-renames "$branch")
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     n=$(wc -l < "$f" | tr -d ' ')
     changes+=$'\n'"$n	0	$f"
   done < <(git ls-files --others --exclude-standard)
 fi
-changes=$(printf '%s\n' "$changes" | sed '/^$/d' | sort -u -k3)
+# 同一路径多条记录（多个提交、已提交 + 未提交）按增 / 删分别相加；二进制的 "-" 算 0
+changes=$(printf '%s\n' "$changes" | sed '/^$/d' | awk -F'\t' '
+  { a=$1; d=$2; if (a=="-") a=0; if (d=="-") d=0; add[$3]+=a; del[$3]+=d }
+  END { for (p in add) printf "%d\t%d\t%s\n", add[p], del[p], p }' | sort -k3)
 if [ -z "$changes" ]; then
-  green "[check-ownership] $branch 相对 $base 没有改动"; exit 0
+  green "[check-ownership] $branch 相对 $base 没有改动$merged_note"; exit 0
 fi
 
 # ---- 逐文件判定 ----
@@ -137,4 +171,4 @@ if [ "${#violations[@]}" -gt 0 ]; then
   for v in "${violations[@]}"; do printf '    %s\n' "$v"; done
   exit 1
 fi
-green "[check-ownership] $branch 的 $total 个改动文件都在允许范围内"
+green "[check-ownership] $branch 的 $total 个改动文件都在允许范围内$merged_note"
