@@ -1,0 +1,721 @@
+{
+  "audio" : {
+    "afv" : false,
+    "buses" : [
+      {
+        "bus" : 0,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      },
+      {
+        "bus" : 1,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      },
+      {
+        "bus" : 2,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      },
+      {
+        "bus" : 3,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      }
+    ],
+    "monitorMode" : "afl"
+  },
+  "inputs" : [
+    {
+      "name" : "合成 1 · 30 +音频",
+      "number" : 1,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : true,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 32
+              }
+            },
+            "clockDriftPpm" : 0,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1,
+              "numerator" : 30
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "合成 2 · 30",
+      "number" : 2,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : false,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 52
+              }
+            },
+            "clockDriftPpm" : 0,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1,
+              "numerator" : 30
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "合成 3 · 59.94",
+      "number" : 3,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : false,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 72
+              }
+            },
+            "clockDriftPpm" : 0,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1001,
+              "numerator" : 60000
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "合成 4 · 59.94",
+      "number" : 4,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : false,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 92
+              }
+            },
+            "clockDriftPpm" : 0,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1001,
+              "numerator" : 60000
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "合成 5 · 60 +100 ppm",
+      "number" : 5,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : false,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 112
+              }
+            },
+            "clockDriftPpm" : 100,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1,
+              "numerator" : 60
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "合成 6 · 60 -100 ppm",
+      "number" : 6,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : false,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 132
+              }
+            },
+            "clockDriftPpm" : -100,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1,
+              "numerator" : 60
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "合成 7 · 60 ±3 ms",
+      "number" : 7,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : false,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 152
+              }
+            },
+            "clockDriftPpm" : 0,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1,
+              "numerator" : 60
+            },
+            "height" : 1080,
+            "jitterMs" : 3,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "合成 8 · 60",
+      "number" : 8,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : false,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "gray" : {
+                "level" : 172
+              }
+            },
+            "clockDriftPpm" : 0,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1,
+              "numerator" : 60
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    }
+  ],
+  "layout" : {
+
+  },
+  "mixer" : {
+    "format" : {
+      "frameRate" : {
+        "denominator" : 1,
+        "numerator" : 60
+      },
+      "height" : 1080,
+      "width" : 1920
+    },
+    "ftb" : {
+      "durationTicks" : 30,
+      "level" : 0,
+      "on" : false
+    },
+    "overlays" : [
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      },
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      },
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      },
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      }
+    ],
+    "preview" : 2,
+    "program" : 1,
+    "transition" : {
+      "durationTicks" : 30,
+      "progress" : 0,
+      "source" : "auto",
+      "stinger" : {
+        "cutAtTick" : 0
+      },
+      "type" : "fade",
+      "wipe" : {
+        "direction" : "leftToRight",
+        "softness" : 0
+      }
+    }
+  },
+  "name" : "m0",
+  "outputs" : [
+    {
+      "enabled" : true,
+      "kind" : "record",
+      "name" : "录制",
+      "number" : 1,
+      "settings" : {
+        "audio" : {
+          "bitrateBps" : 160000,
+          "codec" : "aac"
+        },
+        "extra" : {
+
+        },
+        "record" : {
+          "container" : "mov",
+          "directory" : ".",
+          "fileNamePattern" : "{show}-{date}-{time}",
+          "fragmentIntervalSeconds" : 1,
+          "remuxToMP4" : false
+        },
+        "source" : {
+          "program" : {
+
+          }
+        },
+        "video" : {
+          "bitrateBps" : 6000000,
+          "codec" : "h264",
+          "keyframeIntervalFrames" : 120
+        }
+      }
+    }
+  ],
+  "schemaVersion" : 1
+}
