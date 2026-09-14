@@ -1,0 +1,224 @@
+{
+  "checkpoint" : "G2",
+  "commit" : "7d669e5",
+  "date" : "2026-09-14T15:38:16Z",
+  "durationSeconds" : 598.9833009243011,
+  "machine" : "m5max",
+  "notes" : {
+    "label" : "10min",
+    "macos" : "26.6.2",
+    "power" : "",
+    "show" : "scenarios/m0-show.json"
+  },
+  "scenario" : "scenarios/m0.json",
+  "summary" : {
+    "audioDropouts" : 0,
+    "audioUnderruns" : 0,
+    "cpuPct" : {
+      "avg" : 23.789566375506432,
+      "count" : 600,
+      "max" : 31.67307010123157,
+      "min" : 14.911661040047075,
+      "p99" : 27.91961529076866
+    },
+    "durationSeconds" : 598.9833009243011,
+    "encoders" : [
+      {
+        "bitrate" : {
+          "avg" : 60658.37927014952,
+          "count" : 600,
+          "max" : 116276.99680042482,
+          "min" : 35008,
+          "p99" : 66715.48562994935
+        },
+        "index" : 0,
+        "skipped" : 0
+      }
+    ],
+    "firstTick" : 20,
+    "firstTs" : 1789399240.7059221,
+    "gpuPct" : {
+      "avg" : 25.69,
+      "count" : 600,
+      "max" : 34,
+      "min" : 16,
+      "p99" : 33
+    },
+    "jitterMs" : {
+      "avg" : 0.024229015000000017,
+      "count" : 600,
+      "max" : 0.078875,
+      "min" : 0.013625,
+      "p99" : 0.056375
+    },
+    "lastTick" : 35960,
+    "lastTs" : 1789399839.689223,
+    "lineCount" : 600,
+    "missedRender" : 0,
+    "missedRenderRatio" : 0,
+    "perInput" : {
+      "1" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.5005354920764955,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 17970,
+        "dupRatio" : 0.5,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 29.9687059506845,
+          "count" : 600,
+          "max" : 30.299935271763275,
+          "min" : 10.902220708024903,
+          "p99" : 30.291600853662146
+        },
+        "inputID" : 1
+      },
+      "2" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.5005354920764955,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 17970,
+        "dupRatio" : 0.5,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 29.9687059506845,
+          "count" : 600,
+          "max" : 30.299935271763275,
+          "min" : 10.902220708024903,
+          "p99" : 30.291600853662146
+        },
+        "inputID" : 2
+      },
+      "3" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0020877730519146542,
+        "drop" : 22,
+        "dropRatio" : 0.0006127463104889908,
+        "dup" : 58,
+        "dupRatio" : 0.001613800779076238,
+        "excessDropRatio" : 0.0006127463104889908,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.87640286660807,
+          "count" : 600,
+          "max" : 60.92144691160902,
+          "min" : 20.813330442592996,
+          "p99" : 60.8165014111173
+        },
+        "inputID" : 3
+      },
+      "4" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0020877730519146542,
+        "drop" : 23,
+        "dropRatio" : 0.0006405984155112177,
+        "dup" : 59,
+        "dupRatio" : 0.0016416249304396216,
+        "excessDropRatio" : 0.0006405984155112177,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.87640286660807,
+          "count" : 600,
+          "max" : 60.92144691160902,
+          "min" : 20.813330442592996,
+          "p99" : 60.8165014111173
+        },
+        "inputID" : 4
+      },
+      "5" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0010077599258425662,
+        "drop" : 30,
+        "dropRatio" : 0.0008346565472162538,
+        "dup" : 26,
+        "dupRatio" : 0.0007234279354479689,
+        "excessDropRatio" : 0.0008346565472162538,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.94120546075574,
+          "count" : 600,
+          "max" : 60.98637972885601,
+          "min" : 20.813330442592996,
+          "p99" : 60.95127201797506
+        },
+        "inputID" : 5
+      },
+      "6" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.001200585139951249,
+        "drop" : 29,
+        "dropRatio" : 0.0008069918219292372,
+        "dup" : 33,
+        "dupRatio" : 0.0009181969949916528,
+        "excessDropRatio" : 0.0008069918219292372,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.92963562536238,
+          "count" : 600,
+          "max" : 60.981926481539034,
+          "min" : 20.813330442592996,
+          "p99" : 60.89131156628926
+        },
+        "inputID" : 6
+      },
+      "7" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0010971582215945075,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 0,
+        "dupRatio" : 0,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.935841413470335,
+          "count" : 600,
+          "max" : 61.20945624969876,
+          "min" : 21.804441416049805,
+          "p99" : 61.089717886931695
+        },
+        "inputID" : 7
+      },
+      "8" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0011073999892132758,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 0,
+        "dupRatio" : 0,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.93522689028137,
+          "count" : 600,
+          "max" : 60.980620907501184,
+          "min" : 20.813330442592996,
+          "p99" : 60.96323155097082
+        },
+        "inputID" : 8
+      }
+    },
+    "programFps" : 60.001672742028674,
+    "renderMs" : {
+      "avg" : 1.9307549574624283,
+      "count" : 600,
+      "max" : 3.3989639523809525,
+      "min" : 1.5069288333333333,
+      "p99" : 2.1402163333333335
+    },
+    "rssFitAfterWarmup" : false,
+    "rssMb" : {
+      "avg" : 771.0145902252198,
+      "count" : 600,
+      "max" : 771.2042007446289,
+      "min" : 769.8604278564453,
+      "p99" : 771.1573257446289
+    },
+    "rssSlopeMbPerHour" : 2.7207468042243175,
+    "tickSpan" : 35940
+  }
+}

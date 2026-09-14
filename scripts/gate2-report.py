@@ -75,9 +75,13 @@ def main():
     key = summary.get("key", {})
     per_input_stats = summary.get("perInput", {})
     summary_md = read_text(os.path.join(out, "summary.md"))
+    # frameprobe --out 的 JSON 外面包了一层 {"source": …, "stats" | "switches" | "av": 报告本体}
     probe = load_json(os.path.join(out, "probe-stats.json"), {}) or {}
+    probe = probe.get("stats", probe)
     switches = load_json(os.path.join(out, "probe-switches.json"), {}) or {}
+    switches = switches.get("switches", switches) if isinstance(switches.get("switches"), dict) else switches
     av = load_json(os.path.join(out, "probe-av.json"), {}) or {}
+    av = av.get("av", av)
     ffp = load_json(os.path.join(out, "ffprobe.json"), {}) or {}
     show = load_json(a.show, {}) or {}
     scenario = load_json(a.script, {}) or {}
@@ -219,7 +223,17 @@ def main():
     lines.append(f"| S3 占用 | CPU avg {fmt(cpu, 1)}%（100 = 一核）/ GPU avg {fmt(gpu, 1)}%（IOKit Device Utilization） | CPU ≤ 60%，GPU ≤ 50% | {mark(None if cpu is None else cpu <= 60 and (gpu or 0) <= 50)} | CPU {delta(cpu, b_cpu, '%', 1)}；GPU {delta(gpu, b_gpu, '%', 1)} |")
     lines.append(f"| V6 切换（信息） | {n_switch} 次切换（{', '.join(f'{k} {v}' for k, v in sorted(kinds.items())) or '无'}），Cut 全部干净：{mark(clean)} | G3 判 | — | — |")
     if av:
-        lines.append(f"| A2 / A3 音画偏移（信息） | 闪光 {av.get('flashCount')} / click {av.get('clickCount')} / 配对 {av.get('matchedCount')}；均值 {fmt(av.get('meanMs'), 3)} ms，最大 {fmt(av.get('maxAbsMs'), 3)} ms，斜率 {fmt(av.get('slopeMsPerSecond'), 4)} ms/s | ≤ 16.7 ms（G3 判） | {mark(av.get('passA2'))} | — |")
+        # 59.94 fps 的合成源闪光周期是 60 帧 = 1.001 s（契约 isFlashTick），它在播时闪光帧相对整秒逐渐滞后，click（整秒）与它的差不是 A/V 偏移；
+        # 只取闪光落在整秒拍上的配对（60 / 30 fps 的路在播）另算一行。
+        exact = [q["offsetMs"] for q in av.get("pairs", []) if q.get("offsetMs") is not None and abs(q.get("flashTimeSeconds", 0.5) - round(q.get("flashTimeSeconds", 0.5))) < 1e-6]
+        if exact:
+            mean_e = sum(exact) / len(exact)
+            max_e = max(abs(v) for v in exact)
+            std_e = (sum((v - mean_e) ** 2 for v in exact) / len(exact)) ** 0.5
+            exact_line = f"整秒闪光（60 / 30 fps 在播）{len(exact)} 对：均值 {mean_e:.3f} ms，标准差 {std_e:.3f}，最大 {max_e:.3f} ms → {mark(max_e <= 16.6667)}；"
+        else:
+            exact_line = ""
+        lines.append(f"| A2 / A3 音画偏移（信息，音频超前为正） | {exact_line}全部配对：闪光 {av.get('flashCount')} / click {av.get('clickCount')} / 配对 {av.get('matchedCount')}，均值 {fmt(av.get('meanMs'), 3)} ms，最大 {fmt(av.get('maxAbsMs'), 3)} ms，斜率 {fmt(av.get('slopeMsPerSecond'), 4)} ms/s（59.94 在播段闪光周期 1.001 s，拉大了均值与最大值） | ≤ 16.7 ms（G3 判） | {mark(av.get('passA2'))} | — |")
     lines.append(f"| 文件 | {total_frames} 帧（读不出帧号 {undecodable}，读不出 ID {unidentified}），ffprobe 时长 {ff_dur or '?'} s，{vstream.get('codec_name', '?')} {vstream.get('width', '?')}×{vstream.get('height', '?')} {vstream.get('avg_frame_rate', '?')}，音轨 {'有（' + ', '.join(k for k in streams if k and k != vstream.get('codec_name')) + '）' if len(streams) > 1 else '无'} | — | — | — |")
     lines.append("")
     lines.append("### V4 明细一：stats.jsonl 帧槽计数（全程、每路都在，铁律 4 的那份统计）")
