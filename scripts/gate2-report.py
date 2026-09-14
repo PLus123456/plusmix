@@ -160,13 +160,57 @@ def main():
     undecodable = probe.get("undecodableFrames", 0)
     unidentified = probe.get("unidentifiedFrames", 0)
 
+    # ---- missed_render 何时增加：逐行看 stats.jsonl，配上 load.log（5 s 一次的负载 / 进程采样，若有）----
+    miss_events = []
+    gpu_busy_seconds = 0
+    gpu_max = 0.0
+    try:
+        prev = None
+        for line in open(os.path.join(out, "stats.jsonl"), encoding="utf-8"):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            gpu_max = max(gpu_max, row.get("gpu_pct", 0))
+            if row.get("gpu_pct", 0) > 50:
+                gpu_busy_seconds += 1
+            m = row.get("missed_render", 0)
+            if prev is not None and m > prev:
+                miss_events.append((row["ts"], row["tick"], m - prev, row.get("render_ms", 0), row.get("gpu_pct", 0), row.get("cpu_pct", 0)))
+            prev = m
+    except Exception:
+        pass
+    load_samples = []
+    for line in read_text(os.path.join(out, "load.log")).splitlines():
+        try:
+            hms = line[:8]
+            t = datetime.datetime.strptime(hms, "%H:%M:%S")
+            load_samples.append((t, line))
+        except Exception:
+            continue
+
+    def nearest_load(ts):
+        if not load_samples:
+            return ""
+        d = datetime.datetime.fromtimestamp(ts)
+        best = min(load_samples, key=lambda x: abs((x[0].replace(year=d.year, month=d.month, day=d.day) - d).total_seconds()))
+        gap = abs((best[0].replace(year=d.year, month=d.month, day=d.day) - d).total_seconds())
+        return best[1][9:] if gap <= 10 else ""
+
+    miss_note = "；".join(
+        f"{datetime.datetime.fromtimestamp(ts).strftime('%H:%M:%S')} 拍 {tick} +{k}（render {r:.2f} ms，GPU {g:.0f}%，CPU {c:.0f}%{'，' + nearest_load(ts) if nearest_load(ts) else ''}）"
+        for ts, tick, k, r, g, c in miss_events[:12])
+    if len(miss_events) > 12:
+        miss_note += f"；…共 {len(miss_events)} 次增量"
+
     # ---- G2 通过标准 ----
     checks = [
         ("V1 渲染耗时（本机参考线）", f"avg {fmt(v1_avg)} ms / p99 {fmt(v1_p99)} ms", "avg ≤ 2 ms（M5 Max，G2 prompt）", v1_avg is not None and v1_avg <= 2.0,
          delta(v1_avg, b_v1_avg, "ms")),
         ("V1 渲染耗时（必须档）", f"avg {fmt(v1_avg)} / p99 {fmt(v1_p99)} ms", "avg ≤ 6，p99 ≤ 12（目标 ≤ 4 / ≤ 8）",
          v1_avg is not None and v1_avg <= 6 and v1_p99 <= 12, delta(v1_p99, b_v1_p99, "ms（p99）")),
-        ("V2 渲染滞后丢帧", f"{int(v2) if v2 is not None else '—'} 帧 / {int(T)} 拍", f"{a.minutes:g} 分钟内 0", v2 is not None and v2 == 0, "—"),
+        ("V2 渲染滞后丢帧", f"{int(v2) if v2 is not None else '—'} 帧 / {int(T)} 拍（{(v2 or 0) / T * 100 if T else 0:.4f}%）" + (f"；增量时刻：{miss_note}" if miss_note else ""),
+         "10 分钟内 0（G2 prompt）" if a.minutes <= 10 else "≤ 0.02%（§4 必须档，60 fps 每小时 ≤ 43 帧）；目标 0",
+         (v2 is not None and v2 == 0) if a.minutes <= 10 else (v2 is not None and T and v2 / T <= 0.0002), "—"),
         ("V3 输出抖动", f"p99 {fmt(v3_p99)} ms / max {fmt(v3_max)} ms（jitter_ms 是每秒窗口最大值，p99 取各秒最大值）", "p99 ≤ 4 ms（目标 ≤ 2）",
          v3_p99 is not None and v3_p99 <= 4.0, delta(v3_p99, b_v3_p99, "ms")),
         ("V4 设计外重复 / 丢弃", f"精确核算设计外 {v4_design_out_total} 帧（stats.jsonl 全程）/ {probe_design_out_total} 帧（frameprobe 在播段）；"
@@ -201,6 +245,8 @@ def main():
     lines.append(f"- 机器：{env.get('cpu', '?')}，{env.get('cores', '?')} 核，{env.get('memory_gb', '?')} GB；macOS {env.get('macos', '?')}；{env.get('xcode', '?')}")
     lines.append(f"- 电源：{env.get('power', '?')}；温度 / 降频：{env.get('thermal', '无记录')}")
     lines.append(f"- 负载：跑前 {env.get('load_before', '?')} → 跑后 {env.get('load_after', '?')}；跑前占 CPU 的进程：{env.get('top_processes_before', '?')}")
+    lines.append(f"- 运行期间：GPU 占用 > 50% 的秒数 {gpu_busy_seconds}（最高 {gpu_max:.0f}%；本负载自己约 25%，明显更高说明有别的程序在用 GPU，例如桌面端 Claude 的渲染进程）；"
+                 f"负载采样 {'有（' + str(len(load_samples)) + ' 条，5 s 一次，load.log）' if load_samples else '无'}")
     lines.append(f"- 场景：`{a.script}`（{scenario.get('durationTicks', '?')} 拍，{len(scenario.get('events', []))} 个事件：每 30 s Cut、每 5 min Fade 30 拍）；节目：`{a.show}`（{show.get('mixer', {}).get('format', {}).get('width', '?')}×{show.get('mixer', {}).get('format', {}).get('height', '?')}@{program_fps:g}）")
     lines.append("  - 输入：" + "；".join(input_lines))
     lines.append(f"- 命令：`switcher-headless run --show {a.show} --script {a.script} --duration {int(a.minutes * 60)} --stats {out}/stats.jsonl --record {out}/out.mov --audio-device null`")

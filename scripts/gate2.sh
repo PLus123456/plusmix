@@ -78,8 +78,17 @@ stats="$out_dir/stats.jsonl"; movie="$out_dir/out.mov"; run_log="$out_dir/headle
 if [ "$do_run" = 1 ]; then
   step "跑 $minutes 分钟：$headless run --show $show --script $script --duration $duration --stats $stats --record $movie --audio-device null"
   rm -f "$stats" "$movie"
+  # 运行期间每 5 s 记一次负载与前 4 个占 CPU 的进程（测试标准 §2.8 要求环境干净；出了 missed_render 靠它归因）
+  load_log="$out_dir/load.log"; : > "$load_log"
+  ( while true; do
+      l=$(uptime | sed 's/.*averages: //' | cut -d' ' -f1)
+      t=$(ps -eo pcpu,comm | sort -rn | head -5 | tail -4 | awk '{n=split($2,a,"/"); printf "%s%%%s; ", $1, a[n]}')
+      echo "$(date +%T) load $l top: $t" >> "$load_log"; sleep 5
+    done ) &
+  sampler_pid=$!
   "$headless" run --show "$show" --script "$script" --duration "$duration" --stats "$stats" --record "$movie" --audio-device null 2>&1 | tee "$run_log"
   rc=${PIPESTATUS[0]}
+  kill "$sampler_pid" 2>/dev/null; wait "$sampler_pid" 2>/dev/null
   echo "load_after=$(uptime | sed 's/.*load averages: //')" >> "$env_file"
   [ "$rc" = 0 ] || { red "headless 退出码 $rc"; exit 1; }
 fi
@@ -104,14 +113,12 @@ PY
 )
 program_fps=$(python3 -c "import json,sys; fr=json.load(open('$show'))['mixer']['format']['frameRate']; print(fr['numerator']/fr['denominator'])")
 step "frameprobe stats（V4 / V5，--fps $program_fps --input-fps $input_fps）"
-"$frameprobe" stats "$movie" --fps "$program_fps" --input-fps "$input_fps" --max-events 50 --out "$out_dir/probe-stats.json" >/dev/null
-"$frameprobe" stats "$movie" --fps "$program_fps" --input-fps "$input_fps" --max-events 20 --markdown > "$out_dir/probe-stats.md"
+# --out + --markdown 并用：一遍解码同时写 JSON 文件并打印人读表（60 分钟的文件每遍约 7 分钟）
+"$frameprobe" stats "$movie" --fps "$program_fps" --input-fps "$input_fps" --max-events 20 --out "$out_dir/probe-stats.json" --markdown > "$out_dir/probe-stats.md"
 step "frameprobe switches（V6，M0 只记录不判定）"
-"$frameprobe" switches "$movie" --out "$out_dir/probe-switches.json" >/dev/null
-"$frameprobe" switches "$movie" --markdown > "$out_dir/probe-switches.md"
+"$frameprobe" switches "$movie" --out "$out_dir/probe-switches.json" --markdown > "$out_dir/probe-switches.md"
 step "frameprobe av（A2 / A3，M0 只记录不判定）"
-"$frameprobe" av "$movie" --fps "$program_fps" --out "$out_dir/probe-av.json" >/dev/null
-"$frameprobe" av "$movie" --fps "$program_fps" --markdown > "$out_dir/probe-av.md"
+"$frameprobe" av "$movie" --fps "$program_fps" --out "$out_dir/probe-av.json" --markdown > "$out_dir/probe-av.md"
 step "ffprobe"
 ffprobe -v error -show_entries format=duration:stream=codec_name,nb_frames,avg_frame_rate,width,height -of json "$movie" > "$out_dir/ffprobe.json" 2>/dev/null || true
 
