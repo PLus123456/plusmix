@@ -122,6 +122,53 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(st.dropped, 0)
     }
 
+    /// V4 退回单：引擎走带到达余量的挑帧。真线程生产者 60 fps +1%（每 100 拍穿越一次相位边界）、到达 = pts + U[0.03, 3] ms，
+    /// 600 拍：快输入 reuse 恰好 0，drop = 设计内（帧数 − 拍数），无迟到帧。
+    func testV4_engine_driftingInputWithArrivalJitter_designInOnly() async throws {
+        let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 1))
+        let engine = makeEngine(renderer: renderer)
+        let slot = LockFreeFrameSlot(capacity: 3)
+        engine.registerInput(number: 1, slot: slot)
+        let t0 = HostClock.now() + HostDuration(milliseconds: 50)
+        let inputSpec = TickClockSpec(t0: t0 - HostDuration(milliseconds: 5), frameDuration: Rational(1000, 60_600))
+        let running = Atomic<Bool>(true)
+        let period = UInt32(clamping: inputSpec.duration(ofTicks: 1).ticks)
+        let config = NativeThreadConfig(name: "producer-drift", qos: QOS_CLASS_USER_INTERACTIVE,
+                                        timeConstraint: .init(period: period, computation: period / 10, constraint: period / 2))
+        let lastPushed = Atomic<Int64>(-1)
+        let producer = NativeThread(config: config) {
+            var k: Int64 = 0
+            var rng: UInt64 = 0x1234_5678
+            while running.load(ordering: .acquiring) {
+                let pts = inputSpec.time(of: Tick(k))
+                rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17
+                let delay = HostDuration(nanoseconds: 30_000 + Int64(rng % 2_970_000))
+                mach_wait_until((pts + delay).ticks)
+                slot.push(TestFrames.frame(sequence: UInt64(k), pts: pts, ingress: HostClock.now()))
+                lastPushed.store(k, ordering: .releasing)
+                k += 1
+            }
+        }
+        try producer.start()
+        try await engine.start(t0: t0, lastTick: Tick(599))
+        engine.clock!.join()
+        running.store(false, ordering: .releasing)
+        producer.join()
+        renderer.waitForCompletion()
+        await engine.stop()
+        let st = slot.stats
+        let pacing = engine.pacingStats(forInput: 1)!
+        XCTAssertTrue(pacing.initialized)
+        XCTAssertEqual(pacing.lateFrames, 0, "余量盖住 3 ms 抖动，没有迟到帧")
+        XCTAssertEqual(st.reused, 0, "快输入：任何 reuse 都是设计外")
+        // 设计内 drop = 最后一拍合格的帧数 − 返回过帧的拍数
+        let lastTick = engine.clock!.spec.time(of: Tick(599))
+        let eligibleFrames = inputSpec.tick(at: lastTick - pacing.margin).rawValue + 1
+        XCTAssertEqual(Int64(st.dropped), eligibleFrames - Int64(st.consumed), "drop 恰好等于设计内值")
+        XCTAssertEqual(Int(st.dropped), 6, accuracy: 1, "+1% 每 100 拍丢 1 帧")
+        XCTAssertLessThan(pacing.margin.milliseconds, 8)
+    }
+
     /// Stats 一行：字段来自引擎计数（铁律 4），能编成 jsonl。
     func testW1B_engine_statsRow() async throws {
         let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 2))

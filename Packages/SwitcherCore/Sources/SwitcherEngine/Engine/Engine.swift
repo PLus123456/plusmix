@@ -6,7 +6,9 @@ import SwitcherContracts
 //
 // 每拍（时钟线程 = 渲染线程，零分配、不进 actor、无 async）：
 //   时钟到期 tick n → 确认状态机已准备到 n（否则短暂等，超时用旧快照并计数）→ 借用快照（原子指针）
-//   → noteRendered(n) + requestPrepare(n + 1)（原子量 + 信号量）→ 借用输入表，对每路 slot.latest(atOrBefore: t_n) 填 RenderInputTable
+//   → noteRendered(n) + requestPrepare(n + 1)（原子量 + 信号量）→ 借用输入表，对每路挑帧填 RenderInputTable：
+//     实现了 ArrivalPacedFrameSlot 的槽走 latest(forTick: t_n)（带到达余量，V4 退回单的修法，见 Slots/ArrivalPacing.swift），
+//     其他槽走契约的 latest(atOrBefore: t_n)
 //   → renderer.render(...)：.skipped 记 missed_render → 归还借用。
 // GPU 完成回调线程（RenderSink）：计 render_ms / 派发抖动 / 帧数 → 对每个 FrameConsumer 调 consume（必须立即返回，
 //   各自入队；引擎给每次 consume 计时，超过 1 ms 计入 slowConsumeCalls 供诊断）。
@@ -21,6 +23,8 @@ public struct EngineOptions: Sendable {
     public var snapshotWaitLimit = HostDuration(milliseconds: 1)
     /// consume 超过这个时长算"慢消费者"（诊断计数）。
     public var slowConsumeThreshold = HostDuration(milliseconds: 1)
+    /// 到达余量参数（注册输入时交给实现了 ArrivalPacedFrameSlot 的槽；initialFloor / maxRaise 为 nil 时按节目帧率填）。
+    public var pacing = PacingOptions()
     public init() {}
 }
 
@@ -54,10 +58,14 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         let slots: [LockFreeFrameSlotBox?]
         init(slots: [LockFreeFrameSlotBox?]) { self.slots = slots }
     }
-    /// 把 any FrameSlot 装箱成 Sendable 引用。
+    /// 把 any FrameSlot 装箱成 Sendable 引用；带到达余量的槽另存一份协议引用，渲染线程按它分流。
     final class LockFreeFrameSlotBox: @unchecked Sendable {
         let slot: any FrameSlot
-        init(_ slot: any FrameSlot) { self.slot = slot }
+        let paced: (any ArrivalPacedFrameSlot)?
+        init(_ slot: any FrameSlot, paced: (any ArrivalPacedFrameSlot)?) {
+            self.slot = slot
+            self.paced = paced
+        }
     }
 
     private let inputTable: RenderInputTable
@@ -94,12 +102,31 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
 
     // MARK: 组装（普通线程）
 
-    /// 注册一路输入的帧槽（可在运行中调；换表走原子指针）。
+    /// 注册一路输入的帧槽（可在运行中调；换表走原子指针）。实现了 ArrivalPacedFrameSlot 的槽在这里拿到余量参数。
     public func registerInput(number: Int, slot: any FrameSlot) {
         precondition(number >= 1 && number <= maxInputs, "输入编号 \(number) 超出 1…\(maxInputs)")
-        let box = LockFreeFrameSlotBox(slot)
+        var paced: (any ArrivalPacedFrameSlot)? = nil
+        if let p = slot as? any ArrivalPacedFrameSlot {
+            p.configurePacing(resolvedPacingOptions)
+            paced = p
+        }
+        let box = LockFreeFrameSlotBox(slot, paced: paced)
         registry.withLock { $0[number] = box }
         republishSlots()
+    }
+
+    /// 注册时交给槽的余量参数：nil 的 initialFloor / maxRaise 按节目帧率填（1/4 帧 / 一帧）。
+    var resolvedPacingOptions: PacingOptions {
+        var o = options.pacing
+        let period = TickClockSpec(t0: .zero, frameRate: format.frameRate).duration(ofTicks: 1)
+        if o.initialFloor == nil { o.initialFloor = period / 4 }
+        if o.maxRaise == nil { o.maxRaise = period }
+        return o
+    }
+
+    /// 某路输入的到达余量状态（没注册或槽不带余量为 nil）。普通线程。
+    public func pacingStats(forInput number: Int) -> PacingStats? {
+        registry.withLock { $0[number]?.paced?.pacingStats }
     }
 
     /// 注销一路输入。
@@ -186,7 +213,11 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
             var number = 1
             while number <= maxInputs {
                 if let box = table.slots[number] {
-                    inputTable[inputNumber: number] = box.slot.latest(atOrBefore: ideal)
+                    if let paced = box.paced {
+                        inputTable[inputNumber: number] = paced.latest(forTick: ideal)
+                    } else {
+                        inputTable[inputNumber: number] = box.slot.latest(atOrBefore: ideal)
+                    }
                 } else {
                     inputTable[inputNumber: number] = nil
                 }
