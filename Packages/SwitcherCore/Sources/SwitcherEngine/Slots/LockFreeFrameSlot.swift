@@ -92,7 +92,7 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
     /// 渲染线程：取 pts ≤ time 的最新帧；没有新帧时重复上一帧（reused += 1）；从未有帧返回 nil。不带余量。
     public func latest(atOrBefore time: HostTime) -> Frame? {
         drain(observe: false)
-        return pick(limit: Int64(time.ticks))
+        return pick(limit: Int64(clamping: time.ticks))
     }
 
     // MARK: 消费者：引擎入口（带到达余量）
@@ -100,16 +100,16 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
     /// 渲染线程：第 tickTime 拍的挑帧，上限 = tickTime − 余量。余量的初值、抬高、降低规则见 ArrivalPacing.swift。
     public func latest(forTick tickTime: HostTime) -> Frame? {
         drain(observe: true)
-        let ideal = Int64(tickTime.ticks)
+        let ideal = Int64(clamping: tickTime.ticks)
         guard pacingOptions.enabled.load(ordering: .relaxed), pacingInitialized else {
             return pick(limit: ideal)
         }
         var limit = ideal - margin
-        if hasLastLimit, pendingCount > 0, let oldest = pending[pendingStart], Int64(oldest.pts.ticks) <= lastLimit {
+        if hasLastLimit, pendingCount > 0, let oldest = pending[pendingStart], Int64(clamping: oldest.pts.ticks) <= lastLimit {
             // 迟到：本该上一拍就返回。抬余量盖住它的 d，但不超过让它此刻恰好合格的值，单次不超过 maxRaise。
-            let d = Int64(oldest.ingressTime.ticks) - Int64(oldest.pts.ticks)
+            let d = Int64(clamping: oldest.ingressTime.ticks) - Int64(clamping: oldest.pts.ticks)
             var target = max(margin, d + guardBand(for: d))
-            target = min(target, ideal - Int64(oldest.pts.ticks))
+            target = min(target, ideal - Int64(clamping: oldest.pts.ticks))
             target = min(target, margin + pacingOptions.maxRaise.load(ordering: .relaxed))
             target = min(target, marginCap())
             if target > margin {
@@ -129,7 +129,7 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
                 var candidate = desired
                 let firstIneligible = scan(limit: limit).firstIneligible
                 if firstIneligible >= 0, let f = pending[(pendingStart + firstIneligible) % capacity] {
-                    candidate = max(candidate, ideal - Int64(f.pts.ticks) + 1)
+                    candidate = max(candidate, ideal - Int64(clamping: f.pts.ticks) + 1)
                 }
                 if candidate < margin {
                     margin = candidate
@@ -141,7 +141,7 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
                 let pickIndex = scan(limit: limit).pick
                 var safe = true
                 if pickIndex >= 0, let f = pending[(pendingStart + pickIndex) % capacity] {
-                    safe = Int64(f.pts.ticks) <= ideal - desired
+                    safe = Int64(clamping: f.pts.ticks) <= ideal - desired
                 }
                 if safe {
                     margin = desired
@@ -205,7 +205,7 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
         var pick = -1
         var k = 0
         while k < pendingCount {
-            if let f = pending[(pendingStart + k) % capacity], Int64(f.pts.ticks) <= limit { pick = k }
+            if let f = pending[(pendingStart + k) % capacity], Int64(clamping: f.pts.ticks) <= limit { pick = k }
             k += 1
         }
         let next = pick + 1
@@ -239,7 +239,7 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
 
     /// 记一帧的到达延迟 d = ingressTime − pts（可为负：帧早于 pts 到达）。
     private func observeArrival(_ frame: Frame) {
-        let d = Int64(frame.ingressTime.ticks) - Int64(frame.pts.ticks)
+        let d = Int64(clamping: frame.ingressTime.ticks) - Int64(clamping: frame.pts.ticks)
         if d > blockMax[blockIndex] { blockMax[blockIndex] = d }
         if d < blockMin[blockIndex] { blockMin[blockIndex] = d }
         lastFrameDuration = frame.duration.ticks
