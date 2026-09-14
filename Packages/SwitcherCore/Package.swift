@@ -32,7 +32,9 @@ let package = Package(
         ),
         .target(
             name: "SwitcherRender",
-            dependencies: ["SwitcherContracts"]
+            dependencies: ["SwitcherContracts"],
+            // 着色器源随包走：Xcode 构建时编成 default.metallib，swift build 时原样进 bundle、启动时编译（见 ShaderLibrary.swift）
+            resources: [.process("Shaders/Compositor.metal")]
         ),
         .testTarget(
             name: "SwitcherContractsTests",
