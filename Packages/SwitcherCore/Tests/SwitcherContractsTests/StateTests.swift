@@ -109,10 +109,17 @@ final class StateTests: XCTestCase {
 
     func testP1_snapshot_isImmutableReferenceToState() {
         let state = Samples.mixerState()
+        let before = HostClock.now()
         let snap = MixerSnapshot(state: state, sequence: 12, tick: Tick(500))
+        let after = HostClock.now()
         XCTAssertEqual(snap.state, state)
         XCTAssertEqual(snap.sequence, 12)
         XCTAssertEqual(snap.tick, Tick(500))
+        // 提案 003 §B：发布时刻默认取构造那一刻，也可以显式给
+        XCTAssertGreaterThanOrEqual(snap.publishedAt, before)
+        XCTAssertLessThanOrEqual(snap.publishedAt, after)
+        let explicit = MixerSnapshot(state: state, sequence: 13, tick: Tick(501), publishedAt: HostTime(ticks: 42))
+        XCTAssertEqual(explicit.publishedAt, HostTime(ticks: 42))
     }
 
     func testP1_renderInputTable_reusesStorage() {

@@ -91,7 +91,7 @@
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
 | `MixerState` | 不可变快照：format, inputs, program, preview, transition, ftb, overlays[4], audio, outputs；`validate()`、`tally(ofInput:)`、`tallies` | 状态机（reduce / advance） | 渲染（每拍一次）、音频、UI、API、录制 | 值类型；经 `MixerSnapshot` 发布 |
-| `MixerSnapshot` | final class {state, sequence, tick}，不可变；状态机用原子指针交换发布 | 状态机 | 渲染、音频、控制 | 读方只 retain，不进 actor |
+| `MixerSnapshot` | final class {state, sequence, tick, publishedAt}，不可变；状态机用原子指针交换发布；`publishedAt` = 发布时刻 host time（提案 003 §B，C2 从它算） | 状态机 | 渲染、音频、控制 | 读方只 retain，不进 actor |
 | `TransitionState` | {type, durationTicks, progress 0–1, source auto/tbar, startTick, wipe, stinger}；空闲时 type/duration 就是"下一次转场"的选择 | 状态机 | 渲染 | — |
 | `FadeToBlack` | {on 目标, durationTicks, level 当前黑比例, startTick} | 状态机 | 渲染、音频（可选淡出 Master） | — |
 | `OverlayState` | {input?, on 目标, rect, animProgress 0–1, animation, startTick}；`isVisible` | 状态机 | 渲染 | — |
@@ -107,8 +107,8 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
 | `Command` | 枚举，27 个 case（对照见 §8）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}` | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
-| `IssuedCommand` | {sequence, issuedAt, command}：命令总线（W2-C）加信封 | 命令总线 | 状态机（按 sequence 严格顺序） | 普通 |
-| `CommandReceipt` | {sequence, appliedTick} | 状态机 | 总线、API | 普通 |
+| `IssuedCommand` | {sequence, issuedAt, command}：命令总线（W2-C）加信封；`issuedAt` = 命令进总线的时刻（服务端 host time，不是客户端发出时刻；提案 003 §C） | 命令总线 | 状态机（按 sequence 严格顺序） | 普通 |
+| `CommandReceipt` | {sequence, appliedTick, applied}；`applied` = 状态真的变了（false = reducer 按规则忽略了它，提案 003 §A；结构性非法的在总线入口就被拒，到不了回执） | 状态机 | 总线、API | 普通 |
 | `MixerReducing` 协议 | `reduce(state, command, at tick)`、`advance(state, to tick)`，纯函数，实现在 W1-B | W1-B | 状态机、Control 的测试 | 纯函数 |
 
 ### 2.7 统计（Stats.swift）
@@ -142,6 +142,7 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 - **时间戳**：只有 host time。所有帧、音频块入口换算；编码 PTS = 拍点时刻 `RenderedFrame.tickTime`（决策 10）。
 - **挑帧**：渲染线程每拍对每路 `latest(atOrBefore: 拍点时刻)`，30 进 60 自然重复、59.94 进 60 每 1000 拍重复一次，没有别的机制。
 - **切换**：`reduce` 只在拍点边界应用；Cut 原子换号。每拍先 `advance` 再 `reduce` 该拍命令，命令按 sequence 严格顺序。
+- **C1 的两种口径**：`生效拍点时刻 − IssuedCommand.issuedAt` 是"服务端收到 → 生效"；客户端口径（客户端发出 → 画面生效）由客户端自己记发送时刻（scripts/apitest），多一个单程网络延迟。
 - **音频块**：`AudioRing.write` 的 hostTime 是块首帧时刻；混音输出块的首样本 host time 作音频 PTS，与视频同一时基。
 - **编号**：输入 / 输出编号从 1 起，0 = 无；overlay channel 1–4；`Bus.rawValue` = `AudioState.buses` 下标。
 - **范围**：tbar/progress 0–1；pan −1…1；gainDb −96…+24；delayMs 0–500；crop 各边 0–1 且对边之和 ≤ 1（`InputSettings.clamped()`）。
