@@ -20,7 +20,6 @@ final class APIServerTests: XCTestCase {
             let f = BusFixture(state: state)
             let clock = TickClockSpec(t0: HostClock.now(), frameRate: .fps60)
             let feed = StateFeed(stateMachine: f.stateMachine) { clock }
-            feed.attach(to: f.bus)
             await feed.start()
             let server = APIServer(bus: f.bus, feed: feed, configuration: APIServerConfiguration(host: "127.0.0.1", port: 0, token: token))
             try await server.start()
@@ -88,6 +87,7 @@ final class APIServerTests: XCTestCase {
         let tb = try XCTUnwrap(json["timebase"] as? [String: Int])
         XCTAssertEqual(tb["numer"], Int(HostClock.timebase.numer))
         XCTAssertNotNil(json["now"] as? UInt64)
+        XCTAssertNotNil(json["publishedAt"] as? UInt64, "提案 003：快照带发布时刻")
         // 状态与 API 数字同一份：灌一行 Stats 后 GET 能看到同一行
         let stats = Stats(ts: 1, tick: Tick(5), renderMs: 1.5, missedRender: 2, jitterMs: 0.1, perInput: [1: .init(fps: 60, dup: 3, drop: 4)],
                           encoder: [.init(skipped: 1, bitrate: 6e6)], audio: .init(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 20, gpuPct: 30)
@@ -111,12 +111,19 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual(st1, 200)
         XCTAssertEqual(r1["sequence"] as? Int, 1)
         XCTAssertEqual(r1["appliedTick"] as? Int, 0)
+        XCTAssertEqual(r1["applied"] as? Bool, true)
         XCTAssertNotNil(r1["issuedAt"] as? UInt64)
         XCTAssertEqual(r1["appliedTickTime"] as? UInt64, s.clock.time(of: .zero).ticks)
+        // 被 reducer 忽略的命令：200 但 applied == false（提案 003 §A）
+        let (stIgnored, rIgnored) = try await post(url, body: #"{"command":{"mute":{"input":1,"on":false}}}"#)
+        XCTAssertEqual(stIgnored, 200)
+        XCTAssertEqual(rIgnored["applied"] as? Bool, false)
+        XCTAssertEqual(rIgnored["sequence"] as? Int, 2)
         // 直接放 Command 也行
         let (st2, r2) = try await post(url, body: #"{"setPreview":{"input":3}}"#)
         XCTAssertEqual(st2, 200)
-        XCTAssertEqual(r2["sequence"] as? Int, 2)
+        XCTAssertEqual(r2["sequence"] as? Int, 3)
+        XCTAssertEqual(r2["applied"] as? Bool, true)
         let state = await s.fixture.stateMachine.state
         XCTAssertEqual(state.program, 2)
         XCTAssertEqual(state.preview, 3)
@@ -130,7 +137,8 @@ final class APIServerTests: XCTestCase {
         XCTAssertFalse((r4["error"] as? String ?? "").isEmpty)
         let (st5, _) = try await post(url, body: "{not json")
         XCTAssertEqual(st5, 400)
-        XCTAssertEqual(s.fixture.bus.lastSequence, 2, "被拒的不占 sequence")
+        XCTAssertEqual(s.fixture.bus.lastSequence, 3, "被拒的不占 sequence")
+        XCTAssertEqual(s.fixture.bus.counters.ignored, 1)
         // 目录
         let (st6, r6) = try await get(s.baseURL.appending(path: "/api/v1/commands"))
         XCTAssertEqual(st6, 200)
@@ -148,6 +156,7 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual(st1, 200)
         let receipts = try XCTUnwrap(r1["receipts"] as? [[String: Any]])
         XCTAssertEqual(receipts.map { $0["sequence"] as? Int }, [1, 2, 3])
+        XCTAssertEqual(receipts.map { $0["applied"] as? Bool }, [true, true, true])
         var state = await s.fixture.stateMachine.state
         XCTAssertEqual(state.program, 3)
         XCTAssertEqual(state.input(1)?.name, "甲")
@@ -171,6 +180,7 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual(entries.count, 2)
         XCTAssertEqual(entries.last?["sequence"] as? Int, 4)
         XCTAssertEqual(entries.last?["source"] as? String, "api")
+        XCTAssertEqual(entries.last?["applied"] as? Bool, true)
         XCTAssertNotNil((entries.last?["command"] as? [String: Any])?["setPreview"])
         XCTAssertNotNil(entries.last?["appliedTick"])
         let (_, r5) = try await get(s.baseURL.appending(path: "/api/v1/log"))
@@ -227,6 +237,8 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual((snap["tally"] as? [String: [String: Bool]])?["1"], ["program": false, "preview": true])
         XCTAssertNotNil(snap["tickTime"] as? UInt64)
         XCTAssertNotNil(snap["sentAt"] as? UInt64)
+        let publishedAt = try XCTUnwrap(snap["publishedAt"] as? UInt64)
+        XCTAssertLessThanOrEqual(publishedAt, try XCTUnwrap(snap["sentAt"] as? UInt64), "先发布后序列化")
 
         // 拍推进带来的变化（转场进度）→ 推送：第 10 拍起 fade 30 拍，一次 prepare 到 20 → 一条快照（tick 20，progress 1/3）
         await s.fixture.stateMachine.schedule(.fade(durationTicks: 30), at: Tick(10))
@@ -256,6 +268,7 @@ final class APIServerTests: XCTestCase {
                 seenReceipt = true
                 XCTAssertEqual(m["id"] as? Int, 7)
                 XCTAssertEqual(m["sequence"] as? Int, 2)
+                XCTAssertEqual(m["applied"] as? Bool, true)
             case "snapshot":
                 seenSnapshot = true
                 XCTAssertEqual((m["state"] as? [String: Any])?["preview"] as? Int, 4)
@@ -310,6 +323,7 @@ final class APIServerTests: XCTestCase {
         _ = try await receive(ws)   // hello
         _ = try await receive(ws)   // 当前快照
         var transportMs: [Double] = []
+        var fromPublishMs: [Double] = []
         var fromTickMs: [Double] = []
         let n = 200
         for k in 0..<n {
@@ -328,14 +342,19 @@ final class APIServerTests: XCTestCase {
             XCTAssertEqual(m["type"] as? String, "snapshot")
             let sentAt = HostTime(ticks: try XCTUnwrap(m["sentAt"] as? UInt64))
             let tickTime = HostTime(ticks: try XCTUnwrap(m["tickTime"] as? UInt64))
+            let publishedAt = HostTime(ticks: try XCTUnwrap(m["publishedAt"] as? UInt64))
             transportMs.append((recv - sentAt).milliseconds)
+            fromPublishMs.append((recv - publishedAt).milliseconds)
             fromTickMs.append((recv - tickTime).milliseconds)
             try await Task.sleep(for: .milliseconds(2))
         }
         func p99(_ xs: [Double]) -> Double { let s = xs.sorted(); return s[min(s.count - 1, Int((Double(s.count) * 0.99).rounded(.up)) - 1)] }
         let p = p99(transportMs)
-        print("C2 进程内 transport：p50 \(transportMs.sorted()[n / 2]) ms，p99 \(p) ms，max \(transportMs.max()!) ms；相对拍点 p99 \(p99(fromTickMs)) ms")
+        let pp = p99(fromPublishMs)
+        print("C2 进程内 transport：p50 \(transportMs.sorted()[n / 2]) ms，p99 \(p) ms，max \(transportMs.max()!) ms；状态机发布 → 收到 p50 \(fromPublishMs.sorted()[n / 2]) / p99 \(pp) / max \(fromPublishMs.max()!) ms；相对拍点 p99 \(p99(fromTickMs)) ms")
         XCTAssertLessThanOrEqual(p, 50, "C2 必须 ≤ 50 ms")
+        XCTAssertLessThanOrEqual(pp, 50, "C2（从状态机发布算）必须 ≤ 50 ms")
+        XCTAssertGreaterThanOrEqual(fromPublishMs.min()!, 0, "发布时刻不会晚于收到时刻")
         XCTAssertEqual(s.feed.counters.snapshots, UInt64(n), "每次变化一条快照（订阅时补发的当前快照不计）")
     }
 

@@ -45,14 +45,17 @@ public struct CommandLogEntry: Hashable, Sendable, Codable {
     public var command: Command
     /// 生效的拍。
     public var appliedTick: Tick
+    /// 状态是否真的变了（回执的 applied；提案 003 §A）。
+    public var applied: Bool
     /// 回执回到总线的时刻（host time）；appliedAt − issuedAt 是总线 + 状态机的处理耗时。
     public var appliedAt: HostTime
-    public init(sequence: UInt64, issuedAt: HostTime, source: CommandSource, command: Command, appliedTick: Tick, appliedAt: HostTime) {
+    public init(sequence: UInt64, issuedAt: HostTime, source: CommandSource, command: Command, appliedTick: Tick, applied: Bool = true, appliedAt: HostTime) {
         self.sequence = sequence
         self.issuedAt = issuedAt
         self.source = source
         self.command = command
         self.appliedTick = appliedTick
+        self.applied = applied
         self.appliedAt = appliedAt
     }
 }
@@ -71,6 +74,8 @@ public final class CommandBus: Sendable {
         public var rejected: UInt64 = 0
         /// 到达 actor 时前序还没到、排过队的条数。
         public var queued: UInt64 = 0
+        /// 回执 applied == false（reducer 按规则忽略）的条数。
+        public var ignored: UInt64 = 0
     }
 
     public let stateMachine: StateMachine
@@ -81,6 +86,7 @@ public final class CommandBus: Sendable {
     private let appliedCount = Atomic<UInt64>(0)
     private let rejectedCount = Atomic<UInt64>(0)
     private let queuedCount = Atomic<UInt64>(0)
+    private let ignoredCount = Atomic<UInt64>(0)
     private let observers = Mutex<[any CommandBusObserver]>([])
     private let log = Mutex<RingLog>(RingLog(capacity: 256))
 
@@ -94,7 +100,8 @@ public final class CommandBus: Sendable {
 
     public var counters: Counters {
         Counters(submitted: submittedCount.load(ordering: .relaxed), applied: appliedCount.load(ordering: .relaxed),
-                 rejected: rejectedCount.load(ordering: .relaxed), queued: queuedCount.load(ordering: .relaxed))
+                 rejected: rejectedCount.load(ordering: .relaxed), queued: queuedCount.load(ordering: .relaxed),
+                 ignored: ignoredCount.load(ordering: .relaxed))
     }
 
     /// 最近的记录（按 sequence 升序，最多 256 条）。
@@ -132,8 +139,9 @@ public final class CommandBus: Sendable {
             throw CommandBusError.staleSequence(sequence)
         }
         let entry = CommandLogEntry(sequence: sequence, issuedAt: issuedAt, source: source, command: command,
-                                    appliedTick: receipt.appliedTick, appliedAt: HostClock.now())
+                                    appliedTick: receipt.appliedTick, applied: receipt.applied, appliedAt: HostClock.now())
         appliedCount.add(1, ordering: .relaxed)
+        if !receipt.applied { ignoredCount.add(1, ordering: .relaxed) }
         log.withLock { $0.append(entry) }
         let list = observers.withLock { $0 }
         for o in list { o.commandBus(self, didApply: entry) }

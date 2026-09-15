@@ -134,7 +134,6 @@ final class HeadlessSession: @unchecked Sendable {
         self.engine = engine
         let bus = CommandBus(stateMachine: stateMachine)
         let feed = StateFeed(stateMachine: stateMachine) { engine.clock?.spec }
-        feed.attach(to: bus)
         commandBus = bus
         stateFeed = feed
         apiServer = options.api.map { APIServer(bus: bus, feed: feed, configuration: $0) }
@@ -215,11 +214,12 @@ final class HeadlessSession: @unchecked Sendable {
             recorder = rec
         }
 
-        // 4. Stats：引擎每秒组一行（铁律 4，只有这一份），编码 / 音频 / GPU 三个来源从这里灌。
+        // 4. Stats：引擎每秒组一行（铁律 4，只有这一份）——StatsPublisher 是唯一的采样线程，写文件（--stats）和 API 推送（--api）
+        //    都是它的消费者，拿到的是同一行；编码 / 音频 / GPU 三个来源灌给引擎。
         var writer: StatsWriter?
         var gpu: GPUUtilization?
-        if let url = options.statsURL {
-            let w = try StatsWriter(url: url, append: false)
+        var statsPublisher: StatsPublisher?
+        if options.statsURL != nil || apiServer != nil {
             if let rec = recorder {
                 let source = EncoderStatsSource(recorder: rec)
                 engine.encoderStatsProvider = { source.entries() }
@@ -229,29 +229,23 @@ final class HeadlessSession: @unchecked Sendable {
                 gpu = g
                 engine.gpuPercentProvider = { g.deviceUtilizationPercent() }
             }
-            writer = w
+            let publisher = StatsPublisher(engine: engine, interval: 1)
+            if let url = options.statsURL {
+                let w = try StatsWriter(url: url, append: false)
+                publisher.addConsumer { w.submit($0) }
+                writer = w
+            }
+            if apiServer != nil {
+                let feed = stateFeed
+                publisher.addConsumer { feed.publish(stats: $0) }
+            }
+            statsPublisher = publisher
         }
 
-        // 4b. API（W2-C）：先于引擎起，让客户端在第 0 拍前就能连上。Stats 只有一份：有 --stats 时由写文件的采样线程顺手推给 API，
-        //     没有 --stats 但开了 API 时另起一条 1 Hz 采样线程只喂 API（两者互斥，窗口口径不会乱）。
-        var apiSampler: Thread?
+        // 4b. API（W2-C）：先于引擎起，让客户端在第 0 拍前就能连上。
         if let server = apiServer {
             await stateFeed.start()
             try await server.start()
-            if writer == nil {
-                let feed = stateFeed, engine = engine
-                let t = Thread {
-                    while !Thread.current.isCancelled {
-                        Thread.sleep(forTimeInterval: 1)
-                        if Thread.current.isCancelled { break }
-                        feed.publish(stats: engine.makeStats())
-                    }
-                }
-                t.name = "api-stats-sampler"
-                t.qualityOfService = .utility
-                t.start()
-                apiSampler = t
-            }
         }
 
         // 5. 场景：全部预排程到状态机，按拍应用（跳过的拍也逐拍走，命令不会漏）。
@@ -268,18 +262,13 @@ final class HeadlessSession: @unchecked Sendable {
         pump?.start()
         if stopRequested {
             await apiServer?.stop()
-            apiSampler?.cancel()
             await stateFeed.stop()
             shutdownEarly(inputs: inputs, audioInputs: audioInputs.map(\.source), recorder: recorder, pump: pump, audioDevice: audioDevice, writer: writer)
             return
         }
         try await engine.start(t0: t0, firstTick: .zero, lastTick: lastTick)
         let leadLeft = (t0 - HostClock.now()).milliseconds
-        writer?.startSampling(every: 1) { [engine, stateFeed, apiServer] in
-            let s = engine.makeStats()
-            if apiServer != nil { stateFeed.publish(stats: s) }
-            return s
-        }
+        try statsPublisher?.start()
         guard let clock = engine.clock else { throw CLIError("引擎没有时钟") }
         print("""
             switcher-headless \(SwitcherVersion.current)
@@ -299,7 +288,6 @@ final class HeadlessSession: @unchecked Sendable {
 
         // 7b. 先停 API（不再收命令、关掉 WS），推送源等引擎停了再停（最后几拍的快照还要推）
         await apiServer?.stop()
-        apiSampler?.cancel()
 
         // 8. 停。跑满的情况：时钟已派完最后一拍、不会再挑帧，先停视频源再停引擎——反过来的话引擎排空在途帧的那几十毫秒里视频源还在 push，
         //    满槽挤掉的帧会被记成 dropped，stats 最后一行的 V4 精确核算每路多出 2–3 帧（W1-B 报告 §4 第 13 条）。
@@ -337,6 +325,7 @@ final class HeadlessSession: @unchecked Sendable {
         pump?.stop()
         audioDevice.stop()
         for entry in audioInputs { entry.source.stop() }
+        statsPublisher?.stop()   // 先停采样再关文件；最后一行是停机前那一秒的
         writer?.close()
         await stateFeed.stop()
 
@@ -414,7 +403,7 @@ final class HeadlessSession: @unchecked Sendable {
         }
         if apiServer != nil {
             let b = commandBus.counters, f = stateFeed.counters
-            lines.append("  API：命令 \(b.applied) 条应用 / \(b.rejected) 条拒绝 / \(b.queued) 条排过队；推送快照 \(f.snapshots) 条、stats \(f.stats) 条、唤醒 \(f.wakeups) 次")
+            lines.append("  API：命令 \(b.applied) 条应用（其中 \(b.ignored) 条被 reducer 忽略）/ \(b.rejected) 条拒绝 / \(b.queued) 条排过队；推送快照 \(f.snapshots) 条、stats \(f.stats) 条、唤醒 \(f.wakeups) 次")
         }
         print(lines.joined(separator: "\n"))
     }

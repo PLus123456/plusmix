@@ -32,13 +32,14 @@ public enum APIDocument {
           "sequence": 42,
           "tick": 3600,
           "tickTime": 123456000,
+          "publishedAt": 123455900,
           "state": { "format": {...}, "inputs": [...], "program": 1, "preview": 2, "transition": {...}, "ftb": {...}, "overlays": [...], "audio": {...}, "outputs": [...] },
           "tally": {"1": {"program": true, "preview": false}, "2": {"program": false, "preview": true}},
           "stats": { "ts": ..., "tick": ..., "render_ms": ..., "missed_render": ..., "jitter_ms": ..., "per_input": {...}, "encoder": [...], "audio": {...}, "rss_mb": ..., "cpu_pct": ..., "gpu_pct": ... }
         }
         ```
 
-        - `clock` 在引擎没起时钟时为 `null`；`stats` 在还没采到第一行时为 `null`。
+        - `clock` 在引擎没起时钟时为 `null`；`stats` 在还没采到第一行时为 `null`；`publishedAt` 是状态机发布这个快照的时刻。
         - `tally`：每路已配置输入的 `{program, preview}`，由快照推导（`MixerState.tally(ofInput:)`），全系统只算这一处。
         - `stats` 就是 stats.jsonl 的最近一行（测试标准 §7 的字段），UI / API / 测试三方同一份（铁律 4）。
 
@@ -47,13 +48,14 @@ public enum APIDocument {
         请求体 `{"command": <Command>}`（也接受直接放 `<Command>`）。应答 `200`：
 
         ```json
-        {"sequence": 43, "appliedTick": 3601, "issuedAt": 123456100, "appliedTickTime": 123456700}
+        {"sequence": 43, "appliedTick": 3601, "applied": true, "issuedAt": 123456100, "appliedTickTime": 123456700}
         ```
 
         - `sequence`：总线分配的全局序号，严格递增、无空洞。
         - `appliedTick`：命令生效的拍（切换永远落在拍点边界）；`appliedTickTime` 是该拍的理想时刻（引擎没起时钟时为 null）。
-        - 结构性非法（引用不存在的输入 / 输出、通道越界、负时长、JSON 解析失败）→ `400 {"error": "<理由>"}`；
-          语义上的忽略（转场进行中再发 fade 等）仍返回 200，状态不变。
+        - `applied`：状态是否真的变了。`false` = 状态机按规则忽略了它（转场进行中再发 fade、FTB 目标已相同、mute 已是该值……），状态原样，仍是 200。
+        - `issuedAt`：命令进总线的时刻（服务端 host time）。
+        - 结构性非法（引用不存在的输入 / 输出、通道越界、负时长、JSON 解析失败）→ `400 {"error": "<理由>"}`。
 
         批量：请求体 `{"commands": [<Command>, …]}`，按顺序执行、sequence 连续（例如 `setPreview` + `cut` 一次发）。应答 `200 {"receipts": [...]}`；
         第 `index` 条被拒时 `400 {"error": "<理由>", "index": 1, "receipts": [前面已生效的回执]}`。空数组 400。
@@ -64,7 +66,7 @@ public enum APIDocument {
 
         ### GET /api/v1/log?limit=256
 
-        最近走过总线的命令（诊断用）：`{"entries": [{"sequence", "issuedAt", "source": "ui|hotkey|midi|api|script", "command", "appliedTick", "appliedAt"}, ...]}`，
+        最近走过总线的命令（诊断用）：`{"entries": [{"sequence", "issuedAt", "source": "ui|hotkey|midi|api|script", "command", "appliedTick", "applied", "appliedAt"}, ...]}`，
         按 sequence 升序，最多 256 条；`appliedAt − issuedAt` 是总线 + 状态机的处理耗时。
 
         ### GET /api/v1/tally
@@ -79,12 +81,13 @@ public enum APIDocument {
 
         ```json
         {"type": "hello", "version": "\(SwitcherVersion.current)", "now": 123456789, "timebase": {"numer": 125, "denom": 3}, "clock": {...}}
-        {"type": "snapshot", "sequence": 43, "tick": 3601, "tickTime": 123456700, "sentAt": 123456150, "state": {...}, "tally": {"1": {"program": true, "preview": false}}}
+        {"type": "snapshot", "sequence": 43, "tick": 3601, "tickTime": 123456700, "publishedAt": 123456120, "sentAt": 123456150, "state": {...}, "tally": {"1": {"program": true, "preview": false}}}
         {"type": "stats", "stats": {...}}
         ```
 
-        - `tickTime`：该快照生效那一拍的理想时刻；`sentAt`：服务端序列化这条消息的时刻。C2 的两种口径：`收到时刻 − tickTime`（状态变化的拍点 → 客户端）、`收到时刻 − sentAt`（纯传输）。
-        - 客户端也可以在这条连接上发命令：`{"id": 7, "command": <Command>}` → `{"type": "receipt", "id": 7, "sequence": 44, "appliedTick": 3602, "issuedAt": ..., "appliedTickTime": ...}`；出错 `{"type": "error", "id": 7, "error": "<理由>"}`。`id` 原样带回，可省略。
+        - `tickTime`：该快照生效那一拍的理想时刻；`publishedAt`：状态机发布这个快照的时刻；`sentAt`：服务端序列化这条消息的时刻。
+          C2 的三种口径：`收到时刻 − tickTime`（状态变化的拍点 → 客户端）、`收到时刻 − publishedAt`（状态机发布 → 客户端）、`收到时刻 − sentAt`（纯传输）。
+        - 客户端也可以在这条连接上发命令：`{"id": 7, "command": <Command>}` → `{"type": "receipt", "id": 7, "sequence": 44, "appliedTick": 3602, "applied": true, "issuedAt": ..., "appliedTickTime": ...}`；出错 `{"type": "error", "id": 7, "error": "<理由>"}`。`id` 原样带回，可省略。
         - 批量：`{"id": 8, "commands": [<Command>, …]}` → `{"type": "receipts", "id": 8, "receipts": [...]}`；第 `index` 条被拒时同一条消息里带 `"error"` 和 `"index"`（前面的已生效）。
 
         ## 命令

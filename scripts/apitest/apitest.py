@@ -268,7 +268,7 @@ class Listener(threading.Thread):
                 elif t == "snapshot":
                     s = m["state"]
                     self.snapshots.append({
-                        "recv": at, "sentAt": m.get("sentAt"), "tick": m["tick"], "tickTime": m.get("tickTime"),
+                        "recv": at, "sentAt": m.get("sentAt"), "publishedAt": m.get("publishedAt"), "tick": m["tick"], "tickTime": m.get("tickTime"),
                         "sequence": m["sequence"], "program": s["program"], "preview": s["preview"],
                         "transitionActive": (s["transition"]["progress"] > 0) or (s["transition"].get("startTick") is not None),
                         "tally": m["tally"], "bytes": len(text),
@@ -345,7 +345,8 @@ def cmd_run(a):
             rec = {"k": k, "send": t_send, "recv": t_recv, "rtt_ticks": t_recv - t_send, "status": status,
                    "prevProgram": prev, "expectedProgram": expected}
             if status == 200:
-                rec.update({"sequence": obj["sequence"], "appliedTick": obj["appliedTick"], "appliedTickTime": obj.get("appliedTickTime")})
+                rec.update({"sequence": obj["sequence"], "appliedTick": obj["appliedTick"], "appliedTickTime": obj.get("appliedTickTime"),
+                            "applied": obj.get("applied")})
             else:
                 rec["error"] = obj
             session["c1"].append(rec)
@@ -378,7 +379,8 @@ def cmd_run(a):
                     errors.append({"k": k, "error": repr(e)})
                     continue
                 if status == 200:
-                    receipts.append({"k": k, "sequence": obj["sequence"], "appliedTick": obj["appliedTick"], "rtt_ticks": t_recv - t_send})
+                    receipts.append({"k": k, "sequence": obj["sequence"], "appliedTick": obj["appliedTick"], "applied": obj.get("applied"),
+                                     "rtt_ticks": t_recv - t_send})
                 else:
                     errors.append({"k": k, "status": status, "body": obj})
             results.append({"client": idx, "input": inp, "total": total, "receipts": receipts, "errors": errors,
@@ -507,6 +509,7 @@ def cmd_evaluate(a):
             send_tick = tick_at(r["send"])
             row["sendTick"] = send_tick
             row["appliedTick"] = r["appliedTick"]
+            row["applied"] = r.get("applied")
             row["receipt_ms"] = ms(tick_time(r["appliedTick"]) - r["send"])
             eff = None
             if frames is not None:
@@ -539,6 +542,7 @@ def cmd_evaluate(a):
         c1_values = [r["c1_ms"] for r in measured]
         report["c1"] = {
             "count": len(c1), "ok200": sum(1 for r in c1 if r["status"] == 200), "measured": len(measured), "missingInPicture": n_missing,
+            "appliedFalse": sum(1 for r in c1 if r["status"] == 200 and r.get("applied") is False),
             "pass": n_pass, "max_ms": max(c1_values) if c1_values else None, "mean_ms": (sum(c1_values) / len(c1_values)) if c1_values else None,
             "min_ms": min(c1_values) if c1_values else None, "rtt_p50_ms": percentile([r["rtt_ms"] for r in rows], 0.5),
             "rtt_max_ms": max(r["rtt_ms"] for r in rows) if rows else None,
@@ -550,28 +554,33 @@ def cmd_evaluate(a):
                   f"- {len(c1)} 次，200 的 {report['c1']['ok200']} 次，画面里找到生效拍的 {len(measured)} 次，缺 {n_missing} 次",
                   f"- 阈值：≤ 1 拍（{frame_ms:.2f} ms）+ 该次 RTT；通过 {n_pass}/{len(c1)}",
                   f"- 数值：min {report['c1']['min_ms']:.2f} / mean {report['c1']['mean_ms']:.2f} / max {report['c1']['max_ms']:.2f} ms；RTT p50 {report['c1']['rtt_p50_ms']:.3f} ms、max {report['c1']['rtt_max_ms']:.3f} ms" if c1_values else "- 没有可算的样本",
-                  f"- 回执 appliedTick 与画面生效拍相同：{n_pic_matches_receipt}/{len(measured)}",
+                  f"- 回执 appliedTick 与画面生效拍相同：{n_pic_matches_receipt}/{len(measured)}；回执 applied == false 的 {report['c1']['appliedFalse']} 次",
                   f"- 判定：{'✅' if c1_ok else '❌'}", ""]
 
     # ---- C2 ----
     if snapshots:
         transport = [ms(s["recv"] - s["sentAt"]) for s in snapshots if s.get("sentAt")]
+        from_publish = [ms(s["recv"] - s["publishedAt"]) for s in snapshots if s.get("publishedAt")]
         from_tick = [ms(s["recv"] - s["tickTime"]) for s in snapshots if s.get("tickTime")]
         from_tick_clamped = [max(0.0, x) for x in from_tick]
         report["c2"] = {
             "count": len(snapshots),
             "transport_p50_ms": percentile(transport, 0.5), "transport_p99_ms": percentile(transport, 0.99), "transport_max_ms": max(transport) if transport else None,
+            "fromPublish_p50_ms": percentile(from_publish, 0.5), "fromPublish_p99_ms": percentile(from_publish, 0.99),
+            "fromPublish_max_ms": max(from_publish) if from_publish else None,
             "fromTick_p50_ms": percentile(from_tick, 0.5), "fromTick_p99_ms": percentile(from_tick, 0.99), "fromTick_max_ms": max(from_tick) if from_tick else None,
             "fromTick_min_ms": min(from_tick) if from_tick else None,
             "fromTickClamped_p99_ms": percentile(from_tick_clamped, 0.99),
             "bytes_avg": sum(s["bytes"] for s in snapshots) / len(snapshots),
         }
         c2 = report["c2"]
-        c2_ok = c2["fromTick_p99_ms"] is not None and c2["fromTick_p99_ms"] <= 50 and c2["transport_p99_ms"] <= 50
+        c2_ok = (c2["fromTick_p99_ms"] is not None and c2["fromTick_p99_ms"] <= 50 and c2["transport_p99_ms"] <= 50
+                 and (c2["fromPublish_p99_ms"] is None or c2["fromPublish_p99_ms"] <= 50))
         hard_fail |= not c2_ok
         lines += ["## C2 状态推送延迟", "",
                   f"- {len(snapshots)} 条快照（平均 {c2['bytes_avg']:.0f} 字节）",
                   f"- 相对拍点（收到时刻 − 该快照生效拍的拍点时刻）：p50 {c2['fromTick_p50_ms']:.2f} / p99 {c2['fromTick_p99_ms']:.2f} / max {c2['fromTick_max_ms']:.2f} ms（min {c2['fromTick_min_ms']:.2f}；负值 = 状态在拍点之前就到了客户端）",
+                  f"- 状态机发布 → 客户端收到（收到时刻 − 快照 publishedAt，提案 003）：p50 {c2['fromPublish_p50_ms']:.3f} / p99 {c2['fromPublish_p99_ms']:.3f} / max {c2['fromPublish_max_ms']:.3f} ms" if from_publish else "- 快照没有 publishedAt（旧服务端）",
                   f"- 纯传输（收到时刻 − 服务端序列化时刻）：p50 {c2['transport_p50_ms']:.3f} / p99 {c2['transport_p99_ms']:.3f} / max {c2['transport_max_ms']:.3f} ms",
                   f"- 阈值：p99 ≤ 50 ms（目标 20）；判定：{'✅' if c2_ok else '❌'}", ""]
 

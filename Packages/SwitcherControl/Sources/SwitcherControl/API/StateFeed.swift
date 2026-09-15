@@ -5,17 +5,14 @@ import SwitcherEngine
 
 // 状态推送源：把状态机发布的快照变成 WS 事件流（整快照 + 版本号），外加每秒一行 Stats。
 //
-// 怎么知道"状态变了"：状态机没有"快照已发布"的回调，这里用两个信号 + 一个兜底：
-//   1. TickObserver：每拍 advance 之后（排程命令与发布之前）在状态机线程上被调，只做一次原子 max + 信号量；
-//      推送线程醒来后等 `preparedTick ≥ 那一拍`（publish 之后才存 preparedTick），再读 `publisher.latest`。
-//   2. CommandBusObserver：总线上每条命令回执返回前调；那时快照已经发布，直接唤醒。
-//   3. 250 ms 轮询兜底（没有引擎时钟、也没有总线命令的场合）。
-// 推送线程比较 `latest` 的对象身份，和上次发的不同才编码一次、扇出给所有订阅者；所以同一拍内多条命令只发最终状态，
-// 每拍最多一条（渲染线程也只看到每拍一个快照）。订阅者各有一个 AsyncStream 缓冲（最新 256 条），慢客户端丢旧的，
-// 永远不拖推送线程，更不拖状态机。
+// 怎么知道"状态变了"：挂状态机的 SnapshotObserver（提案 003 §D1）——每次 publish 之后在状态机线程上被调，只做一次信号量 signal；
+// 推送线程醒来读 `publisher.latest`，对象身份和上次发的不同才编码一次、扇出给所有订阅者。所以同一拍内多条命令只发最终状态，
+// 每拍最多一条（渲染线程也只看到每拍一个快照）；订阅者各有一个 AsyncStream 缓冲（最新 256 条），慢客户端丢旧的，
+// 永远不拖推送线程，更不拖状态机。250 ms 轮询兜底（观察者还没挂上的窗口）。
+// 每条快照带 publishedAt（状态机发布时刻）和 sentAt（这里序列化的时刻）：C2 的"状态变化 → 客户端"从 publishedAt 算。
 
 /// 状态推送源。
-public final class StateFeed: @unchecked Sendable, TickObserver, CommandBusObserver {
+public final class StateFeed: @unchecked Sendable, SnapshotObserver {
     /// 一个订阅：已编码的 JSON 文本流。
     public struct Subscription: Sendable {
         public let id: UInt64
@@ -34,7 +31,6 @@ public final class StateFeed: @unchecked Sendable, TickObserver, CommandBusObser
     public let stateMachine: StateMachine
     private let clockProvider: @Sendable () -> TickClockSpec?
     private let semaphore = DispatchSemaphore(value: 0)
-    private let requestedTick = Atomic<Int64>(Int64.min)
     private let running = Atomic<Bool>(false)
     private let wakeups = Atomic<UInt64>(0)
     private let snapshotsSent = Atomic<UInt64>(0)
@@ -67,21 +63,21 @@ public final class StateFeed: @unchecked Sendable, TickObserver, CommandBusObser
 
     // MARK: 生命周期
 
-    /// 挂上状态机的每拍观察者并起推送线程。
+    /// 挂上状态机的快照观察者并起推送线程。
     public func start() async {
         guard !running.exchange(true, ordering: .acquiringAndReleasing) else { return }
-        await stateMachine.addTickObserver(self)
         let t = Thread { [self] in loop() }
         t.name = "switcher.state-feed"
         t.qualityOfService = .userInitiated
         thread = t
         t.start()
+        await stateMachine.addSnapshotObserver(self)
     }
 
     /// 停线程、摘掉观察者、结束所有订阅流。
     public func stop() async {
         guard running.exchange(false, ordering: .acquiringAndReleasing) else { return }
-        await stateMachine.removeTickObserver(self)
+        await stateMachine.removeSnapshotObserver(self)
         semaphore.signal()
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .userInitiated).async { [stopped] in
@@ -98,23 +94,15 @@ public final class StateFeed: @unchecked Sendable, TickObserver, CommandBusObser
         for c in subs { c.finish() }
     }
 
-    /// 让总线上每条命令都唤醒推送。
-    public func attach(to bus: CommandBus) { bus.addObserver(self) }
+    // MARK: 信号（状态机线程）
 
-    // MARK: 信号（状态机线程 / 提交方任务）
-
-    public func stateMachine(_ machine: isolated StateMachine, willApplyTick tick: Tick) {
-        _ = requestedTick.max(tick.rawValue, ordering: .acquiringAndReleasing)
-        semaphore.signal()
-    }
-
-    public func commandBus(_ bus: CommandBus, didApply entry: CommandLogEntry) {
+    public func stateMachine(_ machine: StateMachine, didPublish snapshot: MixerSnapshot) {
         semaphore.signal()
     }
 
     // MARK: Stats
 
-    /// 灌一行 Stats（引擎每秒汇总的那一行；铁律 4：API 不另算）。
+    /// 灌一行 Stats（引擎每秒汇总的那一行——StatsPublisher 的一个消费者；铁律 4：API 不另算）。
     public func publish(stats: Stats) {
         latestStatsBox.withLock { $0 = stats }
         guard let text = try? APIJSON.string(StatsMessage(stats: stats)) else { return }
@@ -158,8 +146,8 @@ public final class StateFeed: @unchecked Sendable, TickObserver, CommandBusObser
         let state = snap?.state ?? MixerState()
         let clock = clockProvider()
         return StateResponse(now: now, clock: clock, sequence: snap?.sequence ?? 0, tick: snap?.tick ?? .zero,
-                             tickTime: snap.flatMap { s in clock?.time(of: s.tick) }, state: state, tally: state.tallies,
-                             stats: latestStatsBox.withLock { $0 })
+                             tickTime: snap.flatMap { s in clock?.time(of: s.tick) }, publishedAt: snap?.publishedAt ?? now,
+                             state: state, tally: state.tallies, stats: latestStatsBox.withLock { $0 })
     }
 
     // MARK: 推送线程
@@ -171,15 +159,6 @@ public final class StateFeed: @unchecked Sendable, TickObserver, CommandBusObser
             _ = semaphore.wait(timeout: .now() + .milliseconds(250))
             if !running.load(ordering: .acquiring) { break }
             wakeups.add(1, ordering: .relaxed)
-            // 每拍观察者报的拍还没准备完（快照还没发布）就再等一小会儿，别读到上一拍的
-            let requested = requestedTick.load(ordering: .acquiring)
-            if requested != Int64.min && stateMachine.preparedTick.rawValue < requested {
-                var spins = 0
-                while stateMachine.preparedTick.rawValue < requested && spins < 20 && running.load(ordering: .acquiring) {
-                    _ = semaphore.wait(timeout: .now() + .microseconds(100))
-                    spins += 1
-                }
-            }
             guard let snap = stateMachine.publisher.latest, snap !== lastSeen else { continue }
             lastSeen = snap
             lastSent.withLock { $0 = snap }
@@ -193,8 +172,8 @@ public final class StateFeed: @unchecked Sendable, TickObserver, CommandBusObser
 
     private func encode(_ snap: MixerSnapshot, sentAt: HostTime) throws -> String {
         let clock = clockProvider()
-        let message = SnapshotMessage(sequence: snap.sequence, tick: snap.tick, tickTime: clock?.time(of: snap.tick), sentAt: sentAt,
-                                      state: snap.state, tally: snap.state.tallies)
+        let message = SnapshotMessage(sequence: snap.sequence, tick: snap.tick, tickTime: clock?.time(of: snap.tick), publishedAt: snap.publishedAt,
+                                      sentAt: sentAt, state: snap.state, tally: snap.state.tallies)
         return try APIJSON.string(message)
     }
 

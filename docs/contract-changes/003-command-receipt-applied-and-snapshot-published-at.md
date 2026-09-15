@@ -1,7 +1,11 @@
 # 003 CommandReceipt.applied、MixerSnapshot.publishedAt、issuedAt 的口径；附：状态机的快照观察者与 Stats 发布器（引擎接口，非契约）
 
 提出会话 / 分支：W2-C / w2-control（worktree 分支 claude/w2-control-command-bus-api-8f81c2）
-状态：**用户 2026-09-15 已同意按 W2-C 的想法来**（"契约疑问按照你的想法来，功能肯定是越丰富越完善越好"）。按流程由契约会话（或 G3）在 SwitcherContracts / SwitcherEngine 里落地，W2-C 分支没有直接改这两个包；下面把要改的地方写到能照抄的程度。
+状态：**已落地**（用户 2026-09-15 先同意按 W2-C 的想法来，再指示"提案 003 你直接落地吧，改契约和状态机"；W2-C 在 w2-control 分支提交 `契约 + 状态机：落地提案 003`）。
+A / B / C 在 SwitcherContracts（Command.swift、MixerState.swift、CONTRACTS.md），D1 / D2 在 SwitcherEngine（StateMachine.swift、Engine/StatsPublisher.swift），
+下游 SwitcherControl / headless / scripts/apitest 已跟上。其他 W2 分支合并时不用改代码：加的都是带默认值的字段和新类型，
+只有直接比较 `CommandReceipt` 相等或钉回执 JSON 字面量的测试会红（本仓库只有 SwitcherContractsTests.CodableTests 一处，已改）。
+下面是当时的提案原文（落地的形态与之一致）。
 
 ## 改什么
 

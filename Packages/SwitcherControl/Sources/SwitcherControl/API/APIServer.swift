@@ -208,7 +208,7 @@ public final class APIServer: Sendable {
             }
             let result = await executeBatch(commands, source: .api)
             let receipts = result.receipts.map {
-                ReceiptMessage(id: nil, sequence: $0.sequence, appliedTick: $0.appliedTick, issuedAt: $0.issuedAt, appliedTickTime: $0.appliedTickTime)
+                ReceiptMessage(id: nil, sequence: $0.sequence, appliedTick: $0.appliedTick, applied: $0.applied, issuedAt: $0.issuedAt, appliedTickTime: $0.appliedTickTime)
             }
             return (try? APIJSON.string(WSReceiptsMessage(id: request.id, receipts: receipts, error: result.error, index: result.index))) ?? fallback
         }
@@ -218,8 +218,8 @@ public final class APIServer: Sendable {
         let issuedAt = HostClock.now()
         do {
             let receipt = try await bus.submit(command, source: .api)
-            let m = ReceiptMessage(id: request.id, sequence: receipt.sequence, appliedTick: receipt.appliedTick, issuedAt: issuedAt,
-                                   appliedTickTime: feed.clock?.time(of: receipt.appliedTick))
+            let m = ReceiptMessage(id: request.id, sequence: receipt.sequence, appliedTick: receipt.appliedTick, applied: receipt.applied,
+                                   issuedAt: issuedAt, appliedTickTime: feed.clock?.time(of: receipt.appliedTick))
             return (try? APIJSON.string(m)) ?? fallback
         } catch {
             let reason = (error as? CommandRejection)?.reason ?? "\(error)"

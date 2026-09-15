@@ -25,12 +25,19 @@ final class CommandBusTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(e.issuedAt, before)
             XCTAssertLessThanOrEqual(e.issuedAt, after)
             XCTAssertGreaterThanOrEqual(e.appliedAt, e.issuedAt)
+            XCTAssertTrue(e.applied)
         }
+        // 被 reducer 忽略的（提案 003 §A）：回执和日志都标 applied == false，计 ignored
+        let r4 = try await f.bus.submit(.setPreview(input: 4), source: .api)
+        XCTAssertFalse(r4.applied, "PVW 已经是 4")
+        XCTAssertEqual(f.bus.recentEntries().last?.applied, false)
+        XCTAssertEqual(f.bus.counters.ignored, 1)
         let state = await f.stateMachine.state
         XCTAssertEqual(state.program, 3)
         XCTAssertEqual(state.preview, 4)
-        // 快照的 sequence 跟到最后一条
-        XCTAssertEqual(f.stateMachine.publisher.latest?.sequence, 3)
+        // 快照的 sequence 跟到最后一条（被忽略的命令也发布快照：sequence 就是"已处理到哪条"）
+        XCTAssertEqual(f.stateMachine.publisher.latest?.sequence, 4)
+        XCTAssertEqual(state.preview, 4)
     }
 
     func testBus_receiptTickIsTheTickThePictureChangesOn() async throws {

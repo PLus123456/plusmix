@@ -28,13 +28,15 @@ public struct StateResponse: Encodable, Sendable {
     public var tick: Tick
     /// 该拍的理想时刻（有时钟时）。
     public var tickTime: HostTime?
+    /// 状态机发布这个快照的时刻。
+    public var publishedAt: HostTime
     public var state: MixerState
     /// 每路已配置输入的 tally。
     public var tally: [Int: Tally]
     /// stats.jsonl 的最近一行（还没采到为 nil）。
     public var stats: Stats?
 
-    enum CodingKeys: String, CodingKey { case version, now, timebase, clock, sequence, tick, tickTime, state, tally, stats }
+    enum CodingKeys: String, CodingKey { case version, now, timebase, clock, sequence, tick, tickTime, publishedAt, state, tally, stats }
     /// 可选字段缺省时写 null（合成的 Codable 会整个省略键，客户端不好区分"没有"和"没这个字段"）。
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -45,6 +47,7 @@ public struct StateResponse: Encodable, Sendable {
         try c.encode(sequence, forKey: .sequence)
         try c.encode(tick, forKey: .tick)
         try c.encode(tickTime, forKey: .tickTime)
+        try c.encode(publishedAt, forKey: .publishedAt)
         try c.encode(state, forKey: .state)
         try c.encode(tally, forKey: .tally)
         try c.encode(stats, forKey: .stats)
@@ -60,20 +63,24 @@ public struct CommandRequest: Decodable, Sendable {
 public struct CommandResponse: Encodable, Sendable {
     public var sequence: UInt64
     public var appliedTick: Tick
+    /// 状态是否真的变了（false = reducer 按规则忽略）。
+    public var applied: Bool
     public var issuedAt: HostTime
     public var appliedTickTime: HostTime?
     public init(receipt: CommandReceipt, issuedAt: HostTime, clock: TickClockSpec?) {
         sequence = receipt.sequence
         appliedTick = receipt.appliedTick
+        applied = receipt.applied
         self.issuedAt = issuedAt
         appliedTickTime = clock?.time(of: receipt.appliedTick)
     }
 
-    enum CodingKeys: String, CodingKey { case sequence, appliedTick, issuedAt, appliedTickTime }
+    enum CodingKeys: String, CodingKey { case sequence, appliedTick, applied, issuedAt, appliedTickTime }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(sequence, forKey: .sequence)
         try c.encode(appliedTick, forKey: .appliedTick)
+        try c.encode(applied, forKey: .applied)
         try c.encode(issuedAt, forKey: .issuedAt)
         try c.encode(appliedTickTime, forKey: .appliedTickTime)
     }
@@ -167,18 +174,21 @@ public struct SnapshotMessage: Encodable, Sendable {
     public var sequence: UInt64
     public var tick: Tick
     public var tickTime: HostTime?
+    /// 状态机发布这个快照的时刻（C2 的"状态变化 → 客户端"从它算）。
+    public var publishedAt: HostTime
     /// 服务端序列化这条消息的时刻。
     public var sentAt: HostTime
     public var state: MixerState
     public var tally: [Int: Tally]
 
-    enum CodingKeys: String, CodingKey { case type, sequence, tick, tickTime, sentAt, state, tally }
+    enum CodingKeys: String, CodingKey { case type, sequence, tick, tickTime, publishedAt, sentAt, state, tally }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(type, forKey: .type)
         try c.encode(sequence, forKey: .sequence)
         try c.encode(tick, forKey: .tick)
         try c.encode(tickTime, forKey: .tickTime)
+        try c.encode(publishedAt, forKey: .publishedAt)
         try c.encode(sentAt, forKey: .sentAt)
         try c.encode(state, forKey: .state)
         try c.encode(tally, forKey: .tally)
@@ -223,16 +233,18 @@ public struct ReceiptMessage: Encodable, Sendable {
     public var id: JSONValue?
     public var sequence: UInt64
     public var appliedTick: Tick
+    public var applied: Bool
     public var issuedAt: HostTime
     public var appliedTickTime: HostTime?
 
-    enum CodingKeys: String, CodingKey { case type, id, sequence, appliedTick, issuedAt, appliedTickTime }
+    enum CodingKeys: String, CodingKey { case type, id, sequence, appliedTick, applied, issuedAt, appliedTickTime }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(type, forKey: .type)
         try c.encodeIfPresent(id, forKey: .id)
         try c.encode(sequence, forKey: .sequence)
         try c.encode(appliedTick, forKey: .appliedTick)
+        try c.encode(applied, forKey: .applied)
         try c.encode(issuedAt, forKey: .issuedAt)
         try c.encode(appliedTickTime, forKey: .appliedTickTime)
     }
