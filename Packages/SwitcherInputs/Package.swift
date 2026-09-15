@@ -4,8 +4,9 @@
 //
 // target 归属（docs/OWNERSHIP.md）：
 //   SwitcherInputs          W2-A：CameraInput / ScreenInput / FileInput / ImageInput + 无信号 / 热插拔 / 权限（库只依赖契约）
-//   switcher-input-probe    W2-A：命令行探针——设备清单、时间戳时钟探针、真引擎 + 真渲染器下量 L1、S5 热插拔计时、S6 权限观察。
-//                           它是"组装方"，所以可以看 SwitcherEngine（帧槽、引擎）和 SwitcherRender（Metal 渲染器）。
+//   SwitcherInputsHarness   W2-A：组装方——真引擎 + 真渲染器 + 真帧槽（包一层 L1 记录）+ L1 消费者；探针和测试共用。
+//                           它是"组装方"，所以可以看 SwitcherEngine（帧槽、引擎）和 SwitcherRender（Metal 渲染器）；库本身只依赖契约。
+//   switcher-input-probe    W2-A：命令行探针——设备清单、时间戳时钟探针、量 L1、S5 热插拔计时、S6 权限观察。
 //   DeckLink / NDI          W3-A 加
 import PackageDescription
 
@@ -26,10 +27,20 @@ let package = Package(
                 .product(name: "SwitcherContracts", package: "SwitcherCore"),
             ]
         ),
+        .target(
+            name: "SwitcherInputsHarness",
+            dependencies: [
+                "SwitcherInputs",
+                .product(name: "SwitcherContracts", package: "SwitcherCore"),
+                .product(name: "SwitcherEngine", package: "SwitcherCore"),
+                .product(name: "SwitcherRender", package: "SwitcherCore"),
+            ]
+        ),
         .executableTarget(
             name: "switcher-input-probe",
             dependencies: [
                 "SwitcherInputs",
+                "SwitcherInputsHarness",
                 .product(name: "SwitcherContracts", package: "SwitcherCore"),
                 .product(name: "SwitcherEngine", package: "SwitcherCore"),
                 .product(name: "SwitcherRender", package: "SwitcherCore"),
@@ -40,6 +51,7 @@ let package = Package(
             // 测试是组装方：真帧槽（SwitcherEngine）和真渲染器（SwitcherRender）用来量 L1；依赖探针只是让 swift test 一并编出它
             dependencies: [
                 "SwitcherInputs",
+                "SwitcherInputsHarness",
                 "switcher-input-probe",
                 .product(name: "SwitcherEngine", package: "SwitcherCore"),
                 .product(name: "SwitcherRender", package: "SwitcherCore"),

@@ -171,7 +171,7 @@ public final class FileInput: Input, @unchecked Sendable {
             precondition(newValue > 0 && newValue.isFinite)
             let timing = self.timing
             playback.withLock { p in
-                let tick = timing.nextTick(atOrAfter: HostClock.now() + options.seekLead)
+                let tick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
                 if !p.paused { p.timeline.anchorMedia = p.timeline.position(at: tick) }
                 p.timeline.anchorTick = tick
                 p.timeline.rate = Rational(approximating: newValue)
@@ -313,7 +313,7 @@ public final class FileInput: Input, @unchecked Sendable {
         let timing = self.timing
         playback.withLock { p in
             guard p.paused else { return }
-            p.timeline.anchorTick = timing.nextTick(atOrAfter: HostClock.now() + options.seekLead)
+            p.timeline.anchorTick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
             p.paused = false
             p.version += 1
         }
@@ -408,12 +408,12 @@ public final class FileInput: Input, @unchecked Sendable {
         reader?.cancel()
     }
 
-    /// 本代的第一帧已解出：把锚点定在 seekLead 之后的第一拍。
+    /// 本代的第一帧已解出：把锚点定在 seekLead 之后的第一拍（不早于第 0 拍：引擎还没开始挑帧之前推的帧只会被帧槽挤掉）。
     private func resolveAnchorIfPending(generation: UInt64) {
         let timing = self.timing
         playback.withLock { p in
             guard p.anchorPending, p.generation == generation else { return }
-            p.timeline.anchorTick = timing.nextTick(atOrAfter: HostClock.now() + options.seekLead)
+            p.timeline.anchorTick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
             p.anchorPending = false
             p.version += 1
         }

@@ -119,7 +119,7 @@ public final class ImageInput: Input, @unchecked Sendable {
     private func run(thread: InputThread, buffer: CVPixelBuffer, timing: ProgramTiming) {
         let lead = options.pushLead
         let duration = timing.frameDuration
-        var tick = timing.nextTick(atOrAfter: HostClock.now() + lead)
+        var tick = max(timing.nextTick(atOrAfter: HostClock.now() + lead), .zero)   // 不早于第 0 拍
         var sequence: UInt64 = 0
         while !thread.isStopRequested {
             let tickTime = timing.time(of: tick)
