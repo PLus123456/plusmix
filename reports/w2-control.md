@@ -3,7 +3,7 @@
 日期 2026-09-15。机器 Apple M5 Max 128 GB / macOS 26.6.2 / Xcode 26.6 / Swift 6.3.3，电源适配器，室温；同一台机器上另外四个 W2 会话在并行编译（`uptime` 负载 2–3），实跑期间没有游戏。
 worktree `.claude/worktrees/w2-control-command-bus-api-8f81c2`，分支 `claude/w2-control-command-bus-api-8f81c2`（桌面端自动起的名），从 `main`（2290b4e）开；
 **`w2-control` 这个分支名指向同一个 HEAD**（`git branch -f w2-control`），`make lint BRANCH=w2-control` 和检查点合并都用它。
-提交：`git log main..w2-control`（7 个）。动了 `Packages/SwitcherControl/`、`Tools/switcher-headless/`（`--api` 三个参数 + 接线）、`docs/api.md`（生成物）、`scripts/apitest/`、本报告。
+提交：`git log main..w2-control`（9 个）。动了 `Packages/SwitcherControl/`、`Tools/switcher-headless/`（`--api` 三个参数 + 接线）、`docs/api.md`（生成物）、`scripts/apitest/`、本报告。
 
 ## 1. 做了什么
 
