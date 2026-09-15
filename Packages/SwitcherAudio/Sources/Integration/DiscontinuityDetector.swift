@@ -34,10 +34,11 @@ public struct DiscontinuityDetector: Sendable {
 
     private struct ChannelState {
         var prev: Float = 0
-        /// 以 prev 结尾的平台长度（连续 |x| ≥ 电平的样本数；不在电平上为 0）。
+        /// 以 prev 结尾的平台长度（|x| ≥ 电平的样本数；允许单个样本掉下去——sinc 重采样后的 click 边沿有振铃——连续两个掉下去才清零）。
         var run: Int = 0
-        /// 候选：跳进了一个可能的平台，还在数样本。
-        var pending: (index: Int64, jump: Float, seen: Int)?
+        var belowStreak: Int = 0
+        /// 候选：跳进了一个可能的平台，还在数样本（seen = 在电平上的样本数，total = 跳变以来的样本数）。
+        var pending: (index: Int64, jump: Float, seen: Int, total: Int)?
     }
 
     public let options: Options
@@ -72,28 +73,42 @@ public struct DiscontinuityDetector: Sendable {
                 var big = abs(jump) > options.threshold
                 if big, let ex = isExcluded, ex(idx) || ex(idx - 1) { big = false }
                 let atLevel = abs(v) >= options.plateauLevel
-                if big {
-                    if let p = s.pending {           // 候选平台被一次大跳变打断：候选是真不连续
+                if big, var p = s.pending, atLevel {
+                    // 两步上去的边沿（−0.10 → 0.42 → 1.03）：第二步仍在往电平上走，算同一个候选
+                    p.total += 1; p.seen += 1
+                    s.pending = p.seen >= options.plateauMinFrames ? nil : p
+                } else if big {
+                    if let p = s.pending {           // 候选平台被一次反向大跳变打断：候选是真不连续
                         added += countOnce(Event(sampleIndex: p.index, channel: c, jump: p.jump))
                         s.pending = nil
                     }
                     if options.ignorePlateaus && s.run >= options.plateauMinFrames {
                         // 出平台（click 结束）：忽略
-                    } else if options.ignorePlateaus && atLevel {
-                        s.pending = (idx, jump, 1)   // 可能是进平台（click 开始）：等 N 个样本
+                    } else if options.ignorePlateaus {
+                        // 可能是进平台（click 开始；边沿落在两个样本之间时第一个样本可能还不到电平，AAC 解码后实测 −0.10 → 0.42 → 1.03）：
+                        // 等 N + 4 个样本里 ≥ N 个在电平上
+                        s.pending = (idx, jump, atLevel ? 1 : 0, 1)
                     } else {
                         added += countOnce(Event(sampleIndex: idx, channel: c, jump: jump))
                     }
                 } else if var p = s.pending {
-                    if atLevel {
-                        p.seen += 1
-                        s.pending = p.seen >= options.plateauMinFrames ? nil : p
-                    } else {
+                    p.total += 1
+                    if atLevel { p.seen += 1 }
+                    if p.seen >= options.plateauMinFrames {
+                        s.pending = nil
+                    } else if p.total >= options.plateauMinFrames + 4 {
                         added += countOnce(Event(sampleIndex: p.index, channel: c, jump: p.jump))
                         s.pending = nil
+                    } else {
+                        s.pending = p
                     }
                 }
-                s.run = atLevel ? s.run + 1 : 0
+                if atLevel {
+                    s.run += 1; s.belowStreak = 0
+                } else {
+                    s.belowStreak += 1
+                    if s.belowStreak >= 2 { s.run = 0 }
+                }
                 s.prev = v
             }
             states[c] = s
