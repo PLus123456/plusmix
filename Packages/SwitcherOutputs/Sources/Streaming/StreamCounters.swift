@@ -54,6 +54,8 @@ public struct StreamCounters: Hashable, Sendable {
     public init() {}
 
     /// 生成 Stats.encoder 的一项：skipped 用本路编码器的 E1 计数，bitrate 由与上一次快照的发送字节差算。
+    /// 提案 001 + 002（已批，等契约会话落地）加的字段这样填：frames = framesSent、dropped = networkDropped、reconnects = reconnects、
+    /// state = state.name、disk_free_mb = 0。契约一到，这里加四行即可。
     public func statsEntry(previous: StreamCounters?, windowSeconds: Double, encoderSkipped: UInt64) -> Stats.EncoderEntry {
         let delta = bytesSent &- (previous?.bytesSent ?? 0)
         let bitrate = windowSeconds > 0 ? Double(delta) * 8 / windowSeconds : 0
@@ -77,6 +79,19 @@ public enum StreamState: Hashable, Sendable, CustomStringConvertible {
     case stopped
     /// 放弃（超过最大尝试次数）。
     case failed(String)
+
+    /// 不带参数的状态名（提案 002 的 Stats.encoder[i].state 用它）：idle / connecting / publishing / backoff / stopping / stopped / failed。
+    public var name: String {
+        switch self {
+        case .idle: return "idle"
+        case .connecting: return "connecting"
+        case .publishing: return "publishing"
+        case .backoff: return "backoff"
+        case .stopping: return "stopping"
+        case .stopped: return "stopped"
+        case .failed: return "failed"
+        }
+    }
 
     public var description: String {
         switch self {

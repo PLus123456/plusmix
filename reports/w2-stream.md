@@ -47,7 +47,7 @@ worktree `.claude/worktrees/w2-stream-output-089d47`，分支 `claude/w2-stream-
 | 1 StreamOutput | `Streaming/StreamOutput.swift` | 每个目的地一个实例；FrameConsumer（自己的 VideoEncoder，深度 3，多路共享同一块 NV12 IOSurface）+ AudioBlockConsumer（自己的 AudioEncoder，音频编码线程）；`SendQueue`（视频 1 s 帧数 + 音频 256 包）；发送 Task 按 DTS / 包首时刻交错送；退避重连 1、2、4 … ≤ `StreamSettings.reconnectMaxSeconds`（`ReconnectPolicy`），重连后 `requestKeyframe` 且队列在关键帧前一律丢；`StreamCounters`：帧数、网络丢帧（五个分项）、字节 / 码率、重连次数、断线次数、重连耗时、状态；`statsEntry` → `Stats.encoder[i]`（skipped = 本路编码器 E1，bitrate = 窗口内交出字节 × 8 / 秒） |
 | 协议 | `Streaming/StreamDestination.swift`、`HaishinKitTransport.swift` | rtmp / rtmps / srt 由 url scheme 定；`StreamSettings.streamKey` 是 RTMP 发布名或 SRT streamid；RTMP onMetaData 补尺寸 / 帧率 / 码率 / 编码（它对压缩输入只写 duration） |
 | 2 互不影响 | 结构保证 | 每路自己的编码器、队列、Task、连接对象；没有共享锁或共享队列。E7 逻辑版：一路传输层完全停滞时另两路 0 丢帧，`consume` p99 < 0.1 ms |
-| 3 NDISend | `NDISend/NDISender.swift`、`NV12ToUYVY.swift` | `#if canImport(NDI)`：Package.swift 探测 `/Library/NDI SDK for Apple`（`NDI_SDK_DIR` 可改）才挂系统库 target `NDI`；本机没有 → 空实现：`start()` 不抛、`unavailable = true`、帧照收直接丢。有 SDK 时：`NDIlib_send_send_video_async_v2`（UYVY，双缓冲）+ `NDIlib_send_send_audio_v3`（FLTP）。转换：Metal compute kernel（源码内嵌，运行时编译一次，输出到共享内存 MTLBuffer）/ CPU 逐行；两者逐字节相同。PGM 必送，PVW / 多画面从 RenderedFrame 挑，输入画面由引擎 `send(frame:)` 喂 |
+| 3 NDISend | `NDISend/NDISender.swift`、`NV12ToUYVY.swift` | `#if canImport(NDI)`：Package.swift 探测 `/Library/NDI SDK for Apple`（`NDI_SDK_DIR` 可改）才挂系统库 target `NDI`；本机没有 → 空实现：`start()` 不抛、`unavailable = true`、帧照收直接丢。有 SDK 时：`NDIlib_send_send_video_async_v2`（UYVY，双缓冲）+ `NDIlib_send_send_audio_v3`（FLTP）。转换：Metal compute kernel（源码内嵌，运行时编译一次，输出到共享内存 MTLBuffer）/ CPU 逐行；两者逐字节相同。**选法 `Configuration.Conversion`：auto（默认）/ gpu / cpu**，`setConversion` 运行时可切，Show 文件用 `OutputSettings.extra["ndi.conversion"]`；auto = 第一帧和之后每 300 帧（5 s）把同一帧两种方法各转一次、便宜 30% 以上就切（负载变了会自己换），探测值 `lastCPUProbeMs / lastGPUProbeMs` 和 `autoSwitches` 在计数里。PGM 必送，PVW / 多画面从 RenderedFrame 挑，输入画面由引擎 `send(frame:)` 喂 |
 | 4 netem.sh | `scripts/netem.sh` | dnctl + pfctl，锚点 `com.apple/switcher-netem`（不改 /etc/pf.conf）；block / limit / loss / delay / shape / clear / status；`serve` 代理模式（sudo 起一次，测试进程写请求文件）；语法用 `pfctl -n` 验过，规则没在 root 下实际装过（我没有 sudo） |
 | 5 mediamtx.yml | `scripts/mediamtx.yml` | RTMP 1935 + SRT 8890 + API 9997，path s1 / s2 / s3 / srt1，fMP4 落盘 1 s part；三个实例用 MTX_* 环境变量改端口（头部有命令）；关掉 MoQ（它默认占 8892/8893） |
 | 无 sudo 的损伤 | `Tests/StreamingTests/ThrottleProxy.swift` | 用户态 TCP 代理：黑洞（不转发不断开）/ 令牌桶限速；SWITCHER_NETEM 没设时 E7 / E8 / E9 用它，设了走 dummynet |
@@ -123,7 +123,8 @@ publishing ◄────────────────── backoff(n, 
 | SRT 端到端 | `MediaMTXTests.testSRT_endToEnd_10s_framesContinuous` | 连不上（握手超时） | — | **BLOCKED-防火墙**：应用防火墙拦 mediamtx 入站 UDP；解锁 = §1.1 的两条 socketfilterfw 命令（sudo），之后重跑 |
 | NDI（Studio Monitor 看 PGM） | — | — | — | **BLOCKED-SDK**：本机没有 /Library/NDI SDK for Apple；装上后 Package.swift 自动挂 `NDI`，`NDISender.start()` 走真发送，用 NDI Tools 的 Studio Monitor 看帧号在走 |
 | NDI 转换器 | `NDISendTests.testNV12ToUYVY_cpuMatchesFormula` / `_gpuMatchesCPU_bytewise` | CPU 输出符合公式；GPU 与 CPU 输出逐字节相同（公式帧 + 含噪声的测试图案 1080p）；双缓冲返回不同缓冲 | — | ✅ |
-| NDI 转换成本（报告项） | `testConversionCost_1080p_report` | 1080p：debug 构建 CPU p50 **5.28 ms** / max 5.69 ms，GPU（含等待完成）p50 **0.26 ms** / max 4.32 ms（首帧含编译）；**release 构建 CPU p50 0.09 ms / max 0.29 ms，GPU p50 0.25 ms / max 4.25 ms** | — | ✅（按 prompt GPU 是默认；release 下 CPU 逐行反而更快 —— GPU 路径的成本是提交 + 同步等待，不是计算。`Configuration.conversion = .cpu` 可切） |
+| NDI 转换成本（报告项） | `testConversionCost_1080p_report` | 1080p：debug 构建 CPU p50 **5.28 ms** / max 5.69 ms，GPU（含等待完成）p50 **0.26 ms** / max 4.32 ms（首帧含编译）；**release 构建 CPU p50 0.09 ms / max 0.29 ms，GPU p50 0.25 ms / max 4.25 ms**（机器空闲时测的；GPU 路径的成本是提交 + 同步等待，合成器排满 GPU 队列时会变长） | — | ✅（所以默认 auto，见下一行） |
+| NDI 转换可选 / auto | `testConversionSelectable_runtimeSwitchAndExtraKey`、`testAutoConversion_probesBothAndPicksCheaper` | gpu / cpu 立即生效、`setConversion` 下一帧生效、`extra["ndi.conversion"]` 解析（缺省 / 不认识 = auto）；auto 探测值两边都 > 0 且与当前选择自洽：debug 下选 GPU（CPU 5.3 ms vs GPU 0.6 ms），release 下第一帧就切到 CPU（0.19 vs 1.03 ms，autoSwitches 1） | — | ✅ |
 | NDI 空实现 / 干跑 | `testUnavailableWithoutSDK_emptyImplementation`、`testDryRunPipeline_boundedQueueAndCounters` | unavailable = true、帧照收不计 skipped、statsEntry 全 0；干跑 240 帧 + 20 块音频：收到 = 送出 + skipped、consume p99 < 0.2 ms | — | ✅ |
 | E7 / E8 / E9（dummynet） | 同上三个函数，`SWITCHER_NETEM=sudo` | 没跑 | — | **BLOCKED-sudo**：`sudo -v && SWITCHER_NETEM=sudo swift test --package-path Packages/SwitcherOutputs --filter 'MediaMTXTests/testE[789]_'`；或另开终端 `sudo scripts/netem.sh serve` 再 `SWITCHER_NETEM=broker` |
 
@@ -133,7 +134,7 @@ publishing ◄────────────────── backoff(n, 
 
 - **dummynet 版的 E7 / E8 / E9**：需要 sudo。脚本、判定逻辑和一键命令都在（§2 最后一行），用户态代理版已经过。两者差别：pf 封端口时新连接的 SYN 被丢（连接超时 5 s 才失败），代理版内核会完成握手再由 RTMP 握手超时兜住，重连节奏可能差一个退避档。
 - **SRT 端到端 / SRT 的 E2 / E3**：应用防火墙（§1.1）。代码路径已按源码分析实现（nearest 对齐 + preroll 包 + 扣住第一帧视频之前的音频），但**没有在真连接上验证过**。
-- **NDI 转换器默认**：prompt 要求 GPU kernel，做了；但 release 实测 CPU 逐行 0.09 ms/帧（编译器向量化 + 统一内存），比 GPU 路径的 0.25 ms（命令提交 + 等完成）还快，且不占 GPU 队列。建议 G3 接线时默认 `.cpu`，GPU 留作 4K 或 CPU 紧张时的选项 —— 没改默认，等你定。
+- **NDI 转换器默认**：用户裁定"做成可选的"（低负载下 CPU 便宜不代表高负载也是）→ 默认 auto（定期两种都试、用便宜的），gpu / cpu 可强制、运行时可切。auto 的探测只在空闲机器上验证过自洽，高负载下的实际切换行为等 G3 / W4-A 的长稳看。
 - **NDI 真发送**：没有 SDK。`#if canImport(NDI)` 里的 C 调用按 NDI 5/6 头文件写，没编译过；装上 SDK 后第一次编译大概率要改几处签名（`NDIlib_send_create_t` 的字段名、`NDIlib_video_frame_v2_t` 的初始化）。NDI 也能直接收 NV12（`NDIlib_FourCC_video_type_NV12`，SDK 内部转），prompt 要求 UYVY 我就做了 UYVY；如果想省这一步可以直接送 NV12，GPU kernel 保留。
 - **重连后的 A2 用 frameprobe av 判**：frameprobe 对无 priming 信息的 fMP4 有 44 ms + 起始偏移的偏置（§1.5，单子退给 W1-A）；本会话用 ffmpeg 口径在端到端测试里测到 0.0 ms，E8 之后的那段只验了帧号连续。G3 等 frameprobe 修好后补。
 - **Stats.encoder[i] 的帧数 / 网络丢帧 / 重连次数 / 状态**：契约只有 skipped / bitrate，没直接改；数字在 `StreamOutput.counters`（`StreamCounters`）和 `NDISender.countersSnapshot`，提案 `docs/contract-changes/002`（在 001 之上加 `reconnects`、`state`）。
@@ -145,7 +146,7 @@ publishing ◄────────────────── backoff(n, 
 
 ## 4. 对契约的疑问
 
-1. **提案 002**（`docs/contract-changes/002-stats-encoder-stream-fields.md`；W2-A、W2-E 各自也写了一个 002，编号撞了，G3 合并时按主题重排即可）：`Stats.EncoderEntry` 在 001 的 `frames / dropped / disk_free_mb` 之上加 `reconnects`（UInt64）和 `state`（String：idle / connecting / publishing / backoff / stopping / stopped / failed / unavailable）。不加的话 UI / API 读不到推流状态和 NDI 的 unavailable，E7–E9 的判定只能读 `StreamOutput.counters`。建议和 001 一起批。
+1. **提案 002 已批**（用户 2026-09-15；`docs/contract-changes/002-stats-encoder-stream-fields.md`；W2-A、W2-E 各自也写了一个 002，编号撞了，G3 合并时按主题重排即可）：`Stats.EncoderEntry` 在 001 的 `frames / dropped / disk_free_mb` 之上加 `reconnects` 和 `state`。契约会话落地后，`StreamCounters.statsEntry` 加四行（映射写在它的注释里：frames = framesSent、dropped = networkDropped、reconnects、state = `StreamState.name`），NDI 的 state = unavailable ? "unavailable" : "publishing"。
 2. **001 B（`AudioBlockConsumer` 升契约）**：StreamOutput 和 NDISender 都实现了它，赞成；签名别动。
 3. `StreamSettings` 只有 url / streamKey / reconnectMaxSeconds：连接超时、队列深度、门、停滞秒数现在在 `StreamOutput.Configuration.QueuePolicy`（组装方给）。要让 Show 文件可配就得进契约或放 `OutputSettings.extra`；一期不需要。
 4. `OutputSource.input(n)` 对 NDI：RenderedFrame 里没有输入画面，`NDISender.consume` 对 `.input` 不动，靠引擎用 `send(frame:)` 从该输入的帧槽喂。这是不是 G3 接线时可接受的形态？

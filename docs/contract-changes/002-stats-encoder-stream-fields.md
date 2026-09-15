@@ -1,7 +1,9 @@
 # 002 Stats.encoder 的推流 / NDI 字段（在 001 之上追加）
 
 提出会话 / 分支：W2-D / w2-stream（worktree 分支 claude/w2-stream-output-089d47）
-状态：待批（依赖 001；建议两案一起批，只改一次 Stats.swift）
+状态：**已批**（用户 2026-09-15）。由契约会话在 SwitcherContracts 里落地（和 001 一起改 Stats.swift），其他分支 rebase。
+落地后各输出这样填：推流 `StreamCounters.statsEntry`（注释里写了映射：frames = framesSent、dropped = networkDropped、reconnects、state = state.name）；
+NDI `NDISendCounters`（frames = framesSent、dropped = skipped、reconnects = 0、state = unavailable ? "unavailable" : "publishing"）；录制按 001。
 
 ## 改什么
 

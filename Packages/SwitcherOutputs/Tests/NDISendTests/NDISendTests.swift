@@ -126,6 +126,68 @@ final class NDISendTests: XCTestCase {
         XCTAssertFalse(sender.isRunning)
     }
 
+    /// 转换方式可选：gpu / cpu 立即生效、运行时可切；`OutputSettings.extra["ndi.conversion"]` 解析。
+    func testConversionSelectable_runtimeSwitchAndExtraKey() throws {
+        typealias Conversion = NDISender.Configuration.Conversion
+        XCTAssertEqual(Conversion(extra: [:]), .auto)
+        XCTAssertEqual(Conversion(extra: ["ndi.conversion": "cpu"]), .cpu)
+        XCTAssertEqual(Conversion(extra: ["ndi.conversion": "GPU"]), .gpu)
+        XCTAssertEqual(Conversion(extra: ["ndi.conversion": "whatever"]), .auto)
+        XCTAssertEqual(Conversion(extra: ["ndi.conversion": 1]), .auto)
+        XCTAssertEqual(Conversion.extraKey, "ndi.conversion")
+
+        let hasMetal = MTLCreateSystemDefaultDevice() != nil
+        let sender = NDISender(configuration: .init(name: "sel", format: .hd720p60, conversion: .gpu, dryRun: true))
+        try sender.start()
+        let feeder = try PatternFeeder(configuration: .init(format: .hd720p60))
+        func feed(_ n: Int) throws {
+            for i in 0..<n {
+                sender.consume(try feeder.makeFrame(tick: Tick(Int64(i)), tickTime: HostClock.now()))
+                Thread.sleep(forTimeInterval: 0.005)
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        try feed(10)
+        XCTAssertEqual(sender.countersSnapshot.usingGPU, hasMetal, "gpu 模式：有 Metal 就用 GPU")
+        XCTAssertEqual(sender.countersSnapshot.conversion, "gpu")
+        sender.setConversion(.cpu)
+        try feed(10)
+        XCTAssertFalse(sender.countersSnapshot.usingGPU, "运行时切到 cpu 下一帧生效")
+        XCTAssertEqual(sender.countersSnapshot.conversion, "cpu")
+        sender.setConversion(.gpu)
+        try feed(10)
+        XCTAssertEqual(sender.countersSnapshot.usingGPU, hasMetal)
+        sender.stop()
+        let c = sender.countersSnapshot
+        XCTAssertEqual(c.framesReceived, 30)
+        XCTAssertEqual(c.framesReceived, c.framesSent + c.skipped)
+        XCTAssertEqual(c.conversionFailures, 0)
+    }
+
+    /// auto：第一帧就探一次、之后每 autoProbeInterval 帧探一次（同一帧两种方法各转一次），用便宜的；探测值和当前选择自洽。
+    func testAutoConversion_probesBothAndPicksCheaper() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("BLOCKED-硬件：没有 Metal 设备，auto 就是 cpu") }
+        let sender = NDISender(configuration: .init(name: "auto", format: .hd1080p60, conversion: .auto, dryRun: true, autoProbeInterval: 20))
+        try sender.start()
+        let feeder = try PatternFeeder(configuration: .init(format: .hd1080p60, texture: .noise(amplitude: 12, seed: 2)))
+        for i in 0..<100 {
+            sender.consume(try feeder.makeFrame(tick: Tick(Int64(i)), tickTime: HostClock.now()))
+            Thread.sleep(forTimeInterval: 0.008)
+        }
+        Thread.sleep(forTimeInterval: 0.2)
+        sender.stop()
+        let c = sender.countersSnapshot
+        print("auto：\(c)")
+        XCTAssertEqual(c.conversion, "auto")
+        XCTAssertGreaterThan(c.lastCPUProbeMs, 0)
+        XCTAssertGreaterThan(c.lastGPUProbeMs, 0)
+        XCTAssertEqual(c.conversionFailures, 0)
+        XCTAssertEqual(c.framesReceived, c.framesSent + c.skipped)
+        // 自洽：便宜 30% 以上的那边就是当前选择（差距不到 30% 时保持原样，不断言）
+        if c.lastCPUProbeMs < c.lastGPUProbeMs * 0.7 { XCTAssertFalse(c.usingGPU, "CPU 明显便宜应当在用 CPU：\(c)") }
+        if c.lastGPUProbeMs < c.lastCPUProbeMs * 0.7 { XCTAssertTrue(c.usingGPU, "GPU 明显便宜应当在用 GPU：\(c)") }
+    }
+
     /// 干跑：队列 + 转换线程真跑；consume 立即返回、满了丢最旧计 skipped、音频块进环；恒等式 收到 = 送出 + skipped。
     func testDryRunPipeline_boundedQueueAndCounters() throws {
         let sender = NDISender(configuration: .init(name: "dry", format: .hd1080p60, queueDepth: 2, dryRun: true))

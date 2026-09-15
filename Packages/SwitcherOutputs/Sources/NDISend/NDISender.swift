@@ -37,8 +37,15 @@ public struct NDISendCounters: Hashable, Sendable {
     /// 最近一帧 NV12 → UYVY 的耗时（ms）；`maxConvertMs` 是最大值。
     public var lastConvertMs: Double = 0
     public var maxConvertMs: Double = 0
-    /// 用的是 GPU 还是 CPU 转换。
+    /// 当前用的是 GPU 还是 CPU 转换。
     public var usingGPU: Bool = false
+    /// 转换方式（auto / gpu / cpu，`setConversion` 可运行时改）。
+    public var conversion: String = "auto"
+    /// auto 模式最近一次探测：同一帧两种方法各转一次的耗时（ms）；没探过为 0。
+    public var lastCPUProbeMs: Double = 0
+    public var lastGPUProbeMs: Double = 0
+    /// auto 模式切换过几次。
+    public var autoSwitches: UInt64 = 0
     /// 当前 NDI 接收方数量（NDIlib_send_get_no_connections，每秒查一次）。
     public var connections: Int = 0
     /// SDK 不在 / 初始化失败：Stats 里标 unavailable。
@@ -79,16 +86,36 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         /// 干跑：走完队列 + 转换，不调 NDI（测试转换成本 / 队列行为用；SDK 不在时也能跑）。
         public var dryRun: Bool
 
-        public enum Conversion: Hashable, Sendable {
+        /// NV12 → UYVY 用什么算。低负载下 release 构建 CPU 逐行 0.09 ms / GPU 0.25 ms（提交 + 等完成），高负载下谁便宜说不准
+        /// （合成器把 GPU 队列排满时 GPU 路径要等；CPU 被编码 / 音频挤时 CPU 路径变慢），所以默认 auto：定期两种都试、用便宜的。
+        public enum Conversion: String, Hashable, Sendable, CaseIterable {
+            /// 每 `autoProbeInterval` 帧把同一帧用两种方法各转一次，之后用便宜的（便宜 30% 以上才切，防抖）。没有 Metal 就是 cpu。
+            case auto
             /// Metal kernel；没有 Metal 设备时退到 CPU。
             case gpu
             /// 逐行 CPU 转换。
             case cpu
+
+            /// `OutputSettings.extra` 里的键：`"ndi.conversion": "auto" | "gpu" | "cpu"`（G3 接 Show 文件 / UI 用）。
+            public static let extraKey = "ndi.conversion"
+
+            /// 从 `OutputSettings.extra` 读；没有或不认识 = auto。
+            public init(extra: [String: JSONValue]) {
+                if case .string(let s)? = extra[Self.extraKey], let v = Conversion(rawValue: s.lowercased()) {
+                    self = v
+                } else {
+                    self = .auto
+                }
+            }
         }
 
+        /// auto 模式的探测间隔（帧）；默认 300 = 60 fps 下 5 s。
+        public var autoProbeInterval: Int
+
         public init(name: String, groups: String? = nil, format: ProgramFormat, source: OutputSource = .program,
-                    conversion: Conversion = .gpu, queueDepth: Int = 3, audioChannels: Int = 2, dryRun: Bool = false) {
-            precondition((1...8).contains(queueDepth))
+                    conversion: Conversion = .auto, queueDepth: Int = 3, audioChannels: Int = 2, dryRun: Bool = false,
+                    autoProbeInterval: Int = 300) {
+            precondition((1...8).contains(queueDepth) && autoProbeInterval >= 1)
             self.name = name
             self.groups = groups
             self.format = format
@@ -97,6 +124,7 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
             self.queueDepth = queueDepth
             self.audioChannels = audioChannels
             self.dryRun = dryRun
+            self.autoProbeInterval = autoProbeInterval
         }
     }
 
@@ -117,11 +145,15 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
     private let threadGroup = DispatchGroup()
     private let counters = AtomicNDICounters()
     private let logger = Logger(subsystem: "switcher.ndisend", category: "NDISender")
-    // 转换
+    // 转换（只在发送线程和 start / stop 里碰；`conversionMode` 是外面可改的开关）
     private var gpu: NV12ToUYVY.GPU?
     private var cpuBuffers: [UnsafeMutableRawPointer] = []
     private var cpuNext = 0
     private let bytesPerFrame: Int
+    private let conversionMode: Mutex<Configuration.Conversion>
+    private var activeGPU = false          // 当前这帧用哪个（发送线程）
+    private var framesSinceProbe = 0
+    private var probedOnce = false
     #if canImport(NDI)
     private var sender: NDIlib_send_instance_t?
     private var nameCString: UnsafeMutablePointer<CChar>?
@@ -136,6 +168,8 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         queue = FrameRing(capacity: configuration.queueDepth)
         audioRing = PCMRing(channelCount: configuration.audioChannels, maxFrames: 4096, capacity: 64)
         bytesPerFrame = configuration.format.width * configuration.format.height * 2
+        conversionMode = Mutex(configuration.conversion)
+        counters.conversion = configuration.conversion
         counters.unavailable.store(!Self.isAvailable, ordering: .relaxed)
     }
 
@@ -235,34 +269,87 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         }
     }
 
-    /// 转换器（GPU / CPU 双缓冲）；只在 start 里建。测试也可以单独调它然后用 `convert(_:)`。
+    /// 运行时改转换方式（UI / API 调；发送线程下一帧生效）。
+    public func setConversion(_ mode: Configuration.Conversion) {
+        conversionMode.withLock { $0 = mode }
+        counters.conversion = mode
+    }
+
+    /// 当前转换方式。
+    public var conversion: Configuration.Conversion { conversionMode.withLock { $0 } }
+
+    /// 转换器：CPU 双缓冲总是建（4 MB × 2）；GPU 在 gpu / auto 模式且有 Metal 设备时建。只在 start 里调（测试也可以单独调）。
     public func prepareConverter() throws {
         let f = configuration.format
-        if configuration.conversion == .gpu, gpu == nil, let device = MTLCreateSystemDefaultDevice() {
+        let mode = conversion
+        if mode != .cpu, gpu == nil, let device = MTLCreateSystemDefaultDevice() {
             do {
                 gpu = try NV12ToUYVY.GPU(device: device, width: f.width, height: f.height)
             } catch {
                 logger.warning("Metal 转换器建不出来，退到 CPU：\(String(describing: error), privacy: .public)")
             }
         }
-        if gpu == nil && cpuBuffers.isEmpty {
+        if cpuBuffers.isEmpty {
             for _ in 0..<2 {
                 let b = UnsafeMutableRawPointer.allocate(byteCount: bytesPerFrame, alignment: 64)
                 b.initializeMemory(as: UInt8.self, repeating: 0, count: bytesPerFrame)
                 cpuBuffers.append(b)
             }
         }
-        counters.usingGPU.store(gpu != nil, ordering: .relaxed)
+        activeGPU = gpu != nil && mode != .cpu
+        counters.usingGPU.store(activeGPU, ordering: .relaxed)
     }
 
-    /// 转一帧（GPU 或 CPU），返回的缓冲到下下次 convert 之前有效。测试用；发送线程内部也用它。
+    /// 转一帧（按当前方式），返回的缓冲到该方式下下次 convert 之前有效。测试用；发送线程内部也用它。
     public func convert(_ pixelBuffer: CVPixelBuffer) throws -> NV12ToUYVY.UYVYBuffer {
-        if let gpu { return try gpu.convert(pixelBuffer) }
         if cpuBuffers.isEmpty { try prepareConverter() }
+        applyConversionMode()
+        return activeGPU ? try convertGPU(pixelBuffer) : try convertCPU(pixelBuffer)
+    }
+
+    private func convertGPU(_ pixelBuffer: CVPixelBuffer) throws -> NV12ToUYVY.UYVYBuffer {
+        guard let gpu else { return try convertCPU(pixelBuffer) }
+        return try gpu.convert(pixelBuffer)
+    }
+
+    private func convertCPU(_ pixelBuffer: CVPixelBuffer) throws -> NV12ToUYVY.UYVYBuffer {
         let out = NV12ToUYVY.UYVYBuffer(width: configuration.format.width, height: configuration.format.height, base: cpuBuffers[cpuNext])
         cpuNext = (cpuNext + 1) % cpuBuffers.count
         try NV12ToUYVY.convertCPU(pixelBuffer, into: out)
         return out
+    }
+
+    /// 把外面设的方式落到 activeGPU（gpu / cpu 立即；auto 由探测决定）。
+    private func applyConversionMode() {
+        switch conversion {
+        case .gpu: activeGPU = gpu != nil
+        case .cpu: activeGPU = false
+        case .auto: if gpu == nil { activeGPU = false }
+        }
+        counters.usingGPU.store(activeGPU, ordering: .relaxed)
+    }
+
+    /// auto：到点就把这一帧用另一种方法也转一次，比耗时；便宜 30% 以上才切（防抖）。返回 true = 这次探测过了。
+    /// 另一种方法的输出只用来计时，不送出去（它自己的双缓冲，不碰正在被 NDI 异步发送的那块）。
+    private func autoProbeIfDue(_ pixelBuffer: CVPixelBuffer, currentMs: Double) {
+        guard conversion == .auto, gpu != nil else { return }
+        framesSinceProbe += 1
+        guard !probedOnce || framesSinceProbe >= configuration.autoProbeInterval else { return }
+        probedOnce = true
+        framesSinceProbe = 0
+        let t0 = HostClock.now()
+        let otherOK = (try? (activeGPU ? convertCPU(pixelBuffer) : convertGPU(pixelBuffer))) != nil
+        guard otherOK else { return }
+        let otherMs = (HostClock.now() - t0).milliseconds
+        let (cpuMs, gpuMs) = activeGPU ? (otherMs, currentMs) : (currentMs, otherMs)
+        counters.lastCPUProbeMs.store(cpuMs, ordering: .relaxed)
+        counters.lastGPUProbeMs.store(gpuMs, ordering: .relaxed)
+        if otherMs < currentMs * 0.7 {
+            activeGPU.toggle()
+            counters.usingGPU.store(activeGPU, ordering: .relaxed)
+            counters.autoSwitches.add(1, ordering: .relaxed)
+            logger.info("[\(self.consumerName, privacy: .public)] NV12→UYVY 切到 \(self.activeGPU ? "GPU" : "CPU", privacy: .public)（CPU \(cpuMs, format: .fixed(precision: 2)) ms / GPU \(gpuMs, format: .fixed(precision: 2)) ms）")
+        }
     }
 
     // MARK: FrameConsumer / AudioBlockConsumer
@@ -329,7 +416,9 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
             counters.conversionFailures.add(1, ordering: .relaxed)
             return
         }
+        let convertMs = (HostClock.now() - t0).milliseconds
         counters.recordConvert(HostClock.now() - t0)
+        autoProbeIfDue(item.frame.pixelBuffer, currentMs: convertMs)
         #if canImport(NDI)
         guard let sender else { return }
         var v = NDIlib_video_frame_v2_t()
@@ -513,6 +602,14 @@ final class AtomicNDICounters: @unchecked Sendable {
     let usingGPU = Atomic<Bool>(false)
     let connections = Atomic<Int>(0)
     let unavailable = Atomic<Bool>(true)
+    let lastCPUProbeMs = Atomic<Double>(0)
+    let lastGPUProbeMs = Atomic<Double>(0)
+    let autoSwitches = Atomic<UInt64>(0)
+    private let conversionLock = Mutex<NDISender.Configuration.Conversion>(.auto)
+    var conversion: NDISender.Configuration.Conversion {
+        get { conversionLock.withLock { $0 } }
+        set { conversionLock.withLock { $0 = newValue } }
+    }
 
     func recordConvert(_ d: HostDuration) {
         lastConvertTicks.store(d.ticks, ordering: .relaxed)
@@ -535,6 +632,10 @@ final class AtomicNDICounters: @unchecked Sendable {
         c.lastConvertMs = HostDuration(ticks: lastConvertTicks.load(ordering: .relaxed)).milliseconds
         c.maxConvertMs = HostDuration(ticks: maxConvertTicks.load(ordering: .relaxed)).milliseconds
         c.usingGPU = usingGPU.load(ordering: .relaxed)
+        c.conversion = conversion.rawValue
+        c.lastCPUProbeMs = lastCPUProbeMs.load(ordering: .relaxed)
+        c.lastGPUProbeMs = lastGPUProbeMs.load(ordering: .relaxed)
+        c.autoSwitches = autoSwitches.load(ordering: .relaxed)
         c.connections = connections.load(ordering: .relaxed)
         c.unavailable = unavailable.load(ordering: .relaxed)
         return c
