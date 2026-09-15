@@ -8,7 +8,7 @@
 G2 的 headless 自己 attach 环、自建 `AudioPump` 把 Master tap 喂给 Recorder，块 PTS = 块首 host time（没扣混音器年龄），A2 因此 −16.6…−18.5 ms
 （`G2-w2-audio-integ-av-offset.md`）。W2-E 的 `SwitcherAudioIntegration.AudioEngine` 把这些都收进去了：对齐延迟、AFV、FTB、每路参数、监听、
 消费者泵、真设备 host 时钟重采样、状态快照。W2-E 在 scratchpad 里用一份改过的 headless 副本跑了 45 s / 10 min / 60 min（数字在 `reports/w2-audio-integ.md`），
-改动就是下面这个补丁（`AudioPump.swift` 整个删掉）。
+改动就是下面这个补丁（`AudioPump.swift` 整个删掉；另加了 `--iso-audio N`：再起 N 个录制器录 PGM 视频 + 输入 1…N 的 ISO 音轨，A4 用）。
 
 ## 接线要点
 
@@ -29,7 +29,7 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
 
 ```diff
 --- Tools/switcher-headless/Sources/switcher-headless/HeadlessRun.swift	2026-09-15 11:17:02
-+++ Tools/switcher-headless/Sources/switcher-headless/HeadlessRun.swift（W2-E 接线后）	2026-09-15 12:41:15
++++ Tools/switcher-headless/Sources/switcher-headless/HeadlessRun.swift	2026-09-15 12:48:27
 @@ -4,9 +4,13 @@
  import SwitcherEngine
  import SwitcherRender
@@ -44,8 +44,12 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
  /// run 子命令的参数。
  struct RunOptions: Sendable {
      var showURL: URL
-@@ -24,48 +28,20 @@
+@@ -22,50 +26,24 @@
+     var inputLeadMs: Double?
+     /// 录制封口的看门狗（秒）。
      var stopTimeoutSeconds: Double = 60
++    /// W2-E A4：另起 N 个录制器（PGM 视频 + 输入 1…N 各自的 ISO 音轨），文件名 <record>-iso<k>.mov。
++    var isoAudio: Int = 0
  }
  
 -/// 音频输出：空设备（实时假时钟，不出声）或真设备。
@@ -99,7 +103,7 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
  }
  
  /// 把录制器的编码计数变成 Stats.encoder 的一项：skipped 累计、bitrate 按上次采样以来的窗口算。只在 Stats 采样线程上被调。
-@@ -172,17 +148,21 @@
+@@ -172,17 +150,22 @@
              }
          }
  
@@ -125,10 +129,11 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
          var recorder: Recorder?
 -        var pump: AudioPump?
 +        var recorderAudioToken: AudioConsumerToken?
++        var isoRecorders: [(Recorder, AudioConsumerToken)] = []
          if let url = options.recordURL {
              let outputSettings = show.outputs.first { $0.kind == .record }?.settings
              let cfg = Recorder.Configuration(url: url, format: format,
-@@ -194,10 +174,7 @@
+@@ -194,11 +177,19 @@
                                               name: "record")
              let rec = Recorder(configuration: cfg)
              engine.addConsumer(rec)
@@ -138,9 +143,21 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
 -            }
 +            if !audioInputs.isEmpty { recorderAudioToken = try audioEngine.addConsumer(rec, source: .master) }
              recorder = rec
++            // A4：ISO 音轨录制器（视频仍是 PGM——每路视频 ISO 是 W3-C 的事）
++            for k in 0..<options.isoAudio {
++                let number = audioInputs[k].number
++                let isoURL = url.deletingPathExtension().appendingPathExtension("iso\(number).mov")
++                var isoCfg = cfg
++                isoCfg.url = isoURL
++                isoCfg.name = "iso\(number)"
++                let iso = Recorder(configuration: isoCfg)
++                engine.addConsumer(iso)
++                isoRecorders.append((iso, try audioEngine.addConsumer(iso, source: .input(number: number))))
++            }
          }
  
-@@ -210,7 +187,7 @@
+         // 4. Stats：引擎每秒组一行（铁律 4，只有这一份），编码 / 音频 / GPU 三个来源从这里灌。
+@@ -210,7 +201,7 @@
                  let source = EncoderStatsSource(recorder: rec)
                  engine.encoderStatsProvider = { source.entries() }
              }
@@ -149,7 +166,7 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
              if options.gpuStats, let g = GPUUtilization() {
                  gpu = g
                  engine.gpuPercentProvider = { g.deviceUtilizationPercent() }
-@@ -225,13 +202,12 @@
+@@ -225,13 +216,13 @@
  
          // 6. 起：音频设备 → 视频输入（到 t0 才出第一帧）→ 音频输入 → 录制（起点 = 第 0 拍；尽量晚起，
          //    它的入口环只存 256 块 ≈ 1.4 s，起点之前的块留在里面等第一个压缩视频样本到了才会被丢掉）→ 泵 → 引擎（start 里 prepare 渲染器，lead 要盖住它）
@@ -159,13 +176,14 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
          for entry in audioInputs { try entry.source.start() }
          if let rec = recorder { try rec.start(at: RecordingStart(clock: spec, tick: .zero)) }
 -        pump?.start()
++        for (iso, _) in isoRecorders { try iso.start(at: RecordingStart(clock: spec, tick: .zero)) }
          if stopRequested {
 -            shutdownEarly(inputs: inputs, audioInputs: audioInputs.map(\.source), recorder: recorder, pump: pump, audioDevice: audioDevice, writer: writer)
 +            await shutdownEarly(inputs: inputs, audioInputs: audioInputs.map(\.source), recorder: recorder, audioEngine: audioEngine, writer: writer)
              return
          }
          try await engine.start(t0: t0, firstTick: .zero, lastTick: lastTick)
-@@ -243,7 +219,7 @@
+@@ -243,7 +234,7 @@
                节目：\(show.name)（\(options.showURL.path)）\(format.width)×\(format.height)@\(format.frameRate)，\(inputs.count) 路合成源，\(audioInputs.count) 路音频
                场景：\(options.scriptURL?.path ?? "无")（\(scenario?.events.count ?? 0) 个事件）
                时长：\(totalTicks) 拍（\(String(format: "%.1f", options.durationSeconds)) s）  t0 距现在 \(String(format: "%.0f", leadLeft)) ms\(leadLeft < 0 ? "  ⚠️ 起晚了，开头会跳拍" : "")  合成源提前量 \(String(format: "%.2f", inputLeadMs)) ms
@@ -174,7 +192,7 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
                时钟实时策略：\(clock.isRealtime ? "已生效" : "⚠️ 未生效（V3 会超）")
              """)
  
-@@ -268,6 +244,17 @@
+@@ -268,6 +259,18 @@
          let boundary = Tick((engine.counters.lastTick?.rawValue ?? -1) + 1)
          var recordResult: RecordingResult?
          if let rec = recorder {
@@ -188,16 +206,24 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
 +                if wait.ticks > 0 { try? await Task.sleep(for: .nanoseconds(Int(wait.nanoseconds))) }
 +                audioEngine.removeConsumer(token)
 +                recorderAudioToken = nil
++                for (_, t) in isoRecorders { audioEngine.removeConsumer(t) }
 +            }
              let before = rec.counters
              let result = await stopRecorder(rec, atTick: boundary, timeoutSeconds: options.stopTimeoutSeconds)
              switch result {
-@@ -286,14 +273,14 @@
+@@ -286,14 +289,21 @@
                  exitCode = 1
              }
          }
 -        pump?.stop()
 -        audioDevice.stop()
++        for (iso, _) in isoRecorders {
++            switch await stopRecorder(iso, atTick: boundary, timeoutSeconds: options.stopTimeoutSeconds) {
++            case .success(let r)?: print("  ISO：\(r.url.lastPathComponent) 视频 \(r.videoFrames) 帧 / 音频 \(r.audioFrames) 样本 / 音频漂移 \(String(format: "%.3f", iso.counters.audioDrift.milliseconds)) ms 硬校正 \(iso.counters.audioCorrections)")
++            case .failure(let e)?: print("  ISO 封口失败：\(e)")
++            case nil: print("  ISO 封口超时")
++            }
++        }
 +        let audioStatus = audioEngine.status
 +        await audioEngine.stop()
          for entry in audioInputs { entry.source.stop() }
@@ -211,7 +237,7 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
      }
  
      /// 录制封口，带看门狗：nil = 超时。
-@@ -312,15 +299,12 @@
+@@ -312,15 +322,12 @@
          }
      }
  
@@ -231,7 +257,7 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
          for a in audioInputs { a.stop() }
          for input in inputs { input.stop() }
          writer?.close()
-@@ -329,7 +313,7 @@
+@@ -329,7 +336,7 @@
      }
  
      private func printSummary(clock: ProgramClock, inputs: [SyntheticVideoInput], audioInputs: [(number: Int, source: SyntheticAudioInput)],
@@ -240,7 +266,7 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
                                recordResult: RecordingResult?, writer: StatsWriter?, interrupted: Bool) {
          let c = engine.counters
          func ms(_ d: HostDuration?) -> String { d.map { String(format: "%.3f", $0.milliseconds) } ?? "—" }
-@@ -346,8 +330,13 @@
+@@ -346,8 +353,13 @@
              }
              lines.append("  输入 \(input.number)：生成 \(k.generated)，设定丢 \(k.droppedByDesign)，池不够 \(k.poolStarved)，迟到 \(k.late)，唤醒 max \(String(format: "%.3f", Double(k.wakeLatencyMaxNs) / 1e6)) ms；帧槽 pushed \(s?.pushed ?? 0) consumed \(s?.consumed ?? 0) reused \(s?.reused ?? 0) dropped \(s?.dropped ?? 0)" + pacing)
          }
@@ -256,4 +282,25 @@ Package.swift 加 `.product(name: "SwitcherAudioIntegration", package: "Switcher
          for entry in audioInputs {
              let k = entry.source.counters
              lines.append("  音频源 \(entry.number)：写 \(k.blocksWritten) 块 / \(k.framesWritten) 帧，拒 \(k.framesRejected)，迟到 \(k.late)")
+--- Tools/switcher-headless/Sources/switcher-headless/HeadlessCLI.swift	2026-09-15 11:17:02
++++ Tools/switcher-headless/Sources/switcher-headless/HeadlessCLI.swift	2026-09-15 12:48:27
+@@ -21,7 +21,7 @@
+     /// 带值的参数；其余 -- 开头的都是开关。
+     static let valueKeys: Set<String> = [
+         "show", "script", "duration", "stats", "record", "audio-device", "lead-ms", "input-lead-ms", "stop-timeout",
+-        "out", "width", "height", "minutes", "fps", "inputs", "baseline", "write-baseline", "v1-avg-ms", "meta",
++        "out", "width", "height", "minutes", "fps", "inputs", "baseline", "write-baseline", "v1-avg-ms", "meta", "iso-audio",
+     ]
+ 
+     static func dispatch(_ args: [String]) throws {
+@@ -51,7 +51,8 @@
+                                  statsURL: p.url("stats"), recordURL: p.url("record"), preview: p.has("preview"),
+                                  audioDevice: p.string("audio-device") ?? "default",
+                                  leadMs: try p.double("lead-ms") ?? 1000, gpuStats: !p.has("no-gpu-stats"),
+-                                 inputLeadMs: try p.double("input-lead-ms"), stopTimeoutSeconds: try p.double("stop-timeout") ?? 60)
++                                 inputLeadMs: try p.double("input-lead-ms"), stopTimeoutSeconds: try p.double("stop-timeout") ?? 60,
++                                 isoAudio: try p.int("iso-audio") ?? 0)
+         let session = try HeadlessSession(options: options)
+         SignalHandling.install(session)
+         if options.preview {
 ```
