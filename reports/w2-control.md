@@ -22,7 +22,8 @@ worktree `.claude/worktrees/w2-control-command-bus-api-8f81c2`，分支 `claude/
 | docs/api.md | `CommandBus/CommandCatalog.swift`、`API/APIDocument.swift`、`Sources/switcher-apidoc` | `CommandKind` 用穷举 switch 钉住 27 个 case（契约加 case 这里编译就红），每条一句说明 + 参数 + 用真 JSONEncoder 编出来的样例；`swift run --package-path Packages/SwitcherControl switcher-apidoc > docs/api.md`；`testCatalog_generatedMarkdownMatchesCommittedDocsApiMd` 保证仓库里那份不落后 |
 | C 系列客户端 | `scripts/apitest/apitest.py`、`run-c-tests.sh`、`README.md` | 只用 Python 3 标准库（自带 RFC 6455 文本帧客户端；时间戳用 ctypes 调 `mach_absolute_time`，和服务端同一个钟）；`run` 记全部快照 / stats 并发 C1 的 cut、C4 的带序号命令；`evaluate` 对着 `frameprobe frames` 的逐帧输出算 C1–C4 出 Markdown；`scenario` 生成每 5 s 切一次（每 60 s 一次 Fade）的场景；`run-c-tests.sh` 一键 |
 
-`swift test --package-path Packages/SwitcherControl` 26/26 绿（5.9 s）；`scripts/lint-rules.sh`、`scripts/check-deps.sh` 绿；`scripts/check-ownership.sh w2-control` 报 4 个文件越界（`docs/api.md`、`scripts/apitest/*`）——都是 prompt 点名要放的位置，见 §4 第 1 条。App 构建见 §5。
+`swift test --package-path Packages/SwitcherControl` 26/26 绿（5.9 s）；`make lint BRANCH=w2-control`：禁词 / 版本号 / Package.swift / 依赖方向 / check-rt-symbols 绿，`check-ownership.sh w2-control` 报 4 个文件越界（`docs/api.md`、`scripts/apitest/*`）——都是 prompt 点名要放的位置，见 §4 第 1 条。`make gen build-app`（xcodebuild，App 链接 SwitcherControl 及其远程依赖）绿；`make test-tools`（两个工具冒烟）绿。
+每次 `make test-tools` / `run-c-tests.sh` 会在 `Tools/frameprobe/` 生成一个 `Package.resolved`（frameprobe 没有远程依赖，纯本地 pin，不归本会话），我没提交、跑完删掉了。
 
 ## 2. 每个测试：数值 / 阈值 / 通过否
 
