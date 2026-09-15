@@ -97,6 +97,12 @@ final class EngineRig {
 
     /// 当前块首相对 t0 的秒数。
     var elapsedSeconds: Double { (driver.nextBlockHostTime - t0).seconds }
+
+    /// 消费者流（PTS = 块首 − 对齐延迟）目前送到了哪：[前沿 − n 块, 前沿)。
+    func lastDeliveredWindow(blocks n: Int) -> (HostTime, HostTime) {
+        let frontier = driver.nextBlockHostTime - engine.alignmentDuration
+        return (frontier - engine.blockDuration * n, frontier)
+    }
 }
 
 /// 把收到的块存进 TimedCapture 的消费者。

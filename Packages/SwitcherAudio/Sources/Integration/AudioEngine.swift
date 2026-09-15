@@ -11,7 +11,9 @@ import SwitcherAudio
 //   2. 对齐与 PTS：每路输入就绪后读它的年龄（InputSlotStats.ageSetpoint），用延迟线补到统一的对齐延迟 alignmentFrames；
 //      Master / ISO 块的 PTS = 块首样本 host time − 对齐延迟 = 内容被采集的时刻，与视频拍点同一 host 时基（G2 问题单 A2 的修法）。
 //   3. AFV：状态机的转场事件（AudioStateBridge）→ 同一拍点的 host time 起做等幅交叉淡变，长度 = 转场时长；Cut = 1 块短淡；
-//      T-bar 跟推杆；FTB 同步淡出 Master。
+//      T-bar 跟推杆；FTB 同步淡出 Master。**所有跟视频对齐的音频动作都在混音时间 = 拍点 + 对齐延迟 处应用**：混音块 T 里流过的
+//      内容是 T − 对齐延迟 时刻采集的（PTS 也是它），要让录制文件 / 扬声器里的音频转场与画面同一时刻，增益变化就得晚对齐延迟这么多
+//      （离线用例第一版没加这个偏移，音频淡变在文件里领先画面 42.7 ms）。
 //   4. 每路参数 / 总线 / 监听方式：从状态快照 diff 落到混音命令。
 //   5. 消费者：Master / 总线 / ISO 块经泵线程送录制 / 编码；真设备时重采样到 host 时钟（A3）。
 //   6. Stats.audio 与状态快照（表、对齐、AFV、设备）。
@@ -65,6 +67,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private var ftbFactor: Float = 1
     private var ftbLevel: Double = 0
     private var activeTransition: (from: Int, to: Int, source: TransitionSource, at: HostTime)?
+    /// 到点再设的门控（T-bar：推杆位置要晚对齐延迟才作用到音频）。
+    private var deferredGates: [(due: HostTime, number: Int, gain: Float)] = []
     private let pendingEvents = Mutex<[AudioControlEvent]>([])
     private var bridge: AudioStateBridge?
     private(set) public var clock: TickClockSpec?
@@ -288,6 +292,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             return out
         }
         for e in events { handle(e, now: now) }
+        applyDeferredGates(now: now)
         maintainAlignment()
         stepFadeToBlack(now: now)
         finishRemovals(now: now)
@@ -339,17 +344,21 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             applyGates()
         case .cut(let from, let to, _, let at):
             guard afvOn, from != to else { return }
-            crossfade(from: from, to: to, blocks: max(1, configuration.cutFadeBlocks), start: at)
+            crossfade(from: from, to: to, blocks: max(1, configuration.cutFadeBlocks), start: at + alignmentDuration)
         case .transitionStarted(let from, let to, _, let source, _, let at, _, let duration):
             lock.lock(); activeTransition = (from, to, source, at); lock.unlock()
             guard afvOn, source == .auto, from != to else { return }
             let blocks = max(1, Int((Double(duration.ticks) / Double(blockDuration.ticks)).rounded()))
-            crossfade(from: from, to: to, blocks: blocks, start: at)
+            crossfade(from: from, to: to, blocks: blocks, start: at + alignmentDuration)
         case .tbarProgress(let from, let to, let p):
             guard afvOn else { return }
             let pp = min(max(p, 0), 1)
-            setGate(from, Float(cos(pp * Double.pi / 2)))
-            setGate(to, Float(sin(pp * Double.pi / 2)))
+            // 推杆位置在"现在"生效于画面，音频要晚对齐延迟：排到 now + 对齐延迟 再设
+            let due = now + alignmentDuration
+            lock.lock()
+            deferredGates.append((due, from, Float(cos(pp * Double.pi / 2))))
+            deferredGates.append((due, to, Float(sin(pp * Double.pi / 2))))
+            lock.unlock()
         case .transitionEnded(_, _, _, _, let completed):
             lock.lock()
             let was = activeTransition
@@ -380,6 +389,16 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         rec.afvGain = g
         lock.unlock()
         mixer.setAFVGain(slot: rec.slot, g)
+    }
+
+    /// 到点的延后门控：命令在下一块开始时应用，所以 due 落在下一块内的现在就发。
+    private func applyDeferredGates(now: HostTime) {
+        lock.lock()
+        let horizon = now + blockDuration
+        let ready = deferredGates.filter { $0.due <= horizon }
+        deferredGates.removeAll { $0.due <= horizon }
+        lock.unlock()
+        for g in ready { setGate(g.number, g.gain) }
     }
 
     /// 按最新状态重新门控所有槽位。
@@ -471,8 +490,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private func stepFadeToBlack(now: HostTime) {
         lock.lock()
         guard let ramp = ftbRamp else { lock.unlock(); return }
-        // 提前一点评估：总线增益一阶平滑 τ = 3 ms，目标提前 3 ms 给出，曲线就对上斜坡
-        let at = now + HostDuration(milliseconds: 3, timebase: timebase)
+        // 混音块 T 里的内容是 T − 对齐延迟 采集的，斜坡按内容时刻评估；再提前 3 ms（总线增益一阶平滑 τ = 3 ms），曲线就对上斜坡
+        let at = now - alignmentDuration + HostDuration(milliseconds: 3, timebase: timebase)
         let level = AudioProgramGate.fadeToBlackLevel(at: at, on: ramp.on, start: ramp.start, duration: ramp.duration)
         ftbLevel = level
         let factor = Float(1 - level)
