@@ -5,6 +5,7 @@ import SwitcherEngine
 import SwitcherRender
 import SwitcherAudio
 import SwitcherOutputs
+import SwitcherControl
 import SwitcherTestKit
 
 /// run 子命令的参数。
@@ -22,6 +23,8 @@ struct RunOptions: Sendable {
     var inputLeadMs: Double?
     /// 录制封口的看门狗（秒）。
     var stopTimeoutSeconds: Double = 60
+    /// --api：本地 API 的配置；nil = 不起。
+    var api: APIServerConfiguration? = nil
 }
 
 /// 音频输出：空设备（实时假时钟，不出声）或真设备。
@@ -100,6 +103,10 @@ final class HeadlessSession: @unchecked Sendable {
     let engine: Engine
     /// 本次要跑的拍数（第 0 拍到第 totalTicks − 1 拍）。
     let totalTicks: Int64
+    /// --api：命令总线 + 状态推送 + HTTP/WS 服务（W2-C）。总线是 UI / 快捷键 / MIDI / API 的统一入口；headless 里只有 API 一个来源。
+    let commandBus: CommandBus
+    let stateFeed: StateFeed
+    let apiServer: APIServer?
 
     private let stopRequests = Atomic<Int>(0)
     private(set) var exitCode: Int32 = 0
@@ -123,7 +130,14 @@ final class HeadlessSession: @unchecked Sendable {
         renderer = try MetalRenderer()
         stateMachine = StateMachine(initialState: state)
         let maxNumber = state.inputs.map(\.number).max() ?? 1
-        engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
+        let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
+        self.engine = engine
+        let bus = CommandBus(stateMachine: stateMachine)
+        let feed = StateFeed(stateMachine: stateMachine) { engine.clock?.spec }
+        feed.attach(to: bus)
+        commandBus = bus
+        stateFeed = feed
+        apiServer = options.api.map { APIServer(bus: bus, feed: feed, configuration: $0) }
     }
 
     /// 第一次：请求干净停止；第二次：立即退出。
@@ -218,6 +232,28 @@ final class HeadlessSession: @unchecked Sendable {
             writer = w
         }
 
+        // 4b. API（W2-C）：先于引擎起，让客户端在第 0 拍前就能连上。Stats 只有一份：有 --stats 时由写文件的采样线程顺手推给 API，
+        //     没有 --stats 但开了 API 时另起一条 1 Hz 采样线程只喂 API（两者互斥，窗口口径不会乱）。
+        var apiSampler: Thread?
+        if let server = apiServer {
+            await stateFeed.start()
+            try await server.start()
+            if writer == nil {
+                let feed = stateFeed, engine = engine
+                let t = Thread {
+                    while !Thread.current.isCancelled {
+                        Thread.sleep(forTimeInterval: 1)
+                        if Thread.current.isCancelled { break }
+                        feed.publish(stats: engine.makeStats())
+                    }
+                }
+                t.name = "api-stats-sampler"
+                t.qualityOfService = .utility
+                t.start()
+                apiSampler = t
+            }
+        }
+
         // 5. 场景：全部预排程到状态机，按拍应用（跳过的拍也逐拍走，命令不会漏）。
         if let sc = scenario {
             for e in sc.sortedEvents { await stateMachine.schedule(e.command, at: e.tick) }
@@ -231,12 +267,19 @@ final class HeadlessSession: @unchecked Sendable {
         if let rec = recorder { try rec.start(at: RecordingStart(clock: spec, tick: .zero)) }
         pump?.start()
         if stopRequested {
+            await apiServer?.stop()
+            apiSampler?.cancel()
+            await stateFeed.stop()
             shutdownEarly(inputs: inputs, audioInputs: audioInputs.map(\.source), recorder: recorder, pump: pump, audioDevice: audioDevice, writer: writer)
             return
         }
         try await engine.start(t0: t0, firstTick: .zero, lastTick: lastTick)
         let leadLeft = (t0 - HostClock.now()).milliseconds
-        writer?.startSampling(every: 1) { [engine] in engine.makeStats() }
+        writer?.startSampling(every: 1) { [engine, stateFeed, apiServer] in
+            let s = engine.makeStats()
+            if apiServer != nil { stateFeed.publish(stats: s) }
+            return s
+        }
         guard let clock = engine.clock else { throw CLIError("引擎没有时钟") }
         print("""
             switcher-headless \(SwitcherVersion.current)
@@ -244,6 +287,7 @@ final class HeadlessSession: @unchecked Sendable {
               场景：\(options.scriptURL?.path ?? "无")（\(scenario?.events.count ?? 0) 个事件）
               时长：\(totalTicks) 拍（\(String(format: "%.1f", options.durationSeconds)) s）  t0 距现在 \(String(format: "%.0f", leadLeft)) ms\(leadLeft < 0 ? "  ⚠️ 起晚了，开头会跳拍" : "")  合成源提前量 \(String(format: "%.2f", inputLeadMs)) ms
               音频：\(options.audioDevice)  录制：\(options.recordURL?.path ?? "无")  stats：\(options.statsURL?.path ?? "无")  GPU 占用：\(gpu == nil ? "不可用" : "IOKit")
+              API：\(apiServer.flatMap(\.baseURL).map { "\($0.absoluteString)/api/v1（WS /api/v1/events）\(options.api?.token == nil ? "" : "，token 鉴权开")" } ?? "关")
               时钟实时策略：\(clock.isRealtime ? "已生效" : "⚠️ 未生效（V3 会超）")
             """)
 
@@ -252,6 +296,10 @@ final class HeadlessSession: @unchecked Sendable {
             try? await Task.sleep(for: .milliseconds(100))
         }
         let interrupted = stopRequested
+
+        // 7b. 先停 API（不再收命令、关掉 WS），推送源等引擎停了再停（最后几拍的快照还要推）
+        await apiServer?.stop()
+        apiSampler?.cancel()
 
         // 8. 停。跑满的情况：时钟已派完最后一拍、不会再挑帧，先停视频源再停引擎——反过来的话引擎排空在途帧的那几十毫秒里视频源还在 push，
         //    满槽挤掉的帧会被记成 dropped，stats 最后一行的 V4 精确核算每路多出 2–3 帧（W1-B 报告 §4 第 13 条）。
@@ -290,6 +338,7 @@ final class HeadlessSession: @unchecked Sendable {
         audioDevice.stop()
         for entry in audioInputs { entry.source.stop() }
         writer?.close()
+        await stateFeed.stop()
 
         // 9. 汇总（stdout；数字来源都是各对象的计数器，正式指标以 stats.jsonl / frameprobe 为准）
         printSummary(clock: clock, inputs: inputs, audioInputs: audioInputs.map { (number: $0.number, source: $0.source) }, mixer: mixer,
@@ -362,6 +411,10 @@ final class HeadlessSession: @unchecked Sendable {
         }
         if let w = writer {
             lines.append("  stats：\(w.url.path) 写 \(w.writtenLines) 行，丢 \(w.droppedLines)，清洗 \(w.sanitizedLines)")
+        }
+        if apiServer != nil {
+            let b = commandBus.counters, f = stateFeed.counters
+            lines.append("  API：命令 \(b.applied) 条应用 / \(b.rejected) 条拒绝 / \(b.queued) 条排过队；推送快照 \(f.snapshots) 条、stats \(f.stats) 条、唤醒 \(f.wakeups) 次")
         }
         print(lines.joined(separator: "\n"))
     }
