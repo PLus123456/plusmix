@@ -59,3 +59,90 @@ enum M0Factory {
         return Scenario(durationTicks: Int((Double(minutes) * 60 * fps).rounded()), events: events)
     }
 }
+
+/// G3 检查点的节目文件与场景（G3 prompt 第 2 条 b；测试标准 §3 V6 / V7 / A4 的做法）。
+/// 与 M0 的差别：1 号灰度 64、2 号灰度 192（V7 的 A / B），1–4 号带合成音频（A4 的四路 ISO 音轨；2–4 号不送 Master，
+/// 免得四个满幅 click 叠在一起削波、A2 只看 1 号的 click），Overlay 1 预配成右下角画中画（不盖住测试图案和中心采样区）。
+enum G3Factory {
+    /// 灰度按 V7 要求：A = 64（1 号）、B = 192（2 号）；其余错开 ≥ 16 级，frameprobe 的标称灰度容差是 6。
+    static func show(width: Int = 1920, height: Int = 1080) -> Show {
+        struct Spec { let rate: FrameRate; let gray: UInt8; let drift: Double; let jitter: Double; let audio: Bool; let audioDrift: Double; let toMaster: Bool }
+        let specs: [Spec] = [
+            Spec(rate: .fps30, gray: 64, drift: 0, jitter: 0, audio: true, audioDrift: 0, toMaster: true),
+            Spec(rate: .fps60, gray: 192, drift: 0, jitter: 0, audio: true, audioDrift: 100, toMaster: false),
+            Spec(rate: .fps5994, gray: 96, drift: 0, jitter: 0, audio: true, audioDrift: -100, toMaster: false),
+            Spec(rate: .fps5994, gray: 128, drift: 0, jitter: 0, audio: true, audioDrift: 50, toMaster: false),
+            Spec(rate: .fps60, gray: 144, drift: 100, jitter: 0, audio: false, audioDrift: 0, toMaster: true),
+            Spec(rate: .fps60, gray: 160, drift: -100, jitter: 0, audio: false, audioDrift: 0, toMaster: true),
+            Spec(rate: .fps60, gray: 176, drift: 0, jitter: 3, audio: false, audioDrift: 0, toMaster: true),
+            Spec(rate: .fps60, gray: 208, drift: 0, jitter: 0, audio: false, audioDrift: 0, toMaster: true),
+        ]
+        let inputs = specs.enumerated().map { i, s -> InputConfig in
+            let number = i + 1
+            let settings = SyntheticSourceSettings(frameRate: s.rate, width: width, height: height,
+                                                   background: .gray(level: s.gray), patternID: nil,
+                                                   jitterMs: s.jitter, dropEveryN: 0, clockDriftPpm: s.drift,
+                                                   audio: s.audio, audioDriftPpm: s.audioDrift)
+            var name = "合成 \(number) · \(s.rate) 灰 \(s.gray)"
+            if s.drift != 0 { name += String(format: " %+.0f ppm", s.drift) }
+            if s.jitter != 0 { name += " ±\(Int(s.jitter)) ms" }
+            if s.audio { name += s.toMaster ? " +音频" : String(format: " +音频(ISO %+.0f ppm)", s.audioDrift) }
+            var inputSettings = InputSettings()
+            inputSettings.audio = InputAudioSettings(routing: BusRouting(master: s.toMaster))
+            return InputConfig(number: number, name: name, source: .synthetic(settings: settings), settings: inputSettings)
+        }
+        var overlays = Array(repeating: OverlayState(), count: MixerState.overlayCount)
+        // Overlay 1：8 号画中画放右下角 28%，cut 进出；测试图案在左上、闪光块在右上、frameprobe 的灰度采样区是中心 1/4，都不被盖
+        overlays[0] = OverlayState(input: 8, on: false, rect: NormalizedRect(x: 0.70, y: 0.70, width: 0.28, height: 0.28),
+                                   animation: OverlayAnimation(kind: .cut, durationTicks: 0))
+        let mixer = MixerSettings(format: .hd1080p60, program: 1, preview: 2,
+                                  transition: TransitionState(type: .fade, durationTicks: 30),
+                                  ftb: FadeToBlack(), overlays: overlays)
+        let record = OutputState(number: 1, kind: .record, name: "录制", enabled: true,
+                                 settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
+                                                          record: RecordSettings(directory: ".", fileNamePattern: "{show}-{date}-{time}")))
+        return Show(name: "g3", inputs: inputs, mixer: mixer, audio: AudioState(), outputs: [record])
+    }
+
+    /// 时间线（60 fps 拍数）：
+    ///   1000  Cut（PGM 1 → 2；V6：新 ID 恰在第 1000 拍出现且无混合帧）
+    ///   3000  Fade 30 拍（PGM 2 → 1；V7 曲线：frameprobe fade --fade-at 3000 --duration 30 --gray-a 64 --gray-b 192）
+    ///   3600 / 3660 / 3720  T-bar 0.25 / 0.5 / 0.75 各停 60 拍（V7 映射：PVW = 2 号 192 盖在 PGM = 1 号 64 上，
+    ///                       灰度应为 64 + 128 × 进度；gate3-report 按 frameprobe frames 的中心灰度核），3780 推到 1（提交，PGM 2 / PVW 1）
+    ///   7200 起  每 5 s 一次 Cut、切完 1 拍把 PVW 推到下一路（PGM 1 → 2 → … → 8 → 1 循环）；
+    ///   7350 起  每 30 s 开 / 关一次 Overlay 1（与 Cut 错开 2.5 s）
+    /// C 系列客户端（scripts/apitest）从 150 s 起插自己的 cut（相位避开 5 s 切换点），不碰 V6 / V7 那段。
+    static func scenario(minutes: Int = 10, fps: Double = 60, inputs: Int = 8) -> Scenario {
+        let duration = Int((Double(minutes) * 60 * fps).rounded())
+        var events: [ScenarioEvent] = []
+        func add(_ tick: Int, _ command: Command) { events.append(ScenarioEvent(tick: Tick(Int64(tick)), command: command)) }
+        add(1000, .cut)
+        add(3000, .fade(durationTicks: 30))
+        add(3600, .tbar(progress: 0.25))
+        add(3660, .tbar(progress: 0.5))
+        add(3720, .tbar(progress: 0.75))
+        add(3780, .tbar(progress: 1))
+        var pgm = 2, pvw = 1
+        let ticksPer5s = Int((5 * fps).rounded())
+        var tick = Int((120 * fps).rounded())
+        while tick < duration {
+            add(tick, .cut)
+            (pgm, pvw) = (pvw, pgm)
+            let next = (pgm % inputs) + 1
+            if next != pvw {
+                add(tick + 1, .setPreview(input: next))
+                pvw = next
+            }
+            tick += ticksPer5s
+        }
+        var on = true
+        var overlayTick = Int((122.5 * fps).rounded())
+        let ticksPer30s = Int((30 * fps).rounded())
+        while overlayTick < duration {
+            add(overlayTick, .overlay(channel: 1, on: on, input: nil))
+            on.toggle()
+            overlayTick += ticksPer30s
+        }
+        return Scenario(durationTicks: duration, events: events.sorted { $0.tick.rawValue < $1.tick.rawValue })
+    }
+}

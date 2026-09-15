@@ -2,6 +2,7 @@
 // switcher-headless：命令行跑引擎（无界面模式，测试标准 §2.4）。
 // G2 接线：Engine + MetalRenderer + SyntheticVideoInput × N + 合成音频 + 混音（空设备）+ VideoEncoder / Recorder + StatsWriter。
 // W2-C：--api 起 SwitcherControl 的 CommandBus + StateFeed + APIServer（C 系列测试不依赖 App）。
+// G3：音频换用 W2-E 的 SwitcherAudioIntegration.AudioEngine（对齐延迟 / AFV / 消费者泵 / 真设备重采样），--iso-audio 起 ISO 音轨录制器（A4）。
 // 依赖方向：Tools 在最外层，可以依赖所有包（scripts/check-deps.sh）。
 import PackageDescription
 
@@ -23,6 +24,7 @@ let package = Package(
                 .product(name: "SwitcherEngine", package: "SwitcherCore"),
                 .product(name: "SwitcherRender", package: "SwitcherCore"),
                 .product(name: "SwitcherAudio", package: "SwitcherAudio"),
+                .product(name: "SwitcherAudioIntegration", package: "SwitcherAudio"),
                 .product(name: "SwitcherOutputs", package: "SwitcherOutputs"),
                 .product(name: "SwitcherControl", package: "SwitcherControl"),
                 .product(name: "SwitcherTestKit", package: "SwitcherTestKit"),
