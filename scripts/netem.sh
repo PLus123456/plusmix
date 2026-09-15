@@ -18,6 +18,12 @@
 #   sudo scripts/netem.sh block 1936 30        → 第 2 路断 30 s；第 1、3 路丢帧应为 0，第 2 路 30 s 后自动重连。
 # E9：sudo scripts/netem.sh limit 1935 4200 300  → 6 Mbps 的流限到 70%，跑 5 分钟。
 #
+# 没有 sudo 时：StreamingTests 默认用进程内的用户态代理（ThrottleProxy，限速 / 黑洞）跑同样的 E7 / E8 / E9；设 SWITCHER_NETEM 才走这里。
+#
+# SRT 提醒：macOS 应用防火墙会拦 mediamtx（ad-hoc 签名）的入站 UDP，SRT 握手没回应（回环也拦）。放行一次：
+#   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /opt/homebrew/bin/mediamtx
+#   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /opt/homebrew/bin/mediamtx
+#
 # 注意：
 # - 本机回环（lo0）上 pf 也生效；限速只对"发往 PORT"的方向（上行），服务器回来的 ACK 不限。
 # - 管道编号固定 1（限速 / 丢包 / 延迟共用一条管道），多个端口同时限速请分次用不同脚本实例——一期只需要单端口。

@@ -123,7 +123,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     private let stateLock = NSLock()
     private var running = false                 // stateLock
     private var senderTask: Task<Void, Never>?  // stateLock
-    private let stopRequested = Atomic<Bool>(false)
+    private let stopInitiated = Atomic<Bool>(false)   // stop() 的幂等门
+    private let stopRequested = Atomic<Bool>(false)   // 编码器已停、尾巴已进队列：发送 Task 可以排空并退出
     private let stopped = DispatchGroup()
     private let wake: AsyncStream<Void>
     private let wakeContinuation: AsyncStream<Void>.Continuation
@@ -194,6 +195,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     public func start() throws {
         try stateLock.withLock {
             guard !running else { throw Error.alreadyRunning }
+            stopInitiated.store(false, ordering: .releasing)
             stopRequested.store(false, ordering: .releasing)
             try videoEncoder.start()
             if let audio = configuration.audio, let ring = pcmRing {
@@ -261,17 +263,19 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     private func beginStop() -> Bool {
         let shouldStop: Bool = stateLock.withLock {
             guard running else { return false }
-            let (exchanged, _) = stopRequested.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing)
+            let (exchanged, _) = stopInitiated.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing)
             return exchanged
         }
         guard shouldStop else { return false }
         atomicCounters.state = .stopping
-        // 先停编码器：VideoEncoder.stop 会 flush，尾巴帧同步进队列；音频线程 finish 之后退出
+        // 先停编码器：VideoEncoder.stop 会 flush，尾巴帧同步进队列；音频线程 finish 之后退出。
+        // 尾巴都进了队列才置 stopRequested，否则发送 Task 可能先看到"停 + 队列空"就收尾，把随后到的尾巴当断线丢弃。
         videoEncoder.stop()
         audioAccepting.store(false, ordering: .releasing)
         audioStopRequested.store(true, ordering: .releasing)
         audioWakeup.signal()
         audioThreadGroup.wait()
+        stopRequested.store(true, ordering: .releasing)
         wakeContinuation.yield()
         return true
     }

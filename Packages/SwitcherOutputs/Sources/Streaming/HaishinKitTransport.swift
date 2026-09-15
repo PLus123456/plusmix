@@ -94,10 +94,17 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         protocolName = destination.scheme.rawValue
         self.audioFormat = audioFormat
         self.metadata = metadata
-        connection = RTMPConnection(timeout: connectTimeout, requestTimeout: 1000)
+        connection = RTMPConnection(timeout: connectTimeout)
     }
 
     func connect() async throws {
+        // 先建流再 connect：RTMPConnection.connect 成功后会同步给每个已注册的流做 createStream；
+        // 反过来（connect 之后再建流）createStream 在流的 init Task 里异步跑，publish 可能抢在它前面用 streamId 0 发出去而超时（E7 实测）。
+        // fcPublishName：FMLE 序列（releaseStream / FCPublish / FCUnpublish），关流时不用等服务器回 Unpublish.Success（有的服务器不回，会等满 requestTimeout）
+        let s = RTMPStream(connection: connection, fcPublishName: destination.streamName.isEmpty ? nil : destination.streamName)
+        await s.setBitRateStrategy(reporter)
+        for _ in 0..<5 { await Task.yield() }          // 让 init 里的 addStream Task 先跑
+        try? await Task.sleep(for: .milliseconds(10))
         do {
             let r = try await connection.connect(destination.connectURL)
             guard r.status?.code == RTMPConnection.Code.connectSuccess.rawValue else {
@@ -108,8 +115,6 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         } catch {
             throw StreamTransportError.connectFailed("\(error)")
         }
-        let s = RTMPStream(connection: connection)
-        await s.setBitRateStrategy(reporter)
         do {
             let r = try await s.publish(destination.streamName)
             guard r.status?.code == RTMPStream.Code.publishStart.rawValue else {
