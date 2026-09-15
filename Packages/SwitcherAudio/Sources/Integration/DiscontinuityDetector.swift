@@ -4,9 +4,11 @@ import Foundation
 //
 // 两种用法：
 //   - 流式（`feed`）：泵线程对 Master 块逐样本看，跨块边界连续；计数进状态快照（A1 的第三个加数）。
-//     泵线程不知道 click 在哪，用"满幅平台"识别合成信号的 click：≥ 8 个相同样本且 |x| ≥ 0.9 的平台，
-//     进平台 / 出平台的两次跳变不算不连续（真实节目音频不会出现样本级恒定的满幅平台；混音断裂 / 丢块 / 延迟线跳变
-//     产生的是一次孤立跳变，仍会被计到）。
+//     泵线程不知道 click 在哪，用"高电平平台"识别合成信号的 click：跳进去之后连续 ≥ 8 个样本 |x| ≥ 0.5（单声道 click +1.0
+//     居中声像后每边 0.707，经 sinc 重采样有 ±0.03 的振铃，再叠别的输入 ±0.2 仍在线上），进平台 / 出平台的两次跳变不算不连续；
+//     混音断裂 / 丢块 / 延迟线跳变产生的是一次孤立跳变，仍会被计到。Master 里 click 叠上更响的别路时启发式会失效（实测：
+//     要求样本相同 → 100 次增删用例 60 个假阳性；电平 0.6 + 另一路 ±0.14 → 每秒 1 个假阳性），所以它只是给合成信号长跑看的
+//     诊断数；正式的 A1 第三项按"已知 click 位置排除"的口径：`feed(..., isExcluded:)` 或离线 `analyze`。
 //   - 离线（`analyze`）：测试对整段样本分析，用已知的 click 位置排除（TestSignal.isClick），不靠平台启发式。
 public struct DiscontinuityDetector: Sendable {
     public struct Options: Hashable, Sendable {
@@ -16,8 +18,8 @@ public struct DiscontinuityDetector: Sendable {
         public var ignorePlateaus: Bool = true
         /// 平台最少样本数。
         public var plateauMinFrames: Int = 8
-        /// 平台电平下限（|x|）。
-        public var plateauLevel: Float = 0.9
+        /// 平台电平下限（|x|）：单声道 click 居中声像后 0.707，叠别路 ±0.2 仍 ≥ 0.5。
+        public var plateauLevel: Float = 0.5
         public init() {}
     }
 
@@ -32,7 +34,7 @@ public struct DiscontinuityDetector: Sendable {
 
     private struct ChannelState {
         var prev: Float = 0
-        /// 以 prev 结尾的平台长度（prev 在电平之上且与前面样本相同的连续个数；不在电平上为 0）。
+        /// 以 prev 结尾的平台长度（连续 |x| ≥ 电平的样本数；不在电平上为 0）。
         var run: Int = 0
         /// 候选：跳进了一个可能的平台，还在数样本。
         var pending: (index: Int64, jump: Float, seen: Int)?
@@ -56,10 +58,10 @@ public struct DiscontinuityDetector: Sendable {
     }
 
     /// 流式喂一块（非交错平面）。返回本块新增的不连续数。
+    /// `isExcluded(i)`（i = 自流起始的样本序号）为 true 的样本上的跳变不算（测试知道 click 在哪时用；跳入 / 跳出都排除）。
     @discardableResult
-    public mutating func feed(planes: UnsafePointer<UnsafePointer<Float>>, frameCount: Int) -> Int {
+    public mutating func feed(planes: UnsafePointer<UnsafePointer<Float>>, frameCount: Int, isExcluded: ((Int64) -> Bool)? = nil) -> Int {
         var added = 0
-        let eps: Float = 1e-6
         for c in 0..<channels {
             let x = planes[c]
             var s = states[c]
@@ -67,9 +69,9 @@ public struct DiscontinuityDetector: Sendable {
                 let v = x[i]
                 let idx = framesSeen + Int64(i)
                 let jump = v - s.prev
-                let big = abs(jump) > options.threshold
+                var big = abs(jump) > options.threshold
+                if big, let ex = isExcluded, ex(idx) || ex(idx - 1) { big = false }
                 let atLevel = abs(v) >= options.plateauLevel
-                let same = abs(v - s.prev) < eps
                 if big {
                     if let p = s.pending {           // 候选平台被一次大跳变打断：候选是真不连续
                         added += countOnce(Event(sampleIndex: p.index, channel: c, jump: p.jump))
@@ -83,7 +85,7 @@ public struct DiscontinuityDetector: Sendable {
                         added += countOnce(Event(sampleIndex: idx, channel: c, jump: jump))
                     }
                 } else if var p = s.pending {
-                    if same && atLevel {
+                    if atLevel {
                         p.seen += 1
                         s.pending = p.seen >= options.plateauMinFrames ? nil : p
                     } else {
@@ -91,7 +93,7 @@ public struct DiscontinuityDetector: Sendable {
                         s.pending = nil
                     }
                 }
-                if atLevel && same { s.run += 1 } else { s.run = atLevel ? 1 : 0 }
+                s.run = atLevel ? s.run + 1 : 0
                 s.prev = v
             }
             states[c] = s
