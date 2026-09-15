@@ -95,6 +95,8 @@ public struct LatencyStats: Sendable, Hashable {
     public var ticksWithoutFrame: Int
     /// 用到这路且返回重复帧的拍数（帧率转换）。
     public var ticksReused: Int
+    /// 进帧槽时刻早于 t0（引擎还没起）的新帧数，不计入样本。
+    public var framesBeforeT0: Int
 
     public func frames(at frameRate: FrameRate) -> (mean: Double, p99: Double, max: Double) {
         let f = frameRate.approximateFramesPerSecond / 1000
@@ -111,28 +113,46 @@ public final class LatencyConsumer: FrameConsumer, @unchecked Sendable {
     private let counters: UnsafeMutablePointer<Atomic<Int>>
     private let capacity: Int
     private let framesSeen = Atomic<UInt64>(0)
+    private let t0: UInt64
+    /// 离群样本（> outlierThreshold）：[输入下标, tick, 延迟 ticks, ingress ticks, 消费时刻 ticks]，最多 64 条
+    private let outlierRing: UnsafeMutablePointer<Int64>
+    private let outlierCount = Atomic<Int>(0)
+    private let outlierThreshold: Int64
+    public struct Outlier: Sendable, Hashable {
+        public var inputNumber: Int
+        public var tick: Tick
+        public var latencyMs: Double
+        public var ingressTime: HostTime
+        public var consumeTime: HostTime
+    }
 
-    public init(slots: [(number: Int, slot: LatencyFrameSlot)], capacity: Int = 1 << 17) {
+    public init(slots: [(number: Int, slot: LatencyFrameSlot)], capacity: Int = 1 << 17, outlierThreshold: HostDuration = HostDuration(milliseconds: 100)) {
         self.slots = slots
         self.capacity = capacity
+        self.outlierThreshold = outlierThreshold.ticks
+        t0 = slots.first?.slot.timing.clock.t0.ticks ?? 0
+        outlierRing = .allocate(capacity: 64 * 5)
+        outlierRing.initialize(repeating: 0, count: 64 * 5)
         samples = slots.map { _ in
             let p = UnsafeMutablePointer<Int64>.allocate(capacity: capacity)
             p.initialize(repeating: 0, count: capacity)
             return p
         }
-        counters = .allocate(capacity: slots.count * 3)
-        for i in 0..<(slots.count * 3) { (counters + i).initialize(to: Atomic(0)) }
+        counters = .allocate(capacity: slots.count * 4)
+        for i in 0..<(slots.count * 4) { (counters + i).initialize(to: Atomic(0)) }
     }
 
     deinit {
         for p in samples { p.deallocate() }
-        counters.deinitialize(count: slots.count * 3)
+        counters.deinitialize(count: slots.count * 4)
         counters.deallocate()
+        outlierRing.deallocate()
     }
 
-    @inline(__always) private func count(_ i: Int) -> UnsafeMutablePointer<Atomic<Int>> { counters + i * 3 }
-    @inline(__always) private func noFrame(_ i: Int) -> UnsafeMutablePointer<Atomic<Int>> { counters + i * 3 + 1 }
-    @inline(__always) private func reused(_ i: Int) -> UnsafeMutablePointer<Atomic<Int>> { counters + i * 3 + 2 }
+    @inline(__always) private func count(_ i: Int) -> UnsafeMutablePointer<Atomic<Int>> { counters + i * 4 }
+    @inline(__always) private func noFrame(_ i: Int) -> UnsafeMutablePointer<Atomic<Int>> { counters + i * 4 + 1 }
+    @inline(__always) private func reused(_ i: Int) -> UnsafeMutablePointer<Atomic<Int>> { counters + i * 4 + 2 }
+    @inline(__always) private func beforeT0(_ i: Int) -> UnsafeMutablePointer<Atomic<Int>> { counters + i * 4 + 3 }
 
     public func consume(_ frame: RenderedFrame) {
         let now = HostClock.now()
@@ -140,11 +160,23 @@ public final class LatencyConsumer: FrameConsumer, @unchecked Sendable {
         var i = 0
         while i < slots.count {
             if let e = slots[i].slot.entry(forTick: frame.tick) {
-                if e.isNew {
+                if e.isNew, e.ingressTime.ticks < t0 {
+                    // 引擎起来之前就进了帧槽的帧：它等的是引擎不是管线，不算 L1
+                    beforeT0(i).pointee.add(1, ordering: .relaxed)
+                } else if e.isNew {
                     let n = count(i).pointee.load(ordering: .relaxed)
+                    let d = (now - e.ingressTime).ticks
                     if n < capacity {
-                        samples[i][n] = (now - e.ingressTime).ticks
+                        samples[i][n] = d
                         count(i).pointee.store(n + 1, ordering: .releasing)
+                    }
+                    if d > outlierThreshold {
+                        let k = outlierCount.load(ordering: .relaxed)
+                        if k < 64 {
+                            let p = outlierRing + k * 5
+                            p[0] = Int64(i); p[1] = frame.tick.rawValue; p[2] = d; p[3] = Int64(bitPattern: e.ingressTime.ticks); p[4] = Int64(bitPattern: now.ticks)
+                            outlierCount.store(k + 1, ordering: .releasing)
+                        }
                     }
                 } else {
                     reused(i).pointee.add(1, ordering: .relaxed)
@@ -159,6 +191,16 @@ public final class LatencyConsumer: FrameConsumer, @unchecked Sendable {
     /// 已消费的 PGM 帧数。
     public var framesConsumed: UInt64 { framesSeen.load(ordering: .relaxed) }
 
+    /// 离群样本列表。
+    public var outliers: [Outlier] {
+        let k = outlierCount.load(ordering: .acquiring)
+        return (0..<k).map { j in
+            let p = outlierRing + j * 5
+            return Outlier(inputNumber: slots[Int(p[0])].number, tick: Tick(p[1]), latencyMs: HostDuration(ticks: p[2]).milliseconds,
+                           ingressTime: HostTime(ticks: UInt64(bitPattern: p[3])), consumeTime: HostTime(ticks: UInt64(bitPattern: p[4])))
+        }
+    }
+
     /// 某路的 L1 统计（普通线程；拷贝样本再排序）。
     public func stats(forInput number: Int) -> LatencyStats? {
         guard let i = slots.firstIndex(where: { $0.number == number }) else { return nil }
@@ -168,6 +210,7 @@ public final class LatencyConsumer: FrameConsumer, @unchecked Sendable {
         func pct(_ p: Double) -> Double { v.isEmpty ? 0 : v[min(v.count - 1, Int((Double(v.count - 1) * p).rounded()))] }
         return LatencyStats(samples: n, meanMs: v.isEmpty ? 0 : v.reduce(0, +) / Double(v.count), p50Ms: pct(0.5), p99Ms: pct(0.99),
                             maxMs: v.last ?? 0, minMs: v.first ?? 0,
-                            ticksWithoutFrame: noFrame(i).pointee.load(ordering: .relaxed), ticksReused: reused(i).pointee.load(ordering: .relaxed))
+                            ticksWithoutFrame: noFrame(i).pointee.load(ordering: .relaxed), ticksReused: reused(i).pointee.load(ordering: .relaxed),
+                            framesBeforeT0: beforeT0(i).pointee.load(ordering: .relaxed))
     }
 }

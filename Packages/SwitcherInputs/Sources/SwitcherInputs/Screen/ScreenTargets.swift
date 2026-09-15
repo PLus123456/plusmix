@@ -34,8 +34,8 @@ public enum ScreenTargets {
 
     public static func displays() async throws -> [DisplayInfo] {
         try await content().displays.map { d in
-            DisplayInfo(id: d.displayID, pixelWidth: CGDisplayPixelsWide(d.displayID), pixelHeight: CGDisplayPixelsHigh(d.displayID),
-                        pointWidth: d.width, pointHeight: d.height)
+            let scale = max(1, Int(SCContentFilter(display: d, excludingWindows: []).pointPixelScale.rounded()))
+            return DisplayInfo(id: d.displayID, pixelWidth: d.width * scale, pixelHeight: d.height * scale, pointWidth: d.width, pointHeight: d.height)
         }
     }
 
@@ -60,7 +60,9 @@ public enum ScreenTargets {
                 throw ScreenInput.ScreenInputError.targetNotFound("显示器 \(id)")
             }
             let filter = SCContentFilter(display: d, excludingWindows: [])
-            return (filter, CGDisplayPixelsWide(d.displayID), CGDisplayPixelsHigh(d.displayID), "显示器 \(d.displayID) \(d.width)×\(d.height) pt")
+            // CGDisplayPixelsWide 在 HiDPI 缩放模式下给的是点数（探针：3456×2234 面板报 1728×1117）；像素 = 点 × pointPixelScale
+            let scale = max(1, Int(filter.pointPixelScale.rounded()))
+            return (filter, d.width * scale, d.height * scale, "显示器 \(d.displayID) \(d.width)×\(d.height) pt ×\(scale)")
         case .window(let id):
             guard let w = c.windows.first(where: { $0.windowID == id }) else { throw ScreenInput.ScreenInputError.targetNotFound("窗口 \(id)") }
             let filter = SCContentFilter(desktopIndependentWindow: w)
@@ -73,7 +75,8 @@ public enum ScreenTargets {
             }
             guard let d = c.displays.first else { throw ScreenInput.ScreenInputError.targetNotFound("显示器") }
             let filter = SCContentFilter(display: d, including: [app], exceptingWindows: [])
-            return (filter, CGDisplayPixelsWide(d.displayID), CGDisplayPixelsHigh(d.displayID), "应用 \(app.applicationName)（\(bundleID)）在显示器 \(d.displayID)")
+            let scale = max(1, Int(filter.pointPixelScale.rounded()))
+            return (filter, d.width * scale, d.height * scale, "应用 \(app.applicationName)（\(bundleID)）在显示器 \(d.displayID) ×\(scale)")
         }
     }
 }

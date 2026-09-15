@@ -14,8 +14,9 @@ import SwitcherContracts
 /// - 帧率：`source.frameRate`，nil = 节目帧率（minimumFrameInterval）。
 /// - 时间戳：SCK 的 pts 在 host clock 上（探针，报告 §5），直接换成 host tick；离现在超过 1 s 的当异常，退回帧附件 displayTime
 ///   （mach 时刻），再退回现在（都计数）。
-/// - 画面不动时 SCK 不给新帧（status idle）：一个与采集同队列的定时器每个节目拍把最后一帧以 pts = 现在 重新 push
-///   （帧槽不靠 reused 撑画面，Stats 里 dup = 0；同一串行队列 = 单生产者）。
+/// - 画面不动时 SCK 不给新画面，但仍按帧间隔送 status = idle 的样本（探针：10 s 收到 608 个样本，其中 520 个 idle）：
+///   用 idle 样本的时间戳把最后一帧重新 push（同一串行队列 = 单生产者；与真帧同相位，帧槽不靠 reused 撑画面，Stats 里 dup ≈ 0）。
+///   用定时器重推试过：与 SCK 的相位随机，一拍两帧 / 一拍没帧交替，10 s 里 138 dup + 56 drop。
 /// - 系统音频：`capturesAudio`，48 kHz、环的声道数，排除本进程自己的声音；块首 host time 写环。
 /// - 无信号：流停止（didStopWithError）立即 noSignal 并重试；看门狗兜底。
 /// - 权限：`CGPreflightScreenCaptureAccess()` 为假 → `.error(文案)`，请求一次（系统提示 / 打开系统设置），每秒轮询，授权后自动建流。
@@ -26,7 +27,7 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
         /// 缩放上限；nil = 节目分辨率。
         public var maxWidth: Int?
         public var maxHeight: Int?
-        /// 画面不动时每拍重推最后一帧。
+        /// 画面不动时用 SCK 的 idle 样本重推最后一帧。
         public var refreshWhenIdle = true
         /// 无信号门限倍数。
         public var noSignalMultiplier = 3
@@ -133,7 +134,6 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
     private var color = ColorInfo.sRGBFull
     private var last: LastFrame?
     private var lastPushAt = HostTime.zero
-    private var refreshTimer: DispatchSourceTimer?
     private var audioWriter: AudioSampleWriter?
 
     final class LastFrame: @unchecked Sendable {
@@ -269,7 +269,6 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
         let timing = self.timing
         let fps = (frameRate ?? timing.format.frameRate).approximateFramesPerSecond
         let interval = HostDuration(seconds: 1 / max(fps, 1))
-        let refreshInterval = timing.frameDuration
         captureQueue.sync { [self] in
             sequence = 0
             frameDuration = interval
@@ -277,18 +276,8 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
             last = nil
             lastPushAt = .zero
             audioWriter = (cfg.capturesAudio ? audioRing : nil).map { AudioSampleWriter(ring: $0) }
-            refreshTimer?.cancel()
-            refreshTimer = nil
-            if options.refreshWhenIdle {
-                let t = DispatchSource.makeTimerSource(queue: captureQueue)
-                let ns = Int(max(refreshInterval.nanoseconds, 1_000_000))
-                t.schedule(deadline: .now() + .nanoseconds(ns), repeating: .nanoseconds(ns), leeway: .nanoseconds(ns / 4))
-                t.setEventHandler { [weak self] in self?.refreshIfIdle() }
-                refreshTimer = t
-                t.resume()
-            }
         }
-        let wd = NoSignalWatchdog(expectedInterval: max(interval, refreshInterval), multiplier: options.noSignalMultiplier, queue: sessionQueue) { [weak self] present in
+        let wd = NoSignalWatchdog(expectedInterval: interval, multiplier: options.noSignalMultiplier, queue: sessionQueue) { [weak self] present in
             guard let self, running.load(ordering: .acquiring), stream != nil else { return }
             if present {
                 errorBox.withLock { $0 = nil }
@@ -318,8 +307,6 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
         }
         stream = nil
         captureQueue.sync { [self] in
-            refreshTimer?.cancel()
-            refreshTimer = nil
             last = nil
             audioWriter = nil
         }
@@ -352,10 +339,6 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
             if let s = a[.status] as? Int, let st = SCFrameStatus(rawValue: s) { status = st }
             if let t = a[.displayTime] as? UInt64 { displayTime = t }
         }
-        guard status == .complete || status == .started, let pb = CMSampleBufferGetImageBuffer(sb), CVPixelBufferGetIOSurface(pb) != nil else {
-            if status == .idle { idleCount.add(1, ordering: .relaxed) } else { countersBox.framesRejected.add(1, ordering: .relaxed) }
-            return
-        }
         let now = HostClock.now()
         var pts = HostTime(hostClockTime: CMSampleBufferGetPresentationTimeStamp(sb))
         let oneSecond = HostDuration(seconds: 1)
@@ -369,6 +352,20 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
             }
         }
         if pts > now { pts = now }
+        guard status == .complete || status == .started, let pb = CMSampleBufferGetImageBuffer(sb), CVPixelBufferGetIOSurface(pb) != nil else {
+            if status == .idle {
+                idleCount.add(1, ordering: .relaxed)
+                // 画面没变：用 idle 样本的时间戳把最后一帧再推一次（与真帧同相位）
+                if options.refreshWhenIdle, let l = last {
+                    push(l.buffer, pts: pts, ingress: now)
+                    refreshCount.add(1, ordering: .relaxed)
+                    watchdog?.noteFrame(at: now)
+                }
+            } else {
+                countersBox.framesRejected.add(1, ordering: .relaxed)
+            }
+            return
+        }
         push(pb, pts: pts, ingress: now)
         watchdog?.noteFrame(at: now)
         let d = (now - pts).nanoseconds
@@ -386,16 +383,6 @@ public final class ScreenInput: NSObject, Input, @unchecked Sendable {
         countersBox.framesPushed.add(1, ordering: .relaxed)
         last = LastFrame(pb)
         lastPushAt = ingress
-    }
-
-    /// 定时器（采集队列）：上一拍以来没新帧就把最后一帧重推。
-    private func refreshIfIdle() {
-        guard let l = last else { return }
-        let now = HostClock.now()
-        guard now - lastPushAt >= timing.frameDuration - HostDuration(milliseconds: 1) else { return }
-        push(l.buffer, pts: now, ingress: now)
-        refreshCount.add(1, ordering: .relaxed)
-        watchdog?.noteFrame(at: now)
     }
 
     private func handleAudio(_ sb: CMSampleBuffer) {
@@ -427,7 +414,7 @@ extension ScreenInput: SCStreamOutput, SCStreamDelegate {
             self.stream = nil
             watchdog?.stop()
             watchdog = nil
-            captureQueue.sync { [self] in refreshTimer?.cancel(); refreshTimer = nil; last = nil }
+            captureQueue.sync { [self] in last = nil }
             errorBox.withLock { $0 = "屏幕采集流停止：\(error.localizedDescription)，将重试" }
             stateBox.set(.noSignal)
         }
