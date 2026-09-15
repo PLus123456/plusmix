@@ -157,8 +157,8 @@ final class SendQueue: @unchecked Sendable {
     }
 
     /// 起步对齐：选原点包 —— nearest = false：最后一个 hostTime ≤ time 的包（没有就是第一个包）；true：|hostTime − time| 最小的包。
-    /// 丢掉原点前面、除了保留 preroll 个之外的更早的包（返回丢的个数在 dropped），返回原点包的时刻；队列空返回 nil。
-    func alignAudio(to time: HostTime, nearest: Bool, preroll: Int) -> HostTime? {
+    /// 丢掉原点前面、除了保留 preroll 个之外的更早的包，返回原点包的时刻和丢的个数；队列空返回 nil。
+    func alignAudio(to time: HostTime, nearest: Bool, preroll: Int) -> (origin: HostTime, dropped: Int)? {
         lock.lock()
         defer { lock.unlock() }
         guard audioCount > 0 else { return nil }
@@ -179,7 +179,8 @@ final class SendQueue: @unchecked Sendable {
             audioHead = (audioHead + 1) % audioCapacity
             audioCount -= 1
         }
-        return audio[(audioHead + (originIndex - keepFrom)) % audioCapacity]?.hostTime
+        guard let origin = audio[(audioHead + (originIndex - keepFrom)) % audioCapacity]?.hostTime else { return nil }
+        return (origin, keepFrom)
     }
 
     /// 队列里是否存在 hostTime ≥ time 的音频包（说明 time 之前的都已经到齐）。

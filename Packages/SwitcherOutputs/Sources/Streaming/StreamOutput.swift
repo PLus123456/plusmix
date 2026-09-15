@@ -485,11 +485,14 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                         switch alignment {
                         case .dtsOffset:
                             // 原点 = 最后一个不晚于关键帧时刻的包；关键帧 DTS 设成它的时刻（CTS = 差值）。原点在关键帧之后（不该发生）就不偏移。
-                            if let origin = queue.alignAudio(to: k.tickTime, nearest: false, preroll: 0), origin <= k.tickTime {
-                                s.dtsOffset = k.tickTime - origin
+                            if let (origin, dropped) = queue.alignAudio(to: k.tickTime, nearest: false, preroll: 0) {
+                                if origin <= k.tickTime { s.dtsOffset = k.tickTime - origin }
+                                atomicCounters.audioDropped.add(UInt64(dropped), ordering: .relaxed)
                             }
                         case .nearestPacket(let preroll):
-                            _ = queue.alignAudio(to: k.tickTime, nearest: true, preroll: preroll)
+                            if let (_, dropped) = queue.alignAudio(to: k.tickTime, nearest: true, preroll: preroll) {
+                                atomicCounters.audioDropped.add(UInt64(dropped), ordering: .relaxed)
+                            }
                         }
                         s.aligned = true
                     } else if waitedMs < policy.audioStartWaitMs && !stopping {

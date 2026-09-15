@@ -94,8 +94,9 @@ final class SendQueueTests: XCTestCase {
             q.beginSession()
             packets.forEach { _ = q.pushAudio($0) }
             XCTAssertTrue(q.hasAudio(atOrAfter: k))
-            let origin = q.alignAudio(to: k, nearest: false, preroll: 0)
-            XCTAssertEqual(origin, times[2])
+            let r = q.alignAudio(to: k, nearest: false, preroll: 0)
+            XCTAssertEqual(r?.origin, times[2])
+            XCTAssertEqual(r?.dropped, 2)
             XCTAssertEqual(q.depth.audio, packets.count - 2)
             XCTAssertEqual(q.peekAudio()?.hostTime, times[2])
         }
@@ -104,8 +105,9 @@ final class SendQueueTests: XCTestCase {
             let q = SendQueue(videoCapacity: 2, audioCapacity: 16)
             q.beginSession()
             packets.forEach { _ = q.pushAudio($0) }
-            let origin = q.alignAudio(to: k, nearest: true, preroll: 1)
-            XCTAssertEqual(origin, times[2])
+            let r = q.alignAudio(to: k, nearest: true, preroll: 1)
+            XCTAssertEqual(r?.origin, times[2])
+            XCTAssertEqual(r?.dropped, 1)
             XCTAssertEqual(q.peekAudio()?.hostTime, times[1])
             XCTAssertEqual(q.depth.audio, packets.count - 1)
         }
@@ -114,8 +116,9 @@ final class SendQueueTests: XCTestCase {
             let q = SendQueue(videoCapacity: 2, audioCapacity: 16)
             q.beginSession()
             packets.forEach { _ = q.pushAudio($0) }
-            let origin = q.alignAudio(to: times[2] + HostDuration(milliseconds: 15), nearest: true, preroll: 0)
-            XCTAssertEqual(origin, times[3])
+            let r = q.alignAudio(to: times[2] + HostDuration(milliseconds: 15), nearest: true, preroll: 0)
+            XCTAssertEqual(r?.origin, times[3])
+            XCTAssertEqual(r?.dropped, 3)
             XCTAssertEqual(q.peekAudio()?.hostTime, times[3])
         }
     }
