@@ -2,7 +2,7 @@ import Logging
 
 /// API 服务配置。
 public struct APIServerConfiguration: Sendable, Hashable {
-    /// 默认端口：8765（W2-C 选的；vMix / OBS 那些默认端口有意避开，报告里有记录）。
+    /// 默认端口：8765（W2-C 选的，避开常见直播软件的默认端口，报告里有记录）。
     public static let defaultPort = 8765
 
     /// 监听地址；默认只监听本机回环，要给别的机器用改成 0.0.0.0。
