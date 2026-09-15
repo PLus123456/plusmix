@@ -221,9 +221,10 @@ final class ResultBox<T: Sendable>: @unchecked Sendable {
     func get() -> Result<T, Error> { lock.withLock { value ?? .failure(TestFailure("没有结果")) } }
 }
 
-/// 网络损伤（scripts/netem.sh）。SWITCHER_NETEM=sudo：测试进程自己 `sudo -n scripts/netem.sh …`（先在同一终端 `sudo -v`）；
-/// SWITCHER_NETEM=broker：写请求文件给 `sudo scripts/netem.sh serve`（默认目录 $TMPDIR/switcher-netem，SWITCHER_NETEM_DIR 可改）；
-/// 没设：相关测试 XCTSkip。
+/// 网络损伤（scripts/netem.sh）。SWITCHER_NETEM=sudo：测试进程自己 `sudo -n scripts/netem.sh …`（先在同一终端 `sudo -v`；
+/// 注意 sudo 凭证默认 5 分钟过期，E9 一跑 5 分钟，推荐 broker）；
+/// SWITCHER_NETEM=broker：写请求文件给另一个终端里的 `sudo scripts/netem.sh serve`（默认目录 /tmp/switcher-netem，SWITCHER_NETEM_DIR 可改）；
+/// 没设：E7 / E8 / E9 用进程内的 ThrottleProxy（不需要 sudo）。
 enum Netem {
     enum Mode { case sudo, broker(URL) }
 
@@ -234,8 +235,7 @@ enum Netem {
             guard o.code == 0 else { throw XCTSkip("BLOCKED-sudo：SWITCHER_NETEM=sudo 但 sudo -n 不可用（先在同一终端 sudo -v）") }
             return .sudo
         case "broker":
-            let dir = ProcessInfo.processInfo.environment["SWITCHER_NETEM_DIR"].map { URL(fileURLWithPath: $0) }
-                ?? FileManager.default.temporaryDirectory.appendingPathComponent("switcher-netem")
+            let dir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SWITCHER_NETEM_DIR"] ?? "/tmp/switcher-netem")
             guard FileManager.default.fileExists(atPath: dir.path) else {
                 throw XCTSkip("BLOCKED-sudo：SWITCHER_NETEM=broker 但 \(dir.path) 不存在（先 sudo scripts/netem.sh serve \(dir.path)）")
             }
@@ -250,14 +250,17 @@ enum Netem {
         let script = try StreamTestPaths.repoRoot().appendingPathComponent("scripts/netem.sh").path
         switch mode {
         case .sudo:
+            // 带秒数的命令会 sleep 到时自动清；不等它退出，只等 0.5 s 让规则装上，然后看它有没有立刻失败（凭证过期 = sudo -n 秒退）
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
             p.arguments = ["-n", script] + args
             p.standardOutput = FileHandle.standardOutput
             p.standardError = FileHandle.standardError
             try p.run()
-            // 带秒数的命令会 sleep；不等它退出，只等它把规则装上（0.5 s）
             Thread.sleep(forTimeInterval: 0.5)
+            if !p.isRunning, p.terminationStatus != 0 {
+                XCTFail("netem（sudo -n）失败，退出码 \(p.terminationStatus)：sudo 凭证过期？重新 sudo -v，或改用 SWITCHER_NETEM=broker")
+            }
         case .broker(let dir):
             let reply = dir.appendingPathComponent("netem.reply")
             try? FileManager.default.removeItem(at: reply)

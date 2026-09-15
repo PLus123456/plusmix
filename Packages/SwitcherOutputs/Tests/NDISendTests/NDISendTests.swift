@@ -188,6 +188,38 @@ final class NDISendTests: XCTestCase {
         if c.lastGPUProbeMs < c.lastCPUProbeMs * 0.7 { XCTAssertTrue(c.usingGPU, "GPU 明显便宜应当在用 GPU：\(c)") }
     }
 
+    /// 有 SDK 时真发：`SWITCHER_NDI_LIVE_SECONDS=20 swift test --filter NDISendTests/testLiveSend`，
+    /// 用 NDI Tools 的 Studio Monitor 打开 "<机器名> (Switcher PGM test)"：左上角帧号块每帧在变、右上角闪光块每秒亮一次、1 kHz 正弦 + 每秒一声 click。
+    /// SDK 不在或没设环境变量就 XCTSkip。结束打印送出帧数 / 跳帧 / 接收方数量（Studio Monitor 连着时 ≥ 1）。
+    func testLiveSend_studioMonitor_manual() throws {
+        guard NDISender.isAvailable else { throw XCTSkip("BLOCKED-SDK：没有 NDI SDK（/Library/NDI SDK for Apple）") }
+        guard let secs = ProcessInfo.processInfo.environment["SWITCHER_NDI_LIVE_SECONDS"].flatMap(Double.init), secs > 0 else {
+            throw XCTSkip("设 SWITCHER_NDI_LIVE_SECONDS=20 才真发（要有人看 Studio Monitor）")
+        }
+        let format = ProgramFormat.hd1080p60
+        let sender = NDISender(configuration: .init(name: "Switcher PGM test", format: format))
+        try sender.start()
+        XCTAssertFalse(sender.countersSnapshot.unavailable)
+        let feeder = try PatternFeeder(configuration: .init(format: format, inputID: 1))
+        let t0 = HostClock.now() + HostDuration(milliseconds: 300)
+        let clock = TickClockSpec(t0: t0, frameRate: format.frameRate)
+        let signal = TestSignal(t0: t0, clickPeriod: TestPattern.flashPeriod(frameRate: format.frameRate))
+        let signalFeeder = SignalFeeder(signal: signal)
+        let ticks = Int(secs * Double(format.frameRate.nominalFramesPerSecond))
+        let report = try feeder.feed(consumers: [sender], clock: clock, ticks: Tick.zero..<Tick(Int64(ticks)), pacing: .realTime) { _, tickTime in
+            signalFeeder.feed(upTo: tickTime, to: [sender])
+        }
+        Thread.sleep(forTimeInterval: 0.2)
+        sender.stop()
+        let c = sender.countersSnapshot
+        print("NDI 真发 \(secs) s：喂 \(report.framesFed) 帧（晚点 \(report.lateTicks)），\(c)")
+        XCTAssertEqual(c.framesReceived, UInt64(report.framesFed))
+        XCTAssertEqual(c.skipped, 0, "60 fps 实时喂不该跳帧")
+        XCTAssertEqual(c.conversionFailures, 0)
+        XCTAssertGreaterThan(c.audioBlocksSent, 0)
+        if c.connections == 0 { print("提示：没有接收方连着（Studio Monitor 没开或没选这个源），画面没人看但发送本身没问题") }
+    }
+
     /// 干跑：队列 + 转换线程真跑；consume 立即返回、满了丢最旧计 skipped、音频块进环；恒等式 收到 = 送出 + skipped。
     func testDryRunPipeline_boundedQueueAndCounters() throws {
         let sender = NDISender(configuration: .init(name: "dry", format: .hd1080p60, queueDepth: 2, dryRun: true))

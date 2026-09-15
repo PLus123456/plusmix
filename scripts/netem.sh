@@ -10,9 +10,10 @@
 #   scripts/netem.sh shape  PORT KBIT PERCENT MS [SECONDS]   限速 + 丢包 + 延迟一起
 #   scripts/netem.sh clear                            清掉本脚本加的所有规则和管道
 #   scripts/netem.sh status                           看当前规则
-#   scripts/netem.sh serve [DIR]                      代理模式：循环读 DIR/netem.request（默认 $TMPDIR/switcher-netem），
+#   scripts/netem.sh serve [DIR]                      代理模式：循环读 DIR/netem.request（默认 /tmp/switcher-netem），
 #                                                     每行一条上面的子命令（不含 sudo），执行后把结果写到 DIR/netem.reply。
-#                                                     StreamingTests 在 SWITCHER_NETEM=broker 时用它，这样测试进程不需要 sudo。
+#                                                     StreamingTests 在 SWITCHER_NETEM=broker 时用它，这样测试进程不需要 sudo，
+#                                                     也不受 sudo 5 分钟凭证过期影响（E9 一跑 5 分钟）。Ctrl-C 退出时自动 clear。
 #
 # E7 / E8：先起三个 MediaMTX 实例（见 scripts/mediamtx.yml 头部），推三路到 1935 / 1936 / 1937，然后
 #   sudo scripts/netem.sh block 1936 30        → 第 2 路断 30 s；第 1、3 路丢帧应为 0，第 2 路 30 s 后自动重连。
@@ -127,7 +128,7 @@ run_command() {
 }
 
 do_serve() {
-    local dir="${1:-${TMPDIR:-/tmp}/switcher-netem}"
+    local dir="${1:-/tmp/switcher-netem}"
     mkdir -p "$dir"
     chmod 777 "$dir"
     local req="$dir/netem.request" rep="$dir/netem.reply"
