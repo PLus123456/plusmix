@@ -25,7 +25,7 @@
 | W1-E | 编码录制 | `w1-outputs` | `Packages/SwitcherOutputs/` `Tests/Fixtures/` | pattern.mov 进 Tests/Fixtures/ |
 | G2 | M0 集成 | `g2-m0` | `Tools/switcher-headless/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `~Packages/*:50` | 各包只改"接口对不上"的胶水，每包 ≤ 50 行，超了写 issue 退回 |
 | W2-A | 输入一期 | `w2-inputs` | `Packages/SwitcherInputs/` `!Packages/SwitcherInputs/Sources/DeckLink/` `!Packages/SwitcherInputs/Sources/NDI/` `!Packages/SwitcherInputs/Tests/DeckLinkTests/` `!Packages/SwitcherInputs/Tests/NDITests/` | DeckLink、NDI 是 W3-A 的 |
-| W2-B | 显示与主界面 | `w2-app` | `App/` `Packages/SwitcherCore/Sources/SwitcherRender/MetalDisplayView*` | W1-C 的显示视图允许在此完善 |
+| W2-B | 显示与主界面 | `w2-app` | `App/` `Packages/SwitcherCore/Sources/SwitcherRender/Display/MetalDisplayView*` | W1-C 的显示视图允许在此完善 |
 | W2-C | 控制一期 | `w2-control` | `Packages/SwitcherControl/` `!Packages/SwitcherControl/Sources/VMixCompat/` `!Packages/SwitcherControl/Tests/VMixCompatTests/` `Tools/switcher-headless/` | headless 只加 --api 参数 |
 | W2-D | 推流与 NDI 发送 | `w2-stream` | `Packages/SwitcherOutputs/Sources/Streaming/` `Packages/SwitcherOutputs/Sources/NDISend/` `Packages/SwitcherOutputs/Tests/StreamingTests/` `Packages/SwitcherOutputs/Tests/NDISendTests/` `Packages/SwitcherOutputs/Package.swift` `scripts/netem.sh` `scripts/mediamtx.yml` | Package.swift 只许加这两个 target 和它们的依赖 |
 | W2-E | 音频集成 | `w2-audio-integ` | `Packages/SwitcherCore/Sources/SwitcherEngine/Audio*` `Packages/SwitcherCore/Tests/SwitcherEngineTests/Audio*` `Packages/SwitcherAudio/Sources/Integration/` `Packages/SwitcherAudio/Tests/IntegrationTests/` `Packages/SwitcherAudio/Package.swift` | Package.swift 只许加 Integration target |
