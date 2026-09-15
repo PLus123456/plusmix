@@ -190,12 +190,8 @@ public final class FileInput: Input, @unchecked Sendable {
     /// 当前播放位置（文件内秒）。
     public var positionSeconds: Double {
         let timing = self.timing
-        let (pos, dur) = playback.withLock { p -> (Rational, Rational?) in
-            let raw = p.paused ? p.timeline.anchorMedia : p.timeline.position(at: timing.tick(at: HostClock.now()))
-            return (raw, nil)
-        }
+        let pos = playback.withLock { p in p.paused ? p.timeline.anchorMedia : p.timeline.position(at: timing.tick(at: HostClock.now())) }
         guard let d = info?.duration, d.numerator > 0 else { return max(0, pos.doubleValue) }
-        _ = dur
         let v = pos.doubleValue
         return v < 0 ? 0 : v.truncatingRemainder(dividingBy: d.doubleValue)
     }

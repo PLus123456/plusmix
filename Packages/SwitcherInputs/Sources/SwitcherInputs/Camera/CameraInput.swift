@@ -198,7 +198,8 @@ public final class CameraInput: NSObject, Input, @unchecked Sendable {
         case .authorized:
             break
         case .notDetermined:
-            // 请求一次；系统弹不弹提示都会回调
+            // 请求一次；系统弹不弹提示都会回调。等用户回答期间先把文案挂出来（UI 有东西可显示）
+            setError(CapturePermission.message(for: .notDetermined, mediaType: .video))
             AVCaptureDevice.requestAccess(for: .video) { [self] granted in
                 sessionQueue.async { [self] in
                     if granted {

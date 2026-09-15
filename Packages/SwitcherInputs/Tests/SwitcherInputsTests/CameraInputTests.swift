@@ -18,10 +18,17 @@ final class CameraInputTests: XCTestCase {
         let slot = LockFreeFrameSlot(capacity: 3)
         let input = CameraInput(number: 1, name: "cam", uniqueID: "0", timing: makeTiming(), videoSlot: slot)
         XCTAssertNoThrow(try input.start())
-        // 权限被拒（或系统不弹提示就拒）→ error(文案)
-        XCTAssertTrue(waitUntil(timeoutMs: 5000) { if case .error = input.state { return true } else { return false } },
-                      "5 s 内没进 error：\(input.state) \(input.lastError ?? "")")
-        guard case .error(let message) = input.state else { return XCTFail("\(input.state)") }
+        // 权限被拒（或系统不弹提示就拒）→ error(文案)。请求期间先是"等待系统提示"的过渡文案，要等到最终结论
+        func finalError() -> String? {
+            if case .error(let m) = input.state, !m.contains("等待系统提示") { return m }
+            return nil
+        }
+        let settled = waitUntil(timeoutMs: 5000) { finalError() != nil }
+        if !settled, case .error(let m) = input.state {
+            throw XCTSkip("系统正在等用户回答授权提示（\(m)）；回答后再跑")
+        }
+        XCTAssertTrue(settled, "5 s 内没进 error：\(input.state) \(input.lastError ?? "")")
+        guard let message = finalError() else { return XCTFail("\(input.state)") }
         print("S6 文案：\(message)")
         XCTAssertTrue(message.contains("摄像头权限"), message)
         XCTAssertTrue(message.contains("系统设置") || message.contains("用途说明"), "文案要告诉用户去哪里改：\(message)")
