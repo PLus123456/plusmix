@@ -334,8 +334,13 @@ def cmd_run(a):
             if wait > 0:
                 time.sleep(wait)
             st = api.state()
-            expected = st["state"]["preview"]
             prev = st["state"]["program"]
+            # 场景脚本自己也在转 PVW，可能已把 PVW 转到和 PGM 同一路（cut 就看不出变化）；先把 PVW 明确指到另一路
+            numbers = [i["number"] for i in st["state"]["inputs"]]
+            expected = next((n for n in numbers if n != prev), prev)
+            if st["state"]["preview"] != expected:
+                api.command({"setPreview": {"input": expected}})
+                time.sleep(0.05)
             status, obj, t_send, t_recv = api.command({"cut": {}})
             rec = {"k": k, "send": t_send, "recv": t_recv, "rtt_ticks": t_recv - t_send, "status": status,
                    "prevProgram": prev, "expectedProgram": expected}
@@ -475,7 +480,8 @@ def cmd_evaluate(a):
             fr = json.load(f)
         frames = fr["frames"]
         for fobj in frames:
-            fobj["input"] = id_to_input.get(fobj["inputID"]) if fobj["inputID"] is not None else None
+            pid = fobj.get("inputID")     # 解不出时 JSON 里没有这个键
+            fobj["input"] = id_to_input.get(pid) if pid is not None else None
         report["frames"] = {"count": fr["frameCount"], "truncated": fr["truncated"], "durationSeconds": fr["info"]["durationSeconds"]}
         # 帧 → 拍：按 pts（文件时间线原点 = 第 0 拍），并核对 index
         pts_mismatch = 0

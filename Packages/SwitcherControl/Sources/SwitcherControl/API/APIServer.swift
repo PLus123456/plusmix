@@ -183,8 +183,16 @@ public final class APIServer: Sendable {
     // MARK: 应答编码
 
     static func json<T: Encodable>(_ value: T, status: HTTPResponse.Status = .ok) -> Response {
-        let data = (try? APIJSON.encoder.encode(value)) ?? Data(#"{"error":"encode"}"#.utf8)
-        return Response(status: (try? APIJSON.encoder.encode(value)) == nil ? .internalServerError : status,
+        let data: Data
+        let finalStatus: HTTPResponse.Status
+        if let encoded = try? APIJSON.encoder.encode(value) {
+            data = encoded
+            finalStatus = status
+        } else {
+            data = Data(#"{"error":"encode"}"#.utf8)
+            finalStatus = .internalServerError
+        }
+        return Response(status: finalStatus,
                         headers: [.contentType: "application/json; charset=utf-8", .cacheControl: "no-store"],
                         body: .init(byteBuffer: ByteBuffer(data: data)))
     }
