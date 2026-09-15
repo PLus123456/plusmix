@@ -1,8 +1,8 @@
 # W1-B 核心逻辑 —— 报告（分支 w1-core）
 
-日期 2026-09-14。机器 Apple M5 Max（6P + 12E）/ macOS 26.6.2 (25G83) / Xcode 26.6 / Swift 6.3.3；电源、温度未记录（桌面机，测试全程无其他负载）。
+日期 2026-09-14；2026-09-15 按 G2 退回单修 V4（§1.4，问题单 `reports/issues/G2-w1-core-phase-crossing-dup-drop.md`）。机器 Apple M5 Max（6P + 12E）/ macOS 26.6.2 (25G83) / Xcode 26.6 / Swift 6.3.3；电源、温度未记录（桌面机；9-14 的测试全程无其他负载，9-15 的复测与端到端验证期间 G2 会话的 frameprobe 在另外两核上跑分析，load 2.7–3.8）。
 worktree `.claude/worktrees/w1-core-f4b7cf`，从 `main`（bdab613）开；分支 `claude/w1-core-f4b7cf`，另打了同一提交的 `w1-core` 引用给 `make lint BRANCH=w1-core` 和 G2 合并用。
-提交：`git log main..w1-core`，11 个（engine × 9 + reports × 2）。`make lint BRANCH=w1-core` 绿（禁词 / 版本 / 依赖方向 / 归属 23 个文件全在范围内）；`make build-packages build-tools` 绿；SwitcherCore `swift test` 96 个全过（其中 SwitcherEngineTests 47 个，约 70 s；整包 110 s，大头是实跑）。
+提交：`git log main..w1-core`，9-14 为 11 个（engine × 9 + reports × 2），9-15 再加 engine × 2 + reports × 1。`make lint BRANCH=w1-core` 绿（禁词 / 版本 / 依赖方向 / 归属 23 个文件全在范围内）；`make build-packages build-tools` 绿；SwitcherCore `swift test` 96 个全过（其中 SwitcherEngineTests 47 个，约 70 s；整包 110 s，大头是实跑）；9-15 之后 SwitcherEngineTests 59 个（+12 个 V4 到达余量用例）全过。
 
 ## 1. 做了什么
 
@@ -61,6 +61,21 @@ worktree `.claude/worktrees/w1-core-f4b7cf`，从 `main`（bdab613）开；分�
 - 命令落在"渲染线程还没消费的最早一拍"= max(currentTick, renderedTick + 1)，回执 `appliedTick` 就是它。
 - 状态机线程没在跑（未 start / 已 stop）时 job 在调用方线程上串行执行（一把锁），`await` 不会挂起。
 
+### 1.4 V4 退回：到达余量（问题单 `reports/issues/G2-w1-core-phase-crossing-dup-drop.md`，2026-09-15）
+
+G2 10 分钟 release 运行：与节目时钟有相对漂移的四路（59.94 × 2、±100 ppm）每次到达相位穿过拍点边界就出成串 dup + drop 对，合计设计外 192 帧，单路最差 0.084%（必须档 0.05%，G2 要求 0）。
+
+**根因**（同意问题单的分析）：`latest(atOrBefore: t_n)` 用 pts（确定量）判合格、用"已经 push 进槽"判可用（随机量：到达 = pts + 延迟 + 抖动）。pts 落在拍点附近的帧与到达赛跑：晚到一点 → 这拍重复上一帧，下一拍它和更新的帧一起在槽里 → 取最新、它被跳过。任何依赖到达时刻的规则都躲不掉；唯一的免疫办法是合格判据只用 pts、并留出 ≥ 到达延迟 + 抖动的余量 L，这样合格的帧一定已在槽里。我原来的 V4 测试用无抖动的到达序列，量不到（问题单说得对）。
+
+**修法**（`Slots/ArrivalPacing.swift`、`Slots/LockFreeFrameSlot.swift`、`Engine/Engine.swift`；契约不动）：
+
+- `LockFreeFrameSlot` 新增引擎入口 `latest(forTick: t_n)` = `latest(atOrBefore: t_n − L)`，L 由槽按每帧 d = ingressTime − pts（两者都是输入在入口打的戳）自估。契约入口 `latest(atOrBefore:)` 一字不改、不参与估计。引擎注册输入时按 `ArrivalPacedFrameSlot` 协议识别，识别不到的槽退回契约入口；headless 注入的就是 `LockFreeFrameSlot`，G2 不用改。
+- L 从哪来：初值 = max(节目 1/4 帧, 2 × d_0 + 1 ms)；稳态目标 = 最近 8 块（每块 60 帧）的 d 最大值 + 保护带（1 ms + 15%）。用最大值不用分位数：真设备常有孤立尖峰，分位数盖不住，每个尖峰就是一次 dup，用最大值只多付延迟（一次大卡顿让余量抬高 ≈ 8 s 后收回）。前 2 块热身期只许抬不许减。
+- **余量任何一次变化都是一次相位跳变**：增 δ 可能多一次 dup、减 δ 可能多一次 drop，概率 ≈ δ / 输入帧长，渐变也一样（总位移决定期望事件数）。所以只在"带内没有候选帧"的拍改——消费者线程看候选表就能精确判断：减时第一个不合格的候选帧不能被带进合格区，增时当前合格的最新帧仍须合格；这样改余量零代价。相位锁定的输入（60 fps 提前半帧）若帧相位正好在带内就永远不改，余量停在"刚好不把它带进来"的值，这只影响该路延迟、不出事件。
+- 迟到帧（候选表最旧的帧 pts ≤ 上一拍的合格上限：本该上一拍返回、现在才到）：那次 dup 已躲不掉；把 L 抬到它的 d + 保护带、但不超过"让它此刻恰好合格"的值（否则又要多等一拍）、单次不超过一个节目帧、总量不超过 500 ms 和结构上限"最早到达 + (capacity − 1) × 帧长"（候选表只有 3 格，等着合格的帧再多就会挤掉本该返回的；抖动跨度超过 2 帧的输入该自己加抖动缓冲，设计方案 §3.6）。结果：迟到只花那一次 dup、不丢帧、以后不再迟到；晚到 ≥ 2 拍的帧（卡顿 ≥ 33 ms）被封顶后跳过，最多 1 drop。
+- 延迟代价：帧在第一个 t_n ≥ pts + L 的拍被用。合成源 d ≈ 1–3 ms → L ≈ 2–4.5 ms（设计方案 §3.7 "输入帧槽 1–2 帧"预算内）；真设备 L ≈ 设备延迟 + 15% + 1 ms，即帧到达后再等 ≈ 0.5–1.5 拍——这是让挑帧不依赖到达时刻的最小代价。G2 默认提前量半帧 ≥ 初值下限 1/4 帧，30 fps / 60 fps 相位锁定的路的挑帧拍不变。
+- 引擎新增 `EngineOptions.pacing`（参数）、`Engine.pacingStats(forInput:)`（余量 / 窗口延迟 / 迟到数 / 抬降次数，给 G2 的日志）。`Stats` 契约不变。
+
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
 47 个全过，无 XCTSkip。实跑类在本机 debug 构建下的数值：
@@ -100,6 +115,27 @@ worktree `.claude/worktrees/w1-core-f4b7cf`，从 `main`（bdab613）开；分�
 | `testW1B_showStore_*` | 往返、v0 → v1 迁移链、缺环 / 未知版本 / 坏文件报错 | — | ✅ |
 | `testW1B_stateMachine_usableWithoutExecutorThread` / `_requestPrepare_fromPlainThread_…` / `_submitLandsOnFirstUnrenderedTick` / `_snapshotPublished…` / `_transitionEvents_…` / `_queuedFrameConsumer_…` | 见名 | — | ✅ |
 
+**9-15 V4 复测（到达余量，`ArrivalPacingTests` + `EngineTests`）**——模拟用例：固定种子，到达 = pts + U[30 µs, 3 ms]，渲染线程在 t_n + U[0, 50 µs] 调 `latest(forTick:)`；断言逐拍返回的帧号 = "当拍余量下 pts ≤ t_n − L_n 的最新帧"（参考模型），所以 reused / dropped 是精确值而不是范围：
+
+| 测试 | 数值 | 阈值 / 要求 | 通过 |
+|---|---|---|---|
+| `testV4_5994Into60_withArrivalJitter_reusePer1000_dropZero` | 12000 拍（12 次穿越）：reused 12、dropped 0、迟到 0、余量 4.17 → 4.43 ms（1 次减小） | 每 1000 拍 1 reuse，drop 0 | ✅ |
+| `testV4_60fpsPlus100ppmInto60_withArrivalJitter_dropPer10000_reuseZero` | 60000 拍（6 次穿越）：dropped 6、reused 0、迟到 0 | 每 10000 拍 1 drop，reuse 0 | ✅ |
+| `testV4_60fpsMinus100ppmInto60_withArrivalJitter_reusePer10000_dropZero` | 60000 拍：reused 6、dropped 0 | 每 10000 拍 1 reuse，drop 0 | ✅ |
+| `testV4_plus1000ppm_withArrivalJitter_manyCrossings` | 3 个种子 × 12000 拍（12 次穿越）：dropped 12、reused 0、迟到 0 | 精确 | ✅ |
+| `testV4_phaseLocked60_withLeadAndJitter_noEvents` | 提前半帧 + ±3 ms 抖动 6000 拍：0 / 0，余量停在 4.17 ms | 0 事件 | ✅ |
+| `testV4_30fpsInto60_withArrivalJitter_stillExactly50Percent` | 6000 拍：reused 2999（每帧两拍）、dropped 0 | 50% | ✅ |
+| `testV4_marginDecreaseNeverCausesDrop` | 初始余量 20 ms：慢路 557 步减到 4.43 ms 全程 drop 0、快路 2 步减到 4.44 ms 全程 reuse 0，逐拍 = 参考模型 | 减余量零代价 | ✅ |
+| `testV4_marginIncreaseOnGrowingLatency_noReuseOnFastInput` | 第 4000 帧起延迟 +3 ms：reuse 0、迟到 ≤ 1、余量抬到 > 6 ms | 抬余量零代价 | ✅ |
+| `testV4_lateFrame_costsExactlyOneReuse_noDrop_thenMarginCovers` | 第 3500 帧晚到 20 ms：恰好多 1 次 reuse、drop 0，检测拍返回该帧本身，抬高 = 一个节目帧（封顶），8 s 后收回到 ~1 ms | 迟到 = 1 dup 0 drop | ✅ |
+| `testV4_veryLateFrame_raiseIsCapped_atMostOneDrop` | 晚到 40 ms（≥ 2 拍）：抬高恰好一个节目帧，drop 1，之后收回 | 坏时间戳的损失有界 | ✅ |
+| `testV4_contractLatest_isUnpaced_andBothEntriesShareState` | 契约入口无余量、不参与估计 | 契约不变 | ✅ |
+| `testV4_engine_driftingInputWithArrivalJitter_designInOnly`（真线程） | 60 fps +1%（每 100 拍穿越）+ 到达 U[0.03, 3] ms，600 拍：reused 0，dropped = 合格帧数 − 拍数 = 6 ± 1，迟到 0 | 精确 | ✅ |
+| `testW1B_renderPath_zeroAllocationsInSteadyState`（改后） | 渲染线程稳态 220 拍 malloc 0 / free 0，派发线程 0（挑帧含余量估计与调整） | 零分配 | ✅ |
+| 原 `testV4_*`（无抖动，契约入口） | 不变，全过 | — | ✅ |
+| 端到端（g2-m0 + w1-core 临时合并，release headless，`scenarios/m0.json`，200 s = 12000 拍，`--audio-device null`，G2 的 frameprobe 在旁边跑） | 输入 3 / 4（59.94）：dup 12（期望 11.9）drop 0；5（+100 ppm）：drop 1（期望 1.2）dup 0；6（−100 ppm）：dup 1（期望 1.2）drop 0；7 / 8：0 / 0；1 / 2（30 fps）：dup 5970 = 期望；**八路精确核算设计外全部 0**；missed_render 0，唤醒抖动 p99 0.023 ms，V1 avg 1.77 ms | G2 通过标准：设计外 0 | ✅ |
+| 端到端 `make gate2`（10 分钟 = 36000 拍，同一临时合并，G2 的 frameprobe 在旁边跑，load 3.9） | V1 avg 1.66 / p99 2.03 ms，V2 0，V3 p99 0.049 ms，V5 +0；**V4 逐秒时间线 600 s 内只有设计内事件**：输入 3 / 4 每 ~1000 拍 dup +1（共 36 = 期望 36.0）、输入 5 每 ~10000 拍 drop +1（3 次）、输入 6 每 ~10000 拍 dup +1（4 次）、7 / 8 全程 0，没有任何一秒出现 dup+drop 成对；frameprobe 在播段设计外 0。报告生成器给的"精确核算设计外 10 帧"全部来自**最后一行**（t = 600 s、tick 35999，停机时写）：`engine.stop()` 期间视频源又推了 6 帧、传输环挤掉 3 帧（输入 3–8 各 drop +2/+3/+3/+3/+3/+3，pushed − consumed = 6），是停机顺序的记账副作用（headless 注释里已知"视频源在引擎之后停会多算几帧"），不是挑帧事件——见 §4 第 13 条 | 设计外 0；≤ 0.05% | ✅（运行期 0；停机行的 10 帧是 headless 记账，退回单的现象消失） |
+
 BLOCKED：无。
 
 零分配那条值得单说：第一版实现在 debug 下被探针抓到渲染线程每拍 32 次 malloc、派发线程每帧 4 次，回溯全在 `IndexingIterator.next` / `ClosedRange.subscript` —— -Onone 下 `for x in 1...n` 走未特化的泛型见证，每次迭代给 Index 装箱。热路径全部改成整数 `while` 后归零。发布构建会特化掉，但热路径不该依赖优化器。
@@ -114,6 +150,7 @@ BLOCKED：无。
 - **Wipe / Zoom / Stinger 的参数语义、叠加动画的 kind**：只做了进度规则，画面解释归 W1-C / W3-B。
 - **命令回执的精确确认**：`appliedTick` 在拍点边界有 µs 级窗口可能比实际早一拍（见 §4 第 6 条），没做"渲染线程确认后再回执"。
 - **headless 接线**：G2。
+- **到达余量的手动覆盖**：没做（`InputSettings` 没有视频延迟字段，加字段是契约提案，见 §4 第 11 条）；目前只有自估 + `EngineOptions.pacing` 的全局参数。
 
 ## 4. 对契约的疑问
 
@@ -127,6 +164,9 @@ BLOCKED：无。
 8. **`TransitionEvent`（AFV）的形态**：`cut(from,to)` / `started(type, duration, from, to, source)` / `completed(from,to)` / `cancelled`，每个事件带当时的 `afv` 标志；转场中 Cut 发 `completed`（提前完成）。W2-E 若需要别的（例如 FTB 事件），提案加。
 9. **`Show.migrate` 只认当前版本**：迁移链我放在引擎的 `ShowStore`，契约不用改；但"迁移步骤注册在哪"以后是 App 的事，先记着。
 10. **`SwitcherEngineSkeleton`**：TestKit 的 P0 占位还引用它，我留了别名；G2 合并 w1-testkit 后一起删。
+11. **到达余量的参数没有进契约**：L 由槽自估（`ingressTime − pts`），依赖输入把 `ingressTime` 打准（W1-A 的合成源是 push 前 `HostClock.now()`，对）。若以后某种输入要手动指定（比如 W2-A 想给 UVC 固定 100 ms），`InputSettings` 得加视频延迟字段——那是契约提案，现在不需要。`PacingOptions` 的默认值（1/4 帧下限、1 ms + 15% 保护带、8 × 60 帧窗口、单次抬高 ≤ 一帧、上限 500 ms）是我定的，测试标准没规定；G2 若要写进 §2.1（问题单第 5 条"合成源到达相位"）请一并定。
+12. **V4 的"设计内"口径**：余量收敛时的每次减小会让慢输入少一次 reuse / 快输入的 drop 挪个位置（不是多事件），所以 dup 计数可能比 T × |1 − r/P| 少 1；G2 的"设计外 = max(0, 实测 − ceil(期望) − 1)"只罚超出，没问题。frameprobe 侧同理。
+13. **headless 停机时最后一行 stats 把停机挤掉的帧算成 drop**（G2 的目录）：`engine.stop()` 先于 `input.stop()`，其间视频源继续 push，传输环容量 3 挤掉多出来的帧、`dropped` 计数；若 StatsWriter 的最后一行落在这之后（我这次 601 行、最后一行 tick 35999），精确核算就多出 2–3 帧/路。建议 headless 在 `engine.stop()` 之前写最后一行（或先停视频源再停引擎，代价是末尾几拍多 1–2 次 reuse）。这条不改引擎也能解决，我没动 Tools/。
 
 ## 5. 下一个会话需要知道的坑
 
@@ -142,3 +182,6 @@ BLOCKED：无。
 - **快照只在状态变化时换指针**：判断"状态机是否跟上"用 `preparedTick`，别比 `snapshot.tick`。
 - **测试时长**：SwitcherEngineTests 约 70 s（30 s 抖动 + 4 × 10 s 引擎 + 5 s × 3）；整包 110 s。想快就 `--filter` 跳过 `ClockTests|EngineTests`，别改拍数。
 - **分支名**：桌面端 worktree 的分支叫 `claude/w1-core-f4b7cf`，`w1-core` 是同一提交的引用；合并任一个都行，报告按 `w1-core` 命名。
+- **挑帧现在带到达余量**：引擎对 `LockFreeFrameSlot` 走 `latest(forTick:)`，帧在第一个 t_n ≥ pts + L 的拍被用（合成源 L ≈ 2–4.5 ms）。给 W2-A：真设备的 L ≈ 设备延迟 + 15% + 1 ms，`ingressTime` 必须是进槽那一刻的 `HostClock.now()`，pts 必须是换算成 host time 的采集时刻——两者都乱打，余量估计就乱；`Engine.pacingStats(forInput:)` 能看到每路的 L / 迟到数。给 W2-E：某路的视频延迟 = L + 拍点相位，A/V 对齐要按这个算（不再是"pts ≤ 拍点就用"）。
+- **相位锁定的输入（与节目同源时钟、固定提前量）**：余量减到"刚好不把下一帧带进合格区"就停，提前量 < 1/4 帧的路会比无余量时晚一拍（G2 默认提前半帧，不受影响）。
+- **写模拟测试时到达顺序要按生产者线程的顺序**：一帧晚到会挡住它后面的帧（单线程生产者的真实行为），不是乱序到达。

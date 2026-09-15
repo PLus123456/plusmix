@@ -7,7 +7,8 @@
 //   Clock/ProgramClock.swift      按 TickClockSpec 生成拍点，mach_wait_until 等待，跳拍计数，唤醒抖动记录
 //   Sync/HazardPublisher.swift    单写多读的原子指针发布（hazard pointer），状态快照 / 输入表都用它
 //   Sync/SPSCOverwriteRing.swift  无锁 SPSC 环，满则挤最旧；帧槽与消费者队列的底层
-//   Slots/LockFreeFrameSlot.swift FrameSlot 协议的实现：容量 3，latest(atOrBefore:) 挑帧，统计
+//   Slots/LockFreeFrameSlot.swift FrameSlot 协议的实现：容量 3，latest(atOrBefore:) 挑帧，统计；latest(forTick:) 带到达余量
+//   Slots/ArrivalPacing.swift     到达余量：参数、状态、ArrivalPacedFrameSlot 协议（V4 退回单的修法，规则见文件头）
 //   State/MixerReducer.swift      MixerReducing 的实现：reduce / advance 纯函数，全部 27 条命令
 //   State/StateThreadExecutor.swift 状态机 actor 的专用线程执行器；渲染线程用原子量 + 信号量唤醒它
 //   State/StateMachine.swift      持有 MixerState 的 actor：sequence 顺序、按拍准备快照、原子发布、转场事件
