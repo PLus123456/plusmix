@@ -16,9 +16,12 @@ final class LatencyTests: XCTestCase {
                       label, s.samples, s.meanMs, f.mean, s.p50Ms, s.p99Ms, f.p99, s.maxMs, f.max, s.minMs, s.ticksWithoutFrame, s.ticksReused)
     }
 
-    private func run(config: InputConfig, seconds: Double, make: (InputEngineHarness, LatencyFrameSlot) throws -> any Input) async throws -> (LatencyStats, Stats, InputEngineHarness) {
+    private func run(config: InputConfig, seconds: Double, pacing: Bool = true,
+                     make: (InputEngineHarness, LatencyFrameSlot) throws -> any Input) async throws -> (LatencyStats, Stats, InputEngineHarness) {
         let format = ProgramFormat.hd1080p60
-        let harness = try InputEngineHarness(format: format, configs: [config])
+        var engineOptions = EngineOptions()
+        engineOptions.pacing.enabled = pacing
+        let harness = try InputEngineHarness(format: format, configs: [config], engineOptions: engineOptions)
         let slot = harness.makeSlot(forInput: config.number)
         let input = try make(harness, slot)
         harness.add(input)
@@ -52,23 +55,42 @@ final class LatencyTests: XCTestCase {
         XCTAssertEqual(stats.missedRender, 0, "\(stats)")
     }
 
-    func testL1_cameraInput_within3Frames() async throws {
+    private func cameraL1(pacing: Bool) async throws -> (LatencyStats, Stats, InputEngineHarness, String) {
         let status = CapturePermission.status(for: .video)
         guard status == .authorized else {
             throw XCTSkip("BLOCKED-权限（TCC）：摄像头权限 \(status)，本进程的责任进程没有相机用途说明，系统不弹提示。从 Terminal.app 跑 swift test，或 Scripts/probe-app.sh run --input camera:0")
         }
         guard let dev = CameraDevices.list().first else { throw XCTSkip("BLOCKED-硬件：没有摄像头") }
         let config = InputConfig(number: 1, name: dev.name, source: .camera(uniqueID: dev.uniqueID))
-        let (l1, stats, harness) = try await run(config: config, seconds: 8) { h, slot in
+        let (l1, stats, harness) = try await run(config: config, seconds: 8, pacing: pacing) { h, slot in
             try CameraInput(config: config, timing: h.timing, videoSlot: slot)
         }
-        let line = report("摄像头 \(dev.name)", l1, format: harness.format)
+        let line = report("摄像头 \(dev.name)（到达余量\(pacing ? "开" : "关")）", l1, format: harness.format)
         print(line)
+        if let ps = harness.engine.pacingStats(forInput: 1) { print("  到达余量 \(ps.margin.milliseconds) ms，窗口最大到达延迟 \(ps.windowMaxLatency.milliseconds) ms，迟到 \(ps.lateFrames)") }
+        return (l1, stats, harness, line)
+    }
+
+    /// 产品配置（引擎默认开到达余量）。目前 ❌：余量 = 16 s 内最大的 d（ingress − pts，摄像头 ≈ 55–100 ms）+ 保护带，
+    /// 每帧多等 余量 − d ≈ 20–70 ms，p99 ≈ 3.8 帧；见 reports/issues/W2A-w1-core-arrival-pacing-vs-camera-latency.md。
+    func testL1_cameraInput_within3Frames() async throws {
+        let (l1, stats, harness, line) = try await cameraL1(pacing: true)
         let frames = l1.frames(at: harness.format.frameRate)
         XCTAssertGreaterThan(l1.samples, 100, line)
         XCTAssertLessThanOrEqual(frames.mean, 3, "摄像头 L1 平均应 ≤ 3 帧：\(line)")
         XCTAssertLessThanOrEqual(frames.p99, 3, "摄像头 L1 p99 应 ≤ 3 帧：\(line)")
         XCTAssertEqual(stats.missedRender, 0)
+    }
+
+    /// 对照：引擎走契约入口 latest(atOrBefore:)（不带余量），摄像头的帧到了下一拍就用——这是输入本身的延迟。
+    func testL1_cameraInput_contractEntry_within3Frames() async throws {
+        let (l1, stats, harness, line) = try await cameraL1(pacing: false)
+        let frames = l1.frames(at: harness.format.frameRate)
+        XCTAssertGreaterThan(l1.samples, 100, line)
+        XCTAssertLessThanOrEqual(frames.mean, 3, "摄像头 L1 平均应 ≤ 3 帧：\(line)")
+        XCTAssertLessThanOrEqual(frames.p99, 3, "摄像头 L1 p99 应 ≤ 3 帧：\(line)")
+        XCTAssertEqual(stats.missedRender, 0)
+        XCTAssertLessThanOrEqual(stats.perInput[1]?.drop ?? 0, 3, "30 fps 摄像头进 60 fps 节目不该丢帧：\(stats)")
     }
 
     func testL1_screenInput_within3Frames() async throws {

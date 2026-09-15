@@ -171,7 +171,7 @@ case "devices":
     }
 
 case "clocks", "permission":
-    // 单路输入 + 裸帧槽（不起引擎）：看时间戳 / 状态变化
+    // 单路输入 + 裸帧槽（不起引擎）：看时间戳 / 状态变化。clocks 模式下每拍把帧取出来，记每帧的 pts / ingress，最后出分布。
     let seconds = opts.double("seconds", command == "clocks" ? 5 : 60)
     let timing = ProgramTiming(format: parseFormat(opts.string("format")), t0: HostClock.now())
     let spec: String
@@ -184,15 +184,19 @@ case "clocks", "permission":
     var lastState = input.state
     var lastPushed: UInt64 = 0
     let deadline = HostClock.now() + HostDuration(seconds: seconds)
-    var consumed = 0
+    var seen: [(seq: UInt64, pts: HostTime, ingress: HostTime)] = []
+    var lastSeq: UInt64 = 0
     while HostClock.now() < deadline {
         let s = input.state
         if s != lastState {
             print("[\(stamp())] state \(lastState) → \(s)\(input is CameraInput ? "  \((input as! CameraInput).lastError ?? "")" : "")")
             lastState = s
         }
-        if slot.latest(atOrBefore: .now()) != nil { consumed += 1 }
-        usleep(command == "clocks" ? 16_000 : 100_000)
+        if let f = slot.latest(atOrBefore: HostClock.now() + HostDuration(seconds: 10)), f.sequence != lastSeq {   // 上限放宽：把所有到达的帧都取出来
+            lastSeq = f.sequence
+            seen.append((f.sequence, f.pts, f.ingressTime))
+        }
+        usleep(command == "clocks" ? 4_000 : 100_000)
         if command == "permission" {
             let pushed = (input as? CameraInput)?.counters.framesPushed ?? (input as? ScreenInput)?.counters.framesPushed ?? 0
             if pushed != lastPushed, Int(pushed) % 60 == 0 { print("[\(stamp())] 已推 \(pushed) 帧"); lastPushed = pushed }
@@ -200,6 +204,31 @@ case "clocks", "permission":
     }
     print(describe(input))
     print("帧槽：\(slot.stats)")
+    if command == "clocks", let first = seen.first {
+        print("取到 \(seen.count) 帧（序号缺口 = 被帧槽挤掉的）。d = ingress − pts；Δpts / Δingress = 与上一帧的间隔")
+        print("| # | seq | pts（相对首帧 ms） | ingress（相对首帧 ms） | d ms | Δpts ms | Δingress ms |")
+        print("|---|---|---|---|---|---|---|")
+        for (i, f) in seen.enumerated() where i < 15 || i >= seen.count - 5 {
+            let prev = i > 0 ? seen[i - 1] : nil
+            print("| \(i) | \(f.seq) | \(fmt((f.pts - first.pts).milliseconds)) | \(fmt((f.ingress - first.ingress).milliseconds)) | \(fmt((f.ingress - f.pts).milliseconds)) | \(prev.map { fmt((f.pts - $0.pts).milliseconds) } ?? "-") | \(prev.map { fmt((f.ingress - $0.ingress).milliseconds) } ?? "-") |")
+        }
+        // 每秒统计
+        print("| 秒 | 帧 | d min | d 平均 | d max | Δpts min/max | Δingress min/max |")
+        print("|---|---|---|---|---|---|---|")
+        var bucket: [[(seq: UInt64, pts: HostTime, ingress: HostTime)]] = []
+        for f in seen {
+            let sec = Int((f.ingress - first.ingress).seconds)
+            while bucket.count <= sec { bucket.append([]) }
+            bucket[sec].append(f)
+        }
+        var prev: (seq: UInt64, pts: HostTime, ingress: HostTime)? = nil
+        for (sec, b) in bucket.enumerated() where !b.isEmpty {
+            let ds = b.map { ($0.ingress - $0.pts).milliseconds }
+            var dp: [Double] = [], di: [Double] = []
+            for f in b { if let p = prev { dp.append((f.pts - p.pts).milliseconds); di.append((f.ingress - p.ingress).milliseconds) }; prev = f }
+            print("| \(sec) | \(b.count) | \(fmt(ds.min()!)) | \(fmt(ds.reduce(0, +) / Double(ds.count))) | \(fmt(ds.max()!)) | \(dp.isEmpty ? "-" : "\(fmt(dp.min()!))/\(fmt(dp.max()!))") | \(di.isEmpty ? "-" : "\(fmt(di.min()!))/\(fmt(di.max()!))") |")
+        }
+    }
     input.stop()
 
 case "run":
@@ -208,7 +237,9 @@ case "run":
     let seconds = opts.double("seconds", 10)
     let format = parseFormat(opts.string("format"))
     let configs = specs.enumerated().map { parseInput($0.element, number: $0.offset + 1) }
-    let harness = try InputEngineHarness(format: format, configs: configs, leadMs: opts.double("lead-ms", 800))
+    var engineOptions = EngineOptions()
+    if opts.has("no-pacing") { engineOptions.pacing.enabled = false }   // 对照：引擎退回契约入口 latest(atOrBefore:)，不带到达余量
+    let harness = try InputEngineHarness(format: format, configs: configs, leadMs: opts.double("lead-ms", 800), engineOptions: engineOptions)
     var inputs: [any Input] = []
     for c in configs {
         let slot = harness.makeSlot(forInput: c.number)
@@ -217,7 +248,7 @@ case "run":
         inputs.append(input)
     }
     let ticks = Int64((seconds * format.frameRate.approximateFramesPerSecond).rounded())
-    print("[\(stamp())] run \(format.width)×\(format.height)@\(format.frameRate) \(ticks) 拍（\(seconds) s），\(inputs.count) 路：\(configs.map(\.name).joined(separator: "、"))")
+    print("[\(stamp())] run \(format.width)×\(format.height)@\(format.frameRate) \(ticks) 拍（\(seconds) s），\(inputs.count) 路：\(configs.map(\.name).joined(separator: "、"))，到达余量\(engineOptions.pacing.enabled ? "开" : "关")")
     let sem = DispatchSemaphore(value: 0)
     let box = ErrorBox()
     Task.detached {

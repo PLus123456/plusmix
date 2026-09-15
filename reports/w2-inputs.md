@@ -25,7 +25,7 @@ worktree `.claude/worktrees/w2-inputs-phase-one-2f34b3`，分支 `claude/w2-inpu
 统计：每个输入只暴露 `InputCounters`（原子计数：收 / 推 / 拒、音频块、状态转换、重建、见过的 IOSurface 数）和各自的诊断量（时间戳 d 分布、热插拔事件、文件计数），
 Stats 仍只读帧槽 / 环的统计（铁律 4）；L1 进 Stats 要提案 002。
 
-`make lint BRANCH=w2-inputs` 绿（禁词 / 版本号 / Package.swift / 依赖方向 / 归属 37 个文件 / RT 符号）；`swift build` 绿；`swift test`（本包）27 个：24 通过、3 XCTSkip（下表），约 30 s。
+`make lint BRANCH=w2-inputs` 绿（禁词 / 版本号 / Package.swift / 依赖方向 / 归属 / RT 符号）；`swift build` 绿；`swift test`（本包）28 个：24 通过、4 XCTSkip（摄像头三个 + S5，权限 / 硬件，下表），约 30 s。摄像头的 L1 由 .app 探针量（表里）。
 
 ## 2. 每个测试：数值 / 阈值 / 通过否
 
@@ -53,17 +53,21 @@ Stats 仍只读帧槽 / 环的统计（铁律 4）；L1 进 Stats 要提案 002�
 | **L1 文件** | `testL1_fileInput_within2Frames`（真引擎 + Metal 渲染器，6 s） | 359 样本：平均 **11.34 ms（0.68 帧）**，p50 11.36，p99 11.52 ms（0.69 帧），max 13.86 ms（0.83 帧），min 10.92；没帧 0 拍；per_input dup 0 / drop ≤ 3；missed_render 0。release 探针 10 s：11.56 / p99 11.72 / max 13.80 | ≤ 2 帧 | ✅ |
 | **L1 屏幕** | `testL1_screenInput_within3Frames`（显示器 1，1728×1117 pt ×2 → 1670×1080 BGRA，8 s） | 458 样本：平均 **19.05 ms（1.14 帧）**，p50 18.98，p99 28.55 ms（1.71 帧），max 28.75 ms（1.72 帧），min 2.58；重复 21 拍（显示器刷新与 60 Hz 拍频 + idle 重推）。release 探针 10 s：19.18 / p99 27.59 / max 28.03；per_input dup 28 / drop 7 | ≤ 3 帧 | ✅ |
 | L1 图片（顺带） | 探针 `run --input image:`（10 s） | 599 样本：平均 20.43 ms（1.23 帧），p99 21.86（1.31），max 28.25（1.70）。pts = 拍点 字面实现，引擎到达余量热身后降到 0 才当拍合格，之前晚一拍 | 无阈值 | — |
-| **L1 摄像头** | `testL1_cameraInput_within3Frames` | — | ≤ 3 帧 | **BLOCKED-权限（TCC）**：本进程（责任进程 = Claude 桌面端的 claude-code 辅助程序，Info.plist 没有 NSCameraUsageDescription）系统连提示都不弹就拒（`requestAccess` 立刻回 false、状态仍 notDetermined，探针证明）。解锁：在 Terminal.app 里跑 `swift test --package-path Packages/SwitcherInputs --filter testL1_camera`（第一次会弹"终端想访问摄像头"，点允许），或 `Packages/SwitcherInputs/Scripts/probe-app.sh run --input camera:0 --seconds 10`（弹"SwitcherInputProbe 想访问摄像头"）。我在会话里用后者起过一次 45 s，提示没被回答（状态一直 notDetermined），无法在本会话内量 |
-| 摄像头真机 | `testCamera_builtIn_deliversNV12FramesWithHostTimestamps` | — | 帧 NV12 / IOSurface、pts ≤ ingress、d < 500 ms、2 s ≥ 1.5 s 的帧、IOSurface ≤ 16 | **BLOCKED-权限**（同上） |
+| **L1 摄像头**（产品配置：引擎到达余量开） | `testL1_cameraInput_within3Frames`；探针 `probe-app.sh run --input camera:0 --seconds 10` ×3 | 内置摄像头 1080p@30 '420v' 进 1080p60：运行 1 平均 **64.71 ms（3.88 帧）**、p99 76.14（4.57）、max 88.78（5.33），且**前 252 拍 latest 返回 nil（黑屏 4.2 s）**、dropped 117 / reused 173；运行 2 平均 41.57（2.49）、p99 63.73（**3.82**）、max 65.23（3.91）；运行 3 平均 60.95（3.66）、p99 83.18（4.99）。到达余量 87–136 ms | ≤ 3 帧 | **❌**。不是输入的延迟，是引擎到达余量的代价：余量 = 16 s 内最大 d（ingress − pts）+ 保护带 ≈ 87–136 ms，摄像头 d 稳态 55 ms，每帧多等 余量 − d；起流第一帧 d 大时初值 2 × d₀ 超过候选表能装的，热身 4 s 内饿死 → 黑屏。**问题单 reports/issues/W2A-w1-core-arrival-pacing-vs-camera-latency.md 退回 W1-B**。xctest 进程仍没权限（责任进程是 claude-code 辅助程序），测试在本会话里 XCTSkip，数字来自 .app 探针 |
+| **L1 摄像头**（对照：契约入口 `latest(atOrBefore:)`，`--no-pacing`） | `testL1_cameraInput_contractEntry_within3Frames`；探针同上加 `--no-pacing` | 299 样本：平均 **8.86 ms（0.53 帧）**，p50 7.65，p99 16.97（1.02），max 17.51（1.05）；dup 300（30 进 60 的设计内 50%）、drop 1（引擎起来前的） | ≤ 3 帧 | ✅（这是输入本身的延迟：帧到了下一拍就用） |
+| 摄像头时间戳（探针 `clocks --camera 0`，8 s，218 帧） | — | pts 严格 33.33 / 33.34 ms 步进（传感器时钟）；送达间隔 30–35 ms、重负载 24–41；**d = ingress − pts 稳态 54–58 ms**（相机管线固有延迟），每秒 1–3 帧 60–75，第一帧 75，重负载见过 157；`synchronizationClock` == host clock | — | 数据在问题单里 |
+| 摄像头真机 | `testCamera_builtIn_deliversNV12FramesWithHostTimestamps` | 探针里等价的检查都过：帧 '420v' IOSurface（distinctSurfaces 2–5）、pts ≤ ingress、采集丢帧 0、8 s 219 帧（29.3 fps）、协商 1920×1080@30（匹配节目帧率 false，正确：内置相机最高 30） | — | ✅（探针）；xctest 本身 XCTSkip（权限，同上） |
 | **S6** 权限被拒：不崩、文案清楚 | `testS6_cameraPermissionDenied_startDoesNotCrash_messageIsClear` | 本进程恰好就是"被拒"环境：start 不抛、不崩，5 s 内 state = error，文案：「摄像头权限被拒，且系统没有弹出授权提示：本进程（或启动它的程序）的 Info.plist 没有摄像头用途说明，从终端或带用途说明的 .app 启动，在 系统设置 › 隐私与安全性 › 摄像头 允许后会自动恢复。」；普通拒绝的文案：「摄像头权限被拒。打开 系统设置 › 隐私与安全性 › 摄像头，允许本程序后会自动恢复，不用重启。」；stop 后 noSignal | 不崩、文案清楚 | ✅ |
 | **S6** 授权后 10 s 内恢复 | 手动，`Scripts/probe-app.sh permission --camera 0 --seconds 90` | 代码：每 1 s 轮询 `AVCaptureDevice.authorizationStatus`，变成 authorized 就建会话。**步骤**：① 先跑一次上面的命令并在提示里点"不允许"（或在系统设置里关掉 SwitcherInputProbe 的摄像头）→ 日志应打印 `state noSignal → error(...)`；② 90 s 内到 系统设置 › 隐私与安全性 › 摄像头 打开 SwitcherInputProbe；③ 日志应在 ≤ 2 s 内打印 `error → live` 和 "已推 60 帧"，进程不用重启。屏幕录制同理：`permission --screen 0`，在 屏幕录制与系统录音 里打开 | 授权后不重启恢复 ≤ 10 s | **待手动**（会话里没法替用户点系统设置） |
 | **S5** 热插拔 20 次 | `testS5_hotplug20Cycles_noCrash_recoversWithin3s_numberKept`；脚本 `Scripts/hotplug-timer.sh <uniqueID> 20` | 代码：`wasDisconnected` → 拆会话、noSignal；`wasConnected`（uniqueID 相同）→ 重建会话 → 首帧 live；恢复时间 = 连接通知 → live。脚本每次提示"请拔掉 / 请插回"，出表：断开→noSignal、连接→live、拔着时长，最后崩溃 0 / 编号是否不变 / 最大与平均恢复时间 | 崩溃 0；恢复 ≤ 3 s；设置保持 | **BLOCKED-硬件**（内置摄像头拔不了；没有外接 USB 摄像头 / UVC 卡）+ 权限（同 L1 摄像头）。设备清单里有一台 iPhone 连续互通相机（`.external`，uniqueID `05D5AC85-…0001`，1080p60），关掉 iPhone 的连续互通 / 走远再回来也能触发连接 / 断开通知，可以拿它跑：`Scripts/hotplug-timer.sh 3 20` |
 
-BLOCKED 汇总：L1 摄像头、摄像头真机、S5、S6 恢复路径——都卡在"要有人点一次系统授权提示 / 插拔设备"，代码和工具都在，跑法在表里。
+BLOCKED 汇总：S5、S6 恢复路径——卡在"插拔设备 / 在系统设置里改权限"，代码和工具都在，跑法在表里。摄像头权限用户已在 .app 探针上点了允许，摄像头的数字都是 .app 探针量的；xctest 进程还是没权限（要从 Terminal.app 跑）。
+**摄像头 L1 在产品配置下 ❌（2.5–3.9 帧 avg、3.8–5.0 p99），根因在引擎的到达余量，已退单给 W1-B；输入本身 0.53 帧。**
 
 ## 3. 没做的和原因
 
-1. **摄像头 / 麦克风的真机跑不了**（TCC）。责任进程机制：`responsibility_get_pid_responsible_for_pid` 指向 `…/claude-code/2.1.266/claude.app/Contents/MacOS/claude`（`com.anthropic.claude-code`），它的 Info.plist 只有麦克风 / 本地网络 / Apple Events 用途说明，没有摄像头，所以 AVFoundation 不弹提示直接拒。屏幕录制反而在会话中途变成 authorized（应该是别的会话或用户在系统设置里给 Claude 开了），所以屏幕这路量到了。`Scripts/probe-app.sh` 解决方式：启动器 .app 只编一次（cdhash 稳定，TCC 记得住），经 `open` 起真正的探针二进制，子进程继承责任归属。
+1. **摄像头的 XCTest 在本会话跑不了**（TCC）。责任进程机制：`responsibility_get_pid_responsible_for_pid` 指向 `…/claude-code/2.1.266/claude.app/Contents/MacOS/claude`（`com.anthropic.claude-code`），它的 Info.plist 只有麦克风 / 本地网络 / Apple Events 用途说明，没有摄像头，所以 AVFoundation 不弹提示直接拒。屏幕录制反而在会话中途变成 authorized（应该是别的会话或用户在系统设置里给 Claude 开了），所以屏幕这路量到了。`Scripts/probe-app.sh` 解决方式：启动器 .app 只编一次（cdhash 稳定，TCC 记得住），经 `open` 起真正的探针二进制，子进程继承责任归属——用户在提示里点了允许后，摄像头的所有数字都来自它。
+1a. **摄像头 L1 在产品配置下没达标**（见 §2），修法在引擎（W1-B 的 ArrivalPacing），本会话只准动 Inputs，已写问题单。输入侧没有合法的缓解手段：pts 必须是采集时刻（契约 / 设计方案 §3.6），ingressTime 必须是进槽时刻，帧槽容量由组装方定。
 2. **headless 加 `--input camera:0`** 没做：`Tools/switcher-headless/` 归 W2-C / G3（OWNERSHIP 表），本会话只准动 `Packages/SwitcherInputs/`。等价物是 `switcher-input-probe run --input …`（同一套引擎 / 渲染器 / 帧槽）；G3 接线时把 harness 里 60 行的组装搬进 headless 即可（`InputEngineHarness.swift`），W2-B 的 App 已留了 `InputFactory` 接缝。
 3. **屏幕的窗口 / 应用过滤只做了单元级验证**（SCContentFilter 建得出来、尺寸按 pointPixelScale 算），L1 只量了显示器。
 4. **FileInput 的 rate ≠ 1 音频**是线性插值变速（音调随速率变），没有做保持音调的时间拉伸；prompt 没要求。
@@ -85,6 +89,7 @@ BLOCKED 汇总：L1 摄像头、摄像头真机、S5、S6 恢复路径——都�
 3. **SCK 起流后有一段 ~600 ms 的空窗**：`startCapture` 后送 2–3 帧，然后 600 ms 没有任何样本，之后才稳定按帧间隔送（真帧或 idle）。看门狗会在这段里报一次 noSignal 再回 live；引擎若在空窗里起来，第 0 拍用的是空窗前的旧帧（L1 消费者已忽略 ingress 早于 t0 的帧，否则那一帧算出 645 ms）。
 4. **AVAssetReader 解成 BGRA 时 RGB 电平会变**（探针 `probe-alpha`）：ProRes 4444 / HEVC alpha 写进去 255 / 128，解出来 233 / 117（≈ 0.91×，B/G 也多出 2–3），像是走了 BT.709 → sRGB 的转换。**alpha 值不变**。编码器不改 RGB，只给 alpha 模式打标：ProRes 4444 默认 `StraightAlpha`、HEVC alpha 默认 `PremultipliedAlpha`，输入缓冲带 `kCVImageBufferAlphaChannelModeKey` 附件时跟附件走；解出来的缓冲附件照样带，格式描述里有 `ContainsAlphaChannel = 1`、`Depth = 32`、`AlphaChannelMode`。需要精确电平的带 alpha 图形走 PNG（ImageInput 逐字节精确）。
 5. **进程里第一个 AVAssetReader 要 85 ms 才 startReading**（之后的 2 ms），加首帧 4 ms；定位到非关键帧要从关键帧解到目标（pattern.mov 60 帧 25 ms）。所以 FileInput 的锚点在目标帧解出来之后才定，start / seek 后 `playbackStartTick` 先是 nil。
+5a. **摄像头的 d（ingress − pts）不是抖动，是 55 ms 的固定管线延迟**（内置相机；pts 是传感器时钟，33.33 ms 严格步进），送达抖动本身只有 ±3 ms，重负载下偶发 +20–100 ms 的尖峰。引擎的到达余量把它当抖动全额预留，摄像头就多付 1–3 帧；估计器还按第一帧（最慢的那帧）定初值。细节在问题单。任何"入口打戳 → 引擎挑帧"的新输入（DeckLink、NDI、W3-A）都会遇到同样的事，NDI 的 d 会更大。
 6. **`supportsRandomAccess = true` + `timeRange` 到 +∞ 时 reader 会在结尾多给一个 pts = 时长 的样本**（探针 `probe-file3`：601 个）；`FileReader.nextVideo` 过滤 pts ≥ 时长的样本。循环用重开 reader 而不是 random access（后者要先把当前范围读完才能 reset）。每次重开一个 reader 就换一个像素池（IOSurface 换一批，10 s 循环 22 个不同 IOSurface），渲染器纹理表每路 16 项，每圈会建几次纹理。
 7. **AVAssetReader 的解码像素池会复用 IOSurface**（探针 `probe-surfaces`：立即放手 5 个、持有 6 帧 11 个），前提是下游放手。测试里把 Frame 存进数组就会让池子一直新建（第一版测试见过 161 个不同 IOSurface）。
 8. **暂停位置的归属**：`pause()` 只置标志，位置由推帧线程在下一次醒来时冻结在它最近推出的那一帧上（API 线程读"最近推出"会差一拍，第一版测试恢复后帧号 12,12,13 就是这个原因）。
