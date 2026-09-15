@@ -118,6 +118,9 @@ BLOCKED-硬件：需要音频接口回环线（耳机出 → 线路入）。脚�
 
 ## 3. 没做的和原因
 
+**所有需要别的会话 / 用户决定的修改汇总在一张单子里：`reports/issues/W2E-g3-pending-changes-checklist.md`（接线、契约提案、退回 W1-D / W1-E / W1-A 的问题、W2-E 自己等决定后的跟改、环境），验收时按它逐条定。** 下面是明细。
+
+
 - **headless / App 的接线没进仓库**：`Tools/switcher-headless/` 是 W2-C / 检查点的目录。补丁（119 行 diff，`AudioPump.swift` 删掉）和步骤在 `reports/issues/W2E-g3-headless-audio-engine-wiring.md`，G3 合并时套上即可；本报告的文件级数字全部来自打了这个补丁的副本。
 - **表读数进 Stats**：契约 `Stats.audio` 只有 dropouts / underruns，提案 004 待批；表和不连续计数现在在 `AudioEngineStatus`。
 - **frameprobe / TestKit 里的不连续检测器**：不是本会话目录，检测器在集成层，文件级分析用 scratchpad 探针 `a1check`（见 §2 A1）。
