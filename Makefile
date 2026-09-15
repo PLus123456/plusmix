@@ -87,3 +87,15 @@ lint:
 clean:
 	rm -rf .build $(XCODEPROJ)
 	@for p in $(PACKAGES) $(TOOLS); do rm -rf $$p/.build; done
+
+# ---------- G2 检查点（M0 核心循环）----------
+# make gate2     跑 10 分钟标准负载 → frameprobe → StatsSummary → reports/G2-run-10min.md + reports/G2.md，并写 baselines/m0-m5max.json
+# make gate2-1h  60 分钟版（用户触发），与 10 分钟基线比，结果并入 reports/G2.md
+# 数据留在 .build/gate2/<label>/（不入库）。脚本：scripts/gate2.sh、scripts/gate2-report.py
+GATE2_BASELINE ?= baselines/m0-m5max.json
+.PHONY: gate2 gate2-1h
+gate2:
+	scripts/gate2.sh --minutes 10 --label 10min --write-baseline $(GATE2_BASELINE)
+
+gate2-1h:
+	scripts/gate2.sh --minutes 60 --label 1h --baseline $(GATE2_BASELINE)
