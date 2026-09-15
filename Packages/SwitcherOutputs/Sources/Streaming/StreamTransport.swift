@@ -24,7 +24,7 @@ public struct TransportReport: Hashable, Sendable {
 public enum StartAlignment: Hashable, Sendable {
     /// 视频用 DTS 作时间戳、PTS − DTS 写进 CTS（RTMP / FLV）：第一帧的 DTS 可以设成音频原点包的时刻，对齐精确到 1 ms。
     case dtsOffset
-    /// 只能挑离关键帧最近的音频包当原点（误差 ≤ 半个 AAC 包 10.7 ms）；`prerollPackets` 个包要先送、会被封装层当热身丢掉（TS）。
+    /// 只能挑离关键帧最近的音频包当原点（误差 ≤ 半个 AAC 包 10.7 ms）；`prerollPackets` 个原点前的包也送（封装层要热身时用，TS 现在自己重发原点包，取 0）。
     case nearestPacket(prerollPackets: Int)
 }
 

@@ -156,17 +156,23 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
 }
 
 /// SRT（libsrt，HaishinKit 自带的二进制）。
+///
+/// TSWriter 的规矩：expectedMedias 里的格式都齐了才写；先到的那个样本被当格式热身丢掉。所以：
+/// 1. 第一个音频包先 append 一次（被丢，但 audioFormat 记下了），再扣住等第一帧视频之后重发 —— 音频原点 = 这个包的真实时刻；
+/// 2. 音频格式没记下之前收到的视频先扣住（≤ 64 帧；原点包离关键帧不超过半个包，实际最多扣 2–3 帧），有了再放；
+/// 3. 之后直通。视频 PTS 以第一帧为原点、音频以原点包为原点，两者误差 = 原点包离关键帧的距离（≤ 10.7 ms，StartAlignment.nearestPacket）。
 final class SRTTransport: StreamTransport, @unchecked Sendable {
     let protocolName = "srt"
-    let startAlignment: StartAlignment = .nearestPacket(prerollPackets: 1)
+    let startAlignment: StartAlignment = .nearestPacket(prerollPackets: 0)
     private let destination: StreamDestination
     private let connection = SRTConnection()
     private let reporter = QueueReporter()
     private var stream: SRTStream?
     private let audioFormat: AVAudioFormat?
-    private var videoSent = false
-    private var audioSentBeforeVideo = 0
-    private var heldAudio: [EncodedAudioPacket] = []   // 第一帧视频之前收到的音频（除 preroll）先扣住：TSWriter 两种格式都有了才写
+    private var audioPrimed = false            // TSWriter 已记下音频格式
+    private var videoStarted = false           // 第一帧视频已 append
+    private var heldVideo: [(EncodedVideoSample, HostDuration)] = []
+    private var heldAudio: [EncodedAudioPacket] = []
 
     init(destination: StreamDestination, audioFormat: AVAudioFormat?) {
         self.destination = destination
@@ -189,9 +195,14 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
 
     func send(video sample: EncodedVideoSample, dtsOffset: HostDuration) async throws {
         guard let stream else { throw StreamTransportError.notConnected }
+        if audioFormat != nil && !audioPrimed {
+            heldVideo.append((sample, dtsOffset))
+            if heldVideo.count > 64 { heldVideo.removeFirst() }
+            return
+        }
         await stream.append(sample.sampleBuffer)
-        if !videoSent {
-            videoSent = true
+        if !videoStarted {
+            videoStarted = true
             for p in heldAudio { await appendAudio(p, to: stream) }
             heldAudio.removeAll()
         }
@@ -199,15 +210,22 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
 
     func send(audio packet: EncodedAudioPacket) async throws {
         guard let stream else { throw StreamTransportError.notConnected }
-        if !videoSent {
-            // 第一个包是 preroll：直接送，让 TSWriter 记下音频格式（它会把这个包丢掉）；之后的扣到第一帧视频之后
-            if audioSentBeforeVideo == 0 {
-                audioSentBeforeVideo += 1
-                await appendAudio(packet, to: stream)
-            } else {
-                heldAudio.append(packet)
-                if heldAudio.count > 64 { heldAudio.removeFirst() }
+        if !audioPrimed {
+            // 热身：让 TSWriter 记下音频格式（这份会被它丢掉），真正的那份扣到第一帧视频之后
+            await appendAudio(packet, to: stream)
+            audioPrimed = true
+            heldAudio.append(packet)
+            for (v, _) in heldVideo { await stream.append(v.sampleBuffer); videoStarted = true }
+            heldVideo.removeAll()
+            if videoStarted {
+                for p in heldAudio { await appendAudio(p, to: stream) }
+                heldAudio.removeAll()
             }
+            return
+        }
+        if !videoStarted {
+            heldAudio.append(packet)
+            if heldAudio.count > 64 { heldAudio.removeFirst() }
             return
         }
         await appendAudio(packet, to: stream)

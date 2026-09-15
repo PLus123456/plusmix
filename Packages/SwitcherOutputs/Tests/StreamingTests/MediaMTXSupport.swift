@@ -158,7 +158,8 @@ final class MediaMTXInstance {
         process.executableURL = URL(fileURLWithPath: Self.binary)
         process.arguments = [config.path]
         process.environment = ProcessInfo.processInfo.environment.merging([
-            "MTX_RTMPADDRESS": ":\(rtmpPort)", "MTX_SRTADDRESS": ":\(srtPort)", "MTX_APIADDRESS": "127.0.0.1:\(apiPort)",
+            // SRT 必须显式绑 IPv4（":port" 是 IPv6 双栈 UDP，IPv4 回环的握手收不到，见 scripts/mediamtx.yml）
+            "MTX_RTMPADDRESS": ":\(rtmpPort)", "MTX_SRTADDRESS": "0.0.0.0:\(srtPort)", "MTX_APIADDRESS": "127.0.0.1:\(apiPort)",
             "MTX_PATHDEFAULTS_RECORDPATH": recordDir.appendingPathComponent("%path/%Y-%m-%d_%H-%M-%S-%f").path,
         ]) { $1 }
         process.standardOutput = log
@@ -391,11 +392,12 @@ final class Impairment {
         }
     }
 
-    /// 封 seconds 秒后自动放开。
+    /// 封 seconds 秒后自动放开。netem 的调用放后台线程：它要等 sudo / 代理回话（0.3–0.5 s），不能卡住按拍喂帧的线程，
+    /// 否则编码器队列被成批涌入的帧挤爆（E1 跳帧）—— dummynet 版 E7 第一次就是这么错判的。
     func block(seconds: Double) throws {
         switch kind {
         case .netem(let mode, let port):
-            try Netem.run(mode, ["block", "\(port)", "\(Int(seconds))"])
+            DispatchQueue.global().async { try? Netem.run(mode, ["block", "\(port)", "\(Int(seconds))"]) }
         case .proxy(let proxy):
             proxy.blocked = true
             let item = DispatchWorkItem { proxy.blocked = false }
@@ -408,7 +410,7 @@ final class Impairment {
     func limit(kbit: Int, seconds: Double) throws {
         switch kind {
         case .netem(let mode, let port):
-            try Netem.run(mode, ["limit", "\(port)", "\(kbit)", "\(Int(seconds))"])
+            DispatchQueue.global().async { try? Netem.run(mode, ["limit", "\(port)", "\(kbit)", "\(Int(seconds))"]) }
         case .proxy(let proxy):
             proxy.rateBytesPerSecond = kbit * 1000 / 8
             let item = DispatchWorkItem { proxy.rateBytesPerSecond = nil }

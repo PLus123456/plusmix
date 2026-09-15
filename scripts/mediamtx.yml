@@ -2,8 +2,8 @@
 #
 # 一个实例 = 一个 RTMP 端口 + 一个 SRT 端口，所有 path 共用端口。E7 要"封第 2 路的端口"，所以三路要三个实例：
 #   mediamtx scripts/mediamtx.yml                                                 # 实例 1：RTMP 1935 / SRT 8890 / API 9997
-#   MTX_RTMPADDRESS=:1936 MTX_SRTADDRESS=:8891 MTX_APIADDRESS=:9998 mediamtx scripts/mediamtx.yml   # 实例 2
-#   MTX_RTMPADDRESS=:1937 MTX_SRTADDRESS=:8892 MTX_APIADDRESS=:9999 mediamtx scripts/mediamtx.yml   # 实例 3
+#   MTX_RTMPADDRESS=:1936 MTX_SRTADDRESS=0.0.0.0:8891 MTX_APIADDRESS=:9998 mediamtx scripts/mediamtx.yml   # 实例 2
+#   MTX_RTMPADDRESS=:1937 MTX_SRTADDRESS=0.0.0.0:8892 MTX_APIADDRESS=:9999 mediamtx scripts/mediamtx.yml   # 实例 3
 # 录制目录默认 ./mediamtx-recordings（相对启动时的工作目录），用 MTX_PATHDEFAULTS_RECORDPATH 改；StreamingTests 自己起实例并改它。
 #
 # 推流地址：
@@ -30,7 +30,9 @@ rtmpAddress: :1935
 rtmpEncryption: "no"
 
 srt: yes
-srtAddress: :8890
+# 必须显式绑 IPv4：":8890" 是 IPv6 双栈 UDP socket，本机实测 IPv4 回环发来的 SRT 握手根本收不到（libsrt / HaishinKit 都超时），
+# 改成 0.0.0.0:8890 立刻就通（reports/w2-stream.md §5）。RTMP 是 TCP，双栈没事。
+srtAddress: 0.0.0.0:8890
 
 pathDefaults:
   record: yes

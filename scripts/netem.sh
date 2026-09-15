@@ -21,9 +21,10 @@
 #
 # 没有 sudo 时：StreamingTests 默认用进程内的用户态代理（ThrottleProxy，限速 / 黑洞）跑同样的 E7 / E8 / E9；设 SWITCHER_NETEM 才走这里。
 #
-# SRT 提醒：macOS 应用防火墙会拦 mediamtx（ad-hoc 签名）的入站 UDP，SRT 握手没回应（回环也拦）。放行一次：
-#   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /opt/homebrew/bin/mediamtx
-#   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /opt/homebrew/bin/mediamtx
+# SRT 提醒：MediaMTX 的 srtAddress 必须显式绑 IPv4（scripts/mediamtx.yml 里是 0.0.0.0:8890）；":8890" 双栈 UDP 收不到 IPv4 回环的握手。
+# 从别的机器推 SRT 进来还要在应用防火墙里放行 mediamtx（ad-hoc 签名，系统不会自动放行）：
+#   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$(realpath /opt/homebrew/bin/mediamtx)"
+#   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$(realpath /opt/homebrew/bin/mediamtx)"
 #
 # 注意：
 # - 本机回环（lo0）上 pf 也生效；限速只对"发往 PORT"的方向（上行），服务器回来的 ACK 不限。

@@ -200,7 +200,7 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
     public func start() throws {
         try stateLock.withLock {
             guard !running else { throw NDISendError.alreadyRunning }
-            var haveSDK = false
+            let haveSDK = Self.isAvailable
             #if canImport(NDI)
             if !configuration.dryRun {
                 guard NDIlib_initialize() else {
@@ -220,7 +220,6 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
                     audioPlanar = .allocate(capacity: configuration.audioChannels * audioMaxFrames)
                     audioPlanar?.initialize(repeating: 0, count: configuration.audioChannels * audioMaxFrames)
                 }
-                haveSDK = true
             }
             #endif
             counters.unavailable.store(!haveSDK, ordering: .relaxed)
@@ -420,7 +419,7 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         counters.recordConvert(HostClock.now() - t0)
         autoProbeIfDue(item.frame.pixelBuffer, currentMs: convertMs)
         #if canImport(NDI)
-        guard let sender else { return }
+        if let sender {   // dryRun 时是 nil：只转换、只计数
         var v = NDIlib_video_frame_v2_t()
         v.xres = Int32(out.width)
         v.yres = Int32(out.height)
@@ -434,13 +433,14 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         v.line_stride_in_bytes = Int32(out.bytesPerRow)
         v.timestamp = NDITime.utc100ns(hostTime: item.time)
         NDIlib_send_send_video_async_v2(sender, &v)
+        }
         #endif
         counters.framesSent.add(1, ordering: .relaxed)
     }
 
     private func sendAudio(_ block: PCMRing.Block) {
         #if canImport(NDI)
-        guard let sender, let audioPlanar else { return }
+        if let sender, let audioPlanar {   // dryRun 时是 nil：只计数
         let n = min(block.frameCount, audioMaxFrames)
         for ch in 0..<configuration.audioChannels {
             (audioPlanar + ch * audioMaxFrames).update(from: block.planes[ch], count: n)
@@ -455,6 +455,7 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         a.channel_stride_in_bytes = Int32(audioMaxFrames * MemoryLayout<Float>.size)
         a.timestamp = NDITime.utc100ns(hostTime: block.hostTime)
         NDIlib_send_send_audio_v3(sender, &a)
+        }
         #endif
         counters.audioBlocksSent.add(1, ordering: .relaxed)
     }

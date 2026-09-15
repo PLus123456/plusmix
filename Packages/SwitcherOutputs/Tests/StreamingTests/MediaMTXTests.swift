@@ -93,7 +93,7 @@ final class MediaMTXTests: XCTestCase {
         XCTAssertTrue(pk.allSatisfy { $0.dtsTime == nil || abs($0.ptsTime - $0.dtsTime!) < 0.001 })
     }
 
-    /// SRT：同上（帧号连续）；A/V 用最近包对齐（≤ 10.7 ms + priming 偏置）。macOS 应用防火墙会拦 mediamtx 的入站 UDP（见报告），此时 XCTSkip。
+    /// SRT：同上（帧号连续）；A/V 用最近包对齐（≤ 10.7 ms）。MediaMTX 的 SRT 要绑 IPv4（MediaMTXInstance 已处理）；连不上时打印防火墙状态后 XCTSkip。
     func testSRT_endToEnd_10s_framesContinuous() throws {
         let mtx = try startInstances(1, test: "srt-e2e")[0]
         let scene = try StreamScene()
@@ -104,7 +104,7 @@ final class MediaMTXTests: XCTestCase {
             o.stop()
             let fw = (try? Proc.run("/usr/libexec/ApplicationFirewall/socketfilterfw", ["--getglobalstate"]).stdout).map { String(decoding: $0, as: UTF8.self) } ?? ""
             if fw.contains("enabled") {
-                throw XCTSkip("BLOCKED-防火墙：SRT 连不上（\(o.state)）且应用防火墙开着；放行 mediamtx：sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add \(MediaMTXInstance.binary) && sudo … --unblockapp \(MediaMTXInstance.binary)")
+                throw XCTSkip("BLOCKED-防火墙：SRT 连不上（\(o.state)）且应用防火墙开着；先确认 mediamtx 在放行名单里（socketfilterfw --listapps），再看 mediamtx 日志里 SRT 有没有 conn opened")
             }
             XCTFail("SRT 没连上：\(o.state)")
             return
@@ -205,14 +205,17 @@ final class MediaMTXTests: XCTestCase {
         stopAll(outputs)
         let c = outputs.map(\.counters)
         for i in [0, 2] {
-            print("第 \(i + 1) 路：\(c[i])，编码器 skipped \(outputs[i].videoEncoder.counters.skipped)")
+            let skipped = outputs[i].videoEncoder.counters.skipped
+            print("第 \(i + 1) 路：\(c[i])，编码器 skipped \(skipped)")
             XCTAssertEqual(c[i].networkDropped, 0, "E7 硬性：第 \(i + 1) 路网络丢帧必须为 0")
             XCTAssertEqual(c[i].disconnects, 0)
-            XCTAssertEqual(c[i].framesSent, 3600)
+            XCTAssertEqual(skipped, 0, "E1：第 \(i + 1) 路编码器不该跳帧（跳了说明喂帧线程被卡过，不是网络问题）")
+            XCTAssertEqual(c[i].framesSent, c[i].framesReceived, "编码出的帧全部交出")
             let totals = try frameprobeTotals(mtx[i].recordings("s\(i + 1)"))
             print("第 \(i + 1) 路落盘：\(totals)")
-            XCTAssertGreaterThanOrEqual(totals.frames, 3599, "第 \(i + 1) 路落盘帧数（MediaMTX 丢最后一帧）")
-            XCTAssertEqual(totals.gaps, 0)
+            // 落盘 = 交出 − 1（MediaMTX 丢每个文件最后一帧）；帧号缺口只有编码器跳帧才会有
+            XCTAssertGreaterThanOrEqual(totals.frames, Int(c[i].framesSent) - 1, "第 \(i + 1) 路落盘帧数")
+            if skipped == 0 { XCTAssertEqual(totals.gaps, 0, "第 \(i + 1) 路帧号连续") }
         }
         print("第 2 路：\(c[1])")
         for o in outputs { print("\(o.consumerName) 退出原因：\(o.lastExitReasonDescription)") }
