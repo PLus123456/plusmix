@@ -4,7 +4,7 @@
 **整个会话期间机器不干净**：另外四个 W2 会话（w2-app / w2-control / w2-stream / w2-audio-integ）同时在编译跑测试，load average 2–4。
 worktree `.claude/worktrees/w2-inputs-phase-one-2f34b3`，分支 `claude/w2-inputs-phase-one-2f34b3`（桌面端自动起的名），从 `main`（2290b4e）开；
 **`w2-inputs` 这个分支名指向同一个 HEAD**（`git branch -f w2-inputs HEAD`），`make lint BRANCH=w2-inputs` 和检查点合并都用它。
-提交：`git log main..w2-inputs`（5 个）。只动了 `Packages/SwitcherInputs/`、本报告、`docs/contract-changes/002`。
+提交：`git log main..w2-inputs`（5 个）。只动了 `Packages/SwitcherInputs/`、本报告、`docs/contract-changes/005`（原 002，G3 合并时因与 W2-D 撞号改为 005）。
 
 ## 1. 做了什么
 
@@ -18,12 +18,12 @@ worktree `.claude/worktrees/w2-inputs-phase-one-2f34b3`，分支 `claude/w2-inpu
 | 3 FileInput | `File/FileInput.swift`、`FileDecoder.swift`、`FileQueues.swift`、`FileTimeline.swift` | AVAssetReaderTrackOutput（内部 VideoToolbox 硬解，探针 1080p60 H.264 解 2700 fps）；**时钟从属**：全有理数时间线，第 anchorTick 拍显示位置 anchorMedia，每拍前进 一拍秒数 × 速率；推帧线程（time-constraint）每拍醒一次，把"位置 ≤ 本拍"的最新解码帧推进帧槽（多余的计 `framesRejected`），pts = 拍点 − 半个节目帧；预解码 3 帧；循环重开 reader（2 ms）；定位 = 换代，**锚点在目标帧解出来之后才定**（首帧就是第 300 帧，不依赖 GOP）；暂停时每拍以 pts = 拍点 重推停住的帧；结束动作 hold / black / loop 运行中可改；音频 256 帧一块按"样本已发生"写环（混音器年龄设定点才对得上），速率 ≠ 1 线性插值变速；带 alpha（格式描述 `ContainsAlphaChannel` / Depth 32）输出 BGRA，解码器标 `StraightAlpha` 的就地预乘 |
 | 4 ImageInput | `Image/ImageInput.swift` | 缩略图接口一次完成解码 + EXIF 转正 + 长边缩放，再按两边收进节目框（不放大、偶数尺寸）；预乘 BGRA、sRGB、IOSurface；拍点线程每拍 push 同一个缓冲，pts = 拍点 |
 | 5 通用 | `Common/NoSignalWatchdog.swift`（期望帧间隔 × N，N = 3，定时器周期 = 间隔）、`InputStateBox.swift`（状态 + 转换计数）、`InputThread.swift`（pthread + THREAD_TIME_CONSTRAINT_POLICY + mach_wait_until）、`ProgramTiming.swift`（节目格式 + 拍点时钟，组装方在引擎 start 前定 t0 传给输入）、`LPCM.swift` / `AudioSampleWriter.swift`（任意 LPCM 布局 → float32 非交错 → 环）、`HostTimeConversion.swift`、`PixelBuffers.swift`、`SurfaceTracker.swift` | 热插拔：`AVCaptureDevice.wasDisconnected / wasConnected`（按 uniqueID）+ 每秒轮询兜底；断开拆会话进 noSignal，回来自动重建（`rebuilds` 计数），编号在对象里不变、InputSettings 在 MixerState 里不碰；权限：未授权 → `.error(文案指到系统设置)`，每秒轮询，授权后自动建会话（不用重启） |
-| 6 L1 打点 | `Frame.ingressTime` 每种输入都在 push 前一刻填；"引擎送编码器时记差"要在引擎里做，Stats 没字段 → **提案 002**；本会话用 `SwitcherInputsHarness/LatencyFrameSlot.swift`（包一层真帧槽，记第 n 拍用了哪帧）+ `LatencyConsumer`（PGM 消费者 consume 入口打戳）在包外量 | 提案里写了引擎侧算法（就是 harness 这套） |
+| 6 L1 打点 | `Frame.ingressTime` 每种输入都在 push 前一刻填；"引擎送编码器时记差"要在引擎里做，Stats 没字段 → **提案 002**；本会话用 `SwitcherInputsHarness/LatencyFrameSlot.swift`（包一层真帧槽，记第 n 拍用了哪帧）+ `LatencyConsumer`（PGM 消费者 consume 入口打戳）在包外量 | 提案里写了引擎侧算法（就是 harness 这套）；提案编号 G3 合并时由 002 改为 005 |
 | 探针 | `Sources/switcher-input-probe/main.swift` | `devices`（设备 / 屏幕目标 / 权限）、`clocks`、`run --input … --seconds N`（真引擎跑，出每路 L1 表）、`hotplug --camera <id> --cycles 20`（S5 计时）、`permission`（S6 观察） |
 | TCC | `Scripts/probe-app.sh`、`Scripts/hotplug-timer.sh` | 见 §3 第 1 条：从 Claude / 脚本直接起的进程系统连授权提示都不弹，用只编一次的启动器 .app 经 `open` 起探针 |
 
 统计：每个输入只暴露 `InputCounters`（原子计数：收 / 推 / 拒、音频块、状态转换、重建、见过的 IOSurface 数）和各自的诊断量（时间戳 d 分布、热插拔事件、文件计数），
-Stats 仍只读帧槽 / 环的统计（铁律 4）；L1 进 Stats 要提案 002。
+Stats 仍只读帧槽 / 环的统计（铁律 4）；L1 进 Stats 要提案 005（原 002）。
 
 `make lint BRANCH=w2-inputs` 绿（禁词 / 版本号 / Package.swift / 依赖方向 / 归属 / RT 符号）；`swift build` 绿；`swift test`（本包）28 个：24 通过、4 XCTSkip（摄像头三个 + S5，权限 / 硬件，下表），约 30 s。摄像头的 L1 由 .app 探针量（表里）。
 
@@ -75,7 +75,7 @@ BLOCKED 汇总：S5、S6 恢复路径——卡在"插拔设备 / 在系统设置
 
 ## 4. 对契约的疑问
 
-1. **提案 002**（`docs/contract-changes/002-stats-per-input-latency.md`，待批）：`Stats.per_input` 加 `latency_ms` / `latency_max_ms`。不批的话 L1 只能靠探针 / 测试报，UI / API / 长稳 stats 里没有。
+1. **提案 005（原 002，G3 改号）**（`docs/contract-changes/005-stats-per-input-latency.md`，待批）：`Stats.per_input` 加 `latency_ms` / `latency_max_ms`。不批的话 L1 只能靠探针 / 测试报，UI / API / 长稳 stats 里没有。
 2. **输入怎么拿到节目时钟**：契约的 `Input` 协议没有时钟参数，但四种输入都需要（摄像头按节目帧率协商、屏幕跟节目帧率、文件锚到拍点、图片每拍刷新 pts）。本会话在各自的 init 里收 `ProgramTiming{format, TickClockSpec}`（组装方在引擎 `start(t0:)` 之前定 t0，把同一份给所有输入——headless 现在就是这么算 t0 的）。这是包内类型，不动契约；但如果以后节目格式要热切换（"改它等于重启管线"），输入也得重建。要不要把 `ProgramTiming` 升到契约让 App / headless / TestKit 共用，请拍板。
 3. **`Frame.pts` 对文件 / 图片的语义**：契约说 pts 是"采集时刻"。文件帧的 pts 我定为 **拍点 − 半个节目帧**（相位提前量，让带到达余量的引擎入口当拍就合格；30 fps 节目里同样），图片按 prompt 字面是 **拍点**（引擎热身前会晚一拍）。两者的 A/V 关系：文件音频样本的 host time = 该媒体位置的拍点（不带提前量），所以视频在拍点显示、音频在拍点响，对齐。如果希望图片也带提前量（少一拍延迟），改一个默认值即可。
 4. **`FileEndAction.black` 的语义**：我实现成"推一帧黑场然后 noSignal"（帧槽保留黑场）。另一种理解是"持续输出黑场且仍算 live"。按 prompt 的无信号测试（播完 → noSignal）选了前者。

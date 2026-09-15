@@ -1,7 +1,7 @@
-# 002 Stats.per_input 加 L1 内部延迟字段
+# 005 Stats.per_input 加 L1 内部延迟字段（原 002，G3 改号）
 
 提出会话 / 分支：W2-A / w2-inputs（worktree 分支 claude/w2-inputs-phase-one-2f34b3）
-状态：待批
+状态：待批。**编号说明**：W2-A、W2-D 并行各自用了 002；W2-D 的 002（Stats.encoder 推流字段）用户已批并被其报告引用，故 G3 合并时把本案改号为 005（W2-E 的已自改为 004，003 是 W2-C 已落地的）。
 
 ## 改什么
 
