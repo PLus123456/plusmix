@@ -85,6 +85,40 @@ public struct ErrorResponse: Encodable, Sendable {
     public init(_ error: String) { self.error = error }
 }
 
+/// 批量请求体：`{"commands": [<Command>, …]}`，按顺序执行，sequence 连续。
+public struct BatchCommandRequest: Decodable, Sendable {
+    public var commands: [Command]
+}
+
+/// 批量回执：全部成功 200；第 index 条被拒时 400，带前面已生效的回执。
+public struct BatchCommandResponse: Encodable, Sendable {
+    public var receipts: [CommandResponse]
+    public var error: String?
+    public var index: Int?
+
+    enum CodingKeys: String, CodingKey { case receipts, error, index }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(receipts, forKey: .receipts)
+        try c.encodeIfPresent(error, forKey: .error)
+        try c.encodeIfPresent(index, forKey: .index)
+    }
+}
+
+/// GET /api/v1/log：最近走过总线的命令（诊断用）。
+public struct CommandLogResponse: Encodable, Sendable {
+    public var entries: [CommandLogEntry]
+}
+
+/// GET /api/v1/tally：给外部 tally / 面板轮询用的小应答。
+public struct TallyResponse: Encodable, Sendable {
+    public var sequence: UInt64
+    public var tick: Tick
+    public var program: Int
+    public var preview: Int
+    public var tally: [Int: Tally]
+}
+
 /// GET /api/v1/commands 的一项。
 public struct CommandCatalogEntry: Encodable, Sendable {
     public var kind: CommandKind
@@ -157,10 +191,30 @@ public struct StatsMessage: Encodable, Sendable {
     public var stats: Stats
 }
 
-/// 客户端在 WS 上发的命令：`{"id": <任意 JSON>, "command": <Command>}`。
+/// 客户端在 WS 上发的命令：`{"id": <任意 JSON>, "command": <Command>}` 或 `{"id": …, "commands": [<Command>, …]}`。
 public struct WSCommandRequest: Decodable, Sendable {
     public var id: JSONValue?
-    public var command: Command
+    public var command: Command?
+    public var commands: [Command]?
+}
+
+/// WS 批量回执。
+public struct WSReceiptsMessage: Encodable, Sendable {
+    public var type = "receipts"
+    public var id: JSONValue?
+    public var receipts: [ReceiptMessage]
+    public var error: String?
+    public var index: Int?
+
+    enum CodingKeys: String, CodingKey { case type, id, receipts, error, index }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encodeIfPresent(id, forKey: .id)
+        try c.encode(receipts, forKey: .receipts)
+        try c.encodeIfPresent(error, forKey: .error)
+        try c.encodeIfPresent(index, forKey: .index)
+    }
 }
 
 /// WS 命令的回执。
@@ -191,11 +245,35 @@ public struct WSErrorMessage: Encodable, Sendable {
     public var error: String
 }
 
-/// 解析命令请求体：`{"command": ...}` 或裸 Command。
+/// 请求体里的命令：一条或一批。
+public enum CommandPayload: Sendable {
+    case single(Command)
+    case batch([Command])
+}
+
+/// 解析命令请求体：`{"commands": [...]}`、`{"command": ...}` 或裸 Command。
 public enum CommandEnvelope {
     public static func decode(_ data: Data) throws -> Command {
         if let wrapped = try? APIJSON.decoder.decode(CommandRequest.self, from: data) { return wrapped.command }
         return try APIJSON.decoder.decode(Command.self, from: data)
+    }
+
+    /// 批量或单条。空的 commands 数组算错。
+    public static func decodePayload(_ data: Data) throws -> CommandPayload {
+        if let batch = try? APIJSON.decoder.decode(BatchCommandRequest.self, from: data) {
+            guard !batch.commands.isEmpty else { throw EnvelopeError.emptyBatch }
+            return .batch(batch.commands)
+        }
+        if (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["commands"] != nil {
+            // 有 commands 键但解不成命令数组：把解码错误报出去，别当成裸 Command
+            _ = try APIJSON.decoder.decode(BatchCommandRequest.self, from: data)
+        }
+        return .single(try decode(data))
+    }
+
+    public enum EnvelopeError: Error, CustomStringConvertible {
+        case emptyBatch
+        public var description: String { "commands 不能是空数组" }
     }
 
     /// 给人看的解码错误。
@@ -209,6 +287,7 @@ public enum CommandEnvelope {
             @unknown default: return "命令 JSON 无法解析：\(e)"
             }
         }
+        if let e = error as? EnvelopeError { return e.description }
         return "命令 JSON 无法解析：\(error)"
     }
 }

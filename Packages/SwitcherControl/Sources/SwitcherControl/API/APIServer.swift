@@ -10,9 +10,11 @@ import SwitcherEngine
 
 // 本地 API（设计方案 §9.2）：HTTP + WebSocket，JSON。Hummingbird 2（Apache-2.0）。
 //   GET  /api/v1/state     全量 MixerState + tally + Stats
-//   POST /api/v1/command   {command} → {sequence, appliedTick, …}；结构性非法 400 带理由
+//   POST /api/v1/command   {command} → {sequence, appliedTick, …}；{commands: [...]} 批量顺序执行；结构性非法 400 带理由
 //   GET  /api/v1/commands  命令目录
-//   WS   /api/v1/events    hello → 快照（整快照 + 版本号）/ tally / 每秒 Stats；连接上也能发命令
+//   GET  /api/v1/log       最近走过总线的命令（?limit=）
+//   GET  /api/v1/tally     PGM / PVW / 每路 tally 的小应答（外部 tally 轮询用）
+//   WS   /api/v1/events    hello → 快照（整快照 + 版本号）/ tally / 每秒 Stats；连接上也能发命令（单条或批量）
 // 默认只监听 127.0.0.1:8765；token 鉴权默认关。所有应答都是手工编码的 JSON（APIJSON：键排序、不转义斜杠），
 // 不用 Hummingbird 的默认编码器，保证和 stats.jsonl / 节目文件同一种写法。
 
@@ -101,16 +103,33 @@ public final class APIServer: Sendable {
         router.get("/api/v1/commands") { _, _ in
             Self.json(CommandCatalogResponse())
         }
+        router.get("/api/v1/log") { [bus] request, _ in
+            let limit = request.uri.queryParameters["limit"].flatMap { Int($0) } ?? 256
+            return Self.json(CommandLogResponse(entries: bus.recentEntries(limit: max(0, limit))))
+        }
+        router.get("/api/v1/tally") { [feed] _, _ in
+            let snap = feed.stateMachine.publisher.latest
+            let state = snap?.state ?? MixerState()
+            return Self.json(TallyResponse(sequence: snap?.sequence ?? 0, tick: snap?.tick ?? .zero, program: state.program,
+                                           preview: state.preview, tally: state.tallies))
+        }
         router.post("/api/v1/command") { [self] request, _ in
             var request = request
             let body = try await request.collectBody(upTo: 4 << 20)
-            let command: Command
+            let payload: CommandPayload
             do {
-                command = try CommandEnvelope.decode(Data(buffer: body))
+                payload = try CommandEnvelope.decodePayload(Data(buffer: body))
             } catch {
                 return Self.json(ErrorResponse(CommandEnvelope.describe(error)), status: .badRequest)
             }
-            return await self.execute(command, source: .api)
+            switch payload {
+            case .single(let command):
+                return await self.execute(command, source: .api)
+            case .batch(let commands):
+                let result = await self.executeBatch(commands, source: .api)
+                return Self.json(BatchCommandResponse(receipts: result.receipts, error: result.error, index: result.index),
+                                 status: result.error == nil ? .ok : .badRequest)
+            }
         }
     }
 
@@ -125,6 +144,22 @@ public final class APIServer: Sendable {
         } catch {
             return Self.json(ErrorResponse("\(error)"), status: .internalServerError)
         }
+    }
+
+    /// 批量：顺序提交（sequence 连续），第 index 条被拒就停，前面的已生效。
+    func executeBatch(_ commands: [Command], source: CommandSource) async -> (receipts: [CommandResponse], error: String?, index: Int?) {
+        var receipts: [CommandResponse] = []
+        for (i, command) in commands.enumerated() {
+            let issuedAt = HostClock.now()
+            do {
+                let receipt = try await bus.submit(command, source: source)
+                receipts.append(CommandResponse(receipt: receipt, issuedAt: issuedAt, clock: feed.clock))
+            } catch {
+                let reason = (error as? CommandRejection)?.reason ?? "\(error)"
+                return (receipts, reason, i)
+            }
+        }
+        return (receipts, nil, nil)
     }
 
     private func addWebSocket(_ router: Router<BasicWebSocketRequestContext>) {
@@ -152,29 +187,43 @@ public final class APIServer: Sendable {
         }
     }
 
-    /// WS 上的一条命令 → 回执或错误（JSON 文本）。
+    /// WS 上的一条（或一批）命令 → 回执或错误（JSON 文本）。
     func handleWSCommand(_ text: String) async -> String {
         let data = Data(text.utf8)
+        let id = (try? APIJSON.decoder.decode(IDOnly.self, from: data))?.id
+        let fallback = #"{"type":"error","error":"encode"}"#
         let request: WSCommandRequest
         do {
-            if let r = try? APIJSON.decoder.decode(WSCommandRequest.self, from: data) {
+            if let r = try? APIJSON.decoder.decode(WSCommandRequest.self, from: data), r.command != nil || r.commands != nil {
                 request = r
             } else {
-                request = WSCommandRequest(id: nil, command: try CommandEnvelope.decode(data))
+                request = WSCommandRequest(id: nil, command: try CommandEnvelope.decode(data), commands: nil)
             }
         } catch {
-            let id = (try? APIJSON.decoder.decode(IDOnly.self, from: data))?.id
-            return (try? APIJSON.string(WSErrorMessage(id: id, error: CommandEnvelope.describe(error)))) ?? #"{"type":"error","error":"bad json"}"#
+            return (try? APIJSON.string(WSErrorMessage(id: id, error: CommandEnvelope.describe(error)))) ?? fallback
+        }
+        if let commands = request.commands {
+            guard !commands.isEmpty else {
+                return (try? APIJSON.string(WSErrorMessage(id: request.id, error: CommandEnvelope.EnvelopeError.emptyBatch.description))) ?? fallback
+            }
+            let result = await executeBatch(commands, source: .api)
+            let receipts = result.receipts.map {
+                ReceiptMessage(id: nil, sequence: $0.sequence, appliedTick: $0.appliedTick, issuedAt: $0.issuedAt, appliedTickTime: $0.appliedTickTime)
+            }
+            return (try? APIJSON.string(WSReceiptsMessage(id: request.id, receipts: receipts, error: result.error, index: result.index))) ?? fallback
+        }
+        guard let command = request.command else {
+            return (try? APIJSON.string(WSErrorMessage(id: request.id, error: "要有 command 或 commands"))) ?? fallback
         }
         let issuedAt = HostClock.now()
         do {
-            let receipt = try await bus.submit(request.command, source: .api)
+            let receipt = try await bus.submit(command, source: .api)
             let m = ReceiptMessage(id: request.id, sequence: receipt.sequence, appliedTick: receipt.appliedTick, issuedAt: issuedAt,
                                    appliedTickTime: feed.clock?.time(of: receipt.appliedTick))
-            return (try? APIJSON.string(m)) ?? #"{"type":"error","error":"encode"}"#
+            return (try? APIJSON.string(m)) ?? fallback
         } catch {
             let reason = (error as? CommandRejection)?.reason ?? "\(error)"
-            return (try? APIJSON.string(WSErrorMessage(id: request.id, error: reason))) ?? #"{"type":"error","error":"encode"}"#
+            return (try? APIJSON.string(WSErrorMessage(id: request.id, error: reason))) ?? fallback
         }
     }
 

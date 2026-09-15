@@ -42,13 +42,26 @@
 ```
 
 - `sequence`：总线分配的全局序号，严格递增、无空洞。
-- `appliedTick`：命令生效的拍（切换永远落在拍点边界）；`appliedTickTime` 是该拍的理想时刻（引擎没起时钟时省略）。
+- `appliedTick`：命令生效的拍（切换永远落在拍点边界）；`appliedTickTime` 是该拍的理想时刻（引擎没起时钟时为 null）。
 - 结构性非法（引用不存在的输入 / 输出、通道越界、负时长、JSON 解析失败）→ `400 {"error": "<理由>"}`；
   语义上的忽略（转场进行中再发 fade 等）仍返回 200，状态不变。
 
+批量：请求体 `{"commands": [<Command>, …]}`，按顺序执行、sequence 连续（例如 `setPreview` + `cut` 一次发）。应答 `200 {"receipts": [...]}`；
+第 `index` 条被拒时 `400 {"error": "<理由>", "index": 1, "receipts": [前面已生效的回执]}`。空数组 400。
+
 ### GET /api/v1/commands
 
-命令目录（下表的机器可读版）：`[{"kind": "cut", "group": "切换", "summary": "...", "example": {"cut": {}}}, ...]`。
+命令目录（下表的机器可读版）：`{"commands": [{"kind": "cut", "group": "切换", "summary": "...", "parameters": {...}, "example": {"cut": {}}}, ...]}`。
+
+### GET /api/v1/log?limit=256
+
+最近走过总线的命令（诊断用）：`{"entries": [{"sequence", "issuedAt", "source": "ui|hotkey|midi|api|script", "command", "appliedTick", "appliedAt"}, ...]}`，
+按 sequence 升序，最多 256 条；`appliedAt − issuedAt` 是总线 + 状态机的处理耗时。
+
+### GET /api/v1/tally
+
+给外部 tally / 面板轮询的小应答：`{"sequence", "tick", "program", "preview", "tally": {"1": {"program": true, "preview": false}, ...}}`。
+与 `state` 里的 `tally` 同一份推导，只是没有整个 MixerState。
 
 ## WebSocket /api/v1/events
 
@@ -63,6 +76,7 @@
 
 - `tickTime`：该快照生效那一拍的理想时刻；`sentAt`：服务端序列化这条消息的时刻。C2 的两种口径：`收到时刻 − tickTime`（状态变化的拍点 → 客户端）、`收到时刻 − sentAt`（纯传输）。
 - 客户端也可以在这条连接上发命令：`{"id": 7, "command": <Command>}` → `{"type": "receipt", "id": 7, "sequence": 44, "appliedTick": 3602, "issuedAt": ..., "appliedTickTime": ...}`；出错 `{"type": "error", "id": 7, "error": "<理由>"}`。`id` 原样带回，可省略。
+- 批量：`{"id": 8, "commands": [<Command>, …]}` → `{"type": "receipts", "id": 8, "receipts": [...]}`；第 `index` 条被拒时同一条消息里带 `"error"` 和 `"index"`（前面的已生效）。
 
 ## 命令
 

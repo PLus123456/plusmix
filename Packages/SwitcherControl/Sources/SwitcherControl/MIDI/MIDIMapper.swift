@@ -62,9 +62,9 @@ public struct TBarMapper: Hashable, Sendable {
     public var inverted = false
     public init() {}
 
-    /// 0–127 → 进度 0–1。
-    public mutating func progress(forValue value: Int) -> Double {
-        let raw = Double(min(max(value, 0), 127)) / 127
+    /// 0…max → 进度 0–1（7-bit max = 127，14-bit max = 16383）。
+    public mutating func progress(forValue value: Int, max: Int = 127) -> Double {
+        let raw = Double(Swift.min(Swift.max(value, 0), max)) / Double(max)
         let p = inverted ? 1 - raw : raw
         if p >= 1 {
             inverted.toggle()
@@ -78,29 +78,55 @@ public struct TBarMapper: Hashable, Sendable {
 public struct MIDIMapper: Sendable {
     public var table: MIDIMapTable
     public var tbar = TBarMapper()
+    /// 14-bit 配对：最近收到的 MSB，键 = (通道, MSB 控制器号)。
+    private var msb: [Pair: Int] = [:]
+
+    private struct Pair: Hashable { let channel: Int; let controller: Int }
 
     public init(table: MIDIMapTable) { self.table = table }
 
     /// 一条消息对应的命令；没映射、Note 松开、动作解析不出（引用不存在）都返回 nil。
     public mutating func command(for message: MIDIMessage, state: MixerState) -> Command? {
-        guard let mapping = table.mapping(for: message.trigger) else { return nil }
-        switch mapping.action {
-        case .tbar:
-            guard case .cc = message.trigger else { return nil }
-            return .tbar(progress: tbar.progress(forValue: message.value))
-        case .inputGain(let input, let minDb, let maxDb):
-            guard case .cc = message.trigger else { return nil }
-            return .audioGain(input: input, dB: Self.scale(message.value, minDb, maxDb))
-        case .busGain(let bus, let minDb, let maxDb):
-            guard case .cc = message.trigger else { return nil }
-            return .busGain(bus: bus, dB: Self.scale(message.value, minDb, maxDb))
-        case .action(let action):
-            guard case .note = message.trigger, !message.isNoteOff, message.value > 0 else { return nil }
+        switch message.trigger {
+        case .note:
+            guard let mapping = table.mapping(for: message.trigger), case .action(let action) = mapping.action else { return nil }
+            guard !message.isNoteOff, message.value > 0 else { return nil }
             return action.resolve(in: state)
+        case .cc(let channel, let controller):
+            // 显式的 7-bit 映射优先；否则看它是不是某个 14-bit 映射的 MSB（0–31）或 LSB（32–63）
+            if let mapping = table.mapping(for: message.trigger) {
+                return continuous(mapping.action, value: message.value, max: 127)
+            }
+            if controller < 32, let mapping = table.mapping(for: .cc14(channel: channel, controller: controller)) {
+                msb[Pair(channel: channel, controller: controller)] = message.value
+                // MIDI 1.0：收到 MSB 时 LSB 视为 0，先按粗值动
+                return continuous(mapping.action, value: message.value << 7, max: 16383)
+            }
+            if controller >= 32, controller < 64, let mapping = table.mapping(for: .cc14(channel: channel, controller: controller - 32)) {
+                let high = msb[Pair(channel: channel, controller: controller - 32)] ?? 0
+                return continuous(mapping.action, value: high << 7 | message.value, max: 16383)
+            }
+            return nil
+        case .cc14:
+            return nil   // 收到的消息永远是具体的 CC 号，cc14 只出现在表里
         }
     }
 
-    static func scale(_ value: Int, _ lo: Double, _ hi: Double) -> Double {
-        lo + (hi - lo) * Double(min(max(value, 0), 127)) / 127
+    /// 连续控制（推杆 / 推子）的动作。
+    private mutating func continuous(_ action: MIDIAction, value: Int, max: Int) -> Command? {
+        switch action {
+        case .tbar:
+            return .tbar(progress: tbar.progress(forValue: value, max: max))
+        case .inputGain(let input, let minDb, let maxDb):
+            return .audioGain(input: input, dB: Self.scale(value, max: max, minDb, maxDb))
+        case .busGain(let bus, let minDb, let maxDb):
+            return .busGain(bus: bus, dB: Self.scale(value, max: max, minDb, maxDb))
+        case .action:
+            return nil   // 按钮动作不接受连续控制
+        }
+    }
+
+    static func scale(_ value: Int, max: Int = 127, _ lo: Double, _ hi: Double) -> Double {
+        lo + (hi - lo) * Double(Swift.min(Swift.max(value, 0), max)) / Double(max)
     }
 }

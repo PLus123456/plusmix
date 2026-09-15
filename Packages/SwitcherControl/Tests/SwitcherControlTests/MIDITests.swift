@@ -85,6 +85,34 @@ final class MIDITests: XCTestCase {
         XCTAssertEqual(m.command(for: msg(.note(channel: 1, note: 61), 1), state: s), .ftb(on: false))
     }
 
+    /// 14-bit CC：控制器 n 是 MSB、n + 32 是 LSB；MSB 到了先按粗值发（LSB 归零），LSB 到了再按细值发。
+    func testMIDI_cc14_fineTbarAndGain() {
+        var m = MIDIMapper(table: MIDIMapTable(mappings: [
+            MIDIMapping(trigger: .cc14(channel: 1, controller: 1), action: .tbar),
+            MIDIMapping(trigger: .cc14(channel: 1, controller: 7), action: .inputGain(input: 1, minDb: -60, maxDb: 12)),
+            MIDIMapping(trigger: .cc(channel: 1, controller: 40), action: .busGain(bus: .master, minDb: -60, maxDb: 6)),   // 显式映射的 LSB 号优先当普通 CC
+        ]))
+        let s = TestStates.base()
+        func cc(_ n: Int, _ v: Int) -> Command? { m.command(for: MIDIMessage(trigger: .cc(channel: 1, controller: n), value: v, timestamp: .zero), state: s) }
+        // MSB 64 → 8192/16383；LSB 100 → (64<<7 | 100)/16383
+        if case .tbar(let p)? = cc(1, 64) { XCTAssertEqual(p, 8192.0 / 16383.0, accuracy: 1e-12) } else { XCTFail() }
+        if case .tbar(let p)? = cc(33, 100) { XCTAssertEqual(p, Double(64 << 7 | 100) / 16383.0, accuracy: 1e-12) } else { XCTFail() }
+        // 到顶：MSB 127 + LSB 127 = 16383 → 提交并换向
+        if case .tbar(let p)? = cc(1, 127) { XCTAssertEqual(p, Double(127 << 7) / 16383.0, accuracy: 1e-12) } else { XCTFail() }
+        XCTAssertEqual(cc(33, 127), .tbar(progress: 1))
+        if case .tbar(let p)? = cc(1, 127) { XCTAssertEqual(p, 1 - Double(127 << 7) / 16383.0, accuracy: 1e-12, "换向后 MSB 127 / LSB 0 是 127/16383") } else { XCTFail() }
+        // 没有 MSB 先到的 LSB：当 MSB = 0
+        if case .audioGain(_, let dB)? = cc(39, 127) { XCTAssertEqual(dB, -60 + 72 * 127.0 / 16383.0, accuracy: 1e-9) } else { XCTFail() }
+        if case .audioGain(_, let dB)? = cc(7, 127) { XCTAssertEqual(dB, -60 + 72 * Double(127 << 7) / 16383.0, accuracy: 1e-9) } else { XCTFail() }
+        // 显式映射的 40 号（= 8 + 32）走自己的映射，不当 8 号的 LSB
+        XCTAssertEqual(cc(40, 127), .busGain(bus: .master, dB: 6))
+        // 表里 cc14 的 controller 必须 0–31
+        XCTAssertThrowsError(try MIDIMapTable.load(from: Data(#"{"version":1,"mappings":[{"trigger":{"cc14":{"channel":1,"controller":32}},"action":{"tbar":{}}}]}"#.utf8)))
+        let t = try? MIDIMapTable.load(from: Data(#"{"version":1,"mappings":[{"trigger":{"cc14":{"channel":2,"controller":3}},"action":{"tbar":{}}}]}"#.utf8))
+        XCTAssertEqual(t?.mappings.first?.trigger, .cc14(channel: 2, controller: 3))
+        XCTAssertEqual(MIDITrigger.cc14(channel: 2, controller: 3).description, "CC 3/35 (14-bit) @ ch2")
+    }
+
     func testMIDI_umpParsing() {
         // MIDI 1.0 channel voice（UMP MT=2）：CC1=64 ch1、Note On 60 vel 100 ch1、Note Off 60 ch2、Note On vel 0、别的消息类型跳过
         let words: [UInt32] = [0x20B00140, 0x20903C64, 0x20813C40, 0x20903C00, 0x10F80000, 0x40903C00, 0x00000000]

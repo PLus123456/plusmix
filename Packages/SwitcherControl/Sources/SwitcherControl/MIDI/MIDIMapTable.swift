@@ -2,25 +2,30 @@ import Foundation
 import SwitcherContracts
 
 // MIDI 映射表（设计方案 §9.4：T-bar 映射 CC，按钮映射 Note）。JSON，存在用户配置目录（节目文件之外）。
-// 触发：CC（通道 1–16，控制器 0–127）或 Note（通道 1–16，音符 0–127）。
+// 触发：CC（通道 1–16，控制器 0–127）、14-bit CC（控制器 0–31 为 MSB、+32 为 LSB，推杆用）或 Note（通道 1–16，音符 0–127）。
 // 动作：CC → tbar / inputGain / busGain（值 0–127 线性映射），Note（按下，力度 > 0）→ ControlAction（同快捷键）。
 
-/// 触发源。JSON：{"cc": {"channel": 1, "controller": 1}} / {"note": {"channel": 1, "note": 60}}。
+/// 触发源。JSON：{"cc": {"channel": 1, "controller": 1}} / {"cc14": {"channel": 1, "controller": 1}} / {"note": {"channel": 1, "note": 60}}。
 public enum MIDITrigger: Hashable, Codable, Sendable, CustomStringConvertible {
+    /// 7-bit CC（0–127）。
     case cc(channel: Int, controller: Int)
+    /// 14-bit CC：controller（0–31）收 MSB，controller + 32 收 LSB，合成 0–16383（MIDI 1.0 规范的粗 / 细配对；推杆用）。
+    case cc14(channel: Int, controller: Int)
     case note(channel: Int, note: Int)
 
     public var description: String {
         switch self {
         case .cc(let ch, let cc): return "CC \(cc) @ ch\(ch)"
+        case .cc14(let ch, let cc): return "CC \(cc)/\(cc + 32) (14-bit) @ ch\(ch)"
         case .note(let ch, let n): return "Note \(n) @ ch\(ch)"
         }
     }
 
-    /// 通道 1–16、控制器 / 音符 0–127。
+    /// 通道 1–16、控制器 / 音符 0–127（14-bit 的 MSB 号 0–31）。
     public var isValid: Bool {
         switch self {
         case .cc(let ch, let cc): return (1...16).contains(ch) && (0...127).contains(cc)
+        case .cc14(let ch, let cc): return (1...16).contains(ch) && (0...31).contains(cc)
         case .note(let ch, let n): return (1...16).contains(ch) && (0...127).contains(n)
         }
     }
@@ -105,7 +110,7 @@ public enum MIDIMapTableError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .conflicts(let list): return "MIDI 映射冲突：" + list.map { "\($0.trigger) 映射了 \($0.mappings.count) 次" }.joined(separator: "；")
-        case .invalidTrigger(let t): return "MIDI 触发超出范围（通道 1–16、控制器 / 音符 0–127）：\(t)"
+        case .invalidTrigger(let t): return "MIDI 触发超出范围（通道 1–16、控制器 / 音符 0–127、14-bit 的 MSB 号 0–31）：\(t)"
         case .unsupportedVersion(let v): return "MIDI 映射表版本 \(v) 不支持（当前 \(MIDIMapTable.currentVersion)）"
         }
     }

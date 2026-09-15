@@ -137,6 +137,69 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual((r6["commands"] as? [Any])?.count, 27)
     }
 
+    // MARK: 批量、日志、tally
+
+    func testAPI_batchCommands_logAndTally() async throws {
+        let s = try await Server.start()
+        defer { Task { await s.stop() } }
+        let url = s.baseURL.appending(path: "/api/v1/command")
+        // 批量：顺序执行，sequence 连续
+        let (st1, r1) = try await post(url, body: #"{"commands":[{"setPreview":{"input":3}},{"cut":{}},{"renameInput":{"input":1,"name":"甲"}}]}"#)
+        XCTAssertEqual(st1, 200)
+        let receipts = try XCTUnwrap(r1["receipts"] as? [[String: Any]])
+        XCTAssertEqual(receipts.map { $0["sequence"] as? Int }, [1, 2, 3])
+        var state = await s.fixture.stateMachine.state
+        XCTAssertEqual(state.program, 3)
+        XCTAssertEqual(state.input(1)?.name, "甲")
+        // 中途一条非法：前面的已生效，返回 400 带 index 与已有回执
+        let (st2, r2) = try await post(url, body: #"{"commands":[{"setPreview":{"input":4}},{"setPreview":{"input":99}},{"cut":{}}]}"#)
+        XCTAssertEqual(st2, 400)
+        XCTAssertEqual(r2["index"] as? Int, 1)
+        XCTAssertEqual((r2["receipts"] as? [[String: Any]])?.count, 1)
+        XCTAssertTrue((r2["error"] as? String ?? "").contains("输入 99"))
+        state = await s.fixture.stateMachine.state
+        XCTAssertEqual(state.preview, 4, "第一条生效")
+        XCTAssertEqual(state.program, 3, "第三条没执行")
+        XCTAssertEqual(s.fixture.bus.lastSequence, 4)
+        // 空批量 / 不是数组：400
+        let (st3, _) = try await post(url, body: #"{"commands":[]}"#)
+        XCTAssertEqual(st3, 400)
+        // 日志：最近的命令，带来源和拍
+        let (st4, r4) = try await get(s.baseURL.appending(path: "/api/v1/log").appending(queryItems: [.init(name: "limit", value: "2")]))
+        XCTAssertEqual(st4, 200)
+        let entries = try XCTUnwrap(r4["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries.last?["sequence"] as? Int, 4)
+        XCTAssertEqual(entries.last?["source"] as? String, "api")
+        XCTAssertNotNil((entries.last?["command"] as? [String: Any])?["setPreview"])
+        XCTAssertNotNil(entries.last?["appliedTick"])
+        let (_, r5) = try await get(s.baseURL.appending(path: "/api/v1/log"))
+        XCTAssertEqual((r5["entries"] as? [Any])?.count, 4)
+        // tally 快捷端点
+        let (st6, r6) = try await get(s.baseURL.appending(path: "/api/v1/tally"))
+        XCTAssertEqual(st6, 200)
+        XCTAssertEqual(r6["program"] as? Int, 3)
+        XCTAssertEqual(r6["preview"] as? Int, 4)
+        XCTAssertEqual(r6["sequence"] as? Int, 4)
+        XCTAssertEqual((r6["tally"] as? [String: [String: Bool]])?["3"], ["program": true, "preview": false])
+        XCTAssertEqual((r6["tally"] as? [String: [String: Bool]])?["4"], ["program": false, "preview": true])
+        // WS 上的批量
+        let ws = WSClient(url: s.wsURL)
+        defer { ws.close() }
+        _ = try await receive(ws); _ = try await receive(ws)
+        try await ws.send(#"{"id":9,"commands":[{"setPreview":{"input":2}},{"cut":{}}]}"#)
+        var got: [String: Any]? = nil
+        for _ in 0..<4 {
+            let m = try await receive(ws)
+            if m["type"] as? String == "receipts" { got = m; break }
+        }
+        let batch = try XCTUnwrap(got)
+        XCTAssertEqual(batch["id"] as? Int, 9)
+        XCTAssertEqual((batch["receipts"] as? [[String: Any]])?.map { $0["sequence"] as? Int }, [5, 6])
+        state = await s.fixture.stateMachine.state
+        XCTAssertEqual(state.program, 2)
+    }
+
     // MARK: WS /api/v1/events
 
     func testAPI_wsEvents_helloSnapshotStatsReceiptAndTally() async throws {
