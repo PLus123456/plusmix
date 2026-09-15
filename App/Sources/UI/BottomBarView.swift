@@ -19,6 +19,8 @@ final class BottomBarView: NSView {
     let statusLabel = Theme.monoLabel("", size: 11, color: Theme.dimText)
     private var state = MixerState()
     private var previousStats: Stats?
+    /// 最近一行 Stats 里有没有编码器在跑（录制按钮的文案用；Stats.encoder 为空 = 没有编码器接上）。
+    private var encodersRunning = false
     private var format: ProgramFormat = .hd1080p60
     /// 最近一次显示的状态行（测试对照 stats.jsonl 用）。
     private(set) var lastStatusLine: (stats: Stats, text: String)?
@@ -69,10 +71,8 @@ final class BottomBarView: NSView {
     func apply(state: MixerState) {
         self.state = state
         format = state.format
-        let recording = state.outputs.contains { $0.kind == .record && $0.enabled }
+        updateRecordButton()
         let streaming = state.outputs.contains { $0.kind == .stream && $0.enabled }
-        recordButton.title = recording ? "● 录制中" : "录制"
-        Theme.setHighlighted(recordButton, recording, color: Theme.recording)
         streamButton.title = streaming ? "● 推流中" : "推流"
         Theme.setHighlighted(streamButton, streaming, color: Theme.recording)
         streamButton.isEnabled = state.outputs.contains { $0.kind == .stream }
@@ -85,6 +85,27 @@ final class BottomBarView: NSView {
         statusLabel.stringValue = text
         lastStatusLine = (stats, text)
         previousStats = stats
+        if encodersRunning != !stats.encoder.isEmpty {
+            encodersRunning = !stats.encoder.isEmpty
+            updateRecordButton()
+        }
+    }
+
+    /// 录制按钮：快照里录制输出的目标开关 + Stats 里有没有编码器真在跑（W2-B 还没接 Recorder，G3 接上前显示"等编码器"）。
+    private func updateRecordButton() {
+        let wanted = state.outputs.contains { $0.kind == .record && $0.enabled }
+        switch (wanted, encodersRunning) {
+        case (true, true):
+            recordButton.title = "● 录制中"
+            recordButton.toolTip = nil
+        case (true, false):
+            recordButton.title = "录制 · 等编码器"
+            recordButton.toolTip = "录制输出已打开，但 Stats 里没有编码器在跑：录制器由 G3 接线（W1-E 的 Recorder）"
+        default:
+            recordButton.title = "录制"
+            recordButton.toolTip = nil
+        }
+        Theme.setHighlighted(recordButton, wanted, color: Theme.recording)
     }
 
     /// 新 session：忘掉上一行（fps 要重新算）。

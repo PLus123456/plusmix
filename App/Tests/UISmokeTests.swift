@@ -106,7 +106,38 @@ final class UISmokeTests: XCTestCase {
         wc.mixerPanel.muteButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.buses[0].muted })
 
-        // 12. 快照分发合并：整个过程每秒最多 60 次
+        // 12. 录制 / 推流按钮：发 startRecord / stopRecord；没有编码器时文案说明；推流没有输出就置灰
+        XCTAssertTrue(wc.bottomBar.recordButton.isEnabled)
+        wc.bottomBar.recordButton.performClick(nil)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == true }, "录制按钮应发 startRecord")
+        XCTAssertEqual(wc.bottomBar.recordButton.title, "录制 · 等编码器")
+        wc.bottomBar.recordButton.performClick(nil)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == false })
+        XCTAssertEqual(wc.bottomBar.recordButton.title, "录制")
+        XCTAssertFalse(wc.bottomBar.streamButton.isEnabled, "空节目没有推流输出")
+        XCTAssertFalse(wc.bottomBar.externalButton.isEnabled, "外部输出 W3-C")
+        XCTAssertFalse(wc.bottomBar.multiviewButton.isEnabled, "多画面窗口 W3-E")
+
+        // 13. 调音台收起 / 展开
+        XCTAssertTrue(wc.isMixerPanelVisible)
+        wc.toggleMixerPanel()
+        AppTest.pump(seconds: 0.1)
+        XCTAssertFalse(wc.isMixerPanelVisible, "调音台应收起")
+        wc.toggleMixerPanel()
+        AppTest.pump(seconds: 0.1)
+        XCTAssertTrue(wc.isMixerPanelVisible, "调音台应展开")
+
+        // 14. 搜索框：过滤格子；回车把焦点还给窗口
+        wc.inputStrip.searchField.stringValue = "2"
+        wc.inputStrip.searchField.performClick(nil)
+        AppTest.pump(seconds: 0.05)
+        XCTAssertEqual(wc.inputStrip.visibleNumbers, [2], "搜索 2 只剩 2 号格子")
+        wc.inputStrip.searchField.stringValue = ""
+        wc.inputStrip.searchField.performClick(nil)
+        AppTest.pump(seconds: 0.05)
+        XCTAssertEqual(wc.inputStrip.visibleNumbers, [1, 2])
+
+        // 15. 快照分发合并：整个过程每秒最多 60 次
         XCTAssertLessThanOrEqual(wc.maxSnapshotsPerSecond, 60, "快照分发每秒最多 60 次")
         print("UI 冒烟：Fade 用了 \(elapsed) 拍；快照回调 \(wc.snapshotsReceived) 次，峰值 \(wc.maxSnapshotsPerSecond)/s；命令 \(session.commandsSent) 条")
     }

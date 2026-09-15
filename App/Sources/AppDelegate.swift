@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recentMenu: NSMenu?
     /// `--stats <路径>`：把每秒的 Stats 也写进 stats.jsonl（排障 / 对照测试）。
     private var statsLogURL: URL?
+    /// `--show <路径>`：启动时打开这个节目文件（不走"上次"）。
+    private var showURL: URL?
 
     /// 在 xctest 宿主里（不恢复上次节目、不弹错误框）。
     static var isTestHost: Bool {
@@ -24,11 +26,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let i = args.firstIndex(of: "--stats"), i + 1 < args.count {
             statsLogURL = URL(fileURLWithPath: args[i + 1])
         }
+        if let i = args.firstIndex(of: "--show"), i + 1 < args.count {
+            showURL = URL(fileURLWithPath: args[i + 1])
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { @MainActor in
-            await controller.launch()
+            await controller.launch(showURL: showURL)
             if let url = statsLogURL {
                 do { try controller.session?.startStatsLog(url: url) } catch { NSLog("stats.jsonl 打不开：\(error)") }
             }

@@ -20,13 +20,15 @@ final class AppController {
 
     // MARK: 启动 / 退出
 
-    /// 启动：恢复上次的文件 → 没有就恢复退出时自动存的 → 再没有就空节目。测试宿主永远空节目。
-    func launch() async {
+    /// 启动：命令行指定的文件 → 恢复上次的文件 → 没有就恢复退出时自动存的 → 再没有就空节目。测试宿主永远空节目。
+    func launch(showURL: URL? = nil) async {
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
         windowController.window?.makeFirstResponder(nil)   // 快捷键直接到窗口；搜索框要点了才有焦点
         var show = ShowDocuments.emptyShow()
-        if !isTestHost {
+        if let showURL {
+            do { show = try documents.load(from: showURL) } catch { presentError(error, context: "打开 \(showURL.lastPathComponent)") }
+        } else if !isTestHost {
             if let url = documents.lastURL, let loaded = try? documents.load(from: url) {
                 show = loaded
             } else if let auto = documents.loadAutosave() {

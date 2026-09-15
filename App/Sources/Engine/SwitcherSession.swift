@@ -41,8 +41,9 @@ final class SwitcherSession {
 
     private var lastSnapshot: MixerSnapshot?
     private var pollTimer: Timer?
-    private var stateObservers: [UInt64: @MainActor (MixerState) -> Void] = [:]
-    private var statsObservers: [UInt64: @MainActor (Stats) -> Void] = [:]
+    // 按登记顺序回调（字典的遍历顺序不定，测试对照状态行时要先让窗口更新再让测试读）
+    private var stateObservers: [(key: UInt64, block: @MainActor (MixerState) -> Void)] = []
+    private var statsObservers: [(key: UInt64, block: @MainActor (Stats) -> Void)] = []
     private var observerCounter: UInt64 = 0
     private func nextObserverKey() -> UInt64 {
         observerCounter &+= 1
@@ -145,17 +146,17 @@ final class SwitcherSession {
         let inputsChanged = newState.inputs.map { ($0.number, $0.source) }.elementsEqual(state.inputs.map { ($0.number, $0.source) }) { $0 == $1 } == false
         state = newState
         if inputsChanged { inputs.reconcile(newState, timeline: syntheticTimeline()) }
-        for observer in stateObservers.values { observer(newState) }
+        for observer in stateObservers { observer.block(newState) }
     }
 
     /// 立刻用当前状态回调一次，之后每次快照变化都回调。
     @discardableResult
     func observeState(_ block: @escaping @MainActor (MixerState) -> Void) -> ObserverToken {
         let key = nextObserverKey()
-        stateObservers[key] = block
+        stateObservers.append((key, block))
         block(state)
         return ObserverToken { [weak self] in
-            Task { @MainActor in self?.stateObservers.removeValue(forKey: key) }
+            Task { @MainActor in self?.stateObservers.removeAll { $0.key == key } }
         }
     }
 
@@ -163,16 +164,16 @@ final class SwitcherSession {
 
     private func publish(stats: Stats) {
         self.stats = stats
-        for observer in statsObservers.values { observer(stats) }
+        for observer in statsObservers { observer.block(stats) }
     }
 
     @discardableResult
     func observeStats(_ block: @escaping @MainActor (Stats) -> Void) -> ObserverToken {
         let key = nextObserverKey()
-        statsObservers[key] = block
+        statsObservers.append((key, block))
         if let stats { block(stats) }
         return ObserverToken { [weak self] in
-            Task { @MainActor in self?.statsObservers.removeValue(forKey: key) }
+            Task { @MainActor in self?.statsObservers.removeAll { $0.key == key } }
         }
     }
 
