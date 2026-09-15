@@ -497,10 +497,13 @@ public final class MixerSnapshot: Sendable {
     public let sequence: UInt64
     /// 这个快照生效的拍。
     public let tick: Tick
+    /// 状态机发布这个快照的时刻（host time；提案 003 §B）。C2 的"状态变化 → 客户端"从它算。
+    public let publishedAt: HostTime
 
-    public init(state: MixerState, sequence: UInt64, tick: Tick) {
+    public init(state: MixerState, sequence: UInt64, tick: Tick, publishedAt: HostTime = .now()) {
         self.state = state
         self.sequence = sequence
         self.tick = tick
+        self.publishedAt = publishedAt
     }
 }
