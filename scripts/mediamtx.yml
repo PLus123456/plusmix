@@ -1,0 +1,48 @@
+# 本地推流服务器（MediaMTX，MIT；测试标准 §2.6）。W2-D 的 E7 / E8 / E9 和推流路径的 E2 / E3 都推到这里。
+#
+# 一个实例 = 一个 RTMP 端口 + 一个 SRT 端口，所有 path 共用端口。E7 要"封第 2 路的端口"，所以三路要三个实例：
+#   mediamtx scripts/mediamtx.yml                                                 # 实例 1：RTMP 1935 / SRT 8890 / API 9997
+#   MTX_RTMPADDRESS=:1936 MTX_SRTADDRESS=:8891 MTX_APIADDRESS=:9998 mediamtx scripts/mediamtx.yml   # 实例 2
+#   MTX_RTMPADDRESS=:1937 MTX_SRTADDRESS=:8892 MTX_APIADDRESS=:9999 mediamtx scripts/mediamtx.yml   # 实例 3
+# 录制目录默认 ./mediamtx-recordings（相对启动时的工作目录），用 MTX_PATHDEFAULTS_RECORDPATH 改；StreamingTests 自己起实例并改它。
+#
+# 推流地址：
+#   RTMP  rtmp://127.0.0.1:1935/s1（s2、s3 同理；密钥留空）
+#   SRT   srt://127.0.0.1:8890?streamid=publish:srt1
+# 落盘：fMP4，每 1 s 一个 part（崩了也留下已写的部分），文件交给 ffprobe / frameprobe。
+
+logLevel: info
+logDestinations: [stdout]
+
+# 只开需要的：其他协议的端口留给别的实例 / 别的程序
+api: yes
+apiAddress: :9997
+metrics: no
+pprof: no
+playback: no
+rtsp: no
+hls: no
+webrtc: no
+moq: no
+
+rtmp: yes
+rtmpAddress: :1935
+rtmpEncryption: "no"
+
+srt: yes
+srtAddress: :8890
+
+pathDefaults:
+  record: yes
+  recordPath: ./mediamtx-recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 1h
+  recordDeleteAfter: 0s
+
+paths:
+  # 三个 RTMP 路径（E7 三路）+ 一个 SRT 路径
+  s1:
+  s2:
+  s3:
+  srt1:

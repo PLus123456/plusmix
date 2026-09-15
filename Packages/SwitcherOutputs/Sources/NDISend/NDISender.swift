@@ -1,0 +1,542 @@
+import CoreVideo
+import Foundation
+@preconcurrency import Metal
+import os
+import Synchronization
+import SwitcherContracts
+import SwitcherOutputs
+#if canImport(NDI)
+import NDI
+#endif
+
+/// NDI 发送的错误。
+public enum NDISendError: Swift.Error, Equatable {
+    /// 编译时没有 NDI SDK（Package.swift 没探测到 /Library/NDI SDK for Apple）。
+    case sdkUnavailable
+    /// NDIlib_initialize 失败（CPU 不支持或库版本不对）。
+    case initializeFailed
+    /// NDIlib_send_create 失败。
+    case createFailed
+    case alreadyRunning
+}
+
+/// NDI 发送的累计计数（值快照）。
+public struct NDISendCounters: Hashable, Sendable {
+    /// `consume` 收到的帧。
+    public var framesReceived: UInt64 = 0
+    /// 送出去的视频帧。
+    public var framesSent: UInt64 = 0
+    /// 队列满丢的最旧帧（E1 口径，Stats.encoder[i].skipped）。
+    public var skipped: UInt64 = 0
+    /// 转换失败的帧。
+    public var conversionFailures: UInt64 = 0
+    /// 送出去的音频块。
+    public var audioBlocksSent: UInt64 = 0
+    /// 音频环满丢的块。
+    public var audioBlocksDropped: UInt64 = 0
+    /// 最近一帧 NV12 → UYVY 的耗时（ms）；`maxConvertMs` 是最大值。
+    public var lastConvertMs: Double = 0
+    public var maxConvertMs: Double = 0
+    /// 用的是 GPU 还是 CPU 转换。
+    public var usingGPU: Bool = false
+    /// 当前 NDI 接收方数量（NDIlib_send_get_no_connections，每秒查一次）。
+    public var connections: Int = 0
+    /// SDK 不在 / 初始化失败：Stats 里标 unavailable。
+    public var unavailable: Bool = false
+
+    public init() {}
+
+    /// Stats.encoder 的一项：NDI 没有码率控制，bitrate = 窗口内送出的 UYVY 字节 × 8 / 秒（原始码率，报告用）。
+    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, bytesPerFrame: Int) -> Stats.EncoderEntry {
+        let frames = framesSent &- (previous?.framesSent ?? 0)
+        let bitrate = windowSeconds > 0 ? Double(frames * UInt64(bytesPerFrame)) * 8 / windowSeconds : 0
+        return Stats.EncoderEntry(skipped: skipped, bitrate: bitrate)
+    }
+}
+
+/// NDI 发送（设计方案 §8 NDI 发送行；prompt 交付 3）。
+///
+/// 线程：`consume`（引擎派发线程）只入有界队列（深度 2–3，满了丢最旧计 skipped）并唤醒；`consumeAudio`（泵线程）拷进音频环。
+/// 自己的线程：取帧 → NV12 → UYVY（GPU / CPU）→ NDIlib_send_send_video_async_v2；取音频块 → NDIlib_send_send_audio_v3（同步，几十微秒）。
+/// 视频异步发送要求缓冲在下一次调用前有效：GPU 版双缓冲、CPU 版双缓冲，都在 init 分配好。
+public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Sendable {
+    /// 参数。
+    public struct Configuration: Sendable {
+        /// NDI 源名（在网络上显示为 "<机器名> (name)"）。
+        public var name: String
+        /// NDI 分组，nil = 默认组。
+        public var groups: String?
+        /// 节目格式（尺寸、帧率）。
+        public var format: ProgramFormat
+        /// 送什么：program（必送）/ preview / multiview 从 RenderedFrame 里挑；input(n) 由引擎用 `send(frame:)` 直接喂。
+        public var source: OutputSource
+        /// 转换方式。
+        public var conversion: Conversion
+        /// 有界队列深度（2–3）。
+        public var queueDepth: Int
+        /// 音频声道数。
+        public var audioChannels: Int
+        /// 干跑：走完队列 + 转换，不调 NDI（测试转换成本 / 队列行为用；SDK 不在时也能跑）。
+        public var dryRun: Bool
+
+        public enum Conversion: Hashable, Sendable {
+            /// Metal kernel；没有 Metal 设备时退到 CPU。
+            case gpu
+            /// 逐行 CPU 转换。
+            case cpu
+        }
+
+        public init(name: String, groups: String? = nil, format: ProgramFormat, source: OutputSource = .program,
+                    conversion: Conversion = .gpu, queueDepth: Int = 3, audioChannels: Int = 2, dryRun: Bool = false) {
+            precondition((1...8).contains(queueDepth))
+            self.name = name
+            self.groups = groups
+            self.format = format
+            self.source = source
+            self.conversion = conversion
+            self.queueDepth = queueDepth
+            self.audioChannels = audioChannels
+            self.dryRun = dryRun
+        }
+    }
+
+    /// 编译时是否有 SDK。
+    public static var isAvailable: Bool { SwitcherNDISendInfo.isSDKAvailable }
+
+    public let consumerName: String
+    public let configuration: Configuration
+
+    private let queue: FrameRing
+    private let audioRing: PCMRing
+    private let wakeup = DispatchSemaphore(value: 0)
+    private let stateLock = NSLock()
+    private var running = false
+    private var thread: Thread?
+    private let stopRequested = Atomic<Bool>(false)
+    private let acceptingFrames = Atomic<Bool>(false)
+    private let threadGroup = DispatchGroup()
+    private let counters = AtomicNDICounters()
+    private let logger = Logger(subsystem: "switcher.ndisend", category: "NDISender")
+    // 转换
+    private var gpu: NV12ToUYVY.GPU?
+    private var cpuBuffers: [UnsafeMutableRawPointer] = []
+    private var cpuNext = 0
+    private let bytesPerFrame: Int
+    #if canImport(NDI)
+    private var sender: NDIlib_send_instance_t?
+    private var nameCString: UnsafeMutablePointer<CChar>?
+    private var groupsCString: UnsafeMutablePointer<CChar>?
+    private var audioPlanar: UnsafeMutablePointer<Float>?    // no_channels × maxFrames，FLTP
+    private let audioMaxFrames = 4096
+    #endif
+
+    public init(configuration: Configuration) {
+        self.configuration = configuration
+        consumerName = configuration.name
+        queue = FrameRing(capacity: configuration.queueDepth)
+        audioRing = PCMRing(channelCount: configuration.audioChannels, maxFrames: 4096, capacity: 64)
+        bytesPerFrame = configuration.format.width * configuration.format.height * 2
+        counters.unavailable.store(!Self.isAvailable, ordering: .relaxed)
+    }
+
+    deinit {
+        for b in cpuBuffers { b.deallocate() }
+        #if canImport(NDI)
+        audioPlanar?.deallocate()
+        nameCString.map { free($0) }
+        groupsCString.map { free($0) }
+        #endif
+    }
+
+    /// 计数快照。
+    public var countersSnapshot: NDISendCounters { counters.snapshot() }
+    /// 是否在运行。
+    public var isRunning: Bool { stateLock.withLock { running } }
+    /// 每帧 UYVY 字节数（statsEntry 用）。
+    public var uyvyBytesPerFrame: Int { bytesPerFrame }
+
+    /// Stats.encoder 的一项。
+    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
+        counters.snapshot().statsEntry(previous: previous, windowSeconds: windowSeconds, bytesPerFrame: bytesPerFrame)
+    }
+
+    /// 起：初始化 NDI、建发送实例、建转换器、起线程。
+    /// SDK 不在（编译时没探测到）：空实现 —— 不抛错、不起线程，`countersSnapshot.unavailable == true`，帧照收但直接丢（不计 skipped）；
+    /// `dryRun` 时例外：起线程、做转换、不调 NDI（测试用）。SDK 在但初始化 / 建实例失败：抛错并标 unavailable。
+    public func start() throws {
+        try stateLock.withLock {
+            guard !running else { throw NDISendError.alreadyRunning }
+            var haveSDK = false
+            #if canImport(NDI)
+            if !configuration.dryRun {
+                guard NDIlib_initialize() else {
+                    counters.unavailable.store(true, ordering: .relaxed)
+                    throw NDISendError.initializeFailed
+                }
+                nameCString = strdup(configuration.name)
+                groupsCString = configuration.groups.map { strdup($0) }
+                var desc = NDIlib_send_create_t(p_ndi_name: UnsafePointer(nameCString), p_groups: UnsafePointer(groupsCString),
+                                                clock_video: false, clock_audio: false)
+                guard let s = NDIlib_send_create(&desc) else {
+                    counters.unavailable.store(true, ordering: .relaxed)
+                    throw NDISendError.createFailed
+                }
+                sender = s
+                if audioPlanar == nil {
+                    audioPlanar = .allocate(capacity: configuration.audioChannels * audioMaxFrames)
+                    audioPlanar?.initialize(repeating: 0, count: configuration.audioChannels * audioMaxFrames)
+                }
+                haveSDK = true
+            }
+            #endif
+            counters.unavailable.store(!haveSDK, ordering: .relaxed)
+            guard haveSDK || configuration.dryRun else {
+                running = true
+                acceptingFrames.store(false, ordering: .releasing)   // 空实现：收到就丢
+                return
+            }
+            try prepareConverter()
+            stopRequested.store(false, ordering: .releasing)
+            running = true
+            threadGroup.enter()
+            let t = Thread { [weak self] in
+                self?.loop()
+                self?.threadGroup.leave()
+            }
+            t.name = "switcher.ndisend.\(consumerName)"
+            t.qualityOfService = .userInteractive
+            thread = t
+            acceptingFrames.store(true, ordering: .releasing)
+            t.start()
+        }
+    }
+
+    /// 停：不再收帧，线程退出，销毁发送实例。
+    public func stop() {
+        let wasRunning: Bool = stateLock.withLock {
+            guard running else { return false }
+            running = false
+            return true
+        }
+        guard wasRunning else { return }
+        acceptingFrames.store(false, ordering: .releasing)
+        stopRequested.store(true, ordering: .releasing)
+        wakeup.signal()
+        if stateLock.withLock({ thread }) != nil { threadGroup.wait() }
+        stateLock.withLock {
+            thread = nil
+            #if canImport(NDI)
+            if let sender {
+                NDIlib_send_send_video_async_v2(sender, nil)   // 让 SDK 放掉最后一帧的缓冲
+                NDIlib_send_destroy(sender)
+            }
+            sender = nil
+            #endif
+        }
+    }
+
+    /// 转换器（GPU / CPU 双缓冲）；只在 start 里建。测试也可以单独调它然后用 `convert(_:)`。
+    public func prepareConverter() throws {
+        let f = configuration.format
+        if configuration.conversion == .gpu, gpu == nil, let device = MTLCreateSystemDefaultDevice() {
+            do {
+                gpu = try NV12ToUYVY.GPU(device: device, width: f.width, height: f.height)
+            } catch {
+                logger.warning("Metal 转换器建不出来，退到 CPU：\(String(describing: error), privacy: .public)")
+            }
+        }
+        if gpu == nil && cpuBuffers.isEmpty {
+            for _ in 0..<2 {
+                let b = UnsafeMutableRawPointer.allocate(byteCount: bytesPerFrame, alignment: 64)
+                b.initializeMemory(as: UInt8.self, repeating: 0, count: bytesPerFrame)
+                cpuBuffers.append(b)
+            }
+        }
+        counters.usingGPU.store(gpu != nil, ordering: .relaxed)
+    }
+
+    /// 转一帧（GPU 或 CPU），返回的缓冲到下下次 convert 之前有效。测试用；发送线程内部也用它。
+    public func convert(_ pixelBuffer: CVPixelBuffer) throws -> NV12ToUYVY.UYVYBuffer {
+        if let gpu { return try gpu.convert(pixelBuffer) }
+        if cpuBuffers.isEmpty { try prepareConverter() }
+        let out = NV12ToUYVY.UYVYBuffer(width: configuration.format.width, height: configuration.format.height, base: cpuBuffers[cpuNext])
+        cpuNext = (cpuNext + 1) % cpuBuffers.count
+        try NV12ToUYVY.convertCPU(pixelBuffer, into: out)
+        return out
+    }
+
+    // MARK: FrameConsumer / AudioBlockConsumer
+
+    public func consume(_ frame: RenderedFrame) {
+        let picked: Frame?
+        switch configuration.source {
+        case .program: picked = frame.program
+        case .preview: picked = frame.preview
+        case .multiview: picked = frame.multiview
+        case .input: picked = nil     // 输入画面由引擎用 send(frame:) 喂
+        }
+        guard let picked else { return }
+        send(frame: picked, tickTime: frame.tickTime)
+    }
+
+    /// 直接喂一帧（`source = .input(n)` 时引擎从该输入的帧槽喂；时间戳用帧的 pts）。
+    public func send(frame: Frame, tickTime: HostTime? = nil) {
+        counters.framesReceived.add(1, ordering: .relaxed)
+        guard acceptingFrames.load(ordering: .acquiring) else { return }
+        if queue.push(QueuedFrame(frame: frame, time: tickTime ?? frame.pts)) != nil {
+            counters.skipped.add(1, ordering: .relaxed)
+        }
+        wakeup.signal()
+    }
+
+    public func consumeAudio(planes: UnsafePointer<UnsafePointer<Float>>, channelCount: Int, frameCount: Int, hostTime: HostTime) {
+        guard acceptingFrames.load(ordering: .acquiring) else { return }
+        if audioRing.push(planes: planes, channelCount: channelCount, frameCount: frameCount, hostTime: hostTime) {
+            counters.audioBlocksDropped.add(1, ordering: .relaxed)
+        }
+        wakeup.signal()
+    }
+
+    // MARK: 发送线程
+
+    private func loop() {
+        var lastConnectionsCheck = HostClock.now()
+        while true {
+            _ = wakeup.wait(timeout: .now() + .seconds(1))
+            if stopRequested.load(ordering: .acquiring) { return }
+            while let block = audioRing.pop() {
+                sendAudio(block)
+            }
+            while let item = queue.pop() {
+                sendVideo(item)
+            }
+            let now = HostClock.now()
+            if (now - lastConnectionsCheck).seconds >= 1 {
+                lastConnectionsCheck = now
+                #if canImport(NDI)
+                if let sender { counters.connections.store(Int(NDIlib_send_get_no_connections(sender, 0)), ordering: .relaxed) }
+                #endif
+            }
+        }
+    }
+
+    private func sendVideo(_ item: QueuedFrame) {
+        let t0 = HostClock.now()
+        let out: NV12ToUYVY.UYVYBuffer
+        do {
+            out = try convert(item.frame.pixelBuffer)
+        } catch {
+            counters.conversionFailures.add(1, ordering: .relaxed)
+            return
+        }
+        counters.recordConvert(HostClock.now() - t0)
+        #if canImport(NDI)
+        guard let sender else { return }
+        var v = NDIlib_video_frame_v2_t()
+        v.xres = Int32(out.width)
+        v.yres = Int32(out.height)
+        v.FourCC = NDIlib_FourCC_video_type_UYVY
+        v.frame_rate_N = Int32(configuration.format.frameRate.framesPerSecond.numerator)
+        v.frame_rate_D = Int32(configuration.format.frameRate.framesPerSecond.denominator)
+        v.picture_aspect_ratio = Float(out.width) / Float(out.height)
+        v.frame_format_type = NDIlib_frame_format_type_progressive
+        v.timecode = NDIlib_send_timecode_synthesize
+        v.p_data = out.base.assumingMemoryBound(to: UInt8.self)
+        v.line_stride_in_bytes = Int32(out.bytesPerRow)
+        v.timestamp = NDITime.utc100ns(hostTime: item.time)
+        NDIlib_send_send_video_async_v2(sender, &v)
+        #endif
+        counters.framesSent.add(1, ordering: .relaxed)
+    }
+
+    private func sendAudio(_ block: PCMRing.Block) {
+        #if canImport(NDI)
+        guard let sender, let audioPlanar else { return }
+        let n = min(block.frameCount, audioMaxFrames)
+        for ch in 0..<configuration.audioChannels {
+            (audioPlanar + ch * audioMaxFrames).update(from: block.planes[ch], count: n)
+        }
+        var a = NDIlib_audio_frame_v3_t()
+        a.sample_rate = Int32(AudioFormat.sampleRate)
+        a.no_channels = Int32(configuration.audioChannels)
+        a.no_samples = Int32(n)
+        a.timecode = NDIlib_send_timecode_synthesize
+        a.FourCC = NDIlib_FourCC_audio_type_FLTP
+        a.p_data = UnsafeMutableRawPointer(audioPlanar).assumingMemoryBound(to: UInt8.self)
+        a.channel_stride_in_bytes = Int32(audioMaxFrames * MemoryLayout<Float>.size)
+        a.timestamp = NDITime.utc100ns(hostTime: block.hostTime)
+        NDIlib_send_send_audio_v3(sender, &a)
+        #endif
+        counters.audioBlocksSent.add(1, ordering: .relaxed)
+    }
+}
+
+/// host time → NDI 时间戳（UTC，100 ns 单位）：用"现在"的墙钟与 host time 差换算。
+enum NDITime {
+    static func utc100ns(hostTime: HostTime) -> Int64 {
+        let now = HostClock.now()
+        let wallNow = Date().timeIntervalSince1970
+        let delta = (hostTime - now).seconds
+        return Int64((wallNow + delta) * 1e7)
+    }
+}
+
+/// 队列里的一帧。
+struct QueuedFrame {
+    let frame: Frame
+    let time: HostTime
+}
+
+/// 有界帧环（满了返回被挤掉的最旧帧）。
+final class FrameRing: @unchecked Sendable {
+    let capacity: Int
+    private let lock = OSAllocatedUnfairLock()
+    private var slots: [QueuedFrame?]
+    private var head = 0
+    private var count = 0
+
+    init(capacity: Int) {
+        self.capacity = capacity
+        slots = Array(repeating: nil, count: capacity)
+    }
+
+    func push(_ f: QueuedFrame) -> QueuedFrame? {
+        lock.lock()
+        defer { lock.unlock() }
+        var evicted: QueuedFrame?
+        if count == capacity {
+            evicted = slots[head]
+            slots[head] = nil
+            head = (head + 1) % capacity
+            count -= 1
+        }
+        slots[(head + count) % capacity] = f
+        count += 1
+        return evicted
+    }
+
+    func pop() -> QueuedFrame? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard count > 0 else { return nil }
+        let f = slots[head]
+        slots[head] = nil
+        head = (head + 1) % capacity
+        count -= 1
+        return f
+    }
+}
+
+/// 音频块环（同 SwitcherStreaming 的 PCMBlockRing；两个模块互不依赖，各自一份）。
+final class PCMRing: @unchecked Sendable {
+    struct Block {
+        var hostTime: HostTime
+        var frameCount: Int
+        var planes: UnsafePointer<UnsafePointer<Float>>
+    }
+
+    let channelCount: Int
+    let maxFrames: Int
+    let capacity: Int
+    private let lock = OSAllocatedUnfairLock()
+    private let storage: UnsafeMutablePointer<Float>
+    private let planeTable: UnsafeMutablePointer<UnsafePointer<Float>>
+    private var hostTimes: [HostTime]
+    private var frameCounts: [Int]
+    private var head = 0
+    private var count = 0
+
+    init(channelCount: Int, maxFrames: Int, capacity: Int) {
+        self.channelCount = channelCount
+        self.maxFrames = maxFrames
+        self.capacity = capacity
+        storage = .allocate(capacity: capacity * channelCount * maxFrames)
+        storage.initialize(repeating: 0, count: capacity * channelCount * maxFrames)
+        planeTable = .allocate(capacity: capacity * channelCount)
+        for slot in 0..<capacity {
+            for ch in 0..<channelCount {
+                planeTable[slot * channelCount + ch] = UnsafePointer(storage + (slot * channelCount + ch) * maxFrames)
+            }
+        }
+        hostTimes = Array(repeating: .zero, count: capacity)
+        frameCounts = Array(repeating: 0, count: capacity)
+    }
+
+    deinit {
+        storage.deallocate()
+        planeTable.deallocate()
+    }
+
+    /// 返回 true = 满了丢了最旧的一块。
+    func push(planes: UnsafePointer<UnsafePointer<Float>>, channelCount inChannels: Int, frameCount: Int, hostTime: HostTime) -> Bool {
+        let n = min(frameCount, maxFrames)
+        lock.lock()
+        defer { lock.unlock() }
+        var dropped = false
+        if count == capacity {
+            head = (head + 1) % capacity
+            count -= 1
+            dropped = true
+        }
+        let slot = (head + count) % capacity
+        for ch in 0..<channelCount {
+            let src = planes[min(ch, max(inChannels - 1, 0))]
+            UnsafeMutablePointer(mutating: planeTable[slot * channelCount + ch]).update(from: src, count: n)
+        }
+        hostTimes[slot] = hostTime
+        frameCounts[slot] = n
+        count += 1
+        return dropped
+    }
+
+    func pop() -> Block? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard count > 0 else { return nil }
+        let slot = head
+        head = (head + 1) % capacity
+        count -= 1
+        return Block(hostTime: hostTimes[slot], frameCount: frameCounts[slot], planes: UnsafePointer(planeTable + slot * channelCount))
+    }
+}
+
+/// 原子计数。
+final class AtomicNDICounters: @unchecked Sendable {
+    let framesReceived = Atomic<UInt64>(0)
+    let framesSent = Atomic<UInt64>(0)
+    let skipped = Atomic<UInt64>(0)
+    let conversionFailures = Atomic<UInt64>(0)
+    let audioBlocksSent = Atomic<UInt64>(0)
+    let audioBlocksDropped = Atomic<UInt64>(0)
+    let lastConvertTicks = Atomic<Int64>(0)
+    let maxConvertTicks = Atomic<Int64>(0)
+    let usingGPU = Atomic<Bool>(false)
+    let connections = Atomic<Int>(0)
+    let unavailable = Atomic<Bool>(true)
+
+    func recordConvert(_ d: HostDuration) {
+        lastConvertTicks.store(d.ticks, ordering: .relaxed)
+        var current = maxConvertTicks.load(ordering: .relaxed)
+        while d.ticks > current {
+            let (done, original) = maxConvertTicks.compareExchange(expected: current, desired: d.ticks, ordering: .relaxed)
+            if done { break }
+            current = original
+        }
+    }
+
+    func snapshot() -> NDISendCounters {
+        var c = NDISendCounters()
+        c.framesReceived = framesReceived.load(ordering: .relaxed)
+        c.framesSent = framesSent.load(ordering: .relaxed)
+        c.skipped = skipped.load(ordering: .relaxed)
+        c.conversionFailures = conversionFailures.load(ordering: .relaxed)
+        c.audioBlocksSent = audioBlocksSent.load(ordering: .relaxed)
+        c.audioBlocksDropped = audioBlocksDropped.load(ordering: .relaxed)
+        c.lastConvertMs = HostDuration(ticks: lastConvertTicks.load(ordering: .relaxed)).milliseconds
+        c.maxConvertMs = HostDuration(ticks: maxConvertTicks.load(ordering: .relaxed)).milliseconds
+        c.usingGPU = usingGPU.load(ordering: .relaxed)
+        c.connections = connections.load(ordering: .relaxed)
+        c.unavailable = unavailable.load(ordering: .relaxed)
+        return c
+    }
+}
