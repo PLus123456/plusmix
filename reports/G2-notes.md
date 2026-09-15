@@ -15,6 +15,7 @@
 | 3 | `w1-compositor` | `0311f32` | W1-C 合成引擎 | `942cea4` |
 | 4 | `w1-audio` | `b1ff37f` | W1-D 音频引擎 | `6b3b5db` |
 | 5 | `w1-outputs` | `a494d26` | W1-E 编码录制 | `9736336` |
+| 6 | `w1-core`（V4 复测版） | `3fe6d29` | W1-B 到达余量（修退回单） | `f694a97` |
 
 - 报告的最终提交号：`git log -1 g2-m0`（本文件与 reports/G2.md 在最后一个提交里；gate 运行用的 headless 是 `7d669e5`，报告生成器修正在 `4de1039`）。
 
@@ -37,6 +38,7 @@
 | 2 w1-core | `make build-packages`、`make lint`、`swift test` SwitcherCore | 全绿：lint 三项 + check-rt-symbols 通过；SwitcherCore 96 个测试全过（108 s，含 30 s 抖动实跑 p99 < 1 ms） |
 | 3 w1-compositor | `make build-packages`、`make lint`、`swift test` SwitcherCore（含 Render 27 个）、重跑 TestKit | 全绿：SwitcherCore 122 个测试全过（224 s，含 V1 30 s 实跑、显示解耦切全屏）；TestKit 49/49（74 s）；lint 绿 |
 | 4 w1-audio | `make build-packages`、`make lint`、`swift test` SwitcherAudio | 全绿：52 个测试 50 过 2 跳（跳的是 W1-D 报告里的 BLOCKED-权限：真麦克风 IOProc），183 s；lint 多了 `check-rt-symbols.sh`（自动挂上）也绿 |
+| 6 w1-core 复测版（2026-09-15） | `make build-packages build-tools`、`make lint`、`swift test` SwitcherCore | 全绿：SwitcherCore 134 个（比之前多 W1-B 的 12 个 `testV4_*` 到达抖动用例，234 s）；lint 六项绿（归属 26 个文件，含合并提交结算） |
 | 5 w1-outputs | `make build-packages build-tools`、`make lint`，然后整仓 `make test`（六包 + 两工具冒烟 + App xcodebuild test）+ `make lint` | 全绿（23:39–23:57，机器空闲）：SwitcherCore 122、SwitcherAudio 52（2 跳，BLOCKED-权限）、SwitcherOutputs 18（431 s，含 E5 20 次、E6 kill -9 10 次）、SwitcherTestKit 49、Inputs / Control 骨架各过；switcher-headless / frameprobe 冒烟过；App `xcodebuild test` 退出 0；`make lint` 六项全绿（禁词、版本、Package.swift、依赖方向、归属 17 个文件、check-rt-symbols） |
 
 接口不一致 / 冲突：五次合并零冲突（改动文件两两无交集）；接口全部按 CONTRACTS.md 对上，没改任何包（§5.4）。
@@ -70,7 +72,7 @@ docs/OWNERSHIP.md 补充规则 5 的文字（"脚本只看已提交的改动（m
 
 | # | 问题 | 归属 | 严重级 | 状态 |
 |---|---|---|---|---|
-| 1 | 输入帧到达相位穿过拍点边界时成串的重复 + 丢弃：10 分钟里 59.94 ×2、±100 ppm ×2 四路设计外共 192 帧，单路最差 0.084%（必须 ≤ 0.05%，G2 要求 0）。根因是挑帧规则按 pts 判合格、按已到达判可用，pts 落在拍点附近时与到达时刻赛跑。 | W1-B | S2 | `reports/issues/G2-w1-core-phase-crossing-dup-drop.md`，退回 |
+| 1 | 输入帧到达相位穿过拍点边界时成串的重复 + 丢弃：10 分钟里 59.94 ×2、±100 ppm ×2 四路设计外共 192 帧，单路最差 0.084%（必须 ≤ 0.05%，G2 要求 0）。根因是挑帧规则按 pts 判合格、按已到达判可用，pts 落在拍点附近时与到达时刻赛跑。 | W1-B | S2 | `reports/issues/G2-w1-core-phase-crossing-dup-drop.md`，退回 → **W1-B 已交付 `3fe6d29`**（到达余量：`latest(forTick:)` = `latest(atOrBefore: t_n − L)`，L 按 ingressTime − pts 自估、只在零代价的拍变动；契约不动；12 个新 `testV4_*` 用例；reports/w1-core.md §1.4），合入 `f694a97`；复测结果见自动结果里的"运行 10min"，修前那次改名 `G2-run-10min-pre-fix.md` 留档 |
 | 2 | `Recorder.stop(atTick: nil)` 期间音频还在实时到达时收尾拖成分钟级；`appendPCM` 超时丢样本不计数。headless 已改为传拍边界绕开。 | W1-E | S2 | `reports/issues/G2-w1-outputs-stop-with-live-audio.md`，退回 |
 | 3 | A2：click 比闪光晚 18.0 ms（整秒闪光 300 对，标准差 0，无漂移），超必须档 16.7 ms 1.3 ms。混音器输入槽稳态延迟（ageSetpoint 14.65 ms）没有在音频 PTS 上扣掉。M0 不判 A2。 | W2-E（W1-D 报告已把这项延迟核算划给 W2-E） | S2 | `reports/issues/G2-w2-audio-integ-av-offset.md`，给 G3 |
 | 4 | frameprobe 在 Fade 的混合帧上：1 帧帧号读不出（CRC）、20 帧 ID 读不出、4 帧 ID 误判成调色板 15（明细二里"ID 15 丢 8990"那行）。混合帧本来就不该解出 ID，`switches` 已把它们识别为 transition，`stats` 没排除。不影响 V4 / V5 判定。 | W1-A | S3 | 只记录，未开单（G3 判 V7 时若碍事再开） |
