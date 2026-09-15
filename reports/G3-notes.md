@@ -50,7 +50,7 @@
 | 1 | w2-inputs | 绿（禁词 / 版本 / Package / 依赖方向 / 归属）；check-rt-symbols 需先修布局（3ac3f8c） | SwitcherInputs：**BLOCKED-Metal**（编 Compositor.metal 失败） | — |
 | 2 | w2-control | 绿 | SwitcherControl 28/28 绿（Swift 6.4，5.9 s） | Hummingbird 依赖首次解析 |
 | 3 | w2-audio-integ | 绿 | SwitcherAudio 87 个（52 + 35）全绿，5 个按环境跳过（真设备 / 回环）；SwitcherEngineTests（AudioBridge 10 个）BLOCKED-Metal（同包有 Render） | — |
-| 4 | w2-stream | 绿 | SwitcherOutputs（去掉 MediaMTXTests：它要 release frameprobe，BLOCKED-Metal）：见 §4.6 | HaishinKit 2.2.5 首次解析 |
+| 4 | w2-stream | 绿 | SwitcherOutputs `--skip MediaMTXTests`（它要 release frameprobe，BLOCKED-Metal）：W1-E 18/18（434 s）、StreamingTests 21/21、NDISendTests 8 个（2 跳过：人工 Studio Monitor、"无 SDK"用例——SDK 已装）全绿 | HaishinKit 2.2.5 首次解析 |
 | 5 | w2-app | check-ownership 报 `docs/OWNERSHIP.md`（冲突解决算 G3 手改，G3 行没有 docs/；见 §7 第 1 条） | App：BLOCKED-Metal | — |
 
 4.6 整仓 `make test`（Metal 工具链装上后）：待补。
