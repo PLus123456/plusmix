@@ -127,6 +127,13 @@ final class ConsumerPump: @unchecked Sendable {
         }
     }
 
+    /// 设备换了：所有来源的重采样器重建（下一块起重新测速率、重新锚定 PTS；录制器会看到一次跳变并硬校正一次）。
+    func resetResamplers() {
+        lock.lock(); defer { lock.unlock() }
+        guard resample else { return }
+        for (_, s) in sources { s.resampler = HostClockResampler(channels: channels, timebase: timebase) }
+    }
+
     var statuses: [SourceStatus] {
         lock.lock(); defer { lock.unlock() }
         return sources.values.map {

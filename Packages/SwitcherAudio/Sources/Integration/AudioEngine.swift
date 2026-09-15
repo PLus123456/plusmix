@@ -299,8 +299,14 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         if now - lastStatusAt >= statusInterval || lastStatusAt == .zero {
             lastStatusAt = now
             refreshStatus(now: now)
+            // 真设备换了（默认设备变更 / 拔插重建 IOProc）：设备时钟变了，消费者流的重采样器重新测速率、重新锚定 PTS
+            if let d = outputDevice, d.rebuilds != seenRebuilds {
+                seenRebuilds = d.rebuilds
+                pump.resetResamplers()
+            }
         }
     }
+    private var seenRebuilds = 0
 
     /// 手动模式：把消费者队列里的块搬给消费者。
     @discardableResult
@@ -447,7 +453,9 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     // MARK: 对齐维护
 
     /// 读混音器统计：新就绪的槽位按年龄设对齐延迟并放音；掉出就绪的重新静音等它回来。
+    /// 统计快照 3 KB + 32 路数组，每 4 个控制周期（≈ 8 ms）读一次就够（对齐前输入是静音的，晚几毫秒放音无所谓）。
     private func maintainAlignment() {
+        if controlCycles % 4 != 1 { return }
         let stats = mixer.stats
         lock.lock()
         let records = Array(slots.values)
@@ -499,8 +507,10 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         ftbFactor = factor
         let done = level == (ramp.on ? 1 : 0) && at >= ramp.start
         if done { ftbRamp = nil }
+        let master = buses.first { $0.bus == .master } ?? BusState(bus: .master)
         lock.unlock()
-        if changed { applyBuses() }
+        // 只推 Master 增益一条命令（斜坡期间每个控制周期一条；别把四条总线的增益 / 静音都重发一遍）
+        if changed { mixer.setBusGain(.master, linear: Float(pow(10, master.gainDb / 20)) * factor) }
     }
 
     // MARK: 摘除
