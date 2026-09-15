@@ -40,10 +40,10 @@ public final class VirtualMIDISource: @unchecked Sendable {
         var list = MIDIEventList()
         let packet = MIDIEventListInit(&list, ._1_0)
         var words = [word]
-        let added = words.withUnsafeMutableBufferPointer {
+        // Swift 导出的 MIDIEventListAdd 返回非可选指针（C 里失败返回 NULL）；单字消息不会装不下，直接用
+        _ = words.withUnsafeMutableBufferPointer {
             MIDIEventListAdd(&list, MemoryLayout<MIDIEventList>.size, packet, timestamp.ticks, 1, $0.baseAddress!)
         }
-        guard added != nil else { throw MIDIError(what: "MIDIEventListAdd", status: -1) }
         let st = MIDIReceivedEventList(endpoint, &list)
         guard st == noErr else { throw MIDIError(what: "MIDIReceivedEventList", status: st) }
     }
