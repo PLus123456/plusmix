@@ -121,23 +121,23 @@ publishing ◄────────────────── backoff(n, 
 | 停止排空 / 生命周期 | `testStopDrainsQueue`、`testLifecycle` | 停前喂的帧全部送出、每个传输层都关掉；重复 start 抛、重复 stop 安全、stop 后不计数 | — | ✅ |
 | 代理工装 | `ThrottleProxyTests`（2） | 限速 500 KB/s 送 4 MB 用 8.16 s（497 KB/s）；封住后写端 EAGAIN、放开后旧连接被关 | — | ✅ |
 | SRT 端到端 | `MediaMTXTests.testSRT_endToEnd_10s_framesContinuous` | MediaMTX 绑 IPv4 后：599 帧（0…598）、缺口 0、不可解 0、网络丢帧 0；A/V（ffmpeg 口径）**−1.3 ms**（= 原点包 P2 在关键帧前 1.33 ms） | A2 ≤ 16.7 ms / ≤ 5 ms；nearest 对齐上限 10.7 ms | ✅（两档） |
-| NDI 真发 | `NDISendTests.testLiveSend_studioMonitor_manual`（`SWITCHER_NDI_LIVE_SECONDS=5`） | SDK 装上后：`NDIlib_initialize` / `send_create` 成功，1080p60 实时喂 5 s：300 帧全部送出、跳帧 0、转换失败 0、音频 934 块、`unavailable = false`；接收方 0（我这边没开 Studio Monitor） | 送出 = 喂入、跳帧 0 | ✅（画面在 Studio Monitor 里"帧号在走"这一眼要用户看：`SWITCHER_NDI_LIVE_SECONDS=30 swift test --filter NDISendTests/testLiveSend`） |
+| NDI 真发 | `NDISendTests.testLiveSend_studioMonitor_manual` | SDK 装上后：`NDIlib_initialize` / `send_create` 成功，1080p60 实时喂 5 s：300 帧全部送出、跳帧 0、转换失败 0、音频 934 块、`unavailable = false`；**用户开 Studio Monitor 看 30 s：帧号块每帧在变、闪光块每秒亮一次**（"Studio Monitor 能看到 PGM 且帧号在走"） | 送出 = 喂入、跳帧 0；人眼确认 | ✅ |
 | NDI 转换器 | `NDISendTests.testNV12ToUYVY_cpuMatchesFormula` / `_gpuMatchesCPU_bytewise` | CPU 输出符合公式；GPU 与 CPU 输出逐字节相同（公式帧 + 含噪声的测试图案 1080p）；双缓冲返回不同缓冲 | — | ✅ |
 | NDI 转换成本（报告项） | `testConversionCost_1080p_report` | 1080p：debug 构建 CPU p50 **5.28 ms** / max 5.69 ms，GPU（含等待完成）p50 **0.26 ms** / max 4.32 ms（首帧含编译）；**release 构建 CPU p50 0.09 ms / max 0.29 ms，GPU p50 0.25 ms / max 4.25 ms**（机器空闲时测的；GPU 路径的成本是提交 + 同步等待，合成器排满 GPU 队列时会变长） | — | ✅（所以默认 auto，见下一行） |
 | NDI 转换可选 / auto | `testConversionSelectable_runtimeSwitchAndExtraKey`、`testAutoConversion_probesBothAndPicksCheaper` | gpu / cpu 立即生效、`setConversion` 下一帧生效、`extra["ndi.conversion"]` 解析（缺省 / 不认识 = auto）；auto 探测值两边都 > 0 且与当前选择自洽：debug 下选 GPU（CPU 5.3 ms vs GPU 0.6 ms），release 下第一帧就切到 CPU（0.19 vs 1.03 ms，autoSwitches 1） | — | ✅ |
 | NDI 空实现 / 干跑 | `testUnavailableWithoutSDK_emptyImplementation`、`testDryRunPipeline_boundedQueueAndCounters` | unavailable = true、帧照收不计 skipped、statsEntry 全 0；干跑 240 帧 + 20 块音频：收到 = 送出 + skipped、consume p99 < 0.2 ms | — | ✅ |
 | E8（dummynet，用户跑） | 同上，`SWITCHER_NETEM=broker`（`sudo scripts/netem.sh serve`） | pf `block drop` 封 10 s × 10：**10 / 10** 重连，放开后 0.00–0.60 s；断线判定 9.0–9.9 s；最后一段 1818 帧、缺口 0、不可解 0 | 10 次全部 ≤ 15 s / ≤ 5 s | ✅（两档） |
 | E9（dummynet，用户跑） | 同上 | dummynet 管道 4312 kbit/s 5 分钟：收到 18000，落盘 12556（+1），缺 5443，软件报告 **5443，误差 0.00%**；断线 0 | ≤ 5% / ≤ 1% | ✅（两档） |
-| E7（dummynet，用户跑） | 同上 | 第一次：第 1、3 路网络丢帧 **0 / 0**、第 2 路放开后 1.22 s 重连 ✅；但第 1、2 路各有 8 帧**编码器跳帧**（E1）—— 测试工装的问题：封端口那一拍 `Netem.run` 在喂帧线程上等代理回话 0.3–0.5 s，帧成批涌入把编码器队列挤爆。已改成后台线程调用、断言里把 E1 和 E7 分开（代理版重跑 3599 / 3599、缺口 0）；**dummynet 版要用同一条命令重跑一次** | 其他路 0（硬性） | ⏳（网络丢帧 0 已达标，重跑确认 E1 也是 0） |
+| E7（dummynet，用户跑） | 同上 | pf `block drop` 封第 2 路 30 s：第 1、3 路网络丢帧 **0 / 0**、编码器跳帧 0 / 0、送出 3600 / 3600、落盘 3599 / 3599、缺口 0；第 2 路 t=18 s 判断线、放开后 **0.57 s** 重连、网络丢帧 1807。（第一次跑第 1、2 路各 8 帧 E1 跳帧是工装在喂帧线程上等代理回话造成的，改成后台调用后重跑干净） | 其他路 0（硬性） | ✅ |
 
 计时：StreamingTests + NDISendTests 一遍约 15 分钟（E9 5.7 分钟、E8 2.9 分钟、E7 1.3 分钟、E2/E3 1.1 分钟，其余 < 1 分钟）。
 
 ## 3. 没做的和原因
 
-- **dummynet 版 E7 重跑**：第一次跑网络丢帧已经是 0，但工装把喂帧线程卡了 0.3–0.5 s 造成 E1 跳帧（§2），改完要再跑一次确认。E8 / E9 dummynet 版已过。两种损伤的差别：pf 封端口时新连接的 SYN 被丢（连接超时 5 s 才失败），代理版内核会完成握手再由 RTMP 握手超时兜住，重连节奏可能差一个退避档。
+- 两种损伤的差别：pf 封端口时新连接的 SYN 被丢（连接超时 5 s 才失败），代理版内核会完成握手再由 RTMP 握手超时兜住，重连节奏可能差一个退避档（dummynet 版 E7 放开后 0.57 s，代理版 2.03 s）。
 - **SRT 的 E2 / E3、E7–E9**：SRT 端到端已通（§2），损伤测试只做了 RTMP；SRT 的网络丢帧口径还要加 libsrt 的 `pktSndDrop`（发送端超时丢包，`SRTConnection.performanceData`），现在只算我们自己队列的丢帧。
 - **NDI 转换器默认**：用户裁定"做成可选的"（低负载下 CPU 便宜不代表高负载也是）→ 默认 auto（定期两种都试、用便宜的），gpu / cpu 可强制、运行时可切。auto 的探测只在空闲机器上验证过自洽，高负载下的实际切换行为等 G3 / W4-A 的长稳看。
-- **NDI 在 Studio Monitor 里看一眼**：真发路径已通（§2），"帧号在走"要用户开 Studio Monitor 看。NDI 也能直接收 NV12（`NDIlib_FourCC_video_type_NV12`，SDK 内部转），prompt 要求 UYVY 我就做了 UYVY；如果想省这一步可以直接送 NV12，GPU kernel 保留。
+- NDI 也能直接收 NV12（`NDIlib_FourCC_video_type_NV12`，SDK 内部转），prompt 要求 UYVY 我就做了 UYVY；如果想省这一步可以直接送 NV12，GPU kernel 保留。回环 L1 等 W3-A 的收端。
 - **重连后的 A2 用 frameprobe av 判**：frameprobe 对无 priming 信息的 fMP4 有 44 ms + 起始偏移的偏置（§1.5，单子退给 W1-A）；本会话用 ffmpeg 口径在端到端测试里测到 0.0 ms，E8 之后的那段只验了帧号连续。G3 等 frameprobe 修好后补。
 - **Stats.encoder[i] 的帧数 / 网络丢帧 / 重连次数 / 状态**：契约只有 skipped / bitrate，没直接改；数字在 `StreamOutput.counters`（`StreamCounters`）和 `NDISender.countersSnapshot`，提案 `docs/contract-changes/002`（在 001 之上加 `reconnects`、`state`）。
 - **HEVC 推流、RTMPS**：HaishinKit 的 enhanced-RTMP HEVC 路径（`hvc1` fourcc）和 TLS（`rtmps` → `NWParameters.tls`）都在，`StreamDestination` 也解析，但本地 MediaMTX 没配 TLS，HEVC 没跑。
