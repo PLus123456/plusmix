@@ -153,3 +153,40 @@ final class ShortcutAndShowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(AddInputModel.displays().count, 1)
     }
 }
+
+@MainActor
+final class AddInputSheetTests: XCTestCase {
+    /// Sheet 真的能弹出、切类型、取消；截图留档（AppKit 内容）。
+    func testAddInput_sheetPresentsSwitchesKindsAndCancels() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 1)
+        let wc = AppTest.controller.windowController
+        let window = try XCTUnwrap(wc.window)
+        wc.presentAddInput()
+        XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet != nil }, "应弹出 sheet")
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        XCTAssertEqual(sheet.title, "添加输入")
+        let controller = try XCTUnwrap(sheet.windowController as? AddInputSheetController)
+        XCTAssertEqual(controller.model.number, 2, "默认编号 = 最小空闲编号")
+        XCTAssertEqual(controller.model.kind, .synthetic)
+        AppTest.pump(seconds: 0.3)
+        // TEST_RUNNER_SWITCHER_HOLD=秒：让 sheet 停一会儿，好从外面用 screencapture 截真图（cacheDisplay 截不到 AppKit 的 SwiftUI 底控件）
+        if let hold = ProcessInfo.processInfo.environment["SWITCHER_HOLD"].flatMap(Double.init) { AppTest.pump(seconds: hold) }
+        // 走一遍五种类型的表单都建得出来
+        for kind in AddInputModel.Kind.allCases {
+            controller.selectKindForTesting(kind)
+            AppTest.pump(seconds: 0.05)
+            XCTAssertEqual(controller.model.kind, kind)
+        }
+        controller.cancelForTesting()
+        XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet == nil }, "取消应收起 sheet")
+        XCTAssertEqual(session.state.inputs.count, 1, "取消不加输入")
+        // 确定：默认合成源 → 加了 2 号
+        wc.presentAddInput()
+        XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet != nil })
+        let c2 = try XCTUnwrap(window.attachedSheet?.windowController as? AddInputSheetController)
+        c2.confirmForTesting()
+        XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.count == 2 && session.state.input(2)?.kind == .synthetic }, "确定应加一路合成源")
+        XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet == nil })
+    }
+}

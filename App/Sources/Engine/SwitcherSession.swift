@@ -143,7 +143,9 @@ final class SwitcherSession {
         guard let snapshot = stateMachine.publisher.latest, snapshot !== lastSnapshot else { return }
         lastSnapshot = snapshot
         let newState = snapshot.state
-        let inputsChanged = newState.inputs.map { ($0.number, $0.source) }.elementsEqual(state.inputs.map { ($0.number, $0.source) }) { $0 == $1 } == false
+        // 输入表的"编号 + 来源"变了才动运行表（改名 / 改设置不重建输入）
+        let inputsChanged = !newState.inputs.map(\.number).elementsEqual(state.inputs.map(\.number))
+            || !newState.inputs.map(\.source).elementsEqual(state.inputs.map(\.source))
         state = newState
         if inputsChanged { inputs.reconcile(newState, timeline: syntheticTimeline()) }
         for observer in stateObservers { observer.block(newState) }

@@ -125,6 +125,34 @@ final class InputCellView: NSView {
         return "\(config.number)" == q || config.name.localizedCaseInsensitiveContains(q)
     }
 
+    /// 右键：重命名 / 删除（稿子里每格的 Close；完整的输入设置在 W3-E）。
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "重命名…", action: #selector(renamePressed), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "删除输入 \(number)", action: #selector(removePressed), keyEquivalent: "").target = self
+        return menu
+    }
+
+    @objc private func renamePressed() {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "重命名输入 \(number)"
+        let field = NSTextField(string: config.name)
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: "取消")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                guard let self, response == .alertFirstButtonReturn else { return }
+                let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty { self.send?(.renameInput(input: self.number, name: name)) }
+            }
+        }
+    }
+
+    @objc private func removePressed() { send?(.removeInput(input: number)) }
+
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         guard display.frame.contains(p) || titleBar.frame.contains(p) else { super.mouseDown(with: event); return }

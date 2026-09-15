@@ -336,6 +336,11 @@ final class AddInputSheetController: NSWindowController {
 
     @objc private func cancel() { close(returnCode: .cancel) }
 
+    // 测试入口（sheet 里的控件没有公开的 outlet）
+    func selectKindForTesting(_ kind: AddInputModel.Kind) { selectKind(kind) }
+    func confirmForTesting() { confirm() }
+    func cancelForTesting() { cancel() }
+
     private func close(returnCode: NSApplication.ModalResponse) {
         guard let window else { return }
         if let parent = window.sheetParent {
