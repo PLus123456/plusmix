@@ -101,7 +101,8 @@ struct TickDriver {
 
 /// 解出一帧里的测试图案帧号（pattern.mov 的帧号 = 帧序号）。
 func frameNumber(of frame: Frame?) -> Int? {
-    guard let frame, let d = TestPattern.decode(pixelBuffer: frame.pixelBuffer), let n = d.frameNumber else { return nil }
+    guard let frame, frame.width >= 320, frame.height >= 180,   // TestPattern.Geometry 的最小尺寸
+          let d = TestPattern.decode(pixelBuffer: frame.pixelBuffer), let n = d.frameNumber else { return nil }
     return Int(n)
 }
 
