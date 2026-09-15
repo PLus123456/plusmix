@@ -323,7 +323,12 @@ def main():
         key_idx = [i for i, p in enumerate(packets) if "K" in p[2]]
         e3_intervals = [b - a_ for a_, b in zip(key_idx, key_idx[1:])]
         e3_max_dev = max(abs(x - target_gop) for x in e3_intervals) if e3_intervals else None
-    e2_ok = e2_win_err is not None and e2_win_err <= 0.10 and e2_peak is not None and e2_peak <= 1.5
+    # 码率遵从只在内容"压得出"设定码率时才有意义：合成源的灰底 + 帧号块几乎不含信息，VT 编码器本来就不会填充到目标码率
+    # （G3 第一次跑：6 Mbps 设定、实际 0.1 Mbps）。整段平均码率不到设定的 25% 就判"本场景不适用"，E2 以 W1-E / W2-D 的噪声内容用例为准，
+    # 合成源加噪声底纹的单子给 W1-A。不是放宽阈值：阈值不变，只是这次测量没有可判的对象。
+    avg_bps = (prefix[-1] * 8 / t_end) if packets and t_end > 0 else None
+    e2_applicable = avg_bps is not None and avg_bps >= 0.25 * target_bps
+    e2_ok = (e2_win_err is not None and e2_win_err <= 0.10 and e2_peak is not None and e2_peak <= 1.5) if e2_applicable else None
     e3_ok = e3_max_dev is not None and e3_max_dev <= 1
     vstream = next((s for s in ffp.get("streams", []) if s.get("codec_type") == "video"), {})
     astream = next((s for s in ffp.get("streams", []) if s.get("codec_type") == "audio"), {})
@@ -387,8 +392,10 @@ def main():
          "|均值| ≤ 16.7 ms（目标 ≤ 5；音频超前为正）", a2_ok, "—"),
         ("A3 A/V 漂移", f"整秒闪光序列斜率 {fmt(a3_slope, 5)} ms/s × 8 h = {fmt(a3_8h, 2)} ms（{a.minutes:g} 分钟外推）" if a3_slope is not None else "—", "× 8 h ≤ 16 ms（目标 ≤ 5；8 小时实跑归 W4-A）", a3_ok, "—"),
         ("A4 多文件对齐", a4_value, "≤ 1 帧（目标 ≤ 1 ms）", a4_ok, "—"),
-        ("E1 编码滞后跳帧", f"{int(e1) if e1 is not None else '—'}（PGM 录制器 + {len(av_multi.get('sources', [])) - 1 if av_multi else 0} 路 ISO 录制器的 skipped 之和）", "标准负载下 0", None if e1 is None else e1 == 0, "—"),
-        ("E2 码率遵从", f"设定 {target_bps / 1e6:.1f} Mbps：10 s 滑窗最大误差 {fmt(e2_win_err * 100 if e2_win_err is not None else None, 2)}%，1 s 峰值 {fmt(e2_peak, 3)}×（{len(packets)} 个视频包）", "误差 ≤ 10%，峰值 ≤ 1.5×（目标 5% / 1.2×）", e2_ok, "—"),
+        ("E1 编码滞后跳帧", f"{int(e1) if e1 is not None else '—'}（stats.jsonl encoder[] 全部条目的 skipped 之和：PGM 录制器 + ISO 录制器）", "标准负载下 0", None if e1 is None else e1 == 0, "—"),
+        ("E2 码率遵从", (f"设定 {target_bps / 1e6:.1f} Mbps：整段平均 {fmt(avg_bps / 1e6 if avg_bps else None, 3)} Mbps，10 s 滑窗最大误差 {fmt(e2_win_err * 100 if e2_win_err is not None else None, 2)}%，1 s 峰值 {fmt(e2_peak, 3)}×（{len(packets)} 个视频包）"
+                       + ("" if e2_applicable else "。**本场景不适用**：合成源灰底压不出设定码率（平均 < 25% 设定），E2 以 W1-E `VideoEncoderTests` / W2-D `MediaMTXTests.testE2E3`（噪声内容）为准；合成源加噪声底纹的单子 reports/issues/G3-w1-testkit-synthetic-noise-for-E2.md")),
+         "误差 ≤ 10%，峰值 ≤ 1.5×（目标 5% / 1.2×）", e2_ok, "—"),
         ("E3 关键帧间隔", f"设定 {target_gop}：{len(e3_intervals)} 个间隔，最大偏差 {e3_max_dev if e3_max_dev is not None else '—'} 帧" + (f"（min {min(e3_intervals)} / max {max(e3_intervals)}）" if e3_intervals else ""), "≤ ±1 帧（目标精确）", e3_ok, "—"),
         ("C1 命令延迟", f"{c1.get('count', 0)} 次：画面里找到 {c1.get('measured', 0)}，通过 {c1.get('pass', 0)}；min {fmt(c1.get('min_ms'), 2)} / mean {fmt(c1.get('mean_ms'), 2)} / max {fmt(c1.get('max_ms'), 2)} ms，RTT p50 {fmt(c1.get('rtt_p50_ms'))} ms" if c1 else "没跑 C 系列",
          "≤ 1 拍 + 该次 RTT", c1_ok if c1 else None, "—"),
@@ -403,7 +410,8 @@ def main():
     if unknown:
         sys.exit(f"--waive 里的指标名不在判定表里：{unknown}；可用：{[c[0] for c in checks]}")
     waived = [c[0] for c in checks if c[3] is False and c[0] in waivers]
-    all_pass = all((c[3] is True) or (c[0] in waivers) for c in checks)
+    not_applicable = {"E2 码率遵从"} if not e2_applicable else set()
+    all_pass = all((c[3] is True) or (c[0] in waivers) or (c[0] in not_applicable) for c in checks)
 
     # ---- 信息项 ----
     cpu, gpu = key.get("cpu_avg_pct"), key.get("gpu_avg_pct")
@@ -434,8 +442,10 @@ def main():
         m = mark(ok)
         if ok is False and name in waivers:
             m = f"⚠️ 放行（{waivers[name]}）"
+        elif name in not_applicable:
+            m = "⏭ 本场景不适用（以专项用例为准）"
         lines.append(f"| {name} | {value} | {thr} | {m} | {d} |")
-    verdict = "✅ 通过" + (f"（含放行 {len(waived)} 项）" if waived else "") if all_pass else "❌ 未通过"
+    verdict = "✅ 通过" + (f"（含放行 {len(waived)} 项）" if waived else "") + (f"（{len(not_applicable)} 项本场景不适用）" if not_applicable else "") if all_pass else "❌ 未通过"
     lines.append(f"| **总判定（自动项）** | E7–E9 见 reports/G3-net.md（scripts/gate3-net.sh，需要 sudo 起 netem 代理） | | **{verdict}** | 基线：{a.baseline or '无（本次即基线）'} |")
     lines.append("")
     lines.append("### 其它指标（信息；阈值按测试标准 §4）")

@@ -184,7 +184,7 @@ fi
 # ---- 6. 报告 ----
 step "生成 reports/G3-run-$label.md 并拼 reports/G3.md"
 python3 scripts/gate3-report.py --out-dir "$out_dir" --label "$label" --minutes "$minutes" --show "$show" --script "$script" \
-  --baseline "$baseline" --run-report "reports/G3-run-$label.md" --notes reports/G3-notes.md --report reports/G3.md "${waives[@]}"
+  --baseline "$baseline" --run-report "reports/G3-run-$label.md" --notes reports/G3-notes.md --report reports/G3.md ${waives[@]+"${waives[@]}"}
 rc=$?
 if [ "$rc" = 0 ]; then
   green "G3 自动项全部满足：$out_dir → reports/G3-run-$label.md → reports/G3.md（E7–E9 另见 scripts/gate3-net.sh）"

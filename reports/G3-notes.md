@@ -53,7 +53,21 @@
 | 4 | w2-stream | 绿 | SwitcherOutputs `--skip MediaMTXTests`（它要 release frameprobe，BLOCKED-Metal）：W1-E 18/18（434 s）、StreamingTests 21/21、NDISendTests 8 个（2 跳过：人工 Studio Monitor、"无 SDK"用例——SDK 已装）全绿 | HaishinKit 2.2.5 首次解析 |
 | 5 | w2-app | check-ownership 报 `docs/OWNERSHIP.md`（冲突解决算 G3 手改，G3 行没有 docs/；见 §7 第 1 条） | App：BLOCKED-Metal | — |
 
-4.6 整仓 `make test`（Metal 工具链装上后）：待补。
+4.6 整仓 `make test`（用户装好 Metal 工具链后于 18:4x 跑，Xcode 27.0 / Swift 6.4；SwitcherCore、SwitcherInputs 由 G3 在 22:2x 再跑一遍核对）：全绿。
+
+| 包 / 目标 | 结果 |
+|---|---|
+| SwitcherCore | 148 个：SwitcherContractsTests 48、SwitcherEngineTests 73（含 W2-C 提案 003 的 4 个、W2-E AudioBridge 10 个）、SwitcherRenderTests 27，0 失败 |
+| SwitcherInputs | 28 个，4 跳过（摄像头 3 个 BLOCKED-权限：xctest 的责任进程没有相机用途说明；S5 BLOCKED-硬件），0 失败 |
+| SwitcherAudio | 87 个（W1-D 52 + W2-E 35），5 按环境跳过（真设备 / 回环），0 失败 |
+| SwitcherOutputs | W1-E 18（434 s）+ StreamingTests 21 + NDISendTests 8（2 跳过：人工 Studio Monitor、"无 SDK"用例）；MediaMTXTests 单独由 gate3-net 跑 |
+| SwitcherControl | 28，0 失败 |
+| SwitcherTestKit | 49，0 失败 |
+| 两个工具冒烟 | switcher-headless 0.1.0 / frameprobe 0.1.0 |
+| App（xcodebuild test） | 14 / 14 通过（xcresult `.build/DerivedData/Logs/Test/Test-Switcher-2026.09.15_18-52-24-+0800.xcresult`） |
+
+`xcodebuild` 全程刷 `DVTCoreDeviceCore` 加载失败 / `CoreSimulator is out of date (1051.55.0 < 1171.7.0)` 的红字：Xcode 27 的首次启动任务没做（`xcodebuild -checkFirstLaunchStatus` 返回 69），
+CoreSimulator 框架还是 26.x 的；只影响模拟器，macOS 测试不受影响。想清掉：`sudo xcodebuild -runFirstLaunch`。
 
 ## 5. G3 自己改了什么（只准动的目录：Tools、scripts、Makefile、scenarios、reports、baselines；各包 / App 胶水 ≤ 50 行）
 
@@ -83,7 +97,24 @@
 6. W1-D 淡变收口的两个小尾巴（−20 dB 以下 0.5–0.9 dB；Cut 后 −44 dB 尾巴）：听感无影响，W2-E 的 AFV 判据已按 −20 dB 以上判。归 W1-D。S3。
 7. 契约提案 001 / 002（推流字段，已批）/ 004 / 005 都还没落地：Stats.encoder 仍只有 skipped / bitrate，推流的帧数 / 网络丢帧 / 重连 / 状态在 `StreamOutput.counters`，
    录制的帧数 / 丢帧 / 磁盘剩余在 `RecorderCounters`，表读数在 `AudioEngineStatus`，L1 在 W2-A 的 harness。E7–E9 的判定读的是 W2-D 测试自己打印的 `StreamCounters`（不违反"三方同一份"——它们还没有第二份）。
-8. **App 一期只接了合成源**：摄像头 / 文件 / 录制 / 推流 / 音频 / API 的 App 接线约 170 行，超过检查点的 `~App/:50`，没做（§7 第 3 条）；人工清单里给了 headless 等价物。
+8. **E7–E9 第一次跑（19:01–19:12）E8 失败，是工装问题不是推流问题**：下午 15:06 起的 `sudo scripts/netem.sh serve` 一直没关（另一个终端），晚上按 G3 说明又起了一个，
+   两个代理循环抢同一个 `netem.request`——一个读到完整行、另一个读到被截断的空文件（跑了空命令、回了用法文本），两个 `pfctl` 同时装规则（`DIOCADDRULE: Resource busy`），
+   第 4 次封端口没封上 → 30 s 没判断线 → 该次"重连"记成 20.23 s；其余 9 次 0.10–1.12 s，E7（邻路 0 丢帧）、E9（误差 0.00%）都过。
+   证据：代理终端日志里的空 `收到：` 行与用法文本、`ps` 里 15:07 起的代理进程。修：`netem.sh serve` 单实例锁 + 原子认领请求（10942e4），`gate3-net.sh` 数到多于一个代理就拒跑。
+   **需要用户杀掉旧代理后重跑 `make gate3-net`**（E8 必须 10/10）。
+9. **第一次 10 分钟 gate（22:39–23:02，reports/G3-run-10min-run1.md）V4 差 1 帧、E2 量不出，都不是切换 / 编码的问题**：
+   - V4：设计外 1 帧全在 stats 最后一行（tick 35999）。headless 的等待循环 100 ms 看一次时钟，最后一拍派完到停视频源之间 60 fps 的源又推了 5 帧，
+     3 格候选表挤掉 2 帧记成 dropped（8 号输入 pushed 36005 / consumed 36000 / dropped 2；4、6、7 号各 1，在 +1 帧余量内；5 号的 3 次 drop 在 102 / 269 / 435 s，是 +100 ppm 的设计内）。
+     frameprobe 在播段口径 0。修：最后 30 拍改 2 ms 轮询、最后一拍派完立刻停视频源（Tools/，各包 0 行），重跑见下一节。
+   - E2：灰底合成源整段只压出 0.101 Mbps（设定 6 Mbps），VideoToolbox 不会往目标码率填充，"误差 98.9%"没有可判的对象。E2 的判定以 W1-E `VideoEncoderTests`（0.57% / 1.067×）
+     和 W2-D `MediaMTXTests.testE2E3`（0.61% / 1.050×，噪声内容，本次 `make test` 里跑过）为准；gate3-report 对"平均码率 < 25% 设定"标"本场景不适用"，不改阈值；
+     合成源加噪声底纹的单子 `reports/issues/G3-w1-testkit-synthetic-noise-for-E2.md`（W1-A，契约要加 Background case → 提案 006）。
+   - E5（信息项）：音轨比视频长 169 ms（4 路音频输入 + ISO），就是第 2 条 W1-E 的越界块问题。
+   - S2（信息项，10 分钟整段拟合）：RSS 820 → 834 MB，其中 +9 MB 在前 90 s（预热）、+4 MB 落在 C4 的 12000 条命令期间（240–270 s），之后 300 s 平的；
+     停机后 736 MB。要判 S2 得等 W4-A 的 8 小时；C4 期间的 +4 MB 提醒 W2-C 看一眼命令日志 / 回执历史是否有界。
+   - 其余 15 项都过：A2 整秒闪光 379 对均值 0.000 ms（G2 时 −18.3 ms，W2-E 的对齐延迟 / PTS 修正生效）、A4 五个文件 click 极差 0.188 ms、
+     V6 恰在第 1000 拍且 147 次 Cut 全干净、V7 曲线 0.344 帧 / T-bar 映射误差 ≤ 0.78%（目标 1% 也过）、C1 50/50 max 16.98 ms、C3 35795 帧 0 不一致、C4 12000/12000。
+10. **App 一期只接了合成源**：摄像头 / 文件 / 录制 / 推流 / 音频 / API 的 App 接线约 170 行，超过检查点的 `~App/:50`，没做（§7 第 3 条）；人工清单里给了 headless 等价物。
 
 ## 7. 对契约 / 流程的疑问（等用户拍板）
 

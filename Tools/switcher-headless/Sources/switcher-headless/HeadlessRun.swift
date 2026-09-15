@@ -49,23 +49,29 @@ enum AudioOutputChoice {
     }
 }
 
-/// 把录制器的编码计数变成 Stats.encoder 的一项：skipped 累计、bitrate 按上次采样以来的窗口算。只在 Stats 采样线程上被调。
+/// 把录制器的编码计数变成 Stats.encoder 的项（每个录制器一项，顺序 = 传入顺序：PGM 录制器在前、ISO 录制器在后）：
+/// skipped 累计、bitrate 按上次采样以来的窗口算。只在 Stats 采样线程上被调。
 final class EncoderStatsSource: @unchecked Sendable {
-    private let recorder: Recorder
-    private let last = Mutex<(counters: EncoderCounters, at: HostTime)?>(nil)
+    private let recorders: [Recorder]
+    private let last = Mutex<[(counters: EncoderCounters, at: HostTime)?]>([])
 
-    init(recorder: Recorder) { self.recorder = recorder }
+    init(recorders: [Recorder]) {
+        self.recorders = recorders
+        last.withLock { $0 = Array(repeating: nil, count: recorders.count) }
+    }
 
     func entries() -> [Stats.EncoderEntry] {
         let now = HostClock.now()
-        let current = recorder.counters.encoder
-        let previous = last.withLock { box -> (counters: EncoderCounters, at: HostTime)? in
+        let current = recorders.map(\.counters.encoder)
+        let previous = last.withLock { box -> [(counters: EncoderCounters, at: HostTime)?] in
             let p = box
-            box = (current, now)
+            box = current.map { ($0, now) }
             return p
         }
-        let window = previous.map { max((now - $0.at).seconds, 1e-3) } ?? 1
-        return [current.statsEntry(previous: previous?.counters, windowSeconds: window)]
+        return current.enumerated().map { i, c in
+            let window = previous[i].map { max((now - $0.at).seconds, 1e-3) } ?? 1
+            return c.statsEntry(previous: previous[i]?.counters, windowSeconds: window)
+        }
     }
 }
 
@@ -217,7 +223,7 @@ final class HeadlessSession: @unchecked Sendable {
         var statsPublisher: StatsPublisher?
         if options.statsURL != nil || apiServer != nil {
             if let rec = recorder {
-                let source = EncoderStatsSource(recorder: rec)
+                let source = EncoderStatsSource(recorders: [rec] + isoRecorders.map(\.0))
                 engine.encoderStatsProvider = { source.entries() }
             }
             engine.audioStatsProvider = { audioEngine.audioCounters }
@@ -277,8 +283,11 @@ final class HeadlessSession: @unchecked Sendable {
             """)
 
         // 7. 等：跑完 totalTicks 拍（派发 + 跳过 = 总拍数），或收到信号。
+        //    平时 100 ms 看一次；最后 30 拍改 2 ms，这样最后一拍派完后 ≤ 2 ms 就能停视频源——否则 60 fps 的源在这 100 ms 里再推 5–6 帧，
+        //    3 格候选表挤掉 2–3 帧记成 dropped，stats 最后一行的 V4 精确核算会多出 1–2 帧设计外（G3 第一次跑 8 号输入就是这样）。
         while !(clock.ticksDispatched + clock.ticksSkipped >= UInt64(totalTicks)) && !stopRequested {
-            try? await Task.sleep(for: .milliseconds(100))
+            let remaining = Int64(totalTicks) - Int64(clock.ticksDispatched + clock.ticksSkipped)
+            try? await Task.sleep(for: remaining > 30 ? .milliseconds(100) : .milliseconds(2))
         }
         let interrupted = stopRequested
 
