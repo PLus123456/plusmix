@@ -2,7 +2,7 @@ import Foundation
 import SwitcherContracts
 import SwitcherAudio
 
-/// 音频引擎的状态快照（UI / API / 测试读；表读数进 Stats 要契约加字段，见 docs/contract-changes/002）。
+/// 音频引擎的状态快照（UI / API / 测试读；表读数进 Stats 要契约加字段，见 docs/contract-changes/004）。
 /// 数字来源只有一处：混音器的统计 / 表 + 集成层的槽位表；每 `statusInterval` 刷新一次。
 public struct AudioEngineStatus: Sendable {
     /// 一路输入。

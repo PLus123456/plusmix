@@ -1,4 +1,4 @@
-# 002 Stats.audio 的表读数与不连续计数
+# 004 Stats.audio 的表读数与不连续计数
 
 提出会话 / 分支：W2-E / w2-audio-integ（worktree 分支 claude/w2-audio-integ-00e60c）
 状态：待批
