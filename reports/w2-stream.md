@@ -145,7 +145,7 @@ publishing ◄────────────────── backoff(n, 
 
 ## 4. 对契约的疑问
 
-1. **提案 002**（`docs/contract-changes/002-stats-encoder-stream-fields.md`）：`Stats.EncoderEntry` 在 001 的 `frames / dropped / disk_free_mb` 之上加 `reconnects`（UInt64）和 `state`（String：idle / connecting / publishing / backoff / stopping / stopped / failed / unavailable）。不加的话 UI / API 读不到推流状态和 NDI 的 unavailable，E7–E9 的判定只能读 `StreamOutput.counters`。建议和 001 一起批。
+1. **提案 002**（`docs/contract-changes/002-stats-encoder-stream-fields.md`；W2-A、W2-E 各自也写了一个 002，编号撞了，G3 合并时按主题重排即可）：`Stats.EncoderEntry` 在 001 的 `frames / dropped / disk_free_mb` 之上加 `reconnects`（UInt64）和 `state`（String：idle / connecting / publishing / backoff / stopping / stopped / failed / unavailable）。不加的话 UI / API 读不到推流状态和 NDI 的 unavailable，E7–E9 的判定只能读 `StreamOutput.counters`。建议和 001 一起批。
 2. **001 B（`AudioBlockConsumer` 升契约）**：StreamOutput 和 NDISender 都实现了它，赞成；签名别动。
 3. `StreamSettings` 只有 url / streamKey / reconnectMaxSeconds：连接超时、队列深度、门、停滞秒数现在在 `StreamOutput.Configuration.QueuePolicy`（组装方给）。要让 Show 文件可配就得进契约或放 `OutputSettings.extra`；一期不需要。
 4. `OutputSource.input(n)` 对 NDI：RenderedFrame 里没有输入画面，`NDISender.consume` 对 `.input` 不动，靠引擎用 `send(frame:)` 从该输入的帧槽喂。这是不是 G3 接线时可接受的形态？
