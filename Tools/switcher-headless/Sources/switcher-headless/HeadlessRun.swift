@@ -253,11 +253,18 @@ final class HeadlessSession: @unchecked Sendable {
         }
         let interrupted = stopRequested
 
-        // 8. 停：引擎（时钟停 → 渲染器排空在途帧并派发 → 状态机停）→ 视频源 → 录制封口（边界 = 最后一拍 + 1：音频恰好裁到最后一帧末尾，
-        //    再多 writer 会因为音频超前于已结束的视频拒收而死等；封口期间音频源、泵、设备都还在跑）→ 泵 → 音频设备 → 音频源 → stats 关文件
-        await engine.stop()
-        // 视频源立刻停：时钟停了以后它们再 push 只会把满槽里的帧挤掉，帧槽的 dropped 会多算几帧（冒烟跑 60 fps 的路各多 4–6）。音频源要留到封口完成。
-        for input in inputs { input.stop() }
+        // 8. 停。跑满的情况：时钟已派完最后一拍、不会再挑帧，先停视频源再停引擎——反过来的话引擎排空在途帧的那几十毫秒里视频源还在 push，
+        //    满槽挤掉的帧会被记成 dropped，stats 最后一行的 V4 精确核算每路多出 2–3 帧（W1-B 报告 §4 第 13 条）。
+        //    中断的情况：时钟还在跑，先停引擎（否则末尾几拍每路多 1–2 次 reuse），视频源紧接着停。
+        //    然后录制封口（边界 = 最后一拍 + 1：音频恰好裁到最后一帧末尾，再多 writer 会因为音频超前于已结束的视频拒收而死等；
+        //    封口期间音频源、泵、设备都还在跑）→ 泵 → 音频设备 → 音频源 → stats 关文件
+        if interrupted {
+            await engine.stop()
+            for input in inputs { input.stop() }
+        } else {
+            for input in inputs { input.stop() }
+            await engine.stop()
+        }
         let boundary = Tick((engine.counters.lastTick?.rawValue ?? -1) + 1)
         var recordResult: RecordingResult?
         if let rec = recorder {
@@ -333,7 +340,11 @@ final class HeadlessSession: @unchecked Sendable {
         for input in inputs {
             let k = input.counters
             let s = input.videoSlot?.stats
-            lines.append("  输入 \(input.number)：生成 \(k.generated)，设定丢 \(k.droppedByDesign)，池不够 \(k.poolStarved)，迟到 \(k.late)，唤醒 max \(String(format: "%.3f", Double(k.wakeLatencyMaxNs) / 1e6)) ms；帧槽 pushed \(s?.pushed ?? 0) consumed \(s?.consumed ?? 0) reused \(s?.reused ?? 0) dropped \(s?.dropped ?? 0)")
+            var pacing = ""
+            if let ps = engine.pacingStats(forInput: input.number) {
+                pacing = "；到达余量 \(String(format: "%.2f", ps.margin.milliseconds)) ms（窗口最大到达延迟 \(String(format: "%.2f", ps.windowMaxLatency.milliseconds)) ms，迟到 \(ps.lateFrames)，抬 \(ps.raises) / 降 \(ps.decreases)）"
+            }
+            lines.append("  输入 \(input.number)：生成 \(k.generated)，设定丢 \(k.droppedByDesign)，池不够 \(k.poolStarved)，迟到 \(k.late)，唤醒 max \(String(format: "%.3f", Double(k.wakeLatencyMaxNs) / 1e6)) ms；帧槽 pushed \(s?.pushed ?? 0) consumed \(s?.consumed ?? 0) reused \(s?.reused ?? 0) dropped \(s?.dropped ?? 0)" + pacing)
         }
         let a = mixer.stats
         lines.append("  音频：\(a.blocksRendered) 块，dropouts \(a.dropouts)，underruns \(a.underruns)，实时违规 \(a.rtViolations)，队列丢块 \(a.tapDrops)，最长一块 \(String(format: "%.3f", HostDuration(ticks: Int64(a.maxBlockTicks)).milliseconds)) ms；\(audioDevice.summary)" + (pump.map { "；泵搬块 \($0.moved)" } ?? ""))
