@@ -93,7 +93,7 @@ do_shape() {
 dummynet out quick proto tcp from any to any port $port pipe $PIPE
 dummynet out quick proto udp from any to any port $port pipe $PIPE
 RULES
-    echo "netem: 发往端口 $port 的包 → 管道 $PIPE（bw ${kbit}kbit/s, plr ${plr}%, delay ${delay}ms）"
+    echo "netem: 发往端口 ${port} 的包 → 管道 ${PIPE}（bw ${kbit}kbit/s, plr ${plr}%, delay ${delay}ms）"
 }
 
 do_status() {
@@ -133,7 +133,7 @@ do_serve() {
     chmod 777 "$dir"
     local req="$dir/netem.request" rep="$dir/netem.reply"
     rm -f "$req" "$rep"
-    echo "netem: 代理模式，监听 $req（Ctrl-C 退出；退出前会 clear）"
+    echo "netem: 代理模式，监听 ${req}（Ctrl-C 退出；退出前会 clear）"
     trap 'do_clear; exit 0' INT TERM
     while true; do
         if [ -s "$req" ]; then
