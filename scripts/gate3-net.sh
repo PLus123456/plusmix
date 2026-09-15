@@ -29,7 +29,19 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 step()  { printf '\033[36m== %s\033[0m\n' "$*"; }
 mkdir -p "$out"
 
-# ---- 0. 代理活着吗：写一条 status 请求，3 s 内要有 reply ----
+# ---- 0. 代理有且只有一个吗（G3 第一次跑 E8 时下午起的代理没关、晚上又起了一个，两个代理各读半个请求、pfctl 撞锁，E8 第 4 次封没封上）----
+serve_pids=$(pgrep -f "bash.*netem.sh serve" 2>/dev/null | tr '\n' ' ')
+serve_count=$(echo "$serve_pids" | wc -w | tr -d ' ')
+if [ "$serve_count" -gt 1 ]; then
+  red "有 $serve_count 个 netem 代理在跑，必须只留一个（它们会抢同一个请求文件）："
+  ps -o pid,lstart,tty,command -p "$(echo "$serve_pids" | tr ' ' ',' | sed 's/,$//')" 2>/dev/null
+  echo "    在多余的那个终端 Ctrl-C，或 sudo kill <pid>；然后重跑本脚本"; exit 2
+fi
+if [ "$serve_count" = 0 ]; then
+  red "没有 netem 代理在跑。请先在另一个终端跑："; echo "    sudo scripts/netem.sh serve"; exit 2
+fi
+green "netem 代理进程：$(ps -o pid=,lstart=,tty= -p "$(echo "$serve_pids" | tr -d ' ')" 2>/dev/null | sed 's/^ *//')"
+# ---- 0b. 代理活着吗：写一条 status 请求，3 s 内要有 reply ----
 if [ ! -d "$dir" ]; then
   red "netem 代理目录 $dir 不存在。请先在另一个终端跑："; echo "    sudo scripts/netem.sh serve"; exit 2
 fi

@@ -132,22 +132,47 @@ do_serve() {
     local dir="${1:-/tmp/switcher-netem}"
     mkdir -p "$dir"
     chmod 777 "$dir"
-    local req="$dir/netem.request" rep="$dir/netem.reply"
-    rm -f "$req" "$rep"
-    echo "netem: 代理模式，监听 ${req}（Ctrl-C 退出；退出前会 clear）"
-    trap 'do_clear; exit 0' INT TERM
+    local req="$dir/netem.request" rep="$dir/netem.reply" lock="$dir/.serve.lock"
+    # 只允许一个代理：两个 serve 同时读同一个请求文件会各读一半、各回一份、pfctl 撞锁（DIOCADDRULE: Resource busy）——
+    # G3 的 E8 就是这么挂的（下午 15:06 起的一个代理没关，晚上又起了一个）。锁目录里记 pid，活着就拒绝，死了就接管。
+    if ! mkdir "$lock" 2>/dev/null; then
+        local other
+        other=$(cat "$lock/pid" 2>/dev/null || echo "")
+        if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then
+            echo "netem: 已经有一个代理在跑（pid $other，$(ps -o lstart= -p "$other" 2>/dev/null | sed 's/^ *//')，tty $(ps -o tty= -p "$other" 2>/dev/null)）。" >&2
+            echo "netem: 先在它的终端 Ctrl-C，或者 sudo kill $other；再起本代理。" >&2
+            exit 2
+        fi
+        echo "netem: 上一个代理（pid ${other:-?}）已不在，接管锁"
+    fi
+    echo $$ > "$lock/pid"
+    rm -f "$req" "$rep" "$rep".tmp.*
+    echo "netem: 代理模式，监听 ${req}（pid $$；Ctrl-C 退出；退出前会 clear）"
+    trap 'do_clear; rm -rf "$lock" "$rep".tmp.*; exit 0' INT TERM
+    local n=0
     while true; do
         if [ -s "$req" ]; then
-            local line
-            line=$(head -1 "$req")
-            : > "$req"
-            echo "netem: 收到：$line"
-            # 代理里不允许带秒数阻塞太久：交给后台，reply 立刻写
-            # shellcheck disable=SC2086
-            ( run_command $line ) > "$rep.tmp" 2>&1 &
-            sleep 0.3
-            cat "$rep.tmp" 2>/dev/null
-            mv -f "$rep.tmp" "$rep" 2>/dev/null || true
+            # 原子认领：把请求文件改名拿走再读，读的是完整文件（不是 head -1 后再截断的窗口），空行跳过
+            local claimed="$req.$$.$n"
+            if mv -f "$req" "$claimed" 2>/dev/null; then
+                local line
+                line=$(grep -v '^[[:space:]]*$' "$claimed" | head -1)
+                rm -f "$claimed"
+                if [ -z "$line" ]; then
+                    echo "netem: 收到空请求，忽略"
+                else
+                    echo "netem: 收到：$line"
+                    # 每个请求自己的临时回复文件（带秒数的命令在后台继续跑并往里写，不和下一个请求共用）；reply 立刻写
+                    local tmp="$rep.tmp.$n"
+                    rm -f "$rep.tmp.$((n - 1))"   # 上一个请求的临时文件（它的后台进程若还在写，写进的是已删除的 inode，无害）
+                    # shellcheck disable=SC2086
+                    ( run_command $line ) > "$tmp" 2>&1 &
+                    sleep 0.3
+                    cat "$tmp" 2>/dev/null
+                    cp -f "$tmp" "$rep.new" 2>/dev/null && mv -f "$rep.new" "$rep" 2>/dev/null || true
+                fi
+                n=$((n + 1))
+            fi
         fi
         sleep 0.2
     done
