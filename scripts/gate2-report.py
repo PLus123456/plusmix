@@ -67,7 +67,15 @@ def main():
     ap.add_argument("--run-report", required=True)
     ap.add_argument("--notes", required=True)
     ap.add_argument("--report", required=True)
+    ap.add_argument("--waive", action="append", default=[],
+                    help="个案放行：'<判定表里的指标名>=<理由>'，可多次。放行项标 ⚠️，总判定变成通过（含放行）；理由要同时写进 reports/G2-notes.md §6（测试标准 §4：非硬性项可个案放行一次）")
     a = ap.parse_args()
+    waivers = {}
+    for w in a.waive:
+        if "=" not in w:
+            sys.exit(f"--waive 形如 '指标名=理由'，收到 {w}")
+        k, v = w.split("=", 1)
+        waivers[k.strip()] = v.strip()
     out = a.out_dir
 
     env = read_kv(os.path.join(out, "environment.txt"))
@@ -219,7 +227,11 @@ def main():
         ("V5 帧计数一致性", f"文件 {total_frames} 帧 − 运行 {expected_run} 拍 = {v5_delta:+d} 帧" if v5_delta is not None else "—",
          "|Δ| ≤ 2 帧（60 分钟）；10 分钟同样要求", v5_delta is not None and abs(v5_delta) <= 2, "—"),
     ]
-    all_pass = all(c[3] for c in checks)
+    waived = [c[0] for c in checks if not c[3] and c[0] in waivers]
+    unknown = [k for k in waivers if k not in {c[0] for c in checks}]
+    if unknown:
+        sys.exit(f"--waive 里的指标名不在判定表里：{unknown}；可用：{[c[0] for c in checks]}")
+    all_pass = all(c[3] or c[0] in waivers for c in checks)
 
     # ---- 信息项 ----
     e1 = key.get("e1_skipped")
@@ -256,8 +268,12 @@ def main():
     lines.append("| 指标 | 数值 | 阈值 | 通过 | 与上一版本的差 |")
     lines.append("|---|---|---|---|---|")
     for name, value, thr, ok, d in checks:
-        lines.append(f"| {name} | {value} | {thr} | {mark(ok)} | {d} |")
-    lines.append(f"| **总判定** | | | **{'✅ 通过' if all_pass else '❌ 未通过'}** | 基线：{a.baseline or '无（本次即基线）'} |")
+        m = mark(ok)
+        if not ok and name in waivers:
+            m = f"⚠️ 放行（{waivers[name]}）"
+        lines.append(f"| {name} | {value} | {thr} | {m} | {d} |")
+    verdict = "✅ 通过" + (f"（含放行 {len(waived)} 项）" if waived else "") if all_pass else "❌ 未通过"
+    lines.append(f"| **总判定** | | | **{verdict}** | 基线：{a.baseline or '无（本次即基线）'} |")
     lines.append("")
     lines.append("### 其它指标（M0 只记录；阈值按测试标准 §4）")
     lines.append("")

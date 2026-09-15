@@ -6,12 +6,13 @@
 #
 # 用法：scripts/gate2.sh [--minutes 10] [--label 10min] [--baseline baselines/m0-m5max.json] [--write-baseline PATH]
 #                        [--out-dir .build/gate2/<label>] [--no-build] [--skip-run]（只重算已有输出）
+#                        [--waive '指标名=理由']（用户裁定的个案放行，可多次；理由同时写进 reports/G2-notes.md §6）
 # 采集数据（stats.jsonl、out.mov、frameprobe JSON）留在 out-dir，不入库；报告里写路径。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="/opt/homebrew/bin:$PATH"
 
-minutes=10; label=""; baseline=""; write_baseline=""; out_dir=""; do_build=1; do_run=1
+minutes=10; label=""; baseline=""; write_baseline=""; out_dir=""; do_build=1; do_run=1; waives=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --minutes) minutes="$2"; shift 2 ;;
@@ -21,6 +22,7 @@ while [ $# -gt 0 ]; do
     --out-dir) out_dir="$2"; shift 2 ;;
     --no-build) do_build=0; shift ;;
     --skip-run) do_run=0; shift ;;
+    --waive) waives+=(--waive "$2"); shift 2 ;;   # 个案放行（用户裁定后才加）：'指标名=理由'，透传给 gate2-report.py
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "不认识的参数：$1" >&2; exit 2 ;;
   esac
@@ -139,7 +141,7 @@ fi
 # ---- 5. 报告 ----
 step "生成 reports/G2-run-$label.md 并拼 reports/G2.md"
 python3 scripts/gate2-report.py --out-dir "$out_dir" --label "$label" --minutes "$minutes" --show "$show" --script "$script" \
-  --baseline "$baseline" --run-report "reports/G2-run-$label.md" --notes reports/G2-notes.md --report reports/G2.md
+  --baseline "$baseline" --run-report "reports/G2-run-$label.md" --notes reports/G2-notes.md --report reports/G2.md "${waives[@]}"
 rc=$?
 if [ "$rc" = 0 ]; then
   green "G2 通过标准全部满足：$out_dir → reports/G2-run-$label.md → reports/G2.md"
