@@ -99,3 +99,26 @@ gate2:
 
 gate2-1h:
 	scripts/gate2.sh --minutes 60 --label 1h --baseline $(GATE2_BASELINE)
+
+# ---------- G3 检查点（M1 切换 + M2 音频 + M3 输出 + M5 控制）----------
+# make gate3      L0 + L1（六个包 swift test + 两个工具冒烟）→ 10 分钟 G3 场景（scripts/gate3.sh：V1–V7、A1–A4、E1–E3、C1–C4）
+#                 → reports/G3-run-10min.md + reports/G3.md，并写 baselines/g3-m5max.json
+# make gate3-run  只跑 10 分钟场景（跳过 L0 / L1）；make gate3-1h 60 分钟版（用户触发）
+# make gate3-net  E7–E9：需要用户先在另一个终端 sudo scripts/netem.sh serve（scripts/gate3-net.sh 会检查代理是否在线）
+# 数据留在 .build/gate3/<label>/（不入库）。
+GATE3_BASELINE ?= baselines/g3-m5max.json
+.PHONY: gate3 gate3-run gate3-1h gate3-net
+gate3: test-packages test-tools
+	scripts/gate3.sh --minutes 10 --label 10min --write-baseline $(GATE3_BASELINE)
+
+gate3-run:
+	scripts/gate3.sh --minutes 10 --label 10min --write-baseline $(GATE3_BASELINE)
+
+gate3-1h:
+	scripts/gate3.sh --minutes 60 --label 1h --baseline $(GATE3_BASELINE)
+
+gate3-net:
+	@echo "E7–E9 需要网络损伤（dummynet + pf）。先在另一个终端跑（要 sudo，Ctrl-C 退出时自动清规则）："
+	@echo "    sudo scripts/netem.sh serve"
+	scripts/gate3-net.sh
+

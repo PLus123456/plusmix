@@ -316,6 +316,12 @@ def cmd_run(a):
     }
     if host_now() < t0:
         time.sleep(ticks_to_ms(t0 - host_now()) / 1e3 + 0.5)
+    # --c1-start：C1 从 t0 之后第几秒开始（G3 的场景前 2 分钟是 V6 / V7 / T-bar 段，客户端的 cut 不能插进去）
+    if a.c1_start > 0:
+        start_wait = a.c1_start - ticks_to_ms(host_now() - t0) / 1e3
+        if start_wait > 0:
+            print(f"等到 t0 + {a.c1_start:g} s 再开始 C1（还有 {start_wait:.1f} s）", flush=True)
+            time.sleep(start_wait)
 
     # ---- C1：在避开场景切换的相位发 cut ----
     if a.c1_count > 0:
@@ -738,6 +744,7 @@ def main():
     r.add_argument("--token")
     r.add_argument("--out", required=True)
     r.add_argument("--c1-count", type=int, default=50)
+    r.add_argument("--c1-start", type=float, default=0, help="C1 从 t0 之后第几秒开始（默认 0）")
     r.add_argument("--c1-period", type=float, default=1.0)
     r.add_argument("--c1-phase", type=float, default=0.5)
     r.add_argument("--scenario-period", type=float, default=5.0)
