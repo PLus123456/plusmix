@@ -1,17 +1,16 @@
-// Switcher App —— AppKit 主程序（W2-B：显示路径 + 主界面骨架）。
+// Switcher App —— AppKit 主程序（W2-B：显示路径 + 主界面骨架；W2-B2：接上输入 / 命令 / API / 音频 / 录制 / 推流 / Stats）。
 // 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：自动保存 → 停引擎。
-// 菜单：节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加）、切换（Cut / Fade / FTB，快捷键见 KeyCommandMap）、窗口（调音台）。
+// 菜单：节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加）、切换（Cut / Fade / FTB；快捷键表来自 HotkeyTable）、窗口（调音台）。
+// 启动参数与设置见 AppSettings。
 import AppKit
 import SwitcherContracts
+import SwitcherControl
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var controller: AppController!
     private var recentMenu: NSMenu?
-    /// `--stats <路径>`：把每秒的 Stats 也写进 stats.jsonl（排障 / 对照测试）。
-    private var statsLogURL: URL?
-    /// `--show <路径>`：启动时打开这个节目文件（不走"上次"）。
-    private var showURL: URL?
+    private var settings = AppSettings()
 
     /// 在 xctest 宿主里（不恢复上次节目、不弹错误框）。
     static var isTestHost: Bool {
@@ -21,20 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         controller = AppController(isTestHost: Self.isTestHost)
+        settings = AppSettings.load(arguments: ProcessInfo.processInfo.arguments, defaults: controller.defaults)
+        controller.settings = settings
         buildMenu()
-        let args = ProcessInfo.processInfo.arguments
-        if let i = args.firstIndex(of: "--stats"), i + 1 < args.count {
-            statsLogURL = URL(fileURLWithPath: args[i + 1])
-        }
-        if let i = args.firstIndex(of: "--show"), i + 1 < args.count {
-            showURL = URL(fileURLWithPath: args[i + 1])
-        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { @MainActor in
-            await controller.launch(showURL: showURL)
-            if let url = statsLogURL {
+            await controller.launch(showURL: settings.showURL)
+            if let url = settings.statsURL {
                 do { try controller.session?.startStatsLog(url: url) } catch { NSLog("stats.jsonl 打不开：\(error)") }
             }
         }
@@ -95,12 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(submenu(input, title: "输入"))
 
         let transition = NSMenu(title: "切换")
-        transition.addItem(withTitle: "Cut（空格）", action: #selector(cut), keyEquivalent: "")
-        transition.addItem(withTitle: "Fade（回车）", action: #selector(fade), keyEquivalent: "")
-        transition.addItem(withTitle: "FTB（F）", action: #selector(ftb), keyEquivalent: "")
+        transition.addItem(withTitle: "Cut", action: #selector(cut), keyEquivalent: "")
+        transition.addItem(withTitle: "Fade", action: #selector(fade), keyEquivalent: "")
+        transition.addItem(withTitle: "FTB", action: #selector(ftb), keyEquivalent: "")
         transition.addItem(.separator())
-        for row in KeyCommandMap.table {
-            let item = transition.addItem(withTitle: "\(row.key)：\(row.action)", action: nil, keyEquivalent: "")
+        // 快捷键表（用户表 hotkeys.json 或默认表）：只列出来看，改表编辑器是 W3-E 的
+        let table = HotkeyTable.loadUserTableOrDefault()
+        let header = transition.addItem(withTitle: "快捷键（\(Self.hotkeyTableSource)）", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        for b in table.bindings.prefix(40) {
+            let item = transition.addItem(withTitle: "\(b.key)：\(b.note ?? "\(b.action)")", action: nil, keyEquivalent: "")
             item.isEnabled = false
         }
         main.addItem(submenu(transition, title: "切换"))
@@ -114,6 +112,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.mainMenu = main
         rebuildRecentMenu()
+    }
+
+    /// 菜单头上说明快捷键表从哪来。
+    static var hotkeyTableSource: String {
+        FileManager.default.fileExists(atPath: HotkeyTable.defaultFileURL.path) ? HotkeyTable.defaultFileURL.path : "默认表"
     }
 
     private func submenu(_ menu: NSMenu, title: String) -> NSMenuItem {

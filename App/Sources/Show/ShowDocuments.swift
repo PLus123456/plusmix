@@ -14,23 +14,33 @@ final class ShowDocuments {
 
     private let store = ShowStore()
     private let defaults: UserDefaults
+    /// 新建节目的默认录制目录（测试宿主用临时目录）。
+    let recordDirectory: String
     /// 当前节目对应的文件；未保存过为 nil。
     private(set) var currentURL: URL?
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, recordDirectory: String = ShowDocuments.defaultRecordDirectory) {
         self.defaults = defaults
+        self.recordDirectory = recordDirectory
     }
 
-    /// 空节目：没有输入，带一个默认录制输出（录到 ~/Movies/Switcher），PGM / PVW 都是黑场。
-    static func emptyShow(name: String = "未命名") -> Show {
-        let directory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first?
+    /// 默认录制目录：~/Movies/Switcher。
+    static var defaultRecordDirectory: String {
+        FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Switcher").path ?? NSHomeDirectory()
+    }
+
+    /// 空节目：没有输入，带一个默认录制输出（录到 recordDirectory，默认 ~/Movies/Switcher），PGM / PVW 都是黑场。
+    static func emptyShow(name: String = "未命名", recordDirectory: String = ShowDocuments.defaultRecordDirectory) -> Show {
         let record = OutputState(number: 1, kind: .record, name: "录制", enabled: false,
                                  settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
-                                                          record: RecordSettings(directory: directory)))
+                                                          record: RecordSettings(directory: recordDirectory)))
         let state = MixerState(outputs: [record])
         return Show(name: name, state: state)
     }
+
+    /// 空节目，录制目录用本对象的。
+    func emptyShow(name: String = "未命名") -> Show { Self.emptyShow(name: name, recordDirectory: recordDirectory) }
 
     // MARK: 文件
 

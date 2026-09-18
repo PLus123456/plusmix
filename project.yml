@@ -68,7 +68,11 @@ targets:
         product: SwitcherRender
       - package: SwitcherInputs
       - package: SwitcherAudio
+      - package: SwitcherAudio
+        product: SwitcherAudioIntegration   # W2-B2：App 接 W2-E 的 AudioEngine
       - package: SwitcherOutputs
+      - package: SwitcherOutputs
+        product: SwitcherStreaming           # W2-B2：App 接 W2-D 的 StreamOutput
       - package: SwitcherControl
       - package: SwitcherTestKit
 
