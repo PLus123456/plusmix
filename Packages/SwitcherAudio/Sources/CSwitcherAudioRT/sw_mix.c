@@ -745,8 +745,8 @@ static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t fra
     const float a_from = x->from >= 0 ? ctx->inputs[x->from].afv_fade_start : 0.0f;
     const float a_to = x->to >= 0 ? ctx->inputs[x->to].afv_fade_start : 0.0f;
     for (uint32_t i = 0; i < frames; i++) {
-        if (i < s0) { gain_from[i] = a_from; gain_to[i] = a_to; continue; }
-        const uint64_t k = x->elapsed_frames + (uint64_t)(i - s0);
+        // 起点之前 k = 0（cos 0 = 1、sin 0 = 0 → 起点前的增益）：不单独写常量填充循环，-O2 会把它认成 memset_pattern16（check-rt-symbols 不认）
+        const uint64_t k = i < s0 ? 0u : x->elapsed_frames + (uint64_t)(i - s0);
         if (k >= (uint64_t)x->duration_frames) { gain_from[i] = 0.0f; gain_to[i] = 1.0f; continue; }   // 走满：精确 0 / 1（cosf(π/2) 不是 0）
         const float ang = ((float)k / dur) * (SW_PI_F * 0.5f);
         gain_from[i] = a_from * cosf(ang);
@@ -883,8 +883,8 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
 
     // 2. AFV 淡变的每样本增益（每条淡变有自己的 from / to 曲线缓冲，ctx 创建时分配）；走满的本块把终值交给 sw_process_input 钉死
     const float *slot_xf[SW_MIX_MAX_INPUTS];
-    float slot_xf_end[SW_MIX_MAX_INPUTS];
-    for (uint32_t i = 0; i < ctx->input_capacity; i++) { slot_xf[i] = NULL; slot_xf_end[i] = -1.0f; }
+    uint8_t slot_xf_end[SW_MIX_MAX_INPUTS];   // 0 = 本块没走满；1 = 走满、终值 0（from）；2 = 走满、终值 1（to）。字节填充 → bzero（浮点填充会被认成 memset_pattern16）
+    for (uint32_t i = 0; i < ctx->input_capacity; i++) { slot_xf[i] = NULL; slot_xf_end[i] = 0; }
     for (uint32_t k = 0; k < SW_MIX_MAX_CROSSFADES; k++) {
         sw_crossfade *x = &ctx->xfades[k];
         if (!x->active) continue;
@@ -893,8 +893,8 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
         bool hf, ht, ended;
         const int32_t from = x->from, to = x->to;
         sw_xfade_block(ctx, x, frames, host_time, gf, gt, &hf, &ht, &ended);
-        if (hf && from >= 0) { slot_xf[from] = gf; if (ended) slot_xf_end[from] = 0.0f; }
-        if (ht && to >= 0) { slot_xf[to] = gt; if (ended) slot_xf_end[to] = 1.0f; }
+        if (hf && from >= 0) { slot_xf[from] = gf; if (ended) slot_xf_end[from] = 1; }
+        if (ht && to >= 0) { slot_xf[to] = gt; if (ended) slot_xf_end[to] = 2; }
     }
 
     // 3. 每路输入（独听状态先看一遍：耳机是"有独听只听独听的"，每路处理时就要知道）
@@ -906,7 +906,7 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
     for (uint32_t i = 0; i < ctx->input_capacity; i++) {
         sw_input_slot *slot = &ctx->inputs[i];
         if (!slot->attached || !slot->ring) { slot->st.attached = 0; slot->st.primed = 0; continue; }
-        sw_process_input(ctx, i, frames, host_time, slot_xf[i], slot_xf_end[i], solo_active);
+        sw_process_input(ctx, i, frames, host_time, slot_xf[i], slot_xf_end[i] == 0 ? -1.0f : (slot_xf_end[i] == 1 ? 0.0f : 1.0f), solo_active);
     }
 
     // 4. 总线
