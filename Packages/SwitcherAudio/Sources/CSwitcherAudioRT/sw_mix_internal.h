@@ -56,6 +56,8 @@ typedef struct sw_input_slot {
     uint32_t channels;            ///< 参与混音的声道数：1 或 2（环声道数 > 2 时取前两路）
     uint32_t resample_mode;       ///< sw_resample_mode
     uint32_t target_frames;       ///< 估计器设定点（环里平均保有帧数）
+    uint32_t target_age_frames;   ///< 就绪目标年龄（帧；0 = 旧规则）。W1-D2
+    uint32_t prime_wait_blocks;   ///< 目标年龄模式下"数据够了但目标那一帧还不合适"已等了几块（超限退回旧规则）
     uint32_t chunk_frames;        ///< 每次交给重采样器的帧数（ctx->resampler_chunk 的拷贝）
     uint32_t ring_mask;           ///< ring->capacity_frames − 1 的拷贝
     SRC_STATE *src[SW_MIX_BUS_CHANNELS];
@@ -123,7 +125,7 @@ typedef struct sw_crossfade {
 /// 消费者队列挂点。
 typedef struct sw_tap {
     sw_block_queue *q;
-    int32_t source;             ///< 0…3 总线；16 + 槽位 = 该输入推子后
+    int32_t source;             ///< 0…3 总线；SW_TAP_INPUT_BASE + 槽位 = 该输入推子后（含 AFV）；SW_TAP_INPUT_PRE_AFV_BASE + 槽位 = 推子后 AFV 前
 } sw_tap;
 
 /// 命令队列（SPSC：控制线程写 tail，实时线程写 head）。
@@ -165,6 +167,7 @@ struct sw_mix_ctx {
     uint32_t resampler_latency;   ///< sinc 半长 hf（帧）：libsamplerate 在"手里 ≤ hf 帧"时才取下一段
     uint32_t meter_interval_frames;
     uint32_t monitor_mode;
+    uint32_t monitor_point;       ///< sw_monitor_point：耳机取延迟线前（默认）/ 后。W1-D2
     double   host_ticks_per_frame;
     float    gain_smooth_k;       ///< 增益 / AFV 一阶平滑每样本系数 1 − exp(−1 / (τ · fs))，τ = 3 ms，创建时算好
     sw_rate_params rate_defaults;
@@ -177,6 +180,9 @@ struct sw_mix_ctx {
     uint64_t cmds_dropped;        ///< 控制线程写
     float   *zeros;               ///< max_block 个 0
     float   *xfade_gain[SW_MIX_MAX_CROSSFADES][2]; ///< 每条淡变 from / to 的每样本增益曲线（max_block）
+    float   *fader_gain;          ///< 当前这路输入本块每样本的推子增益（含静音平滑；max_block，各路顺序复用）
+    float   *fader_afv;           ///< 同上，AFV 增益（曲线或平滑）
+    float   *tap_scratch[SW_MIX_BUS_CHANNELS]; ///< 推子后 AFV 前的立体声临时块（推给 ISO tap 就丢）
     uint32_t timing_check;        ///< 1 = 用真实时钟检查块处理超时（实时驱动置 1，离线不置）
     uint64_t timeouts;            ///< 超时次数（dropouts 的一部分）
     // 表快照（seqlock：RT 写，其他线程读）
@@ -187,6 +193,14 @@ struct sw_mix_ctx {
     uint64_t overloads;
     uint64_t block_sequence;
 };
+
+/// 就绪时从 write_index 往回退多少帧开始消费（旧规则的 back；也是目标年龄模式的安全下限）：
+/// target + P/2（+ 重采样器要先吞的 hf + chunk/2）。RT 与 Host（sw_mix_ctx_deterministic_age_frames）共用一份公式。
+static inline uint64_t sw_slot_back_frames(const struct sw_mix_ctx *ctx, uint32_t target_frames, uint32_t producer_block, bool resampled) SW_NONBLOCKING {
+    uint64_t back = (uint64_t)target_frames + (uint64_t)producer_block / 2u;
+    if (resampled) back += (uint64_t)ctx->resampler_latency + (uint64_t)ctx->resampler_chunk / 2u;
+    return back;
+}
 
 /// AU 输入回调（RT target 定义，Host 装进 AU）。
 OSStatus sw_effect_input_proc(void *refCon, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *ts,

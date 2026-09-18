@@ -27,14 +27,25 @@ public enum BusEffect: Int32, Sendable, CaseIterable {
 public enum TapSource: Hashable, Sendable {
     /// 某条总线（总线增益之后）。
     case bus(Bus)
-    /// 某路输入的推子后信号。
+    /// 某路输入的推子后信号，含 AFV 门控（= 它送进总线的样子）。
     case input(slot: Int)
+    /// 某路输入推子后、AFV 门控前（含增益 / 静音 / 声像 / 延迟线，不含 AFV）—— ISO 音轨用（W1-D2）。
+    case inputPreAFV(slot: Int)
     var cValue: Int32 {
         switch self {
         case .bus(let b): Int32(b.rawValue)
-        case .input(let s): Int32(16 + s)
+        case .input(let s): SW_TAP_INPUT_BASE + Int32(s)
+        case .inputPreAFV(let s): SW_TAP_INPUT_PRE_AFV_BASE + Int32(s)
         }
     }
+}
+
+/// 耳机总线从每路输入的哪一点取信号（W1-D2；对应 C 的 sw_monitor_point）。
+public enum MonitorPoint: Int32, Sendable {
+    /// 延迟线之前：不带对齐延迟与延迟补偿的低延迟监听（默认）。
+    case preDelayLine = 0
+    /// 延迟线之后：与节目总线同刻。
+    case postDelayLine = 1
 }
 
 /// 速率估计器参数（默认值与理由见 sw_mix.c 顶部和报告）。
@@ -317,14 +328,26 @@ public final class AudioMixer: @unchecked Sendable {
     // MARK: 输入
 
     /// 把一路输入的环挂到槽位。槽位空闲时才能挂（同一槽位先 detach）。
-    public func attach(ring: any AudioRing, toSlot slot: Int, resampling: ResampleMode = .estimated, targetFrames: Int = 0) {
+    /// - Parameters:
+    ///   - targetFrames: 估计器设定点（环里平均保有帧数；0 = 2 块）。
+    ///   - targetAgeFrames: 就绪目标年龄（帧；W1-D2）：就绪时从"块首 host time − 目标年龄"那一刻采到的帧起消费，
+    ///     `InputSlotStats.ageSetpoint` 就等于它（± 半帧），与生产者相位无关；0 = 旧规则（年龄 = back + 相位 [0, P)）。
+    ///     任何相位都能命中的最小值见 `deterministicAgeFrames`；更小的目标在相位不利时按安全下限就绪（年龄 > 目标）。
+    public func attach(ring: any AudioRing, toSlot slot: Int, resampling: ResampleMode = .estimated, targetFrames: Int = 0, targetAgeFrames: Int = 0) {
         precondition((0..<inputCapacity).contains(slot), "槽位越界")
         lock.lock()
         precondition(rings[slot] == nil, "槽位 \(slot) 已有输入，先 detach")
         rings[slot] = ring
         sw_mix_ctx_prepare_slot(context, UInt32(slot))
         lock.unlock()
-        push(cmd(SW_CMD_ATTACH_INPUT, index: slot, i0: resampling.rawValue, i1: Int32(targetFrames), ptr: UnsafeMutableRawPointer(ring.raw)))
+        push(cmd(SW_CMD_ATTACH_INPUT, index: slot, i0: resampling.rawValue, i1: Int32(targetFrames), i2: Int32(max(0, targetAgeFrames)),
+                 ptr: UnsafeMutableRawPointer(ring.raw)))
+    }
+
+    /// 指定目标年龄时任何生产者相位都能精确命中的最小年龄（帧）= back（target + P/2 + hf + chunk/2）+ 生产者块 P；
+    /// 默认参数（target 2 块、P 256、重采样）= 959 帧 ≈ 20 ms。bypass（与输出同时钟）的输入没有 hf + chunk/2。
+    public func deterministicAgeFrames(targetFrames: Int, producerBlockFrames: Int, resampled: Bool = true) -> Int {
+        Int(sw_mix_ctx_deterministic_age_frames(context, UInt32(max(0, targetFrames)), UInt32(max(0, producerBlockFrames)), resampled))
     }
 
     /// 摘掉槽位上的输入。环对象在实时线程确认之后才释放（这里只入队）。
@@ -383,15 +406,22 @@ public final class AudioMixer: @unchecked Sendable {
         push(cmd(SW_CMD_EFFECT_ENABLE, index: bus.rawValue, i0: effect.rawValue, i1: on ? 1 : 0))
     }
     public func setMonitorMode(_ mode: MonitorMode) { push(cmd(SW_CMD_MONITOR_MODE, i0: mode == .pfl ? 1 : 0)) }
+    /// 耳机总线取每路输入延迟线前（默认，低延迟监听）还是延迟线后（与节目同刻）的信号。W1-D2。
+    public func setMonitorPoint(_ point: MonitorPoint) { push(cmd(SW_CMD_MONITOR_POINT, i0: point.rawValue)) }
 
     // MARK: AFV
 
     /// 等幅交叉淡变（设计方案 §7 AFV；W2-E 接到转场）：`from` 的 AFV 增益 1 → 0、`to` 的 0 → 1，
     /// 曲线 cos / sin（中点各 −3 dB），起点 = 首样本 host time ≥ startHostTime 的那一块里按样本定位，
-    /// 长度 durationBlocks × 块。迟到时跳到该在的位置，终点仍与视频对齐。任一方可为 nil。
-    public func crossfade(from: Int?, to: Int?, durationBlocks: Int, startHostTime: HostTime) {
+    /// 长度 durationFrames 帧（样本精确，不按块取整；W1-D2 前只收块数），走满那一刻起 from 严格 0、to 严格 1。
+    /// 迟到时跳到该在的位置，终点仍与视频对齐。任一方可为 nil。
+    public func crossfade(from: Int?, to: Int?, durationFrames: Int, startHostTime: HostTime) {
         push(cmd(SW_CMD_CROSSFADE, i0: from.map(Int32.init) ?? -1, i1: to.map(Int32.init) ?? -1,
-                 i2: Int32(max(1, durationBlocks)), u0: startHostTime.ticks))
+                 i2: Int32(max(1, durationFrames)), u0: startHostTime.ticks))
+    }
+    /// 便利写法：durationBlocks × 名义块（`configuration.blockFrames`）。
+    public func crossfade(from: Int?, to: Int?, durationBlocks: Int, startHostTime: HostTime) {
+        crossfade(from: from, to: to, durationFrames: max(1, durationBlocks) * configuration.blockFrames, startHostTime: startHostTime)
     }
 
     // MARK: 消费者队列

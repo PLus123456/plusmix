@@ -4,7 +4,7 @@ import SwitcherContracts
 import SwitcherAudio
 
 // 消费者泵（设计方案 §3.4 / W1-E 报告要求由组装方提供的"非实时泵"）：把混音器消费者队列（实时线程写的 SPSC）里的块搬给
-// 各消费者。一个来源（Master / 总线 / 某路输入）一个 tap，多个消费者共享（扇出拷贝），tap 数 ≤ 8 不再受消费者数限制。
+// 各消费者。一个来源（Master / 总线 / 某路输入的 ISO 或节目信号）一个 tap，多个消费者共享（扇出拷贝），tap 数 ≤ 8 不再受消费者数限制。
 //
 // 每块：PTS = 块首样本 host time − 对齐延迟（= 内容被采集的时刻，与视频拍点同一时基）；真设备时经 HostClockResampler
 // 把设备时钟重采样到 host 时钟（PTS 按计数连续）；Master 流顺便做波形不连续检测（A1 第三项）。
@@ -101,6 +101,9 @@ final class ConsumerPump: @unchecked Sendable {
             case .master: tapSource = .bus(.master)
             case .bus(let b): tapSource = .bus(b)
             case .input(let n):
+                guard let slot = slotOf(n) else { throw AudioEngineError.inputNotRegistered(n) }
+                tapSource = .inputPreAFV(slot: slot)
+            case .inputProgram(let n):
                 guard let slot = slotOf(n) else { throw AudioEngineError.inputNotRegistered(n) }
                 tapSource = .input(slot: slot)
             }

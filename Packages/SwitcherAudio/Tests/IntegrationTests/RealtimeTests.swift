@@ -125,7 +125,7 @@ final class IntegrationRealtimeTests: XCTestCase {
         try addSource(&rig, number: 1) { start, n, buf in for i in 0..<n { buf[i] = 0.5 * Float(sin(2 * Double.pi * 1000 * Double(start + Int64(i)) / 48_000)) } }
         try addSource(&rig, number: 2) { start, n, buf in for i in 0..<n { buf[i] = 0.5 * Float(sin(2 * Double.pi * 1500 * Double(start + Int64(i)) / 48_000)) } }
         let cap2 = TimedCapture()
-        try rig.engine.addConsumer(CaptureConsumer(name: "in2", capture: cap2), source: .input(number: 2))
+        try rig.engine.addConsumer(CaptureConsumer(name: "in2", capture: cap2), source: .inputProgram(number: 2))
         let s = Tick(120)
         await rig.sm.schedule(.fade(durationTicks: 30), at: s)
         await driveStateMachine(rig, until: rig.t0 + HostDuration(seconds: 4))
@@ -207,13 +207,13 @@ final class IntegrationRealtimeTests: XCTestCase {
             throw XCTSkip("BLOCKED-硬件：需要音频接口回环线（耳机出 → 线路入）；设 SW_AUDIO_LOOPBACK_OUTPUT / SW_AUDIO_LOOPBACK_INPUT 后跑")
         }
         guard let inInfo = AudioHAL.device(named: inName), inInfo.inputChannels > 0 else { throw XCTSkip("找不到输入设备 \(inName)") }
-        // 低延迟监听配置：对齐延迟 0（监听不需要与视频对齐）、就绪目标 1 块、buffer 128
+        // 对齐延迟用默认（2048 帧）：W1-D2 起耳机总线不经对齐延迟线（monitorPoint 默认 .preDelayLine），监听延迟 = 环年龄 + 设备；
+        // 低延迟的部分只剩就绪目标 1 块、buffer 128（年龄 = 128 + 64 + 47 + 16 + 128 = 383 帧 = 8 ms）
         let sm = StateMachine(initialState: States.fourInputs(afv: false))
         sm.start()
         var cfg = AudioEngineConfiguration()
         cfg.output = .device(name: outName)
         cfg.blockFrames = 128
-        cfg.alignmentFrames = 0
         cfg.outputChannelMap = BusChannelMap(master: nil, headphones: (0, 1))   // 耳机总线 → 设备 0/1
         let engine = try AudioEngine(stateMachine: sm, configuration: cfg)
         let t0 = HostClock.now() + HostDuration(milliseconds: 300)
@@ -241,7 +241,9 @@ final class IntegrationRealtimeTests: XCTestCase {
         // 回环里 click 相对发出时刻晚 = 往返；A5 = 往返 / 2（音频超前为正，所以取负）
         let roundTripMs = -s.meanMs
         let a5 = roundTripMs / 2
-        print("A5 回环：往返 \(String(format: "%.2f", roundTripMs)) ms（\(s.count) 个 click，σ \(String(format: "%.2f", s.stdMs))）→ 监听延迟 \(String(format: "%.2f", a5)) ms；输出设备延迟 \(engine.outputDevice?.outputLatencyFrames ?? 0) 帧，输入设备延迟 \(inputDevice.inputLatencyFrames) 帧")
+        let in1 = engine.status.inputs.first { $0.number == 1 }
+        print("A5 回环：往返 \(String(format: "%.2f", roundTripMs)) ms（\(s.count) 个 click，σ \(String(format: "%.2f", s.stdMs))）→ 监听延迟 \(String(format: "%.2f", a5)) ms；输出设备延迟 \(engine.outputDevice?.outputLatencyFrames ?? 0) 帧，输入设备延迟 \(inputDevice.inputLatencyFrames) 帧；输入 1 年龄 \(in1?.ageSetpointFrames ?? -1) 帧（目标 \(in1?.targetAgeFrames ?? -1)）、对齐延迟线 \(in1?.alignmentDelayFrames ?? -1) 帧（耳机不走）")
+        XCTAssertEqual(engine.configuration.alignmentFrames, 2048, "默认对齐配置")
         XCTAssertGreaterThan(s.count, 5)
         XCTAssertLessThanOrEqual(a5, 20, "A5 必须档（buffer 256）")
         await engine.stop()

@@ -16,10 +16,12 @@ final class AlignmentTests: XCTestCase {
         let st = rig.engine.status
         let in1 = try XCTUnwrap(st.inputs.first { $0.number == 1 })
         XCTAssertTrue(in1.primed && in1.aligned, "\(in1)")
-        // 年龄 = 目标 512 + P/2 128 + hf 47 + chunk/2 16 + 相位 [0, 256)
-        XCTAssertGreaterThanOrEqual(in1.ageSetpointFrames, 700)
-        XCTAssertLessThan(in1.ageSetpointFrames, 960)
+        // W1-D2：年龄由混音器按目标就绪 = 目标 512 + P/2 128 + hf 47 + chunk/2 16 + P 256 = 959（确定值，不再带 [0, 256) 的相位）；
+        // 对齐延迟线 = 2048 − 959 = 1089，也是确定的
+        XCTAssertEqual(in1.targetAgeFrames, 959)
+        XCTAssertEqual(in1.ageSetpointFrames, 959, accuracy: 1.0)
         XCTAssertEqual(in1.alignmentDelayFrames, 2048 - Int(in1.ageSetpointFrames.rounded()))
+        XCTAssertEqual(in1.alignmentDelayFrames, 1089, accuracy: 1)
         XCTAssertEqual(in1.residualFrames, 0)
         let offsets = cap.clickOffsetsMs(t0: rig.t0)
         XCTAssertGreaterThanOrEqual(offsets.count, 4, "\(offsets)")
@@ -48,9 +50,14 @@ final class AlignmentTests: XCTestCase {
         let st = rig.engine.status
         let a = try XCTUnwrap(st.inputs.first { $0.number == 1 }), b = try XCTUnwrap(st.inputs.first { $0.number == 2 })
         XCTAssertTrue(a.aligned && b.aligned)
-        XCTAssertGreaterThan(b.ageSetpointFrames, a.ageSetpointFrames + 300, "P = 1024 的年龄多出 P/2 + 目标差")
+        // P = 1024：确定年龄 1280 + 512 + 63 + 1024 = 2879 超过对齐延迟，集成层把目标压到 2048（能对齐的最大值）；
+        // 混音器等生产者相位转到"最新数据够新"的那一块再就绪，年龄正好 2048、延迟线 0（W2-E 时靠相位碰运气才有残差 0）
+        XCTAssertEqual(a.targetAgeFrames, 959); XCTAssertEqual(b.targetAgeFrames, 2048)
+        XCTAssertEqual(a.ageSetpointFrames, 959, accuracy: 1.0)
+        XCTAssertEqual(b.ageSetpointFrames, 2048, accuracy: 1.0, "P = 1024 的年龄 = 对齐延迟")
         XCTAssertEqual(a.alignmentDelayFrames + Int(a.ageSetpointFrames.rounded()), 2048)
         XCTAssertEqual(b.alignmentDelayFrames + Int(b.ageSetpointFrames.rounded()), 2048)
+        XCTAssertEqual(b.residualFrames, 0)
         for cap in [capA, capB] {
             let offsets = cap.clickOffsetsMs(t0: rig.t0)
             XCTAssertGreaterThanOrEqual(offsets.count, 3)
@@ -108,6 +115,8 @@ final class AlignmentTests: XCTestCase {
         let cap = try rig.capture(.master)
         await rig.run(seconds: 5)
         let in1 = try XCTUnwrap(rig.engine.status.inputs.first { $0.number == 1 })
+        // 目标年龄被压到 512，低于混音器的安全下限（703 + 相位），按下限就绪，残差报出来
+        XCTAssertEqual(in1.targetAgeFrames, 512)
         XCTAssertEqual(in1.alignmentDelayFrames, 0)
         XCTAssertGreaterThan(in1.residualFrames, 150)
         let expectedMs = -Double(in1.residualFrames) / 48
@@ -132,5 +141,63 @@ final class AlignmentTests: XCTestCase {
         XCTAssertLessThan(blockPeaks[firstAudible], 0.35, "第一块不是满电平硬起（3 ms 平滑）：\(blockPeaks[firstAudible])")
         XCTAssertEqual(Double(blockPeaks.last!), 0.5 / sqrt(2), accuracy: 0.01)
         await rig.shutdown()
+    }
+
+    // MARK: W1-D2 就绪年龄确定、耳机不走对齐
+
+    /// 10 次重新注册（源相对块网格的相位各不同）：就绪年龄都 = 目标（959）± 1 帧，对齐延迟线都 = 1089，
+    /// 残差（年龄 + 延迟线 − 对齐延迟）= 0；W2-E 时年龄带 [0, 256) 的随机相位，延迟线每次不同。
+    func testAlignment_readyAgeIsDeterministic_10reprimes_residualZero() async throws {
+        let rig = try await EngineRig(state: States.fourInputs(afv: false))
+        try rig.addSource(number: 1)
+        _ = try rig.capture(.master)
+        await rig.run(seconds: 1)
+        var ages: [Double] = [], delays: [Int] = []
+        for k in 0..<10 {
+            let phase = HostDuration(ticks: Int64((Double(k * 23) * rig.engine.mixer.hostTicksPerFrame).rounded()))
+            try rig.addSource(number: 2, sourceT0: rig.driver.nextBlockHostTime + phase) { _, start, n, buf in
+                for i in 0..<n { buf[i] = 0.3 * Float(sin(2 * Double.pi * 1500 * Double(start + Int64(i)) / 48_000)) }
+            }
+            await rig.run(blocks: 40)
+            let st = try XCTUnwrap(rig.engine.status.inputs.first { $0.number == 2 })
+            XCTAssertTrue(st.primed && st.aligned, "第 \(k) 次：\(st)")
+            XCTAssertEqual(st.targetAgeFrames, 959)
+            XCTAssertEqual(st.ageSetpointFrames, Double(st.targetAgeFrames), accuracy: 1.0, "第 \(k) 次就绪年龄")
+            XCTAssertEqual(Int(st.ageSetpointFrames.rounded()) + st.alignmentDelayFrames - st.residualFrames, 2048, "第 \(k) 次残差")
+            ages.append(st.ageSetpointFrames); delays.append(st.alignmentDelayFrames)
+            rig.engine.unregisterInput(number: 2, now: rig.driver.nextBlockHostTime)
+            await rig.run(blocks: 8)
+            rig.sources.removeValue(forKey: 2)
+            XCTAssertNil(rig.engine.slot(forInput: 2))
+        }
+        XCTAssertLessThanOrEqual(ages.max()! - ages.min()!, 1.0, "10 次就绪年龄极差 ≤ 1 帧：\(ages)")
+        XCTAssertEqual(Set(delays).count, 1, "对齐延迟线每次相同：\(delays)")
+        print("[age] 10 次重就绪年龄 \(ages.map { String(format: "%.2f", $0) })，延迟线 \(delays)")
+        let st = rig.engine.status
+        XCTAssertEqual(st.counters.underruns, 0)
+        XCTAssertEqual(st.realtimeViolations, 0)
+        await rig.shutdown()
+    }
+
+    /// 耳机总线默认取延迟线之前的信号：同一路 click 在耳机流里比 Master 早"对齐延迟线"那么多（1089 帧 = 22.7 ms），Master 仍回到整秒；
+    /// `monitorPoint = .postDelayLine` 时耳机与 Master 同刻。监听延迟因此只剩环年龄（959 帧 = 20 ms，可用 hints 调小）+ 设备。
+    func testMonitor_headphonesBypassAlignmentDelayLineByDefault() async throws {
+        for point in [MonitorPoint.preDelayLine, .postDelayLine] {
+            let rig = try await EngineRig(state: States.fourInputs(afv: false)) { $0.monitorPoint = point }
+            try rig.addSource(number: 1)
+            var s = InputSettings(); s.audio.routing = BusRouting(master: true, headphones: true)
+            _ = await rig.sm.apply(.setInputSettings(input: 1, settings: s))
+            let master = try rig.capture(.master), hp = try rig.capture(.bus(.headphones))
+            await rig.run(seconds: 5)
+            let in1 = try XCTUnwrap(rig.engine.status.inputs.first { $0.number == 1 })
+            XCTAssertEqual(in1.alignmentDelayFrames, 1089, accuracy: 1)
+            let expectedHP = point == .preDelayLine ? Double(in1.alignmentDelayFrames) / 48 : 0     // 音频超前为正
+            let mo = master.clickOffsetsMs(t0: rig.t0), ho = hp.clickOffsetsMs(t0: rig.t0)
+            XCTAssertGreaterThanOrEqual(mo.count, 3); XCTAssertGreaterThanOrEqual(ho.count, 3)
+            for o in mo { XCTAssertEqual(o.offsetMs, 0, accuracy: 0.05, "\(point) Master \(o)") }
+            for o in ho { XCTAssertEqual(o.offsetMs, expectedHP, accuracy: 0.05, "\(point) 耳机 \(o)") }
+            XCTAssertEqual(rig.engine.status.monitorPoint, point)
+            await rig.shutdown()
+        }
     }
 }
