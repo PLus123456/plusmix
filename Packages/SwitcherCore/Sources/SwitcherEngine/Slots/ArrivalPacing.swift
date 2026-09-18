@@ -11,12 +11,14 @@ import SwitcherContracts
 // 修法：合格判据改成 pts ≤ 拍点 − L。L ≥ 该路的到达延迟 + 抖动，则合格的帧一定已在槽里，不再与到达赛跑。
 // 代价：每帧多等 L − d_k（再加拍点量化）。L 由帧槽按每帧 d = ingressTime − pts（两者都是输入在入口打的戳）自估：
 //
-//   窗口：最近 blockCount = 8 块，每块 blockDuration（默认 2 s，按 ingressTime 定长，与输入帧率无关：8 × 60 帧的老窗口在 30 fps
-//         源上是 16 s、60 fps 上是 8 s，同一个尖峰影响的时长不一样）。每块记最小值和最大的 4 个样本。
-//   d_min = 窗口最小值。
-//   d_max = 窗口"可覆盖"最大值：每块在它最大的 4 个样本里取第一个 ≤ d_min + 一个节目帧 的；4 个都超过就取第 4 个（保守：
-//           一块 2 s 里超过 3 个"尖峰"就不是尖峰，是水平变了）。超过 d_min + 一帧 的样本即使被余量盖住也要付 > 一帧的代价
-//           （见上限），所以只走迟到路径，不让一个孤立尖峰（含相机总是最慢的第一帧）把余量钉在上限整整一个窗口。
+//   窗口：最近 blockCount = 8 块，每块 blockDuration（默认 1 s，按 ingressTime 定长，与输入帧率无关：8 × 60 帧的老窗口在 30 fps
+//         源上是 16 s、60 fps 上是 8 s，同一个尖峰影响的时长不一样）。每块记最小值和最大的 8 个样本。
+//         起流块（第 0 块）在窗口有两个完整块后作废：相机起流的前几百毫秒是曝光 / 管线收敛，实测 5–7 帧 d 比稳态大 15–40 ms。
+//   d_min = 窗口最小值（PacingOptions.capAnchor = .windowMinimum，裁定原文）；或每块最小值里最大的那个（.sustainedMinimum，
+//           孤立的提前帧不压上限；给双峰的相机用，报告 §3 有对照数据，默认值等用户裁）。
+//   d_max = 窗口"可覆盖"最大值：每块在它最大的 8 个样本里取第一个 ≤ d_min + 一个节目帧 的；8 个都超过就取第 8 个（保守：
+//           一块 1 s 里超过 7 个"尖峰"就不是尖峰，是水平变了）。超过 d_min + 一帧 的样本即使被余量盖住也要付 > 一帧的代价
+//           （见上限），所以只走迟到路径，不让孤立尖峰（含相机总是最慢的第一帧）把余量钉在上限整整一个窗口。
 //   保护带 guard = guardAbsolute + guardRelative × (d_max − d_min)：比例部分按抖动跨度，不按 d_max 绝对值
 //           （摄像头 d ≈ 55–75 ms 是固定管线延迟，按绝对值算白付 8–11 ms）。
 //   上限 cap = min(maximumMargin, max(0, d_min) + 一个节目帧 + guard)：硬件帧同步器的"最多缓一帧"——最早到的帧也只多等
@@ -25,7 +27,7 @@ import SwitcherContracts
 //           不再乘 2：相机第一帧总是最慢的（75–115 ms），乘 2 再被单样本上限钳住会让稳态帧等 3–4 个帧长、候选表装不下 →
 //           黑屏到热身结束（W2-A 实测 4.2 s）。
 //   稳态目标 desired = max(minimumMargin, d_max + guard)，≤ cap。
-//   热身：前 warmupBlocks 块（默认 1 块 = 2 s）不主动往下减到 desired（一块样本估不出抖动），但上限随时生效：余量高于 cap
+//   热身：前 warmupBlocks 块（默认 1 块 = 1 s）不主动往下减到 desired（一块样本估不出抖动），但上限随时生效：余量高于 cap
 //           就减到 cap（起流第一帧慢的那个初值就是这么被压下来的）。
 //
 // 余量的任何一次变化都是一次相位跳变——增 δ 可能多一次 dup、减 δ 可能多一次 drop（概率 ≈ δ / 输入帧长，渐变也一样）。
@@ -53,7 +55,7 @@ public struct PacingOptions: Sendable, Hashable {
     /// 滞回：目标比余量高出这么多才主动抬、低这么多才往下减（迟到 / 饿死触发的变化不受限）。
     public var hysteresis = HostDuration(milliseconds: 1)
     /// 到达延迟窗口：每块的时长（块数固定 8；按帧的 ingressTime 定长）。
-    public var blockDuration = HostDuration(seconds: 2)
+    public var blockDuration = HostDuration(seconds: 1)
     /// 热身块数：窗口里完成的块不足这么多之前不主动往下减到稳态目标（上限、饿死保护仍生效）。
     public var warmupBlocks: Int = 1
     /// 初值下限（第一帧 d ≤ 0 时的初值）；nil = 节目 1/4 帧（引擎填）。
@@ -62,11 +64,23 @@ public struct PacingOptions: Sendable, Hashable {
     public var maxRaise: HostDuration? = nil
     /// 一个节目帧的时长（上限 = d_min + 它 + 保护带）；nil = 引擎按节目帧率填。
     public var programFrame: HostDuration? = nil
+    /// 上限公式里"窗口最小到达延迟"取哪个（默认按裁定原文取窗口最小值；另一种见 CapAnchor）。
+    public var capAnchor: CapAnchor = .windowMinimum
     /// 余量下限（帧不会早于 pts + minimumMargin 被用）。
     public var minimumMargin = HostDuration.zero
     /// 余量的绝对上限（另有动态上限 = d_min + 一个节目帧 + 保护带）。
     public var maximumMargin = HostDuration(milliseconds: 500)
     public init() {}
+
+    /// 上限 = 锚点 + 一个节目帧 + 保护带 里的锚点。
+    public enum CapAnchor: Sendable, Hashable {
+        /// 窗口内的最小到达延迟（G3 裁定第 3 条原文）。双峰源（内置相机 AE 收敛时每隔 1–3 s 有 2–8 帧提前 20 ms 到）
+        /// 会被这些提前帧把上限压到主模态 d_max 下面 1–2 ms，相位不巧时主模态的帧持续迟到（实测 10 s 里 10 次 dup）。
+        case windowMinimum
+        /// 每块最小值里最大的那个（"每块都出现的最小延迟"）：孤立的提前帧不压上限，只有每块都有的提前帧才算稳态最小值。
+        /// 代价：双峰源的余量 = 主模态 d_max + 保护带，提前帧多等 20 ms；单模态源与 windowMinimum 没有区别。
+        case sustainedMinimum
+    }
 
     /// 60 fps 的兜底值（没经引擎注册、直接用槽时）。
     static let fallbackFloor = HostDuration(milliseconds: 1000.0 / 60 / 4)
@@ -123,6 +137,7 @@ final class PacingOptionsAtomic: @unchecked Sendable {
     let initialFloor = Atomic<Int64>(0)
     let maxRaise = Atomic<Int64>(0)
     let programFrame = Atomic<Int64>(0)
+    let sustainedAnchor = Atomic<Bool>(false)
     let minimumMargin = Atomic<Int64>(0)
     let maximumMargin = Atomic<Int64>(Int64.max)
 
@@ -138,6 +153,7 @@ final class PacingOptionsAtomic: @unchecked Sendable {
         initialFloor.store((o.initialFloor ?? PacingOptions.fallbackFloor).ticks, ordering: .relaxed)
         maxRaise.store((o.maxRaise ?? PacingOptions.fallbackMaxRaise).ticks, ordering: .relaxed)
         programFrame.store((o.programFrame ?? PacingOptions.fallbackProgramFrame).ticks, ordering: .relaxed)
+        sustainedAnchor.store(o.capAnchor == .sustainedMinimum, ordering: .relaxed)
         minimumMargin.store(o.minimumMargin.ticks, ordering: .relaxed)
         maximumMargin.store(o.maximumMargin.ticks, ordering: .releasing)
     }

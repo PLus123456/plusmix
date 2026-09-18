@@ -379,7 +379,7 @@ final class EngineTests: XCTestCase {
         let spec = TickClockSpec(t0: t0 - HostDuration(milliseconds: 20), frameRate: .fps60)
         let running = RunFlag()
         let producers = try [(a, 1), (b, 2), (c, 3)].map { try startProducer(slot: $0.0, input: $0.1, spec: spec, delay: HostDuration(milliseconds: 1), running: running) }
-        try await engine.start(t0: t0, lastTick: Tick(59))          // 1 s：热身（2 s）未结束，初值还在
+        try await engine.start(t0: t0, lastTick: Tick(29))          // 0.5 s：热身（1 块 = 1 s）未结束，初值还在
         engine.clock!.join()
         running.stop()
         producers.forEach { $0.join() }

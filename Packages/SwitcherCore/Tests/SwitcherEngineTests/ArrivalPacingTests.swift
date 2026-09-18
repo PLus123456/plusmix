@@ -428,7 +428,8 @@ final class ArrivalPacingTests: XCTestCase {
         XCTAssertEqual(nilTicksAfterFirstFrame(spike), 0)
     }
 
-    /// 估计器窗口按时间定长（8 × 2 s）：尖峰只影响 ≤ 16 s；30 fps 和 60 fps 源的回落时间相同（不再是 8 × 60 帧 = 16 s / 8 s）。
+    /// 估计器窗口按时间定长（8 × 1 s）：尖峰只影响 ≤ 8 s（prompt 的要求是 ≤ 16 s）；30 fps 和 60 fps 源的回落时间相同
+    /// （不再是 8 × 60 帧 = 16 s / 8 s）。
     func testL1_estimatorWindow_timeBased_spikeLeavesWithin16s_sameForBothRates() {
         for (period, seed) in [(Rational(1, 30), UInt64(1)), (Self.camera60, UInt64(4))] {
             let spike = simulateCamera(inputPeriod: period, ticks: 2_400, seed: seed, spikeFrame: period == Rational(1, 30) ? 600 : 1200)
@@ -437,8 +438,25 @@ final class ArrivalPacingTests: XCTestCase {
             let bound = HostDuration(milliseconds: 58 + 1.9 + 1.05).ticks
             let back = (detect..<spike.margins.count).first { spike.margins[$0] <= bound }
             XCTAssertNotNil(back)
-            if let back { XCTAssertLessThanOrEqual(back - detect, 960, "\(period)：尖峰后 \(back - detect) 拍才回落（应 ≤ 16 s = 960 拍）") }
+            if let back { XCTAssertLessThanOrEqual(back - detect, 480, "\(period)：尖峰后 \(back - detect) 拍才回落（8 × 1 s 窗口应 ≤ 8 s = 480 拍）") }
         }
+    }
+
+    /// 相机起流：前 7 帧 d = 92 / 57 / 73 / 71 / 70 / 71 / 62 ms（2026-09-19 内置相机 clocks 实测），之后 54 ± 1。这些帧超过
+    /// d_min + 一帧 的不计入可覆盖最大值（每块最大 8 个样本），起流块在窗口有两个完整块后（2 s）作废：3 s 后余量 ≤ 55 + 保护带 + 滞回。
+    func testL1_cameraStartupTransient_doesNotPinMargin_forWholeWindow() {
+        let startup: [Int64: HostDuration] = [0: HostDuration(milliseconds: 38), 2: HostDuration(milliseconds: 19), 3: HostDuration(milliseconds: 17),
+                                              4: HostDuration(milliseconds: 16), 5: HostDuration(milliseconds: 17), 6: HostDuration(milliseconds: 8)]
+        let run = simulate(inputPeriod: Rational(1, 30), ticks: 1_200, seed: 8, arrivalNs: (53_000_000, 55_000_000), extraLatency: startup)
+        XCTAssertEqual(nilTicksAfterFirstFrame(run), 0)
+        XCTAssertEqual(run.pacing.lateFrames, 0)
+        XCTAssertEqual(run.stats.dropped, 0)
+        let ms = { (n: Int) in HostDuration(ticks: run.margins[n]).milliseconds }
+        XCTAssertLessThanOrEqual(ms(70), 53 + programFrameMs + 1 + 0.15 * 20 + 0.1, "热身期：余量 ≤ 上限")
+        XCTAssertLessThanOrEqual(ms(100), 62 + 1 + 0.15 * 9 + 1.05, "1 s 后（热身结束）：≤ 可覆盖最大 62 + 保护带 + 滞回，不被 70–92 的起流帧钉住")
+        XCTAssertLessThanOrEqual(ms(190), 55 + 1 + 0.15 * 2 + 1.05, "3 s 后（起流块作废）：≤ 稳态 55 + 保护带 + 滞回")
+        for n in 190..<1_200 { XCTAssertLessThanOrEqual(ms(n), 55 + 1 + 0.15 * 2 + 1.05, "第 \(n) 拍") }
+        assertMatchesReference(run)
     }
 
     /// 饿死保护（裁定第 2 条）：保护带故意设成 100 ms，30 fps、d = 5 ms 的源每帧要等 100 ms 才合格，候选表（3 格）装不下；

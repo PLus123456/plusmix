@@ -35,8 +35,8 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
     // 到达余量（渲染线程私有状态 + 对外的原子镜像）
     private let pacingOptions: PacingOptionsAtomic
     private static let blockCount = 8
-    /// 每块保留的最大样本数（降序）。
-    private static let blockTopCount = 4
+    /// 每块保留的最大样本数（降序）：≤ blockTopCount − 1 个超过 d_min + 一帧 的孤立尖峰不计入可覆盖最大值。
+    private static let blockTopCount = 8
     /// 每块最大的 blockTopCount 个到达延迟（host tick，降序，Int64.min = 空）；blockCount × blockTopCount。
     private let blockTop: UnsafeMutablePointer<Int64>
     /// 每块的最小到达延迟（Int64.max = 没样本）。
@@ -46,6 +46,8 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
     private var blockStart: Int64 = 0
     /// 自初始化以来推进过的块数（饱和在 blockCount）：热身用。
     private var blocksCompleted = 0
+    /// 起流块（第 0 块，装着相机起流那几帧慢的）已在窗口有两个完整块后作废。
+    private var startupBlockRetired = false
     private var observedFrames: UInt64 = 0
     private var pacingInitialized = false
     private var margin: Int64 = 0
@@ -306,6 +308,11 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
             }
             if advanced == Self.blockCount { blockStart = ingress }   // 停了超过整个窗口：从这帧重新计块
             if advanced > 0, blocksCompleted < Self.blockCount { blocksCompleted = min(Self.blockCount, blocksCompleted + advanced) }
+            if !startupBlockRetired, blocksCompleted >= 2 {
+                // 起流块作废：相机起流的前几百毫秒是曝光 / 管线收敛，几帧 d 比稳态大 15–40 ms，不该再钉住余量一整个窗口
+                startupBlockRetired = true
+                if blockIndex != 0 { clearBlock(0) }
+            }
             insertSample(d)
         }
         observedFrames += 1
@@ -341,16 +348,20 @@ public final class LockFreeFrameSlot: FrameSlot, ArrivalPacedFrameSlot, @uncheck
     }
 
     /// 窗口统计：最小值、原始最大值、可覆盖最大值（每块最大的几个样本里第一个 ≤ d_min + 一个节目帧 的；都超过就取最小的那个）。
+    /// d_min 按 capAnchor：窗口最小值，或每块最小值里最大的（只看有样本的块）。
     private func refreshWindow() {
         var minimum = Int64.max
+        var sustained = Int64.min
         var peak = Int64.min
         var k = 0
         while k < Self.blockCount {
             if blockMin[k] < minimum { minimum = blockMin[k] }
+            if blockMin[k] != Int64.max, blockMin[k] > sustained { sustained = blockMin[k] }
             if blockTop[k * Self.blockTopCount] > peak { peak = blockTop[k * Self.blockTopCount] }
             k += 1
         }
-        windowMin = minimum == Int64.max ? 0 : minimum
+        let anchor = pacingOptions.sustainedAnchor.load(ordering: .relaxed) ? sustained : minimum
+        windowMin = (minimum == Int64.max || anchor == Int64.min) ? 0 : anchor
         windowPeak = peak == Int64.min ? 0 : peak
         let threshold = windowMin + pacingOptions.programFrame.load(ordering: .relaxed)
         var covered = Int64.min
