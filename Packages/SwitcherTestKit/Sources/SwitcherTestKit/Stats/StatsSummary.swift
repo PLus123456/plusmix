@@ -12,6 +12,9 @@ import SwitcherContracts
 /// - 设计内重复 = max(0, 1 − 输入 fps / 节目 fps)，设计内丢弃 = max(0, 1 − 节目 fps / 输入 fps)；设计外 = 实测 − 设计内（V4）。
 /// - S2：RSS 对时间线性拟合；文件 ≥ 1 h 时丢掉前 30 min 预热再拟合（§3 S2），否则整段拟合并标注。
 /// - jitter_ms 在 Stats 里已是"窗口内最大值"，这里的 p99 是各窗口最大值的 p99，比逐帧 p99 严。
+/// - P2 起（提案 001 / 002 / 004 / 005）多出的汇总都是可选字段：encoder 的 `delivery`（frames / dropped / reconnects 取末行 − 首行、disk_free_mb 序列、状态）、
+///   每路的 `latency`（L1 序列 + 全程最大）、`audioDiscontinuities`、`masterMeters`（Master 峰值 / 真峰值 / LUFS 的序列）。
+///   老基线（baselines/*.json）没有这些键，解码为 nil；与上一版本比较时只比 verdicts 的 primary，不受影响。
 public struct StatsSummary: Hashable, Codable, Sendable {
     /// 一列数的统计。
     public struct Series: Hashable, Codable, Sendable {
@@ -48,6 +51,14 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         public var designDropRatio: Double
         public var excessDupRatio: Double
         public var excessDropRatio: Double
+        /// 提案 005 的 L1（P2 起才有；老基线为 nil）。
+        public var latency: LatencySummary?
+    }
+
+    /// 一路输入的 L1：latency_ms 逐行序列（各窗口平均值的 min / avg / p99 / max）+ latency_max_ms 的全程最大。W1-B2 之前引擎写 0。
+    public struct LatencySummary: Hashable, Codable, Sendable {
+        public var ms: Series
+        public var maxMs: Double
     }
 
     /// 每个编码器。
@@ -55,6 +66,28 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         public var index: Int
         public var skipped: UInt64
         public var bitrate: Series
+        /// 提案 001 / 002 的落地 / 传输统计（P2 起才有；老基线为 nil）。
+        public var delivery: DeliverySummary?
+    }
+
+    /// 一个输出的落地 / 传输统计：frames / dropped / reconnects 取末行 − 首行；disk_free_mb 逐行序列；state 取末行与全程出现的状态（行数）。
+    public struct DeliverySummary: Hashable, Codable, Sendable {
+        public var frames: UInt64
+        public var dropped: UInt64
+        public var reconnects: UInt64
+        public var diskFreeMb: Series
+        public var lastState: String
+        public var states: [String: Int]
+    }
+
+    /// Master 表读数的逐行序列（提案 004）：峰值 / 真峰值取 L / R 的较大者；LUFS 瞬时 / 短期逐行；积分响度与 LRA 取末行。
+    public struct MasterMeterSummary: Hashable, Codable, Sendable {
+        public var peakDb: Series
+        public var truePeakDb: Series
+        public var lufsM: Series
+        public var lufsS: Series
+        public var lufsI: Double
+        public var lra: Double
     }
 
     public var lineCount: Int
@@ -76,6 +109,10 @@ public struct StatsSummary: Hashable, Codable, Sendable {
     public var encoders: [EncoderSummary]
     public var audioDropouts: UInt64
     public var audioUnderruns: UInt64
+    /// A1 第三项（流式检测，末行 − 首行；提案 004，P2 起才有，老基线为 nil）。
+    public var audioDiscontinuities: UInt64?
+    /// Master 表读数序列（有 meters 的文件才有）。
+    public var masterMeters: MasterMeterSummary?
     /// RSS 线性拟合斜率（MB / h）；不足两行为 nil。
     public var rssSlopeMbPerHour: Double?
     /// 是否按 §3 S2 丢掉了前 30 min 再拟合。
@@ -92,6 +129,7 @@ public struct StatsSummary: Hashable, Codable, Sendable {
             firstTs = 0; lastTs = 0; durationSeconds = 0; firstTick = 0; lastTick = 0; tickSpan = 0; programFps = 0
             renderMs = Series(values: []); jitterMs = Series(values: []); cpuPct = Series(values: []); gpuPct = Series(values: []); rssMb = Series(values: [])
             missedRender = 0; missedRenderRatio = 0; perInput = [:]; encoders = []; audioDropouts = 0; audioUnderruns = 0
+            audioDiscontinuities = nil; masterMeters = nil
             rssSlopeMbPerHour = nil; rssFitAfterWarmup = false
             return
         }
@@ -111,16 +149,30 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         missedRenderRatio = tickSpan > 0 ? Double(missedRender) / Double(tickSpan) : 0
         audioDropouts = last.audio.dropouts &- first.audio.dropouts
         audioUnderruns = last.audio.underruns &- first.audio.underruns
+        audioDiscontinuities = last.audio.discontinuities &- first.audio.discontinuities
+        let masters = lines.compactMap { $0.audio.meters.buses.first { $0.bus == Bus.master.name } }
+        if let lastMaster = masters.last {
+            masterMeters = MasterMeterSummary(peakDb: Series(values: masters.map { $0.peakDb.max() ?? Stats.AudioCounters.Meters.floorDb }),
+                                              truePeakDb: Series(values: masters.map { $0.truePeakDb.max() ?? Stats.AudioCounters.Meters.floorDb }),
+                                              lufsM: Series(values: masters.map(\.lufsM)), lufsS: Series(values: masters.map(\.lufsS)),
+                                              lufsI: lastMaster.lufsI, lra: lastMaster.lra)
+        } else {
+            masterMeters = nil
+        }
 
         var inputs: [Int: InputSummary] = [:]
         let ids = Set(lines.flatMap { $0.perInput.keys })
         for id in ids {
             var fpsValues: [Double] = []
+            var latencyValues: [Double] = []
+            var latencyMax = 0.0
             var pushed = 0.0
             var prevTs: Double?
             for l in lines {
                 guard let p = l.perInput[id] else { continue }
                 fpsValues.append(p.fps)
+                latencyValues.append(p.latencyMs)
+                latencyMax = max(latencyMax, p.latencyMaxMs)
                 if let pt = prevTs { pushed += p.fps * (l.ts - pt) } else if lines.count == 1 { pushed = p.fps }
                 prevTs = l.ts
             }
@@ -134,15 +186,23 @@ public struct StatsSummary: Hashable, Codable, Sendable {
             let designDrop = (programFps > 0 && fps.avg > 0) ? max(0, 1 - programFps / fps.avg) : 0
             inputs[id] = InputSummary(inputID: id, fps: fps, dup: dup, drop: drop, dupRatio: dupRatio, dropRatio: dropRatio,
                                       designDupRatio: designDup, designDropRatio: designDrop,
-                                      excessDupRatio: max(0, dupRatio - designDup), excessDropRatio: max(0, dropRatio - designDrop))
+                                      excessDupRatio: max(0, dupRatio - designDup), excessDropRatio: max(0, dropRatio - designDrop),
+                                      latency: LatencySummary(ms: Series(values: latencyValues), maxMs: latencyMax))
         }
         perInput = inputs
 
         let encoderCount = lines.map(\.encoder.count).max() ?? 0
         encoders = (0..<encoderCount).map { i in
             let entries = lines.compactMap { i < $0.encoder.count ? $0.encoder[i] : nil }
+            var states: [String: Int] = [:]
+            for e in entries { states[e.state, default: 0] += 1 }
+            let delivery = DeliverySummary(frames: (entries.last?.frames ?? 0) &- (entries.first?.frames ?? 0),
+                                           dropped: (entries.last?.dropped ?? 0) &- (entries.first?.dropped ?? 0),
+                                           reconnects: (entries.last?.reconnects ?? 0) &- (entries.first?.reconnects ?? 0),
+                                           diskFreeMb: Series(values: entries.map(\.diskFreeMb)),
+                                           lastState: entries.last?.state ?? "idle", states: states)
             return EncoderSummary(index: i, skipped: (entries.last?.skipped ?? 0) &- (entries.first?.skipped ?? 0),
-                                  bitrate: Series(values: entries.map(\.bitrate)))
+                                  bitrate: Series(values: entries.map(\.bitrate)), delivery: delivery)
         }
 
         let warmup = durationSeconds >= 3600
@@ -219,12 +279,15 @@ public struct StatsSummary: Hashable, Codable, Sendable {
                            must: "≤ \(pct(t.v4MustExcess))", target: "0", pass: worst.map { $0 <= t.v4MustExcess },
                            meetsTarget: worst.map { $0 <= t.v4TargetExcess }, note: inputNote))
         let a1 = audioDropouts + audioUnderruns
-        out.append(Verdict(id: "A1", name: "音频断裂", value: "超时 \(audioDropouts) + 欠载 \(audioUnderruns)", primary: has ? Double(a1) : nil, unit: "次",
-                           must: "0（硬性）", target: "0", pass: has ? a1 == 0 : nil, meetsTarget: has ? a1 == 0 : nil, note: "波形不连续检测另测"))
+        let discNote = audioDiscontinuities.map { "；不连续 \($0)（流式检测，信息项）" } ?? ""
+        out.append(Verdict(id: "A1", name: "音频断裂", value: "超时 \(audioDropouts) + 欠载 \(audioUnderruns)\(discNote)", primary: has ? Double(a1) : nil, unit: "次",
+                           must: "0（硬性）", target: "0", pass: has ? a1 == 0 : nil, meetsTarget: has ? a1 == 0 : nil,
+                           note: "判定只算超时 + 欠载；不连续以离线口径（frameprobe，按已知 click 位置排除）为准"))
         let e1 = encoders.reduce(0) { $0 + $1.skipped }
+        let e1Note = encoders.compactMap { e in e.delivery.map { "#\(e.index) 帧 \($0.frames) 丢 \($0.dropped) 状态 \($0.lastState)" } }.joined(separator: "；")
         out.append(Verdict(id: "E1", name: "编码滞后跳帧", value: encoders.isEmpty ? "无编码器" : encoders.map { "#\($0.index) \($0.skipped)" }.joined(separator: ", "),
                            primary: encoders.isEmpty ? nil : Double(e1), unit: "帧", must: "标准负载下 0", target: "0",
-                           pass: encoders.isEmpty ? nil : e1 == 0, meetsTarget: encoders.isEmpty ? nil : e1 == 0, note: ""))
+                           pass: encoders.isEmpty ? nil : e1 == 0, meetsTarget: encoders.isEmpty ? nil : e1 == 0, note: e1Note))
         out.append(Verdict(id: "S2", name: "内存增长", value: rssSlopeMbPerHour.map { "\(f($0, 2)) MB/h（RSS \(f(rssMb.min, 0)) → \(f(rssMb.max, 0)) MB）" } ?? "不足两行",
                            primary: rssSlopeMbPerHour, unit: "MB/h", must: "≤ \(f(t.s2MustMbPerHour, 0)) MB/h", target: "≤ \(f(t.s2TargetMbPerHour, 0)) MB/h",
                            pass: rssSlopeMbPerHour.map { $0 <= t.s2MustMbPerHour }, meetsTarget: rssSlopeMbPerHour.map { $0 <= t.s2TargetMbPerHour },

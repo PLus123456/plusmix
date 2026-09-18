@@ -53,13 +53,13 @@ public struct StreamCounters: Hashable, Sendable {
 
     public init() {}
 
-    /// 生成 Stats.encoder 的一项：skipped 用本路编码器的 E1 计数，bitrate 由与上一次快照的发送字节差算。
-    /// 提案 001 + 002（已批，等契约会话落地）加的字段这样填：frames = framesSent、dropped = networkDropped、reconnects = reconnects、
-    /// state = state.name、disk_free_mb = 0。契约一到，这里加四行即可。
+    /// 生成 Stats.encoder 的一项：skipped 用本路编码器的 E1 计数，bitrate 由与上一次快照的发送字节差算；
+    /// 提案 001 + 002（P2 落地）：frames = framesSent、dropped = networkDropped（E9）、reconnects = reconnects、state = state.name、disk_free_mb = 0。
     public func statsEntry(previous: StreamCounters?, windowSeconds: Double, encoderSkipped: UInt64) -> Stats.EncoderEntry {
         let delta = bytesSent &- (previous?.bytesSent ?? 0)
         let bitrate = windowSeconds > 0 ? Double(delta) * 8 / windowSeconds : 0
-        return Stats.EncoderEntry(skipped: encoderSkipped, bitrate: bitrate)
+        return Stats.EncoderEntry(skipped: encoderSkipped, bitrate: bitrate, frames: framesSent, dropped: networkDropped, diskFreeMb: 0,
+                                  reconnects: reconnects, state: state.name)
     }
 }
 

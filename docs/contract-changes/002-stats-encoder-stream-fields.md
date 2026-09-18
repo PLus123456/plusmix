@@ -2,6 +2,8 @@
 
 提出会话 / 分支：W2-D / w2-stream（worktree 分支 claude/w2-stream-output-089d47）
 状态：**已批**（用户 2026-09-15）。由契约会话 P2（docs/plan/prompts/41，2026-09-18 排定）在 SwitcherContracts 里落地（和 001 一起改 Stats.swift），其他分支 rebase。
+落地：**已落地**（P2，2026-09-18，分支 p2-contracts）。`Stats.EncoderEntry` 加 reconnects / state；`StreamCounters.statsEntry` 填 frames = framesSent、dropped = networkDropped、reconnects、state = state.name；
+`NDISendCounters.statsEntry` 填 frames = framesSent、dropped = skipped、state = unavailable ? "unavailable" : (running ? "publishing" : "idle")；录制的 state 取 idle / recording / stopping / stopped / failed（"recording" 是本案列表之外为录制加的值）。见 reports/p2-contracts.md。
 落地后各输出这样填：推流 `StreamCounters.statsEntry`（注释里写了映射：frames = framesSent、dropped = networkDropped、reconnects、state = state.name）；
 NDI `NDISendCounters`（frames = framesSent、dropped = skipped、reconnects = 0、state = unavailable ? "unavailable" : "publishing"）；录制按 001。
 

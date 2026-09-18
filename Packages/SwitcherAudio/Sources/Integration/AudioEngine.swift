@@ -529,8 +529,35 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
 
     // MARK: 状态与统计
 
-    /// 测试标准 §7 的 audio{dropouts, underruns}（铁律 4：引擎 Stats 从这里灌，UI / API 读同一份）。
-    public var audioCounters: Stats.AudioCounters { mixer.audioCounters }
+    /// 测试标准 §7 的 audio 一节（铁律 4：引擎 Stats 从这里灌，UI / API 读同一份）：dropouts / underruns 来自混音器，
+    /// discontinuities 来自泵（A1 第三项），meters 是此刻的表读数（提案 004，来源只有 `AudioMixer.meters`；dB 下限 −120，静音总线的 LUFS 也钳到 −120）。
+    /// 1 Hz 的 Stats 留档 / API / 测试用；UI 高刷新率的表继续读 `meters` / `status`。只在普通线程上调（每秒一次的采样线程）。
+    public var audioCounters: Stats.AudioCounters {
+        var c = mixer.audioCounters
+        c.discontinuities = pump.discontinuities
+        c.meters = statsMeters(mixer.meters)
+        return c
+    }
+
+    /// MixerMeters → Stats 的表：buses 顺序 = Bus.allCases，inputs 键 = 输入编号（槽位表在 lock 下换算）。
+    private func statsMeters(_ m: MixerMeters) -> Stats.AudioCounters.Meters {
+        typealias M = Stats.AudioCounters.Meters
+        func dB(_ v: [Float]) -> [Double] { v.map { M.decibels(fromLinear: Double($0)) } }
+        let buses = Bus.allCases.compactMap { b -> Stats.AudioCounters.BusMeter? in
+            guard b.rawValue < m.buses.count else { return nil }
+            let r = m.buses[b.rawValue]
+            return .init(bus: b.name, peakDb: dB(r.peak), truePeakDb: dB(r.truePeak), lufsM: M.loudness(r.momentaryLUFS),
+                         lufsS: M.loudness(r.shortTermLUFS), lufsI: M.loudness(r.integratedLUFS), lra: M.loudness(r.loudnessRangeLU))
+        }
+        lock.lock()
+        let pairs = slots.map { ($0.key, $0.value.slot) }
+        lock.unlock()
+        var inputs: [Int: Stats.AudioCounters.InputMeter] = [:]
+        for (number, slot) in pairs where slot >= 0 && slot < m.inputs.count {
+            inputs[number] = .init(peakDb: dB(m.inputs[slot].peak))
+        }
+        return M(buses: buses, inputs: inputs)
+    }
     /// 表读数（实时刷新，UI 用）。
     public var meters: MixerMeters { mixer.meters }
     /// 最近一次状态快照（控制循环每 statusInterval 刷新；还没有就现算一份）。

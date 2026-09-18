@@ -2,14 +2,11 @@ import SwitcherContracts
 
 /// 混音块（Master / 某条总线 / 某路输入推子后）的消费者：录制、编码、推流、NDI 发送。
 ///
-/// 与 W1-E 的 `SwitcherOutputs.AudioBlockConsumer` 逐字同签名（`consumerName` + `consumeAudio(planes:channelCount:frameCount:hostTime:)`），
-/// 所以组装方对 Recorder 写一行 `extension Recorder: AudioBlockConsuming {}` 就能接上；提案 001 把它升进契约后两边都改成 typealias。
+/// 提案 001 B（P2 落地）：协议本体是契约的 `SwitcherContracts.AudioBlockConsumer`，这里只留别名让 W2-E 时期写的 `AudioBlockConsuming` 照常编译；
+/// Recorder / StreamOutput / NDISender 直接实现契约协议，组装方不再需要空扩展。
 /// 线程规则：在泵线程（非实时）上被调，必须立即返回（只拷进自己的有界缓冲）；永远不在音频实时回调里被调。
 /// `hostTime` = 这块首样本的 host time，已按对齐延迟修正到"内容被采集的时刻"，与视频拍点同一时基（PTS 直接用）。
-public protocol AudioBlockConsuming: AnyObject {
-    var consumerName: String { get }
-    func consumeAudio(planes: UnsafePointer<UnsafePointer<Float>>, channelCount: Int, frameCount: Int, hostTime: HostTime)
-}
+public typealias AudioBlockConsuming = AudioBlockConsumer
 
 /// 消费者从哪里取块。
 public enum AudioTapSource: Hashable, Sendable {

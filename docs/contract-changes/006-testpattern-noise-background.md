@@ -1,7 +1,10 @@
 # 006 TestPattern.Background 加噪声底纹（让 E2 在 L2 长跑里可判）
 
 提出会话 / 分支：G3 / g3（检查点；问题单 reports/issues/G3-w1-testkit-synthetic-noise-for-E2.md）
-状态：待批
+状态：**已批**（用户 2026-09-18，P2 会话里口头批）。
+落地：**已落地**（P2，2026-09-18，分支 p2-contracts）：`TestPattern.Background.noise(level:amplitude:seed:)` + CPU 参考实现（BGRA 三通道同值、NV12 只动亮度；SplitMix64 按 seed / 帧号 / 行号播种，
+每像素 32 位做无偏映射到 −amplitude…+amplitude；`TestPattern.noiseValue(level:amplitude:seed:frameNumber:x:y:)` 是逐像素参考定义），块区域盖在噪声上、解码规则不变；
+Codable 形态 `{"noise":{"level":128,"amplitude":24,"seed":7}}`。合成源（`SyntheticVideoInput` 直接调 `TestPattern.draw`，所以已能画；成本 / GPU 版）归 W1-A2（prompt 44），G3Factory 改噪声归 G4。见 reports/p2-contracts.md。
 
 ## 改什么
 

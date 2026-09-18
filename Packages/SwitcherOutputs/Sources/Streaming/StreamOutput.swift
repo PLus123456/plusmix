@@ -184,7 +184,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     /// 最近一次退出发布循环的原因（诊断）。
     public var lastExitReasonDescription: String { lastExitReason.withLock { $0 } }
 
-    /// Stats.encoder[i] 的一项：skipped = 本路编码器的 E1 计数；bitrate = 窗口内交给传输层的 bit/s。
+    /// Stats.encoder[i] 的一项：skipped = 本路编码器的 E1 计数；bitrate = 窗口内交给传输层的 bit/s；
+    /// frames / dropped / reconnects / state 按提案 001 / 002（`StreamCounters.statsEntry`：framesSent / networkDropped / reconnects / state.name）。
     public func statsEntry(previous: StreamCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
         counters.statsEntry(previous: previous, windowSeconds: windowSeconds, encoderSkipped: videoEncoder.counters.skipped)
     }

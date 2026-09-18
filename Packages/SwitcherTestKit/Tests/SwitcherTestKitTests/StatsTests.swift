@@ -167,6 +167,42 @@ final class StatsTests: XCTestCase {
         XCTAssertTrue(md2.contains("−1.000"), "与上一版本的差：avg 低了 1 ms\n\(md2)")
     }
 
+    /// P2：新字段的汇总（frames / dropped / reconnects / state、L1、不连续、Master 表）、老基线（没有这些键）的解码、表里 −inf 的清洗。
+    func testP2_statsSummary_newFieldsAndOldBaselineDecode() throws {
+        func line(_ i: Int, frames: UInt64, dropped: UInt64, state: String, lat: Double, latMax: Double, disc: UInt64, peak: Double, lufs: Double) -> Stats {
+            var s = sample(ts: 1000 + Double(i), tick: Int64(i) * 60)
+            s.perInput[1]!.latencyMs = lat; s.perInput[1]!.latencyMaxMs = latMax
+            s.encoder[0].frames = frames; s.encoder[0].dropped = dropped; s.encoder[0].state = state; s.encoder[0].diskFreeMb = 1000 - Double(i)
+            s.audio.discontinuities = disc
+            s.audio.meters.buses = [.init(bus: "master", peakDb: [peak, peak - 1], truePeakDb: [peak + 0.5, peak], lufsM: lufs, lufsS: lufs - 1, lufsI: lufs - 2, lra: 3)]
+            return s
+        }
+        let s = StatsSummary(lines: [line(0, frames: 0, dropped: 0, state: "recording", lat: 30, latMax: 40, disc: 0, peak: -10, lufs: -20),
+                                     line(1, frames: 60, dropped: 1, state: "recording", lat: 34, latMax: 50, disc: 1, peak: -6, lufs: -18),
+                                     line(2, frames: 120, dropped: 1, state: "stopped", lat: 32, latMax: 45, disc: 1, peak: -8, lufs: -19)])
+        let d = try XCTUnwrap(s.encoders[0].delivery), l = try XCTUnwrap(s.perInput[1]?.latency), m = try XCTUnwrap(s.masterMeters)
+        XCTAssertEqual([d.frames, d.dropped, d.reconnects], [120, 1, 0]); XCTAssertEqual(d.lastState, "stopped"); XCTAssertEqual(d.states, ["recording": 2, "stopped": 1])
+        XCTAssertEqual([d.diskFreeMb.min, d.diskFreeMb.max, l.ms.avg, l.ms.max, l.maxMs], [998, 1000, 32, 34, 50])
+        XCTAssertEqual(s.audioDiscontinuities, 1)
+        XCTAssertEqual([m.peakDb.min, m.peakDb.max, m.truePeakDb.max, m.lufsM.min, m.lufsM.max, m.lufsS.max, m.lufsI, m.lra], [-10, -6, -5.5, -20, -18, -19, -21, 3])
+        XCTAssertTrue(s.verdicts().first { $0.id == "A1" }!.value.contains("不连续 1"))
+        XCTAssertEqual(try JSONDecoder().decode(StatsSummary.self, from: try JSONEncoder().encode(s)), s)
+        // 老基线（P2 之前的 StatsSummary JSON）没有 delivery / latency / audioDiscontinuities / masterMeters：照样解码，缺的为 nil
+        var old = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(s)) as! [String: Any]
+        old["audioDiscontinuities"] = nil; old["masterMeters"] = nil
+        old["encoders"] = (old["encoders"] as! [[String: Any]]).map { var e = $0; e["delivery"] = nil; return e }
+        old["perInput"] = (old["perInput"] as! [String: Any]).mapValues { var p = $0 as! [String: Any]; p["latency"] = nil; return p }
+        let back = try JSONDecoder().decode(StatsSummary.self, from: try JSONSerialization.data(withJSONObject: old))
+        XCTAssertTrue(back.encoders[0].delivery == nil && back.perInput[1]?.latency == nil && back.audioDiscontinuities == nil && back.masterMeters == nil)
+        XCTAssertEqual(back.encoders[0].skipped, s.encoders[0].skipped)
+        // sanitizer：表里的 −inf 换成 −120、其余非有限换 0，整行仍能写出
+        var bad = line(3, frames: 0, dropped: 0, state: "idle", lat: .nan, latMax: 0, disc: 0, peak: -.infinity, lufs: -.infinity)
+        bad.encoder[0].diskFreeMb = .infinity
+        let fixed = StatsWriter.sanitized(bad)
+        XCTAssertEqual([fixed.audio.meters.buses[0].peakDb[0], fixed.audio.meters.buses[0].lufsM, fixed.perInput[1]!.latencyMs, fixed.encoder[0].diskFreeMb], [-120, -120, 0, 0])
+        XCTAssertNoThrow(try fixed.jsonLine())
+    }
+
     func testW1A_statsSummary_loadFromFileAndEmpty() throws {
         let url = tempURL("s.jsonl")
         try "\n".write(to: url, atomically: true, encoding: .utf8)

@@ -10,7 +10,7 @@
 //   PatternFeeder / SignalFeeder   测试喂料：TestPattern 写 NV12、TestSignal 写音频，按精确拍点喂，不需要合成引擎。
 //
 // 统计：每个对象只暴露原子计数（EncoderCounters / RecorderCounters），汇总进 Stats 的是引擎（铁律 4）；
-// Stats.encoder[i] 只有 skipped / bitrate 两个字段，其余字段的去向见 docs/contract-changes/001-stats-encoder-fields.md。
+// Stats.encoder[i] 的 frames / dropped / disk_free_mb / state 由 Recorder.statsEntry 填（提案 001 / 002，P2 落地）；AudioBlockConsumer 协议在契约里。
 import SwitcherContracts
 
 /// 模块版本 = 契约版本（同一仓库、同一版本号）。

@@ -108,6 +108,28 @@ final class MonitoringAndLifecycleTests: XCTestCase {
         await rig.shutdown()
     }
 
+    /// P2（提案 004）：Stats.audio 带 discontinuities 与表读数，与 status 同源（AudioMixer.meters）；静音处钳到 −120 而不是 −inf，整行能写成 JSON。
+    func testP2_audioCounters_carryMetersAndDiscontinuities() async throws {
+        let rig = try await EngineRig(state: States.fourInputs())
+        try rig.addSource(number: 1)
+        try rig.addSource(number: 2)
+        try rig.capture(.master)
+        await rig.run(seconds: 2)
+        let c = rig.engine.audioCounters, st = rig.engine.status
+        XCTAssertEqual([c.dropouts, c.underruns, c.discontinuities], [st.counters.dropouts, st.counters.underruns, st.discontinuities])
+        XCTAssertEqual(c.meters.buses.map(\.bus), Bus.allCases.map(\.name))
+        XCTAssertGreaterThan(c.meters.buses[0].peakDb[0], -30, "Master 上有 1 号的 1 kHz −20 dBFS")
+        XCTAssertEqual(c.meters.buses[0].peakDb[0], st.buses[0].peakDb[0], accuracy: 1e-9)
+        XCTAssertGreaterThan(c.meters.buses[0].lufsM, -60)
+        XCTAssertTrue(c.meters.buses.allSatisfy { b in (b.peakDb + b.truePeakDb + [b.lufsM, b.lufsS, b.lufsI, b.lra]).allSatisfy { $0.isFinite && $0 >= -120 } })
+        XCTAssertEqual(Set(c.meters.inputs.keys), [1, 2])
+        XCTAssertGreaterThan(c.meters.inputs[1]!.peakDb[0], -30)
+        XCTAssertLessThan(c.meters.inputs[2]!.peakDb[0], -90, "AFV 开着，非 PGM 的 2 号推子后是静音")
+        let row = Stats(ts: 0, tick: .zero, renderMs: 0, missedRender: 0, jitterMs: 0, perInput: [:], encoder: [], audio: c, rssMb: 0, cpuPct: 0, gpuPct: 0)
+        XCTAssertEqual(try Stats.parse(line: try row.jsonLine()).audio, c)
+        await rig.shutdown()
+    }
+
     // MARK: 增删输入
 
     /// 增删 100 次：另一路持续播放的 Master 上 dropouts / underruns / 不连续 = 0，实时违规 0；摘除先淡出再 detach，环在确认后释放。

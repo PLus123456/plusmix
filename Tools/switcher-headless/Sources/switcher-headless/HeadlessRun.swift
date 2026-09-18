@@ -9,9 +9,6 @@ import SwitcherOutputs
 import SwitcherControl
 import SwitcherTestKit
 
-/// W2-E：Recorder 与集成层的消费者协议逐字同签名，空扩展即可接上（提案 001 B 批后两边都是契约协议，这行删掉）。
-extension Recorder: AudioBlockConsuming {}
-
 /// run 子命令的参数。
 struct RunOptions: Sendable {
     var showURL: URL
@@ -49,11 +46,12 @@ enum AudioOutputChoice {
     }
 }
 
-/// 把录制器的编码计数变成 Stats.encoder 的项（每个录制器一项，顺序 = 传入顺序：PGM 录制器在前、ISO 录制器在后）：
-/// skipped 累计、bitrate 按上次采样以来的窗口算。只在 Stats 采样线程上被调。
+/// 把录制器的计数变成 Stats.encoder 的项（每个录制器一项，顺序 = 传入顺序：PGM 录制器在前、ISO 录制器在后）：
+/// skipped / frames / dropped / disk_free_mb / state 按提案 001 / 002 由 `RecorderCounters.statsEntry` 填，bitrate 按上次采样以来的窗口算。
+/// 只在 Stats 采样线程上被调。
 final class EncoderStatsSource: @unchecked Sendable {
     private let recorders: [Recorder]
-    private let last = Mutex<[(counters: EncoderCounters, at: HostTime)?]>([])
+    private let last = Mutex<[(counters: RecorderCounters, at: HostTime)?]>([])
 
     init(recorders: [Recorder]) {
         self.recorders = recorders
@@ -62,15 +60,15 @@ final class EncoderStatsSource: @unchecked Sendable {
 
     func entries() -> [Stats.EncoderEntry] {
         let now = HostClock.now()
-        let current = recorders.map(\.counters.encoder)
-        let previous = last.withLock { box -> [(counters: EncoderCounters, at: HostTime)?] in
+        let current = recorders.map(\.counters)
+        let previous = last.withLock { box -> [(counters: RecorderCounters, at: HostTime)?] in
             let p = box
             box = current.map { ($0, now) }
             return p
         }
         return current.enumerated().map { i, c in
             let window = previous[i].map { max((now - $0.at).seconds, 1e-3) } ?? 1
-            return c.statsEntry(previous: previous[i]?.counters, windowSeconds: window)
+            return c.statsEntry(previous: previous[i]?.counters, windowSeconds: window, state: recorders[i].state.statsName)
         }
     }
 }

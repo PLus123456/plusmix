@@ -22,6 +22,20 @@ final class RecorderTests: XCTestCase {
             audio: audio, fragmentIntervalSeconds: fragment, remuxToMP4: remux, minimumFreeBytes: minimumFree, name: name))
     }
 
+    /// P2（提案 001 / 002）：Stats.encoder 项的 frames / dropped / disk_free_mb / state 从录制器计数与状态来。
+    func testP2_recorder_statsEntryCarriesFramesDiskAndState() throws {
+        let rec = makeRecorder("p2-stats")
+        XCTAssertEqual(rec.statsEntry(previous: nil, windowSeconds: 1).state, "idle")
+        try rec.start(at: RecordingStart(clock: TickClockSpec(t0: HostClock.now(), frameRate: format.frameRate), tick: .zero))
+        let e = rec.statsEntry(previous: nil, windowSeconds: 1)
+        XCTAssertEqual([e.state, "\(e.frames)", "\(e.dropped)", "\(e.reconnects)"], ["recording", "0", "0", "0"])
+        XCTAssertGreaterThan(e.diskFreeMb, 200, "录制目录所在卷的剩余 MB（start 时刷新）")
+        let done = expectation(description: "stop")
+        rec.stop { _ in done.fulfill() }
+        wait(for: [done], timeout: 10)
+        XCTAssertEqual(rec.statsEntry(previous: nil, windowSeconds: 1).state, "failed", "一帧没写就封口 → failed")
+    }
+
     // MARK: E2 码率遵从
 
     /// H.264 6 Mbps 1080p60 录 60 秒（噪声底，实时喂）；ffprobe 包按秒分桶：10 s 滑窗平均误差 ≤ 10%（目标 5%），1 s 峰值 ≤ 1.5×（目标 1.2×）。

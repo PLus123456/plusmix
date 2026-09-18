@@ -90,6 +90,17 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
         case stopping
         case finished
         case failed(String)
+
+        /// Stats.encoder[i].state（提案 002）用的名字：idle / recording / stopping / stopped / failed。
+        public var statsName: String {
+            switch self {
+            case .idle: "idle"
+            case .recording: "recording"
+            case .stopping: "stopping"
+            case .finished: "stopped"
+            case .failed: "failed"
+            }
+        }
     }
 
     /// 错误。
@@ -162,6 +173,10 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
         var c = countersSnapshot()
         c.encoder = encoder.counters
         return c
+    }
+    /// Stats.encoder[i] 的一项（提案 001 / 002）：见 `RecorderCounters.statsEntry`；state 按录制状态。只在 Stats 采样线程上调（每秒一次）。
+    public func statsEntry(previous: RecorderCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
+        counters.statsEntry(previous: previous, windowSeconds: windowSeconds, state: state.statsName)
     }
     /// 编码队列是否已满（喂料背压用）。
     public var isQueueFull: Bool { encoder.isQueueFull }

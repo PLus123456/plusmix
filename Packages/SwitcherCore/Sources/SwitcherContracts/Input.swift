@@ -36,7 +36,7 @@ public struct SyntheticSourceSettings: Hashable, Codable, Sendable {
     public var width: Int
     /// 画面高（像素）。
     public var height: Int
-    /// 图案底色：纯灰（V7 用 64 / 192）或渐变。
+    /// 图案底色：纯灰（V7 用 64 / 192）、渐变，或灰底叠零均值噪声（`.noise`，提案 006，E2 在长跑里才有可判对象）。
     public var background: TestPattern.Background
     /// 烧进画面的输入 ID（调色板索引 0–15）；nil = (输入编号 − 1) mod 16。
     public var patternID: Int?

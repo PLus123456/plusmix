@@ -2,6 +2,8 @@
 
 提出会话 / 分支：W1-E / w1-outputs（worktree 分支 claude/w1-outputs-6d38c6）
 状态：**已批**（用户 2026-09-18，按 G3 报告 §7 第 2 条：A、B 都批）。由契约会话 P2（docs/plan/prompts/41）落地。
+落地：**已落地**（P2，2026-09-18，分支 p2-contracts）。A：`Stats.EncoderEntry` 加 frames / dropped / disk_free_mb（与 002 的 reconnects / state 一起），填数方 `RecorderCounters.statsEntry` / `Recorder.statsEntry`；
+B：`SwitcherContracts.AudioBlockConsumer`（Render.swift，签名逐字不动），SwitcherOutputs 的那份删掉，`SwitcherAudioIntegration.AudioBlockConsuming` 改 typealias，headless 的空扩展删掉。见 reports/p2-contracts.md。
 
 ## 改什么
 

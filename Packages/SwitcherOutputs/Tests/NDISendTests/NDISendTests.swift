@@ -122,6 +122,7 @@ final class NDISendTests: XCTestCase {
         let entry = sender.statsEntry(previous: nil, windowSeconds: 1)
         XCTAssertEqual(entry.skipped, 0)
         XCTAssertEqual(entry.bitrate, 0)
+        XCTAssertEqual([entry.state, "\(entry.frames)"], ["unavailable", "0"], "提案 002：SDK 不在时 Stats 里标 unavailable")
         sender.stop()
         XCTAssertFalse(sender.isRunning)
     }
@@ -225,6 +226,7 @@ final class NDISendTests: XCTestCase {
         let sender = NDISender(configuration: .init(name: "dry", format: .hd1080p60, queueDepth: 2, dryRun: true))
         try sender.start()
         XCTAssertEqual(sender.countersSnapshot.unavailable, !NDISender.isAvailable, "干跑不改变 unavailable 的含义（= 有没有 SDK）")
+        XCTAssertEqual(sender.statsEntry(previous: nil, windowSeconds: 1).state, NDISender.isAvailable ? "publishing" : "unavailable", "提案 002")
         let feeder = try PatternFeeder(configuration: .init(format: .hd1080p60, texture: .noise(amplitude: 12, seed: 4)))
         var pushMs: [Double] = []
         // 尽快喂 240 帧（不等拍点）：GPU 转换 0.3 ms/帧比造帧还快，通常不丢；丢了也要满足恒等式
@@ -246,6 +248,8 @@ final class NDISendTests: XCTestCase {
         sender.stop()
         let c = sender.countersSnapshot
         print("干跑：\(c)")
+        let e = sender.statsEntry(previous: nil, windowSeconds: 1)
+        XCTAssertEqual([e.state, "\(e.frames)"], [NDISender.isAvailable ? "idle" : "unavailable", "\(c.framesSent)"], "提案 002：停了 = idle；frames = framesSent")
         XCTAssertEqual(c.framesReceived, 240)
         XCTAssertEqual(c.framesReceived, c.framesSent + c.skipped, "收到 = 送出 + skipped（停止时队列已排空）")
         XCTAssertGreaterThan(c.framesSent, 0)
