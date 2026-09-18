@@ -87,9 +87,11 @@ final class FixtureSnapshotTests: XCTestCase {
         XCTAssertEqual(s.fade.fades[0].startIndex, 701); XCTAssertEqual(s.fade.fades[0].endIndex, 729); XCTAssertEqual(s.fade.fades[0].direction, "B→A")
         XCTAssertLessThanOrEqual(s.fade.fades[0].maxDeviationFrames, 1); XCTAssertTrue(s.fade.fades[0].monotonic); XCTAssertTrue(s.fade.allPassV7)
         XCTAssertEqual(s.fadeAuto.fades.count, 1); XCTAssertEqual(s.fadeAuto.fades[0].startIndex, 701); XCTAssertEqual(s.fadeAuto.fades[0].durationTicks, 30)
-        // A2 / A3：20 个闪光 20 个 click 全配上，经 AAC 仍 |偏移| < 0.5 ms，无漂移
+        // A2 / A3：20 个闪光 20 个 click 全配上（全在整秒拍上），经 AAC 仍 |偏移| < 0.5 ms，无漂移；录制文件有编辑列表，时间轴修正 0
         XCTAssertEqual(s.av.flashCount, 20); XCTAssertEqual(s.av.clickCount, 20); XCTAssertEqual(s.av.matchedCount, 20)
+        XCTAssertEqual(s.av.onSecond.count, 20); XCTAssertEqual(s.av.offSecondCount, 0)
         XCTAssertLessThan(s.av.maxAbsMs, 0.5); XCTAssertLessThan(abs(s.av.driftOverSpanMs), 0.5); XCTAssertEqual(s.av.passA2, true)
+        XCTAssertEqual(s.audio?.timeline?.correctionSeconds, 0); XCTAssertEqual(s.audio?.timeline?.hasEditList, true)
         // A4：同一文件两份 → 极差 0
         XCTAssertEqual(s.avMulti.events.count, 20); XCTAssertEqual(s.avMulti.maxFlashSpreadMs, 0); XCTAssertEqual(s.avMulti.passA4, true)
         // 闪光帧：0, 60, …；B 段（400–699）里闪光帧因 30 fps 源连着两帧
@@ -107,8 +109,11 @@ final class FixtureSnapshotTests: XCTestCase {
         compare(e.fade, a.fade, "fade"); compare(e.fade, a.fadeAuto, "fadeAuto", other: e.fadeAuto)
         XCTAssertEqual(e.av.flashCount, a.av.flashCount); XCTAssertEqual(e.av.clickCount, a.av.clickCount); XCTAssertEqual(e.av.matchedCount, a.av.matchedCount)
         XCTAssertEqual(e.av.meanMs, a.av.meanMs, accuracy: 0.1); XCTAssertEqual(e.av.maxAbsMs, a.av.maxAbsMs, accuracy: 0.1); XCTAssertEqual(e.av.passA2, a.av.passA2)
+        XCTAssertEqual(e.av.onSecond.count, a.av.onSecond.count); XCTAssertEqual(e.av.offSecondCount, a.av.offSecondCount)
+        XCTAssertEqual(e.av.onSecond.meanMs, a.av.onSecond.meanMs, accuracy: 0.1); XCTAssertEqual(e.av.onSecond.maxAbsMs, a.av.onSecond.maxAbsMs, accuracy: 0.1)
+        XCTAssertEqual(e.audio?.timeline?.correctionSeconds ?? 0, a.audio?.timeline?.correctionSeconds ?? 0, accuracy: 1e-9)
         for (x, y) in zip(e.av.pairs, a.av.pairs) {
-            XCTAssertEqual(x.flashIndex, y.flashIndex); XCTAssertEqual(x.genTimeMs, y.genTimeMs)
+            XCTAssertEqual(x.flashIndex, y.flashIndex); XCTAssertEqual(x.genTimeMs, y.genTimeMs); XCTAssertEqual(x.tick, y.tick); XCTAssertEqual(x.onSecondTick, y.onSecondTick)
             XCTAssertEqual(x.clickTimeSeconds ?? -1, y.clickTimeSeconds ?? -1, accuracy: 1e-4); XCTAssertEqual(x.offsetMs ?? 0, y.offsetMs ?? 0, accuracy: 0.1)
         }
         XCTAssertEqual(e.avMulti.events.map(\.key), a.avMulti.events.map(\.key)); XCTAssertEqual(e.avMulti.passA4, a.avMulti.passA4)

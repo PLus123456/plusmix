@@ -72,14 +72,84 @@ public struct ProbeVideoInfo: Hashable, Codable, Sendable {
 public struct ProbeAudioInfo: Hashable, Codable, Sendable {
     public var sampleRate: Double
     public var channels: Int
-    /// 音轨第一个样本在文件时间线上的时刻（秒）。
+    /// 音轨第一个（解码输出的）样本在文件时间线上的时刻（秒）：AVFoundation 的解码起点 + `timeline.correctionSeconds`。
     public var startSeconds: Double
     public var sampleCount: Int
-    public init(sampleRate: Double, channels: Int, startSeconds: Double, sampleCount: Int) {
+    /// 起点是怎么算出来的（容器偏移、priming、口径）；老版本 JSON 没有。
+    public var timeline: AudioTimeline?
+    public init(sampleRate: Double, channels: Int, startSeconds: Double, sampleCount: Int, timeline: AudioTimeline? = nil) {
         self.sampleRate = sampleRate
         self.channels = channels
         self.startSeconds = startSeconds
         self.sampleCount = sampleCount
+        self.timeline = timeline
+    }
+}
+
+/// 音轨时间轴的修正（W1-A2，问题单 W2D-w1-testkit-frameprobe-av-on-stream-recordings）：
+/// AVFoundation 对没有编辑列表的分片文件把每条轨各自归零、又对 AAC 按 2112 样本裁 priming 而不挪时间轴，推流落盘文件的 click 就早了 44–64 ms。
+/// 两种口径：**AVFoundation 原生**（不修正）；**ffmpeg 口径**（`aresample=first_pts=0`、不裁 priming：第 k 个包的时间戳 = 非裁剪解码器输出的时刻，
+/// RTMP / SRT 的行业约定，W2-D 按它送包）= 加上容器里音轨相对视频的起始偏移，再把裁掉的 priming 加回时间轴。
+/// `--aac-priming auto`（默认）：有编辑列表就信 AVFoundation（它按 elst 裁并挪，是对的），没有就按 ffmpeg 口径；`0` = 只加容器偏移不加回 priming；`N` = 加回 N 样本。
+public struct AudioTimeline: Hashable, Codable, Sendable {
+    /// "auto" / "0" / "N"。
+    public var mode: String
+    /// 实际采用的口径："ffmpeg" / "avfoundation" / "custom"。
+    public var applied: String
+    /// 音轨编码（"aac" / "lpcm" / …）。
+    public var codec: String
+    public var isFragmented: Bool
+    public var hasEditList: Bool
+    /// 有编辑列表时第一个非空条目的 media_time（AAC 录制文件 = 2112）。
+    public var editListMediaTime: Int64?
+    /// AVFoundation 解码输出第一个样本的 PTS（秒）。
+    public var avfoundationStartSeconds: Double
+    /// 容器里音轨第一个样本相对视频轨第一个样本的时刻（秒）：分片、无编辑列表时 = tfdt 之差；其他情况 0。
+    public var containerOffsetSeconds: Double
+    /// AVFoundation 裁掉的样本数。
+    public var primingTrimmedSamples: Int
+    /// 按 mode 加回时间轴的样本数。
+    public var primingAddedBackSamples: Int
+    /// 实际加到 AVFoundation 起点上的修正（秒）= containerOffset + addedBack / 采样率。
+    public var correctionSeconds: Double
+    /// ffmpeg 口径的修正（秒）；`auto` 就是它。
+    public var ffmpegCorrectionSeconds: Double
+    public init(mode: String, applied: String, codec: String, isFragmented: Bool, hasEditList: Bool, editListMediaTime: Int64?,
+                avfoundationStartSeconds: Double, containerOffsetSeconds: Double, primingTrimmedSamples: Int, primingAddedBackSamples: Int,
+                correctionSeconds: Double, ffmpegCorrectionSeconds: Double) {
+        self.mode = mode
+        self.applied = applied
+        self.codec = codec
+        self.isFragmented = isFragmented
+        self.hasEditList = hasEditList
+        self.editListMediaTime = editListMediaTime
+        self.avfoundationStartSeconds = avfoundationStartSeconds
+        self.containerOffsetSeconds = containerOffsetSeconds
+        self.primingTrimmedSamples = primingTrimmedSamples
+        self.primingAddedBackSamples = primingAddedBackSamples
+        self.correctionSeconds = correctionSeconds
+        self.ffmpegCorrectionSeconds = ffmpegCorrectionSeconds
+    }
+}
+
+/// `--aac-priming` 的取值。
+public enum PrimingMode: Hashable, Sendable {
+    /// 有编辑列表信 AVFoundation，没有就按 ffmpeg 口径把裁掉的 priming 加回时间轴。
+    case auto
+    /// 加回固定的样本数（0 = 只加容器偏移，不加回 priming）。
+    case samples(Int)
+
+    public var label: String {
+        switch self {
+        case .auto: "auto"
+        case .samples(let n): "\(n)"
+        }
+    }
+    /// 解析命令行值：auto / 0 / N。
+    public init?(_ s: String) {
+        if s == "auto" { self = .auto; return }
+        guard let n = Int(s), n >= 0 else { return nil }
+        self = .samples(n)
     }
 }
 

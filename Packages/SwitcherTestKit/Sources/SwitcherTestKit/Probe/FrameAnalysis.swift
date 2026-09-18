@@ -378,12 +378,16 @@ public enum FrameAnalysis {
         public var clickTimeSeconds: Double?
         /// (闪光时刻 − click 时刻) ms：音频超前为正（测试标准 §0 第 6 条）。
         public var offsetMs: Double?
+        /// 闪光帧的节目拍号 = startTick + round((pts − 第一帧 pts) × fps)。
+        public var tick: Int64
+        /// 闪光是否落在整秒拍上（拍号是标称整数帧率的倍数）。59.94 的路在 60 fps 节目里在播时闪光周期 1.001 s（契约定的），
+        /// 相对整秒的 click 逐秒滞后，这些配对只报不判（G2 报告第 5 条、W2-E 清单 3-10）。
+        public var onSecondTick: Bool
     }
-    public struct AVReport: Hashable, Codable, Sendable {
-        public var pairs: [AVPair]
-        public var flashCount: Int
-        public var clickCount: Int
-        public var matchedCount: Int
+
+    /// 一组配对的统计。
+    public struct AVStats: Hashable, Codable, Sendable {
+        public var count: Int
         public var meanMs: Double
         public var stdMs: Double
         public var maxAbsMs: Double
@@ -392,25 +396,75 @@ public enum FrameAnalysis {
         /// 斜率 × 首尾事件间隔（A3 口径）。
         public var driftOverSpanMs: Double
         public var spanSeconds: Double
-        /// A2 阈值（1 帧，ms）。
-        public var thresholdMs: Double
-        /// A2：最大绝对值 ≤ 阈值。
-        public var passA2: Bool?
+
+        public static let empty = AVStats(count: 0, meanMs: 0, stdMs: 0, maxAbsMs: 0, slopeMsPerSecond: 0, driftOverSpanMs: 0, spanSeconds: 0)
+
+        /// 由 (时刻, 偏移) 序列算。
+        public init(times: [Double], offsets: [Double]) {
+            count = offsets.count
+            let mean = offsets.isEmpty ? 0 : offsets.reduce(0, +) / Double(offsets.count)
+            let variance = offsets.isEmpty ? 0 : offsets.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(offsets.count)
+            meanMs = mean
+            stdMs = variance.squareRoot()
+            maxAbsMs = offsets.map(abs).max() ?? 0
+            slopeMsPerSecond = FrameAnalysis.linearFit(x: times, y: offsets).slope
+            spanSeconds = (times.last ?? 0) - (times.first ?? 0)
+            driftOverSpanMs = slopeMsPerSecond * spanSeconds
+        }
+        init(count: Int, meanMs: Double, stdMs: Double, maxAbsMs: Double, slopeMsPerSecond: Double, driftOverSpanMs: Double, spanSeconds: Double) {
+            self.count = count; self.meanMs = meanMs; self.stdMs = stdMs; self.maxAbsMs = maxAbsMs
+            self.slopeMsPerSecond = slopeMsPerSecond; self.driftOverSpanMs = driftOverSpanMs; self.spanSeconds = spanSeconds
+        }
     }
 
-    /// 每个闪光帧 ↔ 最近 click 的时间差序列，均值 / 标准差 / 最大绝对值 / 线性拟合斜率。
+    public struct AVReport: Hashable, Codable, Sendable {
+        public var pairs: [AVPair]
+        public var flashCount: Int
+        public var clickCount: Int
+        public var matchedCount: Int
+        /// 以下六项是**全部配对**的统计（含 59.94 在播段的假象；gate 脚本在读，字段保留）。
+        public var meanMs: Double
+        public var stdMs: Double
+        public var maxAbsMs: Double
+        /// 偏移对时间的最小二乘斜率（ms / s）。
+        public var slopeMsPerSecond: Double
+        /// 斜率 × 首尾事件间隔（A3 口径）。
+        public var driftOverSpanMs: Double
+        public var spanSeconds: Double
+        /// **整秒拍配对**的统计：A2 / A3 的判定口径。
+        public var onSecond: AVStats
+        /// 配上了但闪光不在整秒拍上的数量（59.94 在播段）。
+        public var offSecondCount: Int
+        /// 判整秒拍用的节目帧率与第 0 帧的拍号。
+        public var programFps: Double
+        public var startTick: Int64
+        /// A2 阈值（1 帧，ms）。
+        public var thresholdMs: Double
+        /// A2：整秒拍配对的最大绝对值 ≤ 阈值；一个整秒配对都没有时为 nil。
+        public var passA2: Bool?
+        /// 有不在整秒拍上的配对时的说明。
+        public var note: String?
+    }
+
+    /// 每个闪光帧 ↔ 最近 click 的时间差序列。A2 / A3 按整秒拍配对判（`onSecond`），全部配对另报。
     /// - Parameters:
     ///   - maxMatchSeconds: click 离闪光超过这个距离就算没配上。
-    ///   - frameDurationSeconds: A2 阈值 = 1 帧。
+    ///   - frameDurationSeconds: 节目帧时长；A2 阈值 = 1 帧，整秒拍 = 拍号是 round(1 / 帧时长) 的倍数。
+    ///   - startTick: 文件第一帧对应的节目拍（推流落盘从关键帧起录时用 `--start-tick` 对上）。
     public static func av(frames: [ProbeFrame], clicks: [ClickEvent], maxMatchSeconds: Double = 0.5,
-                          frameDurationSeconds: Double = 1.0 / 60) -> AVReport {
+                          frameDurationSeconds: Double = 1.0 / 60, startTick: Int64 = 0) -> AVReport {
         let clickTimes = clicks.map(\.timeSeconds)
+        let fps = 1 / frameDurationSeconds
+        let nominal = Int64(max(1, fps.rounded()))
+        let pts0 = frames.first?.ptsSeconds ?? 0
         var pairs: [AVPair] = []
         var prevFlash = false
         for f in frames {
             defer { prevFlash = f.flash }
             guard f.flash && !prevFlash else { continue }
-            var pair = AVPair(flashIndex: f.index, flashTimeSeconds: f.ptsSeconds, genTimeMs: f.genTimeMs, clickTimeSeconds: nil, offsetMs: nil)
+            let tick = startTick + Int64(((f.ptsSeconds - pts0) * fps).rounded())
+            var pair = AVPair(flashIndex: f.index, flashTimeSeconds: f.ptsSeconds, genTimeMs: f.genTimeMs, clickTimeSeconds: nil, offsetMs: nil,
+                              tick: tick, onSecondTick: ((tick % nominal) + nominal) % nominal == 0)
             if let c = nearest(clickTimes, to: f.ptsSeconds), abs(c - f.ptsSeconds) <= maxMatchSeconds {
                 pair.clickTimeSeconds = c
                 pair.offsetMs = (f.ptsSeconds - c) * 1000
@@ -418,18 +472,88 @@ public enum FrameAnalysis {
             pairs.append(pair)
         }
         let matched = pairs.filter { $0.offsetMs != nil }
-        let offsets = matched.map { $0.offsetMs! }
-        let times = matched.map(\.flashTimeSeconds)
-        let mean = offsets.isEmpty ? 0 : offsets.reduce(0, +) / Double(offsets.count)
-        let variance = offsets.isEmpty ? 0 : offsets.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(offsets.count)
-        let (slope, _) = linearFit(x: times, y: offsets)
-        let span = (times.last ?? 0) - (times.first ?? 0)
+        let all = AVStats(times: matched.map(\.flashTimeSeconds), offsets: matched.map { $0.offsetMs! })
+        let onPairs = matched.filter(\.onSecondTick)
+        let on = AVStats(times: onPairs.map(\.flashTimeSeconds), offsets: onPairs.map { $0.offsetMs! })
+        let off = matched.count - onPairs.count
         let threshold = frameDurationSeconds * 1000
-        let maxAbs = offsets.map(abs).max() ?? 0
+        var note: String?
+        if off > 0 {
+            note = "\(off) 个配对的闪光不在整秒拍上（拍号不是 \(nominal) 的倍数，如 59.94 的路在播时闪光周期 1.001 s 逐秒滞后），只报不判；" +
+                   "全部配对均值 \(String(format: "%.3f", all.meanMs)) ms vs 整秒配对 \(String(format: "%.3f", on.meanMs)) ms" +
+                   (onPairs.isEmpty ? "；一个整秒配对都没有——文件不从第 0 拍起时用 --start-tick 给出第一帧的拍号" : "")
+        }
         return AVReport(pairs: pairs, flashCount: pairs.count, clickCount: clicks.count, matchedCount: matched.count,
-                        meanMs: mean, stdMs: variance.squareRoot(), maxAbsMs: maxAbs, slopeMsPerSecond: slope,
-                        driftOverSpanMs: slope * span, spanSeconds: span, thresholdMs: threshold,
-                        passA2: matched.isEmpty ? nil : maxAbs <= threshold)
+                        meanMs: all.meanMs, stdMs: all.stdMs, maxAbsMs: all.maxAbsMs, slopeMsPerSecond: all.slopeMsPerSecond,
+                        driftOverSpanMs: all.driftOverSpanMs, spanSeconds: all.spanSeconds,
+                        onSecond: on, offSecondCount: off, programFps: fps, startTick: startTick, thresholdMs: threshold,
+                        passA2: onPairs.isEmpty ? nil : on.maxAbsMs <= threshold, note: note)
+    }
+
+    // MARK: - A1 第三项：波形不连续
+
+    /// 一次不连续（相邻样本跳变 > 阈值且不在 click 位置）。
+    public struct DiscontinuityEvent: Hashable, Codable, Sendable {
+        /// 音轨样本序号（跳到的那个样本）。
+        public var sampleIndex: Int64
+        /// 文件时间线上的时刻（秒）。
+        public var timeSeconds: Double
+        /// 跳变量（有符号，满幅比例）。
+        public var jump: Float
+    }
+
+    public struct DiscontinuityReport: Hashable, Codable, Sendable {
+        /// 不连续次数（A1 的第三个加数）。
+        public var count: Int
+        /// 前 maxEvents 条。
+        public var events: [DiscontinuityEvent]
+        public var truncated: Bool
+        /// 落在 click 窗口内而被排除的 > 阈值跳变数（合成 click 每个进 / 出各一次；AAC 解码后边沿多几个台阶也在这里）。
+        public var jumpsAtClicks: Int
+        public var threshold: Float
+        public var clickCount: Int
+        /// 排除窗口：click 起点前 marginMs 到起点 + clickMs + marginMs。
+        public var clickMs: Double
+        public var marginMs: Double
+        public var sampleCount: Int
+        /// A1 第三项：0 次（硬性）。
+        public var passA1: Bool
+    }
+
+    /// 离线口径（搬自 W2-E `DiscontinuityDetector.analyze(samples:isExcluded:)`）：相邻样本跳变 > threshold 满幅，跳入 / 跳出落在任一 click 窗口
+    /// [click − margin, click + clickSeconds + margin] 内的不算。计的是"跳变"次数：一次台阶 = 1，单个样本的毛刺 = 2（进、出）。
+    public static func discontinuities(samples: [Float], sampleRate: Double, startSeconds: Double, clicks: [ClickEvent],
+                                       threshold: Float = 0.5, clickSeconds: Double = 0.001, marginSeconds: Double = 0.001,
+                                       maxEvents: Int = 200) -> DiscontinuityReport {
+        let margin = Int64((marginSeconds * sampleRate).rounded(.up))
+        let clickLen = Int64((clickSeconds * sampleRate).rounded(.up))
+        // 排除区间（已排序、可能重叠）；走一个游标
+        let windows = clicks.map { ($0.sampleIndex - margin, $0.sampleIndex + clickLen + margin) }.sorted { $0.0 < $1.0 }
+        var cursor = 0
+        func excluded(_ i: Int64) -> Bool {
+            while cursor < windows.count && windows[cursor].1 < i - 1 { cursor += 1 }
+            var k = cursor
+            while k < windows.count && windows[k].0 <= i {
+                if i >= windows[k].0 && i <= windows[k].1 { return true }
+                k += 1
+            }
+            return false
+        }
+        var events: [DiscontinuityEvent] = []
+        var count = 0, atClicks = 0
+        if samples.count >= 2 {
+            for i in 1..<samples.count {
+                let jump = samples[i] - samples[i - 1]
+                guard abs(jump) > threshold else { continue }
+                let idx = Int64(i)
+                if excluded(idx) || excluded(idx - 1) { atClicks += 1; continue }
+                count += 1
+                if events.count < maxEvents { events.append(DiscontinuityEvent(sampleIndex: idx, timeSeconds: startSeconds + Double(idx) / sampleRate, jump: jump)) }
+            }
+        }
+        return DiscontinuityReport(count: count, events: events, truncated: count > events.count, jumpsAtClicks: atClicks, threshold: threshold,
+                                   clickCount: clicks.count, clickMs: clickSeconds * 1000, marginMs: marginSeconds * 1000,
+                                   sampleCount: samples.count, passA1: count == 0)
     }
 
     /// 已排序数组里离 t 最近的值。
