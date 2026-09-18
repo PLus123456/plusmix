@@ -88,7 +88,7 @@ prompt：docs/plan/prompts/41-P2-契约落地.md。落地提案 001（A + B）�
 | `testP2_noise_bgraAndNV12Agree` | NV12 亮度 = limitedLuma(BGRA 灰值) 逐像素 0 差异（ID 色块除外）、色度全 128、解码一致；每帧成本 debug 1080p NV12 45.9 ms / BGRA 45.2 ms，release 1080p NV12 1.06 ms，BGRA 1.25 ms（`swift test -c release`，单线程逐行生成；8 路 60 fps 仍要 W1-A2 做预生成平面 / GPU 版） | — | ✅ |
 | `testP2_noise_degradedDecodeIs100Percent` | 20 帧随机 level / amplitude 1…48 的噪声帧经 σ 1.5 模糊 + 4:2:0 + ±10 噪声后帧号 / 时间戳 / ID / 闪光 20 / 20 正确 | 100% | ✅ |
 | `make lint`（BRANCH=p2-contracts） | 禁词 / 版本 / Package 约束 / 依赖方向 / 归属 30 个文件在范围内，胶水 SwitcherAudio 22、SwitcherOutputs 43、SwitcherTestKit 36（各 ≤ 50）/ rt-symbols | 全绿 | ✅ |
-| `make test`（六个包 + 两个工具冒烟 + App xcodebuild test） | 退出码 0（2026-09-18 11:2x–12:07）：SwitcherCore 153（Contracts 53 / Engine 73 / Render 27）、Inputs 28（4 跳）、Audio 88（SwitcherAudioTests 52（2 跳）+ IntegrationTests 36（3 跳））、Outputs 55（SwitcherOutputsTests 28（4 跳）+ StreamingTests 19 + NDISendTests 8（2 跳））、Control 28、TestKit 50；headless / frameprobe 冒烟输出 0.1.0；App `xcodebuild test` 通过（-quiet，只打印失败）。日志里唯一的 error 字样是 SwiftPM 拉 hummingbird 缓存的网络警告 | 全绿 | ✅ |
+| `make test`（六个包 + 两个工具冒烟 + App xcodebuild test） | 退出码 0（2026-09-18 11:2x–12:07）：SwitcherCore 153（Contracts 53 / Engine 73 / Render 27）、Inputs 28（4 跳）、Audio 88（SwitcherAudioTests 52（2 跳）+ IntegrationTests 36（3 跳））、Outputs 55（SwitcherOutputsTests 28（4 跳）+ StreamingTests 19 + NDISendTests 8（2 跳））、Control 28、TestKit 50；headless / frameprobe 冒烟输出 0.1.0；App `xcodebuild test` 通过（-quiet，只打印失败）。日志里唯一的 error 字样是 SwiftPM 拉 hummingbird 缓存的网络警告 ；**006 之后又整仓跑了一次**（2026-09-18 12:5x–13:3x，退出码 0，各 target 数同上、SwitcherContractsTests 58 = 53 + 5 个噪声用例） | 全绿 | ✅ |
 | `make gate3-run` 的 stats.jsonl（实际跑 `scripts/gate3.sh --minutes 10 --label 10min`，= 该目标去掉 `--write-baseline`） | 12:08 起，脚本结论「G3 自动项全部满足」（V1 avg 1.926 / p99 2.053 ms，V2 0，V3 p99 0.037 ms，V4 0，V6 / V7 / A1–A4 / E1 / E3 / E5 / C1–C4 全过，E2 本场景不适用同 G3）。stats.jsonl 601 行：5 个 encoder 条目（PGM + 4 路 ISO 录制器）frames 首行 9 → 末行 36000，相邻行 3000 / 3000 对严格递增，每秒增量 51–62；state 600 行 recording、末行按封口顺序 stopped / stopping / recording（最后一行采在收尾中）；dropped / skipped / reconnects 全 0；disk_free_mb ≈ 1 650 000；audio.meters.buses = [master, busA, busB, headphones]，master peak_db −20.00 dBFS（合成源 −20 dBFS 测试音，601 行无一行 −120）、lufs_m −18.5 / lufs_s −19.3 / lufs_i −19.3、true_peak −20.00，busA / busB / headphones 全 −120；inputs 键 1–4，峰值都 −20 dBFS；discontinuities 0；per_input 五个键齐全，latency_ms / latency_max_ms 共 4808 条全 0；整文件无非有限值。summarize `--json` 新 key 有值：encoder_frames 179955（= 5 × (36000 − 9)）、encoder_dropped 0、master_peak_db_max −20.00、master_lufs_i −19.34、l1_* 0。S2 行 13.24 MB/h 标 ❌ 但注明「不足 1 h 整段拟合仅供参考」，不在自动判定项里（对比见 §5） | encoder[].frames 逐秒增长、encoder[].state 有值、audio.meters.buses[0].peak_db ≠ −120、per_input[n].latency_ms 存在（W1-B2 前为 0） | ✅ |
 
 ## 3. 没做的和原因
@@ -108,6 +108,7 @@ prompt：docs/plan/prompts/41-P2-契约落地.md。落地提案 001（A + B）�
 4. **LUFS 静音钳到 −120**：提案 004 只写了峰值的下限；libebur128 对静音给 −inf，JSON 写不了，所以 LUFS / LRA 也钳到 −120。
 5. **`disk_free_mb` 用 2^20 字节**（与 `rss_mb` 的 phys_footprint / 1_048_576 同口径），提案没写明进制。
 6. **`state` 保持 String 而不是枚举**：照提案；CONTRACTS.md §2.7 列了三类输出各自的取值。
+7. **006 多出的公开小件**：`TestPattern.noiseValue(...)`（逐像素参考定义）和内部的 `NoiseRow`；噪声只在亮度上（NV12 色度保持 128），与提案「BGRA 与 NV12 亮度平面」一致，但与 W2-D `PatternFeeder.Texture.noise` 的色度 ±A/2 不同——那是喂料器自己的纹理，不是契约。
 
 **测试标准 §7 需要用户同步的行**（docs/spec/导播台测试标准.md，第 305 行附近）：
 
@@ -126,6 +127,8 @@ prompt：docs/plan/prompts/41-P2-契约落地.md。落地提案 001（A + B）�
 - **`swift test` 会在 `Packages/SwitcherOutputs/`、`Packages/SwitcherTestKit/` 生成未跟踪的 `Package.resolved`**（仓库只跟踪 SwitcherControl 与 headless 的）；`check-ownership.sh --include-working-tree` 会把它们按行数算成胶水，提交前别 `git add -A` 把它们带进去（我第一次就撞上了）。
 - **`make gate3-run` 会重写 `reports/G3-run-10min.md` / `reports/G3.md` 并写 `baselines/g3-m5max.json`**：本会话只用它验字段，跑的是 `scripts/gate3.sh --minutes 10 --label 10min`（不带 `--write-baseline`），跑完把 reports/ 的两份改动还原了，数据留在本 worktree `.build/gate3/10min/`。
 - **老 stats.jsonl 兼容测试**默认扫本 worktree 的 `.build/gate2`、`.build/gate3`；新 worktree 没有这些目录时只验嵌入的两行并 XCTSkip。我从 `/Users/plus/plusmix-g2-m0/.build/gate2/{10min,1h}` 和 `wonderful-fermi-40fe5f/.build/gate3/{10min,10min-run1}` 各拷了一份到本 worktree（不入库）。
+- **给契约枚举加 case 会红下游的穷举 switch**：006 只红了 `PatternFeeder` 一处（按 case 写的 switch，grep 类型名找不到，要 grep `case .gradient`）；TestKit / headless 的编译失败都是它传导的。以后加 case 先 `grep -rn 'case \.<某个现有 case>'`。
+- **噪声底纹的成本**：CPU 参考实现 1080p 每帧 release 1.06 ms（NV12）/ 1.25 ms（BGRA），debug 45 ms；8 路 1080p60 在 release 约占 0.5 核，debug 下跑不动，W1-A2 做预生成平面 / GPU 版时拿 `TestPattern.noiseValue` 逐像素对照（或只对照统计量：中心均值、|n| ≤ A、n = 0 比例 = 1/(2A+1)）。
 - **`EncoderCounters.statsEntry` 仍是"基础项"**（state 恒 "idle"、frames 0）：别拿裸编码器的它当输出项，录制 / 推流 / NDI 各自有带数的版本。
 - **`AudioEngine.audioCounters` 现在每次都拷一份表**（`sw_mix_ctx_copy_meters` seqlock + 槽位表加锁）：1 Hz 的 Stats 采样线程用没问题，别在更高频率的路径上调它，UI 的表继续读 `meters` / `status`。
 - **StatsSummary 的新汇总都是 Optional**：`summarize --baseline` 读老基线时它们是 nil；写新基线时才有。判定表（verdicts）没有新行，G4 比较老基线不受影响。
