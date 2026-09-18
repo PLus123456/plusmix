@@ -190,11 +190,7 @@ sw_mix_ctx *sw_mix_ctx_create(const sw_mix_ctx_config *config) {
     default: ctx->resampler_latency = 47; break;
     }
     ctx->zeros = (float *)calloc(ctx->max_block_frames, sizeof(float));
-    ctx->fader_gain = (float *)calloc(ctx->max_block_frames, sizeof(float));
-    ctx->fader_afv = (float *)calloc(ctx->max_block_frames, sizeof(float));
-    for (uint32_t c = 0; c < SW_MIX_BUS_CHANNELS; c++) ctx->tap_scratch[c] = (float *)calloc(ctx->max_block_frames, sizeof(float));
-    if (!ctx->zeros || !ctx->fader_gain || !ctx->fader_afv || !ctx->tap_scratch[0] || !ctx->tap_scratch[1]) { sw_mix_ctx_destroy(ctx); return NULL; }
-    ctx->monitor_point = SW_MONITOR_PRE_DELAY;   // 耳机默认取延迟线前（低延迟监听，W1-D2）
+    if (!ctx->zeros) { sw_mix_ctx_destroy(ctx); return NULL; }
     for (uint32_t k = 0; k < SW_MIX_MAX_CROSSFADES; k++) {
         ctx->xfade_gain[k][0] = (float *)calloc(ctx->max_block_frames, sizeof(float));
         ctx->xfade_gain[k][1] = (float *)calloc(ctx->max_block_frames, sizeof(float));
@@ -239,8 +235,6 @@ void sw_mix_ctx_destroy(sw_mix_ctx *ctx) {
     }
     for (uint32_t k = 0; k < SW_MIX_MAX_CROSSFADES; k++) { free(ctx->xfade_gain[k][0]); free(ctx->xfade_gain[k][1]); }
     free(ctx->zeros);
-    free(ctx->fader_gain); free(ctx->fader_afv);
-    for (uint32_t c = 0; c < SW_MIX_BUS_CHANNELS; c++) free(ctx->tap_scratch[c]);
     free(ctx);
 }
 
@@ -317,12 +311,6 @@ uint32_t sw_mix_ctx_input_capacity(const sw_mix_ctx *ctx) { return ctx->input_ca
 double sw_mix_ctx_host_ticks_per_frame(const sw_mix_ctx *ctx) { return ctx->host_ticks_per_frame; }
 uint32_t sw_mix_ctx_sample_rate(const sw_mix_ctx *ctx) { return ctx->sample_rate; }
 uint32_t sw_mix_ctx_resampler_latency_frames(const sw_mix_ctx *ctx) { return ctx->resampler_latency; }
-uint32_t sw_mix_ctx_deterministic_age_frames(const sw_mix_ctx *ctx, uint32_t target_frames, uint32_t producer_block, bool resampled) {
-    if (!target_frames) target_frames = ctx->rate_defaults.target_frames;
-    if (!producer_block) producer_block = ctx->default_block_frames;
-    // 就绪时 start ≤ write_index − back 才安全；目标年龄 A 对应的帧比 write_index 早 A − 相位 帧，相位 ∈ [0, P)，所以 A ≥ back + P 任何相位都命中
-    return (uint32_t)(sw_slot_back_frames(ctx, target_frames, producer_block, resampled) + (uint64_t)producer_block);
-}
 void sw_mix_ctx_set_timing_check(sw_mix_ctx *ctx, bool on) { __atomic_store_n(&ctx->timing_check, on ? 1u : 0u, __ATOMIC_RELAXED); }
 
 // ---------------------------------------------------------------------------

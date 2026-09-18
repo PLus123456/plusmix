@@ -333,6 +333,14 @@ static inline bool sw_slot_resampled(const sw_input_slot *slot) SW_NONBLOCKING {
     return !(slot->resample_mode == SW_RESAMPLE_BYPASS || slot->src[0] == NULL);
 }
 
+/// 就绪时从 write_index 往回退多少帧开始消费（旧规则的 back；也是目标年龄模式的安全下限）：
+/// target + P/2（+ 重采样器要先吞的 hf + chunk/2）。Swift 侧 AudioMixer.deterministicAgeFrames 抄的是同一条公式（+ P）。
+static inline uint64_t sw_slot_back_frames(const struct sw_mix_ctx *ctx, uint32_t target_frames, uint32_t producer_block, bool resampled) SW_NONBLOCKING {
+    uint64_t back = (uint64_t)target_frames + (uint64_t)producer_block / 2u;
+    if (resampled) back += (uint64_t)ctx->resampler_latency + (uint64_t)ctx->resampler_chunk / 2u;
+    return back;
+}
+
 /// 就绪门限：环里要有 target + P/2 + hf + chunk 帧（P = 生产者块；重采样器一上来就会吞 hf + chunk）。
 /// 就绪那一刻紧跟一次交付，所以之后原始占用在 [target − P/2, target + P/2] 之间随相位周期变化，平均 = target。
 static inline uint64_t sw_slot_prime_threshold(const struct sw_mix_ctx *ctx, const sw_input_slot *slot) SW_NONBLOCKING {
@@ -630,26 +638,12 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     // 3. 延迟线
     sw_delay_process(&slot->delay, ch, slot->resampled, slot->delayed, frames);
 
-    // 4. 推子：每样本的增益 / 静音（一阶平滑）与 AFV（曲线或平滑）先算成两条轨迹，延迟线后 / 前的信号共用（耳机取延迟线前时同一条推子）
+    // 4. 推子：增益 / 静音一阶平滑、AFV（曲线或平滑）、声像（每块线性插到目标）。延迟线前的耳机通路与 AFV 前的 ISO 通路
+    //    从同一初值重放同一条递推（确定性，逐位相同），不用临时缓冲（Host 不用多分配）
     const float gt = slot->muted ? 0.0f : slot->gain_target;
     const float k = ctx->gain_smooth_k;
-    float g = slot->gain;
-    float afv = slot->afv;
+    const float g0 = slot->gain, afv0 = slot->afv;
     const float afv_t = slot->afv_target;
-    float *fg = ctx->fader_gain, *fa = ctx->fader_afv;
-    for (uint32_t i = 0; i < frames; i++) {
-        g += (gt - g) * k;
-        if (xfade_gain) afv = xfade_gain[i]; else afv += (afv_t - afv) * k;
-        fg[i] = g; fa[i] = afv;
-    }
-    // 一阶平滑到目标 1e-6（−120 dB）以内就吸到目标：float32 在 1.0 附近一个 ulp 是 1.19e-7，增量早已加不进去
-    if (fabsf(g - gt) < 1e-6f) g = gt;
-    if (!xfade_gain && fabsf(afv - afv_t) < 1e-6f) afv = afv_t;
-    slot->gain = g;
-    // 淡变在本块走满：终值钉死（0 或 1），下一块起不再有曲线尾巴
-    if (xfade_end >= 0.0f) { slot->afv = xfade_end; slot->afv_target = xfade_end; }
-    else slot->afv = afv;
-    // 声像（每块线性插到目标）
     float pl0, pr0, pl1, pr1;
     sw_pan_coeffs(slot->pan, ch, &pl0, &pr0);
     slot->pan += (slot->pan_target - slot->pan) * SW_PAN_SMOOTH_PER_BLOCK;
@@ -661,17 +655,27 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     const float *xl = slot->delayed[0];
     const float *xr = ch >= 2 ? slot->delayed[1] : slot->delayed[0];
     float *pl = slot->post[0], *pr = slot->post[1];
+    float g = g0, afv = afv0;
     float pk0 = 0, pk1 = 0;
     for (uint32_t i = 0; i < frames; i++) {
+        g += (gt - g) * k;
+        if (xfade_gain) afv = xfade_gain[i]; else afv += (afv_t - afv) * k;
         const float t = (float)i * inv;
         const float cl = pl0 + (pl1 - pl0) * t, cr = pr0 + (pr1 - pr0) * t;
-        const float ga = fg[i] * fa[i];
+        const float ga = g * afv;
         const float l = xl[i] * ga * cl, r = xr[i] * ga * cr;
         pl[i] = l; pr[i] = r;
         const float al = fabsf(l), ar = fabsf(r);
         if (al > pk0) pk0 = al;
         if (ar > pk1) pk1 = ar;
     }
+    // 一阶平滑到目标 1e-6（−120 dB）以内就吸到目标：float32 在 1.0 附近一个 ulp 是 1.19e-7，增量早已加不进去
+    if (fabsf(g - gt) < 1e-6f) g = gt;
+    if (!xfade_gain && fabsf(afv - afv_t) < 1e-6f) afv = afv_t;
+    slot->gain = g;
+    // 淡变在本块走满：终值钉死（0 或 1），下一块起不再有曲线尾巴
+    if (xfade_end >= 0.0f) { slot->afv = xfade_end; slot->afv_target = xfade_end; }
+    else slot->afv = afv;
     slot->peak_block[0] = pk0; slot->peak_block[1] = pk1;
     if (pk0 > slot->peak_max[0]) slot->peak_max[0] = pk0;
     if (pk1 > slot->peak_max[1]) slot->peak_max[1] = pk1;
@@ -694,28 +698,33 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
         } else if (!pre_delay) {
             for (uint32_t n = 0; n < frames; n++) { hl[n] += pl[n]; hr[n] += pr[n]; }
         } else {
+            float gg = g0, aa = afv0;   // 重放推子递推（与 post 那条逐位相同）
             for (uint32_t i = 0; i < frames; i++) {
+                gg += (gt - gg) * k;
+                if (xfade_gain) aa = xfade_gain[i]; else aa += (afv_t - aa) * k;
                 const float t = (float)i * inv;
-                const float ga = fg[i] * fa[i];
+                const float ga = gg * aa;
                 hl[i] += sl[i] * ga * (pl0 + (pl1 - pl0) * t);
                 hr[i] += sr[i] * ga * (pr0 + (pr1 - pr0) * t);
             }
         }
     }
 
-    // 8. 输入 tap：推子后含 AFV（= 送总线的信号）；推子后 AFV 前（ISO 音轨：不受 AFV 门控，含增益 / 静音 / 声像 / 延迟线）
+    // 8. 输入 tap：推子后含 AFV（= 送总线的信号，post）；推子后 AFV 前（ISO 音轨：不受 AFV 门控，含增益 / 静音 / 声像 / 延迟线）。
+    //    post 到这里已经送完总线 / 耳机 / 表 / 含 AFV 的 tap，本块不再用，ISO 信号就写在它上面推出去（不另开缓冲）
     {
         const float *planes[SW_MIX_BUS_CHANNELS] = { pl, pr };
         sw_push_taps(ctx, SW_TAP_INPUT_BASE + (int32_t)slot_index, planes, frames, host_time);
     }
     if (sw_has_tap(ctx, SW_TAP_INPUT_PRE_AFV_BASE + (int32_t)slot_index)) {
-        float *il = ctx->tap_scratch[0], *ir = ctx->tap_scratch[1];
+        float gg = g0;
         for (uint32_t i = 0; i < frames; i++) {
+            gg += (gt - gg) * k;
             const float t = (float)i * inv;
-            il[i] = xl[i] * fg[i] * (pl0 + (pl1 - pl0) * t);
-            ir[i] = xr[i] * fg[i] * (pr0 + (pr1 - pr0) * t);
+            pl[i] = xl[i] * gg * (pl0 + (pl1 - pl0) * t);
+            pr[i] = xr[i] * gg * (pr0 + (pr1 - pr0) * t);
         }
-        const float *planes[SW_MIX_BUS_CHANNELS] = { il, ir };
+        const float *planes[SW_MIX_BUS_CHANNELS] = { pl, pr };
         sw_push_taps(ctx, SW_TAP_INPUT_PRE_AFV_BASE + (int32_t)slot_index, planes, frames, host_time);
     }
 }

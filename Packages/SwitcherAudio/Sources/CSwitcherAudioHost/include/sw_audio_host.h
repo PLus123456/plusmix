@@ -72,10 +72,6 @@ double   sw_mix_ctx_host_ticks_per_frame(const sw_mix_ctx *ctx);
 uint32_t sw_mix_ctx_sample_rate(const sw_mix_ctx *ctx);
 /// 重采样器需要预先看到的帧数（sinc 半长）；对齐延迟为 0（libsamplerate 前补零），这个数给就绪门限说明用。
 uint32_t sw_mix_ctx_resampler_latency_frames(const sw_mix_ctx *ctx);
-/// 指定目标年龄（SW_CMD_ATTACH_INPUT 的 i2）时，任何生产者相位都能精确命中的最小年龄（帧）：
-/// back（= target + P/2 + hf + chunk/2，重采样时；bypass 时没有 hf + chunk/2）+ 生产者块 P。target_frames 0 = 默认（2 块）。
-/// 比它小的目标在相位不利的块上会被钳到 back + 相位（年龄 > 目标）。W1-D2。
-uint32_t sw_mix_ctx_deterministic_age_frames(const sw_mix_ctx *ctx, uint32_t target_frames, uint32_t producer_block, bool resampled);
 /// 是否用真实时钟检查"块处理时间 > 块时长"（记 dropouts）。实时驱动开，离线驱动关。
 void sw_mix_ctx_set_timing_check(sw_mix_ctx *ctx, bool on);
 

@@ -346,8 +346,15 @@ public final class AudioMixer: @unchecked Sendable {
 
     /// 指定目标年龄时任何生产者相位都能精确命中的最小年龄（帧）= back（target + P/2 + hf + chunk/2）+ 生产者块 P；
     /// 默认参数（target 2 块、P 256、重采样）= 959 帧 ≈ 20 ms。bypass（与输出同时钟）的输入没有 hf + chunk/2。
+    /// 公式与 sw_mix.c 的 sw_slot_back_frames 一致（就绪时 start ≤ write_index − back 才安全；目标年龄 A 对应的帧比 write_index 早
+    /// A − 相位 帧，相位 ∈ [0, P)，所以 A ≥ back + P 任何相位都命中）；MixerTapAndAgeTests 用"按它就绪年龄精确命中"钉住两边一致。
     public func deterministicAgeFrames(targetFrames: Int, producerBlockFrames: Int, resampled: Bool = true) -> Int {
-        Int(sw_mix_ctx_deterministic_age_frames(context, UInt32(max(0, targetFrames)), UInt32(max(0, producerBlockFrames)), resampled))
+        let target = targetFrames > 0 ? targetFrames : (configuration.rate.targetFrames > 0 ? configuration.rate.targetFrames : 2 * configuration.blockFrames)
+        let p = producerBlockFrames > 0 ? producerBlockFrames : configuration.blockFrames
+        let chunk = min(configuration.resamplerChunkFrames, maxBlockFrames)
+        var back = target + p / 2
+        if resampled { back += resamplerLookaheadFrames + chunk / 2 }
+        return back + p
     }
 
     /// 摘掉槽位上的输入。环对象在实时线程确认之后才释放（这里只入队）。
