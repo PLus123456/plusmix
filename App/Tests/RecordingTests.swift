@@ -49,3 +49,34 @@ final class RecordingTests: XCTestCase {
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }
 }
+
+@MainActor
+final class RecordingShutdownTests: XCTestCase {
+    /// 录着的时候换节目（= 退出时的路径）：session.stop 里录制器封口完成，文件是好的，没有"封口后按 enabled 再起一次"。
+    func testRecord_stopSessionWhileRecordingFinalizesFile() throws {
+        try AppTest.requireFFprobe()
+        let session = try AppTest.freshSession()
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 1, audio: true)))
+        session.send(.setProgram(input: 1))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
+        AppTest.pump(seconds: 1)
+        session.send(.startRecord(output: 1))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.outputs.recorders[1] != nil })
+        AppTest.pump(seconds: 1.5)
+        let began = Date()
+        let done = AppTest.expectationBox()
+        Task { await AppTest.controller.newShow(); done.value = true }
+        XCTAssertTrue(AppTest.waitUntil(20) { done.value && AppTest.controller.session?.isRunning == true }, "换节目应完成")
+        let took = Date().timeIntervalSince(began)
+        let result = try XCTUnwrap(session.outputs.lastResults[1], "旧 session 的录制应封口完成")
+        XCTAssertTrue(session.outputs.recorders.isEmpty, "封口后不能再起一次")
+        XCTAssertFalse(session.isRunning)
+        let probe = try AppTest.ffprobeStreams(result.url)
+        print("录着换节目：用时 \(String(format: "%.2f", took)) s，\(result.videoFrames) 帧 / \(result.audioFrames) 样本，ffprobe \(probe.streams.map { "\($0.type) \($0.duration)" })")
+        XCTAssertEqual(probe.errors, "")
+        XCTAssertEqual(probe.streams.count, 2)
+        XCTAssertGreaterThanOrEqual(result.videoFrames, 60)
+        XCTAssertEqual(Int(result.audioFrames), Int(result.videoFrames) * 800, accuracy: 1)
+        XCTAssertLessThan(took, 5, "换节目不该被封口拖太久")
+    }
+}

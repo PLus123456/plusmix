@@ -22,7 +22,7 @@
 
 真跑过（Debug，`open -n Switcher.app --args --show <2 路 30 fps 合成源> --stats …`，从 Finder 路径起、真音频设备）：API 在 8765 起来，GET /state 的 stats 带两项 encoder（record idle 报磁盘剩余 1.6 TB、stream idle）、Master −20 dBFS；POST startRecord / stopRecord 录出 242 帧 = 1326 − 1084 拍、两轨 4.033333 s；render 0.9 ms、CPU 56%。stats.jsonl 头 3 s 的丢帧见 §5 第 1 条。
 
-## 2. 测试（`xcodebuild test`，SwitcherTests 25 个：24 过 1 跳，约 80 s；`make lint BRANCH=w2-app-2` 只剩 project.yml 一条越界）
+## 2. 测试（`xcodebuild test`，SwitcherTests 26 个：25 过 1 跳，约 83 s；`make lint BRANCH=w2-app-2` 只剩 project.yml 一条越界）
 
 | 测试 | 数值 | 阈值 | 通过 |
 |---|---|---|---|
@@ -38,6 +38,7 @@
 | Master 表 / FTB `testAudio_masterMeterReadsAndFTBDropsToSilence` | Stats.audio.meters master 峰值 −20.00 dBFS（1 kHz −20 dBFS 合成音频），调音台 "−20.0 dBFS"，条子有电平；FTB 开 → −120（显示 −∞ dBFS）；关 → 回 −20；A1 0 / 0 / 0 | 有读数；FTB → −∞ | ✅ |
 | 推流到本地 MediaMTX 10 s `testStream_10sToLocalMediaMTX_framesContinuous` | 测试自己起 mediamtx（RTMP 23935）；连上后 10 s Stats.encoder：publishing、frames 645、dropped 0、skipped 0、reconnects 0；停后按钮回"推流"；frameprobe stats 落盘 645 帧、丢 0（缺口 0）、重复 0、解不出 0 | 帧号连续 | ✅（码率只有 224 kb/s：灰底合成源，E2 不适用，G3 已记） |
 | 启动参数 `testSettings_argumentsOverrideDefaults` | 参数覆盖 UserDefaults；`--no-api`；`--api-listen` 打开 API；空 token = 关；设备名解析 | — | ✅ |
+| 录着换节目（= 退出路径）`testRecord_stopSessionWhileRecordingFinalizesFile` | session.stop 里封口完成：0.21 s，85 帧 / 68000 样本两轨 1.416667 s、ffprobe 无错；封口后没有按"仍 enabled"再起一次（第一版有这个 bug：stopAll 完成后 finishRecording 看快照仍 enabled 又起了一个） | 文件完整、不重起 | ✅ |
 
 改过的旧测试：`testShortcuts_defaultTable` → `testHotkeys_defaultTableResolvesThroughDispatcher`（同一组按键经 `KeyCombo(event:)` + `HotkeyDispatcher` 解析：数字 / Shift 数字 / 空格 / 回车 = autoTransition / F = FTB 开关；⌘ 组合、自动重复、没绑定的键不吃；默认表 23 条）；`testShow_unsupportedInputKindIsPlaceholder` 改用 NDI（摄像头现在走真实现：假 uniqueID = 无信号或权限文案）；`testStatus_formatterFields` 的 encoder 项带 state / disk_free_mb（P2 之后 idle 项不算"在跑"）；冒烟第 12 步真录一段（14 帧）到测试宿主的临时目录。
 

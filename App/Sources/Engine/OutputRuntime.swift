@@ -176,8 +176,9 @@ final class OutputRuntime {
         rebuildStats()
     }
 
-    /// 停掉全部（换节目 / 退出）：录制封口等到完成（每个最多 10 s）。
+    /// 停掉全部（换节目 / 退出）：录制封口等到完成（每个最多 10 s）。先忘掉快照里的目标状态，封口完成后才不会按"仍 enabled"再起一次。
     func stopAll() async {
+        lastOutputs = []
         for n in recorders.keys.sorted() where !recorders[n]!.stopping { stopRecording(n) }
         for n in streams.keys.sorted() where !streams[n]!.stopping { stopStream(n) }
         let deadline = Date().addingTimeInterval(10)
