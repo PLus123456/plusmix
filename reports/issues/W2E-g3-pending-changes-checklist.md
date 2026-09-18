@@ -38,6 +38,7 @@
 | 3-5 | 输入 tap 加"推子后、AFV 前"的来源 | 现在的输入 tap 在 AFV 增益之后，AFV 开着时非 PGM 路的 ISO 音轨是静音 | 建议（W3-C 做视频 ISO 前） | ISO 只能在 AFV 关时用 | ISO tap 换来源 |
 
 详情：`W2E-w1-audio-crossfade-tail-block-duration-monitor.md`。
+**3-1…3-5 已由 W1-D2（`w1-audio-2`，2026-09-19）全部做完，含第四节里对应的四条 W2-E 侧跟改**（`durationFrames:`、`maintainAlignment` 只补 alignment − 确定年龄、耳机不走对齐 + A5 脚本、ISO tap 换来源）；数字见 `reports/w1-audio-2.md`。
 
 ### W1-E `w1-outputs`（`Recording/Recorder.swift`）
 

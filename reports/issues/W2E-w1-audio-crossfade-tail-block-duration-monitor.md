@@ -31,3 +31,11 @@ S3（听感无影响；影响测试判据与 A5 / ISO 的可达性）。
 - 3：`SW_CMD_ATTACH_INPUT` 加"目标年龄（帧）"参数：就绪时 `start` 按 stamp 外推到 `host_time − 目标年龄` 对应的帧，而不是 `write_index − back`；
   这样各路年龄天然一致，W2-E 的对齐延迟线只处理年龄 > 目标的残差。
 - 4：给耳机送一个"延迟线之前 / 之后可选"的分支；输入 tap 加"推子前"来源（`SW_INPUT_TAP_BASE` 之外再一段），ISO 才不受 AFV 门控。
+
+## 处理结果（W1-D2 / `w1-audio-2`，2026-09-19，报告 `reports/w1-audio-2.md`）
+
+四条都落地，C 侧改动全在 `CSwitcherAudioRT`：
+1. `SW_CMD_CROSSFADE.i2` = 帧数；Swift `crossfade(from:to:durationFrames:startHostTime:)`；集成层按帧（24000 / 24024）。AFV 尾巴 −20…−40 dB 0.843 → 0.109 dB，判到 −40 dB。
+2. 淡变走满的终值在推子之后钉死（`sw_process_input` 收 `xfade_end`），走满处精确 0 / 1；Cut 后 from 路严格 0（`XCTAssertEqual(x, 0)`）。
+3. `SW_CMD_ATTACH_INPUT.i2` = 目标年龄；就绪沿 stamps 找 `host_time − 目标年龄` 那一帧。10 次重就绪 959.00（离线 / 空设备）、1263 ± 1（真设备，含输出提前量 304），延迟线 1089 / 785 恒定。
+4. `SW_CMD_MONITOR_POINT`（耳机取延迟线前 / 后，默认前）；输入 tap 加 `64 + 槽位` = 推子后 AFV 前；集成层 `AudioTapSource.input` 改成 ISO 口径、新增 `.inputProgram`，`monitorPoint` 默认 `.preDelayLine`，A5 脚本改回默认对齐（仍 BLOCKED-硬件）。
