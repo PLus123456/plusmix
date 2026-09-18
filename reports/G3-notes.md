@@ -104,7 +104,7 @@ CoreSimulator 框架还是 26.x 的；只影响模拟器，macOS 测试不受影
    两个代理循环抢同一个 `netem.request`——一个读到完整行、另一个读到被截断的空文件（跑了空命令、回了用法文本），两个 `pfctl` 同时装规则（`DIOCADDRULE: Resource busy`），
    第 4 次封端口没封上 → 30 s 没判断线 → 该次"重连"记成 20.23 s；其余 9 次 0.10–1.12 s，E7（邻路 0 丢帧）、E9（误差 0.00%）都过。
    证据：代理终端日志里的空 `收到：` 行与用法文本、`ps` 里 15:07 起的代理进程。修：`netem.sh serve` 单实例锁 + 原子认领请求（10942e4），`gate3-net.sh` 数到多于一个代理就拒跑。
-   **需要用户杀掉旧代理后重跑 `make gate3-net`**（E8 必须 10/10）。
+   **用户 2026-09-18 杀掉旧代理后重跑 `make gate3-net`：E7 / E8 / E9 3 / 3 通过**，E8 10 / 10 重连，放开后 0.08–1.10 s（断线判定 9.0–9.2 s）（reports/G3-net.md）。
 9. **第一次 10 分钟 gate（22:39–23:02，reports/G3-run-10min-run1.md）V4 差 1 帧、E2 量不出，都不是切换 / 编码的问题**：
    - V4：设计外 1 帧全在 stats 最后一行（tick 35999）。headless 的等待循环 100 ms 看一次时钟，最后一拍派完到停视频源之间 60 fps 的源又推了 5 帧，
      3 格候选表挤掉 2 帧记成 dropped（8 号输入 pushed 36005 / consumed 36000 / dropped 2；4、6、7 号各 1，在 +1 帧余量内；5 号的 3 次 drop 在 102 / 269 / 435 s，是 +100 ppm 的设计内）。
@@ -119,7 +119,17 @@ CoreSimulator 框架还是 26.x 的；只影响模拟器，macOS 测试不受影
      V6 恰在第 1000 拍且 147 次 Cut 全干净、V7 曲线 0.344 帧 / T-bar 映射误差 ≤ 0.78%（目标 1% 也过）、C1 50/50 max 16.98 ms、C3 35795 帧 0 不一致、C4 12000/12000。
 10. **App 一期只接了合成源**：摄像头 / 文件 / 录制 / 推流 / 音频 / API 的 App 接线约 170 行，超过检查点的 `~App/:50`，没做（§7 第 3 条）；人工清单里给了 headless 等价物。
 
-## 7. 对契约 / 流程的疑问（等用户拍板）
+## 7. 对契约 / 流程的疑问（用户 2026-09-18 拍板："四个拍板按照你的方案来"）
+
+**拍板结果与落地**（提交在 g3 分支）：
+- 第 1 条 docs/ 归属：docs/OWNERSHIP.md G3 / G4 行加 `docs/checklists/` `docs/OWNERSHIP.md` `docs/plan/prompts/`，补充规则 5 改成脚本实际的算法、加规则 6（检查点可写清单 / 改归属表 / 加续做 prompt）。
+- 第 2 条 契约提案：001（A + B）、004、005 标已批，与已批的 002 一起由契约会话 P2 落地——prompt `docs/plan/prompts/41-P2-契约落地.md`，OWNERSHIP 加 P2 行；006（合成源噪声底纹）新写，待批。
+- 第 3 条 App 接线：开 W2-B2 会话——prompt 43，分支 `w2-app-2`，OWNERSHIP 加行。
+- 第 4 条 到达余量：裁定生效，W1-B2 会话——prompt 42，分支 `w1-core-2`，含提案 005 的引擎侧。
+- 顺带落成 prompt 的续做（用户可选开）：44 W1-A2（噪声底纹 + frameprobe 三个修正）、45 W1-E2（录制器收尾 / 编码器崩溃，E5 才能过）、46 W1-D2（混音器收口 / 就绪年龄 / tap 点）。
+- 续做分支都从 G3 合入后的 main 开；P2 先于 42 / 44 更顺（字段先有）。
+
+原疑问原文：
 
 1. **docs/ 归属**：G3 prompt 要求写 `docs/checklists/G3.md`，合并冲突解决又改了 `docs/OWNERSHIP.md`，两者都被 `check-ownership.sh g3` 报越界（G3 行只有 Tools / scripts / Makefile / scenarios / reports / baselines）。
    请把 G3 行（以及 G4 行）加上 `docs/checklists/` `docs/OWNERSHIP.md`，或授权本次例外；G2 §7 第 1 条的"补充规则 5 文字"也还没改。
@@ -173,7 +183,7 @@ docs/checklists/G3.md。App 没接线的项按清单里的 headless 等价物做
 | M3 输出 | E2 | 通过（专项用例） | L2 场景灰底压不出码率（不适用，§6 第 9 条）；W1-E VideoEncoderTests 0.57% / 1.067×、W2-D testE2E3 0.61% / 1.050× 都在本次 make test 里过 |
 | M3 输出 | E3 | 通过 | 299 个关键帧间隔全部恰好 120 |
 | M3 输出 | E7 | 通过 | 邻路网络丢帧 0 / 0、编码器跳帧 0（硬性）；第一次 gate3-net 已过 |
-| M3 输出 | E8 | **待重跑** | 第一次 9 / 10 且一次 20.2 s——两个 netem 代理同时在跑（§6 第 8 条，工装）；杀掉旧代理后 `make gate3-net` |
+| M3 输出 | E8 | 通过 | 重跑（2026-09-18，单代理）：10 / 10 重连，放开后 0.08–1.10 s（断线判定 9.0–9.2 s），≤ 15 s（目标 ≤ 5 s）全部满足；第一次 9 / 10 是双代理工装问题（§6 第 8 条） |
 | M3 输出 | E9 | 通过 | 5 分钟 70% 带宽，软件报告丢帧与落盘缺帧误差 0.00%（≤ 5%，目标 1%） |
 | M5 控制 | C1 | 通过 | 50 / 50，max 16.87 ms（≤ 1 拍 + RTT） |
 | M5 控制 | C2 | 通过 | 相对拍点 p99 0.39 ms；纯传输 p99 0.87 ms（≤ 50，目标 20） |
@@ -181,5 +191,8 @@ docs/checklists/G3.md。App 没接线的项按清单里的 headless 等价物做
 | M5 控制 | C4 | 通过 | 12000 / 12000，0 空洞 0 乱序（硬性） |
 | — | S5 | BLOCKED-硬件 | 无 USB 摄像头 / UVC；docs/checklists/G3.md 第 6 条，`hotplug-timer.sh` 就绪 |
 
-人工检查（docs/checklists/G3.md）未做：App 接线未完成（§7 第 3 条），用户回来后按清单里的 headless 等价物做或先定接线归属。
+人工检查（docs/checklists/G3.md）未做：App 接线归 W2-B2（prompt 43）做完再按清单走；清单里的 headless 等价物现在也能做。
+
+**G3 结论：通过。** 自动项（V1–V7、A1–A4、E1、E3、E7–E9、C1–C4）全部通过，E2 以专项用例通过；A5 / S5 BLOCKED-硬件；人工清单等 W2-B2 接线后走。
+合并 g3 → main 由用户裁定（同 G2，`git merge --no-ff g3`）。
 

@@ -23,13 +23,12 @@ worktree `.claude/worktrees/wonderful-fermi-40fe5f`，从 main 2290b4e 开；`g3
 |---|---|
 | L0 / L1 整仓 `make test`（Xcode 27.0，Metal 工具链装好后） | 全绿：SwitcherCore 148（Contracts 48 / Engine 73 / Render 27）、SwitcherInputs 28（4 跳过：摄像头权限 ×3、S5 硬件）、SwitcherAudio 87（5 跳过：真设备 / 回环）、SwitcherOutputs 18 + 21 + 8（2 跳过）、SwitcherControl 28、SwitcherTestKit 49、两个工具冒烟、App 14 / 14 |
 | L2 10 分钟（V1–V7、A1–A4、E1–E3、C1–C4） | 第二次运行 **18 / 19 通过、E2 本场景不适用**（灰底合成源压不出码率，以 W1-E / W2-D 噪声用例为准）：V1 1.78 ms、V2 0、V3 0.037、V4 设计外 0、V5 0、V6 恰第 1000 拍 147 次 Cut 全干净、V7 曲线 0.344 帧 / T-bar ≤ 0.78%、A1 0、A2 0.000 ms、A3 0、A4 0.208 ms、E1 0、E3 精确、C1 50/50 max 16.87 ms、C2 p99 0.39 ms、C3 0、C4 12000/12000（reports/G3.md） |
-| E7–E9 | 第一次（19:01）E7 ✅ E9 ✅ **E8 ❌（工装：两个 netem 代理同时在跑，第 4 次封端口没封上）**；修了 netem.sh 单实例锁后要用户杀掉旧代理重跑 `make gate3-net` |
+| E7–E9 | 第一次（09-15 19:01）E8 ❌ 是工装（两个 netem 代理同时在跑）；修单实例锁后用户 09-18 重跑：**3 / 3 通过**，E8 10 / 10 重连，放开后 0.08–1.10 s（断线判定 9.0–9.2 s） |
 | A5、A6、A7 | A5 BLOCKED-硬件（W2-E 脚本在）；A6 W1-D 测过（0.007 LU）；A7 W1-D / W2-E 的实时用例 0 违规（SwitcherAudio 全绿即含） |
 | S5 | BLOCKED-硬件（无 USB 摄像头）；docs/checklists/G3.md 第 6 条 |
 
 ## 3. 没做的和原因
 
-- **E8 的复跑**：要用户先杀掉下午残留的 netem 代理（`sudo kill <pid>` 或在那个终端 Ctrl-C），只留一个 `sudo scripts/netem.sh serve`，再 `make gate3-net`。gate3-net.sh 现在会先数代理进程，多于一个就拒跑。
 - `sudo xcodebuild -runFirstLaunch`（清掉 xcodebuild 的 CoreSimulator / DVTCoreDeviceCore 红字）：用户的 sudo。
 - **App 接线**（摄像头 / 文件 / 录制 / 推流 / 音频 / API，约 170 行）：超过检查点 `~App/:50` 额度，没做；选项见 reports/G3-notes.md §7 第 3 条。人工清单里给了 headless 等价物。
 - **契约提案落地**（001 / 002 / 004 / 005）：不是检查点的事；建议一次契约会话一起落地（G3-notes §7 第 2 条）。
@@ -37,7 +36,8 @@ worktree `.claude/worktrees/wonderful-fermi-40fe5f`，从 main 2290b4e 开；`g3
 
 ## 4. 对契约 / 规则的疑问
 
-见 reports/G3-notes.md §7（docs/ 归属、提案批与落地、App 接线归属、到达余量裁定确认、W2-E 待办、G2 遗留 7 条）。
+见 reports/G3-notes.md §7：用户 2026-09-18 已按 G3 方案拍板四条（docs/ 归属、提案 001 / 002 / 004 / 005 落地、App 接线开 W2-B2、到达余量裁定交 W1-B2），
+落地为 docs/OWNERSHIP.md 的新行与规则 6、提案文件状态、docs/plan/prompts/41–46 六个续做 prompt、提案 006（待批）。
 
 ## 5. 下一个会话需要知道的坑
 

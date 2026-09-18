@@ -104,7 +104,7 @@ gate2-1h:
 # make gate3      L0 + L1（六个包 swift test + 两个工具冒烟）→ 10 分钟 G3 场景（scripts/gate3.sh：V1–V7、A1–A4、E1–E3、C1–C4）
 #                 → reports/G3-run-10min.md + reports/G3.md，并写 baselines/g3-m5max.json
 # make gate3-run  只跑 10 分钟场景（跳过 L0 / L1）；make gate3-1h 60 分钟版（用户触发）
-# make gate3-net  E7–E9：需要用户先在另一个终端 sudo scripts/netem.sh serve（scripts/gate3-net.sh 会检查代理是否在线）
+# make gate3-net  E7–E9：需要用户先在另一个终端 sudo scripts/netem.sh serve（scripts/gate3-net.sh 会检查代理只有一个且在线），跑完自动重拼 reports/G3.md
 # 数据留在 .build/gate3/<label>/（不入库）。
 GATE3_BASELINE ?= baselines/g3-m5max.json
 .PHONY: gate3 gate3-run gate3-1h gate3-net
@@ -121,4 +121,11 @@ gate3-net:
 	@echo "E7–E9 需要网络损伤（dummynet + pf）。先在另一个终端跑（要 sudo，Ctrl-C 退出时自动清规则）："
 	@echo "    sudo scripts/netem.sh serve"
 	scripts/gate3-net.sh
+	$(MAKE) gate3-report
+
+# make gate3-report  只用已有的 .build/gate3/10min 产物重出 reports/G3-run-10min.md 并拼 reports/G3.md（改了 G3-notes.md 或跑完 gate3-net 之后用；不跑、不解码）
+.PHONY: gate3-report
+gate3-report:
+	python3 scripts/gate3-report.py --out-dir .build/gate3/10min --label 10min --minutes 10 --show scenarios/g3-show.json --script scenarios/g3.json \
+	  --baseline "" --run-report reports/G3-run-10min.md --notes reports/G3-notes.md --report reports/G3.md
 

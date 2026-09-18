@@ -1,7 +1,7 @@
 # 004 Stats.audio 的表读数与不连续计数
 
 提出会话 / 分支：W2-E / w2-audio-integ（worktree 分支 claude/w2-audio-integ-00e60c）
-状态：待批
+状态：**已批**（用户 2026-09-18，按 G3 报告 §7 第 2 条）。由契约会话 P2（docs/plan/prompts/41）落地。
 
 ## 改什么
 
