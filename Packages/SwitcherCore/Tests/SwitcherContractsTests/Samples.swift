@@ -74,12 +74,29 @@ enum Samples {
         return show
     }
 
+    /// P2 之后每个新字段都填非默认值（latency、frames / dropped / disk_free_mb / reconnects / state、discontinuities / meters）。
     static func stats() -> Stats {
         Stats(ts: 1_757_690_000.5, tick: Tick(216_000), renderMs: 1.75, missedRender: 0, jitterMs: 0.42,
-              perInput: [1: Stats.PerInput(fps: 30, dup: 30, drop: 0), 2: Stats.PerInput(fps: 60, dup: 0, drop: 1)],
-              encoder: [Stats.EncoderEntry(skipped: 0, bitrate: 6_000_000), Stats.EncoderEntry(skipped: 3, bitrate: 2_500_000)],
-              audio: Stats.AudioCounters(dropouts: 0, underruns: 1),
+              perInput: [1: Stats.PerInput(fps: 30, dup: 30, drop: 0, latencyMs: 33.4, latencyMaxMs: 41.7),
+                         2: Stats.PerInput(fps: 60, dup: 0, drop: 1, latencyMs: 16.7, latencyMaxMs: 18.2)],
+              encoder: [Stats.EncoderEntry(skipped: 0, bitrate: 6_000_000, frames: 215_990, dropped: 0, diskFreeMb: 40_960.5, reconnects: 0, state: "recording"),
+                        Stats.EncoderEntry(skipped: 3, bitrate: 2_500_000, frames: 215_000, dropped: 12, diskFreeMb: 0, reconnects: 2, state: "publishing")],
+              audio: Stats.AudioCounters(dropouts: 0, underruns: 1, discontinuities: 2, meters: meters()),
               rssMb: 512.25, cpuPct: 12.5, gpuPct: 30)
+    }
+
+    /// 四条总线（顺序 = Bus.allCases）+ 两路输入的表读数；A / B 总线静音（下限 −120）。
+    static func meters() -> Stats.AudioCounters.Meters {
+        typealias BM = Stats.AudioCounters.BusMeter
+        let silent = [-120.0, -120.0]
+        return Stats.AudioCounters.Meters(
+            buses: [
+                BM(bus: Bus.master.name, peakDb: [-6.5, -7], truePeakDb: [-6.2, -6.8], lufsM: -18.3, lufsS: -19.1, lufsI: -20, lra: 4.5),
+                BM(bus: Bus.busA.name, peakDb: silent, truePeakDb: silent, lufsM: -120, lufsS: -120, lufsI: -120, lra: 0),
+                BM(bus: Bus.busB.name, peakDb: silent, truePeakDb: silent, lufsM: -120, lufsS: -120, lufsI: -120, lra: 0),
+                BM(bus: Bus.headphones.name, peakDb: [-9, -9], truePeakDb: [-8.9, -8.9], lufsM: -21, lufsS: -21.5, lufsI: -22, lra: 3),
+            ],
+            inputs: [1: Stats.AudioCounters.InputMeter(peakDb: [-12, -12.5]), 3: Stats.AudioCounters.InputMeter(peakDb: silent)])
     }
 
     static func scenario() -> Scenario {

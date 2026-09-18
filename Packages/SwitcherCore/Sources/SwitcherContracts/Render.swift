@@ -1,5 +1,6 @@
 // 引擎（W1-B）、渲染器（W1-C）、输出消费者（W1-E）之间的协议草案。三者互不依赖，只见这里。
 // 每拍的调用链：引擎 → Renderer.render(...) → GPU 完成 → RenderSink.renderer(_:didComplete:)（引擎实现）→ 逐个 FrameConsumer.consume(...)
+// 音频（提案 001 B，P2 落地）：混音回调 → SPSC 环 → 集成层的泵线程（非实时）→ 逐个 AudioBlockConsumer.consumeAudio(...)
 
 /// 一拍渲染完成的产物。`program` 是 NV12（BT.709 limited）IOSurface 背后的 CVPixelBuffer，pts = 拍点时刻（决策 10）。
 public struct RenderedFrame: Sendable {
@@ -98,4 +99,18 @@ public protocol Renderer: AnyObject {
 public protocol FrameConsumer: AnyObject {
     var consumerName: String { get }
     func consume(_ frame: RenderedFrame)
+}
+
+/// 混音块（Master、某条总线、某路输入推子后）的消费者：录制、推流、NDI 发送……，与 `FrameConsumer` 对称（提案 001 B）。
+/// 签名逐字 = W1-E 原来在 SwitcherOutputs 里的那份；SwitcherAudioIntegration 的 `AudioBlockConsuming` 是它的 typealias。
+///
+/// 规则：`consumeAudio` 在**非实时**的泵线程上被调（把混音回调写进 SPSC 环的块搬出来的那条线程，W2-E 的 AudioEngine 提供），
+/// 实现必须立即返回：只拷进自己的有界缓冲；永远不在音频实时回调里直接调它（铁律 3）。
+/// `planes` 有 channelCount 个指针，每个指向 frameCount 个非交错 float32（48 kHz）；`hostTime` 是块首样本的 host time
+/// （与 `AudioRing.write` 同一口径；集成层已按对齐延迟修正到"内容被采集的时刻"，与视频拍点同一时基，PTS 直接用）。
+public protocol AudioBlockConsumer: AnyObject {
+    /// 名字（Stats / 日志）。
+    var consumerName: String { get }
+    /// 一块：`planes` 有 channelCount 个指针，每个指向 frameCount 个 float；`hostTime` 是块首样本的 host time。
+    func consumeAudio(planes: UnsafePointer<UnsafePointer<Float>>, channelCount: Int, frameCount: Int, hostTime: HostTime)
 }

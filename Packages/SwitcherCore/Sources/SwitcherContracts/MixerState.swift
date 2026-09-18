@@ -173,6 +173,21 @@ public struct OverlayState: Hashable, Codable, Sendable {
 /// 四条总线（§1.1 Bus）。rawValue 也是 `AudioState.buses` 的下标。
 public enum Bus: Int, Codable, Sendable, CaseIterable {
     case master = 0, busA, busB, headphones
+
+    /// 名字（Stats.audio.meters.buses[i].bus 用，提案 004）：master / busA / busB / headphones，与 `BusRouting` 的 JSON 键一致。
+    public var name: String {
+        switch self {
+        case .master: "master"
+        case .busA: "busA"
+        case .busB: "busB"
+        case .headphones: "headphones"
+        }
+    }
+    /// 按名字找；不认识给 nil。
+    public init?(name: String) {
+        guard let b = Bus.allCases.first(where: { $0.name == name }) else { return nil }
+        self = b
+    }
 }
 
 /// 一条总线的状态。
