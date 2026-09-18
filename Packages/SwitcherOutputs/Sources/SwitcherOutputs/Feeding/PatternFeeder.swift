@@ -111,7 +111,7 @@ public final class PatternFeeder: @unchecked Sendable {
             let amp = max(0, min(100, amplitude))
             let base: Int
             switch configuration.background {
-            case .gray(let level): base = Int(TestPattern.limitedLumaPublic(level))
+            case .gray(let level), .noise(let level, _, _): base = Int(TestPattern.limitedLumaPublic(level))   // 006：噪声底纹按其灰底取中心
             case .gradient: base = 128
             }
             // 先用 8 字节一次的 PRNG 填满，再查表映射到 [base − amp, base + amp]（debug 下每平面约 30 ms）

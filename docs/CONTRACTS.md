@@ -7,7 +7,7 @@
 加 case / 加字段也算改（下游的 switch 和快照测试会红）。只有文档注释和实现细节（不改公开签名与 JSON）可以直接改。
 
 **变更记录**：P1 冻结（2026-09）→ 提案 003（W2-C 直接落地：CommandReceipt.applied、MixerSnapshot.publishedAt 等）→ P2（2026-09-18，分支 p2-contracts）：
-提案 001 A / 002 / 004 / 005 的 Stats 字段、001 B 的 `AudioBlockConsumer`、`Bus.name`。提案文件留在 docs/contract-changes/ 当决策记录；006（合成源噪声底纹）待批未做。
+提案 001 A / 002 / 004 / 005 的 Stats 字段、001 B 的 `AudioBlockConsumer`、`Bus.name`、006 的 `TestPattern.Background.noise`（用户 2026-09-18 批）。提案文件留在 docs/contract-changes/ 当决策记录。
 
 ---
 
@@ -169,7 +169,7 @@ P2 加的字段（口径全文在 Stats.swift 的文档注释）：
 | 行 2 时间戳 | y = 64，同上 | 生成时 host time 的毫秒 mod 2²⁸ |
 | 输入 ID | (16, 112) 64×64 纯色 | 16 色 `palette[inputID]`，两两 BT.709 limited YCbCr 距离 ≥ 48（实测最小 56.6），不含纯黑、纯白和任何灰 |
 | 闪光 | 右上 (1840, 16) 64×64 | `isFlashTick`: tick % 整数帧率 == 0 → 全白，否则全黑（59.94 → 每 60 拍 = 1.001 s） |
-| 底色 | 其余 | `.gray(level)`（full-range RGB 电平；V7 用 64/192，NV12 写成 limited Y 71/181）或 `.gradient` |
+| 底色 | 其余 | `.gray(level)`（full-range RGB 电平；V7 用 64/192，NV12 写成 limited Y 71/181）、`.gradient`，或 `.noise(level:amplitude:seed:)`（提案 006，P2 落地）：灰底叠零均值均匀噪声 ±amplitude，三通道同值、NV12 只动亮度，确定性伪随机（seed + 帧号 + 行 + 列，`TestPattern.noiseValue` 是逐像素参考定义），帧号变了噪声就变；四样东西盖在噪声上面，解码规则不变；中心 1/4 区域均值 = level ± 0.25。JSON `{"noise":{"level":128,"amplitude":24,"seed":7}}` |
 
 解码：每块取中心一半区域（1080p 下 16×16）均值，limited Y > 128 记 1；CRC 不对返回 nil；输入 ID 取最近调色板色，距离 > 24 返回 nil；全黑 / 全白 / 纯灰画面三项都是 nil。
 CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`）。任意单块翻转都能发现；全 0 / 全 1 码字都无效。
@@ -177,6 +177,7 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 **与测试标准 §2.1 的唯一偏离**：帧号 16 块 12 位 → 32 块 28 位。12 位 68 秒回绕，8 小时长稳会歧义；28 位 60 fps 下 51 天。这是 P1 唯一允许偏离测试标准的地方（落地方案 §1.3 第 4 条）。
 
 测试证明：码字层 10 万随机值往返恒等；单块翻转 5000 × 32 位全部捕获；图像层 1080p BGRA 1500 帧 + NV12 600 帧 + 720p/2160p/640×360/1366×768 各 100 帧往返恒等；高斯模糊 σ = 1.5 + 4:2:0 + ±10 噪声后 60 帧 100% 正确。
+噪声底纹（P2）：|n| ≤ amplitude、三通道同值、n = 0 的比例 = 1/(2A+1)（均匀）、同 seed + 帧号逐字节相同、帧号或 seed 变了即独立、块区域逐像素等于纯灰渲染、解码与纯灰相同、NV12 亮度 = limitedLuma(BGRA 灰值) 且色度全 128、退化后 20 帧 100% 正确。
 
 ## 5. 合成音频 `TestSignal`
 

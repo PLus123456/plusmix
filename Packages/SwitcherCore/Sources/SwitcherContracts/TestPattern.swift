@@ -8,7 +8,7 @@ import CoreVideo
 /// - 行 2（y = 64）：生成时 host time 的毫秒（mod 2^28），同样编码。
 /// - 输入 ID：(16, 112) 起 64×64 纯色块，16 色调色板（`palette`），任意两色 BT.709 limited YCbCr 距离 ≥ `minimumPaletteDistance`。
 /// - 闪光：右上角 (width − 80, 16) 起 64×64；tick % 整数帧率 == 0 的帧全白，其余全黑（`isFlashTick`）。
-/// - 其余画面：纯灰（V7 用 64 / 192，值是 full-range RGB 电平）或水平渐变。
+/// - 其余画面：纯灰（V7 用 64 / 192，值是 full-range RGB 电平）、水平渐变，或灰底叠零均值噪声（`.noise`，提案 006：让 E2 在长跑里有东西可压）。
 /// 解码：每块取中心一半区域（1080p 下 16×16）的均值，limited-range Y > 128 记 1；CRC 不对返回 nil。
 ///
 /// 与测试标准 §2.1 的唯一偏离：帧号从 16 块 12 位扩到 32 块 28 位。12 位 68 秒就回绕，8 小时长稳会歧义；
@@ -39,6 +39,13 @@ public enum TestPattern {
         case gray(level: UInt8)
         /// 水平渐变 0 → 255。
         case gradient
+        /// 灰底 level 上叠零均值噪声（提案 006，P2 落地）：每个像素 = level + n，n 在 −amplitude…+amplitude 上均匀（full-range 电平，越出 0…255 截断），
+        /// 三个通道同值（灰噪声；NV12 只动亮度平面，色度保持 128）。确定性伪随机：seed、帧号、行号、列号决定（`noiseValue`），
+        /// 同一 (seed, frameNumber) 画两次逐像素相同，帧号变了整幅噪声就变——码率控制才真的工作。
+        /// 帧号 / 时间戳 / 输入 ID / 闪光块区域不加噪声（四样东西盖在噪声上面，解码规则不变）；
+        /// 中心 1/4 区域的均值 ≈ level（V6 / V7 不受影响）；level ± amplitude 越出 0…255 时截断会让均值偏离 level，V7 用 64 / 192 配 amplitude ≤ 63 没事。
+        /// JSON：`{"noise": {"level": 128, "amplitude": 24, "seed": 7}}`。
+        case noise(level: UInt8, amplitude: UInt8, seed: UInt64)
     }
 
     /// 一帧要烧进去的内容。
@@ -337,6 +344,54 @@ public enum TestPattern {
         }
     }
 
+    // MARK: 噪声底纹（提案 006）
+
+    /// 噪声序列：SplitMix64。行种子由 seed、帧号、行号混合而来，所以每行、每帧、每个 seed 的序列都不同，而且任何一行都能独立生成（并行画也确定）。
+    struct NoiseRow {
+        private var state: UInt64
+        private let level: Int32
+        private let amplitude: Int32
+        private let range: UInt64
+
+        @inline(__always)
+        static func mix(_ x: UInt64) -> UInt64 {
+            var z = x
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+
+        init(seed: UInt64, frameNumber: UInt32, row: Int, level: UInt8, amplitude: UInt8) {
+            state = NoiseRow.mix(seed ^ NoiseRow.mix(UInt64(frameNumber) | (UInt64(UInt32(truncatingIfNeeded: row)) << 32) &+ 0x9E37_79B9_7F4A_7C15))
+            self.level = Int32(level)
+            self.amplitude = Int32(amplitude)
+            range = UInt64(2 * Int(amplitude) + 1)
+        }
+
+        /// 下一对像素的 full-range 灰值（一次 64 位输出给两个像素，各用 32 位做 [0, 2·amplitude] 的无偏映射，偏差 < 2⁻²⁶）。
+        @inline(__always)
+        mutating func next2() -> (UInt8, UInt8) {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            let r = NoiseRow.mix(state)
+            let lo = UInt64(UInt32(truncatingIfNeeded: r)), hi = r >> 32
+            let a = level + Int32((lo &* range) >> 32) - amplitude
+            let b = level + Int32((hi &* range) >> 32) - amplitude
+            return (UInt8(clamping: a), UInt8(clamping: b))
+        }
+    }
+
+    /// 参考定义：(seed, frameNumber, x, y) 处的噪声灰值（full-range），与 `draw` 画出来的逐像素相同；别的实现（GPU / 预生成平面）拿它当对照。
+    public static func noiseValue(level: UInt8, amplitude: UInt8, seed: UInt64, frameNumber: UInt32, x: Int, y: Int) -> UInt8 {
+        var gen = NoiseRow(seed: seed, frameNumber: frameNumber & dataMask, row: y, level: level, amplitude: amplitude)
+        var pair = gen.next2()
+        var i = 0
+        while i + 2 <= x { pair = gen.next2(); i += 2 }
+        return x & 1 == 0 ? pair.0 : pair.1
+    }
+
+    /// limited-range Y 查表（noise 每像素一次换算，不重复算浮点）。
+    static let limitedLumaTable: [UInt8] = (0...255).map { limitedLuma(UInt8($0)) }
+
     static func drawBGRA(_ c: Content, _ g: Geometry, base: UnsafeMutableRawPointer, bytesPerRow bpr: Int) {
         let w = g.width, h = g.height
         switch c.background {
@@ -350,6 +405,19 @@ public enum TestPattern {
                 row0[x] = bgraPixel(l, l, l)
             }
             for y in 1..<h { (base + y * bpr).assumingMemoryBound(to: UInt32.self).update(from: row0, count: w) }
+        case .noise(let level, let amplitude, let seed):
+            for y in 0..<h {
+                var gen = NoiseRow(seed: seed, frameNumber: c.frameNumber, row: y, level: level, amplitude: amplitude)
+                let row = (base + y * bpr).assumingMemoryBound(to: UInt32.self)
+                var x = 0
+                while x + 2 <= w {
+                    let (a, b) = gen.next2()
+                    row[x] = bgraPixel(a, a, a)
+                    row[x + 1] = bgraPixel(b, b, b)
+                    x += 2
+                }
+                if x < w { let (a, _) = gen.next2(); row[x] = bgraPixel(a, a, a) }
+            }
         }
         let white = bgraPixel(255, 255, 255), black = bgraPixel(0, 0, 0)
         for (row, word) in [(0, encodeWord(c.frameNumber)), (1, encodeWord(c.hostTimeMs))] {
@@ -374,6 +442,21 @@ public enum TestPattern {
             let row0 = luma.assumingMemoryBound(to: UInt8.self)
             for x in 0..<w { row0[x] = limitedLuma(UInt8(x * 255 / max(1, w - 1))) }
             for y in 1..<h { (luma + y * lbpr).assumingMemoryBound(to: UInt8.self).update(from: row0, count: w) }
+        case .noise(let level, let amplitude, let seed):
+            limitedLumaTable.withUnsafeBufferPointer { table in
+                for y in 0..<h {
+                    var gen = NoiseRow(seed: seed, frameNumber: c.frameNumber, row: y, level: level, amplitude: amplitude)
+                    let row = (luma + y * lbpr).assumingMemoryBound(to: UInt8.self)
+                    var x = 0
+                    while x + 2 <= w {
+                        let (a, b) = gen.next2()
+                        row[x] = table[Int(a)]
+                        row[x + 1] = table[Int(b)]
+                        x += 2
+                    }
+                    if x < w { let (a, _) = gen.next2(); row[x] = table[Int(a)] }
+                }
+            }
         }
         if let chroma {
             for cy in 0..<(h / 2) { (chroma + cy * cbpr).assumingMemoryBound(to: UInt16.self).update(repeating: 0x8080, count: w / 2) }

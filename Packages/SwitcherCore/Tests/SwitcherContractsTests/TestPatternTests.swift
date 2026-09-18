@@ -258,6 +258,148 @@ final class TestPatternTests: XCTestCase {
         XCTAssertFalse(TestPattern.draw(.init(frameNumber: 0, hostTimeMs: 0, inputID: 0, flash: false), into: try XCTUnwrap(bad)), "UYVY 不支持画图案")
     }
 
+    // MARK: - 噪声底纹（提案 006，P2 落地）
+
+    /// Codable 形态与其他 case 一致（`{"noise":{"amplitude":24,"level":128,"seed":7}}`）；SyntheticSourceSettings 里能往返；老形态不受影响。
+    func testP2_noise_codableShape() throws {
+        let e = JSONEncoder(); e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let bg = TestPattern.Background.noise(level: 128, amplitude: 24, seed: 7)
+        XCTAssertEqual(String(decoding: try e.encode(bg), as: UTF8.self), #"{"noise":{"amplitude":24,"level":128,"seed":7}}"#)
+        XCTAssertEqual(try JSONDecoder().decode(TestPattern.Background.self, from: Data(#"{"noise":{"level":128,"amplitude":24,"seed":7}}"#.utf8)), bg)
+        XCTAssertEqual(String(decoding: try e.encode(TestPattern.Background.gray(level: 192)), as: UTF8.self), #"{"gray":{"level":192}}"#)
+        XCTAssertEqual(String(decoding: try e.encode(TestPattern.Background.gradient), as: UTF8.self), #"{"gradient":{}}"#)
+        XCTAssertEqual(try JSONDecoder().decode(TestPattern.Background.self, from: Data(#"{"gray":{"level":64}}"#.utf8)), .gray(level: 64))
+        let settings = SyntheticSourceSettings(background: bg)
+        XCTAssertEqual(try JSONDecoder().decode(SyntheticSourceSettings.self, from: try e.encode(settings)), settings)
+        XCTAssertThrowsError(try JSONDecoder().decode(TestPattern.Background.self, from: Data(#"{"noise":{"level":128}}"#.utf8)), "缺 amplitude / seed 不能解")
+    }
+
+    /// 噪声有界（level ± amplitude）、三通道同值、零均值（中心 1/4 区域均值 = level ± 0.25）、确定性（同 seed + 帧号逐像素相同；帧号或 seed 变了 ≥ 90% 像素变）；
+    /// amplitude 0 就是纯灰；帧号 / 时间戳 / ID / 闪光块区域逐像素等于纯灰渲染；解码结果与纯灰相同。
+    func testP2_noise_boundedZeroMeanDeterministic_blocksAndDecodeUntouched() {
+        let w = 1920, h = 1080
+        let g = TestPattern.Geometry(width: w, height: h)
+        var rects: [TestPattern.Rect] = [g.idRect, g.flashRect]
+        for row in 0..<2 { for i in 0..<TestPattern.blockCount { rects.append(g.blockRect(row: row, index: i)) } }
+        let blockBottom = rects.map { $0.y + $0.height }.max()!    // 四样东西都在顶部（1080p：y < 176），下面的行直接放行
+        func inBlocks(_ x: Int, _ y: Int) -> Bool { y < blockBottom && rects.contains { x >= $0.x && x < $0.x + $0.width && y >= $0.y && y < $0.y + $0.height } }
+        let noisy = Image.bgra(width: w, height: h), plain = Image.bgra(width: w, height: h), other = Image.bgra(width: w, height: h)
+        for (level, amp, seed, frame) in [(UInt8(128), UInt8(24), UInt64(7), UInt32(4242)), (64, 24, 1, 0), (192, 24, 99, 123_456), (100, 3, 5, 9)] {
+            let c = TestPattern.Content(frameNumber: frame, hostTimeMs: 777_777, inputID: 5, flash: true, background: .noise(level: level, amplitude: amp, seed: seed))
+            var cg = c; cg.background = .gray(level: level)
+            TestPattern.draw(c, into: noisy.planes, width: w, height: h)
+            TestPattern.draw(cg, into: plain.planes, width: w, height: h)
+            TestPattern.draw(c, into: other.planes, width: w, height: h)
+            XCTAssertTrue(noisy.bytesEqual(other), "同 seed + 帧号两次渲染逐字节相同")
+            var blockMismatch = 0, notGray = 0, outOfRange = 0, changed = 0, background = 0
+            var centerSum = 0.0, centerCount = 0
+            for y in 0..<h {
+                for x in 0..<w {
+                    let p = noisy.bgraPixel(x: x, y: y)
+                    if inBlocks(x, y) {
+                        if p != plain.bgraPixel(x: x, y: y) { blockMismatch += 1 }
+                        continue
+                    }
+                    background += 1
+                    let r = Int((p >> 16) & 0xFF), gg = Int((p >> 8) & 0xFF), b = Int(p & 0xFF)
+                    if r != gg || gg != b { notGray += 1 }
+                    if abs(r - Int(level)) > Int(amp) { outOfRange += 1 }
+                    if p != plain.bgraPixel(x: x, y: y) { changed += 1 }
+                    if x >= w / 4 && x < 3 * w / 4 && y >= h / 4 && y < 3 * h / 4 { centerSum += Double(r); centerCount += 1 }
+                }
+            }
+            XCTAssertEqual(blockMismatch, 0, "块区域不加噪声（level \(level)）")
+            XCTAssertEqual(notGray, 0, "灰噪声：三通道同值")
+            XCTAssertEqual(outOfRange, 0, "|噪声| ≤ amplitude")
+            // 均匀分布在 2A + 1 个值上：与纯灰相同（n = 0）的概率 = 1 / (2A + 1)，两次独立抽样相同的概率也是它
+            let expectChanged = 1 - 1 / Double(2 * Int(amp) + 1)
+            XCTAssertEqual(Double(changed) / Double(background), expectChanged, accuracy: 0.005, "n = 0 的比例 = 1/(2A+1)（level \(level) amp \(amp)）")
+            XCTAssertEqual(centerSum / Double(centerCount), Double(level), accuracy: 0.25, "中心 1/4 区域零均值（level \(level)）")
+            let dn = TestPattern.decode(noisy.planes, width: w, height: h), dp = TestPattern.decode(plain.planes, width: w, height: h)
+            XCTAssertEqual(dn, dp)
+            XCTAssertEqual(dn.frameNumber, c.frameNumber); XCTAssertEqual(dn.inputID, 5); XCTAssertTrue(dn.flash)
+            // 帧号 +1 / seed 换掉：≥ 90% 背景像素变
+            var c2 = c; c2.frameNumber = frame &+ 1
+            TestPattern.draw(c2, into: other.planes, width: w, height: h)
+            XCTAssertEqual(Double(noisy.differingPixels(other, skipping: inBlocks)) / Double(background), expectChanged, accuracy: 0.005, "帧号变了噪声就变（且独立）")
+            var c3 = c; c3.background = .noise(level: level, amplitude: amp, seed: seed &+ 1)
+            TestPattern.draw(c3, into: other.planes, width: w, height: h)
+            XCTAssertEqual(Double(noisy.differingPixels(other, skipping: inBlocks)) / Double(background), expectChanged, accuracy: 0.005, "seed 变了噪声就变（且独立）")
+        }
+        // amplitude 0 = 纯灰
+        let c0 = TestPattern.Content(frameNumber: 1, hostTimeMs: 2, inputID: 3, flash: false, background: .noise(level: 77, amplitude: 0, seed: 1))
+        var g0 = c0; g0.background = .gray(level: 77)
+        TestPattern.draw(c0, into: noisy.planes, width: w, height: h)
+        TestPattern.draw(g0, into: plain.planes, width: w, height: h)
+        XCTAssertTrue(noisy.bytesEqual(plain), "amplitude 0 与纯灰逐字节相同")
+    }
+
+    /// 越界截断：level 250 ± 24 最高 255（不回绕）、level 5 ± 24 最低 0；其他尺寸（640×360、3840×2160）也能画能解。
+    func testP2_noise_clampsAtEdges_andOtherSizes() {
+        let img = Image.bgra(width: 1920, height: 1080)
+        for (level, expectMin, expectMax) in [(UInt8(250), 226, 255), (5, 0, 29)] {
+            TestPattern.draw(.init(frameNumber: 9, hostTimeMs: 9, inputID: 9, flash: false, background: .noise(level: level, amplitude: 24, seed: 3)), into: img.planes, width: 1920, height: 1080)
+            var lo = 255, hi = 0
+            for y in stride(from: 300, to: 1080, by: 7) { for x in stride(from: 0, to: 1920, by: 3) { let v = Int(img.bgraPixel(x: x, y: y) & 0xFF); lo = min(lo, v); hi = max(hi, v) } }
+            XCTAssertEqual(lo, expectMin, "level \(level) 的最小值"); XCTAssertEqual(hi, expectMax, "level \(level) 的最大值")
+        }
+        for (w, h) in [(640, 360), (3840, 2160), (1280, 720)] {
+            let a = Image.bgra(width: w, height: h)
+            let c = TestPattern.Content(frameNumber: 31, hostTimeMs: 41, inputID: 2, flash: true, background: .noise(level: 128, amplitude: 24, seed: 11))
+            TestPattern.draw(c, into: a.planes, width: w, height: h)
+            let d = TestPattern.decode(a.planes, width: w, height: h)
+            XCTAssertEqual(d.frameNumber, 31, "\(w)×\(h)"); XCTAssertEqual(d.hostTimeMs, 41); XCTAssertEqual(d.inputID, 2); XCTAssertTrue(d.flash)
+            var sum = 0, n = 0
+            for y in (h / 4)..<(3 * h / 4) { for x in (w / 4)..<(3 * w / 4) { sum += Int(a.bgraPixel(x: x, y: y) & 0xFF); n += 1 } }
+            XCTAssertEqual(Double(sum) / Double(n), 128, accuracy: 0.5, "\(w)×\(h) 中心均值")
+        }
+    }
+
+    /// NV12 亮度 = limitedLuma(BGRA 灰值)，逐像素；色度平面保持中性 128；解码一致。顺带量一下 1080p 每帧成本（信息，给 W1-A2 参考）。
+    func testP2_noise_bgraAndNV12Agree() {
+        let w = 1920, h = 1080
+        let a = Image.bgra(width: w, height: h), b = Image.nv12(width: w, height: h)
+        let c = TestPattern.Content(frameNumber: 555, hostTimeMs: 666, inputID: 12, flash: false, background: .noise(level: 128, amplitude: 24, seed: 2024))
+        TestPattern.draw(c, into: a.planes, width: w, height: h)
+        TestPattern.draw(c, into: b.planes, width: w, height: h)
+        // ID 色块是彩色的（蓝通道 ≠ 灰值、色度 ≠ 128），两项逐像素检查都跳过它；其余全是灰（噪声 / 黑白块）
+        let id = TestPattern.Geometry(width: w, height: h).idRect
+        func inID(_ x: Int, _ y: Int) -> Bool { x >= id.x && x < id.x + id.width && y >= id.y && y < id.y + id.height }
+        var mismatch = 0, chromaOff = 0
+        for y in 0..<h {
+            for x in 0..<w where !inID(x, y) && b.lumaPixel(x: x, y: y) != TestPattern.limitedLuma(UInt8(a.bgraPixel(x: x, y: y) & 0xFF)) { mismatch += 1 }
+        }
+        for cy in 0..<(h / 2) { for cx in 0..<(w / 2) where !inID(2 * cx, 2 * cy) { let (cb, cr) = b.chromaPixel(cx: cx, cy: cy); if cb != 128 || cr != 128 { chromaOff += 1 } } }
+        XCTAssertEqual(mismatch, 0, "NV12 亮度与 BGRA 灰值逐像素对应")
+        XCTAssertEqual(chromaOff, 0, "灰噪声不动色度")
+        XCTAssertEqual(TestPattern.decode(a.planes, width: w, height: h), TestPattern.decode(b.planes, width: w, height: h))
+        let t0 = HostClock.now()
+        for i in 0..<30 { var ci = c; ci.frameNumber = UInt32(i); TestPattern.draw(ci, into: b.planes, width: w, height: h) }
+        let nv12Ms = (HostClock.now() - t0).milliseconds / 30
+        let t1 = HostClock.now()
+        for i in 0..<30 { var ci = c; ci.frameNumber = UInt32(i); TestPattern.draw(ci, into: a.planes, width: w, height: h) }
+        let bgraMs = (HostClock.now() - t1).milliseconds / 30
+        print(String(format: "噪声底纹 1080p 每帧：NV12 %.2f ms，BGRA %.2f ms（本测试的构建配置）", nv12Ms, bgraMs))
+    }
+
+    /// 高斯模糊 σ = 1.5 + 4:2:0 + ±10 噪声退化后，噪声底纹帧的帧号 / 时间戳 / ID / 闪光解码仍 100% 正确（W1-A2 prompt 的验收项）。
+    func testP2_noise_degradedDecodeIs100Percent() {
+        let width = 1920, height = 1080
+        let src = Image.bgra(width: width, height: height), dst = Image.nv12(width: width, height: height)
+        var rng = SystemRandomNumberGenerator()
+        var ok = 0
+        let frames = 20
+        for k in 0..<frames {
+            let level = UInt8.random(in: 0...255, using: &rng)
+            let c = Self.randomContent(&rng, background: .noise(level: level, amplitude: UInt8.random(in: 1...48, using: &rng), seed: UInt64(k)))
+            TestPattern.draw(c, into: src.planes, width: width, height: height)
+            Self.degrade(bgra: src, intoNV12: dst, sigma: 1.5, noise: 10, rng: &rng)
+            let d = TestPattern.decode(dst.planes, width: width, height: height)
+            if d.frameNumber == c.frameNumber && d.hostTimeMs == c.hostTimeMs && d.inputID == c.inputID && d.flash == c.flash { ok += 1 } else { XCTFail("退化后解码错误：期望 \(c)，得到 \(d)") }
+        }
+        XCTAssertEqual(ok, frames)
+    }
+
     // MARK: - 工具
 
     static func randomContent(_ rng: inout SystemRandomNumberGenerator, background: TestPattern.Background) -> TestPattern.Content {
@@ -373,5 +515,20 @@ final class Image {
     func fill(_ pixel: UInt32) {
         guard case .bgra(let base, let bpr) = planes else { fatalError() }
         for y in 0..<height { (base + y * bpr).assumingMemoryBound(to: UInt32.self).update(repeating: pixel, count: width) }
+    }
+    func chromaPixel(cx: Int, cy: Int) -> (UInt8, UInt8) {
+        guard case .nv12(_, _, let chroma?, let cbpr) = planes else { fatalError() }
+        return (chroma.load(fromByteOffset: cy * cbpr + cx * 2, as: UInt8.self), chroma.load(fromByteOffset: cy * cbpr + cx * 2 + 1, as: UInt8.self))
+    }
+    /// 两幅 BGRA 逐字节相同（行距一样）。
+    func bytesEqual(_ o: Image) -> Bool {
+        guard case .bgra(let a, let bpr) = planes, case .bgra(let b, let obpr) = o.planes, bpr == obpr, height == o.height else { return false }
+        return memcmp(a, b, bpr * height) == 0
+    }
+    /// 两幅 BGRA 不同的像素数（跳过 skipping 为真的像素）。
+    func differingPixels(_ o: Image, skipping: (Int, Int) -> Bool) -> Int {
+        var n = 0
+        for y in 0..<height { for x in 0..<width where !skipping(x, y) && bgraPixel(x: x, y: y) != o.bgraPixel(x: x, y: y) { n += 1 } }
+        return n
     }
 }

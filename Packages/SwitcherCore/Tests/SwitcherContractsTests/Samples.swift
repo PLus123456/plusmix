@@ -18,7 +18,7 @@ enum Samples {
             InputConfig(number: 5, name: "SDI", source: .decklink(deviceID: "DeckLink Mini Recorder#0"), settings: InputSettings()),
             InputConfig(number: 6, name: "远端", source: .ndi(sourceName: "STUDIO (Cam A)"), settings: InputSettings()),
             InputConfig(number: 7, name: "话筒", source: .audio(deviceUID: "AppleUSBAudioEngine:1"), settings: InputSettings()),
-            InputConfig(number: 8, name: "合成", source: .synthetic(settings: SyntheticSourceSettings(frameRate: .fps5994, width: 1280, height: 720, background: .gray(level: 192), patternID: 3, jitterMs: 2, dropEveryN: 20, clockDriftPpm: -100, audio: true, audioDriftPpm: 50)), settings: InputSettings()),
+            InputConfig(number: 8, name: "合成", source: .synthetic(settings: SyntheticSourceSettings(frameRate: .fps5994, width: 1280, height: 720, background: .noise(level: 192, amplitude: 24, seed: 7), patternID: 3, jitterMs: 2, dropEveryN: 20, clockDriftPpm: -100, audio: true, audioDriftPpm: 50)), settings: InputSettings()),
         ]
     }
 
