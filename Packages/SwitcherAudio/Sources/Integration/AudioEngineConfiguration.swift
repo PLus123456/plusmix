@@ -89,7 +89,7 @@ public struct AudioInputHints: Sendable {
     public var sameClockAsOutput: Bool = false
     /// 直接指定 targetFrames（覆盖上面的推算；0 = 混音器默认 2 块）。
     public var targetFramesOverride: Int? = nil
-    /// 就绪目标年龄（帧；W1-D2）：nil = min(混音器任何相位都能命中的最小值 = 目标 + P/2 + hf + chunk/2 + P, 对齐延迟)；
+    /// 就绪目标年龄（帧；W1-D2）：nil = min(混音器任何相位都能命中的最小值 = 目标 + P/2 + hf + chunk/2 + P（真设备再加输出提前量 buffer + 安全偏移）, 对齐延迟)；
     /// 0 = 混音器旧规则（年龄 = 安全下限 + 相位，随机）；显式值 = 想要的年龄（低于安全下限时按下限就绪，见 residualFrames）。
     public var targetAgeFrames: Int? = nil
     public init() {}

@@ -70,7 +70,7 @@ final class AFVTests: XCTestCase {
         XCTAssertTrue(onset.start <= tS && tS < onset.end, "音频电平开始变化的块 [\(onset.start.milliseconds - tS.milliseconds), \(onset.end.milliseconds - tS.milliseconds)) ms 应含 t_s")
         // 2. 曲线：逐块（块中心时刻）与 cos / sin 比，期望增益 ≥ −40 dB（0.01）的块误差 ≤ 0.5 dB（W1-D2 起淡变收帧数，
         //    500 ms = 24000 帧精确；W2-E 时只能判到 −20 dB，−20…−40 dB 的尾巴因整块量化有 0.5–0.9 dB）。
-        var maxErr = 0.0, tailErr = 0.0
+        var maxErr = 0.0, tailErr = 0.0, centerTailErr = 0.0
         var compared = 0, comparedTail = 0
         for b in blocks where b.start >= tS + rig.engine.blockDuration && b.end <= tS + D - rig.engine.blockDuration {
             let p = Double((b.start + (b.end - b.start) / 2 - tS).ticks) / Double(D.ticks)
@@ -81,12 +81,15 @@ final class AFVTests: XCTestCase {
                 XCTAssertEqual(err, 0, accuracy: 0.5, "p = \(p) \(name) 增益 \(dB(g)) dB 误差 \(err) dB")
                 if g >= 0.1 { maxErr = max(maxErr, abs(err)); compared += 1 } else { tailErr = max(tailErr, abs(err)); comparedTail += 1 }
             }
+            // 对照：W2-E 的块中心模型（cos / sin 取块中心）在同一段尾巴上的误差——那 0.5–0.9 dB 大半是模型自己的（块内变化 10%+），报告用
+            let gFromC = cos(p * Double.pi / 2)
+            if gFromC >= 0.01 && gFromC < 0.1 { centerTailErr = max(centerTailErr, abs(dB(b.rms1 / (baseRMS * gFromC)))) }
             // 等幅：不同频率的两路功率相加 → Master 功率恒定
             XCTAssertEqual(dB(b.rmsMaster / baseRMS), 0, accuracy: 0.5, "p = \(p) Master 电平 \(dB(b.rmsMaster / baseRMS)) dB")
         }
         XCTAssertGreaterThan(compared, 150)
         XCTAssertGreaterThanOrEqual(comparedTail, 4, "−20…−40 dB 之间应有块被判到")
-        print("AFV fade30：逐块最大误差 \(String(format: "%.3f", maxErr)) dB（\(compared) 块，≥ −20 dB）；−20…−40 dB 尾巴最大 \(String(format: "%.3f", tailErr)) dB（\(comparedTail) 块）")
+        print("AFV fade30：逐块最大误差 \(String(format: "%.3f", maxErr)) dB（\(compared) 块，≥ −20 dB）；−20…−40 dB 尾巴最大 \(String(format: "%.3f", tailErr)) dB（\(comparedTail) 块，块积分模型；按 W2-E 的块中心模型算是 \(String(format: "%.3f", centerTailErr)) dB）")
         // 3. 与视频对照：首个混合帧是第 s + 1 拍（progress 1/30），此时 to 增益 = sin(π/2 × 1/30)；含 t_{s+1} 的块电平与它一致
         let t1 = rig.clock.time(of: s + 1)
         let frameBlock = try XCTUnwrap(blocks.first { $0.start <= t1 && t1 < $0.end })

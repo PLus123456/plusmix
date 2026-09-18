@@ -208,7 +208,8 @@ final class IntegrationRealtimeTests: XCTestCase {
         }
         guard let inInfo = AudioHAL.device(named: inName), inInfo.inputChannels > 0 else { throw XCTSkip("找不到输入设备 \(inName)") }
         // 对齐延迟用默认（2048 帧）：W1-D2 起耳机总线不经对齐延迟线（monitorPoint 默认 .preDelayLine），监听延迟 = 环年龄 + 设备；
-        // 低延迟的部分只剩就绪目标 1 块、buffer 128（年龄 = 128 + 64 + 47 + 16 + 128 = 383 帧 = 8 ms）
+        // 低延迟的部分只剩就绪目标 1 块、buffer 128（年龄 = 128 + 64 + 47 + 16 + 128 + 输出提前量（buffer 128 + 安全偏移）≈ 559 帧 = 11.6 ms，
+        // 内置扬声器的安全偏移 48；再低用 hints.targetAgeFrames 指定）
         let sm = StateMachine(initialState: States.fourInputs(afv: false))
         sm.start()
         var cfg = AudioEngineConfiguration()

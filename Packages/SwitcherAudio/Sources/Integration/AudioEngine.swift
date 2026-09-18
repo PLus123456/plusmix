@@ -1,4 +1,5 @@
 import Foundation
+import CoreAudio
 import Synchronization
 import SwitcherContracts
 import SwitcherEngine
@@ -159,15 +160,15 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         } else {
             rec.afvGain = afvOn ? 0 : 1
         }
-        // 目标年龄：任何相位都能命中的最小值（目标 + P/2 + hf + chunk/2 + P），但不超过对齐延迟——超过了延迟线补不回来，不如压到对齐延迟
-        // 让年龄正好等于它（生产者块 > 混音块的源每块相位不同，混音器会等到能命中的那一块）；对齐延迟 0 = 旧规则（尽早就绪）
+        // 目标年龄：任何相位都能命中的最小值（目标 + P/2 + hf + chunk/2 + P，真设备再加输出提前量），但不超过对齐延迟——超过了延迟线补不回来，
+        // 不如压到对齐延迟让年龄正好等于它（生产者块 > 混音块的源每块相位不同，混音器会等到能命中的那一块）；对齐延迟 0 = 旧规则（尽早就绪）
         let targetFrames = hints.targetFrames(blockFrames: configuration.blockFrames)
         let targetAge: Int
         if let explicit = hints.targetAgeFrames {
             targetAge = max(0, explicit)
         } else {
             let deterministic = mixer.deterministicAgeFrames(targetFrames: targetFrames, producerBlockFrames: hints.producerBlockFrames ?? configuration.blockFrames,
-                                                             resampled: !hints.sameClockAsOutput)
+                                                             resampled: !hints.sameClockAsOutput) + outputLeadFrames
             targetAge = min(deterministic, max(0, configuration.alignmentFrames))
         }
         rec.targetAge = targetAge
@@ -177,6 +178,15 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
                      targetFrames: targetFrames, targetAgeFrames: targetAge)
         applySettings(rec)
         mixer.setAFVGain(slot: slot, rec.afvGain)
+    }
+
+    /// 真设备的混音块 host time 是 inOutputTime（首样本的呈现时刻），比回调进入早 buffer + 安全偏移（内置扬声器 256 + 48 = 304 帧，
+    /// W1-D 实测 6.23–6.35 ms）；源按采集时刻打戳、采完才交，所以相对混音时间线它的数据天然"老"这么多，目标年龄要把它加上才能任何相位都命中
+    /// （否则混音器等满上限后退回旧规则，年龄 = 下限 + 提前量 + 相位，本会话真设备实测 1142）。空设备 / 离线的时间线就是"现在"，提前量 0。
+    private var outputLeadFrames: Int {
+        guard case .device(let d) = output else { return 0 }
+        let buffer = d.isRunning ? d.actualBlockFrames : configuration.blockFrames
+        return buffer + AudioHAL.safetyOffset(d.info.id, scope: kAudioObjectPropertyScopeOutput)
     }
 
     /// 摘除一路输入：先把它淡出（AFV 增益 → 0，3 ms），`removalFadeBlocks` 块后由控制循环 detach；环对象等实时线程确认后才释放。
