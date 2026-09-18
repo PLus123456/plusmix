@@ -6,6 +6,7 @@
 #   --include-working-tree 把当前工作树里未提交、未跟踪的改动也算上（只在该分支已 checkout 时有意义）
 #
 # 规则来源：docs/OWNERSHIP.md 的表（第 3 列分支、第 4 列路径 token）。token 语义见该文件"表格格式"一节。
+# 路径含中文时 git 默认按 core.quotePath 把文件名转成带引号的八进制转义，前缀匹配会全部落空（G3 加 docs/plan/prompts/4x-*.md 时撞上），所以所有 git 调用都关掉 quotePath。
 # 所有分支另外允许：reports/<分支名>.md（/ 换 -）、reports/issues/、docs/contract-changes/。
 #
 # 合并提交（检查点会话 G2–G5 把功能分支合进来）：被合进来的内容不算本分支的改动。分支上只要有合并提交，就沿第一父链
@@ -74,7 +75,7 @@ mb=$(git merge-base "$base" "$branch") || { red "[check-ownership] 找不到 $ba
 # 没有合并提交：一次 diff（merge-base → 分支顶）。有合并提交：沿第一父链逐个提交结算（见文件头注释）。
 collect_committed() {
   if [ -z "$(git rev-list --merges --first-parent "$mb..$branch" | head -1)" ]; then
-    git diff --numstat --no-renames "$mb" "$branch"
+    git -c core.quotePath=false diff --numstat --no-renames "$mb" "$branch"
     return
   fi
   local c p1 p2 tree
@@ -85,9 +86,9 @@ collect_committed() {
       # 自动合并的树；有冲突时 merge-tree 退出 1 但仍写出带冲突标记的树，diff 出来的就是解决冲突的改动
       tree=$(git merge-tree --write-tree "$p1" "$p2" 2>/dev/null | head -1)
       [ -n "$tree" ] || tree=$p1
-      git diff --numstat --no-renames "$tree" "$c"
+      git -c core.quotePath=false diff --numstat --no-renames "$tree" "$c"
     else
-      git diff --numstat --no-renames "$p1" "$c"
+      git -c core.quotePath=false diff --numstat --no-renames "$p1" "$c"
     fi
   done
 }
@@ -98,12 +99,12 @@ fi
 changes=$(collect_committed)
 if [ "$include_wt" = 1 ]; then
   # 未提交的改动：工作树相对分支顶（只在该分支已 checkout 时有意义）；未跟踪文件按行数全算新增
-  changes+=$'\n'$(git diff --numstat --no-renames "$branch")
+  changes+=$'\n'$(git -c core.quotePath=false diff --numstat --no-renames "$branch")
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     n=$(wc -l < "$f" | tr -d ' ')
     changes+=$'\n'"$n	0	$f"
-  done < <(git ls-files --others --exclude-standard)
+  done < <(git -c core.quotePath=false ls-files --others --exclude-standard)
 fi
 # 同一路径多条记录（多个提交、已提交 + 未提交）按增 / 删分别相加；二进制的 "-" 算 0
 changes=$(printf '%s\n' "$changes" | sed '/^$/d' | awk -F'\t' '
