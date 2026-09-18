@@ -63,7 +63,8 @@ public enum Command: Hashable, Codable, Sendable {
 public struct IssuedCommand: Hashable, Codable, Sendable {
     /// 全局单调递增，从 1 起；乱序到达的排队等前一条。
     public var sequence: UInt64
-    /// 发出时刻（host time）。C1 命令延迟 = 生效拍点时刻 − issuedAt。
+    /// 命令进总线的时刻（服务端 host time；提案 003 §C）。`生效拍点时刻 − issuedAt` 是"服务端收到 → 生效"；
+    /// C1 的客户端口径（客户端发出 → 画面生效）由客户端自己记发送时刻（scripts/apitest），比它多一个单程网络延迟。
     public var issuedAt: HostTime
     /// 命令内容。
     public var command: Command
@@ -80,9 +81,22 @@ public struct CommandReceipt: Hashable, Codable, Sendable {
     public var sequence: UInt64
     /// 命令落在哪一拍（切换永远在拍点边界生效）。
     public var appliedTick: Tick
-    public init(sequence: UInt64, appliedTick: Tick) {
+    /// 状态是否真的变了（提案 003 §A）。false = reducer 按规则忽略了它（转场进行中再 fade、FTB 目标已相同、mute 已是该值……），状态原样；
+    /// 结构性非法的命令（引用不存在的输入 / 输出）到不了这里，在总线入口就被拒。
+    public var applied: Bool
+    public init(sequence: UInt64, appliedTick: Tick, applied: Bool = true) {
         self.sequence = sequence
         self.appliedTick = appliedTick
+        self.applied = applied
+    }
+
+    enum CodingKeys: String, CodingKey { case sequence, appliedTick, applied }
+    /// 老的 JSON 没有 applied 键：当 true。
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sequence = try c.decode(UInt64.self, forKey: .sequence)
+        appliedTick = try c.decode(Tick.self, forKey: .appliedTick)
+        applied = try c.decodeIfPresent(Bool.self, forKey: .applied) ?? true
     }
 }
 

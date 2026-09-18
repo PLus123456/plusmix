@@ -141,7 +141,7 @@ fi
 # ---- 5. 报告 ----
 step "生成 reports/G2-run-$label.md 并拼 reports/G2.md"
 python3 scripts/gate2-report.py --out-dir "$out_dir" --label "$label" --minutes "$minutes" --show "$show" --script "$script" \
-  --baseline "$baseline" --run-report "reports/G2-run-$label.md" --notes reports/G2-notes.md --report reports/G2.md "${waives[@]}"
+  --baseline "$baseline" --run-report "reports/G2-run-$label.md" --notes reports/G2-notes.md --report reports/G2.md ${waives[@]+"${waives[@]}"}
 rc=$?
 if [ "$rc" = 0 ]; then
   green "G2 通过标准全部满足：$out_dir → reports/G2-run-$label.md → reports/G2.md"

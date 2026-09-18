@@ -1,0 +1,268 @@
+{
+  "checkpoint" : "G3",
+  "commit" : "fc55f97",
+  "date" : "2026-09-15T15:25:48Z",
+  "durationSeconds" : 598.9586582183838,
+  "machine" : "m5max",
+  "notes" : {
+    "label" : "10min",
+    "macos" : "26.6.2",
+    "power" : "",
+    "show" : "scenarios/g3-show.json"
+  },
+  "scenario" : "scenarios/g3.json",
+  "summary" : {
+    "audioDropouts" : 0,
+    "audioUnderruns" : 0,
+    "cpuPct" : {
+      "avg" : 44.935122187748874,
+      "count" : 600,
+      "max" : 61.04467130092968,
+      "min" : 23.840288126146607,
+      "p99" : 57.90504189547736
+    },
+    "durationSeconds" : 598.9586582183838,
+    "encoders" : [
+      {
+        "bitrate" : {
+          "avg" : 101078.99465540217,
+          "count" : 600,
+          "max" : 174120.44993815006,
+          "min" : 24424,
+          "p99" : 171345.65656042055
+        },
+        "index" : 0,
+        "skipped" : 0
+      },
+      {
+        "bitrate" : {
+          "avg" : 101079.0817967226,
+          "count" : 600,
+          "max" : 172868.00466754058,
+          "min" : 24424,
+          "p99" : 170926.33488914717
+        },
+        "index" : 1,
+        "skipped" : 0
+      },
+      {
+        "bitrate" : {
+          "avg" : 101075.95240401952,
+          "count" : 600,
+          "max" : 172813.2095828467,
+          "min" : 24424,
+          "p99" : 171740.7844173883
+        },
+        "index" : 2,
+        "skipped" : 0
+      },
+      {
+        "bitrate" : {
+          "avg" : 101076.00630075607,
+          "count" : 600,
+          "max" : 175242.4808958874,
+          "min" : 24424,
+          "p99" : 171740.7844173883
+        },
+        "index" : 3,
+        "skipped" : 0
+      },
+      {
+        "bitrate" : {
+          "avg" : 101076.1706944259,
+          "count" : 600,
+          "max" : 175242.4808958874,
+          "min" : 24424,
+          "p99" : 171321.7099951694
+        },
+        "index" : 4,
+        "skipped" : 0
+      }
+    ],
+    "firstTick" : 10,
+    "firstTs" : 1789484547.360633,
+    "gpuPct" : {
+      "avg" : 20.843333333333334,
+      "count" : 600,
+      "max" : 40,
+      "min" : 11,
+      "p99" : 36
+    },
+    "jitterMs" : {
+      "avg" : 0.024800626666666645,
+      "count" : 600,
+      "max" : 0.053,
+      "min" : 0.010625,
+      "p99" : 0.037166
+    },
+    "lastTick" : 35949,
+    "lastTs" : 1789485146.319291,
+    "lineCount" : 600,
+    "missedRender" : 0,
+    "missedRenderRatio" : 0,
+    "perInput" : {
+      "1" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.5006780966244975,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 17970,
+        "dupRatio" : 0.5000139124627841,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 29.960548427149188,
+          "count" : 600,
+          "max" : 30.297330426472797,
+          "min" : 5.943578600919102,
+          "p99" : 30.283549935397968
+        },
+        "inputID" : 1
+      },
+      "2" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0013837086830469358,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 0,
+        "dupRatio" : 0,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.91944586024256,
+          "count" : 600,
+          "max" : 60.594660852945594,
+          "min" : 10.896560768351687,
+          "p99" : 60.567099870795936
+        },
+        "inputID" : 2
+      },
+      "3" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0023994298762535227,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 36,
+        "dupRatio" : 0.0010016973204596679,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.85850007798902,
+          "count" : 600,
+          "max" : 60.89803385456477,
+          "min" : 10.896560768351687,
+          "p99" : 60.80423068580476
+        },
+        "inputID" : 3
+      },
+      "4" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0023994298762535227,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 36,
+        "dupRatio" : 0.0010016973204596679,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.85850007798902,
+          "count" : 600,
+          "max" : 60.89803385456477,
+          "min" : 10.896560768351687,
+          "p99" : 60.80423068580476
+        },
+        "inputID" : 4
+      },
+      "5" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0013125466597145863,
+        "drop" : 3,
+        "dropRatio" : 8.347064178029155e-05,
+        "dup" : 0,
+        "dupRatio" : 0,
+        "excessDropRatio" : 8.347064178029155e-05,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.9237157575409,
+          "count" : 600,
+          "max" : 60.98566330731273,
+          "min" : 10.896560768351687,
+          "p99" : 60.91667111092064
+        },
+        "inputID" : 5
+      },
+      "6" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0015104650599225833,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 4,
+        "dupRatio" : 0.00011129970227329642,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.911840164313425,
+          "count" : 600,
+          "max" : 60.961127161887184,
+          "min" : 10.896560768351687,
+          "p99" : 60.85242526218604
+        },
+        "inputID" : 6
+      },
+      "7" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0013911081323124685,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 0,
+        "dupRatio" : 0,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.91900187499666,
+          "count" : 600,
+          "max" : 61.064392401787686,
+          "min" : 10.896560768351687,
+          "p99" : 60.84600387525605
+        },
+        "inputID" : 7
+      },
+      "8" : {
+        "designDropRatio" : 0,
+        "designDupRatio" : 0.0013837086830469358,
+        "drop" : 0,
+        "dropRatio" : 0,
+        "dup" : 0,
+        "dupRatio" : 0,
+        "excessDropRatio" : 0,
+        "excessDupRatio" : 0,
+        "fps" : {
+          "avg" : 59.91944586024256,
+          "count" : 600,
+          "max" : 60.594660852945594,
+          "min" : 10.896560768351687,
+          "p99" : 60.567099870795936
+        },
+        "inputID" : 8
+      }
+    },
+    "programFps" : 60.00247180147855,
+    "renderMs" : {
+      "avg" : 1.7773148952675737,
+      "count" : 600,
+      "max" : 5.3474997,
+      "min" : 1.2849288333333333,
+      "p99" : 2.039447583333333
+    },
+    "rssFitAfterWarmup" : false,
+    "rssMb" : {
+      "avg" : 835.171196492513,
+      "count" : 600,
+      "max" : 838.9698944091797,
+      "min" : 818.0011444091797,
+      "p99" : 838.9542694091797
+    },
+    "rssSlopeMbPerHour" : 68.56249580803035,
+    "tickSpan" : 35939
+  }
+}

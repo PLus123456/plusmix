@@ -11,9 +11,10 @@
 //   Slots/ArrivalPacing.swift     到达余量：参数、状态、ArrivalPacedFrameSlot 协议（V4 退回单的修法，规则见文件头）
 //   State/MixerReducer.swift      MixerReducing 的实现：reduce / advance 纯函数，全部 27 条命令
 //   State/StateThreadExecutor.swift 状态机 actor 的专用线程执行器；渲染线程用原子量 + 信号量唤醒它
-//   State/StateMachine.swift      持有 MixerState 的 actor：sequence 顺序、按拍准备快照、原子发布、转场事件
+//   State/StateMachine.swift      持有 MixerState 的 actor：sequence 顺序、按拍准备快照、原子发布（带 publishedAt）、快照观察者、回执 applied、转场事件
 //   Engine/Engine.swift           时钟 → 快照 → 挑帧 → Renderer → 完成回调 → FrameConsumer → 计数
 //   Engine/EngineCounters.swift   原子计数 + Stats 行的组装（铁律 4：统计只有这一份）
+//   Engine/StatsPublisher.swift   每秒一行的唯一采样线程，扇出给 StatsWriter / UI / API（提案 003 §D2）
 //   Engine/QueuedFrameConsumer.swift 消费者侧"自己的有界队列 + 自己的线程"的可复用实现
 //   Show/ShowStore.swift          节目文件读写与 schemaVersion 逐级迁移框架
 //

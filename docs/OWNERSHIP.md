@@ -25,17 +25,23 @@
 | W1-E | 编码录制 | `w1-outputs` | `Packages/SwitcherOutputs/` `Tests/Fixtures/` | pattern.mov 进 Tests/Fixtures/ |
 | G2 | M0 集成 | `g2-m0` | `Tools/switcher-headless/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `~Packages/*:50` | 各包只改"接口对不上"的胶水，每包 ≤ 50 行，超了写 issue 退回 |
 | W2-A | 输入一期 | `w2-inputs` | `Packages/SwitcherInputs/` `!Packages/SwitcherInputs/Sources/DeckLink/` `!Packages/SwitcherInputs/Sources/NDI/` `!Packages/SwitcherInputs/Tests/DeckLinkTests/` `!Packages/SwitcherInputs/Tests/NDITests/` | DeckLink、NDI 是 W3-A 的 |
-| W2-B | 显示与主界面 | `w2-app` | `App/` `Packages/SwitcherCore/Sources/SwitcherRender/MetalDisplayView*` | W1-C 的显示视图允许在此完善 |
-| W2-C | 控制一期 | `w2-control` | `Packages/SwitcherControl/` `!Packages/SwitcherControl/Sources/VMixCompat/` `!Packages/SwitcherControl/Tests/VMixCompatTests/` `Tools/switcher-headless/` | headless 只加 --api 参数 |
+| W2-B | 显示与主界面 | `w2-app` | `App/` `Packages/SwitcherCore/Sources/SwitcherRender/Display/MetalDisplayView*` | W1-C 的显示视图允许在此完善 |
+| W2-C | 控制一期 | `w2-control` | `Packages/SwitcherControl/` `!Packages/SwitcherControl/Sources/VMixCompat/` `!Packages/SwitcherControl/Tests/VMixCompatTests/` `Tools/switcher-headless/` `scripts/apitest/` `docs/api.md` | headless 只加 --api 参数；scripts/apitest/ 是 C 系列的客户端脚本，docs/api.md 由 switcher-apidoc 生成（prompt 32 测试段点名的位置，用户 2026-09-15 定） |
 | W2-D | 推流与 NDI 发送 | `w2-stream` | `Packages/SwitcherOutputs/Sources/Streaming/` `Packages/SwitcherOutputs/Sources/NDISend/` `Packages/SwitcherOutputs/Tests/StreamingTests/` `Packages/SwitcherOutputs/Tests/NDISendTests/` `Packages/SwitcherOutputs/Package.swift` `scripts/netem.sh` `scripts/mediamtx.yml` | Package.swift 只许加这两个 target 和它们的依赖 |
 | W2-E | 音频集成 | `w2-audio-integ` | `Packages/SwitcherCore/Sources/SwitcherEngine/Audio*` `Packages/SwitcherCore/Tests/SwitcherEngineTests/Audio*` `Packages/SwitcherAudio/Sources/Integration/` `Packages/SwitcherAudio/Tests/IntegrationTests/` `Packages/SwitcherAudio/Package.swift` | Package.swift 只许加 Integration target |
-| G3 | M1 M2 M3 M5 集成 | `g3` | `Tools/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `~Packages/*:50` `~App/:50` | 同 G2 规则，App 里只许接线胶水 |
+| G3 | M1 M2 M3 M5 集成 | `g3` | `Tools/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `docs/checklists/` `docs/OWNERSHIP.md` `docs/plan/prompts/` `~Packages/*:50` `~App/:50` | 同 G2 规则，App 里只许接线胶水；docs/ 三项是补充规则 6（用户 2026-09-18 批） |
+| P2 | 契约落地（提案 001 / 002 / 004 / 005，006 若批） | `p2-contracts` | `Packages/SwitcherCore/Sources/SwitcherContracts/` `Packages/SwitcherCore/Tests/SwitcherContractsTests/` `docs/CONTRACTS.md` `docs/contract-changes/` `Packages/SwitcherTestKit/Sources/SwitcherTestKit/Stats/` `Packages/SwitcherOutputs/Sources/SwitcherOutputs/Encoding/AudioBlockConsumer.swift` `Packages/SwitcherOutputs/Sources/SwitcherOutputs/Recording/` `Packages/SwitcherOutputs/Sources/Streaming/StreamOutput.swift` `Packages/SwitcherOutputs/Sources/NDISend/` `Packages/SwitcherAudio/Sources/Integration/` `Tools/switcher-headless/` `~Packages/*:50` `~App/:50` | 只做提案里写明的字段 / 协议迁移和各填数方的跟改（prompt 41），不做新功能 |
+| W1-B2 | 到达余量修正 + L1 统计 | `w1-core-2` | `Packages/SwitcherCore/Sources/SwitcherEngine/` `Packages/SwitcherCore/Tests/SwitcherEngineTests/` | prompt 42；裁定在 reports/issues/W2A-w1-core-arrival-pacing-vs-camera-latency.md 末尾 |
+| W2-B2 | App 接线 | `w2-app-2` | `App/` | prompt 43；docs/checklists/G3.md 末表的七个接缝 |
+| W1-A2 | 合成源噪声底纹 + frameprobe 补课 | `w1-testkit-2` | `Packages/SwitcherTestKit/` `Tools/frameprobe/` `Tests/Fixtures/` | prompt 44；提案 006 落地后 |
+| W1-E2 | 录制器收尾 / 编码器崩溃 | `w1-outputs-2` | `Packages/SwitcherOutputs/Sources/SwitcherOutputs/` `Packages/SwitcherOutputs/Tests/SwitcherOutputsTests/` | prompt 45；W2-E / W2-D / G2 退回的单子 |
+| W1-D2 | 混音器收口 / 就绪年龄 / tap 点 | `w1-audio-2` | `Packages/SwitcherAudio/Sources/SwitcherAudio/` `Packages/SwitcherAudio/Sources/CSwitcherAudioRT/` `Packages/SwitcherAudio/Tests/SwitcherAudioTests/` `Packages/SwitcherAudio/Sources/Integration/` `Packages/SwitcherAudio/Tests/IntegrationTests/` | prompt 46；W2-E 退回的单子（3-1…3-5）；Integration 只许做 W2-E 报告 §4 列的那几行跟改 |
 | W3-A | 输入二期 | `w3-inputs2` | `Packages/SwitcherInputs/Sources/DeckLink/` `Packages/SwitcherInputs/Sources/NDI/` `Packages/SwitcherInputs/Tests/DeckLinkTests/` `Packages/SwitcherInputs/Tests/NDITests/` `Packages/SwitcherInputs/Package.swift` | Package.swift 只许加这两个可选 target |
 | W3-B | 合成二期 | `w3-compositor2` | `Packages/SwitcherCore/Sources/SwitcherRender/` `Packages/SwitcherCore/Tests/SwitcherRenderTests/` `Tests/References/` | |
 | W3-C | 输出二期 | `w3-outputs2` | `Packages/SwitcherOutputs/Sources/External/` `Packages/SwitcherOutputs/Sources/VirtualCamera/` `Packages/SwitcherOutputs/Sources/ISO/` `Packages/SwitcherOutputs/Tests/ExternalTests/` `Packages/SwitcherOutputs/Tests/VirtualCameraTests/` `Packages/SwitcherOutputs/Tests/ISOTests/` `Packages/SwitcherOutputs/Package.swift` `CameraExtension/` `App/` `project.yml` | App 里只做对应窗口与设置入口；project.yml 只加扩展 target |
 | W3-D | 控制二期 | `w3-control2` | `Packages/SwitcherControl/Sources/VMixCompat/` `Packages/SwitcherControl/Sources/Tally/` `Packages/SwitcherControl/Tests/VMixCompatTests/` `Packages/SwitcherControl/Tests/TallyTests/` `Packages/SwitcherControl/Package.swift` `Tools/streamdeck-plugin/` `docs/integrations/` | |
 | W3-E | 界面二期 | `w3-app2` | `App/` | |
-| G4 | M4 M6 集成 | `g4` | `Tools/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `~Packages/*:50` `~App/:50` | 规则同 G2 / G3 |
+| G4 | M4 M6 集成 | `g4` | `Tools/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `docs/checklists/` `docs/OWNERSHIP.md` `docs/plan/prompts/` `~Packages/*:50` `~App/:50` | 规则同 G2 / G3 |
 | W4-A | 长稳与性能 | `w4-soak` | `scripts/soak/` `scripts/perf/` `baselines/` `reports/` `Tools/switcher-headless/` | headless 只加参数 |
 | W4-B | 发布工程 | `w4-release` | `scripts/release/` `.github/` `project.yml` `App/Resources/` `docs/release/` | |
 | W4-C | 文档样例 | `w4-docs` | `docs/` `!docs/spec/` `!docs/plan/` `Samples/` `README.md` | |
@@ -47,4 +53,5 @@
 2. **共享测试素材目录**在仓库根：`Tests/Fixtures/`（W1-A、W1-E 产出，W2-A 消费）和 `Tests/References/`（W1-C、W3-B 的参考图）。放包外是因为它们跨包共用，且不会被 SwiftPM 当成 target。
 3. **THIRD_PARTY/**：W1-D 内嵌 libsamplerate / libebur128 时放许可证的地方（它的 prompt 要求）；之后谁再内嵌第三方源码谁加目录。
 4. **挂进 make lint 的新检查**：把脚本放在 `scripts/` 下、名字以 `check-` 或 `lint-` 开头，Makefile 会自动带上（`scripts/check-rt-symbols.sh` 就是这么进来的），不用改 Makefile。
-5. 脚本只看**已提交**的改动（merge-base(main, 分支) → 分支顶）；加 `--include-working-tree` 可以把未提交的也算上，方便会话提交前自查。
+5. 脚本只看**已提交**的改动：功能分支 = merge-base(main, 分支) → 分支顶；检查点分支（有合并提交）= 沿第一父链逐提交结算，合并提交只算相对自动合并结果的手改（冲突解决与胶水）。加 `--include-working-tree` 可以把未提交的也算上，方便会话提交前自查。
+6. **检查点会话可以写 `docs/checklists/`（人工清单，prompt 要求）、改本文件（认领冲突解决、给续做会话加行）、加 `docs/plan/prompts/` 里的续做 prompt**：检查点是产生后续工作项的地方，把决定落成 prompt 和归属行才算持久化（用户 2026-09-18 批，G3 报告 §7 第 1 条）。续做会话的分支名带 `-2` 后缀（`w1-core-2` 之类），从 G3 合入后的 main 开。

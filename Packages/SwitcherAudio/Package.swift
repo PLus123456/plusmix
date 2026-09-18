@@ -10,7 +10,9 @@
 //                      源文件里用 [[clang::nonblocking]] + `#pragma clang diagnostic error "-Wfunction-effects"` 做编译期检查。
 //   CSwitcherAudioHost 非实时侧的 C：分配 / 释放环与混音上下文、命令入队、统计快照。允许 malloc，不允许被回调调用。
 //   SwitcherAudio      Swift：AudioRing 实现包装、AudioMixer 控制 API、AudioUnit 效果链搭建、CoreAudio 设备层、离线 / 空设备驱动。
-// W2-E 之后会加 Sources/Integration/（docs/OWNERSHIP.md），这里不预留。
+//   SwitcherAudioIntegration（Sources/Integration/，W2-E）：音频进引擎的胶水——状态机快照 / 转场事件 → 混音命令（AFV、FTB、监听、
+//                      每路参数）、输入环的槽位管理与对齐延迟、Master / ISO 块的 PTS（拍点同一 host 时基）与消费者泵、表与状态快照。
+//                      依赖 SwitcherEngine（层 1，允许）；非实时代码，不进 IOProc。
 //
 // 三个 C target 在 debug 配置下也用 -O2（unsafeFlags；SwiftPM 对本地路径依赖允许，W1-D 实测 TestKit 能解析）：
 // -O0 的 sinc 重采样 + K 加权滤波每块 2 ms（8 路），debug 下跑真设备会贴近 5.3 ms 预算，离线 10 分钟要 9 分钟；
@@ -22,6 +24,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "SwitcherAudio", targets: ["SwitcherAudio"]),
+        .library(name: "SwitcherAudioIntegration", targets: ["SwitcherAudioIntegration"]),
     ],
     dependencies: [
         .package(path: "../SwitcherCore"),
@@ -85,6 +88,22 @@ let package = Package(
         .testTarget(
             name: "SwitcherAudioTests",
             dependencies: ["SwitcherAudio"]
+        ),
+        // W2-E：音频集成（docs/OWNERSHIP.md 允许本会话加的唯一 target）。
+        .target(
+            name: "SwitcherAudioIntegration",
+            dependencies: [
+                .product(name: "SwitcherContracts", package: "SwitcherCore"),
+                .product(name: "SwitcherEngine", package: "SwitcherCore"),
+                "SwitcherAudio",
+                "CLibSamplerate",
+            ],
+            path: "Sources/Integration"
+        ),
+        .testTarget(
+            name: "IntegrationTests",
+            dependencies: ["SwitcherAudioIntegration", "SwitcherAudio"],
+            path: "Tests/IntegrationTests"
         ),
     ],
     swiftLanguageModes: [.v6],

@@ -11,7 +11,9 @@ import SwitcherContracts
 //     逐拍 advance → 应用该拍的排程命令 → 发布快照 → preparedTick = n。命令应用在"渲染线程还没消费的最早一拍"
 //     （max(currentTick, renderedTick + 1)），所以回执里的 appliedTick 就是画面上生效的拍（拍点边界的微小竞争窗口
 //     除外，见报告）。
-//   - 发布：`publisher`（HazardPublisher）原子指针交换；渲染线程 / 音频线程借用指针，不进 actor。
+//   - 发布：`publisher`（HazardPublisher）原子指针交换；渲染线程 / 音频线程借用指针，不进 actor。快照带 publishedAt（提案 003 §B），
+//     发布后同步通知 SnapshotObserver（API 推送 / App 主线程分发挂这里，提案 003 §D1）。
+//   - 回执：applied = 状态是否真的变了（提案 003 §A）；结构性非法的命令到不了这里（总线入口拒绝）。
 //   - 事件：转场开始 / 完成 / 瞬时切换随每次状态变化发给 TransitionEventSink（AFV，W2-E）。
 
 /// 状态机对一次 `submit` 的答复。
@@ -39,6 +41,12 @@ public enum TransitionEvent: Sendable, Hashable {
 /// 转场事件的接收方。在状态机线程上被同步调用，必须快速返回。
 public protocol TransitionEventSink: AnyObject, Sendable {
     func stateMachine(_ machine: StateMachine, didEmit event: TransitionEvent, afv: Bool)
+}
+
+/// 快照发布观察者（提案 003 §D1）：每次 publish 之后在状态机线程上同步调，参数就是刚发布的快照（此刻 `publisher.latest` 已经是它）。
+/// API 推送、App 主线程分发、外部 tally 都挂这里。不是实时线程，但要快（放信箱 / 发信号，别在里面编码或等锁）。
+public protocol SnapshotObserver: AnyObject, Sendable {
+    func stateMachine(_ machine: StateMachine, didPublish snapshot: MixerSnapshot)
 }
 
 /// 每拍观察者（场景执行器 / 录制脚本这类"按拍发命令"的东西挂这里）。
@@ -77,6 +85,7 @@ public actor StateMachine {
     private var applied: [UInt64] = []
     private var sinks: [any TransitionEventSink] = []
     private var tickObservers: [any TickObserver] = []
+    private var snapshotObservers: [any SnapshotObserver] = []
     private nonisolated let preparedTickValue: Atomic<Int64>
     private nonisolated let renderedTickValue = Atomic<Int64>(Int64.min)
 
@@ -136,6 +145,8 @@ public actor StateMachine {
     public func removeTransitionSink(_ sink: any TransitionEventSink) { sinks.removeAll { $0 === sink } }
     public func addTickObserver(_ observer: any TickObserver) { tickObservers.append(observer) }
     public func removeTickObserver(_ observer: any TickObserver) { tickObservers.removeAll { $0 === observer } }
+    public func addSnapshotObserver(_ observer: any SnapshotObserver) { snapshotObservers.append(observer) }
+    public func removeSnapshotObserver(_ observer: any SnapshotObserver) { snapshotObservers.removeAll { $0 === observer } }
 
     // MARK: 命令
 
@@ -176,17 +187,19 @@ public actor StateMachine {
         if target > currentTick { prepare(upTo: target) }
         let before = current
         current = reducer.reduce(current, command, at: target)
+        // applied = 状态真的变了；reducer 按规则忽略（转场进行中再 fade、目标已相同……）就是 false（提案 003 §A）
+        let changed = current != before
         if let sequence {
             lastSequence = sequence
-            let receipt = CommandReceipt(sequence: sequence, appliedTick: target)
+            let receipt = CommandReceipt(sequence: sequence, appliedTick: target, applied: changed)
             receipts[sequence] = receipt
             applied.append(sequence)
             trimHistory()
         }
         emitEvents(from: before, to: current, tick: target)
-        // 每条命令都发布一个新快照（即使被拒、状态没变）：快照的 sequence 就是"已处理到哪条命令"，API / WS 靠它确认
+        // 每条命令都发布一个新快照（即使被忽略、状态没变）：快照的 sequence 就是"已处理到哪条命令"，API / WS 靠它确认
         publish()
-        return CommandReceipt(sequence: sequence ?? lastSequence, appliedTick: target)
+        return CommandReceipt(sequence: sequence ?? lastSequence, appliedTick: target, applied: changed)
     }
 
     private func trimHistory() {
@@ -224,8 +237,10 @@ public actor StateMachine {
 
     private func publish() {
         publishedState = current
-        publisher.publish(MixerSnapshot(state: current, sequence: lastSequence, tick: currentTick))
+        let snapshot = MixerSnapshot(state: current, sequence: lastSequence, tick: currentTick, publishedAt: HostClock.now())
+        publisher.publish(snapshot)
         preparedTickValue.store(currentTick.rawValue, ordering: .releasing)
+        for observer in snapshotObservers { observer.stateMachine(self, didPublish: snapshot) }
     }
 
     // MARK: 事件

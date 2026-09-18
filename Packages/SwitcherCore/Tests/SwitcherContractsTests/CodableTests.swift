@@ -109,7 +109,14 @@ final class CodableTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(IssuedCommand.self, from: try sortedEncoder.encode(issued)), issued)
         XCTAssertEqual(String(data: try sortedEncoder.encode(issued), encoding: .utf8), #"{"command":{"tbar":{"progress":0.25}},"issuedAt":99,"sequence":7}"#)
         let receipt = CommandReceipt(sequence: 7, appliedTick: Tick(1234))
-        XCTAssertEqual(String(data: try sortedEncoder.encode(receipt), encoding: .utf8), #"{"appliedTick":1234,"sequence":7}"#)
+        XCTAssertEqual(String(data: try sortedEncoder.encode(receipt), encoding: .utf8), #"{"applied":true,"appliedTick":1234,"sequence":7}"#)
+        let ignored = CommandReceipt(sequence: 8, appliedTick: Tick(1235), applied: false)
+        XCTAssertEqual(String(data: try sortedEncoder.encode(ignored), encoding: .utf8), #"{"applied":false,"appliedTick":1235,"sequence":8}"#)
+        XCTAssertEqual(try JSONDecoder().decode(CommandReceipt.self, from: try sortedEncoder.encode(ignored)), ignored)
+        // 提案 003 之前的回执 JSON 没有 applied：当 true
+        let old = try JSONDecoder().decode(CommandReceipt.self, from: Data(#"{"appliedTick":1234,"sequence":7}"#.utf8))
+        XCTAssertEqual(old, receipt)
+        XCTAssertTrue(old.applied)
     }
 
     /// 命令 JSON 形态快照（HTTP API 的 wire format，改了 W2-C 的客户端就断）。

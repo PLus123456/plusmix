@@ -1,7 +1,7 @@
 # 001 Stats.encoder 的录制字段 + AudioBlockConsumer 协议
 
 提出会话 / 分支：W1-E / w1-outputs（worktree 分支 claude/w1-outputs-6d38c6）
-状态：待批
+状态：**已批**（用户 2026-09-18，按 G3 报告 §7 第 2 条：A、B 都批）。由契约会话 P2（docs/plan/prompts/41）落地。
 
 ## 改什么
 

@@ -1,0 +1,5 @@
+// NDI SDK 的 Clang 模块（只有 Package.swift 探测到 SDK 时才被挂上）。头文件搜索路径由 SwitcherNDISend 的 -Xcc -I 给。
+module NDI [system] {
+    header "shim.h"
+    export *
+}
