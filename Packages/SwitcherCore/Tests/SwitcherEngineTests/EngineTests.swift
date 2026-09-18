@@ -261,6 +261,137 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(engine.counters.snapshotStale, 0)
     }
 
+    // MARK: L1 统计（提案 005 引擎侧）
+
+    /// 生产者开关（Atomic 不可拷贝，装进类里给闭包捕获）。
+    final class RunFlag: @unchecked Sendable {
+        let value = Atomic<Bool>(true)
+        func stop() { value.store(false, ordering: .releasing) }
+    }
+
+    /// 起一个真线程生产者：帧 k 的 pts = 输入时钟第 k 拍，pts + delay 到达，ingress = HostClock.now()。
+    func startProducer(slot: any FrameSlot & Sendable, input: Int, spec: TickClockSpec, delay: HostDuration, running: RunFlag) throws -> NativeThread {
+        let period = UInt32(clamping: spec.duration(ofTicks: 1).ticks)
+        let config = NativeThreadConfig(name: "producer-l1-\(input)", qos: QOS_CLASS_USER_INTERACTIVE,
+                                        timeConstraint: .init(period: period, computation: period / 10, constraint: period / 2))
+        let t = NativeThread(config: config) {
+            var k: Int64 = 0
+            while running.value.load(ordering: .acquiring) {
+                let pts = spec.time(of: Tick(k))
+                mach_wait_until((pts + delay).ticks)
+                slot.push(TestFrames.frame(input: input, sequence: UInt64(k), pts: pts, ingress: HostClock.now()))
+                k += 1
+            }
+        }
+        try t.start()
+        return t
+    }
+
+    /// 提案 005：per_input[n].latency_ms / latency_max_ms 由引擎算（GPU 完成回调取 now，减该拍所用新帧的 ingressTime）。
+    /// 与 W2-A 的参考实现（ReferenceLatencySlot + ReferenceLatencyConsumer，同一运行内、同一批帧）比：平均差 ≤ 0.2 ms；
+    /// 30 进 60 只算新帧（样本数 ≈ 帧数，不是拍数）；引擎起来（t0）之前进槽的帧不算。
+    func testL1_stats_perInputLatency_matchesW2AReference_within0_2ms() async throws {
+        let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 2))
+        let engine = makeEngine(renderer: renderer)
+        let t0 = HostClock.now() + HostDuration(milliseconds: 50)
+        let tickSpec = TickClockSpec(t0: t0, frameRate: .fps60)
+        // 输入 1：30 fps，d ≈ 1 ms；输入 2：60 fps，d ≈ 3 ms（两路都相位提前 8 ms）
+        let slot1 = ReferenceLatencySlot(inner: LockFreeFrameSlot(capacity: 3), spec: tickSpec)
+        let slot2 = ReferenceLatencySlot(inner: LockFreeFrameSlot(capacity: 3), spec: tickSpec)
+        engine.registerInput(number: 1, slot: slot1)
+        engine.registerInput(number: 2, slot: slot2)
+        let reference = ReferenceLatencyConsumer(slots: [(1, slot1), (2, slot2)], t0: t0)
+        engine.addConsumer(reference)                       // 第一个消费者：consume 入口 = 编码器入口
+        engine.addConsumer(CountingConsumer(name: "b"))
+        let running = RunFlag()
+        let p1 = try startProducer(slot: slot1, input: 1, spec: TickClockSpec(t0: t0 - HostDuration(milliseconds: 8), frameRate: .fps30),
+                                   delay: HostDuration(milliseconds: 1), running: running)
+        let p2 = try startProducer(slot: slot2, input: 2, spec: TickClockSpec(t0: t0 - HostDuration(milliseconds: 8), frameRate: .fps60),
+                                   delay: HostDuration(milliseconds: 3), running: running)
+        try await engine.start(t0: t0, lastTick: Tick(599))
+        engine.clock!.join()
+        running.stop()
+        p1.join(); p2.join()
+        renderer.waitForCompletion()
+        let stats = engine.makeStats()                      // 第一行：窗口 = 自启动以来
+        await engine.stop()
+        for number in [1, 2] {
+            let ref = reference.stats(forInput: number)!
+            let mine = stats.perInput[number]!
+            print("L1 输入 \(number)：引擎 avg \(String(format: "%.3f", mine.latencyMs)) / max \(String(format: "%.3f", mine.latencyMaxMs)) ms；参考 avg \(String(format: "%.3f", ref.meanMs)) / max \(String(format: "%.3f", ref.maxMs)) ms，样本 \(ref.samples)，重复拍 \(ref.reusedTicks)")
+            XCTAssertGreaterThan(ref.samples, 200, "输入 \(number)")
+            XCTAssertEqual(mine.latencyMs, ref.meanMs, accuracy: 0.2, "输入 \(number)：窗口平均与 W2-A 参考实现差 ≤ 0.2 ms")
+            XCTAssertEqual(mine.latencyMaxMs, ref.maxMs, accuracy: 1.0, "输入 \(number)：最大值同一批样本（参考的 now 晚几微秒，允许 1 ms）")
+            XCTAssertGreaterThan(mine.latencyMs, 2, "输入 \(number)：≥ 假 GPU 2 ms")
+            XCTAssertLessThan(mine.latencyMs, 30, "输入 \(number)")
+        }
+        // 30 进 60：只算新帧 → 样本 ≈ 300（不是 600），重复拍 ≈ 300
+        let r1 = reference.stats(forInput: 1)!
+        XCTAssertEqual(r1.samples, 300, accuracy: 3)
+        XCTAssertEqual(r1.reusedTicks, 300, accuracy: 3)
+        XCTAssertEqual(reference.stats(forInput: 2)!.samples, 600, accuracy: 3)
+        XCTAssertEqual(engine.counters.slowConsumeCalls, 0)
+    }
+
+    /// 窗口语义：每行只算上一行以来的样本；没有样本的窗口 latency_ms / latency_max_ms = 0；最大值读后清零。
+    func testL1_stats_windowResetsPerRow_zeroWhenNoSamples() async throws {
+        let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 1))
+        let engine = makeEngine(renderer: renderer)
+        let slot = LockFreeFrameSlot(capacity: 3)
+        engine.registerInput(number: 3, slot: slot)
+        let t0 = HostClock.now() + HostDuration(milliseconds: 50)
+        let running = RunFlag()
+        let producer = try startProducer(slot: slot, input: 3, spec: TickClockSpec(t0: t0 - HostDuration(milliseconds: 8), frameRate: .fps30),
+                                         delay: HostDuration(milliseconds: 1), running: running)
+        try await engine.start(t0: t0, lastTick: Tick(239))
+        engine.clock!.join()
+        running.stop()
+        producer.join()
+        renderer.waitForCompletion()
+        let row1 = engine.makeStats()
+        XCTAssertGreaterThan(row1.perInput[3]!.latencyMs, 0)
+        XCTAssertGreaterThanOrEqual(row1.perInput[3]!.latencyMaxMs, row1.perInput[3]!.latencyMs)
+        let row2 = engine.makeStats()                        // 第二行：没有新完成的帧
+        XCTAssertEqual(row2.perInput[3]!.latencyMs, 0, "窗口内没有样本写 0")
+        XCTAssertEqual(row2.perInput[3]!.latencyMaxMs, 0)
+        await engine.stop()
+        let line = try row1.jsonLine()
+        XCTAssertTrue(line.contains("\"latency_ms\""), "字段进 stats.jsonl")
+        XCTAssertEqual(try Stats.parse(line: line), row1)
+    }
+
+    /// 可选第 6 条：组装方可按输入给 PacingOptions（例如自由跑的源把余量关掉）；不给的仍用引擎默认。
+    func testW1B_engine_registerInput_perInputPacingOptions() async throws {
+        let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 1))
+        var options = EngineOptions()
+        options.pacing.initialFloor = HostDuration(milliseconds: 6)
+        let engine = Engine(stateMachine: StateMachine(initialState: ReducerTests.baseState()), renderer: renderer, maxInputs: 8, options: options)
+        let a = LockFreeFrameSlot(capacity: 3), b = LockFreeFrameSlot(capacity: 3), c = LockFreeFrameSlot(capacity: 3)
+        var custom = PacingOptions()
+        custom.initialFloor = HostDuration(milliseconds: 12)
+        var off = PacingOptions()
+        off.enabled = false
+        engine.registerInput(number: 1, slot: a)                       // 引擎默认：下限 6 ms
+        engine.registerInput(number: 2, slot: b, pacing: custom)       // 这一路：下限 12 ms（maxRaise / programFrame 仍由引擎按节目帧率填）
+        engine.registerInput(number: 3, slot: c, pacing: off)          // 这一路：关掉
+        let t0 = HostClock.now() + HostDuration(milliseconds: 30)
+        // 相位提前 20 ms（> 12 ms 的下限）：第 0 拍上第一帧已合格，不触发"起流出画"的降余量
+        let spec = TickClockSpec(t0: t0 - HostDuration(milliseconds: 20), frameRate: .fps60)
+        let running = RunFlag()
+        let producers = try [(a, 1), (b, 2), (c, 3)].map { try startProducer(slot: $0.0, input: $0.1, spec: spec, delay: HostDuration(milliseconds: 1), running: running) }
+        try await engine.start(t0: t0, lastTick: Tick(59))          // 1 s：热身（2 s）未结束，初值还在
+        engine.clock!.join()
+        running.stop()
+        producers.forEach { $0.join() }
+        renderer.waitForCompletion()
+        await engine.stop()
+        // 三路 d ≈ 1 ms（> 0）：初值 = max(下限, d₀ + 1 ms) = 下限；上限 ≈ 1 + 16.7 + 1 ms 不压它
+        XCTAssertEqual(engine.pacingStats(forInput: 1)!.margin.milliseconds, 6, accuracy: 0.5)
+        XCTAssertEqual(engine.pacingStats(forInput: 2)!.margin.milliseconds, 12, accuracy: 0.5)
+        XCTAssertFalse(engine.pacingStats(forInput: 3)!.enabled)
+        XCTAssertEqual(c.stats.reused, 0)
+    }
+
     /// 动态增删输入：渲染线程读的输入表是不可变对象，换表走原子指针。
     func testW1B_engine_registerInputWhileRunning() async throws {
         let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 1))
