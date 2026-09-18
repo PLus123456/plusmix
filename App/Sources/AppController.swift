@@ -21,12 +21,25 @@ final class AppController {
     }
     /// 快捷键表：用户表 ~/Library/Application Support/Switcher/hotkeys.json，没有就默认表；测试宿主固定默认表。
     let hotkeyTable: HotkeyTable
+    /// 用户表存在但读不出来（JSON 错 / 冲突）的原因：退回默认表并在状态行提示。
+    private(set) var hotkeyTableError: String?
     private var replacing = false
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost
         defaults = isTestHost ? UserDefaults(suiteName: "com.example.switcher.tests") ?? .standard : .standard
-        hotkeyTable = isTestHost ? .default : HotkeyTable.loadUserTableOrDefault()
+        if isTestHost {
+            hotkeyTable = .default
+        } else if FileManager.default.fileExists(atPath: HotkeyTable.defaultFileURL.path) {
+            do {
+                hotkeyTable = try HotkeyTable.load(from: HotkeyTable.defaultFileURL)
+            } catch {
+                hotkeyTable = .default
+                hotkeyTableError = "快捷键表 \(HotkeyTable.defaultFileURL.path) 读不出来，用默认表：\(error)"
+            }
+        } else {
+            hotkeyTable = .default
+        }
         if isTestHost {
             let recordDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/records", isDirectory: true).path
             documents = ShowDocuments(defaults: defaults, recordDirectory: recordDirectory)
@@ -85,6 +98,7 @@ final class AppController {
             session = s
             windowController.bind(session: s)
             try await s.start()
+            if let hotkeyTableError { windowController.bottomBar.showNotice(hotkeyTableError) }
         } catch {
             lastError = error
             session = nil

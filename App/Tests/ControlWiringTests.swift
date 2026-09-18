@@ -83,3 +83,45 @@ final class ControlWiringTests: XCTestCase {
         XCTAssertEqual(session.state.preview, 0, "被拒的命令没进状态机")
     }
 }
+
+/// 启动参数 / UserDefaults → AppSettings 的纯逻辑。
+final class AppSettingsTests: XCTestCase {
+    func testSettings_argumentsOverrideDefaults() throws {
+        let suite = "com.example.switcher.tests.settings-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let empty = AppSettings.load(arguments: [], defaults: defaults)
+        XCTAssertEqual(empty, AppSettings())
+        XCTAssertEqual(empty.apiConfiguration?.port, APIServerConfiguration.defaultPort)
+        XCTAssertEqual(empty.apiConfiguration?.host, "127.0.0.1")
+        XCTAssertNil(empty.apiConfiguration?.token)
+
+        defaults.set("MacBook Pro扬声器", forKey: AppSettings.Keys.audioDevice)
+        defaults.set(false, forKey: AppSettings.Keys.apiEnabled)
+        defaults.set("0.0.0.0:9000", forKey: AppSettings.Keys.apiListen)
+        defaults.set("secret", forKey: AppSettings.Keys.apiToken)
+        let fromDefaults = AppSettings.load(arguments: [], defaults: defaults)
+        XCTAssertEqual(fromDefaults.audioDevice, .named("MacBook Pro扬声器"))
+        XCTAssertFalse(fromDefaults.apiEnabled)
+        XCTAssertNil(fromDefaults.apiConfiguration, "apiEnabled = false → 不起 API")
+        XCTAssertEqual(fromDefaults.apiHost, "0.0.0.0")
+        XCTAssertEqual(fromDefaults.apiPort, 9000)
+        XCTAssertEqual(fromDefaults.apiToken, "secret")
+
+        let args = ["Switcher", "--show", "/tmp/a.switcher.json", "--stats", "/tmp/s.jsonl", "--audio-device", "null",
+                    "--api-listen", ":8766", "--api-token", ""]
+        let fromArgs = AppSettings.load(arguments: args, defaults: defaults)
+        XCTAssertEqual(fromArgs.showURL, URL(fileURLWithPath: "/tmp/a.switcher.json"))
+        XCTAssertEqual(fromArgs.statsURL, URL(fileURLWithPath: "/tmp/s.jsonl"))
+        XCTAssertEqual(fromArgs.audioDevice, .null)
+        XCTAssertTrue(fromArgs.apiEnabled, "--api-listen 打开 API（覆盖 UserDefaults 的关）")
+        XCTAssertEqual(fromArgs.apiHost, "127.0.0.1")
+        XCTAssertEqual(fromArgs.apiPort, 8766)
+        XCTAssertNil(fromArgs.apiToken, "--api-token 空串 = 关鉴权")
+        XCTAssertFalse(AppSettings.load(arguments: ["Switcher", "--no-api"], defaults: defaults).apiEnabled)
+        XCTAssertEqual(AppSettings.AudioDevice(spec: "Default"), .systemDefault)
+        XCTAssertEqual(AppSettings.AudioDevice(spec: "none"), .null)
+        XCTAssertEqual(AppSettings.AudioDevice(spec: " 外置声卡 "), .named("外置声卡"))
+        XCTAssertEqual(AppSettings.AudioDevice.named("x").spec, "x")
+    }
+}

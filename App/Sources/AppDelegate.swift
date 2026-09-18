@@ -94,8 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transition.addItem(withTitle: "FTB", action: #selector(ftb), keyEquivalent: "")
         transition.addItem(.separator())
         // 快捷键表（用户表 hotkeys.json 或默认表）：只列出来看，改表编辑器是 W3-E 的
-        let table = HotkeyTable.loadUserTableOrDefault()
-        let header = transition.addItem(withTitle: "快捷键（\(Self.hotkeyTableSource)）", action: nil, keyEquivalent: "")
+        let table = controller.hotkeyTable
+        let header = transition.addItem(withTitle: "快捷键（\(table == .default ? "默认表" : HotkeyTable.defaultFileURL.path)）", action: nil, keyEquivalent: "")
         header.isEnabled = false
         for b in table.bindings.prefix(40) {
             let item = transition.addItem(withTitle: "\(b.key)：\(b.note ?? "\(b.action)")", action: nil, keyEquivalent: "")
@@ -112,11 +112,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.mainMenu = main
         rebuildRecentMenu()
-    }
-
-    /// 菜单头上说明快捷键表从哪来。
-    static var hotkeyTableSource: String {
-        FileManager.default.fileExists(atPath: HotkeyTable.defaultFileURL.path) ? HotkeyTable.defaultFileURL.path : "默认表"
     }
 
     private func submenu(_ menu: NSMenu, title: String) -> NSMenuItem {

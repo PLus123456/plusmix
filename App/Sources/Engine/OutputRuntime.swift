@@ -199,7 +199,11 @@ final class OutputRuntime {
     private func startRecording(_ output: OutputState) {
         guard let clock else { return }   // 引擎还没起：等 start 后的 reconcile
         let settings = output.settings
-        let record = settings.record ?? RecordSettings(directory: ShowDocuments.defaultRecordDirectory)
+        var record = settings.record ?? RecordSettings(directory: ShowDocuments.defaultRecordDirectory)
+        // 相对目录（headless 的场景文件写 "."，那是相对仓库根）在 App 里没有可靠的 cwd（Finder 起的是 /），一律挂到默认录制目录下
+        if !record.directory.hasPrefix("/") {
+            record.directory = (ShowDocuments.defaultRecordDirectory as NSString).appendingPathComponent(record.directory)
+        }
         let url = record.outputURL(showName: showName, outputName: output.name)
         let cfg = Recorder.Configuration(url: url, format: format, video: settings.video ?? VideoEncodeSettings(),
                                          audio: settings.audio ?? AudioEncodeSettings(), audioChannels: 2,
