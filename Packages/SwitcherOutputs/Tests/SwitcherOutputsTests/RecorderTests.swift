@@ -198,11 +198,11 @@ final class RecorderTests: XCTestCase {
         try recorder.start(at: RecordingStart(clock: scene.clock, tick: .zero))
         pump.start()
         defer { pump.stop() }
-        let announced = LockedArray<Bool>()
+        let announced = LockedArray<Tick?>()
         let report = try scene.feeder.feed(consumers: [recorder], clock: scene.clock, ticks: Tick.zero..<(boundary + extraTicks), pacing: .realTime) { tick, _ in
             if tick == announceAt { announced.append(recorder.setStopTick(boundary)) }
         }
-        XCTAssertEqual(announced.values, [true])
+        XCTAssertEqual(announced.values, [boundary], "预告的边界原样生效")
         XCTAssertEqual(report.framesFed, seconds * fps + extraTicks)
         let stopCalledAt = HostClock.now()
         let outcome = StopOutcome()
