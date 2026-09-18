@@ -1,5 +1,6 @@
 import CoreVideo
 import Darwin
+import Foundation
 import SwitcherContracts
 import Synchronization
 
@@ -52,7 +53,7 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
 
     /// 噪声底纹在哪画（只对 `.noise` 底色有意义）。
     public enum NoiseBackend: Hashable, Sendable {
-        /// 有 Metal 就 GPU，没有就 CPU。
+        /// 有 Metal 就 GPU，没有就 CPU；环境变量 `SW_SYNTHETIC_NOISE=cpu|gpu` 可以改（组装方不用加参数就能做 A/B，gate 用）。
         case auto
         /// 契约的 CPU 参考实现（`TestPattern.draw`）。
         case cpu
@@ -154,13 +155,24 @@ public final class SyntheticVideoInput: Input, @unchecked Sendable {
         pool = try NV12PixelBufferPool(width: settings.width, height: settings.height, maximumBuffers: poolBuffers)
         timelineBox = Mutex(timeline)
         self.seed = seed
-        if case .noise = settings.background, noise != .cpu {
+        var backend = noise
+        if backend == .auto, let env = ProcessInfo.processInfo.environment["SW_SYNTHETIC_NOISE"] {
+            if env == "cpu" { backend = .cpu } else if env == "gpu" { backend = .gpu }
+        }
+        if case .noise = settings.background, backend != .cpu {
             let renderer: NoisePatternRenderer?
-            switch noise {
+            switch backend {
             case .gpu: renderer = try NoisePatternRenderer()
             default: renderer = try? NoisePatternRenderer()
             }
-            if let renderer { try pool.forEachBuffer { try renderer.prepare($0) } }
+            if let renderer {
+                try pool.forEachBuffer { try renderer.prepare($0) }
+                // 预热：第一次真正派发（管线定型、纹理首次写入、队列首个命令缓冲）要几毫秒，8 路同时起时 30 fps 那路的第 0 帧会赶不上第 0 拍
+                // （90 s 实跑：录制文件第 0 帧黑场）；在这里画一帧丢掉，start 之后每帧都是稳态成本。
+                if let pb = pool.take() {
+                    renderer.draw(TestPattern.Content(frameNumber: 0, hostTimeMs: 0, inputID: patternID, flash: false, background: settings.background), into: pb)
+                }
+            }
             noiseRenderer = renderer
         } else {
             noiseRenderer = nil
