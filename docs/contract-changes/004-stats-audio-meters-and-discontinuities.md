@@ -2,6 +2,8 @@
 
 提出会话 / 分支：W2-E / w2-audio-integ（worktree 分支 claude/w2-audio-integ-00e60c）
 状态：**已批**（用户 2026-09-18，按 G3 报告 §7 第 2 条）。由契约会话 P2（docs/plan/prompts/41）落地。
+落地：**已落地**（P2，2026-09-18，分支 p2-contracts）。`Stats.AudioCounters` 加 discontinuities / meters（`Meters` / `BusMeter` / `InputMeter` 嵌套类型，键名照本案；`Bus.name` 给 `bus` 字段），
+dB / LUFS 下限 −120（静音总线的 LUFS 也钳到 −120，libebur128 给的 −inf 写不进 JSON）；`AudioEngine.audioCounters` 填全部字段（Integration/，不动 SwitcherAudio）。见 reports/p2-contracts.md。
 
 ## 改什么
 

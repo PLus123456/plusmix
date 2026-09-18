@@ -43,6 +43,18 @@ enum Summarize {
                 "audio_dropouts": Double(summary.audioDropouts), "audio_underruns": Double(summary.audioUnderruns),
                 "e1_skipped": Double(summary.encoders.reduce(0) { $0 + $1.skipped }),
                 "v4_worst_excess": summary.perInput.values.map { max($0.excessDupRatio, $0.excessDropRatio) }.max() ?? 0,
+                // P2（提案 001 / 002 / 004 / 005）：落地帧数 / 丢帧 / 重连、不连续、Master 表、L1（W1-B2 之前引擎写 0）
+                "encoder_frames": Double(summary.encoders.reduce(0) { $0 + ($1.delivery?.frames ?? 0) }),
+                "encoder_dropped": Double(summary.encoders.reduce(0) { $0 + ($1.delivery?.dropped ?? 0) }),
+                "encoder_reconnects": Double(summary.encoders.reduce(0) { $0 + ($1.delivery?.reconnects ?? 0) }),
+                "audio_discontinuities": Double(summary.audioDiscontinuities ?? 0),
+                "master_peak_db_max": summary.masterMeters?.peakDb.max ?? Stats.AudioCounters.Meters.floorDb,
+                "master_true_peak_db_max": summary.masterMeters?.truePeakDb.max ?? Stats.AudioCounters.Meters.floorDb,
+                "master_lufs_s_min": summary.masterMeters?.lufsS.min ?? Stats.AudioCounters.Meters.floorDb,
+                "master_lufs_s_max": summary.masterMeters?.lufsS.max ?? Stats.AudioCounters.Meters.floorDb,
+                "master_lufs_i": summary.masterMeters?.lufsI ?? Stats.AudioCounters.Meters.floorDb,
+                "l1_avg_ms_max": summary.perInput.values.compactMap { $0.latency?.ms.avg }.max() ?? 0,
+                "l1_max_ms": summary.perInput.values.compactMap { $0.latency?.maxMs }.max() ?? 0,
             ]
             struct Out: Encodable {
                 var key: [String: Double]

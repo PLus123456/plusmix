@@ -6,6 +6,9 @@
 **改契约的规矩**：任何公开类型、JSON 字段名、测试图案布局、C 结构布局的改动，先在 `docs/contract-changes/` 写提案，用户批了才改（铁律 1）。
 加 case / 加字段也算改（下游的 switch 和快照测试会红）。只有文档注释和实现细节（不改公开签名与 JSON）可以直接改。
 
+**变更记录**：P1 冻结（2026-09）→ 提案 003（W2-C 直接落地：CommandReceipt.applied、MixerSnapshot.publishedAt 等）→ P2（2026-09-18，分支 p2-contracts）：
+提案 001 A / 002 / 004 / 005 的 Stats 字段、001 B 的 `AudioBlockConsumer`、`Bus.name`。提案文件留在 docs/contract-changes/ 当决策记录；006（合成源噪声底纹）待批未做。
+
 ---
 
 ## 1. 术语 → 标识符（设计方案 §1.1）
@@ -115,9 +118,15 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop}, encoder[{skipped,bitrate}], audio{dropouts,underruns}, rss_mb, cpu_pct, gpu_pct | 引擎每秒汇总一次（W1-B），写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
+| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop,latency_ms,latency_max_ms}, encoder[{skipped,bitrate,frames,dropped,disk_free_mb,reconnects,state}], audio{dropouts,underruns,discontinuities,meters{buses[{bus,peak_db,true_peak_db,lufs_m,lufs_s,lufs_i,lra}],inputs{n:{peak_db}}}}, rss_mb, cpu_pct, gpu_pct（P2 按提案 001 / 002 / 004 / 005 扩，2026-09-18） | 引擎每秒汇总一次（W1-B）：encoder[] 由各输出的 `statsEntry` 填（`Recorder` / `StreamOutput` / `NDISender`），audio 由 `AudioEngine.audioCounters` 填（W2-E 集成层），per_input 的 L1 由引擎填（W1-B2）；写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
 
-口径：`render_ms` = 窗口内"拍点时刻 → GPU 完成"平均 ms（V1）；`jitter_ms` = 窗口内 |派发时刻 − 理想拍点| 最大值（V3）；计数类（missed_render, dup, drop, skipped, dropouts, underruns）全是自启动累计，相邻两行相减得窗口增量；`fps` = 窗口内该输入 push 帧数 / 秒；`bitrate` = 窗口平均 bit/s；`ts` = Unix 秒。`Stats.jsonLine()` / `parse(line:)` 是唯一的编解码入口。
+口径：`render_ms` = 窗口内"拍点时刻 → GPU 完成"平均 ms（V1）；`jitter_ms` = 窗口内 |派发时刻 − 理想拍点| 最大值（V3）；计数类（missed_render, dup, drop, skipped, dropouts, underruns, frames, dropped, reconnects, discontinuities）全是自启动累计，相邻两行相减得窗口增量；`fps` = 窗口内该输入 push 帧数 / 秒；`bitrate` = 窗口平均 bit/s；`ts` = Unix 秒。`Stats.jsonLine()` / `parse(line:)` 是唯一的编解码入口。
+
+P2 加的字段（口径全文在 Stats.swift 的文档注释）：
+- `per_input[n].latency_ms` / `latency_max_ms`（提案 005）：窗口内 L1（帧交给第一个 FrameConsumer 的时刻 − 该帧 `Frame.ingressTime`）的平均 / 最大 ms，只算每拍第一次用到的帧，窗口内没样本写 0；引擎侧算法归 W1-B2（prompt 42），之前引擎写 0。
+- `encoder[i].frames`（001）：写进文件 / 交给传输层的帧数累计；`dropped`（001）：编码之后、落地之前丢的帧累计（录制 = writer 不接的 `videoFramesRejected`；推流 = E9 网络丢帧 `networkDropped`；NDI = 队列满丢的帧），与编码前的 E1 `skipped` 是两回事；`disk_free_mb`（001）：录制目录所在卷剩余 MB（2^20 字节，与 rss_mb 同口径），非录制输出 0；`reconnects`（002）：推流重连成功次数累计，录制 / NDI 0；`state`（002）：推流 idle / connecting / publishing / backoff / stopping / stopped / failed，NDI publishing / idle / unavailable（SDK 不在），录制 idle / recording / stopping / stopped / failed。
+- `audio.discontinuities`（004）：A1 第三项，Master 消费者流上相邻样本跳变 > 0.5 满幅的次数累计（集成层泵线程的流式检测，合成信号的 click 按平台启发式排除；正式判定用离线口径）；`audio.meters`（004）：采样那一刻的表读数，`buses` 顺序 = `Bus.allCases`（`bus` = `Bus.name`：master / busA / busB / headphones），`inputs` 键 = 输入编号；峰值 / 真峰值 dBFS / dBTP、响度 LUFS、LRA LU，dB / LUFS 下限 −120（`Stats.AudioCounters.Meters.floorDb`，静音也钳到它，JSON 写不了 −inf），来源只有 `AudioMixer.meters`。
+- 兼容：老 stats.jsonl 缺这些键时解码给 0 / "idle" / 空（`decodeIfPresent`），写出总是写全；Show 文件不受影响（Stats 不在 Show 里）。
 
 ### 2.8 文件与脚本（Show.swift、Scenario.swift）
 
@@ -131,7 +140,7 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 
 `Show ↔ MixerState`：`Show(name:state:layout:)` 和 `show.makeState()`；makeState 清瞬态（进度、startTick），目标值直接到位。
 
-### 2.9 渲染协议草案（Render.swift）见 §7。
+### 2.9 渲染 / 消费者协议（Render.swift：Renderer、RenderSink、FrameConsumer、AudioBlockConsumer）见 §7。
 
 ### 2.10 测试工装（TestPattern.swift、TestSignal.swift）见 §4、§5。
 
@@ -206,11 +215,19 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
        渲染线程内，零分配；按 §5 顺序：PGM 底 → 转场混合 → Overlay 1→4 → FTB → PVW → 多画面 → RGB→NV12 写 IOSurface
   → GPU 完成回调：sink.renderer(_, didComplete: RenderedFrame{tick, tickTime, program(NV12, pts = t_n), preview?, multiview?, submitTime, gpuStart, gpuEnd})
   → 引擎（RenderSink）：更新 Stats（render_ms、jitter）→ 对每个 FrameConsumer 调 consume(frame)（立即返回，各自入队）
+
+音频（与视频并行，提案 001 B）：
+混音回调（实时线程）→ 消费者 SPSC 环 → AudioEngine 的泵线程（W2-E，非实时；PTS = 块首 − 对齐延迟，真设备重采样到 host 时钟）
+  → 对每个 AudioBlockConsumer 调 consumeAudio(planes:channelCount:frameCount:hostTime:)（立即返回，各自入队）
 ```
 
 - `Renderer`：`sink`（设置一次）、`prepare(format:maxInputs:)`（建池，允许分配）、`render(...)`、`shutdown()`。W1-C 实现；与 W1-B 有分歧写进各自报告。
 - `RenderSink`：引擎实现；在 GPU 回调线程被调，只做派发和统计。
 - `FrameConsumer`：`consumerName`、`consume(_:)`。W1-E 的编码器 / 录制器实现；每个消费者自己的线程和有界队列（深度 2–3），满了丢最旧并 `Stats.encoder[i].skipped += 1`。
+- `AudioBlockConsumer`（提案 001 B，P2 落地）：`consumerName`、`consumeAudio(planes:channelCount:frameCount:hostTime:)`，与 FrameConsumer 对称的混音块消费者，
+  Recorder / StreamOutput / NDISender 实现，签名逐字 = W1-E 原版；`SwitcherAudioIntegration.AudioBlockConsuming` 是它的 typealias。
+  在集成层的非实时泵线程上被调，必须立即返回、只拷进自己的有界缓冲，永远不在音频实时回调里直接调（铁律 3）；
+  `planes` = channelCount 个非交错 float32（48 kHz）平面，`hostTime` = 块首样本 host time（与 `AudioRing.write` 同口径，已按对齐延迟修正到内容采集时刻，与视频拍点同一时基，PTS 直接用）。
 - `RenderedFrame.renderMs` = gpuEnd − tickTime（V1 口径）。
 - 显示窗口不走 FrameConsumer：`MetalDisplayView` 直接从渲染器拿"最新完成的纹理"。
 

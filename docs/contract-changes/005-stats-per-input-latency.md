@@ -1,7 +1,8 @@
 # 005 Stats.per_input 加 L1 内部延迟字段（原 002，G3 改号）
 
 提出会话 / 分支：W2-A / w2-inputs（worktree 分支 claude/w2-inputs-phase-one-2f34b3）
-状态：**已批**（用户 2026-09-18，按 G3 报告 §7 第 2 条；字段由 P2 落地，引擎侧算法归 W1-B2 / prompt 42）。**编号说明**：W2-A、W2-D 并行各自用了 002；W2-D 的 002（Stats.encoder 推流字段）用户已批并被其报告引用，故 G3 合并时把本案改号为 005（W2-E 的已自改为 004，003 是 W2-C 已落地的）。
+状态：**已批**（用户 2026-09-18，按 G3 报告 §7 第 2 条；字段由 P2 落地，引擎侧算法归 W1-B2 / prompt 42）。
+落地：**字段已落地**（P2，2026-09-18，分支 p2-contracts）：`Stats.PerInput` 加 latency_ms / latency_max_ms（默认 0，引擎侧算法与填数归 W1-B2）；StatsSummary 每路多 `latency`（序列 + 全程最大），headless summarize 多 l1_avg_ms_max / l1_max_ms。见 reports/p2-contracts.md。**编号说明**：W2-A、W2-D 并行各自用了 002；W2-D 的 002（Stats.encoder 推流字段）用户已批并被其报告引用，故 G3 合并时把本案改号为 005（W2-E 的已自改为 004，003 是 W2-C 已落地的）。
 
 ## 改什么
 

@@ -54,10 +54,13 @@ public struct NDISendCounters: Hashable, Sendable {
     public init() {}
 
     /// Stats.encoder 的一项：NDI 没有码率控制，bitrate = 窗口内送出的 UYVY 字节 × 8 / 秒（原始码率，报告用）。
-    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, bytesPerFrame: Int) -> Stats.EncoderEntry {
+    /// 提案 001 + 002（P2 落地）：frames = framesSent、dropped = skipped（NDI 没有编码器，队列满丢的帧就是"落地之前丢的"）、
+    /// reconnects = 0、disk_free_mb = 0、state = unavailable ? "unavailable" : (running ? "publishing" : "idle")。
+    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, bytesPerFrame: Int, running: Bool = true) -> Stats.EncoderEntry {
         let frames = framesSent &- (previous?.framesSent ?? 0)
         let bitrate = windowSeconds > 0 ? Double(frames * UInt64(bytesPerFrame)) * 8 / windowSeconds : 0
-        return Stats.EncoderEntry(skipped: skipped, bitrate: bitrate)
+        return Stats.EncoderEntry(skipped: skipped, bitrate: bitrate, frames: framesSent, dropped: skipped, diskFreeMb: 0, reconnects: 0,
+                                  state: unavailable ? "unavailable" : (running ? "publishing" : "idle"))
     }
 }
 
@@ -189,9 +192,9 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
     /// 每帧 UYVY 字节数（statsEntry 用）。
     public var uyvyBytesPerFrame: Int { bytesPerFrame }
 
-    /// Stats.encoder 的一项。
+    /// Stats.encoder 的一项（state：SDK 不在 = unavailable；在跑 = publishing；没跑 = idle）。
     public func statsEntry(previous: NDISendCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
-        counters.snapshot().statsEntry(previous: previous, windowSeconds: windowSeconds, bytesPerFrame: bytesPerFrame)
+        counters.snapshot().statsEntry(previous: previous, windowSeconds: windowSeconds, bytesPerFrame: bytesPerFrame, running: isRunning)
     }
 
     /// 起：初始化 NDI、建发送实例、建转换器、起线程。

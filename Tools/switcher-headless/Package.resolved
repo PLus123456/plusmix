@@ -1,5 +1,5 @@
 {
-  "originHash" : "9939f267beac8f6fc6be0b8dbf75203dc9c2cdf6a471dc7a429724f665b138e6",
+  "originHash" : "58dd79cac8c3f50a76514c975eab28272016cbff4cc6ffceaf0490791e2a5d8a",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -20,6 +20,15 @@
       }
     },
     {
+      "identity" : "haishinkit.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/HaishinKit/HaishinKit.swift.git",
+      "state" : {
+        "revision" : "dc880cb540b8feeb98f64e8b7dcfaaf320b6b2bd",
+        "version" : "2.2.5"
+      }
+    },
+    {
       "identity" : "hummingbird",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/hummingbird-project/hummingbird.git",
@@ -35,6 +44,15 @@
       "state" : {
         "revision" : "89c66b8d6655209268c44f619afcf771d8d83ec9",
         "version" : "2.7.0"
+      }
+    },
+    {
+      "identity" : "logboard",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/shogo4405/Logboard.git",
+      "state" : {
+        "revision" : "8f41c63afb903040b77049ee2efa8c257b8c0d50",
+        "version" : "2.6.0"
       }
     },
     {

@@ -28,6 +28,21 @@ final class StreamOutputTests: XCTestCase {
         return (ticks, pushMs)
     }
 
+    /// P2（提案 001 / 002）：Stats.encoder 项带 frames = framesSent、dropped = networkDropped、reconnects、state = 状态名。
+    func testP2_streamOutput_statsEntryCarriesFramesDropsReconnectsAndState() throws {
+        let o = try StreamOutput.makeForTest(name: "p2", factory: FakeTransportFactory(behavior: .init()))
+        XCTAssertEqual(o.statsEntry(previous: nil, windowSeconds: 1).state, "idle")
+        try o.start()
+        XCTAssertTrue(waitUntil(timeout: 2) { o.state == .publishing })
+        _ = try feed(outputs: [o], seconds: 1)
+        XCTAssertEqual(o.statsEntry(previous: nil, windowSeconds: 1).state, "publishing")
+        o.stop()
+        let c = o.counters, e = o.statsEntry(previous: nil, windowSeconds: 1)
+        XCTAssertEqual([e.frames, e.dropped, e.reconnects], [c.framesSent, c.networkDropped, c.reconnects])
+        XCTAssertGreaterThan(e.frames, 0)
+        XCTAssertEqual([e.state, "\(e.diskFreeMb)"], ["stopped", "0.0"])
+    }
+
     /// E7（逻辑版）：三路同帧，第 2 路的传输层完全停滞（不排空、不断开），第 1、3 路一帧不丢；consume 从不阻塞。
     func testE7_stalledTransportDoesNotAffectSiblings() throws {
         let healthy = FakeTransportFactory(behavior: .init())

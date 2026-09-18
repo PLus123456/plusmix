@@ -60,4 +60,17 @@ public struct RecorderCounters: Hashable, Sendable {
     /// 编码器计数。
     public var encoder = EncoderCounters()
     public init() {}
+
+    /// Stats.encoder 的一项（提案 001 / 002，P2 落地）：skipped / bitrate 来自编码器计数（`EncoderCounters.statsEntry`）；
+    /// frames = videoFrames（写进文件的）；dropped = videoFramesRejected（writer 不接的）；disk_free_mb = diskFreeBytes / 2^20（与 rss_mb 同口径）；
+    /// reconnects = 0；state 由录制器给（`Recorder.State.statsName`：idle / recording / stopping / stopped / failed）。
+    public func statsEntry(previous: RecorderCounters?, windowSeconds: Double, state: String) -> Stats.EncoderEntry {
+        var e = encoder.statsEntry(previous: previous?.encoder, windowSeconds: windowSeconds)
+        e.frames = videoFrames
+        e.dropped = videoFramesRejected
+        e.diskFreeMb = Double(diskFreeBytes) / 1_048_576
+        e.reconnects = 0
+        e.state = state
+        return e
+    }
 }

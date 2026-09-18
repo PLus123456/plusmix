@@ -127,9 +127,10 @@ public final class StatsWriter: @unchecked Sendable {
         }
     }
 
-    /// 把非有限的浮点换成 0。
+    /// 把非有限的浮点换成 0；表里的 dB / LUFS 换成下限 −120（提案 004 的口径，JSON 写不了 −inf）。
     static func sanitized(_ s: Stats) -> Stats {
         func fix(_ v: Double) -> Double { v.isFinite ? v : 0 }
+        func fixDb(_ v: Double) -> Double { v.isFinite ? v : Stats.AudioCounters.Meters.floorDb }
         var out = s
         out.ts = fix(s.ts)
         out.renderMs = fix(s.renderMs)
@@ -137,8 +138,23 @@ public final class StatsWriter: @unchecked Sendable {
         out.rssMb = fix(s.rssMb)
         out.cpuPct = fix(s.cpuPct)
         out.gpuPct = fix(s.gpuPct)
-        out.perInput = s.perInput.mapValues { Stats.PerInput(fps: fix($0.fps), dup: $0.dup, drop: $0.drop) }
-        out.encoder = s.encoder.map { Stats.EncoderEntry(skipped: $0.skipped, bitrate: fix($0.bitrate)) }
+        out.perInput = s.perInput.mapValues { p in
+            var p = p
+            p.fps = fix(p.fps); p.latencyMs = fix(p.latencyMs); p.latencyMaxMs = fix(p.latencyMaxMs)
+            return p
+        }
+        out.encoder = s.encoder.map { e in
+            var e = e
+            e.bitrate = fix(e.bitrate); e.diskFreeMb = fix(e.diskFreeMb)
+            return e
+        }
+        out.audio.meters.buses = s.audio.meters.buses.map { b in
+            var b = b
+            b.peakDb = b.peakDb.map(fixDb); b.truePeakDb = b.truePeakDb.map(fixDb)
+            b.lufsM = fixDb(b.lufsM); b.lufsS = fixDb(b.lufsS); b.lufsI = fixDb(b.lufsI); b.lra = fix(b.lra)
+            return b
+        }
+        out.audio.meters.inputs = s.audio.meters.inputs.mapValues { Stats.AudioCounters.InputMeter(peakDb: $0.peakDb.map(fixDb)) }
         return out
     }
 }
