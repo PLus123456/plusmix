@@ -56,6 +56,50 @@ final class AudioEncoderTests: XCTestCase {
         print("AudioEncoder：\(all.count) 包，\(bytes) 字节 = \(bytes * 8 / seconds / 1000) kbps，priming \(enc.primingFrames)")
     }
 
+    /// W2-D 发现（reports/issues/W2D-w1-outputs-audioencoder-finish-empty.md）：一块都没喂过就 finish()，emit 里
+    /// stamp 环为空给出 host time 0、再减 priming 变负 → 崩。修后：没有输入就只置 finishing、不发包；之后再喂也不收。
+    func testAudioEncoder_finishWithoutInput_doesNotCrash() throws {
+        let enc = try AudioEncoder(configuration: .init())
+        let packets = LockedArray<EncodedAudioPacket>()
+        enc.output = { packets.append($0) }
+        enc.finish()
+        enc.finish()   // 重复 finish 也安全
+        XCTAssertEqual(packets.values.count, 0, "没有输入就不该发包")
+        XCTAssertEqual(enc.packetsEncoded, 0)
+        XCTAssertEqual(enc.framesIn, 0)
+        let signal = TestSignal(t0: HostTime(nanoseconds: 1_000_000_000))
+        let feeder = SignalFeeder(signal: signal, channelCount: 2, blockFrames: 256)
+        feeder.flush(upToSample: 256, to: [EncoderSink(enc)])
+        XCTAssertEqual(enc.framesIn, 0, "finish 之后不再接受输入")
+        XCTAssertEqual(packets.values.count, 0)
+    }
+
+    /// 输入块的 host time 比 priming（2112 帧 = 44 ms）还小：预卷包的 host time 钳在 0，不能因为减出负数崩。
+    func testAudioEncoder_prerollHostTimeClampedAtZero() throws {
+        let enc = try AudioEncoder(configuration: .init())
+        let packets = LockedArray<EncodedAudioPacket>()
+        enc.output = { packets.append($0) }
+        let t0 = HostTime(nanoseconds: 1_000_000)   // 1 ms
+        let signal = TestSignal(t0: t0)
+        let feeder = SignalFeeder(signal: signal, channelCount: 2, blockFrames: 256)
+        feeder.flush(upToSample: 1024, to: [EncoderSink(enc)])
+        enc.finish()
+        let all = packets.values
+        XCTAssertGreaterThanOrEqual(all.count, 2, "1024 帧 + 尾部至少两个包")
+        XCTAssertEqual(enc.framesIn, 1024)
+        for (k, p) in all.enumerated() {
+            XCTAssertEqual(p.firstFrameIndex, Int64(k * 1024 - 2112))
+            if p.firstFrameIndex < 0 {
+                XCTAssertLessThanOrEqual(p.hostTime, t0, "预卷包 \(k) 的 host time 不晚于首块")
+            } else {
+                XCTAssertEqual(p.hostTime, signal.hostTime(ofSample: p.firstFrameIndex))
+            }
+            XCTAssertEqual(CMSampleBufferGetPresentationTimeStamp(p.sampleBuffer).value, Int64(p.hostTime.nanoseconds))
+        }
+        XCTAssertEqual(all.first?.hostTime, .zero, "第一个包（首样本序号 −2112）的 host time 钳在 0")
+        print("AudioEncoder 小 host time：\(all.count) 包，host time \(all.map { $0.hostTime.ticks })")
+    }
+
     /// 把 AudioEncoder 挂成 AudioBlockConsumer 用的小适配器。
     final class EncoderSink: AudioBlockConsumer {
         let consumerName = "aac"
