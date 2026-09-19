@@ -52,7 +52,7 @@ d_k = 墙钟 − ts = 传输时间 + 两机钟差；基线 m = 最近 1–2 s �
 J = 1 是给真实局域网留的（同一交换机下 NDI 抖动通常 1–5 ms；跨交换机 / Wi-Fi 会到几十 ms，那时该用 J = 2 或更大——提案 008 把它放进节目文件）。
 J = 0 的 0.73 帧是"到达 → 下一拍被挑 → 渲染 → 交给消费者"的固有量（同 W2-A 摄像头契约入口的 0.53 帧 + 拍点相位）。
 
-`make lint BRANCH=w3-inputs2`、编译矩阵、全包 swift test 的结果见 §2 末尾。
+`make lint BRANCH=w3-inputs2`、编译矩阵三种配置、全包 swift test 的结果见 §2.3。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
@@ -94,7 +94,17 @@ J = 0 的 0.73 帧是"到达 → 下一拍被挑 → 渲染 → 交给消费者"
 
 ### 2.3 编译矩阵 + 全包测试 + lint
 
-（本节由后台跑完后补：[A] 默认"都在"全包 swift test；[B] 只有 NDI；[C] 都不在；[D] make build；[E] make lint）
+| 配置 | 怎么配 | swift build | swift test（NDITests + DeckLinkTests） | 通过 |
+|---|---|---|---|---|
+| A 都在（本机默认） | NDI = /Library/NDI SDK for Apple；DeckLink 头 = NDI 示例自带的 10.11.2 副本（~/SDKs/DeckLink 不存在） | ✅ | **SwitcherInputs 全包 65 个测试 0 失败**：SwitcherInputsTests 28（4 skip = W2-A 的摄像头 ×3 + S5，权限 / 硬件）、NDITests 20（2 skip = 外部源手动项、无 SDK 行为）、DeckLinkTests 17（3 skip = L1 / L2 / S5 BLOCKED-硬件）；NDI 回环那组 80 s | ✅ |
+| B 只有 NDI | `DECKLINK_SDK_DIR=/nonexistent`（设了就只看它，不再找备选路径） | ✅ | DeckLink：Fake 7 条全部 XCTSkip（BLOCKED-SDK），校准器 4 ✅，无硬件行为 ✅（`start()` 抛 `sdkUnavailable`、state = error + "DeckLink SDK 未编译进来…" 文案、stop 后 noSignal）；NDI 与 A 相同 | ✅ |
+| C 都不在 | `NDI_SDK_DIR=/nonexistent DECKLINK_SDK_DIR=/nonexistent` | ✅ | NDI 回环 10 条 XCTSkip（BLOCKED-SDK）、无 SDK 行为 ✅（start 抛错、state error 文案、`NDIFinder()` 抛错、stop 后 noSignal）、抖动缓冲 / 重采样数学 8 ✅；DeckLink 与 B 相同 | ✅ |
+
+- **`make build`（默认配置）**：六个包 + 两个工具 `swift build` 全过，App `xcodebuild build` 生成 `.build/DerivedData/Build/Products/Debug/Switcher.app`（App 没链接新产品，不受影响）。
+- **`make lint`（BRANCH = w3-inputs2）**：lint-rules（禁词 / 版本号 0.1.0 / Package.swift 约束）✅、check-deps（8 个包依赖方向）✅、check-ownership（相对 main 的 29 个改动文件都在允许范围内）✅、check-rt-symbols ✅。
+- 第一版矩阵 B / C 编不过：`#else`（无 SDK）分支用了 `std::snprintf` / `std::memset` 而 `<cstdio>` / `<cstring>` 只在 `#if` 里包含（默认配置永远走 `#if`，所以全包测试发现不了）——这正是矩阵要抓的东西，已修（a2b30ef）。
+- `make build` 会在 `Packages/SwitcherOutputs`、`Packages/SwitcherTestKit`、`Tools/frameprobe` 下生成 `Package.resolved`（W2-D 报告 §3 也提过，不入库），`check-ownership --include-working-tree` 会把它们报成越界；本会话已删，G4 合并时别当成我的改动。
+- 清单的 SDK 探测随环境变量重新求值（`swift package dump-package` 验证：define 跟着变），切配置不用 `make clean`；但 Xcode 集成可能缓存（W2-D 经验）。
 
 ## 3. 没做的和原因
 
@@ -130,4 +140,5 @@ J = 0 的 0.73 帧是"到达 → 下一拍被挑 → 渲染 → 交给消费者"
 11. **`sw_decklink_session_stop()` 不在持锁时调 SDK 的流控制**：先置 running = false（回调看到就退出）再 `StopStreams()`（它等回调线程退出），然后再摘回调 / Disable。反过来会死锁。格式变更回调里的 Pause/Enable/Flush/Start 是在持锁 + 驱动线程上做的，与 stop 并发时靠 SDK 内部串行。
 12. **NDI 发送端测试助手 `TestNDISender`** 在 `Tests/NDITests/Support/`，按拍点时钟实时送测试图案（帧号 = 拍号）、UYVY / BGRA、可选 TestSignal 音频；G4 / W3-C 想要一个不依赖 SwitcherOutputs 的 NDI 源时可以抄它。
 13. **`InputThread(period:)` 给发送端线程挂了 time-constraint 策略**，60 fps 送 1080p 晚点 0；不挂的话普通线程唤醒晚 1–7 ms（W1-A / W1-B 的经验）。
-14. **电池供电下跑的**：本报告所有延迟数字都是 M5 Max 电池模式 + 另有会话在跑（load 3.3）的结果，插电空闲机器只会更好。
+14. **`stop()` 总是把状态复位成 noSignal**（哪怕 `start()` 因 SDK 不在抛了错、从没真起来）：契约 "stop 后 noSignal"，无 SDK 配置下的测试抓到过一次提前返回。
+15. **电池供电下跑的**：本报告所有延迟数字都是 M5 Max 电池模式 + 另有会话在跑（load 3.3）的结果，插电空闲机器只会更好。
