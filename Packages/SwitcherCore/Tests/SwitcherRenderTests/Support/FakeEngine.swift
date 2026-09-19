@@ -181,8 +181,10 @@ enum FakeInputs {
 }
 
 /// V1 的标准负载状态：8 路输入，PGM 1，PVW 2，Fade 进行到一半（多一层混合），4 个 overlay 开（5–8 路在四个角）。
+/// W3-B 起（prompt 的 V1 回归："8 路 + 4 overlay + 抠像 + 多画面全开"）：四路叠加输入都开抠像、两路带边框、多画面用自定义布局（安全框 + 电平表占位）。
+/// `legacy: true` = W1-C 的负载（无抠像 / 边框 / 布局），用来量本会话加的功能多花了多少（SWITCHER_V1_LEGACY_LOAD=1）。
 enum LoadStates {
-    static func eightInputsFourOverlays() -> MixerState {
+    static func eightInputsFourOverlays(legacy: Bool = ProcessInfo.processInfo.environment["SWITCHER_V1_LEGACY_LOAD"] == "1") -> MixerState {
         var s = MixerState(format: .hd1080p60, inputs: ReferenceStates.inputs(count: 8), program: 1, preview: 2)
         s.transition = TransitionState(type: .fade, durationTicks: 30, progress: 0.5, source: .auto, startTick: Tick(0))
         let rects = [NormalizedRect(x: 0.02, y: 0.02, width: 0.3, height: 0.3), NormalizedRect(x: 0.68, y: 0.02, width: 0.3, height: 0.3),
@@ -190,7 +192,11 @@ enum LoadStates {
         for i in 0..<4 {
             s.overlays[i] = OverlayState(input: 5 + i, on: true, rect: rects[i], animProgress: 1, animation: OverlayAnimation(kind: .fade, durationTicks: 15))
         }
-        return s
+        guard !legacy else { return s }
+        for i in 4..<8 { s.inputs[i].settings.keyer = ReferenceStates.keyer() }
+        s.inputs[4].settings.effects = [ReferenceStates.borderEffect()]
+        s.inputs[5].settings.effects = [ReferenceStates.borderEffect(width: 0.01, color: (255, 200, 0))]
+        return ReferenceStates.withMultiviewLayout(s, ReferenceStates.customLayout)
     }
 }
 
