@@ -1,6 +1,8 @@
-// 底栏：添加输入 / 录制 / 推流 / 外部输出 / 多画面 / 叠加 按钮 + 状态行（1 Hz，全部读 Stats）。
-// 录制 / 推流按钮只发 startRecord / stopRecord / startStream / stopStream，按快照里输出的 enabled 显示状态；
-// 真正的录制器 / 推流器由 G3 接线（W1-E / W2-D）。外部输出、多画面窗口是 W3-C / W3-E 的，按钮先置灰。
+// 底栏：添加输入 / 录制 / 推流 / 外部输出 / 多画面 / 叠加 按钮 + 状态行（1 Hz，全部读 Stats）+ 提示（命令被忽略、录制起停、重连……）。
+// 录制 / 推流按钮只发 startRecord / stopRecord / startStream / stopStream；文案 = 快照里输出的 enabled（目标）× Stats.encoder[i].state（实际）：
+//   录制：目标关 → "录制"；目标开、实际 recording → "● 录制中"；目标开、实际还没到（idle / stopping / failed）→ "录制 · <state>"。
+//   推流：目标关 → "推流"；publishing → "● 推流中"；connecting / backoff → "推流 · 重连中（第 n 次）"（n = Stats.encoder[i].reconnects）。
+// 外部输出、多画面窗口是 W3-C / W3-E 的，按钮先置灰。
 import AppKit
 import SwitcherContracts
 
@@ -17,13 +19,17 @@ final class BottomBarView: NSView {
     let multiviewButton: NSButton
     let overlayButton: NSButton
     let statusLabel = Theme.monoLabel("", size: 11, color: Theme.dimText)
+    let noticeLabel = Theme.label("", size: 11, color: Theme.accent)
     private var state = MixerState()
     private var previousStats: Stats?
-    /// 最近一行 Stats 里有没有编码器在跑（录制按钮的文案用；Stats.encoder 为空 = 没有编码器接上）。
-    private var encodersRunning = false
+    /// 最近一行 Stats 里每个输出的状态（按 outputs 里带编码器的输出同序）。
+    private var encoderStates: [Stats.EncoderEntry] = []
     private var format: ProgramFormat = .hd1080p60
     /// 最近一次显示的状态行（测试对照 stats.jsonl 用）。
     private(set) var lastStatusLine: (stats: Stats, text: String)?
+    private var noticeTimer: Timer?
+    /// 提示保留多久。
+    static let noticeSeconds: TimeInterval = 4
 
     override init(frame: NSRect) {
         addInputButton = Theme.button("添加输入…", target: nil, action: nil)
@@ -52,8 +58,12 @@ final class BottomBarView: NSView {
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.lineBreakMode = .byTruncatingTail
+        noticeLabel.lineBreakMode = .byTruncatingTail
+        noticeLabel.alignment = .right
+        noticeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(buttons)
         addSubview(statusLabel)
+        addSubview(noticeLabel)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Theme.bottomBarHeight),
             buttons.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
@@ -61,6 +71,9 @@ final class BottomBarView: NSView {
             statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
             statusLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            noticeLabel.leadingAnchor.constraint(equalTo: buttons.trailingAnchor, constant: 16),
+            noticeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            noticeLabel.centerYAnchor.constraint(equalTo: buttons.centerYAnchor),
         ])
         statusLabel.stringValue = "等待第一行 Stats…"
     }
@@ -71,49 +84,94 @@ final class BottomBarView: NSView {
     func apply(state: MixerState) {
         self.state = state
         format = state.format
-        updateRecordButton()
-        let streaming = state.outputs.contains { $0.kind == .stream && $0.enabled }
-        streamButton.title = streaming ? "● 推流中" : "推流"
-        Theme.setHighlighted(streamButton, streaming, color: Theme.recording)
-        streamButton.isEnabled = state.outputs.contains { $0.kind == .stream }
-        streamButton.toolTip = streamButton.isEnabled ? nil : "节目里没有推流输出（推流设置在 W2-D / W3-E）"
+        updateButtons()
     }
 
-    /// 1 Hz：状态行。
+    /// 1 Hz：状态行 + 按钮的实际状态。
     func apply(stats: Stats) {
         let text = StatusLineFormatter.line(current: stats, previous: previousStats, format: format)
         statusLabel.stringValue = text
         lastStatusLine = (stats, text)
         previousStats = stats
-        if encodersRunning != !stats.encoder.isEmpty {
-            encodersRunning = !stats.encoder.isEmpty
-            updateRecordButton()
+        if encoderStates != stats.encoder {
+            encoderStates = stats.encoder
+            updateButtons()
         }
     }
 
-    /// 录制按钮：快照里录制输出的目标开关 + Stats 里有没有编码器真在跑（W2-B 还没接 Recorder，G3 接上前显示"等编码器"）。
-    private func updateRecordButton() {
-        let wanted = state.outputs.contains { $0.kind == .record && $0.enabled }
-        switch (wanted, encodersRunning) {
-        case (true, true):
-            recordButton.title = "● 录制中"
-            recordButton.toolTip = nil
-        case (true, false):
-            recordButton.title = "录制 · 等编码器"
-            recordButton.toolTip = "录制输出已打开，但 Stats 里没有编码器在跑：录制器由 G3 接线（W1-E 的 Recorder）"
-        default:
+    /// 某个输出在 Stats.encoder 里的项：encoder 与 outputs 里带编码器（record / stream / ndi）的输出同序。
+    func encoderEntry(forOutput number: Int) -> Stats.EncoderEntry? {
+        let withEncoders = state.outputs.filter { [.record, .stream, .ndi].contains($0.kind) }
+        guard let i = withEncoders.firstIndex(where: { $0.number == number }), i < encoderStates.count else { return nil }
+        return encoderStates[i]
+    }
+
+    private func updateButtons() {
+        // 录制：第一个录制输出
+        if let record = state.outputs.first(where: { $0.kind == .record }) {
+            let actual = encoderEntry(forOutput: record.number)?.state ?? "idle"
+            switch (record.enabled, actual) {
+            case (true, "recording"):
+                recordButton.title = "● 录制中"
+                recordButton.toolTip = nil
+            case (true, let s):
+                recordButton.title = "录制 · \(s)"
+                recordButton.toolTip = "录制输出已打开，录制器状态 \(s)"
+            default:
+                recordButton.title = "录制"
+                recordButton.toolTip = nil
+            }
+            Theme.setHighlighted(recordButton, record.enabled, color: Theme.recording)
+        } else {
             recordButton.title = "录制"
-            recordButton.toolTip = nil
+            recordButton.toolTip = "节目里没有录制输出：点一下会加一个默认的（~/Movies/Switcher）"
+            Theme.setHighlighted(recordButton, false, color: Theme.recording)
         }
-        Theme.setHighlighted(recordButton, wanted, color: Theme.recording)
+        // 推流：第一个推流输出
+        if let stream = state.outputs.first(where: { $0.kind == .stream }) {
+            let entry = encoderEntry(forOutput: stream.number)
+            let actual = entry?.state ?? "idle"
+            switch (stream.enabled, actual) {
+            case (true, "publishing"):
+                streamButton.title = "● 推流中"
+            case (true, "connecting"), (true, "backoff"):
+                streamButton.title = "推流 · 重连中（第 \((entry?.reconnects ?? 0) + 1) 次）"
+            case (true, let s):
+                streamButton.title = "推流 · \(s)"
+            default:
+                streamButton.title = "推流"
+            }
+            streamButton.isEnabled = true
+            streamButton.toolTip = stream.settings.stream?.url
+            Theme.setHighlighted(streamButton, stream.enabled, color: Theme.recording)
+        } else {
+            streamButton.title = "推流"
+            streamButton.isEnabled = false
+            streamButton.toolTip = "节目里没有推流输出（推流设置面板在 W3-E；节目文件里加一路 stream 输出即可）"
+            Theme.setHighlighted(streamButton, false, color: Theme.recording)
+        }
     }
 
     /// 新 session：忘掉上一行（fps 要重新算）。
     func resetStats() {
         previousStats = nil
         lastStatusLine = nil
+        encoderStates = []
         statusLabel.stringValue = "等待第一行 Stats…"
+        noticeLabel.stringValue = ""
     }
+
+    /// 右上角提示一句（几秒后自动清掉）。
+    func showNotice(_ message: String) {
+        noticeLabel.stringValue = message
+        noticeLabel.toolTip = message
+        noticeTimer?.invalidate()
+        noticeTimer = Timer.scheduledTimer(withTimeInterval: Self.noticeSeconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.noticeLabel.stringValue = "" }
+        }
+    }
+
+    var displayedNotice: String { noticeLabel.stringValue }
 
     @objc private func addInputPressed() { onAddInput?() }
 

@@ -106,14 +106,21 @@ final class UISmokeTests: XCTestCase {
         wc.mixerPanel.muteButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.buses[0].muted })
 
-        // 12. 录制 / 推流按钮：发 startRecord / stopRecord；没有编码器时文案说明；推流没有输出就置灰
+        // 12. 录制 / 推流按钮：录制按钮发 startRecord → Recorder 真起来（Stats.encoder[i].state = recording → "● 录制中"）→ stopRecord →
+        //     封口后按钮回"录制"、文件落在测试宿主的临时录制目录；推流没有输出就置灰
         XCTAssertTrue(wc.bottomBar.recordButton.isEnabled)
         wc.bottomBar.recordButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == true }, "录制按钮应发 startRecord")
-        XCTAssertEqual(wc.bottomBar.recordButton.title, "录制 · 等编码器")
+        XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.recordButton.title == "● 录制中" }, "Stats 报 recording 后应显示录制中：\(wc.bottomBar.recordButton.title)")
         wc.bottomBar.recordButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == false })
-        XCTAssertEqual(wc.bottomBar.recordButton.title, "录制")
+        XCTAssertTrue(AppTest.waitUntil(10) { wc.bottomBar.recordButton.title == "录制" && session.outputs.lastResults[1] != nil },
+                      "封口后按钮应回「录制」：\(wc.bottomBar.recordButton.title)")
+        if let r = session.outputs.lastResults[1] {
+            print("冒烟录制：\(r.url.path)，\(r.videoFrames) 帧 / \(r.audioFrames) 样本")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: r.url.path))
+            XCTAssertTrue(r.url.path.hasPrefix(AppTest.controller.documents.recordDirectory), "测试宿主录到临时目录，不碰 ~/Movies")
+        }
         XCTAssertFalse(wc.bottomBar.streamButton.isEnabled, "空节目没有推流输出")
         XCTAssertFalse(wc.bottomBar.externalButton.isEnabled, "外部输出 W3-C")
         XCTAssertFalse(wc.bottomBar.multiviewButton.isEnabled, "多画面窗口 W3-E")

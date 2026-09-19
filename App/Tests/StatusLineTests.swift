@@ -60,20 +60,27 @@ final class StatusLineTests: XCTestCase {
         return Double(token)
     }
 
-    /// 纯函数部分：字段顺序、格式、没有编码器时的 —。
+    /// 纯函数部分：字段顺序、格式、没有编码器在跑时的 —、磁盘剩余（P2 的 disk_free_mb）。
     func testStatus_formatterFields() {
         let a = Stats(ts: 100, tick: Tick(600), renderMs: 1.2345, missedRender: 3, jitterMs: 0.1, perInput: [:], encoder: [],
                       audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 12.4, gpuPct: 26.6)
+        // 第一项是没在录的录制输出（idle，但报了所在卷的剩余），第二项是在录的
         let b = Stats(ts: 101, tick: Tick(660), renderMs: 2, missedRender: 3, jitterMs: 0.1, perInput: [:],
-                      encoder: [Stats.EncoderEntry(skipped: 2, bitrate: 6_000_000)],
+                      encoder: [Stats.EncoderEntry(skipped: 9, bitrate: 0, diskFreeMb: 123_456, state: "idle"),
+                                Stats.EncoderEntry(skipped: 2, bitrate: 6_000_000, frames: 60, state: "recording")],
                       audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 12.4, gpuPct: 26.6)
         let fields = StatusLineFormatter.fields(current: b, previous: a, format: .hd1080p60)
         XCTAssertEqual(fields.map(\.label), ["节目", "fps", "render", "GPU", "CPU", "丢帧", "编码跳帧", "码率", "磁盘"])
-        XCTAssertEqual(fields.map(\.value), ["1920×1080 60", "60.0", "2.00 ms", "27%", "12%", "3", "2", "6.00 Mb/s", "—"])
+        XCTAssertEqual(fields.map(\.value), ["1920×1080 60", "60.0", "2.00 ms", "27%", "12%", "3", "2", "6.00 Mb/s", "120.6 GB"])
         let first = StatusLineFormatter.fields(current: a, previous: nil, format: .hd1080p60)
         XCTAssertEqual(first[1].value, "—", "第一行没有上一行，fps 显示 —")
         XCTAssertEqual(first[6].value, "—", "没有编码器时显示 —")
         XCTAssertEqual(StatusLineFormatter.line(current: a, previous: nil, format: .hd1080p60),
                        "节目 1920×1080 60  ·  fps —  ·  render 1.23 ms  ·  GPU 27%  ·  CPU 12%  ·  丢帧 3  ·  编码跳帧 —  ·  码率 —  ·  磁盘 —")
+        // 只有 idle 的录制输出：编码字段 —，磁盘照报
+        let idle = Stats(ts: 102, tick: Tick(720), renderMs: 2, missedRender: 3, jitterMs: 0.1, perInput: [:],
+                         encoder: [Stats.EncoderEntry(skipped: 0, bitrate: 0, diskFreeMb: 512, state: "idle")],
+                         audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 12.4, gpuPct: 26.6)
+        XCTAssertEqual(StatusLineFormatter.fields(current: idle, previous: b, format: .hd1080p60).map(\.value).suffix(3), ["—", "—", "512 MB"])
     }
 }
