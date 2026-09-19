@@ -338,35 +338,115 @@ extension AppTest {
     ]
 
     /// 沿 NSAccessibility 树走一遍，返回缺 label / title 的控件（"角色 @ 路径"）。
+    /// "有 label"按辅助功能的实际口径：自己的 label / title，或 titleUIElement（AppKit 表单里控件左边那个标签），或（cell 型控件）所属 NSControl 的 label / title。
+    /// 只查 AppKit 那一层：NSHostingView 不把 SwiftUI 自己的辅助功能元素暴露给进程内遍历（新式 accessibilityChildren() 和老式 AXChildren 属性都只给
+    /// 底下的 AppKit 视图；AXUIElement 对本进程返回 kAXErrorNotImplemented，探针见 reports/w3-app2.md §5），SwiftUI 控件的 label 由源码扫描
+    /// （swiftUIControlLabelViolations）保证。宿主视图里只查我们自己放进去的 NSViewRepresentable（竖推子 NSSlider）。滚动条的箭头不算。
     static func accessibilityViolations(in root: Any) -> [String] {
         var out: [String] = []
         walkAccessibility(root, path: "", depth: 0) { element, role, path in
-            guard labeledRoles.contains(role) else { return }
-            let label = element.accessibilityLabel() ?? ""
-            let title = element.accessibilityTitle() ?? ""
-            if label.trimmingCharacters(in: .whitespaces).isEmpty && title.trimmingCharacters(in: .whitespaces).isEmpty {
-                out.append("\(role.rawValue) @ \(path)")
-            }
+            guard labeledRoles.contains(role), !path.contains("AXScrollBar(") else { return }
+            if path.contains("NSHostingView<"), !isOwnRepresentable(element) { return }
+            if !hasAccessibleName(element) { out.append("\(role.rawValue) @ \(path) | \(legacyAttributes(element))") }
         }
         return out
     }
 
-    /// 遍历到的（需要 label 的角色的）控件数。
+    /// 宿主视图里由我们自己的 NSViewRepresentable 建的 AppKit 控件（VerticalFader 的 NSSlider）。
+    static func isOwnRepresentable(_ element: Any) -> Bool {
+        if let cell = element as? NSSliderCell { return type(of: cell) == NSSliderCell.self }
+        if let slider = element as? NSSlider { return type(of: slider) == NSSlider.self }
+        return false
+    }
+
+    /// 老式属性 API 看到的东西（SwiftUI 桥接的控件有些只实现这一套）。
+    static func legacyAttributes(_ element: Any) -> String {
+        guard let obj = element as? NSObject else { return "-" }
+        func attr(_ a: NSAccessibility.Attribute) -> String {
+            let v = obj.accessibilityAttributeValue(a)
+            if let s = v as? String { return s }
+            if let v { return "<\(type(of: v))>" }
+            return "nil"
+        }
+        return "desc=\(attr(.description)) title=\(attr(.title)) titleUI=\(attr(.titleUIElement)) help=\(attr(.help)) value=\(attr(.value).prefix(20))"
+    }
+
+    static func hasAccessibleName(_ node: Any) -> Bool {
+        func nonEmpty(_ s: String?) -> Bool { !(s ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+        if let element = node as? any NSAccessibilityProtocol, nonEmpty(element.accessibilityLabel()) || nonEmpty(element.accessibilityTitle()) { return true }
+        if let obj = node as? NSObject {
+            if nonEmpty(obj.accessibilityAttributeValue(.description) as? String) || nonEmpty(obj.accessibilityAttributeValue(.title) as? String) { return true }
+            if let titleElement = obj.accessibilityAttributeValue(.titleUIElement) as? NSObject,
+               nonEmpty(titleElement.accessibilityAttributeValue(.value) as? String) || nonEmpty(titleElement.accessibilityAttributeValue(.title) as? String) {
+                return true
+            }
+        }
+        if let element = node as? any NSAccessibilityProtocol, let titleElement = element.accessibilityTitleUIElement() as? any NSAccessibilityProtocol,
+           nonEmpty(titleElement.accessibilityValue() as? String) || nonEmpty(titleElement.accessibilityTitle()) || nonEmpty(titleElement.accessibilityLabel()) {
+            return true
+        }
+        if let cell = node as? NSCell, let control = cell.controlView as? any NSAccessibilityProtocol {
+            if nonEmpty(control.accessibilityLabel()) || nonEmpty(control.accessibilityTitle()) { return true }
+            if let titleElement = control.accessibilityTitleUIElement() as? any NSAccessibilityProtocol,
+               nonEmpty(titleElement.accessibilityValue() as? String) || nonEmpty(titleElement.accessibilityTitle()) { return true }
+        }
+        return false
+    }
+
+    /// 整棵树的文字（排错用）。
+    static func accessibilityDump(_ root: Any) -> String {
+        var lines: [String] = []
+        walkAccessibility(root, path: "", depth: 0, visitAll: true) { element, role, path in
+            lines.append("\(role.rawValue) \(legacyAttributes(element)) @ \(path.suffix(90))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 遍历到的（需要 label 的角色的、会被检查的）控件数。
     static func accessibilityControlCount(in root: Any) -> Int {
         var n = 0
-        walkAccessibility(root, path: "", depth: 0) { _, role, _ in if labeledRoles.contains(role) { n += 1 } }
+        walkAccessibility(root, path: "", depth: 0) { element, role, path in
+            guard labeledRoles.contains(role), !path.contains("AXScrollBar(") else { return }
+            if path.contains("NSHostingView<"), !isOwnRepresentable(element) { return }
+            n += 1
+        }
         return n
     }
 
-    private static func walkAccessibility(_ node: Any, path: String, depth: Int, visit: (any NSAccessibilityProtocol, NSAccessibility.Role, String) -> Void) {
-        guard depth < 80, let element = node as? any NSAccessibilityProtocol else { return }
-        let role = element.accessibilityRole() ?? NSAccessibility.Role(rawValue: "?")
-        let name = element.accessibilityLabel() ?? element.accessibilityTitle() ?? String(describing: type(of: node))
+    /// 子元素：先走老式属性 API（SwiftUI 的宿主视图只在这一套上返回它自己的元素），再走新式 accessibilityChildren()，都没有就看子视图。
+    static func axChildren(_ node: Any) -> [Any] {
+        if let obj = node as? NSObject, let kids = obj.accessibilityAttributeValue(.children) as? [Any], !kids.isEmpty { return kids }
+        if let e = node as? any NSAccessibilityProtocol, let kids = e.accessibilityChildren(), !kids.isEmpty { return kids }
+        if let v = node as? NSView { return v.subviews }
+        return []
+    }
+
+    static func axString(_ node: Any, _ attribute: NSAccessibility.Attribute) -> String? {
+        (node as? NSObject)?.accessibilityAttributeValue(attribute) as? String
+    }
+
+    static func axRole(_ node: Any) -> NSAccessibility.Role {
+        if let r = axString(node, .role) { return NSAccessibility.Role(rawValue: r) }
+        if let e = node as? any NSAccessibilityProtocol, let r = e.accessibilityRole() { return r }
+        return NSAccessibility.Role(rawValue: "?")
+    }
+
+    private static func walkAccessibility(_ node: Any, path: String, depth: Int, visitAll: Bool = false,
+                                          visit: (Any, NSAccessibility.Role, String) -> Void) {
+        guard depth < 80 else { return }
+        let role = axRole(node)
+        let name = axString(node, .description) ?? axString(node, .title) ?? String(describing: type(of: node))
         let here = path.isEmpty ? "\(role.rawValue)(\(name))" : "\(path) > \(role.rawValue)(\(name))"
-        if element.isAccessibilityElement() { visit(element, role, here) }
-        var children: [Any] = element.accessibilityChildren() ?? []
-        if children.isEmpty, let view = node as? NSView { children = view.subviews }
-        for child in children { walkAccessibility(child, path: here, depth: depth + 1, visit: visit) }
+        let ignored: Bool
+        if let e = node as? any NSAccessibilityProtocol {
+            ignored = !e.isAccessibilityElement()
+        } else if let obj = node as? NSObject, obj.responds(to: Selector(("accessibilityIsIgnored"))) {
+            ignored = obj.accessibilityIsIgnored()
+        } else {
+            ignored = false
+        }
+        if !ignored || visitAll { visit(node, role, here) }
+        for child in axChildren(node) { walkAccessibility(child, path: here, depth: depth + 1, visitAll: visitAll, visit: visit) }
     }
 
     /// 格式串里的占位符（%d、%@、%.1f、%2$@ …）按顺序。
@@ -390,7 +470,8 @@ extension AppTest {
         for file in try swiftFiles(in: directory) {
             let text = try String(contentsOf: file, encoding: .utf8)
             for m in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                if let r = Range(m.range(at: 1), in: text) { keys.insert(String(text[r])) }
+                // 动态拼的键（"addInput.kind.\(kind.rawValue)"）不算：它们的展开值在表里（LocalizationTests 打印"没直接引用的键"时人工看）
+                if let r = Range(m.range(at: 1), in: text), !text[r].contains("\\(") { keys.insert(String(text[r])) }
             }
         }
         return keys
@@ -437,5 +518,60 @@ extension AppTest {
             index = line.index(after: index)
         }
         return line
+    }
+}
+
+// MARK: - W3-E：SwiftUI 控件的 label 静态扫描（源码层面：每个控件构造都带 label 文案或 accessibilityLabel）
+
+extension AppTest {
+    /// App/Sources 里 SwiftUI 控件构造缺 label 的地方（"文件:行 片段"）。规则：
+    /// - Slider / Stepper：同一语句（本行或下两行）要有 `{ Text(`（label 闭包）或 `.accessibilityLabel(`；
+    /// - TextField / SecureField / Picker / Toggle / ColorPicker / DatePicker：第一个参数是 `L(`（本地化文案）或非空字面量；
+    /// - Button：`Button(L(…` / `Button(<表达式含 L(> ) {` 形式，或 `.accessibilityLabel(`；`Button {`（无标题）不行；
+    /// - NSViewRepresentable 的 makeNSView：要调 setAccessibilityLabel。
+    static func swiftUIControlLabelViolations(in directory: URL) throws -> [String] {
+        var out: [String] = []
+        let labeledFirstArg = ["TextField(", "SecureField(", "Picker(", "Toggle(", "ColorPicker(", "DatePicker("]
+        for file in try swiftFiles(in: directory) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            guard text.contains("import SwiftUI") else { continue }
+            let lines = text.components(separatedBy: "\n")
+            /// 控件名前面不能是标识符字符或点（排除 resolutionPicker( / NSSlider( 之类）。
+            func controlRange(_ ctrl: String, in line: String) -> Range<String.Index>? {
+                var search = line.startIndex
+                while let r = line.range(of: ctrl, range: search..<line.endIndex) {
+                    if r.lowerBound == line.startIndex { return r }
+                    let before = line[line.index(before: r.lowerBound)]
+                    if !(before.isLetter || before.isNumber || before == "_" || before == ".") { return r }
+                    search = r.upperBound
+                }
+                return nil
+            }
+            for (i, raw) in lines.enumerated() {
+                let line = stripLineComment(raw)
+                let window = lines[i..<min(i + 3, lines.count)].map { stripLineComment($0).trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
+                func report(_ what: String) { out.append("\(file.lastPathComponent):\(i + 1) \(what)：\(line.trimmingCharacters(in: .whitespaces).prefix(90))") }
+                for ctrl in ["Slider(", "Stepper("] where controlRange(ctrl, in: line) != nil {
+                    if !(window.contains("{ Text(") || window.contains(".accessibilityLabel(")) { report(ctrl + " 没有 label 闭包") }
+                }
+                for ctrl in labeledFirstArg {
+                    guard let r = controlRange(ctrl, in: line) else { continue }
+                    let rest = line[r.upperBound...].trimmingCharacters(in: .whitespaces)
+                    // 文案：L(…)、非空字面量，或按约定叫 label 的变量（值来自 L(…)）
+                    let ok = rest.hasPrefix("L(") || (rest.hasPrefix("\"") && !rest.hasPrefix("\"\"")) || rest.hasPrefix("label,") || rest.hasPrefix("label)")
+                    if !ok && !window.contains(".accessibilityLabel(") { report(ctrl + " 第一个参数不是文案") }
+                }
+                if let r = controlRange("Button(", in: line) ?? controlRange("Button {", in: line) {
+                    let head = line[r.lowerBound...]
+                    let titled = head.contains("Button(L(") || (head.hasPrefix("Button(") && head.contains("L(")) || window.contains(".accessibilityLabel(")
+                    if !titled { report("Button 没有标题文案") }
+                }
+                if line.contains("func makeNSView(") {
+                    let body = lines[i..<min(i + 25, lines.count)].joined(separator: "\n")
+                    if !body.contains("setAccessibilityLabel(") { report("makeNSView 没有 setAccessibilityLabel") }
+                }
+            }
+        }
+        return out
     }
 }

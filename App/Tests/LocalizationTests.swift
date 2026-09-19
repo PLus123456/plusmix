@@ -4,6 +4,7 @@ import Foundation
 import XCTest
 @testable import Switcher
 
+@MainActor
 final class LocalizationTests: XCTestCase {
     func testL10n_bothLanguagesHaveSameKeysAndNoEmptyValues() throws {
         let zh = try XCTUnwrap(L10n.table(language: "zh-Hans"), "应有 zh-Hans.lproj/Localizable.strings")

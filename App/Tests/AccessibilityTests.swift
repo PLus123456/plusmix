@@ -15,14 +15,16 @@ final class AccessibilityTests: XCTestCase {
         let wc = controller.windowController
         let panels = controller.panels
         var violations: [String] = []
+        var counts: [String: Int] = [:]
 
         func check(_ name: String, _ root: Any?) {
             guard let root else { violations.append("\(name)：没有视图"); return }
-            AppTest.pump(seconds: 0.15)
+            AppTest.pump(seconds: 0.3)
             let v = AppTest.accessibilityViolations(in: root)
             let counted = AppTest.accessibilityControlCount(in: root)
-            print("无障碍：\(name) 控件 \(counted) 个，缺 label \(v.count) 个")
-            XCTAssertGreaterThan(counted, 0, "\(name)：应至少遍历到一个控件（树没走进去？）")
+            print("无障碍：\(name) AppKit 层控件 \(counted) 个，缺 label \(v.count) 个")
+            let window = String(name.split(separator: " ").first ?? Substring(name))
+            counts[window, default: 0] += counted
             violations += v.map { "\(name)：\($0)" }
         }
 
@@ -55,6 +57,20 @@ final class AccessibilityTests: XCTestCase {
         check("叠加面板", wc.overlayPanelController?.view)
         panels.closeAll()
 
+        // 纯 SwiftUI 的窗口在 AppKit 层可能一个控件都没有（MIDI 映射），只要求总数 > 0（主窗口 + 调音台的竖推子）且主窗口 > 0
+        XCTAssertGreaterThan(counts.values.reduce(0, +), 0, "应至少遍历到一个控件（树没走进去？）：\(counts)")
+        XCTAssertGreaterThan(counts["主窗口"] ?? 0, 10, "主窗口的 AppKit 控件应都遍历到：\(counts)")
         XCTAssertEqual(violations, [], "缺 accessibility label 的控件：\n" + violations.joined(separator: "\n"))
+    }
+}
+
+@MainActor
+final class AccessibilitySourceScanTests: XCTestCase {
+    /// SwiftUI 那一层的 label 在源码里就能查：每个控件构造带文案（NSHostingView 不把 SwiftUI 自己的辅助功能元素暴露给进程内的 NSAccessibility 遍历，
+    /// 运行期只能查到 AppKit 那一层，见 testAccessibility_allPanelControlsHaveLabels）。
+    func testAccessibility_swiftUIControlsDeclareLabels() throws {
+        let root = try AppTest.repoRoot().appendingPathComponent("App/Sources")
+        let violations = try AppTest.swiftUIControlLabelViolations(in: root)
+        XCTAssertEqual(violations, [], "SwiftUI 控件缺 label：\n" + violations.joined(separator: "\n"))
     }
 }

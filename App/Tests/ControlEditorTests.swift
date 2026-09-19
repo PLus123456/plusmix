@@ -15,6 +15,8 @@ final class ControlEditorTests: XCTestCase {
         XCTAssertTrue(controller.hotkeyFileURL.path.contains("switcher-tests"), "测试宿主的表文件在临时目录：\(controller.hotkeyFileURL.path)")
         let editor = controller.panels.showHotkeyEditor()
         let model = editor.model
+        model.resetToDefault()   // 别的测试可能已经存过表
+        XCTAssertTrue(model.save())
         XCTAssertEqual(model.rows.count, 23, "默认表 23 条")
         XCTAssertTrue(model.conflicts.isEmpty)
 
@@ -75,6 +77,11 @@ final class ControlEditorTests: XCTestCase {
     }
 
     func testMIDIMapping_learnFromVirtualSourceAndSave() throws {
+        // 虚拟源要在 session 起来之前建：CoreMIDI 的热插拔通知只送到进程里第一次 MIDIClientCreate 时的 run loop，第一个 session 的
+        // MIDI 线程停了之后再建的源收不到通知（W2-C 的坑，reports/issues/W3E-w2-control-midi-hotplug-after-restart.md）；起 session 时会枚举现有源
+        let name = "Switcher 测试源 \(UUID().uuidString.prefix(6))"
+        let source = try VirtualMIDISource(name: name)
+        defer { source.dispose() }
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 2)
         session.send(.setProgram(input: 1))
@@ -86,12 +93,11 @@ final class ControlEditorTests: XCTestCase {
         XCTAssertTrue(controller.midiFileURL.path.contains("switcher-tests"))
         let editor = controller.panels.showMIDIMapping()
         let model = editor.model
+        for r in model.rows { model.removeRow(r.id) }   // 别的测试可能已经存过映射
+        XCTAssertTrue(model.save())
         XCTAssertEqual(model.rows.count, 0, "没有默认 MIDI 映射：设备各不相同，用 learn 配")
 
-        let name = "Switcher 测试源 \(UUID().uuidString.prefix(6))"
-        let source = try VirtualMIDISource(name: name)
-        defer { source.dispose() }
-        XCTAssertTrue(AppTest.waitUntil(5) { midi.sources.contains { $0.name == name && $0.connected } }, "虚拟源应被自动连上：\(midi.sources)")
+        XCTAssertTrue(AppTest.waitUntil(5) { midi.sources.contains { $0.name == name && $0.connected } }, "起 session 时应连上已有的虚拟源：\(midi.sources)")
         XCTAssertTrue(AppTest.waitUntil(3) { model.sources.contains { $0.name == name } }, "面板应列出来源")
 
         // learn：下一条 CC 写进那一行的触发；期间不派发
