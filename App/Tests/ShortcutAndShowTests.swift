@@ -74,6 +74,30 @@ final class ShortcutAndShowTests: XCTestCase {
         XCTAssertEqual(docs.loadAutosave(), show)
     }
 
+    /// 打开文件不自动起输出（G3 2026-09-19 定）：保存时录制 / 推流 enabled 的节目，load / loadAutosave 回来 enabled 都是 false，其余字段原样。
+    func testShow_openedFileDoesNotAutoStartOutputs() throws {
+        let suite = "com.example.switcher.tests.show-open-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let docs = ShowDocuments(defaults: defaults)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-show-open-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var show = ShowDocuments.emptyShow(name: "录着存的")
+        show.outputs[0].enabled = true
+        show.outputs.append(OutputState(number: 2, kind: .stream, name: "推流", enabled: true,
+                                        settings: OutputSettings(video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: StreamSettings(url: "rtmp://127.0.0.1/live/x"))))
+        let url = dir.appendingPathComponent("rec.\(ShowDocuments.fileExtension)")
+        try docs.save(show, to: url)
+        let loaded = try docs.load(from: url)
+        XCTAssertEqual(loaded.outputs.map(\.enabled), [false, false])
+        var expected = show
+        expected.outputs[0].enabled = false
+        expected.outputs[1].enabled = false
+        XCTAssertEqual(loaded, expected, "只清 enabled，其余原样")
+        docs.autosave(show)
+        XCTAssertEqual(docs.loadAutosave()?.outputs.map(\.enabled), [false, false])
+    }
+
     /// 通过 AppController：新建 → 加输入 → 写文件 → 打开回来，session 换成文件里的状态；布局键进 Show.layout。
     func testShow_controllerRoundTripReplacesSession() throws {
         let session = try AppTest.freshSession()

@@ -254,11 +254,25 @@ g3 先 fast-forward 到 main 2fdf52d（G3 + P2 合入后），再按 `--no-ff` �
 
 撤 headless 第 8 步的封口绕法并把 gate 的 E5 按 ≤ 20 ms 判；G3 场景八路换噪声底纹（提案 006 + W1-A2 已合入）、gate3-report 去掉 E2"不适用"分支、G4 基线重打；App `OutputRuntime.stopRecording` 简化（约 15 行）；复核 App 启动停顿单（reports/issues/W2B2-w1-core-startup-stall-pacing-drops.md）；ThrottleProxy 抖动单。
 
-### 11.3 等用户定的（本次没改任何契约、阈值、测试标准）
+### 11.3 原本等用户定的 → 用户 2026-09-19 授权按 G3 方案落地（"那些等我定的你也按你的方案来"）
 
-- **`OutputState.enabled` 打开节目时的语义**（W2-B2 §4 第 2 条）：现在按契约字面——打开一个保存时正在录制 / 推流的节目（含 scenarios/*.json、退出时自动存的 LastSession）会立刻起录制 / 推流。G3 建议：App 打开节目文件时把 record / stream 的 `enabled` 清掉（LastSession 恢复除外），一行 App 改动，归 W3-E；或在 CONTRACTS.md 写明"文档里的 enabled 只对 headless 生效"。
-- 测试标准的口径（W1-A2 §4）：A2 判"最大绝对值"（frameprobe）还是"|均值|"（gate3-report），建议前者；"整秒拍"= 标称整数帧率的倍数，写进 §2.3；推流落盘文件按 ffmpeg 口径；`Stats.audio.discontinuities` 是流式信息项，A1 第三项以 frameprobe 离线口径为准（§7）。
-- `PacingOptions` 默认值写进 §2.1、`per_input` 要不要 late 计数（W1-B2 §4 第 2 / 4 条）；`RecordSettings.directory` 相对路径相对什么、推流"x s 后重连"要不要进 Stats（W2-B2 §4 第 3 / 8 条）；对齐延迟 / 监听点是否进 Show（W1-D2 §4 第 2 条）。
-- 提案 006 已由 P2 落地（用户批）。docs/contract-changes/ 本次无新提案。
+| 问题 | 来源 | G3 的裁定与落点 |
+|---|---|---|
+| `OutputState.enabled` 打开节目时的语义 | W2-B2 §4 第 2 条 | 文档里的 enabled 只对 headless 生效；App 打开任何节目文件（含 LastSession）都把 record / stream 的 enabled 清掉，输出只由用户动作起。**App 已做**：`ShowDocuments.stoppingOutputs`（load / loadAutosave 都过一遍）+ `testShow_openedFileDoesNotAutoStartOutputs`，App 胶水共约 35 行（额度 50）。写进提案 007 B-1 |
+| A2 判"最大绝对值"还是"均值" | W1-A2 §4 第 1 条 | **最大绝对值**（更严；整秒配对）。测试标准 §3 A2 / §4 A2 改口径；`scripts/gate3-report.py` 改判 `a2_max`，均值 / 标准差照报；G3 三次运行都是 0.000，结论不变 |
+| "整秒拍"的定义 | W1-A2 §4 第 3 条 | 闪光帧的节目拍号是标称整数帧率的倍数（60 → 整秒；59.94 → 每 1.001 s）；写进测试标准 §2.3 |
+| 推流落盘文件的 A2 口径 | W1-A2 §4 第 2 条 | 按 ffmpeg 口径（音轨起点 = tfdt 偏移 + 加回 priming），AVFoundation 原生口径作对照；写进 §2.3 与 §3 A2 |
+| `Stats.audio.discontinuities` 与离线口径 | W1-A2 §4 第 4 条 | A1 第三项以 `frameprobe av --discontinuities` 为准，stats.jsonl 的是流式信息项；写进 §2.3、§3 A1、§7 |
+| `PacingOptions` 默认值 / 合成源到达相位进 §2.1 | W1-B2 §4 第 4 条、G2 §7 第 5 条 | 写进 §2.1（提前半帧到达、音频不提前；余量参数全套；噪声底纹） |
+| V3 口径、V4 判法、GPU 口径 | G2 §7 第 3 / 4 / 6 条（G3 一直沿用） | 写进 §3 V1–V3、V4、S3 与 §7：V3 = jitter_ms（唤醒 − 拍点，每秒最大）p99 取各秒最大；V4 设计外按精确速率核算 +1 帧相位余量；GPU = IOKit Device Utilization |
+| `per_input` 加 late 计数 | W1-B2 §4 第 2 条 | **不加**：只在 `PacingStats.lateFrames`（headless / 探针打印）；V4 的 dup / drop 看不见它是设计使然，gate 没有以它为判据的项 |
+| 推流"x s 后重连"进 Stats | W2-B2 §4 第 3 条 | **不加**：底栏"重连中（第 n 次）"够用，退避秒数是 UI 装饰，不是指标 |
+| 对齐延迟 / 监听点是否进 Show | W2-E §4 第 1 条、W1-D2 §4 第 2 条 | **进 Show**：`AudioState.alignmentFrames`（默认 2048）+ `monitorPoint`（默认延迟线前）——**提案 007**（待批 → 契约会话落地，W3-E 设置面板前） |
+| `RecordSettings.directory` 相对路径相对什么 | W2-B2 §4 第 8 条 | headless 相对进程工作目录、App 相对 ~/Movies/Switcher（都已如此）；写进 CONTRACTS.md 字段注释——提案 007 B-2 |
+| 录制停止边界写进 CONTRACTS.md | G2 §7 第 7 条 | W1-E2 已实现（`stop(atTick:)` 裁两轨、`setStopTick`、nil = 最后一帧的下一拍）；文字进 CONTRACTS.md——提案 007 B-3 |
+| `Stats.encoder` idle 项、录制提前 10 拍、L1 排除 t0 前的帧 | W2-B2 §4 第 4 / 5 条、W1-B2 §4 第 3 条 | 保持（§11.1 第 5 / 6 条） |
+
+测试标准的改动只有口径文字，**阈值一个没动**（文件头有修订说明；OWNERSHIP 的 G3 / G4 行加了这个文件，备注只准改口径）。W3-C / W3-E 的 prompt 末尾各加了一段"G3 定的"，G4 prompt 第 6 条改成已落地。
+docs/contract-changes/ 本次新增 007（待批）。
 
 合并后的 g3 → main 仍由用户做（`git merge --no-ff g3`）；之后 G4 从 main 开。

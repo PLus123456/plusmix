@@ -42,10 +42,18 @@ final class ShowDocuments {
     /// 空节目，录制目录用本对象的。
     func emptyShow(name: String = "未命名") -> Show { Self.emptyShow(name: name, recordDirectory: recordDirectory) }
 
+    /// 文件里来的节目：录制 / 推流的 enabled 一律清掉。文档里的"应该在跑"只对 headless 的场景文件有意义；App 里输出只由用户动作（按钮 / 快捷键 / API）起，
+    /// 打开一个保存时正在录制 / 推流的节目（含退出时自动存的 LastSession）不能自己开录（G3 2026-09-19 定，W2-B2 报告 §4 第 2 条，契约提案 007 B-1）。
+    static func stoppingOutputs(_ show: Show) -> Show {
+        var show = show
+        for i in show.outputs.indices where show.outputs[i].kind == .record || show.outputs[i].kind == .stream { show.outputs[i].enabled = false }
+        return show
+    }
+
     // MARK: 文件
 
     func load(from url: URL) throws -> Show {
-        let show = try store.load(from: url)
+        let show = Self.stoppingOutputs(try store.load(from: url))
         currentURL = url
         noteRecent(url)
         return show
@@ -93,6 +101,6 @@ final class ShowDocuments {
     }
 
     func loadAutosave() -> Show? {
-        try? store.load(from: Self.autosaveURL)
+        (try? store.load(from: Self.autosaveURL)).map(Self.stoppingOutputs)
     }
 }

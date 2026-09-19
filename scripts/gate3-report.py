@@ -13,7 +13,7 @@ packets-v.csv、ffprobe-errors.txt、summary-c.json / report-c.md、headless.log
       折成 PVW 比例（PGM 1 号 64、PVW 2 号 192 → (gray − 64) / 128），与设定值之差 ≤ 2%（目标 1%）。
   A1：stats.jsonl 的 dropouts + underruns（硬性 0）；第三项"不连续"取 headless 收尾摘要里 AudioEngine 泵线程的流式检测计数（信息项，
       正式的离线口径要 frameprobe 学会按已知 click 位置排除——W1-A 的单子）。
-  A2：frameprobe av，只取闪光落在整秒拍上的配对（59.94 的路在播时闪光周期 1.001 s 是已知假象，G2 报告第 5 条）：|均值| ≤ 16.7 ms（目标 5）。
+  A2：frameprobe av，只取闪光落在整秒拍上的配对（59.94 的路在播时闪光周期 1.001 s 是已知假象，G2 报告第 5 条）：整秒配对的最大绝对值 ≤ 16.7 ms（目标 5），均值 / 标准差同时报（测试标准 §4，2026-09-19 定）。
   A3：同一序列的最小二乘斜率 × 8 h ≤ 16 ms（10 分钟外推，信息为主）。
   A4：frameprobe av 多文件（PGM + ISO 音轨）同一事件 click 时刻极差最大值 ≤ 16.7 ms（目标 1 ms）。
   E2：ffprobe 视频包表：10 s 滑窗平均码率与设定值之差 ≤ 10%（目标 5%）；1 s 窗峰值 ≤ 1.5×（目标 1.2×）。
@@ -269,7 +269,7 @@ def main():
         a3_slope = sum((x - mx) * (y - my) for x, y in zip(exact_t, exact)) / sxx if sxx > 0 else 0.0
     else:
         a2_mean = a2_max = a2_std = a3_slope = None
-    a2_ok = a2_mean is not None and abs(a2_mean) <= frame_ms
+    a2_ok = a2_max is not None and a2_max <= frame_ms
     a3_8h = a3_slope * 8 * 3600 if a3_slope is not None else None
     a3_ok = a3_8h is not None and abs(a3_8h) <= 16
     multi = av_multi.get("multi", {}) if av_multi else {}
@@ -389,7 +389,7 @@ def main():
          "曲线误差 ≤ 1 帧；T-bar 映射误差 ≤ 2%（目标 ≤ 1%）", v7_ok, "—"),
         ("A1 音频断裂", f"超时 + 欠载 = {int(a1)}；泵线程流式不连续检测 {disc if disc is not None else '—'}（信息项，见口径说明）", "0（硬性）", a1 == 0, "—"),
         ("A2 A/V 偏移", (f"整秒闪光 {len(exact)} 对：均值 {a2_mean:+.3f} ms，标准差 {a2_std:.3f}，最大 {a2_max:.3f} ms；全部配对 {av.get('matchedCount')} 对均值 {fmt(av.get('meanMs'))} ms（含 59.94 在播段的假象）" if exact else "没有可配对的闪光 / click"),
-         "|均值| ≤ 16.7 ms（目标 ≤ 5；音频超前为正）", a2_ok, "—"),
+         "整秒配对最大绝对值 ≤ 16.7 ms（目标 ≤ 5；音频超前为正）", a2_ok, "—"),
         ("A3 A/V 漂移", f"整秒闪光序列斜率 {fmt(a3_slope, 5)} ms/s × 8 h = {fmt(a3_8h, 2)} ms（{a.minutes:g} 分钟外推）" if a3_slope is not None else "—", "× 8 h ≤ 16 ms（目标 ≤ 5；8 小时实跑归 W4-A）", a3_ok, "—"),
         ("A4 多文件对齐", a4_value, "≤ 1 帧（目标 ≤ 1 ms）", a4_ok, "—"),
         ("E1 编码滞后跳帧", f"{int(e1) if e1 is not None else '—'}（stats.jsonl encoder[] 全部条目的 skipped 之和：PGM 录制器 + ISO 录制器）", "标准负载下 0", None if e1 is None else e1 == 0, "—"),
