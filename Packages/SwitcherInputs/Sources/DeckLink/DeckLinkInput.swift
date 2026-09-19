@@ -193,18 +193,21 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
         }
     }
 
+    /// 停：关会话、退订热插拔。没 start 过（或 start 因 SDK 不在抛了错）也把状态复位成 noSignal（契约：stop 后 noSignal）。
     public func stop() {
-        guard running.exchange(false, ordering: .acquiringAndReleasing) else { return }
-        sessionQueue.sync { [self] in
-            pollTimer?.cancel()
-            pollTimer = nil
-            if hotplugToken != 0 {
-                sw_decklink_hotplug_unsubscribe(hotplugToken)
-                hotplugToken = 0
+        if running.exchange(false, ordering: .acquiringAndReleasing) {
+            sessionQueue.sync { [self] in
+                pollTimer?.cancel()
+                pollTimer = nil
+                if hotplugToken != 0 {
+                    sw_decklink_hotplug_unsubscribe(hotplugToken)
+                    hotplugToken = 0
+                }
+                teardown()
             }
-            teardown()
-            stateBox.set(.noSignal)
         }
+        errorBox.withLock { $0 = nil }
+        stateBox.set(.noSignal)
     }
 
     /// 桥接层的会话统计（没会话时全 0）。

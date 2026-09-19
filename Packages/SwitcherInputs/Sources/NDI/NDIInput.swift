@@ -183,14 +183,17 @@ public final class NDIInput: Input, @unchecked Sendable {
         t.start()
     }
 
+    /// 停：线程退出、接收器销毁。没 start 过（或 start 因 SDK 不在抛了错）也把状态复位成 noSignal（契约：stop 后 noSignal）。
     public func stop() {
-        guard running.exchange(false, ordering: .acquiringAndReleasing) else { return }
-        let t = threadBox.withLock { t -> InputThread? in
-            let x = t
-            t = nil
-            return x
+        if running.exchange(false, ordering: .acquiringAndReleasing) {
+            let t = threadBox.withLock { t -> InputThread? in
+                let x = t
+                t = nil
+                return x
+            }
+            t?.stop()
         }
-        t?.stop()
+        errorBox.withLock { $0 = nil }
         stateBox.set(.noSignal)
     }
 
