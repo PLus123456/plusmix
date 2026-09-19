@@ -5,8 +5,8 @@ import SwitcherContracts
 /// version、edition、inputs、overlays、preview、active、fadeToBlack、transitions、recording、external、streaming、playList、multiCorder、fullscreen、audio。
 /// 根元素名是上游协议规定的（客户端按它识别文档，没法改）。
 public enum StatusXML {
-    /// 根元素名（上游协议规定；docs/contract-changes/011 记录了这个字面量存在的原因）。
-    public static let rootElement = "vmix"
+    /// 根元素名（上游协议规定；docs/contract-changes/011 记录了这个字面量存在的原因，lint 只放行带标记的这一行）。
+    public static let rootElement = "vmix"   // lint:allow-protocol-literal
 
     /// 生成文档。表读数来自 Stats（铁律 4：兼容层不另算），没有就写 0。
     public static func document(state: MixerState, frameRate: FrameRate, stats: Stats?, configuration: VMixCompatConfiguration) -> String {

@@ -18,4 +18,6 @@
 
 另：法律层面这一字面量属于"描述性使用对方名字"的一部分（设计方案 §0），发布前问律师时一并问。
 
-状态：待批
+状态：已批（用户 2026-09-19："这两个按照你的想法来"），W3-D 会话按用户授权落地：
+`scripts/lint-rules.sh` 加例外 2（只放行 `Packages/SwitcherControl/Sources/VMixCompat/` 下同一行带 `lint:allow-protocol-literal` 标记的行，
+标记出现在别的目录不算数），`StatusXML.swift` 的常量行加标记；`make lint BRANCH=w3-control2` 禁词检查绿。

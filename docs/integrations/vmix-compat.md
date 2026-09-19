@@ -7,7 +7,7 @@
 > 设计方案 §0 把"兼容 X 的 API"这类描述性用法列为法律灰区，所以（1）它是独立的 SwiftPM target，不进默认产品；
 > （2）**默认关闭**，用户在设置里显式打开（W3-E 的偏好设置页带这段提示）；（3）**发布前问律师**——包括产品文案里能不能出现对方的名字、
 > XML 根元素等协议字面量算不算商标使用。代码树里按铁律 6 不出现对方的名字（`scripts/lint-rules.sh` 会拦），
-> 唯一的例外是协议规定的 XML 根元素名，见 [docs/contract-changes/011](../contract-changes/011-lint-exception-compat-protocol-literals.md)。
+> 唯一的例外是协议规定的 XML 根元素名（提案 [docs/contract-changes/011](../contract-changes/011-lint-exception-compat-protocol-literals.md)，已批：lint 只放行 VMixCompat 目录下带 `lint:allow-protocol-literal` 标记的那一行）。
 > 以上不是法律意见。
 
 ## 1. 开关、端口、接线
