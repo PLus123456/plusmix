@@ -3,7 +3,7 @@
 // 表的数字只有一个来源（AudioMixer.meters，铁律 4）：读数文字 + A1 计数从 1 Hz 的 Stats.audio.meters 来（提案 004）；
 // 条子按 AudioEngineStatus（控制循环每 50 ms 刷新的同一份读数）每 50 ms 刷，UI 高刷新率的表允许另读这一份（Stats.swift 的说明）。
 // 契约没有"改监听点 / 总线效果链"的命令（AudioState 只有 busGain / busMute / setAFV），这两项过渡期经 loadShow 整体替换当前状态
-// （转场中会被打断），正式命令见 docs/contract-changes/008。
+// （转场中会被打断），正式命令见 docs/contract-changes/012。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -114,7 +114,7 @@ final class MixerModel: ObservableObject {
     func setBusMute(_ bus: Bus, on: Bool) { send?(.busMute(bus: bus, on: on)) }
     func setAFV(on: Bool) { send?(.setAFV(on: on)) }
 
-    /// 监听点：契约没有命令，过渡期 loadShow 整体替换（提案 008）。
+    /// 监听点：契约没有命令，过渡期 loadShow 整体替换（提案 012）。
     func setMonitorMode(_ mode: MonitorMode) {
         guard state.audio.monitorMode != mode else { return }
         var s = state

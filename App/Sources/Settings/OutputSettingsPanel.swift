@@ -1,7 +1,7 @@
 // 输出设置窗（W3-E 交付第 3 条）：录制（格式、码率、关键帧间隔、目录、停止后转 MP4）、ISO 路选择、推流目的地列表
 // （RTMP / RTMPS / SRT、地址、密钥、每路编码参数）、外部输出、NDI 发送、虚拟摄像头开关与安装状态。
 // 全部落在 MixerState.outputs（addOutput / removeOutput / setOutputSettings）；ISO = 一路 source = .input(n) 的录制输出
-// （契约："ISO = 同一拍发多条 startRecord"；W3-C 做同拍起步）。契约没有"改名 / 改 enabled"的命令，改这两项 = 删掉再加回同编号（提案 008）。
+// （契约："ISO = 同一拍发多条 startRecord"；W3-C 做同拍起步）。契约没有"改名 / 改 enabled"的命令，改这两项 = 删掉再加回同编号（提案 012）。
 import AppKit
 import SwiftUI
 import SwitcherContracts

@@ -60,7 +60,7 @@ final class MixerPanelTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.afv })
         XCTAssertTrue(AppTest.waitUntil(3) { session.audio.status.afv })
 
-        // 监听：PFL（契约没有 setMonitorMode 命令，过渡期经 loadShow 整体替换，提案 008）；输入 / PGM 不变
+        // 监听：PFL（契约没有 setMonitorMode 命令，过渡期经 loadShow 整体替换，提案 012）；输入 / PGM 不变
         panel.model.setMonitorMode(.pfl)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.monitorMode == .pfl }, "监听点应变成 PFL")
         XCTAssertEqual(session.state.inputs.count, 2)

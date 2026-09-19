@@ -5,7 +5,7 @@
 
 ## 1. 做了什么
 
-只动了 `App/`（+ 本报告、`docs/contract-changes/008`）。SwiftUI 表单全部放 NSHostingView（设计方案 §10），模型只发 Command、只读快照（W2-B 的绑定规则）。
+只动了 `App/`（+ 本报告、`docs/contract-changes/012`）。SwiftUI 表单全部放 NSHostingView（设计方案 §10），模型只发 Command、只读快照（W2-B 的绑定规则）。
 
 | prompt 交付 | 落在哪 | 说明 |
 |---|---|---|
@@ -60,9 +60,9 @@
 
 
 - **`OutputRuntime.stopRecording` 按 W2-B2 报告 §4 第 6 条简化**：prompt 末条写"若 G4 没做"；main 上的 `Recorder` 已含 W1-E2（G3 合入），可以简化，但它是接线逻辑不是面板，且 W3-C 同时在 App/ 里做 ISO 录制（会动同一段），留给 G4 / W3-C 一起改，免得冲突。
-- **DeckLink / NDI 特有项**（输入口 / 连接类型、视频格式；带宽模式、tally 回传）：契约里没有字段，W3-A prompt 第 3 条说由它走提案；输入设置窗留了禁用控件 + 说明，批了就接（提案 008 疑问 2）。
+- **DeckLink / NDI 特有项**（输入口 / 连接类型、视频格式；带宽模式、tally 回传）：契约里没有字段，W3-A prompt 第 3 条说由它走提案；输入设置窗留了禁用控件 + 说明，批了就接（提案 012 疑问 2）。
 - **对齐延迟 / 监听点（提案 007）**：待批，契约里还没有，偏好设置 / 调音台没放；批了加两个控件（AudioState 字段，改法同监听模式）。
-- **每路 AFV 开关**：契约只有全局 AFV（设计方案 §7 也是全局），条子上做的是显示该路当前门控增益 + 头部全局开关；每路参与开关要加字段（提案 008 疑问 1）。
+- **每路 AFV 开关**：契约只有全局 AFV（设计方案 §7 也是全局），条子上做的是显示该路当前门控增益 + 头部全局开关；每路参与开关要加字段（提案 012 疑问 1）。
 - **兼容层真的起来**：W3-D 的 VMixCompat target 还没合进 App，偏好设置只保存两个键；ControlRuntime 按键起模块是 G4 / W3-D 合入后的一行。
 - **虚拟摄像头安装的真实验证**：没有 W3-C 的扩展包也没有 Team ID，只能验证请求发得出、错误文案显示（BLOCKED-签名）；测试宿主不发请求。
 - **外部显示的 W3-C 替换**：W3-C 会做 `ExternalDisplayOutput`（Packages 里 + 显示器插拔），本会话的窗口是 App 级的最小实现（MetalDisplayView + 跟快照），G4 合并时以 W3-C 的为准、保留这里的菜单 / 设置面板。
@@ -70,7 +70,7 @@
 
 ## 4. 对契约的疑问
 
-写进 `docs/contract-changes/008-ui-commands-monitor-bus-effects-output-toggle-input-source.md`（待批）：
+写进 `docs/contract-changes/012-ui-commands-monitor-bus-effects-output-toggle-input-source.md`（待批）：
 
 1. `Command` 缺 `setMonitorMode` / `setBusEffects`：调音台的 PFL / AFL 与总线效果链现在经 `loadShow(当前状态改一项)` 整体替换（`MixerModel.replaceWholeState`），转场中会被 `resetTransientState` 打断。
 2. 非录制 / 推流输出（NDI / 外部显示 / 虚拟摄像头 / 多画面）没有改 `enabled` / 改名的命令：现在 `removeOutput + addOutput` 同编号翻转（`OutputSettingsModel.replace`），运行表会看到一次消失再出现。

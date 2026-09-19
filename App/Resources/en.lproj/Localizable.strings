@@ -247,7 +247,7 @@
 "inputSettings.sectionList" = "Settings sections";
 "inputSettings.source.audio" = "Audio device: %@";
 "inputSettings.source.camera" = "Camera / capture card: %@";
-"inputSettings.source.changeHint" = "To change the source, remove the input and add it again (no setInputSource command yet; proposal 008).";
+"inputSettings.source.changeHint" = "To change the source, remove the input and add it again (no setInputSource command yet; proposal 012).";
 "inputSettings.source.decklink" = "DeckLink: %@";
 "inputSettings.source.file" = "File: %@, at end %@, rate %.2f";
 "inputSettings.source.image" = "Image: %@";
@@ -342,7 +342,7 @@
 "mixer.afvHelp" = "Audio follows video: inputs cross-fade with transitions";
 "mixer.afvIndicatorHelp" = "AFV gate: this input’s current gain target";
 "mixer.afvOff" = "AFV off";
-"mixer.busEffectsHint" = "Bus effect changes go through loadShow (no dedicated command yet; proposal 008).";
+"mixer.busEffectsHint" = "Bus effect changes go through loadShow (no dedicated command yet; proposal 012).";
 "mixer.busEffectsTitle" = "%@ effects";
 "mixer.busFader" = "%@ fader";
 "mixer.effects" = "Effects (%d)";

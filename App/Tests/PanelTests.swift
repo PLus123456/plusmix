@@ -143,7 +143,7 @@ final class PanelTests: XCTestCase {
                  describe: { "\(session.state.audio.buses)" }))
         cases.append(Case(name: "调音台：AFV 开", change: { wc.mixerPanel.model.setAFV(on: true) },
                  verify: { session.state.audio.afv }, describe: { "\(session.state.audio.afv)" }))
-        cases.append(Case(name: "调音台：监听 PFL（经 loadShow 过渡，提案 008）", change: { wc.mixerPanel.model.setMonitorMode(.pfl) },
+        cases.append(Case(name: "调音台：监听 PFL（经 loadShow 过渡，提案 012）", change: { wc.mixerPanel.model.setMonitorMode(.pfl) },
                  verify: { session.state.audio.monitorMode == .pfl && session.state.inputs.count == 3 },
                  describe: { "\(session.state.audio.monitorMode) 输入 \(session.state.inputs.count)" }))
         cases.append(Case(name: "调音台：Master 效果链（限幅）", change: {

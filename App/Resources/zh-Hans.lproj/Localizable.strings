@@ -247,7 +247,7 @@
 "inputSettings.sectionList" = "设置分组";
 "inputSettings.source.audio" = "音频设备：%@";
 "inputSettings.source.camera" = "摄像头 / 采集卡：%@";
-"inputSettings.source.changeHint" = "换来源 = 删除这路再重新添加（契约没有 setInputSource 命令，提案 008）。";
+"inputSettings.source.changeHint" = "换来源 = 删除这路再重新添加（契约没有 setInputSource 命令，提案 012）。";
 "inputSettings.source.decklink" = "DeckLink：%@";
 "inputSettings.source.file" = "文件：%@，播完 %@，速率 %.2f";
 "inputSettings.source.image" = "图片：%@";
@@ -342,7 +342,7 @@
 "mixer.afvHelp" = "音频跟随视频：转场时相关输入交叉淡变";
 "mixer.afvIndicatorHelp" = "AFV 门控：这路当前的增益目标";
 "mixer.afvOff" = "AFV 关";
-"mixer.busEffectsHint" = "总线效果链改动经 loadShow 整体替换（契约没有对应命令，提案 008）。";
+"mixer.busEffectsHint" = "总线效果链改动经 loadShow 整体替换（契约没有对应命令，提案 012）。";
 "mixer.busEffectsTitle" = "%@ 效果链";
 "mixer.busFader" = "%@ 推子";
 "mixer.effects" = "效果 (%d)";
