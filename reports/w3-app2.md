@@ -40,7 +40,24 @@
 | `testMIDIMapping_learnFromVirtualSourceAndSave` | 虚拟源起 session 时连上；learn → CC 9 @ ch3（期间不派发）；存盘 + 换表；CC 9 = 64 推 T-bar 到 0.504；冲突 / 通道 17 不存；取消 learn | — | ✅（虚拟源要先于 session 建，§5 第 11 条） |
 | 旧测试 26 个（W2-B / W2-B2） | 改了 3 处入口（Master 推子 / 表走调音台模型、底栏外部输出 / 多画面按钮可用、AddInput 八种）；`testInputs_builtInCameraLiveWithin5sAndPictureShows` 仍 BLOCKED-权限；`testStream_10sToLocalMediaMTX_framesContinuous` 在全量跑时因没编 frameprobe 跳过，单独编好后再跑见文末 | 仍绿 | ✅ |
 
-## 3. 没做的和原因
+运行记录：全量 `xcodebuild test` 44 个测试 42 过 2 跳（摄像头 BLOCKED-权限；推流因全量跑时没编 frameprobe 跳过），`swift build -c release --package-path Tools/frameprobe` 之后单独再跑
+`testStream_10sToLocalMediaMTX_framesContinuous` 17 s 过、`testRecord_5sTwoTracksDurationExact` 7 s 过（底栏推流按钮改成"起停全部目的地"后行为不变）。
+`make lint BRANCH=w3-app2`：禁词 / 版本 / Package.swift / 依赖方向 / 归属（48 个改动文件都在 App/、reports、docs/contract-changes 内）/ 实时符号全绿。
+
+### 人工检查（用户做；自动测试驱动的是模型，没有人点过控件）
+
+前提：`make gen build-app`，打开 `.build/DerivedData/Build/Products/Debug/Switcher.app`。
+
+- [ ] 底栏"添加输入…"：左栏八种类型切换、合成源页的滑杆 / 噪声 / 图案 ID、屏幕页选"单个窗口"后列表能出来（要屏幕录制授权）、音频设备页列出声卡；编号 / 名字 / 添加。
+- [ ] 缩略图右键"设置…"：六节都能改并立刻生效（裁切 / 变换看 PGM；延迟补偿 / 声像听耳机；抠像开关等 W3-B）；改名回车生效。
+- [ ] 输出 › 录制设置：改编码器 / 目录 / 模板，示例文件名跟着变；ISO 页勾一路 → 输出表多一路（W3-C 合入前只是配置）；推流页加一个 rtmp://127.0.0.1:1935/s1 → 底栏"推流"可用。
+- [ ] 窗口 › 外部显示 › 某块屏 › PGM：全屏黑底出画面（只有内置屏时会盖住主窗口，⌘Q 或菜单"关闭全部外部显示"）。
+- [ ] 窗口 › 多画面窗口：16:9 窗口出多画面。
+- [ ] 调音台：条子的表在动、推子 / 静音 / 独听 / 声像 / M A B H 都能改，AFV 开关 + PFL / AFL，总线"效果"弹出 EQ / 压缩 / 限幅（音频引擎暂不读效果）。
+- [ ] 切换 › 快捷键…：录键、改动作、冲突提示、保存后立刻生效；MIDI 映射…：插着 MIDI 设备启动 App 后 Learn 能学到（换过节目后新插的设备连不上，见 issue）。
+- [ ] 偏好设置：改 API 端口 → 应用并重起引擎 → `curl` 新端口；改格式 720p60 → 引擎重起、标题条 / 状态行的节目格式变；语言切 English 重开 App 全英文。
+
+
 
 - **`OutputRuntime.stopRecording` 按 W2-B2 报告 §4 第 6 条简化**：prompt 末条写"若 G4 没做"；main 上的 `Recorder` 已含 W1-E2（G3 合入），可以简化，但它是接线逻辑不是面板，且 W3-C 同时在 App/ 里做 ISO 录制（会动同一段），留给 G4 / W3-C 一起改，免得冲突。
 - **DeckLink / NDI 特有项**（输入口 / 连接类型、视频格式；带宽模式、tally 回传）：契约里没有字段，W3-A prompt 第 3 条说由它走提案；输入设置窗留了禁用控件 + 说明，批了就接（提案 008 疑问 2）。
