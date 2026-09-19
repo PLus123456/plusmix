@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Switcher 输出</title>
+  <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="输出编号（可空）">
+    <sdpi-textfield setting="output" placeholder="留空 = 该类里编号最小的" pattern="[0-9]*"></sdpi-textfield>
+  </sdpi-item>
+  <hr />
+  <sdpi-item label="Switcher 地址">
+    <sdpi-textfield setting="host" global placeholder="127.0.0.1" default="127.0.0.1"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="API 端口">
+    <sdpi-textfield setting="port" global placeholder="8765" default="8765" pattern="[0-9]*"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Token（可空）">
+    <sdpi-password setting="token" global></sdpi-password>
+  </sdpi-item>
+</body>
+</html>

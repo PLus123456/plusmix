@@ -1,0 +1,25 @@
+{
+  "name": "switcher-streamdeck-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Switcher 导播台的 Stream Deck 插件（官方 SDK）：按钮 = 命令，颜色 = tally",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test test/",
+    "link": "streamdeck link com.plusmix.switcher.sdPlugin",
+    "restart": "streamdeck restart com.plusmix.switcher",
+    "pack": "streamdeck pack com.plusmix.switcher.sdPlugin",
+    "validate": "streamdeck validate com.plusmix.switcher.sdPlugin"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "^2.1.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.7.1"
+  },
+  "engines": {
+    "node": ">=20.5.1"
+  }
+}
