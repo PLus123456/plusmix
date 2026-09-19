@@ -30,7 +30,7 @@ enum InputFactoryError: Error, CustomStringConvertible {
     case unsupported(InputKind)
     var description: String {
         switch self {
-        case .unsupported(let kind): "\(kind) 输入还没有实现（W3-A）"
+        case .unsupported(let kind): L("input.unsupported", L("addInput.kind.\(kind.rawValue)"))
         }
     }
 }
@@ -51,7 +51,7 @@ struct DefaultInputFactory: InputFactory {
             guard settings.audio else { return MadeInput(input: video, audioRing: nil, audioBlockFrames: AudioFormat.defaultBlockFrames) }
             // 音频用不带提前量的时间线：第 k 个 click 在 t0 + k s，与第 60k 拍的闪光同刻（A2 = 0 才对）
             let ring = CAudioRing(channelCount: 2)
-            let audio = SyntheticAudioInput(number: config.number, name: "\(config.name) 音频", frameRate: timing.format.frameRate,
+            let audio = SyntheticAudioInput(number: config.number, name: L("input.audioName", config.name), frameRate: timing.format.frameRate,
                                             driftPpm: settings.audioDriftPpm, audioRing: ring,
                                             timeline: SyntheticTimeline(t0: timing.clock.t0, frameRate: timing.format.frameRate))
             return MadeInput(input: SyntheticPairInput(video: video, audio: audio), audioRing: ring, audioBlockFrames: audio.blockFrames)

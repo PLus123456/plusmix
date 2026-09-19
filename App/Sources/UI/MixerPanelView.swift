@@ -1,110 +1,75 @@
-// 右侧可收起的调音台：Master 推子（busGain）+ 静音（busMute）+ 表 + A1 计数。每路条子由 W3-E 做。
-// 表的数字只有一个来源（AudioMixer.meters，铁律 4）：1 Hz 的 Stats.audio.meters（提案 004，P2 落地）给读数文字和 A1；
-// 表的条子按 AudioEngineStatus（控制循环每 50 ms 刷新的同一份读数）每 50 ms 刷，UI 高刷新率的表允许另读这一份（Stats.swift 的说明）。
+// 右侧可收起的调音台（W3-E 交付第 4 条）：每路条子（表、推子、静音、独听、声像、总线送出、AFV 门控状态）、四总线（表、推子、静音、效果链）、
+// AFV 开关、监听选择（PFL / AFL）。SwiftUI 表单放 NSHostingView；动作只发 Command，显示只读快照。
+// 表的数字只有一个来源（AudioMixer.meters，铁律 4）：读数文字 + A1 计数从 1 Hz 的 Stats.audio.meters 来（提案 004）；
+// 条子按 AudioEngineStatus（控制循环每 50 ms 刷新的同一份读数）每 50 ms 刷，UI 高刷新率的表允许另读这一份（Stats.swift 的说明）。
+// 契约没有"改监听点 / 总线效果链"的命令（AudioState 只有 busGain / busMute / setAFV），这两项过渡期经 loadShow 整体替换当前状态
+// （转场中会被打断），正式命令见 docs/contract-changes/008。
 import AppKit
+import SwiftUI
 import SwitcherContracts
+import SwitcherAudioIntegration
 
+/// 表的读数（50 ms）：输入 / 总线的推子后峰值（dBFS，[L, R]）与 AFV 门控。
 @MainActor
-final class MixerPanelView: NSView {
-    var send: ((Command) -> Void)?
-    /// 音频引擎（换 session 时换）；nil = 表不动。
-    var audio: AudioRuntime? {
-        didSet { restartMeterTimer() }
+final class MixerMeters: ObservableObject {
+    @Published private(set) var inputPeakDb: [Int: [Double]] = [:]
+    @Published private(set) var busPeakDb: [Bus: [Double]] = [:]
+    @Published private(set) var afvGain: [Int: Float] = [:]
+    @Published private(set) var busLoudnessLUFS: [Bus: Double] = [:]
+
+    func clear() {
+        inputPeakDb = [:]
+        busPeakDb = [:]
+        afvGain = [:]
+        busLoudnessLUFS = [:]
     }
-    let fader = NSSlider()
-    let muteButton: NSButton
-    let meter = LevelMeterView(frame: .zero)
-    private let gainLabel = Theme.monoLabel("0.0 dB", size: 12)
-    private let meterLabel = Theme.monoLabel("−∞ dBFS", size: 10, color: Theme.dimText)
-    private let audioStatsLabel = Theme.monoLabel("A1 — / —", size: 10, color: Theme.dimText)
-    private var muted = false
-    private var meterTimer: Timer?
-    /// 最近一次从 Stats 读到的 Master 峰值（dBFS，[L, R]；nil = 还没有）。测试看。
-    private(set) var masterPeakDb: [Double]?
+
+    func apply(status: AudioEngineStatus) {
+        var inputs: [Int: [Double]] = [:]
+        var gains: [Int: Float] = [:]
+        for i in status.inputs where !i.removing {
+            inputs[i.number] = i.peakDb
+            gains[i.number] = i.afvGain
+        }
+        var buses: [Bus: [Double]] = [:]
+        var lufs: [Bus: Double] = [:]
+        for b in status.buses {
+            buses[b.bus] = b.peakDb
+            lufs[b.bus] = b.shortTermLUFS
+        }
+        if inputs != inputPeakDb { inputPeakDb = inputs }
+        if gains != afvGain { afvGain = gains }
+        if buses != busPeakDb { busPeakDb = buses }
+        if lufs != busLoudnessLUFS { busLoudnessLUFS = lufs }
+    }
+}
+
+/// 调音台的状态与动作。
+@MainActor
+final class MixerModel: ObservableObject {
+    @Published private(set) var state = MixerState()
+    /// A1 计数 + Master 读数文字（Stats，1 Hz）。
+    @Published private(set) var statsText = ""
+    @Published private(set) var masterPeakText = "−∞ dBFS"
+    var send: ((Command) -> Void)?
+    var onOpenInputSettings: ((Int) -> Void)?
+
     /// 推子范围（dB）。
     static let faderRange = -60.0...12.0
-    /// 表的刷新间隔（与 AudioEngine.statusInterval 一样 50 ms）。
-    static let meterInterval: TimeInterval = 0.05
     /// 低于它显示 −∞（Stats 的 dB 下限是 −120）。
     static let silenceDb = -119.0
 
-    override init(frame: NSRect) {
-        muteButton = Theme.toggleButton("静音", target: nil, action: nil)
-        super.init(frame: frame)
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.backgroundColor = Theme.panelBackground.cgColor
-        let title = Theme.label("Master", size: 13, weight: .semibold)
-        title.alignment = .center
-        fader.isVertical = true
-        fader.minValue = Self.faderRange.lowerBound
-        fader.maxValue = Self.faderRange.upperBound
-        fader.doubleValue = 0
-        fader.numberOfTickMarks = 7
-        fader.allowsTickMarkValuesOnly = false
-        fader.target = self
-        fader.action = #selector(faderChanged)
-        fader.isContinuous = true
-        fader.translatesAutoresizingMaskIntoConstraints = false
-        muteButton.target = self
-        muteButton.action = #selector(mutePressed)
-        muteButton.controlSize = .small
-        gainLabel.alignment = .center
-        meterLabel.alignment = .center
-        meterLabel.toolTip = "Master 峰值（Stats.audio.meters，1 Hz）"
-        audioStatsLabel.alignment = .center
-        audioStatsLabel.toolTip = "Stats.audio：dropouts / underruns / discontinuities 累计"
-        meter.translatesAutoresizingMaskIntoConstraints = false
+    var inputNumbers: [Int] { state.inputs.map(\.number) }
 
-        let row = NSStackView(views: [fader, meter])
-        row.orientation = .horizontal
-        row.spacing = 8
-        row.alignment = .centerY
-        row.translatesAutoresizingMaskIntoConstraints = false
-        let placeholder = Theme.label("每路条子：W3-E", size: 10, color: Theme.dimText)
-        placeholder.alignment = .center
-        let stack = NSStackView(views: [title, row, gainLabel, meterLabel, muteButton, audioStatsLabel, placeholder])
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
-            row.heightAnchor.constraint(equalToConstant: 220),
-            meter.widthAnchor.constraint(equalToConstant: 24),
-            meter.heightAnchor.constraint(equalTo: row.heightAnchor),
-            fader.heightAnchor.constraint(equalTo: row.heightAnchor),
-        ])
-    }
+    func apply(state: MixerState) { self.state = state }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    func apply(state: MixerState) {
-        guard let master = state.audio.buses.first(where: { $0.bus == .master }) else { return }
-        if !fader.isHighlighted || abs(fader.doubleValue - master.gainDb) > 0.05 {
-            fader.doubleValue = min(max(master.gainDb, Self.faderRange.lowerBound), Self.faderRange.upperBound)
-        }
-        gainLabel.stringValue = master.gainDb <= Self.faderRange.lowerBound ? "−∞ dB" : String(format: "%+.1f dB", master.gainDb)
-        muted = master.muted
-        Theme.setHighlighted(muteButton, muted, color: Theme.recording)
-    }
-
-    /// 1 Hz：读数文字 + A1。
     func apply(stats: Stats) {
         let a = stats.audio
-        audioStatsLabel.stringValue = "A1 \(a.dropouts) / \(a.underruns) / \(a.discontinuities)"
+        statsText = L("mixer.a1", Int(a.dropouts), Int(a.underruns), Int(a.discontinuities))
         if let master = a.meters.buses.first(where: { $0.bus == Bus.master.name }) {
-            masterPeakDb = master.peakDb
-            meterLabel.stringValue = Self.peakText(master.peakDb)
+            masterPeakText = Self.peakText(master.peakDb)
         } else {
-            masterPeakDb = nil
-            meterLabel.stringValue = "−∞ dBFS"
+            masterPeakText = "−∞ dBFS"
         }
     }
 
@@ -114,58 +79,368 @@ final class MixerPanelView: NSView {
         return String(format: "%.1f dBFS", m)
     }
 
-    // MARK: 表的条子（50 ms，AudioEngineStatus）
+    static func gainText(_ dB: Double) -> String {
+        dB <= faderRange.lowerBound ? "−∞ dB" : String(format: "%+.1f dB", dB)
+    }
+
+    // MARK: 每路
+
+    private func updateInput(_ number: Int, _ body: (inout InputSettings) -> Void) {
+        guard let i = state.inputs.firstIndex(where: { $0.number == number }) else { return }
+        var s = state.inputs[i].settings
+        body(&s)
+        guard s != state.inputs[i].settings else { return }
+        state.inputs[i].settings = s
+        send?(.setInputSettings(input: number, settings: s))
+    }
+
+    func setInputGain(_ number: Int, dB: Double) {
+        let v = (dB * 10).rounded() / 10
+        send?(.audioGain(input: number, dB: v <= Self.faderRange.lowerBound ? InputAudioSettings.gainRangeDb.lowerBound : v))
+    }
+    func setMute(_ number: Int, on: Bool) { send?(.mute(input: number, on: on)) }
+    func setSolo(_ number: Int, on: Bool) { updateInput(number) { $0.audio.solo = on } }
+    func setPan(_ number: Int, value: Double) { updateInput(number) { $0.audio.pan = min(max(value, -1), 1) } }
+    func setRouting(_ number: Int, bus: Bus, on: Bool) { updateInput(number) { $0.audio.routing[bus] = on } }
+    func setDelay(_ number: Int, ms: Int) { updateInput(number) { $0.audio.delayMs = ms } }
+    func setInputEffects(_ number: Int, _ effects: [EffectSlot]) { updateInput(number) { $0.effects = effects } }
+
+    // MARK: 总线
+
+    func setBusGain(_ bus: Bus, dB: Double) {
+        let v = (dB * 10).rounded() / 10
+        send?(.busGain(bus: bus, dB: v <= Self.faderRange.lowerBound ? InputAudioSettings.gainRangeDb.lowerBound : v))
+    }
+    func setBusMute(_ bus: Bus, on: Bool) { send?(.busMute(bus: bus, on: on)) }
+    func setAFV(on: Bool) { send?(.setAFV(on: on)) }
+
+    /// 监听点：契约没有命令，过渡期 loadShow 整体替换（提案 008）。
+    func setMonitorMode(_ mode: MonitorMode) {
+        guard state.audio.monitorMode != mode else { return }
+        var s = state
+        s.audio.monitorMode = mode
+        replaceWholeState(s)
+    }
+
+    /// 总线效果链：同上。
+    func setBusEffects(_ bus: Bus, _ effects: [EffectSlot]) {
+        guard let i = state.audio.buses.firstIndex(where: { $0.bus == bus }), state.audio.buses[i].effects != effects else { return }
+        var s = state
+        s.audio.buses[i].effects = effects
+        replaceWholeState(s)
+    }
+
+    private func replaceWholeState(_ s: MixerState) {
+        state = s
+        send?(.loadShow(show: Show(name: "", state: s)))
+    }
+
+    func busState(_ bus: Bus) -> BusState { state.audio.buses.first { $0.bus == bus } ?? BusState(bus: bus) }
+}
+
+/// AppKit 容器：主窗口右栏；SwiftUI 内容 + 50 ms 的表定时器。
+@MainActor
+final class MixerPanelView: NSView {
+    let model = MixerModel()
+    let meters = MixerMeters()
+    var send: ((Command) -> Void)? {
+        didSet { model.send = send }
+    }
+    var onOpenInputSettings: ((Int) -> Void)? {
+        didSet { model.onOpenInputSettings = onOpenInputSettings }
+    }
+    /// 音频引擎（换 session 时换）；nil = 表不动。
+    var audio: AudioRuntime? {
+        didSet { restartMeterTimer() }
+    }
+    private var meterTimer: Timer?
+    private let host: NSHostingView<MixerView>
+    /// 最近一次从 Stats 读到的 Master 峰值（dBFS，[L, R]；nil = 还没有）。测试看。
+    private(set) var masterPeakDb: [Double]?
+    /// 表的刷新间隔（与 AudioEngine.statusInterval 一样 50 ms）。
+    static let meterInterval: TimeInterval = 0.05
+
+    override init(frame: NSRect) {
+        host = NSHostingView(rootView: MixerView(model: model, meters: meters))
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = Theme.panelBackground.cgColor
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.sizingOptions = []
+        addSubview(host)
+        NSLayoutConstraint.activate([
+            host.topAnchor.constraint(equalTo: topAnchor),
+            host.leadingAnchor.constraint(equalTo: leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: trailingAnchor),
+            host.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func apply(state: MixerState) { model.apply(state: state) }
+
+    /// 1 Hz：读数文字 + A1。
+    func apply(stats: Stats) {
+        model.apply(stats: stats)
+        masterPeakDb = stats.audio.meters.buses.first { $0.bus == Bus.master.name }?.peakDb
+    }
 
     private func restartMeterTimer() {
         meterTimer?.invalidate()
         meterTimer = nil
-        meter.level = nil
+        meters.clear()
         guard audio != nil else { return }
         let t = Timer(timeInterval: Self.meterInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshMeter() }
+            MainActor.assumeIsolated { self?.refreshMeters() }
         }
         RunLoop.main.add(t, forMode: .common)
         meterTimer = t
     }
 
-    private func refreshMeter() {
-        guard let audio, let master = audio.status.buses.first(where: { $0.bus == .master }) else { meter.level = nil; return }
-        let peak = master.peakDb.max() ?? Self.silenceDb
-        meter.level = peak > Self.silenceDb ? peak : nil
+    private func refreshMeters() {
+        guard let audio else { meters.clear(); return }
+        meters.apply(status: audio.status)
     }
 
-    @objc private func faderChanged() {
-        let v = (fader.doubleValue * 10).rounded() / 10
-        send?(.busGain(bus: .master, dB: v <= Self.faderRange.lowerBound ? InputAudioSettings.gainRangeDb.lowerBound : v))
-    }
-
-    @objc private func mutePressed() { send?(.busMute(bus: .master, on: !muted)) }
-
-    var displayedGain: String { gainLabel.stringValue }
-    var displayedPeak: String { meterLabel.stringValue }
+    var displayedGain: String { MixerModel.gainText(model.busState(.master).gainDb) }
+    var displayedPeak: String { model.masterPeakText }
 }
 
-/// 竖表：0 … −60 dBFS 刻度，level = nil 画 −∞。
-@MainActor
-final class LevelMeterView: NSView {
-    var level: Double? {
-        didSet { if level != oldValue { needsDisplay = true } }
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        Theme.windowBackground.setFill()
-        bounds.fill()
-        let inner = bounds.insetBy(dx: 4, dy: 4)
-        Theme.divider.setFill()
-        inner.fill()
-        for (i, db) in [0, -6, -12, -24, -40].enumerated() {
-            let y = inner.minY + inner.height * CGFloat(1 + Double(db) / 60)
-            (i == 0 ? Theme.recording : Theme.dimText).setFill()
-            NSRect(x: inner.minX, y: y, width: inner.width, height: 1).fill()
+// MARK: - SwiftUI
+
+struct MixerView: View {
+    @ObservedObject var model: MixerModel
+    @ObservedObject var meters: MixerMeters
+    @State private var effectsBus: Bus?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            header
+            Divider()
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 6) {
+                    ForEach(model.state.inputs) { input in
+                        MixerInputStrip(model: model, meters: meters, input: input)
+                    }
+                    if !model.state.inputs.isEmpty { Divider().frame(height: 300) }
+                    ForEach(Bus.allCases, id: \.self) { bus in
+                        MixerBusStrip(model: model, meters: meters, bus: bus) { effectsBus = bus }
+                    }
+                }
+                .padding(.horizontal, 6)
+            }
+            Divider()
+            HStack {
+                Text(model.masterPeakText).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                    .help(L("mixer.masterPeakHelp"))
+                Spacer()
+                Text(model.statsText).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                    .help(L("mixer.a1Help"))
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 4)
         }
-        if let level {
-            let h = inner.height * CGFloat(min(max(1 + level / 60, 0), 1))
-            Theme.tallyPreview.setFill()
-            NSRect(x: inner.minX, y: inner.minY, width: inner.width, height: h).fill()
+        .sheet(item: $effectsBus) { bus in
+            BusEffectsSheet(model: model, bus: bus)
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(L("mixer.title")).font(.system(size: 13, weight: .semibold))
+            Spacer()
+            Toggle(L("mixer.afv"), isOn: Binding(get: { model.state.audio.afv }, set: { model.setAFV(on: $0) }))
+                .toggleStyle(.switch).controlSize(.mini)
+                .help(L("mixer.afvHelp"))
+            Picker(L("mixer.monitor"), selection: Binding(get: { model.state.audio.monitorMode }, set: { model.setMonitorMode($0) })) {
+                Text("AFL").tag(MonitorMode.afl)
+                Text("PFL").tag(MonitorMode.pfl)
+            }
+            .pickerStyle(.segmented).controlSize(.mini).frame(width: 90)
+            .help(L("mixer.monitorHelp"))
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+    }
+}
+
+extension Bus: @retroactive Identifiable {
+    public var id: Int { rawValue }
+}
+
+/// 一路输入的条子。
+struct MixerInputStrip: View {
+    @ObservedObject var model: MixerModel
+    @ObservedObject var meters: MixerMeters
+    let input: InputConfig
+
+    private var audio: InputAudioSettings { input.settings.audio }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text("\(input.number) \(input.name)").font(.system(size: 11, weight: .semibold)).lineLimit(1).frame(width: 84)
+            HStack(spacing: 4) {
+                MeterBar(peakDb: meters.inputPeakDb[input.number])
+                VerticalFader(value: audio.gainDb, range: MixerModel.faderRange, label: L("mixer.inputFader", input.number)) { model.setInputGain(input.number, dB: $0) }
+            }
+            .frame(height: 170)
+            Text(MixerModel.gainText(audio.gainDb)).font(.system(size: 10, design: .monospaced))
+            Slider(value: Binding(get: { audio.pan }, set: { model.setPan(input.number, value: $0) }), in: -1...1) { Text(L("mixer.pan", input.number)) }
+                .labelsHidden().controlSize(.mini).frame(width: 80)
+                .help(L("mixer.panHelp", audio.pan))
+            HStack(spacing: 2) {
+                Toggle(L("mixer.mute"), isOn: Binding(get: { audio.muted }, set: { model.setMute(input.number, on: $0) }))
+                Toggle(L("mixer.solo"), isOn: Binding(get: { audio.solo }, set: { model.setSolo(input.number, on: $0) }))
+            }
+            .toggleStyle(.button).controlSize(.mini)
+            HStack(spacing: 2) {
+                ForEach(Bus.allCases) { bus in
+                    Toggle(L("bus.short.\(bus.name)"), isOn: Binding(get: { audio.routing[bus] }, set: { model.setRouting(input.number, bus: bus, on: $0) }))
+                        .help(L("mixer.routingHelp", L("bus.\(bus.name)")))
+                }
+            }
+            .toggleStyle(.button).controlSize(.mini)
+            afvIndicator
+            Button(L("mixer.inputSettings")) { model.onOpenInputSettings?(input.number) }.controlSize(.mini)
+        }
+        .frame(width: 92)
+        .padding(4)
+        .background(Color(nsColor: Theme.cellBackground), in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    private var afvIndicator: some View {
+        let g = meters.afvGain[input.number]
+        let text: String
+        if !model.state.audio.afv { text = L("mixer.afvOff") }
+        else if let g { text = L("mixer.afvGain", Int((g * 100).rounded())) }
+        else { text = "—" }
+        return Text(text).font(.system(size: 9)).foregroundStyle(.secondary).help(L("mixer.afvIndicatorHelp"))
+    }
+}
+
+/// 一条总线的条子。
+struct MixerBusStrip: View {
+    @ObservedObject var model: MixerModel
+    @ObservedObject var meters: MixerMeters
+    let bus: Bus
+    let onEffects: () -> Void
+
+    var body: some View {
+        let s = model.busState(bus)
+        VStack(spacing: 4) {
+            Text(L("bus.\(bus.name)")).font(.system(size: 11, weight: .semibold)).frame(width: 84)
+            HStack(spacing: 4) {
+                MeterBar(peakDb: meters.busPeakDb[bus])
+                VerticalFader(value: s.gainDb, range: MixerModel.faderRange, label: L("mixer.busFader", L("bus.\(bus.name)"))) { model.setBusGain(bus, dB: $0) }
+            }
+            .frame(height: 170)
+            Text(MixerModel.gainText(s.gainDb)).font(.system(size: 10, design: .monospaced))
+            Text(meters.busLoudnessLUFS[bus].map { $0 > -100 ? String(format: "%.1f LUFS", $0) : "— LUFS" } ?? "— LUFS")
+                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).help(L("mixer.lufsHelp"))
+            Toggle(L("mixer.mute"), isOn: Binding(get: { s.muted }, set: { model.setBusMute(bus, on: $0) }))
+                .toggleStyle(.button).controlSize(.mini)
+            Button(L("mixer.effects", s.effects.count)) { onEffects() }.controlSize(.mini)
+        }
+        .frame(width: 92)
+        .padding(4)
+        .background(Color(nsColor: Theme.cellBackground), in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+/// 总线效果链的 sheet。
+struct BusEffectsSheet: View {
+    @ObservedObject var model: MixerModel
+    let bus: Bus
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                EffectChainView(editor: Binding(get: { EffectChainEditor(slots: model.busState(bus).effects) }, set: { model.setBusEffects(bus, $0.slots) }))
+                Text(L("mixer.busEffectsHint")).font(.caption).foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
+            Divider()
+            HStack {
+                Text(L("mixer.busEffectsTitle", L("bus.\(bus.name)"))).font(.headline)
+                Spacer()
+                Button(L("common.done")) { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(10)
+        }
+        .frame(width: 420, height: 520)
+    }
+}
+
+/// 竖表：0 … −60 dBFS，nil = −∞。
+struct MeterBar: View {
+    let peakDb: [Double]?
+
+    var body: some View {
+        GeometryReader { geo in
+            let level = peakDb?.max().flatMap { $0 > MixerModel.silenceDb ? $0 : nil }
+            let fraction = level.map { min(max(1 + $0 / 60, 0), 1) } ?? 0
+            ZStack(alignment: .bottom) {
+                Rectangle().fill(Color(nsColor: Theme.divider))
+                Rectangle().fill(fraction > 0.9 ? Color(nsColor: Theme.recording) : Color(nsColor: Theme.tallyPreview))
+                    .frame(height: geo.size.height * fraction)
+                ForEach([0.0, -6, -12, -24, -40], id: \.self) { db in
+                    Rectangle().fill(db == 0 ? Color(nsColor: Theme.recording) : Color(nsColor: Theme.dimText)).frame(height: 1)
+                        .offset(y: -geo.size.height * (1 + db / 60) + 1)
+                }
+            }
+        }
+        .frame(width: 10)
+        .accessibilityLabel(L("mixer.meter"))
+        .accessibilityValue(peakDb.map { MixerModel.peakText($0) } ?? "−∞ dBFS")
+    }
+}
+
+/// 竖推子（NSSlider）：SwiftUI 的 Slider 只有横的。
+struct VerticalFader: NSViewRepresentable {
+    var value: Double
+    var range: ClosedRange<Double>
+    var label: String
+    var onChange: (Double) -> Void
+
+    func makeNSView(context: Context) -> NSSlider {
+        let s = NSSlider()
+        s.isVertical = true
+        s.minValue = range.lowerBound
+        s.maxValue = range.upperBound
+        s.doubleValue = value
+        s.numberOfTickMarks = 7
+        s.allowsTickMarkValuesOnly = false
+        s.isContinuous = true
+        s.controlSize = .small
+        s.target = context.coordinator
+        s.action = #selector(Coordinator.changed(_:))
+        s.setAccessibilityLabel(label)
+        s.cell?.setAccessibilityLabel(label)
+        s.setContentHuggingPriority(.defaultLow, for: .vertical)
+        return s
+    }
+
+    func updateNSView(_ s: NSSlider, context: Context) {
+        context.coordinator.onChange = onChange
+        s.setAccessibilityLabel(label)
+        s.cell?.setAccessibilityLabel(label)
+        if !context.coordinator.dragging, abs(s.doubleValue - value) > 0.05 { s.doubleValue = value }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onChange: onChange) }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onChange: (Double) -> Void
+        var dragging = false
+        init(onChange: @escaping (Double) -> Void) { self.onChange = onChange }
+        @objc func changed(_ s: NSSlider) {
+            dragging = NSApp.currentEvent?.type == .leftMouseDragged || NSApp.currentEvent?.type == .leftMouseDown
+            onChange(s.doubleValue)
         }
     }
 }

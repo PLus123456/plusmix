@@ -25,7 +25,7 @@ enum Theme {
     static let thumbnailWidth: CGFloat = 200
     static let thumbnailHeight: CGFloat = 112.5   // 16:9
     static let transitionColumnWidth: CGFloat = 150
-    static let mixerPanelWidth: CGFloat = 200
+    static let mixerPanelWidth: CGFloat = 340
     static let bottomBarHeight: CGFloat = 58
 
     static func label(_ text: String, size: CGFloat = 12, weight: NSFont.Weight = .regular, color: NSColor = Theme.text) -> NSTextField {

@@ -31,7 +31,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private var statsToken: ObserverToken?
     private var noticeToken: ObserverToken?
     private var overlayPopover: NSPopover?
+    /// 叠加面板（弹出期间存在；测试驱动它的模型）。
+    private(set) var overlayPanelController: OverlayPanelController?
     private var addInputSheet: AddInputSheetController?
+    /// 面板总管（AppController 挂上来；输入设置窗 / 多画面 / 外部显示菜单从这里开）。
+    weak var panels: PanelCoordinator?
     /// 收到的快照次数（测试看 ≤ 60 Hz 合并）。
     private(set) var snapshotsReceived: UInt64 = 0
     private var snapshotWindowStart = Date()
@@ -111,6 +115,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
 
         bottomBar.onAddInput = { [weak self] in self?.presentAddInput() }
         bottomBar.onOverlayPanel = { [weak self] anchor in self?.presentOverlayPanel(relativeTo: anchor) }
+        bottomBar.onExternalMenu = { [weak self] anchor in self?.presentExternalDisplayMenu(from: anchor) }
+        bottomBar.onMultiview = { [weak self] in self?.panels?.showMultiview() }
+        inputStrip.onOpenSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
+        mixerPanel.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
     }
 
     // MARK: 绑定
@@ -162,7 +170,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         inputStrip.apply(state: state)
         mixerPanel.apply(state: state)
         bottomBar.apply(state: state)
-        (overlayPopover?.contentViewController as? OverlayPanelController)?.apply(state: state)
+        overlayPanelController?.apply(state: state)
     }
 
     private func apply(stats: Stats) {
@@ -204,6 +212,14 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         popover.behavior = .transient
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
         overlayPopover = popover
+        overlayPanelController = controller
+    }
+
+    /// 底栏"外部输出"：弹外部显示菜单（每块屏 × 来源）。
+    func presentExternalDisplayMenu(from anchor: NSView) {
+        guard let panels else { return }
+        let menu = panels.makeExternalDisplayMenu()
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height), in: anchor)
     }
 
     /// 收起 / 展开调音台。

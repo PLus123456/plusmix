@@ -8,6 +8,10 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     var send: ((Command) -> Void)? {
         didSet { for c in cells.values { c.send = send } }
     }
+    /// 格子右键"设置…"→ 打开该路的输入设置窗（W3-E）。
+    var onOpenSettings: ((Int) -> Void)? {
+        didSet { for c in cells.values { c.onOpenSettings = onOpenSettings } }
+    }
     let searchField = NSSearchField()
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
@@ -23,14 +27,16 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         wantsLayer = true
         layer?.backgroundColor = Theme.windowBackground.cgColor
 
-        searchField.placeholderString = "搜索输入（编号或名字）"
+        searchField.placeholderString = L("strip.searchPlaceholder")
+        searchField.setAccessibilityLabel(L("strip.searchPlaceholder"))
+        searchField.cell?.setAccessibilityLabel(L("strip.searchPlaceholder"))
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.target = self
         searchField.action = #selector(searchChanged)
         searchField.sendsSearchStringImmediately = true
         searchField.sendsWholeSearchString = false
         searchField.delegate = self
-        let title = Theme.label("输入", size: 12, weight: .semibold, color: Theme.dimText)
+        let title = Theme.label(L("strip.title"), size: 12, weight: .semibold, color: Theme.dimText)
 
         stack.orientation = .horizontal
         stack.spacing = 6
@@ -93,6 +99,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
             } else {
                 cell = InputCellView(config: config)
                 cell.send = send
+                cell.onOpenSettings = onOpenSettings
                 cell.display.source = displaySource
                 cells[config.number] = cell
             }

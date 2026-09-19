@@ -1,4 +1,4 @@
-// App 的总管：一个 session（节目跑起来）+ 主窗口 + 节目文件。新建 / 打开总是换一个新 session（节目格式可能变，引擎的格式在 init 定死）。
+// App 的总管：一个 session（节目跑起来）+ 主窗口 + 节目文件 + 面板（W3-E）。新建 / 打开总是换一个新 session（节目格式可能变，引擎的格式在 init 定死）。
 import AppKit
 import SwitcherContracts
 import SwitcherControl
@@ -10,35 +10,56 @@ final class AppController {
     private(set) var session: SwitcherSession?
     /// 上一次 replaceSession 抛的错（测试看）。
     private(set) var lastError: (any Error)?
-    /// 是否在测试宿主里跑（不恢复上次、不写"上次文件"、录到临时目录、API 端口由系统分配）。
+    /// 是否在测试宿主里跑（不恢复上次、不写"上次文件"、录到临时目录、API 端口由系统分配、快捷键 / MIDI 表在临时目录、固定 zh-Hans）。
     let isTestHost: Bool
     /// UserDefaults（测试宿主用独立 suite）。
     let defaults: UserDefaults
-    /// 起 session 用的设置（AppDelegate 启动时按参数 / UserDefaults 填；测试宿主固定：API 端口 0（系统分配）、
+    /// 起 session 用的设置（AppDelegate 启动时按参数 / UserDefaults 填；偏好设置面板改后写回同一组键；测试宿主固定：API 端口 0（系统分配）、
     /// 音频空设备（SWITCHER_TEST_AUDIO=default 可改成真设备，跑 xcodebuild test 时会出声）。
     var settings = AppSettings() {
         didSet { if isTestHost { applyTestHostOverrides() } }
     }
-    /// 快捷键表：用户表 ~/Library/Application Support/Switcher/hotkeys.json，没有就默认表；测试宿主固定默认表。
-    let hotkeyTable: HotkeyTable
+    /// 快捷键表：用户表 ~/Library/Application Support/Switcher/hotkeys.json，没有就默认表；测试宿主固定默认表（文件在临时目录）。
+    private(set) var hotkeyTable: HotkeyTable
+    /// MIDI 映射表：用户表 midi.json，没有就空表。
+    private(set) var midiTable: MIDIMapTable
+    /// 两张表的文件位置（编辑器保存到这里）。
+    let hotkeyFileURL: URL
+    let midiFileURL: URL
     /// 用户表存在但读不出来（JSON 错 / 冲突）的原因：退回默认表并在状态行提示。
     private(set) var hotkeyTableError: String?
+    /// 面板与窗口（W3-E）。
+    lazy var panels = PanelCoordinator(controller: self)
     private var replacing = false
+
+    /// 测试宿主的 UserDefaults suite。
+    static let testDefaultsSuite = "com.example.switcher.tests"
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost
-        defaults = isTestHost ? UserDefaults(suiteName: "com.example.switcher.tests") ?? .standard : .standard
+        defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
         if isTestHost {
+            L10n.languageOverride = "zh-Hans"
+            let configDir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/config", isDirectory: true)
+            try? FileManager.default.removeItem(at: configDir)
+            hotkeyFileURL = configDir.appendingPathComponent("hotkeys.json")
+            midiFileURL = configDir.appendingPathComponent("midi.json")
             hotkeyTable = .default
-        } else if FileManager.default.fileExists(atPath: HotkeyTable.defaultFileURL.path) {
-            do {
-                hotkeyTable = try HotkeyTable.load(from: HotkeyTable.defaultFileURL)
-            } catch {
-                hotkeyTable = .default
-                hotkeyTableError = "快捷键表 \(HotkeyTable.defaultFileURL.path) 读不出来，用默认表：\(error)"
-            }
+            midiTable = .default
         } else {
-            hotkeyTable = .default
+            hotkeyFileURL = HotkeyTable.defaultFileURL
+            midiFileURL = MIDIMapTable.defaultFileURL
+            if FileManager.default.fileExists(atPath: HotkeyTable.defaultFileURL.path) {
+                do {
+                    hotkeyTable = try HotkeyTable.load(from: HotkeyTable.defaultFileURL)
+                } catch {
+                    hotkeyTable = .default
+                    hotkeyTableError = L("notice.hotkeyTableUnreadable", HotkeyTable.defaultFileURL.path, "\(error)")
+                }
+            } else {
+                hotkeyTable = .default
+            }
+            midiTable = MIDIMapTable.loadUserTableOrDefault()
         }
         if isTestHost {
             let recordDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/records", isDirectory: true).path
@@ -47,6 +68,7 @@ final class AppController {
         } else {
             documents = ShowDocuments(defaults: defaults)
         }
+        windowController.panels = panels
     }
 
     private func applyTestHostOverrides() {
@@ -65,7 +87,7 @@ final class AppController {
         windowController.window?.makeFirstResponder(nil)   // 快捷键直接到窗口；搜索框要点了才有焦点
         var show = documents.emptyShow()
         if let showURL {
-            do { show = try documents.load(from: showURL) } catch { presentError(error, context: "打开 \(showURL.lastPathComponent)") }
+            do { show = try documents.load(from: showURL) } catch { presentError(error, context: L("error.open", showURL.lastPathComponent)) }
         } else if !isTestHost {
             if let url = documents.lastURL, let loaded = try? documents.load(from: url) {
                 show = loaded
@@ -94,24 +116,63 @@ final class AppController {
         defer { replacing = false }
         await stopSession()
         do {
-            let s = try SwitcherSession(show: show, settings: settings, hotkeyTable: hotkeyTable)
+            let s = try SwitcherSession(show: show, settings: settings, hotkeyTable: hotkeyTable, midiTable: midiTable)
             session = s
             windowController.bind(session: s)
+            panels.bind(session: s)
             try await s.start()
             if let hotkeyTableError { windowController.bottomBar.showNotice(hotkeyTableError) }
         } catch {
             lastError = error
             session = nil
             windowController.bind(session: nil)
-            presentError(error, context: "起引擎")
+            panels.bind(session: nil)
+            presentError(error, context: L("error.startEngine"))
         }
     }
 
     private func stopSession() async {
         guard let old = session else { return }
         windowController.bind(session: nil)
+        panels.bind(session: nil)
         session = nil
         await old.stop()
+    }
+
+    /// 改节目格式（偏好设置）：引擎的格式在 init 定死，所以换一个 session；输入 / 输出原样带过去，录制 / 推流的目标状态清掉（不自动续录）。
+    func changeProgramFormat(_ format: ProgramFormat) async {
+        guard let session else { return }
+        var show = ShowDocuments.stoppingOutputs(session.makeShow())
+        show.mixer.format = format
+        show.layout = currentLayout()
+        await replaceSession(show: show)
+    }
+
+    /// 用当前节目重起引擎（偏好设置里 API / 音频设备 / 兼容层改了要立刻生效）。
+    func restartSession() async {
+        guard let session else { return }
+        var show = ShowDocuments.stoppingOutputs(session.makeShow())
+        show.layout = currentLayout()
+        await replaceSession(show: show)
+    }
+
+    /// 偏好设置：写 UserDefaults（同一组键）并记下，下次起 session 生效。
+    func updateSettings(_ s: AppSettings) {
+        s.save(to: defaults)
+        settings = s
+    }
+
+    /// 快捷键编辑器保存后：换给派发器，下次起 session 也用它。
+    func applyHotkeyTable(_ table: HotkeyTable) throws {
+        hotkeyTable = table
+        hotkeyTableError = nil
+        session?.control.hotkeys.table = table
+    }
+
+    /// MIDI 映射面板保存后：换给控制器。
+    func applyMIDITable(_ table: MIDIMapTable) throws {
+        midiTable = table
+        session?.control.midi.table = table
     }
 
     // MARK: 节目文件
@@ -126,7 +187,7 @@ final class AppController {
             let show = try documents.load(from: url)
             await replaceSession(show: show)
         } catch {
-            presentError(error, context: "打开 \(url.lastPathComponent)")
+            presentError(error, context: L("error.open", url.lastPathComponent))
         }
     }
 
@@ -134,7 +195,7 @@ final class AppController {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
-        panel.message = "选择节目文件（.\(ShowDocuments.fileExtension)）"
+        panel.message = L("show.openPanelMessage", ShowDocuments.fileExtension)
         guard let window = windowController.window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
@@ -178,7 +239,7 @@ final class AppController {
             session?.layout = s.layout
             windowController.window?.title = "Switcher \(SwitcherVersion.current) — \(s.name)"
         } catch {
-            presentError(error, context: "保存 \(url.lastPathComponent)")
+            presentError(error, context: L("error.save", url.lastPathComponent))
         }
     }
 
@@ -187,7 +248,7 @@ final class AppController {
         var name = url.lastPathComponent
         if name.hasSuffix(".\(ShowDocuments.fileExtension)") { name.removeLast(ShowDocuments.fileExtension.count + 1) }
         else { name = url.deletingPathExtension().lastPathComponent }
-        return name.isEmpty ? "未命名" : name
+        return name.isEmpty ? L("show.untitled") : name
     }
 
     /// 界面布局进 Show.layout（契约不解释内容，App 自己定义键）。
@@ -197,6 +258,7 @@ final class AppController {
             values["mainWindowFrame"] = .string(NSStringFromRect(frame))
         }
         values["mixerPanelVisible"] = .bool(windowController.isMixerPanelVisible)
+        for (k, v) in panels.layoutValues() { values[k] = v }
         return ShowLayout(values: values)
     }
 
@@ -204,7 +266,7 @@ final class AppController {
         NSLog("\(context)失败：\(error)")
         guard !isTestHost, let window = windowController.window else { return }
         let alert = NSAlert()
-        alert.messageText = "\(context)失败"
+        alert.messageText = L("error.failed", context)
         alert.informativeText = "\(error)"
         alert.beginSheetModal(for: window)
     }
