@@ -4,7 +4,7 @@
 worktree `.claude/worktrees/w3-control2-vmix-tally-2c1f6d`，分支 `claude/w3-control2-vmix-tally-2c1f6d`（桌面端自动起的名），从 `main`（f1bd1ee）开；
 **`w3-control2` 这个分支名指向同一个 HEAD**（`git branch -f w3-control2`），`make lint BRANCH=w3-control2` 和检查点合并用它。
 提交：`git log main..w3-control2`。动了 `Packages/SwitcherControl/{Package.swift, Sources/VMixCompat/, Sources/Tally/, Tests/VMixCompatTests/, Tests/TallyTests/}`、
-`Tools/streamdeck-plugin/`、`docs/integrations/`、`docs/contract-changes/011`、本报告，以及 prompt 点名但不在归属行里的 `scripts/apitest/c5-companion.py`（§4 第 1 条）。
+`Tools/streamdeck-plugin/`、`docs/integrations/`、`docs/contract-changes/011`、本报告、`scripts/apitest/c5-companion.py`；另按用户 2026-09-19 的裁定（"这两个按照你的想法来"）动了本会话目录之外的两个文件：`docs/OWNERSHIP.md`（W3-D 行加 `scripts/apitest/`，§4 第 1 条）和 `scripts/lint-rules.sh`（提案 011 的受控例外，§4 第 2 条）。
 
 ## 1. 做了什么
 
@@ -21,8 +21,8 @@ worktree `.claude/worktrees/w3-control2-vmix-tally-2c1f6d`，分支 `claude/w3-c
 | 文档 | `docs/integrations/{README, vmix-compat, companion, stream-deck, tally}.md` | 法律说明在 vmix-compat.md 顶部；函数覆盖表、错误码、协议细节、Companion 六项的配法、tally 流格式 |
 
 `swift test --package-path Packages/SwitcherControl`：**56/56 绿**（VMixCompatTests 25，含 1 个人工用的 skip；TallyTests 3；原有 SwitcherControlTests 28），约 11 s。
-`scripts/lint-rules.sh`：禁词命中 **1 处**（`StatusXML.swift` 的 XML 根元素字面量，见 §4 第 2 条、提案 011），版本号 / Package.swift 约束绿；`scripts/check-deps.sh` 绿（新 target 只依赖 SwitcherCore 与第三方）；
-`scripts/check-ownership.sh w3-control2` 只报 `scripts/apitest/c5-companion.py`（§4 第 1 条）。`swift build --package-path Tools/switcher-headless` 绿（Package.swift 改了依赖声明后下游仍能解析；`Package.resolved` 没变）。
+`scripts/lint-rules.sh`：**绿**（提案 011 落地后：XML 根元素字面量那一行带 `lint:allow-protocol-literal` 标记被放行；两个反例——标记放在别的目录、VMixCompat 目录下没标记的行——都仍被拦，跑过），版本号 / Package.swift 约束绿；`scripts/check-deps.sh` 绿（新 target 只依赖 SwitcherCore 与第三方）；`scripts/check-rt-symbols.sh` 绿；
+`scripts/check-ownership.sh w3-control2` 只报用户授权改的两个文件 `docs/OWNERSHIP.md` 和 `scripts/lint-rules.sh`（都不在任何功能会话的行里，G4 合并时按提交信息认领，同 W2-C 先例）。`swift build --package-path Tools/switcher-headless` 绿（Package.swift 改了依赖声明后下游仍能解析；`Package.resolved` 没变）。
 
 ## 2. 每个测试：数值 / 阈值 / 通过否
 
@@ -53,8 +53,8 @@ worktree `.claude/worktrees/w3-control2-vmix-tally-2c1f6d`，分支 `claude/w3-c
 
 ## 4. 对契约的疑问 / 等拍板
 
-1. **OWNERSHIP 越界一个文件**：prompt 的测试段写明 TCP 客户端脚本放 `scripts/apitest/`，但 W3-D 的归属行没有它（W2-C 当时同样的情况，用户 2026-09-15 裁定加进归属行）。我按 prompt 放在 `scripts/apitest/c5-companion.py`，**没有改 `docs/OWNERSHIP.md`**（不是我的目录）；`check-ownership.sh w3-control2` 只报这一个文件。请 G4 合并时按提交信息认领，或给 W3-D 行加 `scripts/apitest/` token。
-2. **lint 禁词例外（提案 011，待批）**：XML 根元素名是对方协议规定的，Companion 靠 `startsWith('<…>')` 识别文档，没法改名；我在 `StatusXML.rootElement` 写了字面量（唯一一处，测试引用常量），`make lint` 在本分支就这一处红。用字符串拼接绕过 lint 是自欺欺人，所以写提案让用户决定：批 → G4 / P0 给 `scripts/lint-rules.sh` 加这一行的白名单；驳回 → 兼容层等于做不了 C5，要另外决定去留。这不是契约变更，放 docs/contract-changes/ 是因为它是"停下来问用户"的决策记录。**编号 011 是按本机所有分支已用到 010 取的**，若 W3-C / W3-E 也用了 011，G4 合并时改号。
+1. **OWNERSHIP：`scripts/apitest/` 进 W3-D 行（用户 2026-09-19 批："这两个按照你的想法来"，已落地）**：prompt 的测试段写明 TCP 客户端脚本放 `scripts/apitest/`，但 W3-D 的归属行原来没有它（W2-C 当时同样的情况，用户 2026-09-15 裁定加进归属行）。我给 `docs/OWNERSHIP.md` 的 W3-D 行加了 `scripts/apitest/` token 和备注（同时补了 Package.swift 只许加两个 target 的备注），单独一个提交；`docs/OWNERSHIP.md` 本身不在任何功能会话的行里，G4 合并时按提交信息认领。
+2. **lint 禁词例外（提案 011，用户 2026-09-19 批，已落地）**：XML 根元素名是对方协议规定的，Companion 靠 `startsWith('<…>')` 识别文档，没法改名；`StatusXML.rootElement` 写字面量（唯一一处，测试引用常量），用字符串拼接绕过 lint 是自欺欺人。落地方式：`scripts/lint-rules.sh` 加例外 2——只放行 `Packages/SwitcherControl/Sources/VMixCompat/` 下、同一行带 `lint:allow-protocol-literal` 标记的行，标记出现在别的目录不算数；该常量行加了标记。反例验证过：标记放到 `Sources/Tally/` 仍拦、VMixCompat 目录下没标记的字面量仍拦。这不是契约变更，放 docs/contract-changes/ 是因为它是决策记录。**编号 011 是按本机所有分支已用到 010 取的**，若 W3-C / W3-E 也用了 011，G4 合并时改号（提案文件名、vmix-compat.md 的链接、StatusXML.swift 和 lint-rules.sh 注释里的编号一起改）。
 3. **不改契约**：本会话没有改 SwitcherContracts 的需求。用到的都是现成的：`MixerState.tallies`（tally 的唯一算法）、`Command` 27 个 case、`Stats.audio.meters`（提案 004）、`TickClockSpec.frameRate`。
 4. **`reportedVersion` 报的是本产品版本（0.1.0）而不是对方的版本号**：Companion 模块只用主版本号 ≥ 27 决定要不要解析色彩校正 / 位置节点（我们不输出），其他动作不看版本；如果将来某个客户端按版本号拒绝连接，再考虑——冒充对方版本号是法律上更不想碰的事。
 5. **Stream Deck 插件 UUID 用了 `com.plusmix.switcher`**（仓库名反写）：发布前要不要换成正式域名，随 G5 的版本号一起定。
