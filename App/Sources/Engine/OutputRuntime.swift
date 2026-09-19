@@ -219,7 +219,6 @@ final class OutputRuntime {
             }
             usedURLs.insert(url)
             var branch: LockFreeFrameSlot?
-            var audioSource: AudioTapSource = .master
             var hasAudio = audio != nil
             if let n = output.settings.source.inputNumber {
                 guard let b = inputs?.openBranch(input: n) else {
@@ -227,15 +226,13 @@ final class OutputRuntime {
                     continue
                 }
                 branch = b
-                audioSource = .input(number: n)
-                hasAudio = audio?.registeredInputs.contains(n) ?? false
+                hasAudio = audio?.registeredInputs.contains(n) ?? false   // 音轨挂 .input(n)，在 attach 里
             }
             let cfg = Recorder.Configuration(url: url, format: format, video: output.settings.video ?? VideoEncodeSettings(),
                                              audio: hasAudio ? (output.settings.audio ?? AudioEncodeSettings()) : nil, audioChannels: 2,
                                              fragmentIntervalSeconds: record.fragmentIntervalSeconds, remuxToMP4: record.remuxToMP4,
                                              minimumFreeBytes: 0, name: "record\(output.number)")
             prepared.append((output, Recorder(configuration: cfg), branch))
-            _ = audioSource
         }
         guard !prepared.isEmpty else { return }
         // 并发 start（VT 会话创建 64–80 ms 一个），主线程等整批

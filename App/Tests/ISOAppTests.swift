@@ -11,6 +11,7 @@ final class ISOAppTests: XCTestCase {
     func testA4_app_isoRoutesSharedStartAndStop_filesAlignWithin1Frame() throws {
         try AppTest.requireFFprobe()
         let frameprobe = try AppTest.frameprobe()
+        _ = try AppTest.runningSession()   // 等启动时的 replaceSession 完成（它进行中时再调 replaceSession 会被 replacing 挡掉）
         // 三路合成源（1 号 60 fps、2 号 30 fps、3 号 60 fps，都带音频）放进节目文件一起起：同一个 t0，各路的闪光 / click 才是同一事件
         var show = AppTest.controller.documents.emptyShow(name: "iso-a4")
         show.inputs = [
