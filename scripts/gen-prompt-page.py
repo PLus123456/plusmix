@@ -83,7 +83,7 @@ def main():
         title = html.escape(p["title"])
         # 卡片名：去掉开头的 "P1 " / "W1-A " 之类的编号，标签里另放
         code = re.match(r"^([A-Z]\d(?:-[A-Z]\d?)?|G\d|P\d[H]?|P0-H)\s*", p["title"])
-        short = code.group(1).replace("-", "") if code else "—"
+        short = "通用前言" if p["number"] == 0 else (code.group(1).replace("-", "") if code else "—")
         name = html.escape(p["title"][code.end():] if code else p["title"])
         branch = html.escape(p["branch"] or "—")
         pill = f'<span class="status {cls}">{html.escape(label)}</span>' if p["number"] > 0 else ""
