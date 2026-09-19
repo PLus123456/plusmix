@@ -1,7 +1,8 @@
 // 每拍的合成 pass，严格按设计方案 §5 的顺序：
-//   1 PGM 底（裁切 / 缩放 / 变换）→ 2 转场混合 → 3 Overlay 1→4 → 4 FTB → 5 PVW → 6 多画面 → 输出 RGB→NV12。
+//   1 PGM 底（裁切 / 缩放 / 变换）→ 2 转场混合（Fade / Wipe / Zoom / Stinger）→ 3 Overlay 1→4 → 4 FTB → 5 PVW（可选叠加）→ 6 多画面 → 输出 RGB→NV12。
 // 这是唯一编码这些 pass 的地方：实时路径（MetalRenderer.render）和离线路径（OfflineRenderer）都调 `encodeFrame`，
 // 只是目标纹理和命令缓冲区不同。渲染线程调用时零分配：所有参数都是值或预建对象，uniforms 在栈上。
+// W3-B：转场 Wipe / Zoom / Stinger、叠加的 slide / zoom 动画与边框、抠像、多画面布局表、PVW / 多画面的 NV12 输出。
 @preconcurrency import Metal
 import simd
 import SwitcherContracts
@@ -12,14 +13,29 @@ enum CompositorPasses {
         let resources: RenderResources
         let table: SurfaceTextureTable
         let labels: LabelSet?
+        /// 多画面布局（快照 sequence 变了才重新解析）。
+        let layout: MultiviewLayoutTable
         let frameIndex: UInt64
+        /// PVW 也画叠加（提案 009 过渡做法）。
+        var overlaysInPreview = false
     }
 
-    /// 编一整帧：PGM、PVW、多画面三张纹理 + NV12 输出。输出纹理为 nil 时跳过 NV12 pass（只在测试里出现）；
-    /// multiview = false 时跳过多画面（省 GPU 的选项）。
+    /// 一个 NV12 输出目标（IOSurface 两个平面的整数视图）。
+    struct NV12Target {
+        let luma: any MTLTexture
+        let chroma: any MTLTexture
+    }
+
+    /// 这一帧要转成 NV12 的画面；nil 的跳过（测试里 program 也可以为 nil）。
+    struct FrameOutputs {
+        var program: NV12Target? = nil
+        var preview: NV12Target? = nil
+        var multiview: NV12Target? = nil
+    }
+
+    /// 编一整帧：PGM、PVW、多画面三张纹理 + NV12 输出。multiview = false 时跳过多画面（省 GPU 的选项；此时 outputs.multiview 也不转）。
     static func encodeFrame(state: MixerState, inputs: RenderInputTable, slot: RenderSlot, context: Context,
-                            commandBuffer: any MTLCommandBuffer,
-                            outputLuma: (any MTLTexture)?, outputChroma: (any MTLTexture)?, multiview: Bool = true) {
+                            commandBuffer: any MTLCommandBuffer, outputs: FrameOutputs, multiview: Bool = true) {
         let t = slot.targets
         RenderSignposts.begin(.program)
         if let enc = commandBuffer.makeRenderCommandEncoder(descriptor: t.programPass) {
@@ -49,11 +65,13 @@ enum CompositorPasses {
             RenderSignposts.end(.multiview)
         }
 
-        if let outputLuma, let outputChroma {
+        if outputs.program != nil || outputs.preview != nil || (multiview && outputs.multiview != nil) {
             RenderSignposts.begin(.nv12)
             if let enc = commandBuffer.makeComputeCommandEncoder() {
                 enc.label = "NV12"   // 编码器标签只用短 ASCII：长于 9 字节或非 ASCII 的字面量桥接成 NSString 会分配
-                encodeNV12(source: t.program, luma: outputLuma, chroma: outputChroma, context: context, encoder: enc)
+                if let o = outputs.program { encodeNV12(source: t.program, target: o, context: context, encoder: enc) }
+                if let o = outputs.preview { encodeNV12(source: t.preview, target: o, context: context, encoder: enc) }
+                if multiview, let o = outputs.multiview { encodeNV12(source: t.multiview, target: o, context: context, encoder: enc) }
                 enc.endEncoding()
             }
             RenderSignposts.end(.nv12)
@@ -96,15 +114,27 @@ enum CompositorPasses {
 
     // MARK: - 画一个 quad
 
+    /// Wipe 遮罩参数（只有转场的新画面带）。
+    struct WipeMask {
+        var mode: WipeMode
+        var edge: Float
+        var softness: Float
+    }
+
     /// 把一路输入按 crop / transform 画进 dest。blend = false 只对 NV12 / UYVY 生效（它们 alpha 恒 1）；
-    /// BGRA 源可能带 alpha，永远走混合，让底下清好的不透明黑透出来，输出纹理的 alpha 才恒为 1。
+    /// BGRA 源可能带 alpha，永远走混合，让底下清好的不透明黑透出来，输出纹理的 alpha 才恒为 1。抠像 / Wipe 也走混合。
+    /// offsetScale：输入自己的平移按这个比例缩（Zoom 转场里新画面整体缩小时用）。
     @inline(__always)
     static func drawInput(_ tex: InputTextures, config: InputConfig?, dest: PixelRect, opacity: Float, blend: Bool,
+                          wipe: WipeMask? = nil, offsetScale: Float = 1,
                           width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
-        let blend = blend || tex.format == .bgra || opacity < 1
         var u = DrawUniforms()
         let crop = config?.settings.crop ?? .none
-        let transform = config?.settings.transform ?? .identity
+        var transform = config?.settings.transform ?? .identity
+        if offsetScale != 1 {
+            transform.offsetX *= Double(offsetScale)
+            transform.offsetY *= Double(offsetScale)
+        }
         Placement.fill(&u, sourceWidth: tex.width, sourceHeight: tex.height, crop: crop, transform: transform,
                        dest: dest, targetWidth: width, targetHeight: height)
         u.format = tex.format.rawValue
@@ -112,6 +142,17 @@ enum CompositorPasses {
         u.matrix = tex.matrix
         u.chromaSize = SIMD2(Float(tex.chromaWidth), Float(tex.chromaHeight))
         u.tint = SIMD4(repeating: opacity)
+        var keyed = false
+        if let keyer = config?.settings.keyer, keyer.enabled {
+            keyed = true
+            Keyer.fill(&u, keyer)
+        }
+        if let wipe {
+            u.wipeMode = wipe.mode.rawValue
+            u.wipeEdge = wipe.edge
+            u.wipeSoftness = wipe.softness
+        }
+        let blend = blend || tex.format == .bgra || opacity < 1 || keyed || wipe != nil
         encoder.setRenderPipelineState(blend ? context.resources.quadBlend : context.resources.quadOpaque)
         // 0/1 是 float 采样路径，2/3 是 half 采样路径（同一张纹理，着色器按 taps 选一条）
         encoder.setFragmentTexture(tex.tex0, index: 0)
@@ -146,13 +187,18 @@ enum CompositorPasses {
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
 
-    /// 纯色矩形（预乘颜色）。
+    /// 纯色矩形（预乘颜色）。wipe 非 nil 时按遮罩（切向黑场的 Wipe 用）。
     @inline(__always)
-    static func drawSolid(_ color: SIMD4<Float>, dest: PixelRect, width: Int, height: Int,
+    static func drawSolid(_ color: SIMD4<Float>, dest: PixelRect, wipe: WipeMask? = nil, width: Int, height: Int,
                           context: Context, encoder: any MTLRenderCommandEncoder) {
         var u = DrawUniforms()
         Placement.fillSolid(&u, dest: dest, targetWidth: width, targetHeight: height, color: color)
-        encoder.setRenderPipelineState(color.w < 1 ? context.resources.quadBlend : context.resources.quadOpaque)
+        if let wipe {
+            u.wipeMode = wipe.mode.rawValue
+            u.wipeEdge = wipe.edge
+            u.wipeSoftness = wipe.softness
+        }
+        encoder.setRenderPipelineState(color.w < 1 || wipe != nil ? context.resources.quadBlend : context.resources.quadOpaque)
         withUnsafeBytes(of: &u) { raw in
             encoder.setVertexBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)
             encoder.setFragmentBytes(raw.baseAddress!, length: DrawUniforms.expectedStride, index: 0)
@@ -179,6 +225,15 @@ enum CompositorPasses {
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
 
+    @inline(__always)
+    static func scissor(_ r: PixelRect, width: Int, height: Int) -> MTLScissorRect {
+        let x0 = max(0, min(width, Int(r.x.rounded(.down))))
+        let y0 = max(0, min(height, Int(r.y.rounded(.down))))
+        let x1 = max(x0, min(width, Int((r.x + r.width).rounded(.up))))
+        let y1 = max(y0, min(height, Int((r.y + r.height).rounded(.up))))
+        return MTLScissorRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
     // MARK: - §5 步骤 1–4：PGM
 
     static func encodeProgram(state: MixerState, inputs: RenderInputTable, slot: RenderSlot, context: Context,
@@ -188,33 +243,13 @@ enum CompositorPasses {
         if let (tex, cfg) = lookup(state.program, state: state, inputs: inputs, slot: slot, context: context) {
             drawInput(tex, config: cfg, dest: full, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
         }
-        // 2. 转场：新画面（= preview 输入）按进度盖上来。Cut 没有中间态（状态机原子换号，这里永远只画底）。
+        // 2. 转场：新画面（= preview 输入）按进度盖上来。Cut 没有中间态（状态机原子换号，这里永远只画底）；progress 0 = 空闲。
         let tr = state.transition
         if tr.type != .cut, tr.progress > 0 {
-            let progress = Float(min(max(tr.progress, 0), 1))
-            let blendAmount = TransitionRenderer.mixAmount(type: tr.type, progress: progress)
-            if let (tex, cfg) = lookup(state.preview, state: state, inputs: inputs, slot: slot, context: context) {
-                drawInput(tex, config: cfg, dest: full, opacity: blendAmount, blend: true, width: width, height: height, context: context, encoder: encoder)
-            } else if state.preview == MixerState.noInput {
-                // 切向黑场：按进度压黑
-                drawSolid(SIMD4(0, 0, 0, blendAmount), dest: full, width: width, height: height, context: context, encoder: encoder)
-            }
+            encodeTransition(tr, state: state, inputs: inputs, slot: slot, context: context, encoder: encoder, full: full, width: width, height: height)
         }
-        // 3. Overlay 1 → 4（下标循环，见 inputConfig 的说明）
-        let overlayCount = state.overlays.count
-        var k = 0
-        while k < overlayCount {
-            let o = state.overlays[k]
-            k += 1
-            guard o.isVisible, let input = o.input else { continue }
-            let opacity = OverlayRenderer.opacity(o)
-            guard opacity > 0 else { continue }
-            guard let (tex, cfg) = lookup(input, state: state, inputs: inputs, slot: slot, context: context) else { continue }
-            let dest = PixelRect(o.rect, in: width, height)
-            encoder.setScissorRect(scissor(dest, width: width, height: height))
-            drawInput(tex, config: cfg, dest: dest, opacity: opacity, blend: true, width: width, height: height, context: context, encoder: encoder)
-            encoder.setScissorRect(MTLScissorRect(x: 0, y: 0, width: width, height: height))
-        }
+        // 3. Overlay 1 → 4
+        encodeOverlays(state: state, inputs: inputs, slot: slot, context: context, encoder: encoder, width: width, height: height)
         // 4. FTB：乘 (1 − level)，等价于叠一层 alpha = level 的黑
         let level = Float(min(max(state.ftb.level, 0), 1))
         if level > 0 {
@@ -222,13 +257,83 @@ enum CompositorPasses {
         }
     }
 
-    @inline(__always)
-    static func scissor(_ r: PixelRect, width: Int, height: Int) -> MTLScissorRect {
-        let x0 = max(0, min(width, Int(r.x.rounded(.down))))
-        let y0 = max(0, min(height, Int(r.y.rounded(.down))))
-        let x1 = max(x0, min(width, Int((r.x + r.width).rounded(.up))))
-        let y1 = max(y0, min(height, Int((r.y + r.height).rounded(.up))))
-        return MTLScissorRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    /// §5 步骤 2：Fade = mix，Wipe = 遮罩，Zoom = 变换插值，Stinger = 带 alpha 的输入叠加（底在第 cutAtTick 拍换）。
+    static func encodeTransition(_ tr: TransitionState, state: MixerState, inputs: RenderInputTable, slot: RenderSlot, context: Context,
+                                 encoder: any MTLRenderCommandEncoder, full: PixelRect, width: Int, height: Int) {
+        let progress = Float(min(max(tr.progress, 0), 1))
+        let new = lookup(state.preview, state: state, inputs: inputs, slot: slot, context: context)
+        let toBlack = new == nil && state.preview == MixerState.noInput
+        switch tr.type {
+        case .cut:
+            return
+        case .fade:
+            if let (tex, cfg) = new {
+                drawInput(tex, config: cfg, dest: full, opacity: progress, blend: true, width: width, height: height, context: context, encoder: encoder)
+            } else if toBlack {
+                drawSolid(SIMD4(0, 0, 0, progress), dest: full, width: width, height: height, context: context, encoder: encoder)
+            }
+        case .wipe:
+            let mask = WipeMask(mode: TransitionRenderer.wipeMode(tr.wipe.direction), edge: progress,
+                                softness: Float(min(max(tr.wipe.softness, 0), 1)))
+            if let (tex, cfg) = new {
+                drawInput(tex, config: cfg, dest: full, opacity: 1, blend: true, wipe: mask, width: width, height: height, context: context, encoder: encoder)
+            } else if toBlack {
+                drawSolid(SIMD4(0, 0, 0, 1), dest: full, wipe: mask, width: width, height: height, context: context, encoder: encoder)
+            }
+        case .zoom:
+            let dest = full.scaled(progress)
+            if let (tex, cfg) = new {
+                encoder.setScissorRect(scissor(dest, width: width, height: height))
+                drawInput(tex, config: cfg, dest: dest, opacity: 1, blend: false, offsetScale: progress, width: width, height: height, context: context, encoder: encoder)
+                encoder.setScissorRect(MTLScissorRect(x: 0, y: 0, width: width, height: height))
+            } else if toBlack {
+                drawSolid(SIMD4(0, 0, 0, 1), dest: dest, width: width, height: height, context: context, encoder: encoder)
+            }
+        case .stinger:
+            if TransitionRenderer.stingerShowsNewUnder(progress: tr.progress, durationTicks: tr.durationTicks, cutAtTick: tr.stinger.cutAtTick) {
+                if let (tex, cfg) = new {
+                    drawInput(tex, config: cfg, dest: full, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
+                } else if toBlack {
+                    drawSolid(SIMD4(0, 0, 0, 1), dest: full, width: width, height: height, context: context, encoder: encoder)
+                }
+            }
+            if let stingerInput = tr.stinger.input,
+               let (tex, cfg) = lookup(stingerInput, state: state, inputs: inputs, slot: slot, context: context) {
+                drawInput(tex, config: cfg, dest: full, opacity: 1, blend: true, width: width, height: height, context: context, encoder: encoder)
+            }
+        }
+    }
+
+    /// §5 步骤 3：Overlay 1 → 4（PGM 和开了 overlaysInPreview 的 PVW 共用）。下标循环，见 inputConfig 的说明。
+    static func encodeOverlays(state: MixerState, inputs: RenderInputTable, slot: RenderSlot, context: Context,
+                               encoder: any MTLRenderCommandEncoder, width: Int, height: Int) {
+        let overlayCount = state.overlays.count
+        let fullScissor = MTLScissorRect(x: 0, y: 0, width: width, height: height)
+        var k = 0
+        while k < overlayCount {
+            let o = state.overlays[k]
+            k += 1
+            guard OverlayRenderer.isDrawable(o), let input = o.input else { continue }
+            let placement = OverlayRenderer.placement(o)
+            guard placement.opacity > 0 else { continue }
+            guard let (tex, cfg) = lookup(input, state: state, inputs: inputs, slot: slot, context: context) else { continue }
+            let dest = PixelRect(placement.rect, in: width, height)
+            let opacity = placement.opacity
+            if let border = OverlayDecoration.border(for: cfg) {
+                let outer = dest.outsetBy(Float(border.width) * Float(height))
+                let sc = scissor(outer, width: width, height: height)
+                if sc.width > 0 && sc.height > 0 {
+                    encoder.setScissorRect(sc)
+                    drawSolid(border.color * opacity, dest: outer, width: width, height: height, context: context, encoder: encoder)
+                }
+            }
+            let sc = scissor(dest, width: width, height: height)
+            if sc.width > 0 && sc.height > 0 {
+                encoder.setScissorRect(sc)
+                drawInput(tex, config: cfg, dest: dest, opacity: opacity, blend: true, width: width, height: height, context: context, encoder: encoder)
+            }
+            encoder.setScissorRect(fullScissor)
+        }
     }
 
     // MARK: - §5 步骤 5：PVW
@@ -239,6 +344,9 @@ enum CompositorPasses {
         if let (tex, cfg) = lookup(state.preview, state: state, inputs: inputs, slot: slot, context: context) {
             drawInput(tex, config: cfg, dest: full, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
         }
+        if context.overlaysInPreview {
+            encodeOverlays(state: state, inputs: inputs, slot: slot, context: context, encoder: encoder, width: width, height: height)
+        }
     }
 
     // MARK: - §5 步骤 6：多画面
@@ -247,58 +355,65 @@ enum CompositorPasses {
     static let tallyPreviewColor = SIMD4<Float>(0.1, 0.8, 0.1, 1)
     static let tallyOffColor = SIMD4<Float>(0.28, 0.28, 0.28, 1)
     static let cellBackground = SIMD4<Float>(0, 0, 0, 1)
+    /// 安全框线（预乘 70% 白）。
+    static let safeAreaColor = SIMD4<Float>(0.7, 0.7, 0.7, 0.7)
+    /// 电平表占位：条底（预乘 70% 黑）和刻度（预乘 50% 白）。
+    static let meterBackground = SIMD4<Float>(0, 0, 0, 0.7)
+    static let meterTick = SIMD4<Float>(0.5, 0.5, 0.5, 0.5)
 
-    /// 基础布局：上半 PVW（左）+ PGM（右），下半输入按 4 列排，行数按输入数。
+    /// 按布局表画：每格 tally 边框 + 黑底 + 内容 + 名字；PGM / PVW 格可选安全框，输入格可选电平表占位。
     static func encodeMultiview(state: MixerState, inputs: RenderInputTable, slot: RenderSlot, context: Context,
                                 encoder: any MTLRenderCommandEncoder, targets: RenderTargets) {
         let width = targets.width, height = targets.height
-        let w = Float(width), h = Float(height)
-        let margin = (h / 135).rounded()          // 1080 → 8
-        let border = max(2, (h / 270).rounded())  // 1080 → 4
-
-        // 上半：PVW / PGM
-        let topH = h / 2 - 1.5 * margin
-        let topW = (w - 3 * margin) / 2
-        let pvwCell = PixelRect(x: margin, y: margin, width: topW, height: topH)
-        let pgmCell = PixelRect(x: 2 * margin + topW, y: margin, width: topW, height: topH)
-        drawCell(texture: targets.preview, cell: pvwCell, borderColor: tallyPreviewColor, border: border,
-                 width: width, height: height, context: context, encoder: encoder)
-        drawCell(texture: targets.program, cell: pgmCell, borderColor: tallyProgramColor, border: border,
-                 width: width, height: height, context: context, encoder: encoder)
-
-        // 下半：输入。格子数固定成 4×2 / 6×3 / 8×4，让每格接近 16:9（没用到的格子留黑）
-        let count = state.inputs.count
-        guard count > 0 else { return }
-        let columns = count <= 8 ? 4 : (count <= 18 ? 6 : 8)
-        let rows = count <= 8 ? 2 : (count <= 18 ? 3 : 4)
-        let areaY = h / 2 + margin / 2
-        let areaH = h / 2 - 1.5 * margin
-        let cellW = (w - Float(columns + 1) * margin) / Float(columns)
-        let cellH = (areaH - Float(rows - 1) * margin) / Float(rows)
+        let h = Float(height)
+        let layout = context.layout
+        let border = layout.border
+        let fullScissor = MTLScissorRect(x: 0, y: 0, width: width, height: height)
         var i = 0
-        while i < count {
-            let input = state.inputs[i]
-            let col = i % columns, row = i / columns
+        while i < layout.cellCount {
+            let cell = layout.cells[i]
             i += 1
-            let cell = PixelRect(x: margin + Float(col) * (cellW + margin), y: areaY + Float(row) * (cellH + margin),
-                                 width: cellW, height: cellH)
-            let tally = state.tally(ofInput: input.number)
-            let color = tally.program ? tallyProgramColor : (tally.preview ? tallyPreviewColor : tallyOffColor)
-            drawSolid(color, dest: cell, width: width, height: height, context: context, encoder: encoder)
-            let inner = cell.insetBy(border)
-            drawSolid(cellBackground, dest: inner, width: width, height: height, context: context, encoder: encoder)
-            if let (tex, cfg) = lookup(input.number, state: state, inputs: inputs, slot: slot, context: context) {
-                encoder.setScissorRect(scissor(inner, width: width, height: height))
-                drawInput(tex, config: cfg, dest: inner, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
-                encoder.setScissorRect(MTLScissorRect(x: 0, y: 0, width: width, height: height))
-            }
-            if let labels = context.labels, input.number > 0, input.number < labels.slices {
-                let lh = max(12, (cellH * 0.14).rounded())
-                let lw = lh * Float(LabelSet.width) / Float(LabelSet.height)
-                let dest = PixelRect(x: inner.x, y: inner.y + inner.height - lh, width: min(lw, inner.width), height: lh)
-                drawLabel(labels, slice: input.number, dest: dest, width: width, height: height, context: context, encoder: encoder)
+            let rect = cell.rect
+            let inner = rect.insetBy(border)
+            switch cell.kind {
+            case .program, .preview:
+                let isProgram = cell.kind == .program
+                drawCell(texture: isProgram ? targets.program : targets.preview, cell: rect,
+                         borderColor: isProgram ? tallyProgramColor : tallyPreviewColor, border: border,
+                         width: width, height: height, context: context, encoder: encoder)
+                if layout.safeArea { drawSafeArea(inner, width: width, height: height, context: context, encoder: encoder) }
+                if let labels = context.labels {
+                    drawCellLabel(labels, slice: isProgram ? labels.programSlice : labels.previewSlice, inner: inner, cellHeight: rect.height,
+                                  frameHeight: h, width: width, height: height, context: context, encoder: encoder)
+                }
+            case .input:
+                let number = Int(cell.input)
+                let tally = state.tally(ofInput: number)
+                let color = tally.program ? tallyProgramColor : (tally.preview ? tallyPreviewColor : tallyOffColor)
+                drawSolid(color, dest: rect, width: width, height: height, context: context, encoder: encoder)
+                drawSolid(cellBackground, dest: inner, width: width, height: height, context: context, encoder: encoder)
+                if let (tex, cfg) = lookup(number, state: state, inputs: inputs, slot: slot, context: context) {
+                    encoder.setScissorRect(scissor(inner, width: width, height: height))
+                    drawInput(tex, config: cfg, dest: inner, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
+                    encoder.setScissorRect(fullScissor)
+                }
+                if layout.meters { drawMeterPlaceholder(inner, width: width, height: height, context: context, encoder: encoder) }
+                if let labels = context.labels, number > 0, number < labels.inputSlices {
+                    drawCellLabel(labels, slice: number, inner: inner, cellHeight: rect.height, frameHeight: h,
+                                  width: width, height: height, context: context, encoder: encoder)
+                }
             }
         }
+    }
+
+    /// 格子左下角的名字条：高 = 格高 × 14%（≥ 12 px，≤ 画面高 × 3.5%），宽按标签纹理比例。
+    @inline(__always)
+    static func drawCellLabel(_ labels: LabelSet, slice: Int, inner: PixelRect, cellHeight: Float, frameHeight: Float,
+                              width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+        let lh = max(12, min((cellHeight * 0.14).rounded(), (frameHeight * 0.035).rounded()))
+        let lw = lh * Float(LabelSet.width) / Float(LabelSet.height)
+        let dest = PixelRect(x: inner.x, y: inner.y + inner.height - lh, width: min(lw, inner.width), height: lh)
+        drawLabel(labels, slice: slice, dest: dest, width: width, height: height, context: context, encoder: encoder)
     }
 
     @inline(__always)
@@ -310,43 +425,174 @@ enum CompositorPasses {
         drawTexture(texture, dest: inner, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
     }
 
+    /// 安全框（EBU R95，16:9）：动作安全 3.5%、字幕安全 5%，各一圈细线。
+    @inline(__always)
+    static func drawSafeArea(_ inner: PixelRect, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+        let line = max(1, (Float(height) / 540).rounded())
+        var k = 0
+        while k < 2 {
+            let f: Float = k == 0 ? 0.035 : 0.05
+            k += 1
+            let r = PixelRect(x: inner.x + inner.width * f, y: inner.y + inner.height * f,
+                              width: inner.width * (1 - 2 * f), height: inner.height * (1 - 2 * f))
+            drawSolid(safeAreaColor, dest: PixelRect(x: r.x, y: r.y, width: r.width, height: line), width: width, height: height, context: context, encoder: encoder)
+            drawSolid(safeAreaColor, dest: PixelRect(x: r.x, y: r.y + r.height - line, width: r.width, height: line), width: width, height: height, context: context, encoder: encoder)
+            drawSolid(safeAreaColor, dest: PixelRect(x: r.x, y: r.y + line, width: line, height: max(0, r.height - 2 * line)), width: width, height: height, context: context, encoder: encoder)
+            drawSolid(safeAreaColor, dest: PixelRect(x: r.x + r.width - line, y: r.y + line, width: line, height: max(0, r.height - 2 * line)), width: width, height: height, context: context, encoder: encoder)
+        }
+    }
+
+    /// 电平表占位：格子右侧一条 3% 宽的暗条，四道刻度。真实电平在 Stats.audio.meters 里（铁律 4），第一版这里只画位置。
+    @inline(__always)
+    static func drawMeterPlaceholder(_ inner: PixelRect, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+        let sw = max(4, (inner.width * 0.03).rounded())
+        let pad: Float = 2
+        let strip = PixelRect(x: inner.x + inner.width - sw - pad, y: inner.y + pad, width: sw, height: max(0, inner.height - 2 * pad))
+        drawSolid(meterBackground, dest: strip, width: width, height: height, context: context, encoder: encoder)
+        var k = 1
+        while k <= 4 {
+            let y = strip.y + strip.height * Float(k) / 5
+            drawSolid(meterTick, dest: PixelRect(x: strip.x, y: y, width: sw, height: 1), width: width, height: height, context: context, encoder: encoder)
+            k += 1
+        }
+    }
+
     // MARK: - 输出：RGB → NV12
 
-    static func encodeNV12(source: any MTLTexture, luma: any MTLTexture, chroma: any MTLTexture, context: Context,
-                           encoder: any MTLComputeCommandEncoder) {
+    static func encodeNV12(source: any MTLTexture, target: NV12Target, context: Context, encoder: any MTLComputeCommandEncoder) {
         encoder.setComputePipelineState(context.resources.rgbToNV12)
         encoder.setTexture(source, index: 0)
-        encoder.setTexture(luma, index: 1)
-        encoder.setTexture(chroma, index: 2)
-        let grid = MTLSize(width: chroma.width, height: chroma.height, depth: 1)
+        encoder.setTexture(target.luma, index: 1)
+        encoder.setTexture(target.chroma, index: 2)
+        let grid = MTLSize(width: target.chroma.width, height: target.chroma.height, depth: 1)
         let group = MTLSize(width: 16, height: 16, depth: 1)
         encoder.dispatchThreads(grid, threadsPerThreadgroup: group)
     }
 }
 
-/// 转场怎么混（§5 步骤 2）。本期只有 Cut / Fade；Wipe / Zoom / Stinger 的接口留在这里，W3-B 填：
-/// 需要遮罩 / 变换插值 / 带 alpha 的视频叠加时，把 `mixAmount` 换成各自的 pass（encodeProgram 里只有这一个调用点）。
+/// 转场怎么混（§5 步骤 2）。纯函数，测试直接调。
 enum TransitionRenderer {
-    /// 新画面盖在旧画面上的不透明度。
     @inline(__always)
-    static func mixAmount(type: TransitionType, progress: Float) -> Float {
-        switch type {
-        case .cut: 0
-        case .fade: progress
-        case .wipe, .zoom, .stinger: progress   // W3-B：暂按 Fade 处理
+    static func wipeMode(_ d: WipeDirection) -> WipeMode {
+        switch d {
+        case .leftToRight: .leftToRight
+        case .rightToLeft: .rightToLeft
+        case .topToBottom: .topToBottom
+        case .bottomToTop: .bottomToTop
+        case .diagonal: .diagonal
+        }
+    }
+
+    /// Stinger 的底什么时候换成新画面：stinger 第 k 拍（k = round(progress × d)）≥ max(cutAtTick, 1)。
+    /// 第 0 拍是应用命令的那一拍（progress 0，什么都不叠），所以最早在第 1 拍换；cutAtTick ≥ d 时过渡期间不换（完成时状态机对调）。
+    @inline(__always)
+    static func stingerShowsNewUnder(progress: Double, durationTicks d: Int, cutAtTick c: Int) -> Bool {
+        guard d > 0 else { return true }
+        guard c < d else { return false }
+        let k = Int((progress * Double(d)).rounded())
+        return k >= max(c, 1)
+    }
+}
+
+/// 叠加通道的进出动画怎么解释 animProgress（§5 步骤 3；契约 OverlayState 的注释）。
+enum OverlayRenderer {
+    enum Edge { case left, right, top, bottom }
+
+    /// 画不画：有输入、开着或退出动画未完、且进度 > 0。
+    @inline(__always)
+    static func isDrawable(_ o: OverlayState) -> Bool {
+        o.isVisible && o.animProgress > 0
+    }
+
+    /// slide 从哪条边进：离 rect 最近的边；并列时底 > 顶 > 左 > 右（整幅 rect 从底边，下三分之一自然向上滑入）。
+    @inline(__always)
+    static func slideEdge(for r: NormalizedRect) -> Edge {
+        let dl = r.x, dr = 1 - (r.x + r.width), dt = r.y, db = 1 - (r.y + r.height)
+        var edge = Edge.bottom
+        var best = db
+        if dt < best { best = dt; edge = .top }
+        if dl < best { best = dl; edge = .left }
+        if dr < best { edge = .right }
+        return edge
+    }
+
+    /// animProgress → (画在哪, 不透明度)。cut：p > 0 就完整显示；fade：不透明度 = p；slide：从最近的边平移进来；zoom：绕 rect 中心缩放。
+    @inline(__always)
+    static func placement(_ o: OverlayState) -> (rect: NormalizedRect, opacity: Float) {
+        let p = min(max(o.animProgress, 0), 1)
+        let r = o.rect
+        switch o.animation.kind {
+        case .cut:
+            return (r, p > 0 ? 1 : 0)
+        case .fade:
+            return (r, Float(p))
+        case .slide:
+            var moved = r
+            let back = 1 - p
+            switch slideEdge(for: r) {
+            case .left: moved.x = r.x - back * (r.x + r.width)
+            case .right: moved.x = r.x + back * (1 - r.x)
+            case .top: moved.y = r.y - back * (r.y + r.height)
+            case .bottom: moved.y = r.y + back * (1 - r.y)
+            }
+            return (moved, 1)
+        case .zoom:
+            let w = r.width * p, h = r.height * p
+            return (NormalizedRect(x: r.x + (r.width - w) / 2, y: r.y + (r.height - h) / 2, width: w, height: h), 1)
         }
     }
 }
 
-/// 叠加通道的进出动画怎么解释 animProgress（本期只有静态位置；Slide / Zoom 由 W3-B 填）。
-enum OverlayRenderer {
-    @inline(__always)
-    static func opacity(_ o: OverlayState) -> Float {
-        let p = Float(min(max(o.animProgress, 0), 1))
-        return switch o.animation.kind {
-        case .cut: p > 0 ? 1 : 0
-        case .fade: p
-        case .slide, .zoom: p          // W3-B：暂按 Fade 处理
+/// 效果格的标识（契约 EffectSlot.id；视频效果由合成会话定义）。
+enum EffectIDs {
+    /// 画中画边框：params {"width": 占节目高的比例（默认 0.006，钳 0–0.1）, "color": [r, g, b] 0–255（默认白）}。提案 009 的过渡做法。
+    static let border = "border"
+}
+
+/// 叠加通道的装饰（现在只有边框）。
+enum OverlayDecoration {
+    struct Border {
+        var width: Double
+        /// 预乘颜色，alpha 1。
+        var color: SIMD4<Float>
+    }
+
+    /// 输入的效果链里第一个启用的 "border"；没有为 nil。下标循环、只 retain，渲染线程可调。
+    static func border(for config: InputConfig?) -> Border? {
+        guard let config else { return nil }
+        let effects = config.settings.effects
+        var i = 0
+        while i < effects.count {
+            let e = effects[i]
+            i += 1
+            guard e.enabled, e.id == EffectIDs.border else { continue }
+            var width = 0.006
+            if case .number(let w)? = e.params["width"] { width = min(max(w, 0), 0.1) }
+            var color = SIMD4<Float>(1, 1, 1, 1)
+            if case .array(let a)? = e.params["color"], a.count >= 3 {
+                var c = SIMD4<Float>(0, 0, 0, 1)
+                var j = 0
+                while j < 3 {
+                    if case .number(let v) = a[j] { c[j] = Float(min(max(v, 0), 255)) / 255 }
+                    j += 1
+                }
+                color = c
+            }
+            return Border(width: width, color: color)
         }
+        return nil
+    }
+}
+
+/// 抠像参数 → uniforms（提案 008 的口径）。
+enum Keyer {
+    @inline(__always)
+    static func fill(_ u: inout DrawUniforms, _ k: KeyerSettings) {
+        let r = Float(k.keyColor.red) / 255, g = Float(k.keyColor.green) / 255, b = Float(k.keyColor.blue) / 255
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        u.keyer = 1
+        u.keyChroma = SIMD2((b - y) / 1.8556, (r - y) / 1.5748)
+        u.keyRange = SIMD2(Float(min(max(k.tolerance, 0), 1)) * 0.5, Float(min(max(k.softness, 0), 1)) * 0.25)
+        u.keySpill = Float(min(max(k.spillSuppression, 0), 1))
     }
 }

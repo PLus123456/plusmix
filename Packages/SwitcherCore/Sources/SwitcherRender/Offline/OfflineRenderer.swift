@@ -21,6 +21,17 @@ public struct OfflineRenderResult {
     public let multiview: CGImage
     /// PGM 经 RGB→NV12 kernel 的输出（BT.709 limited，IOSurface 背后）——与实时路径交给编码器的完全相同。
     public let programNV12: CVPixelBuffer
+    /// PVW 的 NV12（= 实时路径 previewOutput 打开时 RenderedFrame.preview 的内容）。
+    public let previewNV12: CVPixelBuffer
+    /// 多画面的 NV12（= 实时路径 multiviewOutput 打开时 RenderedFrame.multiview 的内容）。
+    public let multiviewNV12: CVPixelBuffer
+}
+
+/// 只要 NV12 时的产物（V6 / V7 逐拍渲染用，省掉三张 CGImage 的读回）。
+public struct OfflineNV12Result {
+    public let program: CVPixelBuffer
+    public let preview: CVPixelBuffer
+    public let multiview: CVPixelBuffer
 }
 
 /// 离线渲染器。非实时，允许分配；同一实例按尺寸缓存目标纹理，重复调用不重建。线程：一次只在一个线程上用。
@@ -29,6 +40,8 @@ public final class OfflineRenderer {
     private let queue: any MTLCommandQueue
     private let resources: RenderResources
     private var session: Session?
+    /// PVW 也画叠加（= MetalRendererOptions.overlaysInPreview）。
+    public var overlaysInPreview = false
 
     /// 一个尺寸对应的目标纹理和读回纹理。
     private final class Session {
@@ -39,6 +52,9 @@ public final class OfflineRenderer {
         let table: SurfaceTextureTable
         let labels: LabelSet
         let ring: OutputBufferRing
+        let previewRing: OutputBufferRing
+        let multiviewRing: OutputBufferRing
+        let layout = MultiviewLayoutTable()
         let staging: [any MTLTexture]   // program / preview / multiview 的共享内存副本
         let scratch: UnsafeMutableRawPointer
 
@@ -47,9 +63,11 @@ public final class OfflineRenderer {
             self.height = height
             targets = try RenderTargets(device: device, width: width, height: height, label: "offline")
             slot = RenderSlot(index: 0, targets: targets, maxInputs: maxInputs)
-            table = SurfaceTextureTable(device: device, capacity: maxInputs * 4 + 16)
-            labels = try LabelSet(device: device, slices: maxInputs)
+            table = SurfaceTextureTable(device: device, capacity: maxInputs * 4 + 32)
+            labels = try LabelSet(device: device, inputSlices: maxInputs)
             ring = try OutputBufferRing(width: width, height: height, count: 3)
+            previewRing = try OutputBufferRing(width: width, height: height, count: 3)
+            multiviewRing = try OutputBufferRing(width: width, height: height, count: 3)
             var st: [any MTLTexture] = []
             for name in ["program", "preview", "multiview"] {
                 let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: RenderResources.workingFormat,
@@ -108,9 +126,33 @@ public final class OfflineRenderer {
 
     /// 最底层：给带色彩描述的帧（BT.601 输入这类要自己标 ColorInfo 的用它）。
     public func render(state: MixerState, frames: [Int: Frame], size: CGSize) throws -> OfflineRenderResult {
+        let (s, nv12) = try encode(state: state, frames: frames, size: size, readback: true)
+        return OfflineRenderResult(program: try OfflineRenderer.makeImage(from: s.staging[0]),
+                                   preview: try OfflineRenderer.makeImage(from: s.staging[1]),
+                                   multiview: try OfflineRenderer.makeImage(from: s.staging[2]),
+                                   programNV12: nv12.program, previewNV12: nv12.preview, multiviewNV12: nv12.multiview)
+    }
+
+    /// 只要 NV12（不读回 CGImage）。
+    public func renderNV12(state: MixerState, frames: [Int: Frame], size: CGSize) throws -> OfflineNV12Result {
+        try encode(state: state, frames: frames, size: size, readback: false).1
+    }
+
+    /// 同上，给像素缓冲。
+    public func renderNV12(state: MixerState, pixelBuffers: [Int: CVPixelBuffer], size: CGSize) throws -> OfflineNV12Result {
+        var frames: [Int: Frame] = [:]
+        for (number, pb) in pixelBuffers {
+            frames[number] = Frame(pixelBuffer: pb, pts: .zero, duration: .zero, color: OfflineRenderer.colorInfo(of: pb),
+                                   inputNumber: number, sequence: 0, ingressTime: .zero)
+        }
+        return try renderNV12(state: state, frames: frames, size: size)
+    }
+
+    /// 编码 + 提交 + 等完成。readback = true 时把三张目标纹理拷到共享内存（staging）。
+    private func encode(state: MixerState, frames: [Int: Frame], size: CGSize, readback: Bool) throws -> (Session, OfflineNV12Result) {
         let width = Int(size.width.rounded()), height = Int(size.height.rounded())
         guard width >= 2, height >= 2 else { throw RenderError.resource("尺寸至少 2×2") }
-        let maxNumber = max(state.inputs.map(\.number).max() ?? 0, frames.keys.max() ?? 0)
+        let maxNumber = max(state.inputs.map(\.number).max() ?? 0, frames.keys.max() ?? 0, state.transition.stinger.input ?? 0)
         let maxInputs = maxNumber + 1
         let s: Session
         if let existing = session, existing.width == width, existing.height == height, existing.slot.heldFrames.count >= maxInputs {
@@ -124,27 +166,35 @@ public final class OfflineRenderer {
         for (number, frame) in frames where number > 0 && number < table.capacity {
             table[inputNumber: number] = frame
         }
-        // 标签同步画好（实时路径由后台线程画）
+        // 标签同步画好（实时路径由后台线程画）；布局每次都解析（实时路径只在 sequence 变了时解析）
         LabelPainter.update(s.labels, from: state, scratch: s.scratch)
+        s.layout.parse(state: state, width: width, height: height)
 
-        guard let output = s.ring.next(), let unmanaged = CVPixelBufferGetIOSurface(output) else {
-            throw RenderError.resource("拿不到输出像素缓冲")
+        func target(_ ring: OutputBufferRing) throws -> (CVPixelBuffer, CompositorPasses.NV12Target) {
+            guard let output = ring.next(), let unmanaged = CVPixelBufferGetIOSurface(output) else {
+                throw RenderError.resource("拿不到输出像素缓冲")
+            }
+            let surface = unmanaged.takeUnretainedValue()
+            guard let luma = s.table.texture(surface: surface, plane: 0, format: .r8Uint, width: width, height: height,
+                                             usage: .shaderWrite, frame: 0),
+                  let chroma = s.table.texture(surface: surface, plane: 1, format: .rg8Uint, width: (width + 1) / 2, height: (height + 1) / 2,
+                                               usage: .shaderWrite, frame: 0) else {
+                throw RenderError.resource("输出平面包不成纹理")
+            }
+            return (output, CompositorPasses.NV12Target(luma: luma, chroma: chroma))
         }
-        let surface = unmanaged.takeUnretainedValue()
-        guard let luma = s.table.texture(surface: surface, plane: 0, format: .r8Uint, width: width, height: height,
-                                         usage: .shaderWrite, frame: 0),
-              let chroma = s.table.texture(surface: surface, plane: 1, format: .rg8Uint, width: (width + 1) / 2, height: (height + 1) / 2,
-                                           usage: .shaderWrite, frame: 0) else {
-            throw RenderError.resource("输出平面包不成纹理")
-        }
+        let (program, programTarget) = try target(s.ring)
+        let (preview, previewTarget) = try target(s.previewRing)
+        let (multiview, multiviewTarget) = try target(s.multiviewRing)
         guard let cb = queue.makeCommandBuffer() else { throw RenderError.resource("建不出命令缓冲区") }
         cb.label = "switcher.offline"
-        let context = CompositorPasses.Context(resources: resources, table: s.table, labels: s.labels, frameIndex: 0)
+        var context = CompositorPasses.Context(resources: resources, table: s.table, labels: s.labels, layout: s.layout, frameIndex: 0)
+        context.overlaysInPreview = overlaysInPreview
         // ---- 与实时路径同一个函数 ----
         CompositorPasses.encodeFrame(state: state, inputs: table, slot: s.slot, context: context, commandBuffer: cb,
-                                     outputLuma: luma, outputChroma: chroma, multiview: true)
-        // 读回：三张目标纹理拷到共享内存
-        if let blit = cb.makeBlitCommandEncoder() {
+                                     outputs: CompositorPasses.FrameOutputs(program: programTarget, preview: previewTarget, multiview: multiviewTarget),
+                                     multiview: true)
+        if readback, let blit = cb.makeBlitCommandEncoder() {
             blit.copy(from: s.targets.program, to: s.staging[0])
             blit.copy(from: s.targets.preview, to: s.staging[1])
             blit.copy(from: s.targets.multiview, to: s.staging[2])
@@ -154,10 +204,7 @@ public final class OfflineRenderer {
         cb.waitUntilCompleted()
         s.slot.releaseFrame()
         if let err = cb.error { throw RenderError.resource("GPU 执行失败：\(err)") }
-        return OfflineRenderResult(program: try OfflineRenderer.makeImage(from: s.staging[0]),
-                                   preview: try OfflineRenderer.makeImage(from: s.staging[1]),
-                                   multiview: try OfflineRenderer.makeImage(from: s.staging[2]),
-                                   programNV12: output)
+        return (s, OfflineNV12Result(program: program, preview: preview, multiview: multiview))
     }
 
     // MARK: - 像素缓冲 ↔ CGImage

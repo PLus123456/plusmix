@@ -53,6 +53,9 @@ final class RenderSlot: @unchecked Sendable {
     var heldFrames: [Frame?]
     /// 输出 NV12 缓冲（环里挑的）。
     var outputBuffer: CVPixelBuffer?
+    /// PVW / 多画面的 NV12 输出（MetalRendererOptions.previewOutput / multiviewOutput 打开时才有）。
+    var previewBuffer: CVPixelBuffer?
+    var multiviewBuffer: CVPixelBuffer?
     var commandBuffer: (any MTLCommandBuffer)?
     var tick: Tick = .zero
     var tickTime: HostTime = .zero
@@ -70,6 +73,8 @@ final class RenderSlot: @unchecked Sendable {
         var i = 0
         while i < heldFrames.count { heldFrames[i] = nil; i += 1 }
         outputBuffer = nil
+        previewBuffer = nil
+        multiviewBuffer = nil
         commandBuffer = nil
     }
 }

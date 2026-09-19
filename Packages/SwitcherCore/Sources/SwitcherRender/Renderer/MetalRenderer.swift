@@ -11,6 +11,7 @@
 @preconcurrency import Metal
 import CoreVideo
 import Foundation
+import IOSurface
 import Synchronization
 import SwitcherContracts
 
@@ -24,6 +25,12 @@ public struct MetalRendererOptions: Sendable {
     public var outputRingSize: Int = 8
     /// 是否画多画面（关掉省 GPU；测试基线用）。
     public var multiview: Bool = true
+    /// PVW 也画叠加（W3-B；提案 009 过渡做法：等每通道的 previewOn 落地前一刀切）。默认关，PVW = 纯输入。
+    public var overlaysInPreview: Bool = false
+    /// 把 PVW 转成 NV12 填进 RenderedFrame.preview（NDI / 外部输出要 PVW 时开；多一趟 compute 和一个缓冲环）。默认关。
+    public var previewOutput: Bool = false
+    /// 把多画面转成 NV12 填进 RenderedFrame.multiview（NDI / 外部输出要多画面时开；需要 multiview = true）。默认关。
+    public var multiviewOutput: Bool = false
     public init() {}
 }
 
@@ -65,9 +72,14 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     private var slots: [RenderSlot] = []
     private var table: SurfaceTextureTable?
     private var ring: OutputBufferRing?
+    private var previewRing: OutputBufferRing?
+    private var multiviewRing: OutputBufferRing?
     private var labels: LabelRenderer?
     private var format: ProgramFormat?
     private var frameDuration: HostDuration = .zero
+    /// 多画面布局表：只有渲染线程碰；快照 sequence 变了才重新解析。
+    private let layout = MultiviewLayoutTable()
+    private var layoutSequence: UInt64 = .max
 
     /// 在途帧数（已提交未完成）。
     let inflight = Atomic<Int>(0)
@@ -111,7 +123,9 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         // 输入：每路最多约 8 个池缓冲 × 2 平面；输出环 × 2 平面
         let tbl = SurfaceTextureTable(device: device, capacity: max(1, maxInputs) * 16 + options.outputRingSize * 2 + 8)
         let rng = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize)
-        let lbl = try LabelRenderer(device: device, slices: max(1, maxInputs),
+        let pvwRing = options.previewOutput ? try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize) : nil
+        let mvRing = options.multiviewOutput && options.multiview ? try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize) : nil
+        let lbl = try LabelRenderer(device: device, inputSlices: max(1, maxInputs),
                                     submittedFrames: { [weak self] in self?.submitted.load(ordering: .acquiring) ?? 0 },
                                     completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
         stateLock.lock()
@@ -119,7 +133,10 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         slots = newSlots
         table = tbl
         ring = rng
+        previewRing = pvwRing
+        multiviewRing = mvRing
         labels = lbl
+        layoutSequence = .max
         self.format = format
         frameDuration = TickClockSpec(t0: .zero, frameRate: format.frameRate).duration(ofTicks: 1)
         stopping.store(false, ordering: .releasing)
@@ -164,10 +181,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         }
         let surface = unmanaged.takeUnretainedValue()
         let width = slot.targets.width, height = slot.targets.height
-        guard let luma = table.texture(surface: surface, plane: 0, format: .r8Uint, width: width, height: height,
-                                       usage: .shaderWrite, frame: frameIndex),
-              let chroma = table.texture(surface: surface, plane: 1, format: .rg8Uint, width: (width + 1) / 2, height: (height + 1) / 2,
-                                         usage: .shaderWrite, frame: frameIndex),
+        guard let program = nv12Target(surface: surface, table: table, width: width, height: height, frame: frameIndex),
               let cb = commandQueue.makeCommandBufferWithUnretainedReferences() else {
             skipped.wrappingAdd(1, ordering: .relaxed)
             RenderSignposts.event("skip-resource")
@@ -179,11 +193,27 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         slot.frameIndex = frameIndex
         slot.outputBuffer = output
         slot.commandBuffer = cb
-
-        let context = CompositorPasses.Context(resources: resources, table: table, labels: labelSet, frameIndex: frameIndex)
+        // PVW / 多画面的 NV12 输出（选项开了才有；环拿不到缓冲就这一帧不出，不拖 PGM）
+        var outputs = CompositorPasses.FrameOutputs(program: program)
+        if let previewRing, let pb = previewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
+           let t = nv12Target(surface: s.takeUnretainedValue(), table: table, width: width, height: height, frame: frameIndex) {
+            slot.previewBuffer = pb
+            outputs.preview = t
+        }
+        if let multiviewRing, let pb = multiviewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
+           let t = nv12Target(surface: s.takeUnretainedValue(), table: table, width: width, height: height, frame: frameIndex) {
+            slot.multiviewBuffer = pb
+            outputs.multiview = t
+        }
         let state = snapshot.state
+        if snapshot.sequence != layoutSequence {
+            layoutSequence = snapshot.sequence
+            layout.parse(state: state, width: width, height: height)
+        }
+        var context = CompositorPasses.Context(resources: resources, table: table, labels: labelSet, layout: layout, frameIndex: frameIndex)
+        context.overlaysInPreview = options.overlaysInPreview
         CompositorPasses.encodeFrame(state: state, inputs: inputs, slot: slot, context: context, commandBuffer: cb,
-                                     outputLuma: luma, outputChroma: chroma, multiview: options.multiview)
+                                     outputs: outputs, multiview: options.multiview)
 
         RenderSignposts.begin(.submit)
         inflight.wrappingAdd(1, ordering: .acquiringAndReleasing)
@@ -194,6 +224,15 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         RenderSignposts.end(.submit)
         if frameIndex % 600 == 599 { table.evictIdle(frame: frameIndex) }
         return .submitted
+    }
+
+    /// IOSurface 的两个平面包成整数视图（表里按 IOSurfaceID 缓存，稳态零分配）。
+    @inline(__always)
+    private func nv12Target(surface: IOSurfaceRef, table: SurfaceTextureTable, width: Int, height: Int, frame: UInt64) -> CompositorPasses.NV12Target? {
+        guard let luma = table.texture(surface: surface, plane: 0, format: .r8Uint, width: width, height: height, usage: .shaderWrite, frame: frame),
+              let chroma = table.texture(surface: surface, plane: 1, format: .rg8Uint, width: (width + 1) / 2, height: (height + 1) / 2,
+                                         usage: .shaderWrite, frame: frame) else { return nil }
+        return CompositorPasses.NV12Target(luma: luma, chroma: chroma)
     }
 
     public func shutdown() {
@@ -210,6 +249,8 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         slots = []
         table = nil
         ring = nil
+        previewRing = nil
+        multiviewRing = nil
         labels = nil
         format = nil
         latestCompletedSlot.store(-1, ordering: .releasing)
@@ -235,6 +276,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
             let gpuStart = HostTime(nanoseconds: UInt64(max(0, cb.gpuStartTime) * 1e9))
             let gpuEnd = HostTime(nanoseconds: UInt64(max(0, cb.gpuEndTime) * 1e9))
             let tick = slot.tick, tickTime = slot.tickTime, submitTime = slot.submitTime
+            let previewBuffer = slot.previewBuffer, multiviewBuffer = slot.multiviewBuffer
             // 先放资源、放行渲染线程，再派发
             slot.releaseFrame()
             latestCompletedSlot.store(slot.index, ordering: .releasing)
@@ -242,7 +284,11 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
             inflight.wrappingSubtract(1, ordering: .acquiringAndReleasing)
             let program = Frame(pixelBuffer: output, pts: tickTime, duration: frameDuration, color: .bt709Limited,
                                 inputNumber: 0, sequence: next, ingressTime: gpuEnd)
-            let frame = RenderedFrame(tick: tick, tickTime: tickTime, program: program, preview: nil, multiview: nil,
+            let preview = previewBuffer.map { Frame(pixelBuffer: $0, pts: tickTime, duration: frameDuration, color: .bt709Limited,
+                                                    inputNumber: 0, sequence: next, ingressTime: gpuEnd) }
+            let multiview = multiviewBuffer.map { Frame(pixelBuffer: $0, pts: tickTime, duration: frameDuration, color: .bt709Limited,
+                                                        inputNumber: 0, sequence: next, ingressTime: gpuEnd) }
+            let frame = RenderedFrame(tick: tick, tickTime: tickTime, program: program, preview: preview, multiview: multiview,
                                       submitTime: submitTime, gpuStart: gpuStart, gpuEnd: gpuEnd)
             if let sink { sink.renderer(self, didComplete: frame) }
             next += 1

@@ -1,5 +1,5 @@
 // 与 Compositor.metal 共享的结构。字段顺序和类型必须与 .metal 里的 DrawUniforms 逐一对应；
-// 两边各有一个大小断言（Metal 112 字节 static_assert，这里 MemoryLayout 检查）。
+// 两边各有一个大小断言（Metal 144 字节 static_assert，这里 MemoryLayout 检查）。
 import simd
 
 /// 一次 quad 绘制的全部参数。渲染线程在栈上填好后用 setVertexBytes / setFragmentBytes 送进命令缓冲区（不分配）。
@@ -28,12 +28,27 @@ struct DrawUniforms {
     var matrix: Int32 = 0
     /// 标签纹理数组切片。
     var slice: Int32 = 0
+    /// 1 = 抠像（提案 008 的口径）。
+    var keyer: Int32 = 0
+    /// Wipe 遮罩：0 无，1 左→右，2 右→左，3 上→下，4 下→上，5 对角（WipeMode）。
+    var wipeMode: Int32 = 0
     var pad0: Int32 = 0
-    var pad1: Int32 = 0
-    var pad2: Int32 = 0
+    /// 目标纹理尺寸（像素），Wipe 遮罩按片段位置算用。
+    var targetSize: SIMD2<Float> = SIMD2(1, 1)
+    /// 键色的 (Cb, Cr)，归一化 −0.5…0.5。
+    var keyChroma: SIMD2<Float> = SIMD2(0, 0)
+    /// (完全抠掉的色度距离半径, 柔化带宽度)。
+    var keyRange: SIMD2<Float> = SIMD2(0, 0)
+    /// 溢色抑制强度 0–1。
+    var keySpill: Float = 0
+    /// Wipe 擦边位置 0–1（= 进度）。
+    var wipeEdge: Float = 0
+    /// Wipe 软边宽度（占场的比例）。
+    var wipeSoftness: Float = 0
+    var pad1: Float = 0
 
     /// 与 .metal 的 static_assert 对应。
-    static let expectedStride = 112
+    static let expectedStride = 144
 }
 
 /// 片段着色器的分支；值与 .metal 的 DrawFormat 一致。
@@ -43,4 +58,14 @@ enum DrawFormat: Int32 {
     case uyvy = 2
     case solid = 3
     case label = 4
+}
+
+/// Wipe 遮罩方向；值与 .metal 的 wipeMode 一致。
+enum WipeMode: Int32 {
+    case none = 0
+    case leftToRight = 1
+    case rightToLeft = 2
+    case topToBottom = 3
+    case bottomToTop = 4
+    case diagonal = 5
 }
