@@ -62,3 +62,12 @@ worktree `.claude/worktrees/wonderful-fermi-40fe5f`，从 main 2290b4e 开；`g3
 补两条坑：
 - Xcode 27 的 `swift test` 每个测试 target 各印一次 "Test Suite 'All tests' passed"，一个包会出现两三次，数结果要按 target 数。
 - `xcodebuild -quiet test` 不印用例数，要从 `.build/DerivedData/Logs/Test/*.xcresult` 用 `xcrun xcresulttool get test-results summary` 读（本次 26 个：25 过 1 跳）。
+
+## 7. 补记：等拍板项按 G3 方案落地 + prompt 网页（2026-09-19，用户："那些等我定的你也按你的方案来……有一个网页……一起改了"）
+
+- 落地清单见 reports/G3-notes.md §11.3（表）：测试标准只改口径不改阈值（§2.1 / §2.3 / §3 / §4 A2 / §7，文件头有修订说明）；gate3-report 的 A2 改判整秒配对最大绝对值（G3 三次运行仍 0.000）；
+  App 打开节目文件不再按文档里的 enabled 自动起录制 / 推流（`ShowDocuments.stoppingOutputs` + 测试，App 胶水 36 / 50 行，xcodebuild test 27 个 26 过 1 跳）；提案 007（对齐延迟 / 监听点进 Show + CONTRACTS.md 三条口径）待批；
+  W3-C / W3-E / G4 prompt 加对应说明；OWNERSHIP 的 G3 / G4 行加测试标准（备注只准改口径）。不做的两条（per_input late 计数、推流"x s 后"进 Stats）也记在表里。
+- 用户复制 prompt 用的网页（artifact "导播台落地方案"）改成从仓库生成：`scripts/gen-prompt-page.py`（模板 scripts/prompt-page/template.html = 原网页去掉卡片的壳）读 docs/plan/prompts/*.md 出 32 张卡，
+  状态标签按分支状态算（已合入 main / 已合入 g3 等合 main / 完成未合并 / 进行中 / 未开始），顶部进度提示带生成时间与提交号；生成到 scratchpad 后用 Artifact 工具原地更新同一个 URL。以后加了 prompt 重跑一次再发布。
+- `make lint BRANCH=g3` 全绿；g3 顶见 git log。
