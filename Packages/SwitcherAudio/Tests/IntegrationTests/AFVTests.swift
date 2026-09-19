@@ -5,7 +5,8 @@ import SwitcherAudio
 @testable import SwitcherAudioIntegration
 
 /// AFV（设计方案 §7）：转场事件 → 同一拍点的 host time 起做等幅交叉淡变，长度 = 转场时长；Cut = 1 块短淡；T-bar 跟推杆；FTB 淡出 Master。
-/// 量法：每路输入挂推子后 tap（含 AFV 增益），逐块 RMS 与等幅曲线比；起点与视频转场同一拍。
+/// 量法：每路输入挂"推子后、AFV 后"的 tap（`.inputProgram`，= 它送进节目总线的信号），逐块 RMS 与等幅曲线比；起点与视频转场同一拍。
+/// （`.input(number:)` 从 W1-D2 起是 ISO 口径：推子后、AFV 前，见 MonitoringAndLifecycleTests.testISO_*。）
 final class AFVTests: XCTestCase {
     /// 纯正弦生成器（无 click，便于量电平）。
     func sine(_ hz: Double, amplitude: Float = 0.5) -> (Int, Int64, Int, UnsafeMutablePointer<Float>) -> Void {
@@ -23,8 +24,8 @@ final class AFVTests: XCTestCase {
         let rig = try await EngineRig(state: States.fourInputs(afv: true, frameRate: frameRate), frameRate: frameRate)
         try rig.addSource(number: 1, generator: sine(1000))
         try rig.addSource(number: 2, generator: sine(1500))
-        let c1 = try rig.capture(.input(number: 1))
-        let c2 = try rig.capture(.input(number: 2))
+        let c1 = try rig.capture(.inputProgram(number: 1))
+        let c2 = try rig.capture(.inputProgram(number: 2))
         let cm = try rig.capture(.master)
         return (rig, c1, c2, cm)
     }
@@ -43,6 +44,14 @@ final class AFVTests: XCTestCase {
 
     func dB(_ x: Double) -> Double { IT.db(x) }
 
+    /// 等幅曲线在一块 [t1, t2) 上的 RMS 增益：对块积分而不是取块中心（cos / sin 在 −40 dB 附近一块之内变化 10%+，
+    /// 取中心值本身就有 ~0.9 dB 的模型误差）。cos² 的均值 = 1/2 + (sin πp₂ − sin πp₁) / (2π(p₂ − p₁))，sin² 反号。
+    func curveRMS(from t1: HostTime, to t2: HostTime, tS: HostTime, D: HostDuration, toPath: Bool) -> Double {
+        let p1 = Double((t1 - tS).ticks) / Double(D.ticks), p2 = Double((t2 - tS).ticks) / Double(D.ticks)
+        let term = (sin(.pi * p2) - sin(.pi * p1)) / (2 * .pi * (p2 - p1))
+        return sqrt(max(0, 0.5 + (toPath ? -term : term)))
+    }
+
     // MARK: Fade 30 拍
 
     func testAFV_fade30_levelsFollowEqualPowerCurveWithin0_5dB_onsetOnTheTransitionTick() async throws {
@@ -59,39 +68,37 @@ final class AFVTests: XCTestCase {
         for b in before { XCTAssertEqual(b.rms2, 0, "t_s 之前 PVW 输入应静音"); XCTAssertEqual(b.rms1, baseRMS, accuracy: baseRMS * 0.02) }
         let onset = try XCTUnwrap(blocks.first { $0.rms2 > 0 })
         XCTAssertTrue(onset.start <= tS && tS < onset.end, "音频电平开始变化的块 [\(onset.start.milliseconds - tS.milliseconds), \(onset.end.milliseconds - tS.milliseconds)) ms 应含 t_s")
-        // 2. 曲线：逐块（块中心时刻）与 cos / sin 比，期望增益 ≥ −20 dB（0.1）的块误差 ≤ 0.5 dB。
-        //    更低的尾巴受 C 侧"时长按块取整"（94 块 = 501.33 ms vs 500 ms，0.27%）影响：cos 在 p > 0.94 处的相对误差 = tan(θ)·dθ
-        //    被放大到 0.5–0.9 dB，是 W1-D crossfade API 只收块数的固有量化（起点是精确的，不能靠挪起点抵消），见报告 §4 / 问题单。
-        var maxErr = 0.0, tailErr = 0.0
-        var compared = 0
+        // 2. 曲线：逐块（块中心时刻）与 cos / sin 比，期望增益 ≥ −40 dB（0.01）的块误差 ≤ 0.5 dB（W1-D2 起淡变收帧数，
+        //    500 ms = 24000 帧精确；W2-E 时只能判到 −20 dB，−20…−40 dB 的尾巴因整块量化有 0.5–0.9 dB）。
+        var maxErr = 0.0, tailErr = 0.0, centerTailErr = 0.0
+        var compared = 0, comparedTail = 0
         for b in blocks where b.start >= tS + rig.engine.blockDuration && b.end <= tS + D - rig.engine.blockDuration {
-            let center = b.start + (b.end - b.start) / 2
-            let p = Double((center - tS).ticks) / Double(D.ticks)
-            let gFrom = cos(p * Double.pi / 2), gTo = sin(p * Double.pi / 2)
-            if gTo >= 0.1 {
-                let err = dB(b.rms2 / (baseRMS * gTo)); maxErr = max(maxErr, abs(err)); compared += 1
-                XCTAssertEqual(err, 0, accuracy: 0.5, "p = \(p) to 增益误差 \(err) dB")
-            } else if gTo >= 0.01 { tailErr = max(tailErr, abs(dB(b.rms2 / (baseRMS * gTo)))) }
-            if gFrom >= 0.1 {
-                let err = dB(b.rms1 / (baseRMS * gFrom)); maxErr = max(maxErr, abs(err)); compared += 1
-                XCTAssertEqual(err, 0, accuracy: 0.5, "p = \(p) from 增益误差 \(err) dB")
-            } else if gFrom >= 0.01 { tailErr = max(tailErr, abs(dB(b.rms1 / (baseRMS * gFrom)))) }
+            let p = Double((b.start + (b.end - b.start) / 2 - tS).ticks) / Double(D.ticks)
+            let gFrom = curveRMS(from: b.start, to: b.end, tS: tS, D: D, toPath: false)
+            let gTo = curveRMS(from: b.start, to: b.end, tS: tS, D: D, toPath: true)
+            for (rms, g, name) in [(b.rms2, gTo, "to"), (b.rms1, gFrom, "from")] where g >= 0.01 {
+                let err = dB(rms / (baseRMS * g))
+                XCTAssertEqual(err, 0, accuracy: 0.5, "p = \(p) \(name) 增益 \(dB(g)) dB 误差 \(err) dB")
+                if g >= 0.1 { maxErr = max(maxErr, abs(err)); compared += 1 } else { tailErr = max(tailErr, abs(err)); comparedTail += 1 }
+            }
+            // 对照：W2-E 的块中心模型（cos / sin 取块中心）在同一段尾巴上的误差——那 0.5–0.9 dB 大半是模型自己的（块内变化 10%+），报告用
+            let gFromC = cos(p * Double.pi / 2)
+            if gFromC >= 0.01 && gFromC < 0.1 { centerTailErr = max(centerTailErr, abs(dB(b.rms1 / (baseRMS * gFromC)))) }
             // 等幅：不同频率的两路功率相加 → Master 功率恒定
             XCTAssertEqual(dB(b.rmsMaster / baseRMS), 0, accuracy: 0.5, "p = \(p) Master 电平 \(dB(b.rmsMaster / baseRMS)) dB")
         }
         XCTAssertGreaterThan(compared, 150)
-        XCTAssertLessThanOrEqual(tailErr, 1.0, "−20 … −40 dB 的尾巴误差（块取整）")
-        print("AFV fade30：逐块最大误差 \(String(format: "%.3f", maxErr)) dB（\(compared) 块，≥ −20 dB）；−20…−40 dB 尾巴最大 \(String(format: "%.3f", tailErr)) dB")
+        XCTAssertGreaterThanOrEqual(comparedTail, 4, "−20…−40 dB 之间应有块被判到")
+        print("AFV fade30：逐块最大误差 \(String(format: "%.3f", maxErr)) dB（\(compared) 块，≥ −20 dB）；−20…−40 dB 尾巴最大 \(String(format: "%.3f", tailErr)) dB（\(comparedTail) 块，块积分模型；按 W2-E 的块中心模型算是 \(String(format: "%.3f", centerTailErr)) dB）")
         // 3. 与视频对照：首个混合帧是第 s + 1 拍（progress 1/30），此时 to 增益 = sin(π/2 × 1/30)；含 t_{s+1} 的块电平与它一致
         let t1 = rig.clock.time(of: s + 1)
         let frameBlock = try XCTUnwrap(blocks.first { $0.start <= t1 && t1 < $0.end })
         let expectedTo = sin(Double.pi / 2 * (Double((frameBlock.start + (frameBlock.end - frameBlock.start) / 2 - tS).ticks) / Double(D.ticks)))
         XCTAssertEqual(dB(frameBlock.rms2 / (baseRMS * expectedTo)), 0, accuracy: 0.5)
-        // 4. 终点：t_s + D 之后 from 为 0（C 侧淡变最后一个样本的增益会留到下一块再按 3 ms 平滑到 0，≤ −44 dB 的尾巴，见报告）、to 满
-        let after = blocks.filter { $0.start >= tS + D + rig.engine.blockDuration * 2 }
+        // 4. 终点：含 t_s + D 的块之后 from 严格为 0（W1-D2：终值不再被最后一个曲线样本覆盖）、to 满
+        let after = blocks.filter { $0.start >= tS + D + rig.engine.blockDuration }
         XCTAssertFalse(after.isEmpty)
-        for b in after { XCTAssertLessThanOrEqual(b.rms1, 1e-3); XCTAssertEqual(b.rms2, baseRMS, accuracy: baseRMS * 0.02) }
-        for b in after where b.start >= tS + D + rig.engine.blockDuration * 5 { XCTAssertLessThanOrEqual(b.rms1, 1e-5) }
+        for b in after { XCTAssertEqual(b.rms1, 0, "\((b.start - tS - D).milliseconds) ms：from 应严格 0"); XCTAssertEqual(b.rms2, baseRMS, accuracy: baseRMS * 0.02) }
         // 状态机对调后 PGM = 2
         let state = await rig.sm.state
         XCTAssertEqual(state.program, 2)
@@ -109,11 +116,17 @@ final class AFVTests: XCTestCase {
         let blocks = levels(rig, c1, c2, cm, from: tS - rig.engine.blockDuration * 2, to: tS + D + rig.engine.blockDuration * 3)
         let onset = try XCTUnwrap(blocks.first { $0.rms2 > 0 })
         XCTAssertTrue(onset.start <= tS && tS < onset.end)
+        var compared = 0
         for b in blocks where b.start >= tS + rig.engine.blockDuration && b.end <= tS + D - rig.engine.blockDuration {
             let p = Double((b.start + (b.end - b.start) / 2 - tS).ticks) / Double(D.ticks)
-            let gTo = sin(p * Double.pi / 2)
-            if gTo >= 0.01 { XCTAssertEqual(dB(b.rms2 / (baseRMS * gTo)), 0, accuracy: 0.5, "p = \(p)") }
+            let gTo = curveRMS(from: b.start, to: b.end, tS: tS, D: D, toPath: true)
+            let gFrom = curveRMS(from: b.start, to: b.end, tS: tS, D: D, toPath: false)
+            if gTo >= 0.01 { XCTAssertEqual(dB(b.rms2 / (baseRMS * gTo)), 0, accuracy: 0.5, "p = \(p) to"); compared += 1 }
+            if gFrom >= 0.01 { XCTAssertEqual(dB(b.rms1 / (baseRMS * gFrom)), 0, accuracy: 0.5, "p = \(p) from"); compared += 1 }
         }
+        XCTAssertGreaterThan(compared, 170)
+        // 500.5 ms = 24024 帧：终点块之后 from 严格 0
+        for b in blocks where b.start >= tS + D + rig.engine.blockDuration { XCTAssertEqual(b.rms1, 0, "\((b.start - tS - D).milliseconds) ms") }
         await rig.shutdown()
     }
 
@@ -129,9 +142,9 @@ final class AFVTests: XCTestCase {
         for b in blocks where b.end <= tS { XCTAssertEqual(b.rms2, 0); XCTAssertEqual(b.rms1, baseRMS, accuracy: baseRMS * 0.02) }
         let cutBlock = try XCTUnwrap(blocks.first { $0.start <= tS && tS < $0.end })
         XCTAssertGreaterThan(cutBlock.rms2, 0, "含 t_s 的块里输入 2 已经开始进来")
-        // 1 块短淡：t_s 所在块之后最多再 1 块就完全切换（from 留 ≤ −48 dB、3 ms 时间常数的尾巴，W1-D 淡变收口的小问题，见报告）
+        // 1 块短淡（256 帧）从 t_s 所在块中间起、在下一块里走满：再下一块起 from 严格为 0（W1-D2：不再有 −44 dB、τ 3 ms 的尾巴）
         for b in blocks where b.start >= cutBlock.end + rig.engine.blockDuration {
-            XCTAssertLessThanOrEqual(b.rms1, 1e-3, "\((b.start - tS).milliseconds) ms")
+            XCTAssertEqual(b.rms1, 0, "\((b.start - tS).milliseconds) ms：from 应严格 0")
             XCTAssertEqual(b.rms2, baseRMS, accuracy: baseRMS * 0.02)
         }
         // 短淡是等幅的：Master 电平不塌
@@ -170,7 +183,8 @@ final class AFVTests: XCTestCase {
         let rig = try await EngineRig(state: States.fourInputs(afv: false))
         try rig.addSource(number: 1, generator: sine(1000))
         try rig.addSource(number: 2, generator: sine(1500))
-        let c1 = try rig.capture(.input(number: 1)), c2 = try rig.capture(.input(number: 2))
+        let c1 = try rig.capture(.inputProgram(number: 1)), c2 = try rig.capture(.inputProgram(number: 2))
+        let iso2 = try rig.capture(.input(number: 2))
         await rig.run(seconds: 1)
         var (a, b) = rig.lastDeliveredWindow(blocks: 4)
         XCTAssertEqual(c1.rms(from: a, to: b), baseRMS, accuracy: baseRMS * 0.02)
@@ -184,6 +198,7 @@ final class AFVTests: XCTestCase {
         (a, b) = rig.lastDeliveredWindow(blocks: 4)
         XCTAssertEqual(c1.rms(from: a, to: b), 0, accuracy: 1e-4, "AFV 开：非 PGM 静音")
         XCTAssertEqual(c2.rms(from: a, to: b), baseRMS, accuracy: baseRMS * 0.02)
+        XCTAssertEqual(iso2.rms(from: a, to: b), baseRMS, accuracy: baseRMS * 0.02, "ISO 不受 AFV 影响")
         await rig.shutdown()
     }
 
