@@ -1,5 +1,5 @@
 // 与 Compositor.metal 共享的结构。字段顺序和类型必须与 .metal 里的 DrawUniforms 逐一对应；
-// 两边各有一个大小断言（Metal 144 字节 static_assert，这里 MemoryLayout 检查）。
+// 两边各有一个大小断言（Metal 160 字节 static_assert，这里 MemoryLayout 检查）。
 import simd
 
 /// 一次 quad 绘制的全部参数。渲染线程在栈上填好后用 setVertexBytes / setFragmentBytes 送进命令缓冲区（不分配）。
@@ -39,6 +39,8 @@ struct DrawUniforms {
     var keyChroma: SIMD2<Float> = SIMD2(0, 0)
     /// (完全抠掉的色度距离半径, 柔化带宽度)。
     var keyRange: SIMD2<Float> = SIMD2(0, 0)
+    /// 键色色度的单位向量（CPU 算好，溢色抑制用；键色是灰时为 0）。
+    var keyNormal: SIMD2<Float> = SIMD2(0, 0)
     /// 溢色抑制强度 0–1。
     var keySpill: Float = 0
     /// Wipe 擦边位置 0–1（= 进度）。
@@ -46,9 +48,10 @@ struct DrawUniforms {
     /// Wipe 软边宽度（占场的比例）。
     var wipeSoftness: Float = 0
     var pad1: Float = 0
+    var pad2: SIMD2<Float> = SIMD2(0, 0)
 
     /// 与 .metal 的 static_assert 对应。
-    static let expectedStride = 144
+    static let expectedStride = 160
 }
 
 /// 片段着色器的分支；值与 .metal 的 DrawFormat 一致。

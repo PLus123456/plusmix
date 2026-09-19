@@ -41,12 +41,14 @@ struct DrawUniforms {
     float2   targetSize;   // 目标纹理尺寸（像素）
     float2   keyChroma;    // 键色 (Cb, Cr)，−0.5…0.5
     float2   keyRange;     // (全透半径, 柔化带宽度)
+    float2   keyNormal;    // 键色色度的单位向量（CPU 算好）
     float    keySpill;     // 溢色抑制 0–1
     float    wipeEdge;     // 擦边位置 0–1
     float    wipeSoftness; // 软边宽度（占场的比例）
     float    pad1;
+    float2   pad2;
 };
-static_assert(sizeof(DrawUniforms) == 144, "DrawUniforms 布局变了，同步改 ShaderTypes.swift");
+static_assert(sizeof(DrawUniforms) == 160, "DrawUniforms 布局变了，同步改 ShaderTypes.swift");
 
 struct QuadOut {
     float4 position [[position]];
@@ -123,20 +125,40 @@ static inline float4 applyKey(float4 c, constant DrawUniforms &u) {
     float d = distance(chroma, u.keyChroma);
     float radius = u.keyRange.x, ramp = u.keyRange.y;
     float alpha = ramp > 0.0 ? smoothstep(radius, radius + ramp, d) : step(radius, d);
-    float kl = length(u.keyChroma);
-    if (u.keySpill > 0.0 && kl > 1e-4) {
-        float2 kn = u.keyChroma / kl;
-        float proj = dot(chroma, kn);
-        if (proj > 0.0) {
-            chroma -= u.keySpill * proj * kn;
-            float r = y + 1.5748 * chroma.y;
-            float b = y + 1.8556 * chroma.x;
-            float g = (y - 0.2126 * r - 0.0722 * b) / 0.7152;
-            rgb = saturate(float3(r, g, b));
-        }
+    float proj = dot(chroma, u.keyNormal);
+    if (u.keySpill > 0.0 && proj > 0.0) {
+        chroma -= u.keySpill * proj * u.keyNormal;
+        float r = y + 1.5748 * chroma.y;
+        float b = y + 1.8556 * chroma.x;
+        float g = (y - 0.2126 * r - 0.0722 * b) / 0.7152;
+        rgb = saturate(float3(r, g, b));
     }
     float a = alpha * a0;
     return float4(rgb * a, a);
+}
+
+/// 下采样路径（缩略图 / 画中画）的 half 版：同一套公式，half 精度（色度距离误差 ~5e-4，远小于最小容差 0.005）。
+static inline half4 applyKeyHalf(half4 c, constant DrawUniforms &u) {
+    half a0 = c.a;
+    half3 rgb = a0 > 0.0h ? c.rgb / a0 : half3(0.0h);
+    half y = 0.2126h * rgb.r + 0.7152h * rgb.g + 0.0722h * rgb.b;
+    half2 chroma = half2((rgb.b - y) * (1.0h / 1.8556h), (rgb.r - y) * (1.0h / 1.5748h));
+    half2 key = half2(u.keyChroma);
+    half d = distance(chroma, key);
+    half radius = half(u.keyRange.x), ramp = half(u.keyRange.y);
+    half alpha = ramp > 0.0h ? smoothstep(radius, radius + ramp, d) : step(radius, d);
+    half2 kn = half2(u.keyNormal);
+    half spill = half(u.keySpill);
+    half proj = dot(chroma, kn);
+    if (spill > 0.0h && proj > 0.0h) {
+        chroma -= spill * proj * kn;
+        half r = y + 1.5748h * chroma.y;
+        half b = y + 1.8556h * chroma.x;
+        half g = (y - 0.2126h * r - 0.0722h * b) * (1.0h / 0.7152h);
+        rgb = saturate(half3(r, g, b));
+    }
+    half a = alpha * a0;
+    return half4(rgb * a, a);
 }
 
 // MARK: - 下采样用的 half 精度版（缩略图 / 画中画的 taps×taps 盒式滤波；1:1 的路径保持 float 以保证 V9 的电平精度）
@@ -221,19 +243,23 @@ fragment float4 quadFragment(QuadOut in [[stage_in]],
             if (u.keyer != 0) color = applyKey(color, u);
         } else {
             // 下采样：在目标像素的足迹内均匀取 taps×taps 个点做盒式滤波（第一版代替 mipmap，见报告），half 精度；抠像逐采样点做
-            // 累加与缩放保持 half（与 W1-C 逐位相同，参考图不变）；抠像在每个采样点上用 float 算再转回 half
+            // 累加与缩放保持 half（与 W1-C 逐位相同，参考图不变）。
+            // 抠像：2×2（画中画）逐采样点抠，边缘干净；4×4（缩略图）先滤波再抠一次——每像素 16 次抠像在 60 fps 的低 GPU 时钟下
+            // 要 1 ms 以上（V1 实测），缩略图看不出差别（reports/w3-compositor2.md §2）。
+            bool keyPerTap = u.keyer != 0 && taps == 2;
             float inv = 1.0 / float(taps);
             half4 acc = half4(0.0h);
             for (int j = 0; j < taps; ++j) {
                 for (int i = 0; i < taps; ++i) {
                     float2 o = (float2(float(i), float(j)) + 0.5) * inv - 0.5;
                     half4 s = fetchHalf(in.uv + o * u.sampleStep, u, tex0h, tex1h);
-                    if (u.keyer != 0) s = half4(applyKey(float4(s), u));
+                    if (keyPerTap) s = applyKeyHalf(s, u);
                     acc += s;
                 }
             }
             acc *= half(inv * inv);
             color = float4(acc);
+            if (u.keyer != 0 && !keyPerTap) color = applyKey(color, u);
         }
         color *= u.tint;   // 预乘颜色整体乘不透明度
     }

@@ -20,33 +20,44 @@ final class MultiviewLayoutTests: XCTestCase {
         abs(a.r - b.r) <= tolerance && abs(a.g - b.g) <= tolerance && abs(a.b - b.b) <= tolerance
     }
 
-    /// 格子内框中心的像素应是该源的中心像素（fit 缩放中心对中心）；外框左边中点是 tally 色。
+    /// 格子里的内容按 16:9 fit 进内框：算出内容矩形，取它 (0.8, 0.8) 处的像素，应等于源图 (0.8, 0.8) 处的像素
+    /// （不取中心：棋盘 / 纯色块 / 画中画的边都过中心）；外框左边中点是 tally 色。
+    static func contentRect(_ inner: NormalizedRect, width: Int, height: Int) -> (x: Double, y: Double, w: Double, h: Double) {
+        let iw = inner.width * Double(width), ih = inner.height * Double(height)
+        let cw = min(iw, ih * 16 / 9), ch = min(ih, iw * 9 / 16)
+        return (inner.x * Double(width) + (iw - cw) / 2, inner.y * Double(height) + (ih - ch) / 2, cw, ch)
+    }
+
     func checkCells(_ state: MixerState, layout: JSONValue?, file: StaticString = #filePath, line: UInt = #line) throws {
         let r = try render(state)
         let mv = Bitmap(r.multiview)
         let pgm = Bitmap(r.program), pvw = Bitmap(r.preview)
         let placements = MultiviewLayout.placements(layout: layout, inputs: state.inputs.map(\.number), width: 1920, height: 1080)
         XCTAssertFalse(placements.isEmpty, file: file, line: line)
+        let sx = Int(0.8 * 1920), sy = Int(0.8 * 1080)
         for (i, cell) in placements.enumerated() {
-            let cx = Int((cell.inner.x + cell.inner.width / 2) * 1920), cy = Int((cell.inner.y + cell.inner.height / 2) * 1080)
+            let c = Self.contentRect(cell.inner, width: 1920, height: 1080)
+            let cx = Int(c.x + c.w * 0.8), cy = Int(c.y + c.h * 0.8)
             let got = mv.pixel(cx, cy)
             let want: (r: Int, g: Int, b: Int, a: Int)
             let expectedBorder: (r: Int, g: Int, b: Int, a: Int)
             switch cell.source {
             case .program:
-                want = pgm.pixel(960, 540)
+                want = pgm.pixel(sx, sy)
                 expectedBorder = (230, 26, 26, 255)
             case .preview:
-                want = pvw.pixel(960, 540)
+                want = pvw.pixel(sx, sy)
                 expectedBorder = (26, 204, 26, 255)
             case .input(let n):
-                want = Self.inputBitmaps[n]?.pixel(960, 540) ?? (0, 0, 0, 255)
+                want = Self.inputBitmaps[n]?.pixel(sx, sy) ?? (0, 0, 0, 255)
                 let t = state.tally(ofInput: n)
                 expectedBorder = t.program ? (230, 26, 26, 255) : (t.preview ? (26, 204, 26, 255) : (71, 71, 71, 255))
             case .multiview:
                 continue
             }
-            XCTAssertTrue(Self.close(got, want, tolerance: 8), "格子 \(i)（\(cell.source)）中心 (\(cx),\(cy)) 采到 \(got)，期望 \(want)", file: file, line: line)
+            // 绿幕图带 ±6 噪声，缩略图是 4×4 盒式平均，放宽一点
+            let tolerance = cell.source == .input(number: 5) ? 14 : 8
+            XCTAssertTrue(Self.close(got, want, tolerance: tolerance), "格子 \(i)（\(cell.source)）内容 (\(cx),\(cy)) 采到 \(got)，期望 \(want)", file: file, line: line)
             let bx = Int(cell.outer.x * 1920) + 1, by = Int((cell.outer.y + cell.outer.height / 2) * 1080)
             let border = mv.pixel(bx, by)
             XCTAssertTrue(Self.close(border, expectedBorder, tolerance: 8), "格子 \(i)（\(cell.source)）左边框 (\(bx),\(by)) 采到 \(border)，期望 \(expectedBorder)", file: file, line: line)
@@ -134,7 +145,8 @@ final class MultiviewLayoutTests: XCTestCase {
         var many: [JSONValue] = []
         for i in 0..<80 { many.append(["source": .number(Double(i % 8 + 1)), "rect": ["x": .number(Double(i % 10) * 0.1), "y": .number(Double(i / 10) * 0.1), "width": 0.1, "height": 0.1]]) }
         XCTAssertEqual(MultiviewLayout.placements(layout: ["cells": .array(many)], inputs: [1, 2, 3, 4, 5, 6, 7, 8], width: 1920, height: 1080).count, 64)
-        XCTAssertEqual(MultiviewLayout.placements(layout: ["cells": [["source": 1]]], inputs: [1], width: 1920, height: 1080).count, 0)
+        // 全部格子都缺 rect → 没有一个合法格子 → 退回默认布局（PVW、PGM、输入 1）
+        XCTAssertEqual(MultiviewLayout.placements(layout: ["cells": [["source": 1]]], inputs: [1], width: 1920, height: 1080).map(\.source), [.preview, .program, .input(number: 1)])
         // 空 cells → 默认布局
         XCTAssertEqual(MultiviewLayout.placements(layout: ["cells": []], inputs: [1, 2], width: 1920, height: 1080).map(\.source),
                        MultiviewLayout.placements(layout: nil, inputs: [1, 2], width: 1920, height: 1080).map(\.source))
@@ -159,7 +171,7 @@ final class MultiviewLayoutTests: XCTestCase {
         XCTAssertGreaterThan(onTitle.r + onTitle.g + onTitle.b, besideTitle.r + besideTitle.g + besideTitle.b + 150, "5% 处应有字幕安全线")
         // 没开 safeArea 的同一布局：那里没有线
         var plainLayout = layout
-        if case .object(var o) = plainLayout { o["safeArea"] = false; plainLayout = .object(o) }
+        if case .object(var o) = plainLayout { o["safeArea"] = false; o["meters"] = false; plainLayout = .object(o) }
         let plain = Bitmap(try render(ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), plainLayout)).multiview)
         let off = plain.pixel(lineX, midY), offBeside = plain.pixel(lineX + 8, midY)
         XCTAssertLessThan(abs(off.r + off.g + off.b - offBeside.r - offBeside.g - offBeside.b), 40)

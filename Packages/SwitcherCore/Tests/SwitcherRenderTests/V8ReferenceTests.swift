@@ -234,7 +234,7 @@ final class V8ReferenceTests: XCTestCase {
         s.overlays = Array(repeating: OverlayState(), count: 4)
         let bm = Bitmap(try Self.renderer.renderOffline(state: s, inputs: Self.inputs, size: CGSize(width: 320, height: 180)))
         XCTAssertEqual(bm.pixel(160, 90).r + bm.pixel(160, 90).g + bm.pixel(160, 90).b, 0)
-        s.program = 7   // 没这路
+        s.program = 9   // 没这路（W3-B 起输入表带 5–8 路，用 9）
         let bm2 = Bitmap(try Self.renderer.renderOffline(state: s, inputs: Self.inputs, size: CGSize(width: 320, height: 180)))
         XCTAssertEqual(bm2.pixel(10, 10).r + bm2.pixel(10, 10).g + bm2.pixel(10, 10).b, 0)
     }

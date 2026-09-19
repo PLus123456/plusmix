@@ -21,15 +21,15 @@ final class OverlayTests: XCTestCase {
     func testV8_overlayOrder_channel1BelowChannel3WhenOverlapping() throws {
         let s = ReferenceStates.overlayOrder()
         let both = try render(s)
-        // 重叠区 (0.5–0.7, 0.5–0.7) 的中心 (0.6, 0.6)：输入 8 的画中画 (0.5,0.5,0.4,0.4) 内相对位置 (0.25, 0.25) → 输入 8 的外圈（黄）
-        let p = both.pixel(Int(0.6 * 1920), Int(0.6 * 1080))
+        // 重叠区 (0.5–0.7, 0.5–0.7) 里取 (0.55, 0.55)：在输入 8 的画中画 (0.5,0.5,0.4,0.4) 内相对位置 (0.125, 0.125) → 输入 8 的外圈（黄）
+        let p = both.pixel(Int(0.55 * 1920), Int(0.55 * 1080))
         XCTAssertTrue(p.r > 200 && p.g > 170 && p.b < 60, "重叠处应是输入 8 的黄，得 \(p)")
         var only1 = s
         only1.overlays[2].on = false
         only1.overlays[2].animProgress = 0
-        let q = try render(only1).pixel(Int(0.6 * 1920), Int(0.6 * 1080))
-        // 输入 7 的画中画 (0.3,0.3,0.4,0.4) 内相对位置 (0.75, 0.75) → 输入 7 的外圈（青）
-        XCTAssertTrue(q.r < 40 && q.g > 150 && q.b > 170, "只开 1 时应是输入 7 的青，得 \(q)")
+        let q = try render(only1).pixel(Int(0.55 * 1920), Int(0.55 * 1080))
+        // 输入 7 的画中画 (0.3,0.3,0.4,0.4) 内相对位置 (0.625, 0.625) → 输入 7 的中心块（深红）
+        XCTAssertTrue(q.r > 100 && q.g < 40 && q.b < 40, "只开 1 时应是输入 7 的深红中心块，得 \(q)")
         // 关掉 1，只剩 3：非重叠的 1 的区域 (0.35, 0.35) 回到 PGM 底（输入 1 渐变灰）
         var only3 = s
         only3.overlays[0].on = false

@@ -73,11 +73,11 @@ final class KeyerTests: XCTestCase {
         let refCount = Self.referenceAlpha.filter { $0 >= 0.5 }.count, gotCount = alpha.filter { $0 >= 0.5 }.count
         print("V8 抠像：掩膜 IoU \(String(format: "%.4f", full))，边带（±3 px）IoU \(String(format: "%.4f", band))，参考前景 \(refCount) px，抠出 \(gotCount) px")
         XCTAssertGreaterThanOrEqual(full, 0.95, "抠像掩膜与已知 alpha 的 IoU 不达标")
-        // 背景（远离前景的绿幕）必须全透：黑底上是黑
-        let bg = onBlack.pixel(1700, 950)
+        // 背景（远离前景的绿幕；(1700, 950) 在第三条斜条的边上，别用）必须全透：黑底上是黑
+        let bg = onBlack.pixel(1800, 1040)
         XCTAssertEqual(bg.r + bg.g + bg.b, 0, "绿幕背景应被完全抠掉，得 \(bg)")
-        // 前景内部不透明且颜色保留：圆盘中心是肤色
-        let fg = onBlack.pixel(620, 560)
+        // 前景内部不透明且颜色保留：圆盘上半在肤色象限
+        let fg = onBlack.pixel(620, 400)
         XCTAssertEqual(fg.r, 220, accuracy: 3)
         XCTAssertEqual(fg.g, 170, accuracy: 3)
         XCTAssertEqual(fg.b, 140, accuracy: 3)
@@ -128,9 +128,12 @@ final class KeyerTests: XCTestCase {
         let bgKept = strict.alpha.enumerated().filter { Self.referenceAlpha[$0.offset] == 0 && $0.element >= 0.5 }.count
         let bgTotal = Self.referenceAlpha.filter { $0 == 0 }.count
         XCTAssertGreaterThan(Double(bgKept) / Double(bgTotal), 0.5, "容差 0 时带噪声的绿幕大部分应留下")
-        // 容差 1：全抠光（连前景都没了）
+        // 容差 1（半径 0.5）：背景、白 / 灰 / 肤色前景（色度离键色 ≈ 0.41）都抠掉，只剩色度离键色 > 0.5 的蓝圆环（≈ 3.5% 面积）
         let loose = try Self.keyedAlpha(ReferenceStates.keyer(tolerance: 1, softness: 0))
-        XCTAssertTrue(loose.alpha.allSatisfy { $0 < 0.5 }, "容差 1（半径 0.5）应把所有像素都抠掉")
+        let kept = loose.alpha.filter { $0 >= 0.5 }.count
+        XCTAssertLessThan(Double(kept) / Double(loose.alpha.count), 0.05, "容差 1 应只剩蓝圆环")
+        XCTAssertEqual(loose.onBlack.pixel(620, 400).r + loose.onBlack.pixel(620, 400).g, 0, "肤色圆盘应被抠掉")
+        XCTAssertGreaterThan(loose.onBlack.pixel(1350, 230).b, 150, "蓝圆环应留下")
     }
 
     /// 关掉抠像：输出 = 原图（绿幕可见），逐像素与不带 keyer 的渲染一致。
@@ -140,7 +143,7 @@ final class KeyerTests: XCTestCase {
         plain.inputs[4].settings.keyer = KeyerSettings()
         let ref = Bitmap(try Self.renderer.renderOffline(state: plain, inputs: Self.inputs, size: Self.size))
         XCTAssertEqual(off.bgra, ref.bgra)
-        let bg = off.pixel(1700, 950)
+        let bg = off.pixel(1800, 1040)
         XCTAssertTrue(bg.g > 150 && bg.r < 40, "关掉抠像绿幕应可见，得 \(bg)")
     }
 
@@ -149,9 +152,9 @@ final class KeyerTests: XCTestCase {
         var s = MixerState(format: .hd1080p60, inputs: ReferenceStates.phase2Inputs(), program: 5, preview: 5)
         s.inputs[4].settings.keyer = ReferenceStates.keyer()
         let r = try Self.renderer.render(state: s, inputs: Self.inputs, size: Self.size)
-        let pgm = Bitmap(r.program).pixel(1700, 950)
+        let pgm = Bitmap(r.program).pixel(1800, 1040)
         XCTAssertEqual(pgm.r + pgm.g + pgm.b, 0, "PGM 底抠像后背景应是黑，得 \(pgm)")
-        let pvw = Bitmap(r.preview).pixel(1700, 950)
+        let pvw = Bitmap(r.preview).pixel(1800, 1040)
         XCTAssertEqual(pvw.r + pvw.g + pvw.b, 0, "PVW 抠像后背景应是黑，得 \(pvw)")
         // 多画面里输入 5 的格子（第 5 格，index 4）：格子右下角区域应是黑而不是绿
         let cell = try XCTUnwrap(MultiviewLayout.inputCell(index: 4, inputCount: 8, width: 1920, height: 1080))

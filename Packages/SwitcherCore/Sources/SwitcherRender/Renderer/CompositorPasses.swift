@@ -591,7 +591,10 @@ enum Keyer {
         let r = Float(k.keyColor.red) / 255, g = Float(k.keyColor.green) / 255, b = Float(k.keyColor.blue) / 255
         let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
         u.keyer = 1
-        u.keyChroma = SIMD2((b - y) / 1.8556, (r - y) / 1.5748)
+        let chroma = SIMD2<Float>((b - y) / 1.8556, (r - y) / 1.5748)
+        u.keyChroma = chroma
+        let len = (chroma.x * chroma.x + chroma.y * chroma.y).squareRoot()
+        u.keyNormal = len > 1e-4 ? chroma / len : SIMD2(0, 0)   // 键色是灰：没有方向，不做溢色抑制
         u.keyRange = SIMD2(Float(min(max(k.tolerance, 0), 1)) * 0.5, Float(min(max(k.softness, 0), 1)) * 0.25)
         u.keySpill = Float(min(max(k.spillSuppression, 0), 1))
     }

@@ -281,16 +281,25 @@ final class TransitionTests: XCTestCase {
 
     /// 切向黑场（preview = 0）：Wipe / Zoom / Stinger 都按进度压黑，不崩。
     func testTransition_toBlackWorksForWipeZoomStinger() throws {
+        let w = Self.width, h = Self.height
         for type in [TransitionType.wipe, .zoom, .stinger] {
             var s = Self.baseState(type: type, duration: 30, stinger: StingerParams(input: 3, cutAtTick: 10))
             s.preview = 0
             s.transition.startTick = Tick(0)
             s.transition.progress = 0.5
             let luma = try Self.render(s)
-            if type != .stinger { XCTAssertEqual(luma[Self.width / 2, Self.height / 2], 16, "\(type)：中心应是黑") }
             XCTAssertLessThan(luma.mean, Double(GrayLevels.oldLuma), "\(type)：整体应比纯旧画面暗")
-            // Wipe 50%（左→右）/ Zoom 50% 的左上角仍是旧画面；Stinger 第 15 拍已换底 → 左上角是黑
-            XCTAssertEqual(luma[Self.width / 8, Self.height / 8], type == .stinger ? 16 : GrayLevels.oldLuma, "\(type)：左上角")
+            switch type {
+            case .wipe:   // 左→右 50%：左半黑、右半旧
+                XCTAssertEqual(luma[w / 4, h / 2], 16, "wipe 左半应是黑")
+                XCTAssertEqual(luma[3 * w / 4, h / 2], GrayLevels.oldLuma, "wipe 右半应是旧画面")
+            case .zoom:   // 居中一半大小的黑块
+                XCTAssertEqual(luma[w / 2, h / 2], 16, "zoom 中心应是黑")
+                XCTAssertEqual(luma[w / 8, h / 8], GrayLevels.oldLuma, "zoom 角落应是旧画面")
+            default:      // 第 15 拍 ≥ cutAt 10：底已是黑，带子照旧
+                XCTAssertEqual(luma[10, 10], 16, "stinger 换底后角落应是黑")
+                XCTAssertNotEqual(luma[400, 240], 16, "stinger 带子中心应是 stinger")
+            }
         }
     }
 
