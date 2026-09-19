@@ -2,6 +2,9 @@
 // 桥接层对它和对真卡走同一段代码。测试用 sw_decklink_fake_emit_* 在调用线程上同步触发桥接层的回调。
 #include "sw_decklink.h"
 
+#include <cstdio>
+#include <cstring>
+
 #if SWITCHER_HAS_DECKLINK_SDK
 #include "sw_decklink_internal.hpp"
 

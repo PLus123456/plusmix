@@ -1,6 +1,9 @@
 // 编译 / 运行环境信息。
 #include "sw_decklink.h"
 
+#include <cstdio>
+#include <cstring>
+
 #if SWITCHER_HAS_DECKLINK_SDK
 #include "sw_decklink_internal.hpp"
 

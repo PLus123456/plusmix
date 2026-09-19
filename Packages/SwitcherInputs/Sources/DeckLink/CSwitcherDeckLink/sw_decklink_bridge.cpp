@@ -11,6 +11,9 @@
 // - 线程：回调都在驱动线程；stop() 先置 running = false 再 StopStreams（不在持锁时调 SDK 的流控制，避免与回调死锁）。
 #include "sw_decklink.h"
 
+#include <cstdio>
+#include <cstring>
+
 #if SWITCHER_HAS_DECKLINK_SDK
 #include "sw_decklink_internal.hpp"
 

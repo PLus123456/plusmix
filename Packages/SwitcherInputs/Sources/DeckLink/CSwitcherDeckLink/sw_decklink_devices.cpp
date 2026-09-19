@@ -1,6 +1,9 @@
 // 设备枚举（IDeckLinkIterator）与热插拔通知（IDeckLinkDiscovery）。
 #include "sw_decklink.h"
 
+#include <cstdio>
+#include <cstring>
+
 #if SWITCHER_HAS_DECKLINK_SDK
 #include "sw_decklink_internal.hpp"
 
