@@ -1,31 +1,33 @@
-// 快捷键默认表（KeyCommandMap）和节目文件（ShowDocuments：新建 / 保存 / 打开 / 最近 / 上次 / 自动保存）。
+// 快捷键（W2-C 的 HotkeyDispatcher + 默认表，经 MainWindow.keyDown → CommandBus）和节目文件（ShowDocuments：新建 / 保存 / 打开 / 最近 / 上次 / 自动保存）。
 import AppKit
 import XCTest
 import SwitcherContracts
+import SwitcherControl
 @testable import Switcher
 
 @MainActor
 final class ShortcutAndShowTests: XCTestCase {
-    private func key(_ chars: String, ignoring: String? = nil, flags: NSEvent.ModifierFlags = [], repeat: Bool = false) -> NSEvent {
+    private func key(_ chars: String, ignoring: String? = nil, flags: NSEvent.ModifierFlags = [], keyCode: UInt16 = 0, repeat: Bool = false) -> NSEvent {
         NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
-                         characters: chars, charactersIgnoringModifiers: ignoring ?? chars, isARepeat: `repeat`, keyCode: 0)!
+                         characters: chars, charactersIgnoringModifiers: ignoring ?? chars, isARepeat: `repeat`, keyCode: keyCode)!
     }
 
-    func testShortcuts_defaultTable() {
-        var state = MixerState()
-        state.transition.durationTicks = 45
-        state.ftb.on = true
-        XCTAssertEqual(KeyCommandMap.command(for: key("2"), state: state), .setPreview(input: 2))
-        XCTAssertEqual(KeyCommandMap.command(for: key("0"), state: state), .setPreview(input: 10))
-        XCTAssertEqual(KeyCommandMap.command(for: key("@", ignoring: "2", flags: [.shift]), state: state), .setProgram(input: 2))
-        XCTAssertEqual(KeyCommandMap.command(for: key(" "), state: state), .cut)
-        XCTAssertEqual(KeyCommandMap.command(for: key("\r"), state: state), .fade(durationTicks: 45), "回车用当前时长")
-        XCTAssertEqual(KeyCommandMap.command(for: key("f"), state: state), .ftb(on: false), "FTB 是开关")
-        XCTAssertEqual(KeyCommandMap.command(for: key("F", ignoring: "f", flags: [.shift]), state: state), .ftb(on: false))
-        XCTAssertNil(KeyCommandMap.command(for: key("2", flags: [.command]), state: state), "带 ⌘ 的交给菜单")
-        XCTAssertNil(KeyCommandMap.command(for: key("2", repeat: true), state: state), "自动重复不触发")
-        XCTAssertNil(KeyCommandMap.command(for: key("x"), state: state))
-        XCTAssertEqual(KeyCommandMap.table.count, 5)
+    /// 主窗口的按键经 KeyCombo(event:) → HotkeyDispatcher（默认表）解析成命令；带 ⌘ 的、自动重复的、没绑定的不吃。
+    func testHotkeys_defaultTableResolvesThroughDispatcher() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let dispatcher = session.control.hotkeys
+        XCTAssertEqual(dispatcher.table, HotkeyTable.default, "测试宿主固定用默认表")
+        XCTAssertEqual(dispatcher.command(for: KeyCombo(event: key("2", keyCode: 19))!), .setPreview(input: 2))
+        XCTAssertEqual(dispatcher.command(for: KeyCombo(event: key("0", keyCode: 29))!), .setPreview(input: 10))
+        XCTAssertEqual(dispatcher.command(for: KeyCombo(event: key("@", ignoring: "2", flags: [.shift], keyCode: 19))!), .setProgram(input: 2))
+        XCTAssertEqual(dispatcher.command(for: KeyCombo(event: key(" ", keyCode: 49))!), .cut)
+        XCTAssertEqual(dispatcher.command(for: KeyCombo(event: key("\r", keyCode: 36))!), .autoTransition, "回车 = 按已选转场执行")
+        XCTAssertEqual(dispatcher.command(for: KeyCombo(event: key("f", keyCode: 3))!), .ftb(on: true), "FTB 是开关（现在关着 → 开）")
+        XCTAssertFalse(session.control.handleKey(key("2", flags: [.command], keyCode: 19)), "带 ⌘ 的交给菜单")
+        XCTAssertFalse(session.control.handleKey(key("2", keyCode: 19, repeat: true)), "自动重复不触发")
+        XCTAssertFalse(session.control.handleKey(key("x", keyCode: 7)), "没绑定的键交回响应链")
+        XCTAssertEqual(session.control.hotkeyTable.bindings.count, 23, "默认表：10 数字 + 10 Shift 数字 + 空格 + 回车 + F")
     }
 
     func testShow_newSaveOpenRecentAndAutosave() throws {
@@ -72,6 +74,30 @@ final class ShortcutAndShowTests: XCTestCase {
         XCTAssertEqual(docs.loadAutosave(), show)
     }
 
+    /// 打开文件不自动起输出（G3 2026-09-19 定）：保存时录制 / 推流 enabled 的节目，load / loadAutosave 回来 enabled 都是 false，其余字段原样。
+    func testShow_openedFileDoesNotAutoStartOutputs() throws {
+        let suite = "com.example.switcher.tests.show-open-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let docs = ShowDocuments(defaults: defaults)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-show-open-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var show = ShowDocuments.emptyShow(name: "录着存的")
+        show.outputs[0].enabled = true
+        show.outputs.append(OutputState(number: 2, kind: .stream, name: "推流", enabled: true,
+                                        settings: OutputSettings(video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: StreamSettings(url: "rtmp://127.0.0.1/live/x"))))
+        let url = dir.appendingPathComponent("rec.\(ShowDocuments.fileExtension)")
+        try docs.save(show, to: url)
+        let loaded = try docs.load(from: url)
+        XCTAssertEqual(loaded.outputs.map(\.enabled), [false, false])
+        var expected = show
+        expected.outputs[0].enabled = false
+        expected.outputs[1].enabled = false
+        XCTAssertEqual(loaded, expected, "只清 enabled，其余原样")
+        docs.autosave(show)
+        XCTAssertEqual(docs.loadAutosave()?.outputs.map(\.enabled), [false, false])
+    }
+
     /// 通过 AppController：新建 → 加输入 → 写文件 → 打开回来，session 换成文件里的状态；布局键进 Show.layout。
     func testShow_controllerRoundTripReplacesSession() throws {
         let session = try AppTest.freshSession()
@@ -108,18 +134,29 @@ final class ShortcutAndShowTests: XCTestCase {
         XCTAssertEqual(AppTest.controller.windowController.window?.title, "Switcher \(SwitcherVersion.current) — round")
     }
 
-    /// 摄像头等 W2-A 的输入现在是占位：加进去不崩，格子显示提示。
+    /// 还没实现的输入类型（DeckLink / NDI 在 W3-A）是占位：加进去不崩，格子显示提示；不存在的摄像头 uniqueID 是无信号（等它出现），不是占位。
     func testShow_unsupportedInputKindIsPlaceholder() throws {
         let session = try AppTest.freshSession()
-        session.send(.addInput(config: InputConfig(number: 5, name: "相机", source: .camera(uniqueID: "fake"))))
+        session.send(.addInput(config: InputConfig(number: 5, name: "NDI 源", source: .ndi(sourceName: "MACHINE (src)"))))
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.count == 1 })
         XCTAssertTrue(AppTest.waitUntil(5) {
-            if case .error? = session.inputs.runtimeState(of: 5) { return true }
+            if case .error(let m)? = session.inputs.runtimeState(of: 5) { return m.contains("W3-A") }
             return false
-        }, "W2-A 合并前摄像头输入应是带文案的占位：\(String(describing: session.inputs.runtimeState(of: 5)))")
-        XCTAssertEqual(AppTest.controller.windowController.inputStrip.cells[5]?.displayedName, "相机")
+        }, "W3-A 之前 NDI 输入应是带文案的占位：\(String(describing: session.inputs.runtimeState(of: 5)))")
+        XCTAssertEqual(AppTest.controller.windowController.inputStrip.cells[5]?.displayedName, "NDI 源")
         session.send(.removeInput(input: 5))
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.isEmpty && session.inputs.runtimeState(of: 5) == nil })
+        // 摄像头走真实现：uniqueID 不存在 → 无信号（热插拔会等它来）或权限文案，不是"占位"
+        session.send(.addInput(config: InputConfig(number: 6, name: "相机", source: .camera(uniqueID: "fake"))))
+        XCTAssertTrue(AppTest.waitUntil(5) {
+            switch session.inputs.runtimeState(of: 6) {
+            case .noSignal?: return true
+            case .error(let m)?: return m.contains("权限")
+            default: return false
+            }
+        }, "假 uniqueID 的摄像头应是无信号或权限文案：\(String(describing: session.inputs.runtimeState(of: 6)))")
+        session.send(.removeInput(input: 6))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.isEmpty })
     }
 
     /// Add Input 表单模型：五种类型都能出 InputConfig；缺参数报错；空闲编号。

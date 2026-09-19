@@ -39,9 +39,14 @@ public struct AudioEngineConfiguration: Sendable {
     public var outputChannelMap: BusChannelMap? = nil
     /// 节目音频的对齐延迟（帧）：每路输入"环年龄（重采样输入位置相对块首的年龄，InputSlotStats.ageSetpoint）+ 对齐延迟线"= 它；
     /// Master / 总线 / ISO 块的 PTS = 块首样本 host time − 它。默认 2048 帧 = 42.67 ms：盖住 HAL（P 256）、合成源、AVCapture（P ≤ 1024）、
-    /// NDI（1920）这些生产者的年龄（目标 2 块 + P/2 + 63 + 相位 ≤ 1 块），且与视频内部延迟（≈ 3 帧 50 ms）同量级，扬声器与 PGM 画面自然对上。
-    /// 年龄超过它的输入补不齐（`AudioEngineStatus.InputStatus.residualFrames`），需要调大它或减小该路的 targetFrames。
+    /// NDI（1920）这些生产者的年龄，且与视频内部延迟（≈ 3 帧 50 ms）同量级，扬声器与 PGM 画面自然对上。
+    /// W1-D2 起环年龄由混音器按目标就绪（`AudioInputHints.targetAgeFrames`，默认 = 任何相位都能命中的最小值：目标 + 3P/2 + 63，P 256 时 959 帧），
+    /// 是确定值；对齐延迟线 = 它减年龄（959 → 1089 帧），也是确定的。目标年龄比它大的输入压到它（P 1024 时 2048，年龄正好 = 对齐延迟、延迟线 0）；
+    /// 混音器安全下限（目标 + P/2 + 63 + 相位）都超过它的输入补不齐（`AudioEngineStatus.InputStatus.residualFrames`），需要调大它或减小该路的 targetFrames。
+    /// 耳机总线默认不经对齐延迟线（`monitorPoint`），监听延迟 = 环年龄 + 设备。
     public var alignmentFrames: Int = 2048
+    /// 耳机总线取每路输入延迟线前（默认：不带对齐延迟 / 延迟补偿，低延迟监听，A5）还是延迟线后（与节目同刻）的信号。W1-D2。
+    public var monitorPoint: MonitorPoint = .preDelayLine
     /// Cut 的短淡（块数，≥ 1；1 块 = 5.33 ms @256）：避免爆音。
     public var cutFadeBlocks: Int = 1
     /// FTB 同步淡出 Master（线性，与画面同一斜坡）。
@@ -84,6 +89,9 @@ public struct AudioInputHints: Sendable {
     public var sameClockAsOutput: Bool = false
     /// 直接指定 targetFrames（覆盖上面的推算；0 = 混音器默认 2 块）。
     public var targetFramesOverride: Int? = nil
+    /// 就绪目标年龄（帧；W1-D2）：nil = min(混音器任何相位都能命中的最小值 = 目标 + P/2 + hf + chunk/2 + P（真设备再加输出提前量 buffer + 安全偏移）, 对齐延迟)；
+    /// 0 = 混音器旧规则（年龄 = 安全下限 + 相位，随机）；显式值 = 想要的年龄（低于安全下限时按下限就绪，见 residualFrames）。
+    public var targetAgeFrames: Int? = nil
     public init() {}
 
     /// 就绪目标（环里平均保有帧数）：max(2 块, 生产者块 + 1 块, 抖动 + 1 块)。生产者块大的源必须 ≥ 生产者块，否则两次交付之间会欠载。

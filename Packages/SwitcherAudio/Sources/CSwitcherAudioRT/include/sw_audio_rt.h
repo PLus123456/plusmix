@@ -73,6 +73,12 @@ bool sw_audio_ring_host_time_of(const sw_audio_ring *ring, uint64_t frame_index,
 enum sw_bus { SW_BUS_MASTER = 0, SW_BUS_A = 1, SW_BUS_B = 2, SW_BUS_HEADPHONES = 3 };
 enum sw_effect { SW_EFFECT_EQ = 0, SW_EFFECT_DYNAMICS = 1, SW_EFFECT_LIMITER = 2 };
 enum sw_monitor_mode { SW_MONITOR_AFL = 0, SW_MONITOR_PFL = 1 };
+/// 耳机总线从每路输入的哪一点取信号（W1-D2）：延迟线之前 = 不带对齐延迟 / 延迟补偿的低延迟监听（默认），之后 = 与节目同刻。
+enum sw_monitor_point { SW_MONITOR_PRE_DELAY = 0, SW_MONITOR_POST_DELAY = 1 };
+/// 消费者队列的来源编号：0…3 总线（总线增益之后）；SW_TAP_INPUT_BASE + 槽位 = 该输入推子后（含 AFV 门控，= 它送进总线的信号）；
+/// SW_TAP_INPUT_PRE_AFV_BASE + 槽位 = 该输入推子后、AFV 门控前（含增益 / 静音 / 声像 / 延迟线；ISO 音轨用，W1-D2）。
+#define SW_TAP_INPUT_BASE          16
+#define SW_TAP_INPUT_PRE_AFV_BASE  64
 /// 每路输入的重采样方式。
 enum sw_resample_mode {
     SW_RESAMPLE_ESTIMATED = 0, ///< 异步重采样，比率由速率估计器给（默认）
@@ -159,6 +165,9 @@ typedef struct sw_mix_stats {
 enum sw_cmd_type {
     SW_CMD_NONE = 0,
     SW_CMD_ATTACH_INPUT,      ///< index=槽位 ptr=sw_audio_ring* i0=重采样方式 i1=target_frames(0=默认)
+                              ///< i2=目标年龄（帧；W1-D2）：就绪时从"host_time − 目标年龄"那一刻采到的帧起消费（按 stamps 找），
+                              ///< 各路年龄一致且不带生产者相位；0 = 旧规则（从 write_index − back 起，年龄 = back + 相位）。
+                              ///< 目标低于安全下限（back + 生产者块，见 sw_mix_ctx_deterministic_age_frames）时按下限就绪，年龄 > 目标。
     SW_CMD_DETACH_INPUT,      ///< index=槽位（应用后 ring 指针不再被读；控制侧等 commands_applied 再释放）
     SW_CMD_INPUT_GAIN,        ///< index=槽位 f0=线性增益
     SW_CMD_INPUT_MUTE,        ///< index=槽位 i0=0/1
@@ -172,11 +181,12 @@ enum sw_cmd_type {
     SW_CMD_BUS_MUTE,          ///< index=总线 i0=0/1
     SW_CMD_EFFECT_ENABLE,     ///< index=总线 i0=效果序号 i1=0/1
     SW_CMD_MONITOR_MODE,      ///< i0=sw_monitor_mode
-    SW_CMD_CROSSFADE,         ///< i0=from 槽位(−1 无) i1=to 槽位(−1 无) i2=时长（块） u0=起始 host time
-    SW_CMD_TAP_ATTACH,        ///< index=tap 序号 ptr=sw_block_queue* i0=来源（0…3 总线；16+槽位 = 输入推子后）
+    SW_CMD_CROSSFADE,         ///< i0=from 槽位(−1 无) i1=to 槽位(−1 无) i2=时长（帧，≥ 1；W1-D2 前是块） u0=起始 host time
+    SW_CMD_TAP_ATTACH,        ///< index=tap 序号 ptr=sw_block_queue* i0=来源（0…3 总线；SW_TAP_INPUT_BASE / SW_TAP_INPUT_PRE_AFV_BASE + 槽位）
     SW_CMD_TAP_DETACH,        ///< index=tap 序号
     SW_CMD_RESET_METERS,      ///< 清 peak_max / 积分响度
     SW_CMD_RESET_STATS,       ///< 清计数（不清 blocks_rendered）
+    SW_CMD_MONITOR_POINT,     ///< i0=sw_monitor_point（耳机总线取延迟线前 / 后；W1-D2）
 };
 
 typedef struct sw_cmd {

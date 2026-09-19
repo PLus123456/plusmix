@@ -37,12 +37,12 @@ final class OfflineRig {
     /// 加一路合成输入到槽位；默认信号 TestSignal（1 kHz −20 dBFS + click）。
     @discardableResult
     func addSource(slot: Int, channels: Int = 1, driftPpm: Double = 0, producerBlock: Int = 256, capacity: Int = 16_384,
-                   resampling: ResampleMode = .estimated, targetFrames: Int = 0, sourceT0: HostTime? = nil,
+                   resampling: ResampleMode = .estimated, targetFrames: Int = 0, targetAgeFrames: Int = 0, sourceT0: HostTime? = nil,
                    generator: ((Int, Int64, Int, UnsafeMutablePointer<Float>) -> Void)? = nil) -> OfflineAudioSource {
         let src = OfflineAudioSource(channels: channels, t0: sourceT0 ?? t0, driftPpm: driftPpm, producerBlockFrames: producerBlock,
                                      capacityFrames: capacity, timebase: T.tb, generator: generator)
         sources[slot] = src
-        mixer.attach(ring: src.ring, toSlot: slot, resampling: resampling, targetFrames: targetFrames)
+        mixer.attach(ring: src.ring, toSlot: slot, resampling: resampling, targetFrames: targetFrames, targetAgeFrames: targetAgeFrames)
         return src
     }
 

@@ -29,6 +29,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private(set) var session: SwitcherSession?
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
+    private var noticeToken: ObserverToken?
     private var overlayPopover: NSPopover?
     private var addInputSheet: AddInputSheetController?
     /// 收到的快照次数（测试看 ≤ 60 Hz 合并）。
@@ -117,8 +118,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     func bind(session: SwitcherSession?) {
         stateToken?.invalidate()
         statsToken?.invalidate()
+        noticeToken?.invalidate()
         stateToken = nil
         statsToken = nil
+        noticeToken = nil
         self.session = session
         let send: ((Command) -> Void)? = session.map { s in { [weak s] c in s?.send(c) } }
         transitionPanel.send = send
@@ -131,6 +134,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         programMonitor.display.source = source
         inputStrip.displaySource = source
         bottomBar.resetStats()
+        mixerPanel.audio = session?.audio
         guard let session else {
             window?.title = "Switcher \(SwitcherVersion.current)"
             return
@@ -139,6 +143,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         window?.title = "Switcher \(SwitcherVersion.current) — \(session.name)"
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
         statsToken = session.observeStats { [weak self] stats in self?.apply(stats: stats) }
+        noticeToken = session.observeNotices { [weak self] message in self?.bottomBar.showNotice(message) }
+        if let notice = session.lastNotice { bottomBar.showNotice(notice) }
     }
 
     private func apply(state: MixerState) {
@@ -164,12 +170,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         mixerPanel.apply(stats: stats)
     }
 
-    // MARK: 快捷键
+    // MARK: 快捷键（W2-C 的 HotkeyDispatcher：用户表 hotkeys.json，没有就默认表；命令来源 hotkey）
 
     private func handleKey(_ event: NSEvent) -> Bool {
-        guard let session, let command = KeyCommandMap.command(for: event, state: session.state) else { return false }
-        session.send(command)
-        return true
+        guard let session else { return false }
+        return session.control.handleKey(event)
     }
 
     // MARK: 面板

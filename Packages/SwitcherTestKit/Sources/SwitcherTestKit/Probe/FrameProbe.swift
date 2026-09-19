@@ -30,6 +30,12 @@ public enum FrameProbe {
         public var rawFps = 60.0
         /// frames 输出最多多少帧；nil = 全部。
         public var limit: Int?
+        /// 音轨 priming 的处理（`--aac-priming auto|0|N`，见 `AudioTimeline`）。
+        public var aacPriming: PrimingMode = .auto
+        /// av 顺带做波形不连续检测（A1 第三项，`--discontinuities`）。
+        public var discontinuities = false
+        /// 不连续检测的 click 排除窗口：click 起点前后各 marginMs（click 本身按 1 ms 计）。
+        public var discontinuityMarginMs = 1.0
         public init() {}
     }
 
@@ -38,29 +44,70 @@ public enum FrameProbe {
         public var source: String
         public var info: ProbeVideoInfo
         public var frames: [ProbeFrame]
+        /// 音轨信息；`startSeconds` 已按 `timeline` 修正。
         public var audio: ProbeAudioInfo?
+        /// click 时刻（已修正的时间轴）。
         public var clicks: [ClickEvent]
+        /// 单声道样本（withAudio 时有；不连续检测用）。
+        public var samples: [Float]
         /// 节目帧率（选项或标称）。
         public var fps: Double
     }
 
     /// 读文件（.mov / .mp4）或原始 NV12 目录；`withAudio` 才读音轨找 click。
+    /// 音轨时间轴：AVFoundation 的解码起点 + `audioTimeline` 算出的修正（容器里音轨相对视频的偏移 + 按 `options.aacPriming` 加回的 priming）。
     public static func load(_ url: URL, options: Options, withAudio: Bool) async throws -> Loaded {
         var isDir: ObjCBool = false
         FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         if isDir.boolValue {
             let r = try MediaReader.readRawNV12Directory(url: url, width: options.rawWidth, height: options.rawHeight, fps: options.fps ?? options.rawFps)
-            return Loaded(source: url.path, info: r.info, frames: r.frames, audio: nil, clicks: [], fps: options.fps ?? options.rawFps)
+            return Loaded(source: url.path, info: r.info, frames: r.frames, audio: nil, clicks: [], samples: [], fps: options.fps ?? options.rawFps)
         }
         let v = try await MediaReader.readVideo(url: url)
         var audio: ProbeAudioInfo?
         var clicks: [ClickEvent] = []
+        var samples: [Float] = []
         if withAudio, let a = try await MediaReader.readAudio(url: url) {
-            audio = a.info
-            clicks = ClickDetector.detect(samples: a.samples, sampleRate: a.info.sampleRate, startSeconds: a.info.startSeconds)
+            let index = try? MP4Index.scan(url: url)
+            let timeline = audioTimeline(decoded: a, index: index, mode: options.aacPriming)
+            var info = a.info
+            info.startSeconds = timeline.avfoundationStartSeconds + timeline.correctionSeconds
+            info.timeline = timeline
+            audio = info
+            clicks = ClickDetector.detect(samples: a.samples, sampleRate: a.info.sampleRate, startSeconds: info.startSeconds)
+            samples = a.samples
         }
         let fps = options.fps ?? (v.info.nominalFps > 0 ? v.info.nominalFps : 60)
-        return Loaded(source: url.path, info: v.info, frames: v.frames, audio: audio, clicks: clicks, fps: fps)
+        return Loaded(source: url.path, info: v.info, frames: v.frames, audio: audio, clicks: clicks, samples: samples, fps: fps)
+    }
+
+    /// 由解码结果与容器索引算音轨时间轴的修正（`AudioTimeline` 的说明）。
+    public static func audioTimeline(decoded a: MediaReader.AudioResult, index: MP4Index?, mode: PrimingMode) -> AudioTimeline {
+        let track = index?.audioTrack
+        let hasEditList = track?.hasEditList ?? false
+        let containerOffset = index?.audioStartRelativeToVideoSeconds ?? 0
+        let sr = max(1, a.info.sampleRate)
+        // ffmpeg 口径：有编辑列表时 AVFoundation 已经裁对、挪对（修正 0）；没有时它裁了 primingTrimmed 个样本却没挪时间轴，加回去
+        let ffmpegAddBack = hasEditList ? 0 : a.primingTrimmedSamples
+        let ffmpegCorrection = hasEditList ? 0 : containerOffset + Double(ffmpegAddBack) / sr
+        let addBack: Int
+        let correction: Double
+        switch mode {
+        case .auto:
+            addBack = ffmpegAddBack
+            correction = ffmpegCorrection
+        case .samples(let n):
+            addBack = n
+            correction = containerOffset + Double(n) / sr
+        }
+        // 有编辑列表时两种口径重合（AVFoundation 按 elst 裁并挪，ffmpeg 也按 elst 跳过），标 avfoundation
+        let applied = hasEditList && abs(correction) < 1e-9 ? "avfoundation"
+            : abs(correction - ffmpegCorrection) < 1e-9 ? "ffmpeg" : (abs(correction) < 1e-9 ? "avfoundation" : "custom")
+        return AudioTimeline(mode: mode.label, applied: applied, codec: a.codec, isFragmented: index?.isFragmented ?? false,
+                             hasEditList: hasEditList, editListMediaTime: track?.editList.first { $0.mediaTime >= 0 }?.mediaTime,
+                             avfoundationStartSeconds: a.info.startSeconds, containerOffsetSeconds: containerOffset,
+                             primingTrimmedSamples: a.primingTrimmedSamples, primingAddedBackSamples: addBack,
+                             correctionSeconds: correction, ffmpegCorrectionSeconds: ffmpegCorrection)
     }
 
     // MARK: 报告
@@ -88,7 +135,20 @@ public enum FrameProbe {
     public struct AVOutput: Codable, Sendable {
         public var source: String
         public var audio: ProbeAudioInfo?
+        /// 采用口径（`audio.timeline.applied`）下的 A2 / A3。
         public var av: FrameAnalysis.AVReport
+        /// 两种口径的整秒配对对照。
+        public var timelines: AVTimelineComparison?
+        /// `--discontinuities` 时有：A1 第三项。
+        public var discontinuities: FrameAnalysis.DiscontinuityReport?
+    }
+    /// AVFoundation 原生（不修正）与 ffmpeg 口径（容器偏移 + 不裁 priming）各自的整秒配对统计；采用的是哪个见 `applied`。
+    public struct AVTimelineComparison: Codable, Sendable {
+        public var applied: String
+        public var appliedCorrectionMs: Double
+        public var avfoundation: FrameAnalysis.AVStats
+        public var ffmpegCorrectionMs: Double
+        public var ffmpeg: FrameAnalysis.AVStats
     }
     public struct AVMultiOutput: Codable, Sendable {
         public var sources: [String]
@@ -121,14 +181,31 @@ public enum FrameProbe {
 
     public static func av(_ url: URL, options: Options = Options()) async throws -> AVOutput {
         let l = try await load(url, options: options, withAudio: true)
-        return AVOutput(source: l.source, audio: l.audio, av: FrameAnalysis.av(frames: l.frames, clicks: l.clicks, frameDurationSeconds: 1 / l.fps))
+        let report = FrameAnalysis.av(frames: l.frames, clicks: l.clicks, frameDurationSeconds: 1 / l.fps, startTick: options.startTick)
+        var comparison: AVTimelineComparison?
+        if let a = l.audio, let t = a.timeline {
+            // 同一批 click 按另外两个修正量平移，只看整秒配对
+            func stats(correction: Double) -> FrameAnalysis.AVStats {
+                let shifted = l.clicks.map { ClickEvent(sampleIndex: $0.sampleIndex, timeSeconds: $0.timeSeconds - t.correctionSeconds + correction, peak: $0.peak) }
+                return FrameAnalysis.av(frames: l.frames, clicks: shifted, frameDurationSeconds: 1 / l.fps, startTick: options.startTick).onSecond
+            }
+            comparison = AVTimelineComparison(applied: t.applied, appliedCorrectionMs: t.correctionSeconds * 1000,
+                                              avfoundation: stats(correction: 0),
+                                              ffmpegCorrectionMs: t.ffmpegCorrectionSeconds * 1000, ffmpeg: stats(correction: t.ffmpegCorrectionSeconds))
+        }
+        var disc: FrameAnalysis.DiscontinuityReport?
+        if options.discontinuities, let a = l.audio {
+            disc = FrameAnalysis.discontinuities(samples: l.samples, sampleRate: a.sampleRate, startSeconds: a.startSeconds, clicks: l.clicks,
+                                                 marginSeconds: options.discontinuityMarginMs / 1000, maxEvents: options.maxEvents)
+        }
+        return AVOutput(source: l.source, audio: l.audio, av: report, timelines: comparison, discontinuities: disc)
     }
 
     public static func avMulti(_ urls: [URL], options: Options = Options()) async throws -> AVMultiOutput {
         var loaded: [Loaded] = []
         for u in urls { loaded.append(try await load(u, options: options, withAudio: true)) }
         let fps = loaded.first?.fps ?? 60
-        let per = loaded.map { FrameAnalysis.av(frames: $0.frames, clicks: $0.clicks, frameDurationSeconds: 1 / fps) }
+        let per = loaded.map { FrameAnalysis.av(frames: $0.frames, clicks: $0.clicks, frameDurationSeconds: 1 / fps, startTick: options.startTick) }
         let multi = FrameAnalysis.avMulti(files: loaded.map { ($0.source, $0.frames, $0.clicks) }, frameDurationSeconds: 1 / fps)
         return AVMultiOutput(sources: loaded.map(\.source), perFile: per, multi: multi)
     }
@@ -196,15 +273,32 @@ public enum FrameProbe {
     public static func markdown(_ r: AVOutput) -> String {
         let t = r.av
         var s = "**\(r.source)**"
-        if let a = r.audio { s += " 音轨 \(f(a.sampleRate, 0)) Hz × \(a.channels)，起点 \(f(a.startSeconds, 4)) s，\(a.sampleCount) 样本" } else { s += " 没有音轨" }
+        if let a = r.audio {
+            s += " 音轨 \(f(a.sampleRate, 0)) Hz × \(a.channels)，起点 \(f(a.startSeconds, 4)) s，\(a.sampleCount) 样本"
+            if let tl = a.timeline {
+                s += "（\(tl.codec)；AVFoundation 解码起点 \(f(tl.avfoundationStartSeconds, 4)) s + 修正 \(f(tl.correctionSeconds * 1000)) ms = 容器偏移 \(f(tl.containerOffsetSeconds * 1000)) ms + 加回 priming \(tl.primingAddedBackSamples) 样本；"
+                s += "\(tl.isFragmented ? "分片" : "非分片")、\(tl.hasEditList ? "有编辑列表 media_time \(tl.editListMediaTime ?? 0)" : "无编辑列表")、AVFoundation 裁了 \(tl.primingTrimmedSamples) 样本；--aac-priming \(tl.mode) → \(tl.applied) 口径）"
+            }
+        } else { s += " 没有音轨" }
         s += "\n\n| 项 | 值 |\n|---|---|\n"
-        s += "| 闪光 / click / 配上 | \(t.flashCount) / \(t.clickCount) / \(t.matchedCount) |\n"
-        s += "| 偏移（音频超前为正） | 均值 \(f(t.meanMs)) ms，标准差 \(f(t.stdMs)) ms，最大绝对值 \(f(t.maxAbsMs)) ms |\n"
-        s += "| 漂移 | 斜率 \(f(t.slopeMsPerSecond, 4)) ms/s × \(f(t.spanSeconds, 1)) s = \(f(t.driftOverSpanMs)) ms（A3 口径） |\n"
-        s += "| A2（≤ \(f(t.thresholdMs, 2)) ms） | \(mark(t.passA2)) |\n\n"
-        s += "| 闪光帧 | 闪光 (s) | genTimeMs | click (s) | 偏移 (ms) |\n|---|---|---|---|---|\n"
+        s += "| 闪光 / click / 配上 | \(t.flashCount) / \(t.clickCount) / \(t.matchedCount)（整秒拍 \(t.onSecond.count)，非整秒拍 \(t.offSecondCount)） |\n"
+        s += "| 整秒拍配对（A2 / A3 口径，音频超前为正） | 均值 \(f(t.onSecond.meanMs)) ms，标准差 \(f(t.onSecond.stdMs)) ms，最大绝对值 \(f(t.onSecond.maxAbsMs)) ms |\n"
+        s += "| 整秒拍漂移 | 斜率 \(f(t.onSecond.slopeMsPerSecond, 4)) ms/s × \(f(t.onSecond.spanSeconds, 1)) s = \(f(t.onSecond.driftOverSpanMs)) ms（A3 口径） |\n"
+        s += "| 全部配对（只报不判） | 均值 \(f(t.meanMs)) ms，标准差 \(f(t.stdMs)) ms，最大绝对值 \(f(t.maxAbsMs)) ms，斜率 \(f(t.slopeMsPerSecond, 4)) ms/s |\n"
+        if let c = r.timelines {
+            s += "| 两种口径（整秒配对均值 / 最大） | AVFoundation 原生 \(f(c.avfoundation.meanMs)) / \(f(c.avfoundation.maxAbsMs)) ms；ffmpeg 口径（修正 \(f(c.ffmpegCorrectionMs)) ms）\(f(c.ffmpeg.meanMs)) / \(f(c.ffmpeg.maxAbsMs)) ms；采用 \(c.applied)（修正 \(f(c.appliedCorrectionMs)) ms） |\n"
+        }
+        s += "| A2（整秒配对最大绝对值 ≤ \(f(t.thresholdMs, 2)) ms） | \(mark(t.passA2)) |\n"
+        if let d = r.discontinuities {
+            s += "| 不连续（A1 第三项：跳变 > \(f(Double(d.threshold), 2)) 满幅，click ±\(f(d.marginMs, 1)) ms 排除） | \(d.count) 次（click 位置排除了 \(d.jumpsAtClicks) 次跳变，\(d.clickCount) 个 click，\(d.sampleCount) 样本）\(mark(d.passA1)) |\n"
+        }
+        if let n = t.note { s += "\n\(n)\n" }
+        s += "\n| 闪光帧 | 拍 | 整秒 | 闪光 (s) | genTimeMs | click (s) | 偏移 (ms) |\n|---|---|---|---|---|---|---|\n"
         for p in t.pairs {
-            s += "| \(p.flashIndex) | \(f(p.flashTimeSeconds, 4)) | \(p.genTimeMs.map(String.init) ?? "—") | \(p.clickTimeSeconds.map { f($0, 5) } ?? "—") | \(p.offsetMs.map { f($0) } ?? "—") |\n"
+            s += "| \(p.flashIndex) | \(p.tick) | \(p.onSecondTick ? "●" : "") | \(f(p.flashTimeSeconds, 4)) | \(p.genTimeMs.map(String.init) ?? "—") | \(p.clickTimeSeconds.map { f($0, 5) } ?? "—") | \(p.offsetMs.map { f($0) } ?? "—") |\n"
+        }
+        if let d = r.discontinuities, !d.events.isEmpty {
+            s += "\n不连续位置（前 \(d.events.count) 条\(d.truncated ? "，已截断" : "")）：" + d.events.map { "\(f($0.timeSeconds, 4)) s（样本 \($0.sampleIndex)，跳 \(f(Double($0.jump), 2))）" }.joined(separator: "；") + "\n"
         }
         return s
     }
@@ -212,7 +306,7 @@ public enum FrameProbe {
     public static func markdown(_ r: AVMultiOutput) -> String {
         var s = "多文件对齐（A4）：" + r.sources.enumerated().map { "[\($0.offset)] \($0.element)" }.joined(separator: "；") + "\n\n"
         for (i, p) in r.perFile.enumerated() {
-            s += "[\(i)] 闪光 \(p.flashCount)、click \(p.clickCount)，偏移均值 \(f(p.meanMs)) ms，最大 \(f(p.maxAbsMs)) ms\n"
+            s += "[\(i)] 闪光 \(p.flashCount)、click \(p.clickCount)，整秒配对 \(p.onSecond.count) 对偏移均值 \(f(p.onSecond.meanMs)) ms，最大 \(f(p.onSecond.maxAbsMs)) ms（全部配对均值 \(f(p.meanMs)) ms）\n"
         }
         let m = r.multi
         s += "\n| 事件 | " + r.sources.indices.map { "闪光[\($0)] (s)" }.joined(separator: " | ") + " | 闪光极差 (ms) | " + r.sources.indices.map { "click[\($0)] (s)" }.joined(separator: " | ") + " | click 极差 (ms) |\n"

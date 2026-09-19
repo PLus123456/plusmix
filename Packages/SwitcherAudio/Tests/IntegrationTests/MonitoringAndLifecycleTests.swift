@@ -130,6 +130,45 @@ final class MonitoringAndLifecycleTests: XCTestCase {
         await rig.shutdown()
     }
 
+    // MARK: ISO tap（W1-D2）
+
+    /// ISO 音轨（`.input(number:)`）= 推子后、AFV 前：AFV 开着、输入 2 不在 PGM 时 ISO 仍有信号，且含推子 −6 dB 与静音；
+    /// `.inputProgram(number:)`（它送进节目总线的信号）为 0；PGM 那一路两个来源一样。
+    func testISO_inputTapHasSignalWhileAFVGatesTheInput() async throws {
+        let rig = try await EngineRig(state: States.fourInputs(afv: true))    // PGM 1、PVW 2
+        try rig.addSource(number: 1, generator: sine(1000))
+        try rig.addSource(number: 2, generator: sine(1500))
+        var s2 = InputSettings(); s2.audio.gainDb = -6
+        _ = await rig.sm.apply(.setInputSettings(input: 2, settings: s2))
+        let iso2 = try rig.capture(.input(number: 2)), prog2 = try rig.capture(.inputProgram(number: 2))
+        let iso1 = try rig.capture(.input(number: 1)), prog1 = try rig.capture(.inputProgram(number: 1))
+        await rig.run(seconds: 1)
+        var (a, b) = rig.lastDeliveredWindow(blocks: 8)
+        XCTAssertEqual(dB(iso2.rms(from: a, to: b) / baseRMS), -6, accuracy: 0.3, "ISO：AFV 门控前，含推子 −6 dB")
+        XCTAssertEqual(prog2.rms(from: a, to: b), 0, "送总线的信号被 AFV 门控为 0")
+        XCTAssertEqual(dB(iso1.rms(from: a, to: b) / baseRMS), 0, accuracy: 0.3)
+        XCTAssertEqual(dB(prog1.rms(from: a, to: b) / baseRMS), 0, accuracy: 0.3)
+        let st = rig.engine.status
+        XCTAssertEqual(st.consumers.count, 4, "四个来源各一个 tap")
+        XCTAssertLessThan(st.inputs.first { $0.number == 2 }!.peakDb[0], -90, "表读数仍是推子后含 AFV 的口径")
+        s2.audio.muted = true
+        _ = await rig.sm.apply(.setInputSettings(input: 2, settings: s2))
+        await rig.run(seconds: 0.5)
+        (a, b) = rig.lastDeliveredWindow(blocks: 8)
+        XCTAssertLessThan(iso2.rms(from: a, to: b), 1e-4, "静音进 ISO")
+        // Cut 到 2：ISO 不变（仍 −6 dB，静音解除后），节目信号跟着门控
+        s2.audio.muted = false
+        _ = await rig.sm.apply(.setInputSettings(input: 2, settings: s2))
+        await rig.sm.schedule(.cut, at: rig.clock.tick(at: rig.driver.nextBlockHostTime) + 10)
+        await rig.run(seconds: 1)
+        (a, b) = rig.lastDeliveredWindow(blocks: 8)
+        XCTAssertEqual(dB(iso2.rms(from: a, to: b) / baseRMS), -6, accuracy: 0.3)
+        XCTAssertEqual(dB(prog2.rms(from: a, to: b) / baseRMS), -6, accuracy: 0.3, "Cut 后 2 是 PGM")
+        XCTAssertEqual(prog1.rms(from: a, to: b), 0)
+        XCTAssertEqual(dB(iso1.rms(from: a, to: b) / baseRMS), 0, accuracy: 0.3, "ISO 不受 Cut 影响")
+        await rig.shutdown()
+    }
+
     // MARK: 增删输入
 
     /// 增删 100 次：另一路持续播放的 Master 上 dropouts / underruns / 不连续 = 0，实时违规 0；摘除先淡出再 detach，环在确认后释放。

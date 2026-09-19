@@ -177,6 +177,94 @@ final class FrameAnalysisTests: XCTestCase {
         XCTAssertEqual(r.passA2, true)
     }
 
+    /// 整秒拍配对（prompt 44 交付 3）：60 fps 节目里 59.94 的路在播时闪光周期 1.001 s（契约定的），闪光相对整秒 click 每秒滞后 1 ms；
+    /// 只有闪光落在整秒拍（拍号是标称帧率的倍数）上的配对进 A2 / A3 判定，全部配对另报。
+    func testA2_av_onSecondPairs_exclude5994DriftAndDriveVerdict() {
+        var f: [ProbeFrame] = []
+        var idx = 0
+        // 0–9 s：60 fps 路在播（闪光在整秒拍），10–29 s：59.94 的路在播（第 k 个闪光在 1.001 k s → 拍 ceil(60.06 k)），30–39 s 回到 60 fps 路
+        for tick in 0..<(40 * 60) {
+            let t = Double(tick) / 60
+            let onAir5994 = (10..<30).contains(t)
+            var flash = false
+            if onAir5994 {
+                // 59.94 的闪光帧 60k 的 pts = 1.001 k，被拍点 ≥ pts 的第一拍选中
+                let k = Int((t / 1.001).rounded(.down))
+                let flashTick = Int((1.001 * Double(k) * 60).rounded(.up))
+                flash = tick == flashTick
+            } else {
+                flash = tick % 60 == 0
+            }
+            f.append(ProbeFrame(index: idx, ptsSeconds: t, frameNumber: UInt32(tick), inputID: onAir5994 ? 2 : 1, genTimeMs: UInt32(t * 1000), flash: flash, gray: 128))
+            idx += 1
+        }
+        let clicks = (0..<40).map { ClickEvent(sampleIndex: Int64($0) * 48000, timeSeconds: Double($0) + 0.0005, peak: 1) } // 音频落后 0.5 ms → 偏移 −0.5 ms
+        let r = FrameAnalysis.av(frames: f, clicks: clicks, frameDurationSeconds: 1.0 / 60)
+        XCTAssertEqual(r.flashCount, 40)
+        XCTAssertEqual(r.onSecond.count, 20, "0–9 与 30–39 s 的 20 个闪光在整秒拍上")
+        XCTAssertEqual(r.offSecondCount, 20)
+        XCTAssertEqual(r.onSecond.meanMs, -0.5, accuracy: 1e-6)
+        XCTAssertEqual(r.onSecond.maxAbsMs, 0.5, accuracy: 1e-6)
+        XCTAssertEqual(r.onSecond.slopeMsPerSecond, 0, accuracy: 1e-9)
+        XCTAssertGreaterThan(r.meanMs, 5, "全部配对的均值被 59.94 段拉偏（闪光比 click 晚 10…29 ms = 音频超前为正）")
+        XCTAssertGreaterThan(r.maxAbsMs, 20)
+        XCTAssertEqual(r.passA2, true, "A2 按整秒配对判：|0.5| ≤ 16.7")
+        XCTAssertNotNil(r.note)
+        for p in r.pairs { XCTAssertEqual(p.onSecondTick, p.tick % 60 == 0); if p.onSecondTick { XCTAssertEqual(p.offsetMs!, -0.5, accuracy: 1e-6) } }
+        // 文件不从第 0 拍起（推流落盘从某个关键帧起录）：--start-tick 把拍号对上
+        let shifted = f.filter { $0.index >= 37 }.map { ProbeFrame(index: $0.index - 37, ptsSeconds: $0.ptsSeconds - 37.0 / 60, frameNumber: $0.frameNumber, inputID: $0.inputID, genTimeMs: $0.genTimeMs, flash: $0.flash, gray: $0.gray) }
+        let shiftedClicks = clicks.map { ClickEvent(sampleIndex: $0.sampleIndex, timeSeconds: $0.timeSeconds - 37.0 / 60, peak: 1) }
+        let wrong = FrameAnalysis.av(frames: shifted, clicks: shiftedClicks, frameDurationSeconds: 1.0 / 60)
+        XCTAssertEqual(wrong.onSecond.count, 0, "不知道起始拍时整秒闪光一个都对不上")
+        XCTAssertNil(wrong.passA2)
+        let right = FrameAnalysis.av(frames: shifted, clicks: shiftedClicks, frameDurationSeconds: 1.0 / 60, startTick: 37)
+        XCTAssertEqual(right.onSecond.count, 19); XCTAssertEqual(right.passA2, true)
+        // 59.94 节目：整秒拍 = 拍号是 60 的倍数（1.001 k s），click 周期也是 1.001 s
+        var g: [ProbeFrame] = []
+        for tick in 0..<(20 * 60) { g.append(ProbeFrame(index: tick, ptsSeconds: Double(tick) * 1.001 / 60, frameNumber: UInt32(tick), inputID: 1, genTimeMs: 0, flash: tick % 60 == 0, gray: 128)) }
+        let c5994 = (0..<20).map { ClickEvent(sampleIndex: 0, timeSeconds: Double($0) * 1.001, peak: 1) }
+        let r5994 = FrameAnalysis.av(frames: g, clicks: c5994, frameDurationSeconds: 1.001 / 60)
+        XCTAssertEqual(r5994.onSecond.count, 20); XCTAssertEqual(r5994.offSecondCount, 0); XCTAssertEqual(r5994.onSecond.maxAbsMs, 0, accuracy: 1e-9)
+        XCTAssertNil(r5994.note)
+    }
+
+    /// A1 第三项的离线口径（prompt 44 交付 4，搬自 W2-E 的 DiscontinuityDetector.analyze）：相邻样本跳变 > 0.5 满幅、按已知 click 位置 ±1 ms 排除。
+    func testA1_discontinuities_excludesKnownClicks() {
+        // 合成信号：1 kHz −20 dBFS + 每秒 48 个样本的 +1.0 click（TestSignal），5 s
+        let sig = TestSignal(t0: HostTime(nanoseconds: 1_000_000_000))
+        var samples = [Float](repeating: 0, count: 5 * 48000)
+        samples.withUnsafeMutableBufferPointer { sig.render(into: $0.baseAddress!, frameCount: $0.count, startingAt: 0) }
+        let clicks = ClickDetector.detect(samples: samples, sampleRate: 48000)
+        XCTAssertEqual(clicks.count, 5)
+        let clean = FrameAnalysis.discontinuities(samples: samples, sampleRate: 48000, startSeconds: 0, clicks: clicks)
+        XCTAssertEqual(clean.count, 0, "\(clean.events)")
+        XCTAssertEqual(clean.jumpsAtClicks, 9, "5 个 click 各有进 / 出两次 > 0.5 的跳变（第 0 个样本上的 click 没有进），全在 click 位置")
+        XCTAssertEqual(clean.passA1, true)
+        // 人为插一个 0.6 满幅的跳变（1.5 s 起整段抬高 0.6 = 一次台阶）→ 1；口径同 W2-E 的 analyze：数的是"跳变"，单个样本的毛刺是进 / 出两次
+        var broken = samples
+        for i in 72_000..<broken.count { broken[i] += 0.6 }
+        let r = FrameAnalysis.discontinuities(samples: broken, sampleRate: 48000, startSeconds: 0, clicks: clicks)
+        XCTAssertEqual(r.count, 1, "\(r.events)")
+        XCTAssertEqual(r.events.first?.sampleIndex, 72_000)
+        XCTAssertEqual(r.events.first?.timeSeconds ?? 0, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(r.events.first?.jump ?? 0, 0.6, accuracy: 0.05)
+        XCTAssertEqual(r.passA1, false)
+        // 0.45 不算；click 边沿前后 1 ms 内的跳变（AAC 解码后的台阶）不算；起点偏移进时间
+        var small = samples
+        small[100_000] += 0.45
+        XCTAssertEqual(FrameAnalysis.discontinuities(samples: small, sampleRate: 48000, startSeconds: 0, clicks: clicks).count, 0)
+        var edge = samples
+        edge[48_000 - 30] = 0.8   // click 起点前 30 个样本（0.6 ms）：进 / 出两次都排除
+        let e = FrameAnalysis.discontinuities(samples: edge, sampleRate: 48000, startSeconds: 0.25, clicks: clicks)
+        XCTAssertEqual(e.count, 0)
+        XCTAssertEqual(e.jumpsAtClicks, 11)
+        var far = samples
+        far[48_000 - 100] = 0.8   // 2 ms 前：进 / 出两次都算
+        let fr = FrameAnalysis.discontinuities(samples: far, sampleRate: 48000, startSeconds: 0.25, clicks: clicks)
+        XCTAssertEqual(fr.count, 2); XCTAssertEqual(fr.events.first?.timeSeconds ?? 0, 0.25 + Double(48_000 - 100) / 48000, accuracy: 1e-9)
+        XCTAssertEqual(fr.events.map(\.sampleIndex), [48_000 - 100, 48_000 - 99])
+    }
+
     func testA2_av_noClickWithinHalfSecondIsUnmatched() {
         let f = [ProbeFrame(index: 0, ptsSeconds: 10, frameNumber: 0, inputID: 1, genTimeMs: 0, flash: true, gray: 0)]
         let r = FrameAnalysis.av(frames: f, clicks: [ClickEvent(sampleIndex: 0, timeSeconds: 0, peak: 1)])

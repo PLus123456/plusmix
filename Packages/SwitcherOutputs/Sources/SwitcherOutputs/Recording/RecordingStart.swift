@@ -57,6 +57,14 @@ public struct RecorderCounters: Hashable, Sendable {
     public var audioCorrections: UInt64 = 0
     /// 录制目录所在卷的剩余空间（字节），每秒刷新一次。
     public var diskFreeBytes: UInt64 = 0
+    /// tick ≥ 边界（stopTick）的帧数：按设计不进文件，只计数。
+    public var videoFramesBeyondStop: UInt64 = 0
+    /// 拍点时刻 ≥ 边界的音频样本数（含被裁掉的那块的尾巴）：按设计不进文件，只计数。
+    public var audioFramesBeyondStop: UInt64 = 0
+    /// 边界之前、本该进文件的样本在音轨封口之后才到，丢了：> 0 说明组装方送得比 `stopGrace` 还晚（或 stop 调早了）。
+    public var audioFramesDroppedAfterStop: UInt64 = 0
+    /// writer 不接（isReadyForMoreMediaData 等 200 ms 仍 false）而丢的样本：之后的块会算成晚到、按 audioResync 补静音。
+    public var audioFramesDroppedTimeout: UInt64 = 0
     /// 编码器计数。
     public var encoder = EncoderCounters()
     public init() {}

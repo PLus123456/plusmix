@@ -14,9 +14,11 @@ public enum AudioTapSource: Hashable, Sendable {
     case master
     /// 某条总线（总线增益之后）。`.bus(.master)` 与 `.master` 等价。
     case bus(Bus)
-    /// 某路输入的推子后立体声（含增益 / 静音 / AFV 门控 / 声像 / 对齐延迟 / 延迟补偿）—— ISO 音轨。
-    /// 注意：AFV 开着时非 PGM 输入的 ISO 是静音的（W1-D 的 tap 点在 AFV 之后；推子前 tap 要改 C，见报告 §4）。
+    /// 某路输入的 ISO 音轨：推子后、AFV 门控前的立体声（含增益 / 静音 / 声像 / 对齐延迟 / 延迟补偿，不含 AFV）。
+    /// W1-D2 起是这个口径（W2-E 时在 AFV 之后，AFV 开着时非 PGM 输入的 ISO 是静音的）。
     case input(number: Int)
+    /// 某路输入送进节目总线的信号：推子后、AFV 门控后（AFV 用例量它；AFV 开着时非 PGM 输入为 0）。
+    case inputProgram(number: Int)
 
     var normalized: AudioTapSource {
         if case .bus(.master) = self { return .master }

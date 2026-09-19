@@ -1,8 +1,9 @@
 // 添加输入（最小版，完整版 W3-E）：左边选类型（合成源 / 摄像头 / 屏幕 / 文件 / 图片），右边填参数，底部编号 + 名字 + 确定。
-// 只产生 InputConfig 并发 addInput 命令；摄像头 / 屏幕 / 文件 / 图片的运行实现在 W2-A，合并前这些输入建出来是占位（格子上有提示）。
+// 只产生 InputConfig 并发 addInput 命令；五种输入的运行实现由 InputFactory 接（W2-B2）。
 import AppKit
 import AVFoundation
 import SwitcherContracts
+import SwitcherInputs
 
 /// 表单内容 → InputConfig 的纯逻辑（可测）。
 struct AddInputModel {
@@ -238,7 +239,11 @@ final class AddInputSheetController: NSWindowController {
             model.cameraUniqueID = cams.first?.id
             stack.addArrangedSubview(labeled("设备", popup))
             stack.addArrangedSubview(Theme.label(cams.isEmpty ? "没有找到摄像头 / 采集卡" : "\(cams.count) 台设备（AVCaptureDevice）", size: 11, color: Theme.dimText))
-            stack.addArrangedSubview(Theme.label("采集实现在 W2-A，合并前这一路是占位。", size: 11, color: Theme.dimText))
+            let permission = CapturePermission.status(for: .video)
+            if permission != .authorized {
+                stack.addArrangedSubview(Theme.label(CapturePermission.message(for: permission, mediaType: .video), size: 11, color: Theme.dimText))
+            }
+            stack.addArrangedSubview(Theme.label("设备自带的麦克风也会接进来（需要麦克风权限）。", size: 11, color: Theme.dimText))
         case .screen:
             let popup = NSPopUpButton()
             let displays = AddInputModel.displays()
@@ -246,7 +251,7 @@ final class AddInputSheetController: NSWindowController {
             popup.target = self; popup.action = #selector(displayChanged(_:))
             model.displayID = displays.first?.id
             stack.addArrangedSubview(labeled("显示器", popup))
-            stack.addArrangedSubview(Theme.label("窗口 / 应用过滤在 W3-E；采集实现在 W2-A。", size: 11, color: Theme.dimText))
+            stack.addArrangedSubview(Theme.label("窗口 / 应用过滤在 W3-E。屏幕录制要在 系统设置 › 隐私与安全性 里授权。", size: 11, color: Theme.dimText))
         case .file:
             let path = NSTextField(string: model.filePath)
             path.placeholderString = "视频文件路径"

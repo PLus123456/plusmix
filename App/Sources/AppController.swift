@@ -1,6 +1,7 @@
 // App 的总管：一个 session（节目跑起来）+ 主窗口 + 节目文件。新建 / 打开总是换一个新 session（节目格式可能变，引擎的格式在 init 定死）。
 import AppKit
 import SwitcherContracts
+import SwitcherControl
 
 @MainActor
 final class AppController {
@@ -9,13 +10,50 @@ final class AppController {
     private(set) var session: SwitcherSession?
     /// 上一次 replaceSession 抛的错（测试看）。
     private(set) var lastError: (any Error)?
-    /// 是否在测试宿主里跑（不恢复上次、不写"上次文件"）。
+    /// 是否在测试宿主里跑（不恢复上次、不写"上次文件"、录到临时目录、API 端口由系统分配）。
     let isTestHost: Bool
+    /// UserDefaults（测试宿主用独立 suite）。
+    let defaults: UserDefaults
+    /// 起 session 用的设置（AppDelegate 启动时按参数 / UserDefaults 填；测试宿主固定：API 端口 0（系统分配）、
+    /// 音频空设备（SWITCHER_TEST_AUDIO=default 可改成真设备，跑 xcodebuild test 时会出声）。
+    var settings = AppSettings() {
+        didSet { if isTestHost { applyTestHostOverrides() } }
+    }
+    /// 快捷键表：用户表 ~/Library/Application Support/Switcher/hotkeys.json，没有就默认表；测试宿主固定默认表。
+    let hotkeyTable: HotkeyTable
+    /// 用户表存在但读不出来（JSON 错 / 冲突）的原因：退回默认表并在状态行提示。
+    private(set) var hotkeyTableError: String?
     private var replacing = false
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost
-        documents = ShowDocuments(defaults: isTestHost ? UserDefaults(suiteName: "com.example.switcher.tests") ?? .standard : .standard)
+        defaults = isTestHost ? UserDefaults(suiteName: "com.example.switcher.tests") ?? .standard : .standard
+        if isTestHost {
+            hotkeyTable = .default
+        } else if FileManager.default.fileExists(atPath: HotkeyTable.defaultFileURL.path) {
+            do {
+                hotkeyTable = try HotkeyTable.load(from: HotkeyTable.defaultFileURL)
+            } catch {
+                hotkeyTable = .default
+                hotkeyTableError = "快捷键表 \(HotkeyTable.defaultFileURL.path) 读不出来，用默认表：\(error)"
+            }
+        } else {
+            hotkeyTable = .default
+        }
+        if isTestHost {
+            let recordDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/records", isDirectory: true).path
+            documents = ShowDocuments(defaults: defaults, recordDirectory: recordDirectory)
+            applyTestHostOverrides()
+        } else {
+            documents = ShowDocuments(defaults: defaults)
+        }
+    }
+
+    private func applyTestHostOverrides() {
+        var s = settings
+        s.apiPort = 0
+        s.audioDevice = ProcessInfo.processInfo.environment["SWITCHER_TEST_AUDIO"].map { AppSettings.AudioDevice(spec: $0) } ?? .null
+        if s != settings { settings = s }
     }
 
     // MARK: 启动 / 退出
@@ -25,7 +63,7 @@ final class AppController {
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
         windowController.window?.makeFirstResponder(nil)   // 快捷键直接到窗口；搜索框要点了才有焦点
-        var show = ShowDocuments.emptyShow()
+        var show = documents.emptyShow()
         if let showURL {
             do { show = try documents.load(from: showURL) } catch { presentError(error, context: "打开 \(showURL.lastPathComponent)") }
         } else if !isTestHost {
@@ -56,10 +94,11 @@ final class AppController {
         defer { replacing = false }
         await stopSession()
         do {
-            let s = try SwitcherSession(show: show)
+            let s = try SwitcherSession(show: show, settings: settings, hotkeyTable: hotkeyTable)
             session = s
             windowController.bind(session: s)
             try await s.start()
+            if let hotkeyTableError { windowController.bottomBar.showNotice(hotkeyTableError) }
         } catch {
             lastError = error
             session = nil
@@ -79,7 +118,7 @@ final class AppController {
 
     func newShow() async {
         documents.startNew()
-        await replaceSession(show: ShowDocuments.emptyShow())
+        await replaceSession(show: documents.emptyShow())
     }
 
     func openShow(url: URL) async {

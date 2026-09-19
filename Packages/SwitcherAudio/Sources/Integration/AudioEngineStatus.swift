@@ -13,8 +13,10 @@ public struct AudioEngineStatus: Sendable {
         public var primed: Bool
         /// 对齐延迟已按本次就绪的年龄设好、已取消对齐静音。
         public var aligned: Bool
-        /// 就绪那一刻的年龄（帧）= 重采样输入位置相对块首的滞后。
+        /// 就绪那一刻的年龄（帧）= 重采样输入位置相对块首的滞后。W1-D2 起 = 目标年龄 ± 半帧（相位不利时可能更大）。
         public var ageSetpointFrames: Double
+        /// 注册时给混音器的目标年龄（帧；0 = 旧规则）。
+        public var targetAgeFrames: Int
         /// 当前年龄（帧，估计器控制量）。
         public var ageFrames: Double
         /// 对齐延迟线（帧）。
@@ -80,6 +82,8 @@ public struct AudioEngineStatus: Sendable {
     public var buses: [BusStatus]
     public var afv: Bool
     public var monitorMode: MonitorMode
+    /// 耳机取延迟线前 / 后（W1-D2）。
+    public var monitorPoint: MonitorPoint
     /// 进行中的转场（from, to, 起点）。
     public var activeTransition: String?
     /// FTB 当前黑比例（音频侧算的）。

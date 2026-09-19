@@ -10,8 +10,9 @@ import SwitcherContracts
 //     实现了 ArrivalPacedFrameSlot 的槽走 latest(forTick: t_n)（带到达余量，V4 退回单的修法，见 Slots/ArrivalPacing.swift），
 //     其他槽走契约的 latest(atOrBefore: t_n)
 //   → renderer.render(...)：.skipped 记 missed_render → 归还借用。
-// GPU 完成回调线程（RenderSink）：计 render_ms / 派发抖动 / 帧数 → 对每个 FrameConsumer 调 consume（必须立即返回，
-//   各自入队；引擎给每次 consume 计时，超过 1 ms 计入 slowConsumeCalls 供诊断）。
+//   → 每路记下这拍用的帧（InputLatencyRecorder，提案 005 的 L1）。
+// GPU 完成回调线程（RenderSink）：取 now → 计 render_ms / 派发抖动 / 帧数 / 每路 L1（now − 新帧的 ingressTime）
+//   → 对每个 FrameConsumer 调 consume（必须立即返回，各自入队；引擎给每次 consume 计时，超过 1 ms 计入 slowConsumeCalls 供诊断）。
 // 输入表与消费者表：不可变对象 + 原子指针发布（HazardPublisher），注册 / 注销在普通线程换表。
 // Stats：`makeStats()` 在普通线程从 EngineCounters 组装（铁律 4）。
 
@@ -23,7 +24,8 @@ public struct EngineOptions: Sendable {
     public var snapshotWaitLimit = HostDuration(milliseconds: 1)
     /// consume 超过这个时长算"慢消费者"（诊断计数）。
     public var slowConsumeThreshold = HostDuration(milliseconds: 1)
-    /// 到达余量参数（注册输入时交给实现了 ArrivalPacedFrameSlot 的槽；initialFloor / maxRaise 为 nil 时按节目帧率填）。
+    /// 到达余量参数（注册输入时交给实现了 ArrivalPacedFrameSlot 的槽；initialFloor / maxRaise / programFrame 为 nil 时按节目帧率填；
+    /// `registerInput(number:slot:pacing:)` 可按输入另给一份）。
     public var pacing = PacingOptions()
     public init() {}
 }
@@ -43,7 +45,7 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
     /// 最大输入编号（RenderInputTable 容量 = maxInputs + 1）。
     public let maxInputs: Int
     public let options: EngineOptions
-    public let counters = EngineCounters()
+    public let counters: EngineCounters
     /// 时钟；start 之后可用。
     public private(set) var clock: ProgramClock?
     /// 编码器统计来源（W1-E 的消费者提供；G2 接线）。
@@ -69,6 +71,8 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
     }
 
     private let inputTable: RenderInputTable
+    /// 每路 L1 的记录环（提案 005）。
+    private let latency: InputLatencyRecorder
     private let slotsPublisher: HazardPublisher<SlotTable>
     private let slotsReader: HazardPublisher<SlotTable>.ReaderSlot
     private let snapshotReader: HazardPublisher<MixerSnapshot>.ReaderSlot
@@ -94,7 +98,9 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         self.maxInputs = maxInputs
         self.options = options
         format = stateMachine.publisher.latest?.state.format ?? .hd1080p60
+        counters = EngineCounters(maxInputs: maxInputs)
         inputTable = RenderInputTable(capacity: maxInputs + 1)
+        latency = InputLatencyRecorder(inputCapacity: maxInputs + 1)
         slotsPublisher = HazardPublisher(initial: SlotTable(slots: Array(repeating: nil, count: maxInputs + 1)), readerCapacity: 2)
         slotsReader = slotsPublisher.makeReaderSlot()
         snapshotReader = stateMachine.publisher.makeReaderSlot()
@@ -102,12 +108,14 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
 
     // MARK: 组装（普通线程）
 
-    /// 注册一路输入的帧槽（可在运行中调；换表走原子指针）。实现了 ArrivalPacedFrameSlot 的槽在这里拿到余量参数。
-    public func registerInput(number: Int, slot: any FrameSlot) {
+    /// 注册一路输入的帧槽（可在运行中调；换表走原子指针）。实现了 ArrivalPacedFrameSlot 的槽在这里拿到余量参数：
+    /// `pacing` 为 nil 用引擎的 `options.pacing`，否则用给的那份（组装方按输入类型定，例如自由跑的源关掉）；
+    /// 两种情况下 nil 的 initialFloor / maxRaise / programFrame 都按节目帧率填。
+    public func registerInput(number: Int, slot: any FrameSlot, pacing: PacingOptions? = nil) {
         precondition(number >= 1 && number <= maxInputs, "输入编号 \(number) 超出 1…\(maxInputs)")
         var paced: (any ArrivalPacedFrameSlot)? = nil
         if let p = slot as? any ArrivalPacedFrameSlot {
-            p.configurePacing(resolvedPacingOptions)
+            p.configurePacing(resolvePacingOptions(pacing ?? options.pacing))
             paced = p
         }
         let box = LockFreeFrameSlotBox(slot, paced: paced)
@@ -115,12 +123,15 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         republishSlots()
     }
 
-    /// 注册时交给槽的余量参数：nil 的 initialFloor / maxRaise 按节目帧率填（1/4 帧 / 一帧）。
-    var resolvedPacingOptions: PacingOptions {
-        var o = options.pacing
+    /// 注册时交给槽的余量参数：nil 的 initialFloor / maxRaise / programFrame 按节目帧率填（1/4 帧 / 一帧 / 一帧）。
+    var resolvedPacingOptions: PacingOptions { resolvePacingOptions(options.pacing) }
+
+    func resolvePacingOptions(_ base: PacingOptions) -> PacingOptions {
+        var o = base
         let period = TickClockSpec(t0: .zero, frameRate: format.frameRate).duration(ofTicks: 1)
         if o.initialFloor == nil { o.initialFloor = period / 4 }
         if o.maxRaise == nil { o.maxRaise = period }
+        if o.programFrame == nil { o.programFrame = period }
         return o
     }
 
@@ -172,6 +183,7 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         assembler = StatsAssembler(counters: counters, startedAt: startedAt)
         let clock = ProgramClock(spec: TickClockSpec(t0: t0, frameRate: format.frameRate), options: options.clock)
         self.clock = clock
+        latency.t0.store(clock.spec.time(of: firstTick).ticks, ordering: .releasing)
         try clock.start(handler: self, firstTick: firstTick, lastTick: lastTick)
     }
 
@@ -212,15 +224,16 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
             let table = tableRef.takeUnretainedValue()
             var number = 1
             while number <= maxInputs {
+                var frame: Frame? = nil
                 if let box = table.slots[number] {
                     if let paced = box.paced {
-                        inputTable[inputNumber: number] = paced.latest(forTick: ideal)
+                        frame = paced.latest(forTick: ideal)
                     } else {
-                        inputTable[inputNumber: number] = box.slot.latest(atOrBefore: ideal)
+                        frame = box.slot.latest(atOrBefore: ideal)
                     }
-                } else {
-                    inputTable[inputNumber: number] = nil
                 }
+                inputTable[inputNumber: number] = frame
+                latency.record(input: number, tick: tick, frame: frame)
                 number += 1
             }
         }
@@ -252,6 +265,7 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         counters.renderNsSumValue.add(UInt64(max(renderNs, 0)), ordering: .relaxed)
         counters.renderCountValue.add(1, ordering: .relaxed)
         _ = counters.dispatchJitterMaxNsValue.max((now - frame.tickTime).magnitude.nanoseconds, ordering: .relaxed)
+        latency.account(tick: frame.tick, now: now, into: counters)   // 提案 005：派发那一刻 − 各路新帧的 ingressTime
         let threshold = options.slowConsumeThreshold
         consumers.withLock { list in
             var i = 0

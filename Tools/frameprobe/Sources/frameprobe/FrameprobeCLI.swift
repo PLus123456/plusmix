@@ -5,7 +5,7 @@
 //   frameprobe stats    <file|dir> [--fps 60] [--input-fps 0=30,1=60] [--max-events N]        V4 / V5
 //   frameprobe switches <file|dir> [--start-tick N] [--gray-tolerance 6]                       V6
 //   frameprobe fade     <file|dir> [--gray-a 64 --gray-b 192] [--duration D] [--fade-at S] [--fade-tolerance 2]   V7
-//   frameprobe av       <file> [<file2> ...] [--fps 60]                                         A2 / A3（多文件 = A4）
+//   frameprobe av       <file> [<file2> ...] [--fps 60] [--start-tick N] [--aac-priming auto|0|N] [--discontinuities]   A2 / A3（多文件 = A4）、A1 第三项
 //   frameprobe synth    --out x.mov [--seconds 20] [--width 1920 --height 1080] [--fps 60|59.94|30] [--bitrate 2000000]
 //                       [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D] [--raw-dir DIR --raw-frames N]
 // 通用：--size WxH（目录输入）、--markdown、--out PATH（把 JSON 写到文件）、--version
@@ -22,7 +22,9 @@ struct FrameprobeCLI {
       stats     每输入重复 / 丢弃序列与比例（V4）、总帧数 vs 时长 × 帧率（V5）   [--fps N] [--input-fps id=fps,…] [--max-events N]
       switches  输入 ID 变化的帧、Cut 前后有无混合帧（V6）                       [--start-tick N] [--gray-tolerance N]
       fade      Fade 逐帧混合比例与线性曲线的最大偏差帧数（V7）                   [--gray-a N --gray-b N] [--duration D] [--fade-at S] [--fade-tolerance N]
-      av        闪光帧 ↔ 最近 click 的时间差：均值 / 标准差 / 最大 / 斜率（A2、A3）；多个文件比较同一事件（A4）
+      av        闪光帧 ↔ 最近 click 的时间差（A2、A3；按整秒拍配对判，全部配对另报）；多个文件比较同一事件（A4）
+                [--start-tick N] 文件第一帧的节目拍  [--aac-priming auto|0|N] 音轨 priming：auto = 有编辑列表信 AVFoundation、没有按 ffmpeg 口径加回；0 = 不加回；N = 加回 N 样本
+                [--discontinuities] 顺带做波形不连续检测（A1 第三项：跳变 > 0.5 满幅、click ±1 ms 排除） [--click-margin-ms 1]
       synth     生成合成源样例 .mov（VideoToolbox H.264）或原始 NV12 帧目录       --out x.mov [--seconds 20] [--width W --height H] [--fps 60] [--bitrate B] [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D] [--raw-dir DIR --raw-frames N]
     通用：--size WxH（原始 NV12 目录的尺寸，默认 1920x1080）  --markdown（人读表）  --out PATH（JSON 写到文件）  --version
     """
@@ -63,7 +65,7 @@ struct FrameprobeCLI {
         var options: [String: String] = [:]
         var flags: Set<String> = []
         var positional: [String] = []
-        static let flagNames: Set<String> = ["markdown", "software", "no-events", "help"]
+        static let flagNames: Set<String> = ["markdown", "software", "no-events", "help", "discontinuities"]
 
         init(_ args: [String]) throws {
             var i = 0
@@ -116,6 +118,12 @@ struct FrameprobeCLI {
         if let v = try p.int("fade-at") { o.fadeAt = Int64(v) }
         if let v = try p.int("max-events") { o.maxEvents = v }
         o.limit = try p.int("limit")
+        if let v = p.options["aac-priming"] {
+            guard let m = PrimingMode(v) else { throw CLIError("--aac-priming 只认 auto / 0 / N（样本数），给的是 \(v)") }
+            o.aacPriming = m
+        }
+        o.discontinuities = p.flags.contains("discontinuities")
+        if let v = try p.double("click-margin-ms") { o.discontinuityMarginMs = v }
         if let s = p.options["size"] {
             let wh = s.lowercased().split(separator: "x")
             guard wh.count == 2, let w = Int(wh[0]), let h = Int(wh[1]) else { throw CLIError("--size 形如 1920x1080") }

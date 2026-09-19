@@ -1,8 +1,18 @@
 // sw_mix.c —— 混音块（热路径）。设计方案 §3.5 / §3.6 / §7；W1-D。
 //
 // 每块的顺序（sw_mix_block）：
-//   命令 → 对每路输入：环取样 + 异步重采样（比率来自速率估计器）→ 延迟线 → 增益 / 静音 / AFV / 声像 → 送四条总线
+//   命令 → AFV 淡变曲线 → 对每路输入：环取样 + 异步重采样（比率来自速率估计器）→ 延迟线 → 增益 / 静音 / AFV / 声像 → 送四条总线
+//   （耳机可取延迟线前的信号，W1-D2）→ 输入 tap（推子后含 AFV / 推子后 AFV 前）
 //   → 对每条总线：效果链（AudioUnitRender）→ 总线增益 / 静音 → 表 → 写输出 → 消费者队列。
+//
+// 就绪（sw_slot_prime，W1-D2 加目标年龄）：
+//   旧规则：环里攒够 target + P/2 + hf + chunk 帧时从 write_index − back 起消费（back = target + P/2 + hf + chunk/2），
+//   年龄 = back + 生产者相位 [0, P)，每次就绪随机。
+//   目标年龄 A（SW_CMD_ATTACH_INPUT 的 i2）：沿 stamps 找"host_time − A"那一刻采到的帧 f，从 f 起消费 → 年龄 = A（± 半帧），与相位无关。
+//   f 必须 ≤ write_index − back（后面的数据够重采样器和一块用）；不够时等相位转过来（生产者块 > 混音块时每块的相位不同），
+//   等满 A/块 + 16 块仍不行就退回旧规则（目标本来就低于 back 的直接退回）。目标时刻落在 stamps 的时间空洞里（源停过又回来，
+//   环里先是陈旧数据再是当前数据）时不拿陈旧数据凑：等目标时刻走进当前数据；等的期间环若被陈旧数据塞满就先腾出一半，
+//   否则生产者写不进、永远就绪不了。
 //
 // 速率估计器（每路一个；prompt 第 4 条）：
 //   控制量 = "重采样器当前输入位置的年龄"（帧）：age = (块首样本 host time − 该位置对应帧的 host time) / 每帧 tick，
@@ -27,7 +37,7 @@
 #define SW_PAN_SMOOTH_PER_BLOCK 0.3f   ///< 声像每块向目标走 30%
 #define SW_STALL_BLOCKS_LIMIT  190u    ///< write_index 连续 ~1 s（190 × 5.3 ms）没动 → 视为源停了，回到未就绪
 #define SW_PI_F 3.14159265358979323846f
-#define SW_INPUT_TAP_BASE 16
+#define SW_PRIME_WAIT_EXTRA_BLOCKS 16u ///< 目标年龄模式：等相位 / 等目标时刻走进当前数据的上限 = 目标年龄的块数 + 这么多块
 
 // ---------------------------------------------------------------------------
 // 命令队列（实时侧：消费者）
@@ -185,13 +195,17 @@ static void sw_slot_unprime(sw_input_slot *slot) SW_NONBLOCKING {
     sw_rate_reset(&slot->rate);
 }
 
-static void sw_slot_attach(struct sw_mix_ctx *ctx, sw_input_slot *slot, sw_audio_ring *ring, uint32_t mode, uint32_t target) SW_NONBLOCKING {
+static void sw_slot_attach(struct sw_mix_ctx *ctx, sw_input_slot *slot, sw_audio_ring *ring, uint32_t mode, uint32_t target,
+                           uint32_t target_age) SW_NONBLOCKING {
     slot->ring = ring;
     slot->channels = ring->channels >= 2u ? 2u : 1u;
     slot->ring_mask = ring->capacity_frames - 1u;
     slot->resample_mode = mode;
     slot->target_frames = target ? target : ctx->rate_defaults.target_frames;
     if (slot->target_frames > ring->capacity_frames / 2u) slot->target_frames = ring->capacity_frames / 2u;
+    // 目标年龄的数据要一直留在环里（就绪前腾位置时留 容量 − 2P），上限取容量的一半（16384 的环 = 8192 帧 = 171 ms）
+    slot->target_age_frames = target_age > ring->capacity_frames / 2u ? ring->capacity_frames / 2u : target_age;
+    slot->prime_wait_blocks = 0;
     slot->attached = 1;
     slot->last_write_index = __atomic_load_n(&ring->write_index, __ATOMIC_ACQUIRE);
     slot->rate.ratio_ff = 1.0;
@@ -207,7 +221,8 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
     const uint32_t idx = (uint32_t)c->index;
     switch (c->type) {
     case SW_CMD_ATTACH_INPUT:
-        if (idx < ctx->input_capacity && c->ptr) sw_slot_attach(ctx, &ctx->inputs[idx], (sw_audio_ring *)c->ptr, (uint32_t)c->i0, (uint32_t)c->i1);
+        if (idx < ctx->input_capacity && c->ptr)
+            sw_slot_attach(ctx, &ctx->inputs[idx], (sw_audio_ring *)c->ptr, (uint32_t)c->i0, (uint32_t)c->i1, c->i2 < 0 ? 0u : (uint32_t)c->i2);
         break;
     case SW_CMD_DETACH_INPUT:
         if (idx < ctx->input_capacity) {
@@ -250,6 +265,7 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
         if (idx < SW_MIX_BUS_COUNT && c->i0 >= 0 && c->i0 < (int)SW_MIX_EFFECTS_PER_BUS) ctx->buses[idx].fx[c->i0].enabled = c->i1 != 0;
         break;
     case SW_CMD_MONITOR_MODE:  ctx->monitor_mode = (uint32_t)c->i0; break;
+    case SW_CMD_MONITOR_POINT: ctx->monitor_point = c->i0 == SW_MONITOR_POST_DELAY ? SW_MONITOR_POST_DELAY : SW_MONITOR_PRE_DELAY; break;
     case SW_CMD_CROSSFADE: {
         // 同一槽位只允许一条在进行：旧的取消
         for (int k = 0; k < (int)SW_MIX_MAX_CROSSFADES; k++) {
@@ -264,8 +280,7 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
             if (x->active) continue;
             x->from = (c->i0 >= 0 && (uint32_t)c->i0 < ctx->input_capacity) ? c->i0 : -1;
             x->to = (c->i1 >= 0 && (uint32_t)c->i1 < ctx->input_capacity) ? c->i1 : -1;
-            uint32_t blocks = c->i2 <= 0 ? 1u : (uint32_t)c->i2;
-            x->duration_frames = blocks * ctx->default_block_frames;
+            x->duration_frames = c->i2 <= 0 ? 1u : (uint32_t)c->i2;   // 帧（W1-D2 前是块）
             x->start_host = c->u0;
             x->elapsed_frames = 0;
             x->started = 0;
@@ -314,22 +329,56 @@ static inline uint32_t sw_slot_producer_block(const struct sw_mix_ctx *ctx, cons
     return ctx->default_block_frames;
 }
 
+static inline bool sw_slot_resampled(const sw_input_slot *slot) SW_NONBLOCKING {
+    return !(slot->resample_mode == SW_RESAMPLE_BYPASS || slot->src[0] == NULL);
+}
+
+/// 就绪时从 write_index 往回退多少帧开始消费（旧规则的 back；也是目标年龄模式的安全下限）：
+/// target + P/2（+ 重采样器要先吞的 hf + chunk/2）。Swift 侧 AudioMixer.deterministicAgeFrames 抄的是同一条公式（+ P）。
+static inline uint64_t sw_slot_back_frames(const struct sw_mix_ctx *ctx, uint32_t target_frames, uint32_t producer_block, bool resampled) SW_NONBLOCKING {
+    uint64_t back = (uint64_t)target_frames + (uint64_t)producer_block / 2u;
+    if (resampled) back += (uint64_t)ctx->resampler_latency + (uint64_t)ctx->resampler_chunk / 2u;
+    return back;
+}
+
 /// 就绪门限：环里要有 target + P/2 + hf + chunk 帧（P = 生产者块；重采样器一上来就会吞 hf + chunk）。
 /// 就绪那一刻紧跟一次交付，所以之后原始占用在 [target − P/2, target + P/2] 之间随相位周期变化，平均 = target。
 static inline uint64_t sw_slot_prime_threshold(const struct sw_mix_ctx *ctx, const sw_input_slot *slot) SW_NONBLOCKING {
-    uint64_t n = (uint64_t)slot->target_frames + (uint64_t)sw_slot_producer_block(ctx, slot->ring) / 2u;
-    if (!(slot->resample_mode == SW_RESAMPLE_BYPASS || slot->src[0] == NULL)) n += (uint64_t)ctx->resampler_latency + (uint64_t)slot->chunk_frames;
+    uint64_t n = sw_slot_back_frames(ctx, slot->target_frames, sw_slot_producer_block(ctx, slot->ring), sw_slot_resampled(slot));
+    if (sw_slot_resampled(slot)) n += (uint64_t)slot->chunk_frames / 2u;
     return n;
 }
 
-/// 就绪：从 write_index − (target + P/2 + hf + chunk/2) 开始消费（丢掉更早的，保证延迟有界）；设定点 = 此刻的年龄。
-static void sw_slot_prime(struct sw_mix_ctx *ctx, sw_input_slot *slot, uint64_t host_time) SW_NONBLOCKING {
+/// 目标年龄模式：找"host_time − 目标年龄"那一刻采到的帧。沿 stamps 从最新往回找第一条 host_time ≤ 目标时刻的，在它的块内外推。
+/// 返回值：1 = 找到且可用（*start），0 = 还不行、再等（源太新 / 目标时刻在数据空洞里 / 后面的数据不够 back），−1 = 没有 stamp。
+static int sw_slot_find_target_start(const struct sw_mix_ctx *ctx, const sw_input_slot *slot, uint64_t host_time, uint64_t w,
+                                     uint64_t back, uint64_t *start) SW_NONBLOCKING {
+    const sw_audio_ring *ring = slot->ring;
+    const double tpf = ctx->host_ticks_per_frame;
+    const double target_rel = -(double)slot->target_age_frames * tpf;   // 目标时刻相对 host_time 的 tick
+    sw_audio_stamp s;
+    uint64_t next_frame = w;                                             // 当前 stamp 那一块的末尾（不含）
+    for (uint32_t n = 0; n < ring->stamp_capacity; n++) {
+        if (!sw_audio_ring_stamp_from_latest(ring, n, &s)) return n == 0 ? -1 : 0;   // 比最老的 stamp 还早：源太新，等
+        const double rel = (double)(int64_t)(s.host_time - host_time);
+        if (rel <= target_rel) {
+            const double off = (target_rel - rel) / tpf;
+            const uint64_t ideal = s.frame_index + (uint64_t)(off + 0.5);
+            if (ideal >= next_frame) return 0;            // 目标时刻在这块之后、下一块之前的空洞里（源停过）：等它走进当前数据
+            if (ideal + back > w) return 0;               // 后面的数据不够：等相位转过来（或退回旧规则）
+            *start = ideal;
+            return 1;
+        }
+        next_frame = s.frame_index;
+    }
+    return 0;
+}
+
+/// 就绪：从 start 开始消费（丢掉更早的，保证延迟有界）；设定点 = 此刻的年龄。
+static void sw_slot_prime_at(struct sw_mix_ctx *ctx, sw_input_slot *slot, uint64_t host_time, uint64_t w, uint64_t start) SW_NONBLOCKING {
     sw_audio_ring *ring = slot->ring;
-    const uint64_t w = __atomic_load_n(&ring->write_index, __ATOMIC_ACQUIRE);
     const uint32_t pb = sw_slot_producer_block(ctx, ring);
-    uint64_t back = (uint64_t)slot->target_frames + (uint64_t)pb / 2u;
-    if (!(slot->resample_mode == SW_RESAMPLE_BYPASS || slot->src[0] == NULL)) back += (uint64_t)ctx->resampler_latency + (uint64_t)slot->chunk_frames / 2u;
-    const uint64_t start = w - back;
+    const uint64_t back = w - start;
     slot->consumed = start;
     slot->input_pos = (double)start;
     __atomic_store_n(&ring->read_index, start, __ATOMIC_RELEASE);
@@ -354,7 +403,41 @@ static void sw_slot_prime(struct sw_mix_ctx *ctx, sw_input_slot *slot, uint64_t 
     r->ratio = r->ratio_ff;
     slot->primed = 1;
     slot->stall_blocks = 0;
+    slot->prime_wait_blocks = 0;
     slot->last_write_index = w;
+}
+
+/// 就绪判断 + 就绪（每块一次，未就绪时）。返回是否本块就绪。
+static bool sw_slot_try_prime(struct sw_mix_ctx *ctx, sw_input_slot *slot, uint64_t host_time, uint64_t w) SW_NONBLOCKING {
+    sw_audio_ring *ring = slot->ring;
+    const uint64_t read = __atomic_load_n(&ring->read_index, __ATOMIC_RELAXED);
+    const uint64_t avail = w - read;
+    if (avail < sw_slot_prime_threshold(ctx, slot) || slot->stall_blocks != 0) return false;
+    const uint64_t back = sw_slot_back_frames(ctx, slot->target_frames, sw_slot_producer_block(ctx, ring), sw_slot_resampled(slot));
+    uint64_t start = w - back;                                            // 旧规则
+    if (slot->target_age_frames > 0 && (uint64_t)slot->target_age_frames >= back) {
+        uint64_t s;
+        int found = sw_slot_find_target_start(ctx, slot, host_time, w, back, &s);
+        if (found == 1) {
+            start = s < read ? read : s;                                  // read 之前的数据可能已被生产者覆盖
+            if (w - start < back) found = 0;
+        }
+        if (found != 1) {
+            const uint32_t limit = slot->target_age_frames / ctx->default_block_frames + SW_PRIME_WAIT_EXTRA_BLOCKS;
+            if (found == -1 || slot->prime_wait_blocks >= limit) {
+                // 没有 stamp 可依据 / 等太久（源的交付滞后本来就大于目标年龄，或相位一直不利）：退回旧规则
+            } else {
+                slot->prime_wait_blocks++;
+                // 环被就绪前的数据塞满（源停过又回来时，涌入的陈旧数据）：腾出 2 个生产者块的位置，生产者才能继续写当前数据
+                const uint64_t pb2 = 2u * (uint64_t)(sw_slot_producer_block(ctx, ring) > ctx->default_block_frames ? sw_slot_producer_block(ctx, ring) : ctx->default_block_frames);
+                if (avail + pb2 > (uint64_t)ring->capacity_frames)
+                    __atomic_store_n(&ring->read_index, w - ((uint64_t)ring->capacity_frames - pb2), __ATOMIC_RELEASE);
+                return false;
+            }
+        }
+    }
+    sw_slot_prime_at(ctx, slot, host_time, w, start);
+    return true;
 }
 
 /// 每块一次（消费之前）：算年龄、前馈、PI，更新 slot->rate.ratio。
@@ -448,6 +531,9 @@ static inline void sw_rate_advance_position(struct sw_mix_ctx *ctx, sw_input_slo
 static inline void sw_pan_coeffs(float pan, uint32_t channels, float *l, float *r) SW_NONBLOCKING {
     // 等功率声像：θ = (pan + 1) × π/4；单声道 L = cos θ、R = sin θ（中点各 −3 dB）；
     // 立体声当作平衡：L × min(1, √2 cos θ)、R × min(1, √2 sin θ)（中点各 1，不抬升）
+    // 两端精确 0 / 1：cosf(π/2) = −4.4e-8（−147 dB），全左 / 全右的信号不该漏进另一边（W1-D2 的"严格 0"用例撞到）
+    if (pan <= -1.0f) { *l = 1.0f; *r = 0.0f; return; }
+    if (pan >= 1.0f) { *l = 0.0f; *r = 1.0f; return; }
     const float th = (pan + 1.0f) * (SW_PI_F * 0.25f);
     float cl = cosf(th), cr = sinf(th);
     if (channels >= 2) {
@@ -458,8 +544,29 @@ static inline void sw_pan_coeffs(float pan, uint32_t channels, float *l, float *
     *l = cl; *r = cr;
 }
 
+/// 把某个 tap 来源的块推给挂着的消费者队列（没有挂就什么都不做）。
+static inline void sw_push_taps(struct sw_mix_ctx *ctx, int32_t source, const float *const *planes, uint32_t frames, uint64_t host_time) SW_NONBLOCKING {
+    for (uint32_t t = 0; t < SW_MIX_MAX_TAPS; t++) {
+        sw_block_queue *q = __atomic_load_n(&ctx->taps[t].q, __ATOMIC_ACQUIRE);
+        if (q && ctx->taps[t].source == source) {
+            if (!sw_block_queue_push(q, planes, SW_MIX_BUS_CHANNELS, frames, host_time, ctx->block_sequence)) ctx->stats.tap_drops++;
+        }
+    }
+}
+
+static inline bool sw_has_tap(const struct sw_mix_ctx *ctx, int32_t source) SW_NONBLOCKING {
+    for (uint32_t t = 0; t < SW_MIX_MAX_TAPS; t++) {
+        if (__atomic_load_n(&ctx->taps[t].q, __ATOMIC_ACQUIRE) && ctx->taps[t].source == source) return true;
+    }
+    return false;
+}
+
+/// 一路输入的全部处理：取样 / 重采样 → 延迟线 → 推子（增益 / 静音 / AFV / 声像）→ post；送 Master / A / B；
+/// 送耳机（独听 / 路由；PFL 推子前、AFL 推子后；取延迟线前或后，ctx->monitor_point）；推输入 tap（推子后含 AFV；推子后 AFV 前）。
+/// xfade_gain：本块每样本的 AFV 增益曲线（NULL = 向目标一阶平滑）；xfade_end ≥ 0：曲线在本块走满，块末把 afv / 目标钉到这个值
+/// （写在推子之后，才不会被曲线最后一个样本覆盖——W2-E 退回单 3-2）。
 static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32_t frames, uint64_t host_time,
-                             const float *xfade_gain /* 本块每样本的 AFV 增益，NULL = 平滑到目标 */) SW_NONBLOCKING {
+                             const float *xfade_gain, float xfade_end, bool solo_active) SW_NONBLOCKING {
     sw_input_slot *slot = &ctx->inputs[slot_index];
     sw_audio_ring *ring = slot->ring;
     const uint32_t ch = slot->channels;
@@ -474,11 +581,7 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
         sw_slot_unprime(slot);
     }
     if (!slot->primed) {
-        const uint64_t avail = w - __atomic_load_n(&ring->read_index, __ATOMIC_RELAXED);
-        if (avail >= sw_slot_prime_threshold(ctx, slot) && slot->stall_blocks == 0) {
-            sw_slot_prime(ctx, slot, host_time);
-            slot->st.reprimes++;
-        }
+        if (sw_slot_try_prime(ctx, slot, host_time, w)) slot->st.reprimes++;
     }
 
     // 2. 取样 + 重采样 → resampled[ch]
@@ -535,11 +638,11 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     // 3. 延迟线
     sw_delay_process(&slot->delay, ch, slot->resampled, slot->delayed, frames);
 
-    // 4. 增益 / 静音 / AFV / 声像 → post（立体声）
+    // 4. 推子：增益 / 静音一阶平滑、AFV（曲线或平滑）、声像（每块线性插到目标）。延迟线前的耳机通路与 AFV 前的 ISO 通路
+    //    从同一初值重放同一条递推（确定性，逐位相同），不用临时缓冲（Host 不用多分配）
     const float gt = slot->muted ? 0.0f : slot->gain_target;
     const float k = ctx->gain_smooth_k;
-    float g = slot->gain;
-    float afv = slot->afv;
+    const float g0 = slot->gain, afv0 = slot->afv;
     const float afv_t = slot->afv_target;
     float pl0, pr0, pl1, pr1;
     sw_pan_coeffs(slot->pan, ch, &pl0, &pr0);
@@ -547,9 +650,12 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     if (fabsf(slot->pan - slot->pan_target) < 1e-4f) slot->pan = slot->pan_target;
     sw_pan_coeffs(slot->pan, ch, &pl1, &pr1);
     const float inv = frames > 1 ? 1.0f / (float)(frames - 1) : 0.0f;
+
+    // 5. 推子后含 AFV → post（送 Master / A / B、耳机 AFL（延迟线后）、输入 tap、表）
     const float *xl = slot->delayed[0];
     const float *xr = ch >= 2 ? slot->delayed[1] : slot->delayed[0];
     float *pl = slot->post[0], *pr = slot->post[1];
+    float g = g0, afv = afv0;
     float pk0 = 0, pk1 = 0;
     for (uint32_t i = 0; i < frames; i++) {
         g += (gt - g) * k;
@@ -567,19 +673,71 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     if (fabsf(g - gt) < 1e-6f) g = gt;
     if (!xfade_gain && fabsf(afv - afv_t) < 1e-6f) afv = afv_t;
     slot->gain = g;
-    slot->afv = afv;
+    // 淡变在本块走满：终值钉死（0 或 1），下一块起不再有曲线尾巴
+    if (xfade_end >= 0.0f) { slot->afv = xfade_end; slot->afv_target = xfade_end; }
+    else slot->afv = afv;
     slot->peak_block[0] = pk0; slot->peak_block[1] = pk1;
     if (pk0 > slot->peak_max[0]) slot->peak_max[0] = pk0;
     if (pk1 > slot->peak_max[1]) slot->peak_max[1] = pk1;
+
+    // 6. 送节目总线
+    const uint32_t rt = slot->routing;
+    if (rt & SW_ROUTE_MASTER) { float *ml = ctx->buses[SW_BUS_MASTER].sum[0], *mr = ctx->buses[SW_BUS_MASTER].sum[1]; for (uint32_t n = 0; n < frames; n++) { ml[n] += pl[n]; mr[n] += pr[n]; } }
+    if (rt & SW_ROUTE_A)      { float *al = ctx->buses[SW_BUS_A].sum[0], *ar = ctx->buses[SW_BUS_A].sum[1]; for (uint32_t n = 0; n < frames; n++) { al[n] += pl[n]; ar[n] += pr[n]; } }
+    if (rt & SW_ROUTE_B)      { float *bl = ctx->buses[SW_BUS_B].sum[0], *br = ctx->buses[SW_BUS_B].sum[1]; for (uint32_t n = 0; n < frames; n++) { bl[n] += pl[n]; br[n] += pr[n]; } }
+
+    // 7. 耳机：有独听时只听独听的，否则按路由；PFL = 推子前（原始信号）、AFL = 推子后；信号取延迟线前（默认，低延迟监听）或延迟线后
+    const bool to_hp = solo_active ? (slot->solo != 0) : ((rt & SW_ROUTE_HEADPHONES) != 0);
+    if (to_hp) {
+        float *hl = ctx->buses[SW_BUS_HEADPHONES].sum[0], *hr = ctx->buses[SW_BUS_HEADPHONES].sum[1];
+        const bool pre_delay = ctx->monitor_point == SW_MONITOR_PRE_DELAY;
+        const float *sl = pre_delay ? slot->resampled[0] : slot->delayed[0];
+        const float *sr = ch >= 2 ? (pre_delay ? slot->resampled[1] : slot->delayed[1]) : sl;
+        if (solo_active && ctx->monitor_mode == SW_MONITOR_PFL) {
+            for (uint32_t n = 0; n < frames; n++) { hl[n] += sl[n]; hr[n] += sr[n]; }
+        } else if (!pre_delay) {
+            for (uint32_t n = 0; n < frames; n++) { hl[n] += pl[n]; hr[n] += pr[n]; }
+        } else {
+            float gg = g0, aa = afv0;   // 重放推子递推（与 post 那条逐位相同）
+            for (uint32_t i = 0; i < frames; i++) {
+                gg += (gt - gg) * k;
+                if (xfade_gain) aa = xfade_gain[i]; else aa += (afv_t - aa) * k;
+                const float t = (float)i * inv;
+                const float ga = gg * aa;
+                hl[i] += sl[i] * ga * (pl0 + (pl1 - pl0) * t);
+                hr[i] += sr[i] * ga * (pr0 + (pr1 - pr0) * t);
+            }
+        }
+    }
+
+    // 8. 输入 tap：推子后含 AFV（= 送总线的信号，post）；推子后 AFV 前（ISO 音轨：不受 AFV 门控，含增益 / 静音 / 声像 / 延迟线）。
+    //    post 到这里已经送完总线 / 耳机 / 表 / 含 AFV 的 tap，本块不再用，ISO 信号就写在它上面推出去（不另开缓冲）
+    {
+        const float *planes[SW_MIX_BUS_CHANNELS] = { pl, pr };
+        sw_push_taps(ctx, SW_TAP_INPUT_BASE + (int32_t)slot_index, planes, frames, host_time);
+    }
+    if (sw_has_tap(ctx, SW_TAP_INPUT_PRE_AFV_BASE + (int32_t)slot_index)) {
+        float gg = g0;
+        for (uint32_t i = 0; i < frames; i++) {
+            gg += (gt - gg) * k;
+            const float t = (float)i * inv;
+            pl[i] = xl[i] * gg * (pl0 + (pl1 - pl0) * t);
+            pr[i] = xr[i] * gg * (pr0 + (pr1 - pr0) * t);
+        }
+        const float *planes[SW_MIX_BUS_CHANNELS] = { pl, pr };
+        sw_push_taps(ctx, SW_TAP_INPUT_PRE_AFV_BASE + (int32_t)slot_index, planes, frames, host_time);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // AFV 交叉淡变：为本块算 from / to 两路的每样本增益（等幅：cos / sin）
 // ---------------------------------------------------------------------------
 
+/// *ended：本块走满（elapsed ≥ duration）→ true；调用方在推子之后把 from / to 的 afv 钉到 0 / 1（不在这里写，见 sw_process_input）。
 static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t frames, uint64_t host_time,
-                           float *gain_from, float *gain_to, bool *has_from, bool *has_to) SW_NONBLOCKING {
+                           float *gain_from, float *gain_to, bool *has_from, bool *has_to, bool *ended) SW_NONBLOCKING {
     *has_from = *has_to = false;
+    *ended = false;
     if (!x->active) return;
     const double tpf = ctx->host_ticks_per_frame;
     uint32_t s0 = 0;
@@ -596,13 +754,10 @@ static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t fra
     const float a_from = x->from >= 0 ? ctx->inputs[x->from].afv_fade_start : 0.0f;
     const float a_to = x->to >= 0 ? ctx->inputs[x->to].afv_fade_start : 0.0f;
     for (uint32_t i = 0; i < frames; i++) {
-        float p;
-        if (i < s0) p = 0.0f;
-        else {
-            p = ((float)x->elapsed_frames + (float)(i - s0)) / dur;
-            if (p > 1.0f) p = 1.0f;
-        }
-        const float ang = p * (SW_PI_F * 0.5f);
+        // 起点之前 k = 0（cos 0 = 1、sin 0 = 0 → 起点前的增益）：不单独写常量填充循环，-O2 会把它认成 memset_pattern16（check-rt-symbols 不认）
+        const uint64_t k = i < s0 ? 0u : x->elapsed_frames + (uint64_t)(i - s0);
+        if (k >= (uint64_t)x->duration_frames) { gain_from[i] = 0.0f; gain_to[i] = 1.0f; continue; }   // 走满：精确 0 / 1（cosf(π/2) 不是 0）
+        const float ang = ((float)k / dur) * (SW_PI_F * 0.5f);
         gain_from[i] = a_from * cosf(ang);
         gain_to[i] = a_to + (1.0f - a_to) * sinf(ang);
     }
@@ -610,8 +765,7 @@ static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t fra
     *has_from = x->from >= 0;
     *has_to = x->to >= 0;
     if (x->elapsed_frames >= (uint64_t)x->duration_frames) {
-        if (x->from >= 0) { ctx->inputs[x->from].afv_target = 0.0f; ctx->inputs[x->from].afv = 0.0f; }
-        if (x->to >= 0) { ctx->inputs[x->to].afv_target = 1.0f; ctx->inputs[x->to].afv = 1.0f; }
+        *ended = true;
         x->active = 0;
     }
 }
@@ -708,12 +862,7 @@ static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, 
 
     // 消费者队列
     const float *planes[SW_MIX_BUS_CHANNELS] = { l, r };
-    for (uint32_t t = 0; t < SW_MIX_MAX_TAPS; t++) {
-        sw_block_queue *q = __atomic_load_n(&ctx->taps[t].q, __ATOMIC_ACQUIRE);
-        if (q && ctx->taps[t].source == (int32_t)b) {
-            if (!sw_block_queue_push(q, planes, SW_MIX_BUS_CHANNELS, frames, ctx->stats.last_host_time, ctx->block_sequence)) ctx->stats.tap_drops++;
-        }
-    }
+    sw_push_taps(ctx, (int32_t)b, planes, frames, ctx->stats.last_host_time);
     // cur（sum 或 work）里是本块的最终信号；下一块开始时 sum 会被清零，不用收拾
 }
 
@@ -741,63 +890,32 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
         memset(ctx->buses[b].sum[1], 0, (size_t)frames * sizeof(float));
     }
 
-    // 2. AFV 淡变的每样本增益（每条淡变有自己的 from / to 曲线缓冲，ctx 创建时分配）
+    // 2. AFV 淡变的每样本增益（每条淡变有自己的 from / to 曲线缓冲，ctx 创建时分配）；走满的本块把终值交给 sw_process_input 钉死
     const float *slot_xf[SW_MIX_MAX_INPUTS];
-    for (uint32_t i = 0; i < ctx->input_capacity; i++) slot_xf[i] = NULL;
+    uint8_t slot_xf_end[SW_MIX_MAX_INPUTS];   // 0 = 本块没走满；1 = 走满、终值 0（from）；2 = 走满、终值 1（to）。字节填充 → bzero（浮点填充会被认成 memset_pattern16）
+    for (uint32_t i = 0; i < ctx->input_capacity; i++) { slot_xf[i] = NULL; slot_xf_end[i] = 0; }
     for (uint32_t k = 0; k < SW_MIX_MAX_CROSSFADES; k++) {
         sw_crossfade *x = &ctx->xfades[k];
         if (!x->active) continue;
         float *gf = ctx->xfade_gain[k][0];
         float *gt = ctx->xfade_gain[k][1];
-        bool hf, ht;
+        bool hf, ht, ended;
         const int32_t from = x->from, to = x->to;
-        sw_xfade_block(ctx, x, frames, host_time, gf, gt, &hf, &ht);
-        if (hf && from >= 0) slot_xf[from] = gf;
-        if (ht && to >= 0) slot_xf[to] = gt;
+        sw_xfade_block(ctx, x, frames, host_time, gf, gt, &hf, &ht, &ended);
+        if (hf && from >= 0) { slot_xf[from] = gf; if (ended) slot_xf_end[from] = 1; }
+        if (ht && to >= 0) { slot_xf[to] = gt; if (ended) slot_xf_end[to] = 2; }
     }
 
-    // 3. 每路输入
+    // 3. 每路输入（独听状态先看一遍：耳机是"有独听只听独听的"，每路处理时就要知道）
     bool solo_active = false;
+    for (uint32_t i = 0; i < ctx->input_capacity; i++) {
+        const sw_input_slot *slot = &ctx->inputs[i];
+        if (slot->attached && slot->ring && slot->solo) { solo_active = true; break; }
+    }
     for (uint32_t i = 0; i < ctx->input_capacity; i++) {
         sw_input_slot *slot = &ctx->inputs[i];
         if (!slot->attached || !slot->ring) { slot->st.attached = 0; slot->st.primed = 0; continue; }
-        sw_process_input(ctx, i, frames, host_time, slot_xf[i]);
-        if (slot->solo) solo_active = true;
-    }
-    for (uint32_t i = 0; i < ctx->input_capacity; i++) {
-        sw_input_slot *slot = &ctx->inputs[i];
-        if (!slot->attached || !slot->ring) continue;
-        const float *pl = slot->post[0], *pr = slot->post[1];
-        float *ml = ctx->buses[SW_BUS_MASTER].sum[0], *mr = ctx->buses[SW_BUS_MASTER].sum[1];
-        float *al = ctx->buses[SW_BUS_A].sum[0], *ar = ctx->buses[SW_BUS_A].sum[1];
-        float *bl = ctx->buses[SW_BUS_B].sum[0], *br = ctx->buses[SW_BUS_B].sum[1];
-        float *hl = ctx->buses[SW_BUS_HEADPHONES].sum[0], *hr = ctx->buses[SW_BUS_HEADPHONES].sum[1];
-        const uint32_t rt = slot->routing;
-        if (rt & SW_ROUTE_MASTER) for (uint32_t n = 0; n < frames; n++) { ml[n] += pl[n]; mr[n] += pr[n]; }
-        if (rt & SW_ROUTE_A) for (uint32_t n = 0; n < frames; n++) { al[n] += pl[n]; ar[n] += pr[n]; }
-        if (rt & SW_ROUTE_B) for (uint32_t n = 0; n < frames; n++) { bl[n] += pl[n]; br[n] += pr[n]; }
-        // 耳机：有独听时只听独听的（PFL = 推子前 = 延迟线后原始信号；AFL = 推子后）；否则按路由
-        if (solo_active) {
-            if (slot->solo) {
-                if (ctx->monitor_mode == SW_MONITOR_PFL) {
-                    const float *xl = slot->delayed[0];
-                    const float *xr = slot->channels >= 2 ? slot->delayed[1] : slot->delayed[0];
-                    for (uint32_t n = 0; n < frames; n++) { hl[n] += xl[n]; hr[n] += xr[n]; }
-                } else {
-                    for (uint32_t n = 0; n < frames; n++) { hl[n] += pl[n]; hr[n] += pr[n]; }
-                }
-            }
-        } else if (rt & SW_ROUTE_HEADPHONES) {
-            for (uint32_t n = 0; n < frames; n++) { hl[n] += pl[n]; hr[n] += pr[n]; }
-        }
-        // 输入 tap（推子后）
-        for (uint32_t t = 0; t < SW_MIX_MAX_TAPS; t++) {
-            sw_block_queue *q = __atomic_load_n(&ctx->taps[t].q, __ATOMIC_ACQUIRE);
-            if (q && ctx->taps[t].source == (int32_t)(SW_INPUT_TAP_BASE + i)) {
-                const float *planes[SW_MIX_BUS_CHANNELS] = { pl, pr };
-                if (!sw_block_queue_push(q, planes, SW_MIX_BUS_CHANNELS, frames, host_time, ctx->block_sequence)) ctx->stats.tap_drops++;
-            }
-        }
+        sw_process_input(ctx, i, frames, host_time, slot_xf[i], slot_xf_end[i] == 0 ? -1.0f : (slot_xf_end[i] == 1 ? 0.0f : 1.0f), solo_active);
     }
 
     // 4. 总线

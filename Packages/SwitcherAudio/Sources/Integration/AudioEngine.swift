@@ -1,4 +1,5 @@
 import Foundation
+import CoreAudio
 import Synchronization
 import SwitcherContracts
 import SwitcherEngine
@@ -8,14 +9,17 @@ import SwitcherAudio
 //
 // 职责：
 //   1. 输入：每路 Input 的 AudioRing 注册进混音上下文（先 attach、对齐、再放音；摘除先淡出再 detach，环在非实时线程释放）。
-//   2. 对齐与 PTS：每路输入就绪后读它的年龄（InputSlotStats.ageSetpoint），用延迟线补到统一的对齐延迟 alignmentFrames；
-//      Master / ISO 块的 PTS = 块首样本 host time − 对齐延迟 = 内容被采集的时刻，与视频拍点同一 host 时基（G2 问题单 A2 的修法）。
+//   2. 对齐与 PTS：每路输入按目标年龄就绪（W1-D2：注册时给混音器目标年龄 = min(任何相位都能命中的最小值, 对齐延迟)，就绪年龄不再带
+//      生产者相位），就绪后读它的年龄（InputSlotStats.ageSetpoint），用延迟线补齐剩下的 alignmentFrames − 年龄（默认 P 256 时 2048 − 959 = 1089，
+//      确定值；相位不利被钳到安全下限的输入才有不同的值）；Master / ISO 块的 PTS = 块首样本 host time − 对齐延迟 = 内容被采集的时刻，
+//      与视频拍点同一 host 时基（G2 问题单 A2 的修法）。耳机总线默认不经这条延迟线（monitorPoint），监听延迟只有环年龄 + 设备。
 //   3. AFV：状态机的转场事件（AudioStateBridge）→ 同一拍点的 host time 起做等幅交叉淡变，长度 = 转场时长；Cut = 1 块短淡；
 //      T-bar 跟推杆；FTB 同步淡出 Master。**所有跟视频对齐的音频动作都在混音时间 = 拍点 + 对齐延迟 处应用**：混音块 T 里流过的
 //      内容是 T − 对齐延迟 时刻采集的（PTS 也是它），要让录制文件 / 扬声器里的音频转场与画面同一时刻，增益变化就得晚对齐延迟这么多
 //      （离线用例第一版没加这个偏移，音频淡变在文件里领先画面 42.7 ms）。
 //   4. 每路参数 / 总线 / 监听方式：从状态快照 diff 落到混音命令。
-//   5. 消费者：Master / 总线 / ISO 块经泵线程送录制 / 编码；真设备时重采样到 host 时钟（A3）。
+//   5. 消费者：Master / 总线 / ISO 块经泵线程送录制 / 编码；真设备时重采样到 host 时钟（A3）。ISO（AudioTapSource.input）取
+//      推子后、AFV 前（W1-D2），AFV 门控不进 ISO 音轨；.inputProgram 才是含 AFV 的节目信号。
 //   6. Stats.audio 与状态快照（表、对齐、AFV、设备）。
 // 线程：所有混音命令都在非实时线程发（控制线程 / 泵线程 / 组装方线程）；实时回调里只有 W1-D 的 C 代码。
 public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
@@ -42,6 +46,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let hints: AudioInputHints
         var settings: InputAudioSettings
         var aligned = false
+        var targetAge = 0
         var ageSetpoint: Double = 0
         var alignmentDelayFrames = 0
         var residualFrames = 0
@@ -125,6 +130,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         }
         pump = ConsumerPump(mixer: mixer, alignment: alignmentDuration, resample: resample, detectDiscontinuities: cfg.detectDiscontinuities,
                             period: cfg.pumpPeriod, tapCapacity: cfg.tapCapacityBlocks, timebase: timebase)
+        mixer.setMonitorPoint(cfg.monitorPoint)
     }
 
     deinit {
@@ -154,12 +160,33 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         } else {
             rec.afvGain = afvOn ? 0 : 1
         }
+        // 目标年龄：任何相位都能命中的最小值（目标 + P/2 + hf + chunk/2 + P，真设备再加输出提前量），但不超过对齐延迟——超过了延迟线补不回来，
+        // 不如压到对齐延迟让年龄正好等于它（生产者块 > 混音块的源每块相位不同，混音器会等到能命中的那一块）；对齐延迟 0 = 旧规则（尽早就绪）
+        let targetFrames = hints.targetFrames(blockFrames: configuration.blockFrames)
+        let targetAge: Int
+        if let explicit = hints.targetAgeFrames {
+            targetAge = max(0, explicit)
+        } else {
+            let deterministic = mixer.deterministicAgeFrames(targetFrames: targetFrames, producerBlockFrames: hints.producerBlockFrames ?? configuration.blockFrames,
+                                                             resampled: !hints.sameClockAsOutput) + outputLeadFrames
+            targetAge = min(deterministic, max(0, configuration.alignmentFrames))
+        }
+        rec.targetAge = targetAge
         slots[number] = rec
         lock.unlock()
         mixer.attach(ring: ring, toSlot: slot, resampling: hints.sameClockAsOutput ? .bypass : .estimated,
-                     targetFrames: hints.targetFrames(blockFrames: configuration.blockFrames))
+                     targetFrames: targetFrames, targetAgeFrames: targetAge)
         applySettings(rec)
         mixer.setAFVGain(slot: slot, rec.afvGain)
+    }
+
+    /// 真设备的混音块 host time 是 inOutputTime（首样本的呈现时刻），比回调进入早 buffer + 安全偏移（内置扬声器 256 + 48 = 304 帧，
+    /// W1-D 实测 6.23–6.35 ms）；源按采集时刻打戳、采完才交，所以相对混音时间线它的数据天然"老"这么多，目标年龄要把它加上才能任何相位都命中
+    /// （否则混音器等满上限后退回旧规则，年龄 = 下限 + 提前量 + 相位，本会话真设备实测 1142）。空设备 / 离线的时间线就是"现在"，提前量 0。
+    private var outputLeadFrames: Int {
+        guard case .device(let d) = output else { return 0 }
+        let buffer = d.isRunning ? d.actualBlockFrames : configuration.blockFrames
+        return buffer + AudioHAL.safetyOffset(d.info.id, scope: kAudioObjectPropertyScopeOutput)
     }
 
     /// 摘除一路输入：先把它淡出（AFV 增益 → 0，3 ms），`removalFadeBlocks` 块后由控制循环 detach；环对象等实时线程确认后才释放。
@@ -350,12 +377,13 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             applyGates()
         case .cut(let from, let to, _, let at):
             guard afvOn, from != to else { return }
-            crossfade(from: from, to: to, blocks: max(1, configuration.cutFadeBlocks), start: at + alignmentDuration)
+            crossfade(from: from, to: to, frames: max(1, configuration.cutFadeBlocks) * configuration.blockFrames, start: at + alignmentDuration)
         case .transitionStarted(let from, let to, _, let source, _, let at, _, let duration):
             lock.lock(); activeTransition = (from, to, source, at); lock.unlock()
             guard afvOn, source == .auto, from != to else { return }
-            let blocks = max(1, Int((Double(duration.ticks) / Double(blockDuration.ticks)).rounded()))
-            crossfade(from: from, to: to, blocks: blocks, start: at + alignmentDuration)
+            // 时长按帧（W1-D2；30 拍 @60 = 24000 帧精确，@59.94 = 24024），不再按块取整
+            let frames = max(1, Int((Double(duration.ticks) / mixer.hostTicksPerFrame).rounded()))
+            crossfade(from: from, to: to, frames: frames, start: at + alignmentDuration)
         case .tbarProgress(let from, let to, let p):
             guard afvOn else { return }
             let pp = min(max(p, 0), 1)
@@ -379,14 +407,14 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         }
     }
 
-    private func crossfade(from: Int, to: Int, blocks: Int, start: HostTime) {
+    private func crossfade(from: Int, to: Int, frames: Int, start: HostTime) {
         lock.lock()
         let fromRec = slots[from], toRec = slots[to]
         fromRec?.afvGain = 0
         toRec?.afvGain = 1
         lock.unlock()
         guard fromRec != nil || toRec != nil else { return }
-        mixer.crossfade(from: fromRec?.slot, to: toRec?.slot, durationBlocks: blocks, startHostTime: start)
+        mixer.crossfade(from: fromRec?.slot, to: toRec?.slot, durationFrames: frames, startHostTime: start)
     }
 
     private func setGate(_ number: Int, _ g: Float) {
@@ -453,6 +481,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     // MARK: 对齐维护
 
     /// 读混音器统计：新就绪的槽位按年龄设对齐延迟并放音；掉出就绪的重新静音等它回来。
+    /// W1-D2 起年龄是混音器按目标就绪的确定值（rec.targetAge），延迟线只补 alignmentFrames − 年龄 这段残差（默认 1089 帧，各路相同）；
+    /// 仍然读实际的 ageSetpoint 而不是直接用目标：相位不利被钳到安全下限、或目标本来就低于下限的输入，年龄会比目标大。
     /// 统计快照 3 KB + 32 路数组，每 4 个控制周期（≈ 8 ms）读一次就够（对齐前输入是静音的，晚几毫秒放音无所谓）。
     private func maintainAlignment() {
         if controlCycles % 4 != 1 { return }
@@ -579,7 +609,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             let st = rec.slot < stats.inputs.count ? stats.inputs[rec.slot] : nil
             let m = rec.slot < meters.inputs.count ? meters.inputs[rec.slot] : nil
             return AudioEngineStatus.InputStatus(number: rec.number, slot: rec.slot, primed: st?.primed ?? false, aligned: rec.aligned,
-                                                 ageSetpointFrames: rec.ageSetpoint, ageFrames: st?.ageFrames ?? 0,
+                                                 ageSetpointFrames: rec.ageSetpoint, targetAgeFrames: rec.targetAge, ageFrames: st?.ageFrames ?? 0,
                                                  alignmentDelayFrames: rec.alignmentDelayFrames, residualFrames: rec.residualFrames,
                                                  userDelayMs: rec.settings.delayMs, ratio: st?.ratio ?? 1,
                                                  underrunBlocks: st?.underrunBlocks ?? 0, reprimes: st?.reprimes ?? 0, afvGain: rec.afvGain,
@@ -611,7 +641,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         }
         let status = AudioEngineStatus(
             device: device, alignmentFrames: configuration.alignmentFrames, alignmentMs: alignmentDuration.milliseconds(timebase: timebase),
-            inputs: inputs, buses: busStatus, afv: afv, monitorMode: mode,
+            inputs: inputs, buses: busStatus, afv: afv, monitorMode: mode, monitorPoint: configuration.monitorPoint,
             activeTransition: transition.map { "\($0.from)→\($0.to) \($0.source)" }, ftbLevel: level,
             counters: stats.audio, discontinuities: pump.discontinuities, realtimeViolations: stats.rtViolations, tapDrops: stats.tapDrops,
             commandsDropped: stats.commandsDropped + mixer.commandsDropped, blocksRendered: stats.blocksRendered, consumers: consumers, at: now)

@@ -21,6 +21,11 @@ public final class EngineCounters: @unchecked Sendable {
     let snapshotStaleValue = Atomic<UInt64>(0)
     let slowConsumeCallsValue = Atomic<UInt64>(0)
     let lastTickValue = Atomic<Int64>(Int64.min)
+    /// 每路 L1（提案 005）：累计和（host tick）、样本数、窗口最大值（host tick，读后清零）；下标 = 输入编号，0 不用。
+    let inputCapacity: Int
+    let latencySumValue: UnsafeMutablePointer<Atomic<UInt64>>
+    let latencyCountValue: UnsafeMutablePointer<Atomic<UInt64>>
+    let latencyMaxValue: UnsafeMutablePointer<Atomic<Int64>>
 
     /// 时钟派发（调了渲染）的拍数。
     public var ticksDispatched: UInt64 { ticksDispatchedValue.load(ordering: .acquiring) }
@@ -54,7 +59,47 @@ public final class EngineCounters: @unchecked Sendable {
         return Double(renderNsSumValue.load(ordering: .acquiring)) / Double(n) / 1e6
     }
 
-    public init() {}
+    /// 某路自启动以来的 L1 累计：和（host tick）与样本数。
+    public func latencyTotals(forInput number: Int) -> (sum: HostDuration, count: UInt64) {
+        guard number >= 0 && number < inputCapacity else { return (.zero, 0) }
+        return (HostDuration(ticks: Int64(clamping: (latencySumValue + number).pointee.load(ordering: .acquiring))),
+                (latencyCountValue + number).pointee.load(ordering: .acquiring))
+    }
+
+    /// 某路 L1 的窗口最大值，读后清零。
+    public func takeLatencyMax(forInput number: Int) -> HostDuration {
+        guard number >= 0 && number < inputCapacity else { return .zero }
+        return HostDuration(ticks: (latencyMaxValue + number).pointee.exchange(0, ordering: .acquiringAndReleasing))
+    }
+
+    /// GPU 完成线程：记一个 L1 样本（host tick）。
+    @inline(__always)
+    func addLatency(input: Int, ticks: Int64) {
+        (latencySumValue + input).pointee.add(UInt64(max(ticks, 0)), ordering: .relaxed)
+        (latencyCountValue + input).pointee.add(1, ordering: .relaxed)
+        _ = (latencyMaxValue + input).pointee.max(ticks, ordering: .relaxed)
+    }
+
+    /// - Parameter maxInputs: 最大输入编号（每路 L1 计数按它预分配）。
+    public init(maxInputs: Int = 16) {
+        inputCapacity = max(maxInputs, 0) + 1
+        latencySumValue = .allocate(capacity: inputCapacity)
+        latencyCountValue = .allocate(capacity: inputCapacity)
+        latencyMaxValue = .allocate(capacity: inputCapacity)
+        var i = 0
+        while i < inputCapacity {
+            (latencySumValue + i).initialize(to: Atomic(0))
+            (latencyCountValue + i).initialize(to: Atomic(0))
+            (latencyMaxValue + i).initialize(to: Atomic(0))
+            i += 1
+        }
+    }
+
+    deinit {
+        latencySumValue.deinitialize(count: inputCapacity); latencySumValue.deallocate()
+        latencyCountValue.deinitialize(count: inputCapacity); latencyCountValue.deallocate()
+        latencyMaxValue.deinitialize(count: inputCapacity); latencyMaxValue.deallocate()
+    }
 }
 
 /// 进程级指标（RSS、CPU）。普通线程调。
@@ -90,6 +135,8 @@ final class StatsAssembler: @unchecked Sendable {
     private var lastRenderNs: UInt64 = 0
     private var lastRenderCount: UInt64 = 0
     private var lastPushed: [Int: UInt64] = [:]
+    private var lastLatencySum: [Int: Int64] = [:]
+    private var lastLatencyCount: [Int: UInt64] = [:]
 
     init(counters: EngineCounters, startedAt: HostTime) {
         self.counters = counters
@@ -110,7 +157,16 @@ final class StatsAssembler: @unchecked Sendable {
         for (number, s) in inputs {
             let prev = lastPushed[number] ?? 0
             lastPushed[number] = s.pushed
-            perInput[number] = Stats.PerInput(fps: Double(s.pushed &- prev) / windowSeconds, dup: s.reused, drop: s.dropped)
+            // L1（提案 005）：窗口内新帧的平均 / 最大延迟；没有样本写 0
+            let totals = counters.latencyTotals(forInput: number)
+            let dSum = totals.sum.ticks &- (lastLatencySum[number] ?? 0)
+            let dCount = totals.count &- (lastLatencyCount[number] ?? 0)
+            lastLatencySum[number] = totals.sum.ticks
+            lastLatencyCount[number] = totals.count
+            let latencyMs = dCount > 0 ? HostDuration(ticks: dSum).milliseconds / Double(dCount) : 0
+            let latencyMaxMs = counters.takeLatencyMax(forInput: number).milliseconds
+            perInput[number] = Stats.PerInput(fps: Double(s.pushed &- prev) / windowSeconds, dup: s.reused, drop: s.dropped,
+                                              latencyMs: latencyMs, latencyMaxMs: dCount > 0 ? latencyMaxMs : 0)
         }
         let cpu = ProcessMetrics.cpuSeconds()
         let cpuPct = max(0, (cpu - lastCPU) / windowSeconds * 100)
