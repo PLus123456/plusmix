@@ -196,3 +196,69 @@ docs/checklists/G3.md。App 没接线的项按清单里的 headless 等价物做
 **G3 结论：通过。** 自动项（V1–V7、A1–A4、E1、E3、E7–E9、C1–C4）全部通过，E2 以专项用例通过；A5 / S5 BLOCKED-硬件；人工清单等 W2-B2 接线后走。
 合并 g3 → main 由用户裁定（同 G2，`git merge --no-ff g3`）。
 
+## 11. 续做分支合入（G3 检查点，2026-09-19；用户："看一下你安排好的那些吧，合并一下"）
+
+g3 先 fast-forward 到 main 2fdf52d（G3 + P2 合入后），再按 `--no-ff` 合入五个续做分支（都从 2fdf52d 开，文件集两两无交集，**零冲突**）：
+
+| 合并提交 | 分支（prompt） | 提交数 | 报告 | 关键结果（数字出自各自报告） |
+|---|---|---|---|---|
+| 36c68c9 | `w1-core-2`（42 W1-B2） | 4 | reports/w1-core-2.md | 到达余量 7 条裁定全部落地（初值 d₀ + 保护带、饿死保护、上限 d_min + 一帧 + 保护带随时生效、保护带按抖动跨度、8 × 1 s 时间窗 + 每块 8 个最大样本 + 起流块作废、每路参数、提案 005 引擎侧）。真机内置相机 L1：修前 avg 2.3–4.1 帧 / p99 4.1–5.1 → 修后 avg 0.3–1.5 / p99 0.4–2.2 / max ≤ 2.3 帧，起流 nil 拍 15 次全 0；`per_input.latency_ms` 与 W2-A 参考差 ≤ 0.002 ms；gate2 / gate3 各跑 V4 精确核算全 0。SwitcherEngineTests 86 个 |
+| 8d288e2 | `w1-outputs-2`（45 W1-E2） | 4 | reports/w1-outputs-2.md | 录制器自己截两轨到边界拍：E5 停止边界 封口 85–86 ms、两轨差 0.00–0.04 ms（阈值 20 ms）；预告停止拍 `setStopTick` 两轨差 0.00；`stop(atTick:)` 可在边界前调、越界块入口就丢并计数；E6 max 0.803 s；`AudioEncoder.finish()` 空喂不崩。SwitcherOutputsTests 25 个（E1 过喂加 8× 档） |
+| 5ec282c | `w1-audio-2`（46 W1-D2） | 5 | reports/w1-audio-2.md | W2-E 退回单 3-1…3-5 全部落地：淡变收帧数、走满精确 0 / 1（AFV 尾巴 0.843 → 0.109 dB，判到 −40 dB；Cut 后严格 0）；就绪目标年龄 10 次 959.00（真设备 1263 ± 1）、延迟线残差 0；耳机可绕过对齐延迟线（默认绕过，A5 预算 ≈ 17 ms，仍 BLOCKED-硬件）；ISO tap 推子后 AFV 前；A7 离线 10 min + 真设备 1 min 0 违规。SwitcherAudioTests 62 + IntegrationTests 39 |
+| 2bc6a49 | `w1-testkit-2`（44 W1-A2） | 4 | reports/w1-testkit-2.md | 噪声底纹 GPU 生成（逐像素等于契约 `TestPattern.draw`）：每帧 GPU 0.13 ms / CPU 0.04 ms（CPU 参考实现 1.1–1.7 ms）；8 路 1080p60 真管线进程 CPU 20.7%（CPU 版 65.6% 超 S3）；噪声源 E2 6.000 Mbps = 100% 设定、10 s 滑窗 1.34%、峰值 1.082×。frameprobe av：推流落盘文件 A2 +64.000 → 0.000 ms（容器偏移 + priming）、A2 按整秒拍配对判、`--discontinuities`（A1 第三项）。SwitcherTestKitTests 62 |
+| eb04184 | `w2-app-2`（43 W2-B2） | 5 | reports/w2-app-2.md | G3 清单末表七个接缝全接（InputFactory / 命令总线 + 快捷键 / API + MIDI / AudioEngine / Recorder / StreamOutput / StatsPublisher，约 1000 行 App）。xcodebuild test 26 个：25 过、1 跳（内置摄像头，BLOCKED-权限）；录 5 s 两轨 5.0000 s；API cut applied true；音频引擎起停 20 次 RSS 平；推流 10 s 645 帧 0 丢。越界 1 处：project.yml 4 行（见下裁定 1） |
+
+合入后（75257e9 之前的树）：`make build` 六个包 + 两个工具 + App 通过；**`make test` 全绿**（11:09–11:50）：
+
+| 包 / 目标 | 结果 |
+|---|---|
+| SwitcherCore | Contracts 27 + Engine 86 + Render 58，0 失败 |
+| SwitcherInputs | 28（4 跳过：摄像头 TCC） |
+| SwitcherAudio | SwitcherAudioTests 62（2 跳过）+ IntegrationTests 39（3 跳过：真设备 / A5） |
+| SwitcherOutputs | SwitcherOutputsTests 25 + StreamingTests 28 + NDISendTests 8（2 跳过）；W2-D 的 ThrottleProxy 用例这次没抖（问题单 W1E2-w2-stream-throttle-proxy-close-flaky.md 仍在） |
+| SwitcherControl | 28 |
+| SwitcherTestKit | 62 |
+| 工具 | switcher-headless / frameprobe 冒烟通过 |
+| App | 26：25 过、1 跳（摄像头，BLOCKED-权限） |
+
+`make lint BRANCH=g3` 全绿（归属：合并提交只算手改，3 个手改文件 docs/OWNERSHIP.md、docs/checklists/G3.md、docs/plan/prompts/60）。
+
+**合入后 10 分钟 gate3 复核**（`scripts/gate3.sh --minutes 10 --label 10min-followups --baseline baselines/g3-m5max.json`，12:0x–12:2x，load 2.8，机器上没有别的会话在跑；
+产物 `.build/gate3/10min-followups/`，报告 reports/G3-run-10min-followups.md，基线不重打）：**自动项 18 / 19 通过、E2 本场景不适用**，与 G3 正式记录（fce834a 那次）同一结论，数值与基线的差在噪声内：
+
+| 指标 | 合入后 | 与基线 g3-m5max.json 的差 | 说明 |
+|---|---|---|---|
+| V1 | avg 1.784 / p99 2.043 ms | +0.007 ms | W1-B2 在渲染线程多了每路 3 次原子写，看不出来 |
+| V2 / V3 | 0 / 35940；p99 0.065 / max 0.100 ms | — / +0.028 ms | |
+| V4 | 精确核算设计外 0（stats.jsonl 全程）/ 0（frameprobe 在播段）；帧号倒退 0 | — | 新的到达余量算法在合成源上与旧的一样是 0（8 路余量、dup / drop 与设计值逐路相符） |
+| V5 / V6 / V7 | +0 帧；Cut 恰在第 1000 拍、147 次全干净；Fade 0.344 帧、T-bar ≤ 0.78% | — | |
+| A1 / A2 / A3 / A4 | 0；整秒 379 对 0.000 ms；0.00 ms / 8 h；极差 0.208 ms | — | W1-D2 的混音器改动（帧数淡变、目标年龄、ISO tap 换来源）没动这些数；ISO 音轨照样有 click（tap 在推子后、总线路由之外） |
+| E1 / E3 | 5 个录制器 skipped 0；299 个间隔全 120 | — | |
+| E2 | 0.101 Mbps，本场景不适用 | — | G3Factory 还是灰底；换噪声归 G4（prompt 60 末节第 2 条） |
+| C1 / C2 / C3 / C4 | 50 / 50 max 14.47 ms；p99 0.35 ms；35795 帧 0 不一致；12000 / 12000 | — | |
+| E5（信息项） | 音轨 600.025 s，比视频多 24.7 ms（❌ 20 ms） | G3 正式记录那次 24.1 ms，同一现象 | **不是回归**：W1-E2 的录制器只裁 `stop(atTick:)` 之后到的块，headless 第 8 步的绕法（先等含边界的块送到、再 stop）反而把边界后 1.5 拍的音频先写进了文件；撤绕法后应 ≤ 1 块（G4 第 1 条） |
+| S2（信息项） | 48.9 MB/h 拟合（RSS 819 → 844） | −19.6 MB/h | 10 分钟拟合仅供参考，G3 基线自己是 68.6 |
+| S3 | CPU 50.5% / GPU 21.1% | +5.6% / +0.2% | CPU 含 apitest 客户端；噪声底纹换上后 G4 基线要重打 |
+
+
+### 11.1 G3 在合并时做的裁定（技术项，检查点职责内）
+
+1. **W2-B2 的 project.yml（4 行）**：App 目标必须链接 `SwitcherAudioIntegration` / `SwitcherStreaming` 才能 import AudioEngine / StreamOutput，没有别的办法；给 W2-B2 行加 `project.yml`（备注"只加 App 对本仓库包产品的依赖"，同 W3-C），不算越界。`check-ownership.sh w2-app-2` 绿。
+2. **到达余量的上限锚点**（W1-B2 §4 第 1 条）：**默认保持裁定原文 `.windowMinimum`**。W1-B2 同一相机交替各 3 次的对照：`.sustainedMinimum` 延迟更高（p99 2.4–2.5、max 3.1 帧超阈值）且提前帧每块都有时退化成窗口最小值照样迟到。`.sustainedMinimum` 留作可选项（不推荐、已测），不再动。双峰相机（抖动跨度 22–25 ms > 一个节目帧）上每 10 s 10–16 次 3-1 节奏是这种源的必然，不再追。
+3. **ISO 音轨口径**（W1-D2 §4 第 1 条）：按 prompt 46 的"推子后、AFV 前"（含用户增益 / 静音 / 声像 / 延迟补偿）定，不改；要"推子前"再加来源。监听点留在 `AudioEngineConfiguration.monitorPoint`（默认延迟线前），要不要进 Show 与对齐延迟一起等用户（W2-E §4 第 1 条）。
+4. **录制器的四个新计数不进 Stats.encoder**（W1-E2 §4）：同意——`dropped` 口径是视频帧，音频样本丢失是排障项；A1 看混音器输出。
+5. **Stats.encoder 里 idle 的输出占一项、录制起止拍提前 10 拍**（W2-B2 §4 第 4 / 5 条）：保持——契约写"与 outputs 里带编码器的输出同序"；VT 会话创建 64–80 ms 期间 `VideoEncoder` 静默丢帧，提前量必须留（W1-E 的 start 前排队是另一个可选改进，不阻塞）。
+6. **`per_input` 的 L1 统计排除引擎 t0 之前进槽的帧**（W1-B2 §4 第 3 条）：保持与 W2-A 参考实现一致。
+
+### 11.2 交给 G4 的活（已写进 docs/plan/prompts/60-G4-输入叠加.md 末节）
+
+撤 headless 第 8 步的封口绕法并把 gate 的 E5 按 ≤ 20 ms 判；G3 场景八路换噪声底纹（提案 006 + W1-A2 已合入）、gate3-report 去掉 E2"不适用"分支、G4 基线重打；App `OutputRuntime.stopRecording` 简化（约 15 行）；复核 App 启动停顿单（reports/issues/W2B2-w1-core-startup-stall-pacing-drops.md）；ThrottleProxy 抖动单。
+
+### 11.3 等用户定的（本次没改任何契约、阈值、测试标准）
+
+- **`OutputState.enabled` 打开节目时的语义**（W2-B2 §4 第 2 条）：现在按契约字面——打开一个保存时正在录制 / 推流的节目（含 scenarios/*.json、退出时自动存的 LastSession）会立刻起录制 / 推流。G3 建议：App 打开节目文件时把 record / stream 的 `enabled` 清掉（LastSession 恢复除外），一行 App 改动，归 W3-E；或在 CONTRACTS.md 写明"文档里的 enabled 只对 headless 生效"。
+- 测试标准的口径（W1-A2 §4）：A2 判"最大绝对值"（frameprobe）还是"|均值|"（gate3-report），建议前者；"整秒拍"= 标称整数帧率的倍数，写进 §2.3；推流落盘文件按 ffmpeg 口径；`Stats.audio.discontinuities` 是流式信息项，A1 第三项以 frameprobe 离线口径为准（§7）。
+- `PacingOptions` 默认值写进 §2.1、`per_input` 要不要 late 计数（W1-B2 §4 第 2 / 4 条）；`RecordSettings.directory` 相对路径相对什么、推流"x s 后重连"要不要进 Stats（W2-B2 §4 第 3 / 8 条）；对齐延迟 / 监听点是否进 Show（W1-D2 §4 第 2 条）。
+- 提案 006 已由 P2 落地（用户批）。docs/contract-changes/ 本次无新提案。
+
+合并后的 g3 → main 仍由用户做（`git merge --no-ff g3`）；之后 G4 从 main 开。

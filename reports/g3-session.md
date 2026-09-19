@@ -47,3 +47,18 @@ worktree `.claude/worktrees/wonderful-fermi-40fe5f`，从 main 2290b4e 开；`g3
 - **`reports/g3.md`（会话报告）和 `reports/G3.md`（检查点报告）在 macOS 默认的大小写不敏感 APFS 上是同一个文件**：gate3-report 写 G3.md 时把会话报告覆盖了（fc55f97 里的 reports/g3.md 其实是检查点报告的内容），
   会话报告改名 `reports/g3-session.md`、从 e97fe51 恢复后补回。G4 / G5 起分支名别和检查点报告只差大小写。
 - bash 3.2（macOS 自带）下 `"${arr[@]}"` 空数组在 `set -u` 时报 unbound variable，写 `${arr[@]+"${arr[@]}"}`；`git mv` 对未跟踪文件会 fatal 并中断 `&&` 链。
+
+## 6. 补记：续做分支合入（2026-09-19，同一会话续做）
+
+用户让 G3 把它安排的续做分支合了。详细记录在 reports/G3-notes.md §11（合并表、合入后 make test 全表、裁定、交给 G4 的活、等用户定的）。要点：
+
+- g3 先 fast-forward 到 main 2fdf52d，再 `--no-ff` 合入 `w1-core-2`（36c68c9）、`w1-outputs-2`（8d288e2）、`w1-audio-2`（5ec282c）、`w1-testkit-2`（2bc6a49）、`w2-app-2`（eb04184），零冲突；W1-A2 报告里"等并行"的噪声底纹也一起进来了。
+- 合入后 `make build` 通过；`make test` 六个包 + 两个工具 + App **0 失败**（跳过的都是 TCC / 真设备 / 回环硬件）；`make lint BRANCH=g3` 全绿。
+- 只做了两处裁定性的手改：docs/OWNERSHIP.md 的 W2-B2 行认领 `project.yml`（只加 App 对包产品的依赖）；到达余量上限锚点保持 `.windowMinimum`（W1-B2 的对照数据支持）。其余见 §11.1。
+- 合并后又跑了一次 10 分钟 gate3 复核（reports/G3-run-10min-followups.md，与基线 g3-m5max.json 对比），结果在 §11 的 gate 表。
+- 交接：G4 prompt 末节加了合入后要做的 5 件事（撤 headless 封口绕法 + E5 按 20 ms 判、G3 场景换噪声 + 基线重打、App 封口简化、复核启动停顿单、ThrottleProxy 抖动单）；docs/checklists/G3.md 的接线表改成"已接"，人工清单现在可以在 App 里做。
+- 还是不 push、不合 main：合并后的 g3 → main 由用户 `git merge --no-ff g3`。
+
+补两条坑：
+- Xcode 27 的 `swift test` 每个测试 target 各印一次 "Test Suite 'All tests' passed"，一个包会出现两三次，数结果要按 target 数。
+- `xcodebuild -quiet test` 不印用例数，要从 `.build/DerivedData/Logs/Test/*.xcresult` 用 `xcrun xcresulttool get test-results summary` 读（本次 26 个：25 过 1 跳）。
