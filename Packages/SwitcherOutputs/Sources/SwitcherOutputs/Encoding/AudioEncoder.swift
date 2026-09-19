@@ -169,9 +169,11 @@ public final class AudioEncoder: @unchecked Sendable {
     }
 
     /// 结束：把尾部（不足一包的部分 + 编码器延迟）全部编出。之后不再接受输入。
+    /// 一块都没喂过就只置 finishing、不发包：AudioConverter 对空输入也会吐出 priming 那几个包，而它们的 host time 没有 stamp 可依（W2-D 的问题单）。
     public func finish() {
         guard !finishing else { return }
         finishing = true
+        guard fifoWrite > 0 else { return }
         drain()
     }
 
@@ -227,8 +229,10 @@ public final class AudioEncoder: @unchecked Sendable {
                                                  blockBufferOut: &block) == noErr, let block else { return }
         CMBlockBufferReplaceDataBytes(with: outBuffer + Int(desc.mStartOffset), blockBuffer: block, offsetIntoDestination: 0, dataLength: bytes)
         var d = AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: 0, mDataByteSize: desc.mDataByteSize)
-        let hostTime = hostTime(ofFrame: max(0, firstFrame)) - HostDuration(nanoseconds: firstFrame < 0
-            ? Int64((Double(-firstFrame) * 1e9 / Double(configuration.sampleRate)).rounded()) : 0)
+        // 预卷包（首样本序号为负）的 host time = 首块时刻往前推；首块时刻比 priming 还小时钳在 0（HostTime − HostDuration 为负会崩）
+        let base = hostTime(ofFrame: max(0, firstFrame))
+        let preroll = HostDuration(nanoseconds: firstFrame < 0 ? Int64((Double(-firstFrame) * 1e9 / Double(configuration.sampleRate)).rounded()) : 0)
+        let hostTime = Int128(base.ticks) > Int128(preroll.ticks) ? base - preroll : .zero
         var sb: CMSampleBuffer?
         guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(
             allocator: nil, dataBuffer: block, formatDescription: formatDescription, sampleCount: 1,

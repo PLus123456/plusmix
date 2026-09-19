@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Synchronization
 import XCTest
 import SwitcherContracts
 @testable import SwitcherOutputs
@@ -192,6 +193,30 @@ extension XCTestCase {
     }
 }
 
+/// 录制 stop 的结果 + 完成时刻（封口耗时的测法）。
+final class StopOutcome: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<RecordingResult, Error>?
+    private var completedAt: HostTime?
+    private let done = DispatchSemaphore(value: 0)
+
+    /// 传给 `Recorder.stop(atTick:completion:)`。
+    var handler: @Sendable (Result<RecordingResult, Error>) -> Void {
+        { [self] r in
+            lock.withLock { result = r; completedAt = HostClock.now() }
+            done.signal()
+        }
+    }
+
+    /// 等到完成；返回结果与完成时刻，失败 / 超时抛错。
+    func wait(timeout: TimeInterval) throws -> (RecordingResult, HostTime) {
+        guard done.wait(timeout: .now() + timeout) == .success else { throw TestError.timeout("stop 超过 \(timeout) s 没完成") }
+        let (r, t) = lock.withLock { (result, completedAt) }
+        guard let r, let t else { throw TestError.timeout("没有结果") }
+        return (try r.get(), t)
+    }
+}
+
 final class ResultBox<T: Sendable>: @unchecked Sendable {
     private var value: Result<T, Error>?
     private let lock = NSLock()
@@ -200,6 +225,55 @@ final class ResultBox<T: Sendable>: @unchecked Sendable {
 }
 
 enum TestError: Error { case timeout(String), message(String) }
+
+/// 模拟集成层的消费者泵（W1-E2 的停止边界测试用）：自己的线程每 `period` 醒一次，把"到 now − lag 为止应当已经产出"的样本
+/// 按整块喂给消费者——块的 PTS = 块首样本时刻，但比 PTS 晚 `lag` 才送到，和 AudioEngine 的对齐延迟 + 一块 + 泵周期（约 50–60 ms）一个样子。
+/// `stop()` 之后不再喂（阻塞到线程退出）。SignalFeeder 只在泵线程上用。
+final class LaggedAudioPump: @unchecked Sendable {
+    private let feeder: SignalFeeder
+    private let consumers: [any AudioBlockConsumer]
+    private let lag: HostDuration
+    private let period: HostDuration
+    private let stopFlag = Atomic<Bool>(false)
+    private let blocks = Atomic<Int>(0)
+    private let done = DispatchSemaphore(value: 0)
+    private var thread: Thread?
+
+    init(signal: TestSignal, consumers: [any AudioBlockConsumer], lag: HostDuration = HostDuration(milliseconds: 60),
+         period: HostDuration = HostDuration(milliseconds: 5)) {
+        feeder = SignalFeeder(signal: signal)
+        self.consumers = consumers
+        self.lag = lag
+        self.period = period
+    }
+
+    /// 已喂出的块数。
+    var blocksFed: Int { blocks.load(ordering: .relaxed) }
+    /// 下一块从这个样本开始（= 已喂到的样本数）。
+    var nextSample: Int64 { feeder.nextSample }
+
+    func start() {
+        let t = Thread { [self] in
+            while !stopFlag.load(ordering: .relaxed) {
+                let n = feeder.feed(upTo: HostClock.now() - lag, to: consumers)
+                if n > 0 { blocks.add(n, ordering: .relaxed) }
+                mach_wait_until((HostClock.now() + period).ticks)
+            }
+            done.signal()
+        }
+        t.name = "test.audio-pump"
+        t.qualityOfService = .userInteractive
+        thread = t
+        t.start()
+    }
+
+    func stop() {
+        guard thread != nil, !stopFlag.load(ordering: .relaxed) else { return }
+        stopFlag.store(true, ordering: .relaxed)
+        done.wait()
+        thread = nil
+    }
+}
 
 /// 一次"起点 + 时钟 + 图案喂料 + 音频喂料"的录制场景。
 struct RecordingScene {

@@ -81,12 +81,15 @@ final class VideoEncoderTests: XCTestCase {
         encoder.stop()
     }
 
-    // MARK: E1 —— 真编码器，喂帧速率 2 倍与 4 倍
+    // MARK: E1 —— 真编码器，喂帧速率 2 倍、4 倍与 8 倍
 
     /// 1080p60 的帧按 2 倍（120 fps）实时喂给硬件 H.264 编码器 8 秒：恒等式成立，push p99 < 0.1 ms。
-    /// M5 Max 的硬件编码器 1080p 吞吐约 170 fps，2 倍速通常跟得上（skipped 理论值 = 0 或很小）；4 倍速一定跟不上，看计数正确增长。
+    /// 2 倍速通常跟得上（skipped 理论值 = 0 或很小）；最高倍速（8 倍 = 480 fps）一定跟不上，看计数正确增长。
+    /// W1-E 时 4 倍（240 fps）就丢 21 帧，W1-E2 时（macOS 26.6.2 / Xcode 27）同一台 M5 Max 4 倍只丢 0–1 帧、"一定跟不上"的断言抖动，
+    /// 所以加了 8 倍这一档、只在最高倍速上要求 skipped > 0。
     func testE1_realEncoderOverfeed_accountingHoldsAndPushNeverBlocks() throws {
-        for multiplier in [2, 4] {
+        let multipliers = [2, 4, 8]
+        for multiplier in multipliers {
             let encoder = VideoEncoder(configuration: .init(name: "overfeed\(multiplier)x", format: format,
                                                             settings: VideoEncodeSettings(codec: .h264, bitrateBps: 6_000_000)))
             try encoder.start()
@@ -119,7 +122,7 @@ final class VideoEncoderTests: XCTestCase {
             XCTAssertEqual(c.pushed, c.accountedFrames, "恒等式 pushed = submitted + skipped + 队列")
             XCTAssertEqual(c.submitted, c.backendAccountedFrames, "flush 后 submitted = encoded + droppedByEncoder + failed")
             XCTAssertLessThan(p99, 0.1, "push 耗时 p99 必须 < 0.1 ms")
-            if multiplier == 4 { XCTAssertGreaterThan(c.skipped, 0, "4 倍速应当让编码器跟不上并计数") }
+            if multiplier == multipliers.last { XCTAssertGreaterThan(c.skipped, 0, "\(multiplier) 倍速应当让编码器跟不上并计数") }
         }
     }
 

@@ -6,7 +6,8 @@
 //   AudioEncoder   AudioToolbox AudioConverter 的 AAC；输入 Master 块 + 块首样本 host time。给推流用（W2-D）。
 //   Recorder       AVAssetWriter 写 .mov（movieFragmentInterval 1 s）；视频轨接 VideoEncoder 的压缩样本直通；
 //                  音频轨接 PCM 块，writer 自己编 AAC / 写 LPCM（原因见 reports/w1-outputs.md 探针 7）。
-//                  时间基：开始录制那一拍的拍点时刻 = 0。
+//                  时间基：开始录制那一拍的拍点时刻 = 0。停止边界（一个拍）可用 setStopTick 预告、stop(atTick:) 也可在边界前调，
+//                  两轨都由录制器截到边界，越界的帧 / 样本只计数（W1-E2，reports/w1-outputs-2.md）。
 //   PatternFeeder / SignalFeeder   测试喂料：TestPattern 写 NV12、TestSignal 写音频，按精确拍点喂，不需要合成引擎。
 //
 // 统计：每个对象只暴露原子计数（EncoderCounters / RecorderCounters），汇总进 Stats 的是引擎（铁律 4）；
