@@ -2,7 +2,8 @@
 // 录制 / 推流按钮只发 startRecord / stopRecord / startStream / stopStream；文案 = 快照里输出的 enabled（目标）× Stats.encoder[i].state（实际）：
 //   录制：目标关 → "录制"；目标开、实际 recording → "● 录制中"；目标开、实际还没到（idle / stopping / failed）→ "录制 · <state>"。
 //   推流：目标关 → "推流"；publishing → "● 推流中"；connecting / backoff → "推流 · 重连中（第 n 次）"（n = Stats.encoder[i].reconnects）。
-// 外部输出、多画面窗口是 W3-C / W3-E 的，按钮先置灰。
+// W3-C：外部输出按钮弹显示器 × 源的菜单，多画面按钮开独立窗口，ISO… 按钮弹选路面板；录制按钮对全部录制输出（PGM + ISO 路）一起发
+// startRecord / stopRecord（同一拍起停）。
 import AppKit
 import SwitcherContracts
 
@@ -11,6 +12,9 @@ final class BottomBarView: NSView {
     var send: ((Command) -> Void)?
     var onAddInput: (() -> Void)?
     var onOverlayPanel: ((NSView) -> Void)?
+    var onExternalMenu: ((NSView) -> Void)?
+    var onMultiview: (() -> Void)?
+    var onISOPanel: ((NSView) -> Void)?
 
     let addInputButton: NSButton
     let recordButton: NSButton
@@ -18,6 +22,7 @@ final class BottomBarView: NSView {
     let externalButton: NSButton
     let multiviewButton: NSButton
     let overlayButton: NSButton
+    let isoButton: NSButton
     let statusLabel = Theme.monoLabel("", size: 11, color: Theme.dimText)
     let noticeLabel = Theme.label("", size: 11, color: Theme.accent)
     private var state = MixerState()
@@ -38,6 +43,7 @@ final class BottomBarView: NSView {
         externalButton = Theme.button("外部输出", target: nil, action: nil)
         multiviewButton = Theme.button("多画面", target: nil, action: nil)
         overlayButton = Theme.button("叠加…", target: nil, action: nil)
+        isoButton = Theme.button("ISO…", target: nil, action: nil)
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -46,14 +52,16 @@ final class BottomBarView: NSView {
         recordButton.target = self; recordButton.action = #selector(recordPressed)
         streamButton.target = self; streamButton.action = #selector(streamPressed)
         overlayButton.target = self; overlayButton.action = #selector(overlayPressed)
-        externalButton.isEnabled = false
-        externalButton.toolTip = "外部输出窗口在 W3-C"
-        multiviewButton.isEnabled = false
-        multiviewButton.toolTip = "多画面窗口在 W3-E"
+        externalButton.target = self; externalButton.action = #selector(externalPressed)
+        externalButton.toolTip = "外部显示输出：选显示器和源（PGM / PVW / 多画面 / 任一输入）"
+        multiviewButton.target = self; multiviewButton.action = #selector(multiviewPressed)
+        multiviewButton.toolTip = "多画面独立窗口"
+        isoButton.target = self; isoButton.action = #selector(isoPressed)
+        isoButton.toolTip = "ISO 分路录制：选哪些输入各录一个文件"
         addInputButton.keyEquivalent = "i"
         addInputButton.keyEquivalentModifierMask = [.command]
 
-        let buttons = NSStackView(views: [addInputButton, recordButton, streamButton, externalButton, multiviewButton, overlayButton])
+        let buttons = NSStackView(views: [addInputButton, recordButton, isoButton, streamButton, externalButton, multiviewButton, overlayButton])
         buttons.orientation = .horizontal
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
@@ -107,19 +115,22 @@ final class BottomBarView: NSView {
     }
 
     private func updateButtons() {
-        // 录制：第一个录制输出
-        if let record = state.outputs.first(where: { $0.kind == .record }) {
+        // 录制：全部录制输出（PGM + ISO 路）一起看；文案按第一个 enabled 的（没有就第一个）
+        let records = state.outputs.filter { $0.kind == .record }
+        if let record = records.first(where: \.enabled) ?? records.first {
             let actual = encoderEntry(forOutput: record.number)?.state ?? "idle"
+            let enabledCount = records.filter(\.enabled).count
+            let suffix = enabledCount > 1 ? "（\(enabledCount) 路）" : ""
             switch (record.enabled, actual) {
             case (true, "recording"):
-                recordButton.title = "● 录制中"
+                recordButton.title = "● 录制中" + suffix
                 recordButton.toolTip = nil
             case (true, let s):
-                recordButton.title = "录制 · \(s)"
+                recordButton.title = "录制 · \(s)" + suffix
                 recordButton.toolTip = "录制输出已打开，录制器状态 \(s)"
             default:
                 recordButton.title = "录制"
-                recordButton.toolTip = nil
+                recordButton.toolTip = records.count > 1 ? "起 \(records.count) 路（PGM + ISO）" : nil
             }
             Theme.setHighlighted(recordButton, record.enabled, color: Theme.recording)
         } else {
@@ -176,8 +187,14 @@ final class BottomBarView: NSView {
     @objc private func addInputPressed() { onAddInput?() }
 
     @objc private func recordPressed() {
-        if let record = state.outputs.first(where: { $0.kind == .record }) {
-            send?(record.enabled ? .stopRecord(output: record.number) : .startRecord(output: record.number))
+        let records = state.outputs.filter { $0.kind == .record }
+        if !records.isEmpty {
+            // 有任何一路在录就全停，否则全起（同一拍发多条 = ISO 共用起点）
+            if records.contains(where: \.enabled) {
+                for r in records where r.enabled { send?(.stopRecord(output: r.number)) }
+            } else {
+                for r in records { send?(.startRecord(output: r.number)) }
+            }
         } else {
             // 节目里没有录制输出：先加一个再开
             let number = (state.outputs.map(\.number).max() ?? 0) + 1
@@ -195,4 +212,7 @@ final class BottomBarView: NSView {
     }
 
     @objc private func overlayPressed() { onOverlayPanel?(overlayButton) }
+    @objc private func externalPressed() { onExternalMenu?(externalButton) }
+    @objc private func multiviewPressed() { onMultiview?() }
+    @objc private func isoPressed() { onISOPanel?(isoButton) }
 }

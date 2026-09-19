@@ -3,6 +3,7 @@
 import AppKit
 import SwitcherContracts
 import SwitcherRender
+import SwitcherExternal
 
 /// 能收键盘的主窗口：不被文本框吃掉的按键走快捷键表。
 @MainActor
@@ -31,6 +32,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private var statsToken: ObserverToken?
     private var noticeToken: ObserverToken?
     private var overlayPopover: NSPopover?
+    private var isoPopover: NSPopover?
+    private var externalMenuBuilder: ExternalOutputMenuBuilder?
+    private(set) var multiviewWindow: MultiviewWindowController?
+    /// 新 ISO 路的默认录制目录（AppController 按测试宿主 / 正常设）。
+    var defaultRecordDirectory: String = ShowDocuments.defaultRecordDirectory
     private var addInputSheet: AddInputSheetController?
     /// 收到的快照次数（测试看 ≤ 60 Hz 合并）。
     private(set) var snapshotsReceived: UInt64 = 0
@@ -111,6 +117,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
 
         bottomBar.onAddInput = { [weak self] in self?.presentAddInput() }
         bottomBar.onOverlayPanel = { [weak self] anchor in self?.presentOverlayPanel(relativeTo: anchor) }
+        bottomBar.onExternalMenu = { [weak self] anchor in self?.presentExternalMenu(relativeTo: anchor) }
+        bottomBar.onMultiview = { [weak self] in self?.toggleMultiviewWindow() }
+        bottomBar.onISOPanel = { [weak self] anchor in self?.presentISOPanel(relativeTo: anchor) }
     }
 
     // MARK: 绑定
@@ -133,6 +142,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         previewMonitor.display.source = source
         programMonitor.display.source = source
         inputStrip.displaySource = source
+        multiviewWindow?.source = source
         bottomBar.resetStats()
         mixerPanel.audio = session?.audio
         guard let session else {
@@ -145,6 +155,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         statsToken = session.observeStats { [weak self] stats in self?.apply(stats: stats) }
         noticeToken = session.observeNotices { [weak self] message in self?.bottomBar.showNotice(message) }
         if let notice = session.lastNotice { bottomBar.showNotice(notice) }
+        multiviewWindow?.restore(from: session.layout)
     }
 
     private func apply(state: MixerState) {
@@ -163,6 +174,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         mixerPanel.apply(state: state)
         bottomBar.apply(state: state)
         (overlayPopover?.contentViewController as? OverlayPanelController)?.apply(state: state)
+        (isoPopover?.contentViewController as? ISOPanelController)?.apply(state: state)
     }
 
     private func apply(stats: Stats) {
@@ -205,6 +217,49 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
         overlayPopover = popover
     }
+
+    /// ISO 选路面板（底栏 ISO… 弹出）。
+    func presentISOPanel(relativeTo anchor: NSView) {
+        guard let session else { return }
+        if let isoPopover, isoPopover.isShown {
+            isoPopover.close()
+            return
+        }
+        let controller = ISOPanelController(state: session.state, defaultDirectory: defaultRecordDirectory,
+                                            reserveBytes: session.outputs.minimumFreeBytes)
+        controller.send = { [weak session] c in session?.send(c) }
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        isoPopover = popover
+    }
+
+    /// 外部输出菜单（底栏按钮 / 菜单栏都用它）。
+    func externalOutputMenu() -> NSMenu? {
+        guard let session else { return nil }
+        let builder = ExternalOutputMenuBuilder(state: session.state, statuses: session.aux.externalStatuses)
+        builder.send = { [weak session] c in session?.send(c) }
+        externalMenuBuilder = builder   // 菜单项的 target 是它，得活到菜单关掉
+        return builder.makeMenu()
+    }
+
+    func presentExternalMenu(relativeTo anchor: NSView) {
+        guard let menu = externalOutputMenu() else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height), in: anchor)
+    }
+
+    /// 多画面独立窗口开 / 关。
+    func toggleMultiviewWindow() {
+        if multiviewWindow == nil {
+            let w = MultiviewWindowController(source: session?.displaySource)
+            if let session { w.restore(from: session.layout) }
+            multiviewWindow = w
+        }
+        multiviewWindow?.toggle()
+    }
+
+    var isMultiviewWindowVisible: Bool { multiviewWindow?.isShowing ?? false }
 
     /// 收起 / 展开调音台。
     func toggleMixerPanel() {

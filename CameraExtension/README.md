@@ -1,9 +1,16 @@
 # CameraExtension（虚拟摄像头，CMIO 系统扩展）
 
-W3-C 会话在这里实现 CMIO Camera Extension，把 PGM 的 NV12 IOSurface 作为一路系统摄像头提供给其他 App（设计方案 §8）。
+W3-C 实现：`Sources/` 是 CMIOExtension API 的 provider → 设备 → 两条流（source 给别的 App 读、sink 给主程序写），
+设备名 / UID / 流 UID 等常量在 `Packages/SwitcherOutputs/Sources/VirtualCamera/Shared/`（project.yml 按路径编进本 target，主程序那边的 SwitcherVirtualCamera 也编它）。
 
-现状：空目录。project.yml 里**还没有**这个 target——W3-C 加（落地方案 §2 把 `project.yml 的扩展 target` 划给了它）。
+- project.yml 的 target `SwitcherCameraExtension`（type system-extension，产品名 = bundle ID `com.example.switcher.camera-extension`），
+  嵌在 Switcher.app/Contents/Library/SystemExtensions/。`make gen` / `make build` 一起编。
+- 主程序侧：`SwitcherVirtualCamera` 的 `VirtualCameraOutput`（PGM 帧 → sink stream）和 `SystemExtensionInstaller`（激活 / 卸载）。
+- 帧的路：主程序 CMIOStreamCopyBufferQueue + CMSimpleQueueEnqueue → 扩展 `consumeSampleBuffer` → `sourceStream.send`（不拷像素，PTS = 拍点 host time）。
+  主程序没在送时扩展自己产 30 fps 的占位画面（深灰 + 移动白条）。
 
 前置条件（落地方案 §6）：
-- Apple Developer Program 付费账号 + Team ID（系统扩展必须签名，ad-hoc 不能激活）。
-- 主 App 要带 `com.apple.developer.system-extension.install` 权限，并从 `/Applications` 运行才能激活扩展。
+- Apple Developer Program 付费账号 + Team ID（`DEVELOPMENT_TEAM=XXXXXXXXXX make gen`）。系统扩展必须由 Apple 签发的证书签名，ad-hoc 不能激活。
+- 主 App 带 `com.apple.developer.system-extension.install`（App/Switcher.entitlements），从 `/Applications` 运行才能激活。
+- `systemextensionsctl developer on` 在 macOS 26.6.2 上仍要求关 SIP（实测：`At this time, this tool cannot be used if System Integrity Protection is enabled`）。
+  替代验证路径见 `SystemExtensionInstaller.developerModeHint` 和 reports/w3-outputs2.md。

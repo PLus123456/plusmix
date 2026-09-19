@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 有 DEVELOPMENT_TEAM 时用的权限表（project.yml 按 DEVELOPMENT_TEAM 是否为空自动选）：安装 / 激活虚拟摄像头系统扩展（W3-C）。
+	     受限权限，只有 Apple 签发的证书 + 描述文件才生效；ad-hoc 签名带着它 Xcode 直接拒绝构建，所以 ad-hoc 用空的 Switcher.entitlements。 -->
+	<key>com.apple.developer.system-extension.install</key>
+	<true/>
+</dict>
+</plist>
