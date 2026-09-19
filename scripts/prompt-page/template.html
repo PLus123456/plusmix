@@ -1,0 +1,347 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>导播台落地方案</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F4F5F7; --panel:#FFFFFF; --ink:#1B1F26; --muted:#5B6372; --line:#D8DCE3; --line-strong:#B9BFC9;
+  --pgm:#C8253A; --pgm-soft:#FBE9EC; --pvw:#1E8E4E; --pvw-soft:#E4F4EA; --amber:#B4740B; --amber-soft:#FBF1DC;
+  --slate:#4A5568; --slate-soft:#E9ECF1; --console:#14171C; --console-ink:#E7EAEE; --console-muted:#8B94A3;
+  --code-bg:#EEF0F3; --focus:#2F6FE4;
+  --f-display:"Barlow Condensed","PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif;
+  --f-body:"IBM Plex Sans","PingFang SC","Hiragino Sans GB","Noto Sans SC",-apple-system,sans-serif;
+  --f-mono:"IBM Plex Mono","SF Mono",Menlo,"PingFang SC",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121418; --panel:#191C22; --ink:#E6E9EE; --muted:#9AA3B1; --line:#2A2F38; --line-strong:#3A4150;
+    --pgm:#FF5A6C; --pgm-soft:#3A1A20; --pvw:#3ECB7C; --pvw-soft:#15301F; --amber:#E4A93A; --amber-soft:#3A2E14;
+    --slate:#AEB7C6; --slate-soft:#232833; --console:#0B0D10; --console-ink:#E7EAEE; --console-muted:#8B94A3;
+    --code-bg:#0F1216; --focus:#6FA1FF;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121418; --panel:#191C22; --ink:#E6E9EE; --muted:#9AA3B1; --line:#2A2F38; --line-strong:#3A4150;
+  --pgm:#FF5A6C; --pgm-soft:#3A1A20; --pvw:#3ECB7C; --pvw-soft:#15301F; --amber:#E4A93A; --amber-soft:#3A2E14;
+  --slate:#AEB7C6; --slate-soft:#232833; --console:#0B0D10; --console-ink:#E7EAEE; --console-muted:#8B94A3;
+  --code-bg:#0F1216; --focus:#6FA1FF;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:40px;max-width:1240px;margin:0 auto;padding:32px 28px 96px}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr);gap:20px;padding:20px 16px 80px}.nav{position:static!important;max-height:none!important}}
+.nav{position:sticky;top:20px;align-self:start;max-height:calc(100vh - 40px);overflow:auto;font-size:13px;padding-right:6px}
+.nav h4{font-family:var(--f-display);font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:18px 0 6px}
+.nav h4:first-child{margin-top:0}
+.nav a{display:block;text-decoration:none;color:var(--ink);padding:3px 8px;border-left:2px solid transparent;border-radius:0 4px 4px 0}
+.nav a:hover{background:var(--slate-soft)}
+.nav a.w{border-left-color:var(--pvw)}.nav a.g{border-left-color:var(--pgm)}.nav a.p{border-left-color:var(--slate)}
+.nav .id{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-right:6px}
+main{min-width:0}
+.eyebrow{font-family:var(--f-display);font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:13px;color:var(--pgm)}
+h1{font-family:var(--f-display);font-weight:700;font-size:44px;line-height:1.05;margin:6px 0 10px;text-wrap:balance;letter-spacing:.01em}
+h2{font-family:var(--f-display);font-weight:600;font-size:26px;line-height:1.15;margin:56px 0 14px;padding-top:18px;border-top:1px solid var(--line);text-wrap:balance}
+h2 .num{font-family:var(--f-mono);font-size:13px;color:var(--muted);margin-right:10px;vertical-align:middle}
+h3{font-family:var(--f-display);font-weight:600;font-size:19px;margin:26px 0 8px;text-wrap:balance}
+p,li{max-width:72ch}
+.lede{font-size:16px;color:var(--muted);max-width:68ch;margin:0 0 22px}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 8px}
+.stat{border:1px solid var(--line);background:var(--panel);padding:10px 16px;border-radius:6px;min-width:120px}
+.stat b{display:block;font-family:var(--f-display);font-size:30px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted);letter-spacing:.04em}
+.callout{border-left:3px solid var(--amber);background:var(--amber-soft);padding:12px 16px;border-radius:0 6px 6px 0;margin:18px 0;max-width:80ch}
+.callout.red{border-left-color:var(--pgm);background:var(--pgm-soft)}
+.callout b{font-weight:600}
+.k{font-family:var(--f-mono);font-size:.92em;background:var(--code-bg);padding:1px 5px;border-radius:3px}
+pre.cmd{font-family:var(--f-mono);font-size:13px;background:var(--console);color:var(--console-ink);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:10px 0}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel);margin:12px 0 4px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+th{font-family:var(--f-display);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--slate-soft);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.id,td.mono{font-family:var(--f-mono);font-size:12.5px;white-space:nowrap}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line-strong);white-space:nowrap}
+.pill.w{color:var(--pvw);border-color:var(--pvw);background:var(--pvw-soft)}
+.pill.g{color:var(--pgm);border-color:var(--pgm);background:var(--pgm-soft)}
+.pill.p{color:var(--slate);background:var(--slate-soft)}
+.pill.b{color:var(--amber);border-color:var(--amber);background:var(--amber-soft)}
+/* run of show */
+.ros{background:var(--console);color:var(--console-ink);border-radius:8px;padding:18px 18px 14px;margin:18px 0 8px;overflow-x:auto}
+.ros-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:12px}
+.ros-head .t{font-family:var(--f-display);font-weight:600;letter-spacing:.12em;text-transform:uppercase;font-size:12px;color:var(--console-muted)}
+.ros-head .legend{display:flex;gap:14px;font-size:11px;color:var(--console-muted);font-family:var(--f-mono)}
+.ros-head .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.lane{display:flex;align-items:stretch;gap:8px;min-width:980px}
+.step{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:10px 12px;border-radius:5px;font-family:var(--f-display);font-weight:600;font-size:15px;line-height:1.1;min-width:96px;text-align:center}
+.step small{display:block;font-family:var(--f-mono);font-weight:400;font-size:10.5px;color:var(--console-muted);letter-spacing:.02em}
+.step.serial{background:#262B34;color:#E7EAEE;border:1px solid #3A4150}
+.step.gate{background:transparent;color:var(--console-ink);border:2px solid var(--pgm);box-shadow:inset 0 0 0 1px rgba(255,90,108,.25)}
+.step.gate small{color:var(--pgm)}
+.wave{display:grid;gap:4px;padding:6px;border-radius:6px;border:1px dashed var(--pvw);min-width:150px}
+.wave .cap{font-family:var(--f-mono);font-size:10.5px;color:var(--pvw);text-align:center;letter-spacing:.06em;padding-bottom:2px}
+.wave .s{background:#16281E;color:#DDEFE3;border:1px solid #23503A;border-radius:4px;padding:5px 8px;font-size:12.5px;font-family:var(--f-body);line-height:1.2;white-space:nowrap}
+.wave .s b{font-family:var(--f-mono);font-weight:500;font-size:11px;color:var(--pvw);margin-right:6px}
+.arrow{align-self:center;color:var(--console-muted);font-size:14px;flex:0 0 auto}
+/* gates */
+.gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:12px}
+.gate{border:1px solid var(--line);border-top:3px solid var(--pgm);background:var(--panel);border-radius:6px;padding:14px 16px}
+.gate h3{margin:0 0 6px;font-size:20px}
+.gate h3 .id{font-family:var(--f-mono);font-size:12px;color:var(--pgm);margin-right:8px;vertical-align:middle}
+.gate dl{margin:8px 0 0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13.5px}
+.gate dt{font-family:var(--f-display);font-weight:600;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:2px;white-space:nowrap}
+.gate dd{margin:0}
+.gate ul{margin:4px 0 0;padding-left:18px}
+.gate li{max-width:none}
+/* prompt library */
+.lib-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 14px}
+button{font:inherit;font-family:var(--f-body);font-size:13px;font-weight:500;color:var(--ink);background:var(--panel);border:1px solid var(--line-strong);border-radius:5px;padding:5px 11px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button.ok{border-color:var(--pvw);color:var(--pvw)}
+.card{border:1px solid var(--line);background:var(--panel);border-radius:6px;margin:10px 0}
+.card summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card summary::-webkit-details-marker{display:none}
+.card summary .chev{font-family:var(--f-mono);color:var(--muted);width:12px;flex:0 0 auto}
+.card[open] summary .chev{transform:rotate(90deg)}
+.card summary .code{font-family:var(--f-mono);font-size:12px;padding:2px 7px;border-radius:4px;border:1px solid var(--line-strong);flex:0 0 auto}
+.card.w summary .code{color:var(--pvw);border-color:var(--pvw);background:var(--pvw-soft)}
+.card.g summary .code{color:var(--pgm);border-color:var(--pgm);background:var(--pgm-soft)}
+.card.p summary .code{color:var(--slate);background:var(--slate-soft)}
+.card summary .name{font-family:var(--f-display);font-weight:600;font-size:18px;line-height:1.1}
+.card summary .status{font-family:var(--f-mono);font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line-strong);white-space:nowrap}
+.card summary .status.done{color:var(--pvw);border-color:var(--pvw);background:var(--pvw-soft)}
+.card summary .status.wait{color:var(--amber);border-color:var(--amber);background:var(--amber-soft)}
+.card summary .status.run{color:var(--pgm);border-color:var(--pgm);background:var(--pgm-soft)}
+.card summary .branch{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);margin-left:auto}
+.card .body{border-top:1px solid var(--line);padding:10px 14px 14px}
+.card .actions{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.card pre{font-family:var(--f-mono);font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;background:var(--code-bg);padding:14px 16px;border-radius:5px;margin:0;max-height:70vh;overflow:auto}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:6px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+@media (prefers-reduced-motion: reduce){.toast{transition:none}.card[open] summary .chev{transform:none}}
+ol.conf li{margin-bottom:4px}
+.note{font-size:13px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+<nav class="nav" aria-label="目录">
+  <h4>方案</h4>
+  <a href="#s0">0 一屏结论</a>
+  <a href="#s1">1 现状盘点</a>
+  <a href="#s2">2 拆分总览</a>
+  <a href="#s3">3 流程与依赖</a>
+  <a href="#s4">4 检查点</a>
+  <a href="#s5">5 会话怎么跑</a>
+  <a href="#s6">6 阻塞矩阵</a>
+  <a href="#s7">7 待拍板决策</a>
+  <h4>Prompt 库</h4>
+  <div id="navlib"></div>
+</nav>
+
+<main>
+<div class="eyebrow">Switcher · 执行版 v0.1</div>
+<h1>导播台落地方案</h1>
+<p class="lede">把三份规格（设计方案、测试标准、后续方案）和 UI 稿拆成可以直接开工的会话：拆成几块、哪些并行哪些串行、检查点在哪、怎么检查。最后一节是每个会话可以直接复制的 prompt。</p>
+{{STATS}}
+
+<h2 id="s0"><span class="num">0</span>一屏结论</h2>
+<ul>
+  <li>串行骨架：环境（你）→ P0 仓库骨架 → P1 契约冻结 → <b>G1 人工复审</b> → 【W1 五路并行】→ <b>G2 = M0</b> → 【W2 五路并行】→ <b>G3 = M1 + M2 + M3 + M5</b> → 【W3 五路并行】→ <b>G4 = M4 + M6</b> → 【W4 三路并行】→ <b>G5 = M7 发布门槛</b>。</li>
+  <li>为什么这样拆：设计方案 §12 决策 9 说先 headless 跑通核心循环再做 UI；测试标准 §9 说先做工装；契约先冻结，五路才能并行不打架。每个会话只拥有一个目录，跨目录改动由脚本机械拦截。</li>
+  <li>检查点的本质：<b>功能会话不合并。检查点会话只合并、只跑测试、只写报告、不写功能。</b> 不过就把失败项连同报告退回原会话。</li>
+</ul>
+{{STATUS}}
+
+<div class="ros">
+  <div class="ros-head"><span class="t">Run of show · 串行闸门与并行波次</span><span class="legend"><span><i style="background:#262B34;border:1px solid #3A4150"></i>串行</span><span><i style="border:2px solid var(--pgm)"></i>检查点</span><span><i style="background:#16281E;border:1px solid var(--pvw)"></i>并行波次</span></span></div>
+  <div class="lane">
+    <div class="step serial">P0-H<small>环境 · 你做</small></div><span class="arrow">→</span>
+    <div class="step serial">P0<small>仓库骨架</small></div><span class="arrow">→</span>
+    <div class="step serial">P1<small>契约冻结</small></div><span class="arrow">→</span>
+    <div class="step gate">G1<small>人工复审</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">W1 · 五路并行</div><div class="s"><b>A</b>测试工装</div><div class="s"><b>B</b>核心逻辑</div><div class="s"><b>C</b>合成引擎</div><div class="s"><b>D</b>音频引擎</div><div class="s"><b>E</b>编码录制</div></div><span class="arrow">→</span>
+    <div class="step gate">G2<small>M0 核心循环</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">W2 · 五路并行</div><div class="s"><b>A</b>输入一期</div><div class="s"><b>B</b>显示与主界面</div><div class="s"><b>C</b>控制一期</div><div class="s"><b>D</b>推流与 NDI 发送</div><div class="s"><b>E</b>音频集成</div></div><span class="arrow">→</span>
+    <div class="step gate">G3<small>M1 M2 M3 M5</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">W3 · 五路并行</div><div class="s"><b>A</b>输入二期</div><div class="s"><b>B</b>合成二期</div><div class="s"><b>C</b>输出二期</div><div class="s"><b>D</b>控制二期</div><div class="s"><b>E</b>界面二期</div></div><span class="arrow">→</span>
+    <div class="step gate">G4<small>M4 M6</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">W4 · 三路并行</div><div class="s"><b>A</b>长稳与性能</div><div class="s"><b>B</b>发布工程</div><div class="s"><b>C</b>文档样例</div></div><span class="arrow">→</span>
+    <div class="step gate">G5<small>发布门槛</small></div>
+  </div>
+</div>
+<p class="note">红框是闸门：进不去下一波。绿框里的会话各占一个目录，同时开。</p>
+
+<h2 id="s1"><span class="num">1</span>现状盘点</h2>
+<h3>1.1 读了什么</h3>
+<div class="tbl"><table>
+<tr><th>文件</th><th>内容</th><th>用在哪</th></tr>
+<tr><td>导播台设计方案.md</td><td>架构、线程模型、数据模型、选型、里程碑 M0–M7</td><td>拆分的骨架，每个 prompt 的"先读"</td></tr>
+<tr><td>导播台测试标准.md</td><td>V / A / E / L / S / C 六类指标、工装、测法、阈值、报告模板</td><td>每个会话的验收 ID，检查点的通过标准</td></tr>
+<tr><td>导播台后续方案.md</td><td>第二版功能</td><td>本期只要求架构留位置：Frame 像素格式含 UYVY、Renderer 留转场接口、总线枚举可扩</td></tr>
+<tr><td>Vmix macOS风格界面设计.zip</td><td>Claude Design 画布（React 组件）+ 三张 vMix 截图（主界面、Input Select、Recording Setup）</td><td>W2-B / W3-E 的布局参考，只借布局不借品牌</td></tr>
+</table></div>
+<h3>1.2 这台机器</h3>
+<p>Apple M5 Max / 128 GB / macOS 26.4。缺 Xcode、Command Line Tools、Homebrew、ffmpeg、MediaMTX、NDI SDK、DeckLink SDK，硬件只有内置摄像头。这台机器远强于规格里的目标机（M1 Air 8 GB）：性能阈值在这里过了不代表在 Air 上过，发布前要借一台 Air 跑 L5。</p>
+<h3>1.3 规格与 UI 稿的冲突和缺口</h3>
+<p class="note">prompt 里已按默认值处理，第 7 节等你拍板。</p>
+<ol class="conf">
+  <li><b>品牌。</b>UI 稿标题写着 "vMix Pro" / "vMix for Mac"，设计方案 §0 明确产品名不能带 vMix。→ 只借布局，文案全换。</li>
+  <li><b>转场集合。</b>稿子是 Cut / Fade / Merge / Wipe / Fly / Quick Play，规格是 Cut / Fade / Wipe / Zoom / Stinger。→ 按规格。</li>
+  <li><b>Tally 颜色。</b>稿子用 vMix 的绿 = PGM、橙 = PVW。→ 改用广播惯例红 = PGM、绿 = PVW。</li>
+  <li><b>测试图案帧号位数。</b>测试标准写 16 块 12 位，12 位 68 秒就回绕，8 小时长稳会歧义。→ 32 块 28 位 + 4 位校验，这是 P1 里唯一允许偏离测试标准的地方。</li>
+  <li><b>输入类型与录制格式列表。</b>稿子里是 vMix Windows 版的（DVD、PowerPoint、AVI、WMV）。→ 按规格 §6 和 §8。</li>
+  <li><b>HaishinKit 接哪一层。</b>规格自己说"做到这步再验证"。→ W2-D 第一步就是 spike，三选一写结论。</li>
+  <li><b>vMix 兼容层法律灰区。</b>→ 独立 target、默认关、文档顶部带提示。</li>
+  <li><b>虚拟摄像头与公证</b>需要付费 Apple Developer 账号，W3 之前要有。</li>
+  <li><b>硬件缺口</b>导致一批测试只能标 BLOCKED，见第 6 节。</li>
+</ol>
+
+<h2 id="s2"><span class="num">2</span>拆分总览</h2>
+<p>体量：S 半天内、M 一到两天、L 三天以上，指 Claude 会话的工作量，不是日历。"只准动"就是 docs/OWNERSHIP.md 的内容，check-ownership 脚本按它拦截。</p>
+<div class="tbl"><table>
+<tr><th>编号</th><th>会话</th><th>只准动</th><th>依赖</th><th>并行组</th><th>验收 ID</th><th>体量</th></tr>
+<tr><td class="id">P0-H</td><td>环境清单（你做）</td><td>—</td><td>—</td><td><span class="pill p">串行</span></td><td>第 4 节 G0</td><td>—</td></tr>
+<tr><td class="id">P0</td><td>仓库初始化</td><td>根、docs/、scripts/、各 Package.swift、project.yml、Makefile</td><td>P0-H</td><td><span class="pill p">串行</span></td><td class="mono">make gen build test lint</td><td>S</td></tr>
+<tr><td class="id">P1</td><td>契约冻结</td><td>SwitcherContracts、docs/CONTRACTS.md</td><td>P0</td><td><span class="pill p">串行</span></td><td>契约单元测试 + G1 复审</td><td>M</td></tr>
+<tr><td class="id">W1-A</td><td>测试工装</td><td>SwitcherTestKit、Tools/frameprobe</td><td>P1</td><td><span class="pill w">W1</span></td><td>图案往返、click 检测、合成源自测</td><td>M</td></tr>
+<tr><td class="id">W1-B</td><td>核心逻辑</td><td>SwitcherCore/SwitcherEngine</td><td>P1</td><td><span class="pill w">W1</span></td><td class="mono">V2 V3 V4 V5 C4</td><td>M</td></tr>
+<tr><td class="id">W1-C</td><td>合成引擎</td><td>SwitcherCore/SwitcherRender、References</td><td>P1</td><td><span class="pill w">W1</span></td><td class="mono">V1 V8 V9 零分配 显示解耦</td><td>L</td></tr>
+<tr><td class="id">W1-D</td><td>音频引擎</td><td>SwitcherAudio</td><td>P1</td><td><span class="pill w">W1</span></td><td class="mono">A1 A6 A7 重采样对齐</td><td>L</td></tr>
+<tr><td class="id">W1-E</td><td>编码录制</td><td>SwitcherOutputs</td><td>P1</td><td><span class="pill w">W1</span></td><td class="mono">E1 E2 E3 E5 E6</td><td>M</td></tr>
+<tr><td class="id">G2</td><td>M0 集成</td><td>Tools/headless、scripts、scenarios、reports、baselines</td><td>W1 全部</td><td><span class="pill g">闸门</span></td><td class="mono">V1–V5（10 分钟 + 60 分钟）</td><td>M</td></tr>
+<tr><td class="id">W2-A</td><td>输入一期</td><td>SwitcherInputs（除 DeckLink / NDI）</td><td>G2</td><td><span class="pill w">W2</span></td><td class="mono">L1 S5 S6</td><td>M</td></tr>
+<tr><td class="id">W2-B</td><td>显示与主界面</td><td>App、MetalDisplayView</td><td>G2</td><td><span class="pill w">W2</span></td><td>UI 冒烟、显示解耦、状态行一致</td><td>L</td></tr>
+<tr><td class="id">W2-C</td><td>控制一期</td><td>SwitcherControl（除 VMixCompat）</td><td>G2，可在 W1-B 合并后提前</td><td><span class="pill w">W2</span></td><td class="mono">C1 C2 C3 C4</td><td>M</td></tr>
+<tr><td class="id">W2-D</td><td>推流与 NDI 发送</td><td>SwitcherOutputs/Streaming、NDISend、netem 脚本</td><td>G2</td><td><span class="pill w">W2</span></td><td class="mono">E7 E8 E9 + E2 E3 复跑</td><td>L</td></tr>
+<tr><td class="id">W2-E</td><td>音频集成</td><td>SwitcherEngine/Audio*、SwitcherAudio/Integration</td><td>G2</td><td><span class="pill w">W2</span></td><td class="mono">A1 A2 A3 A4 A5 AFV</td><td>M</td></tr>
+<tr><td class="id">G3</td><td>M1 M2 M3 M5 集成</td><td>同 G2 + App 胶水</td><td>W2 全部</td><td><span class="pill g">闸门</span></td><td class="mono">V6 V7 A1–A7 E1–E9 C1–C4 S5</td><td>M</td></tr>
+<tr><td class="id">W3-A</td><td>输入二期</td><td>SwitcherInputs/DeckLink、NDI</td><td>G3</td><td><span class="pill w">W3</span></td><td>NDI 回环 L1、DeckLink 单元</td><td>M</td></tr>
+<tr><td class="id">W3-B</td><td>合成二期</td><td>SwitcherRender、References</td><td>G3，可在 G2 后提前</td><td><span class="pill w">W3</span></td><td class="mono">V6 V7 V8 扩展 V1 回归</td><td>L</td></tr>
+<tr><td class="id">W3-C</td><td>输出二期</td><td>Outputs/External、VirtualCamera、ISO、CameraExtension</td><td>G3</td><td><span class="pill w">W3</span></td><td class="mono">A4 S7 虚拟摄像头 L1</td><td>L</td></tr>
+<tr><td class="id">W3-D</td><td>控制二期</td><td>Control/VMixCompat、Tally、streamdeck-plugin</td><td>G3，可在 W2-C 合并后提前</td><td><span class="pill w">W3</span></td><td class="mono">C5</td><td>M</td></tr>
+<tr><td class="id">W3-E</td><td>界面二期</td><td>App</td><td>G3</td><td><span class="pill w">W3</span></td><td>UI 表驱动、Show 往返</td><td>L</td></tr>
+<tr><td class="id">G4</td><td>M4 M6 集成</td><td>同 G3</td><td>W3 全部</td><td><span class="pill g">闸门</span></td><td class="mono">V1–V9 A1–A4 E1–E3 C1–C5</td><td>M</td></tr>
+<tr><td class="id">W4-A</td><td>长稳与性能</td><td>scripts/soak、perf、baselines</td><td>G4</td><td><span class="pill w">W4</span></td><td class="mono">S1 S2 S3 A3（8 小时）</td><td>M + 8 小时挂机</td></tr>
+<tr><td class="id">W4-B</td><td>发布工程</td><td>scripts/release、.github、project.yml</td><td>G4</td><td><span class="pill w">W4</span></td><td>干净账户安装、Sparkle 更新</td><td>M</td></tr>
+<tr><td class="id">W4-C</td><td>文档样例</td><td>docs（除 spec / plan）、Samples、README</td><td>G4</td><td><span class="pill w">W4</span></td><td>命令可执行、样例可打开</td><td>M</td></tr>
+<tr><td class="id">G5</td><td>发布门槛</td><td>reports、KNOWN_ISSUES、版本号</td><td>W4 全部</td><td><span class="pill g">闸门</span></td><td>测试标准 §6 五条</td><td>S</td></tr>
+</table></div>
+<h3>2.1 可以提前开的会话</h3>
+<p>波次是安全排法。有余力时这三处可以提前，不会打架：W2-C 控制层只依赖契约和状态机，W1-B 一合并就能开；W3-B 合成二期只依赖 W1-C，G2 一过就能开，和 W2 并行；W3-D 只依赖 W2-C，W2-C 合并即可开。</p>
+<p>真设备（内置摄像头、扬声器）同一时刻只能给一个会话用：W2-A 和 W2-E 的真设备测试要错开跑。</p>
+
+<h2 id="s3"><span class="num">3</span>流程与依赖</h2>
+<p>上面的 run of show 是主线。逐个会话的依赖见第 2 节"依赖"列；三处可提前的会话见 2.1。规则只有两条：闸门不过不进下一波；同一波内的会话互不依赖。</p>
+
+<h2 id="s4"><span class="num">4</span>检查点：在哪、怎么检查</h2>
+<p>检查点会话的规矩：只合并、只跑、只写报告。单个包超过 50 行的改动不许在检查点做，写成 reports/issues/ 退回原会话。每个检查点固定产出 reports/GN.md（测试标准 §7 模板）和 baselines/gN-机器.json。你每个检查点的人工时间控制在 15–30 分钟。</p>
+<div class="gates">
+  <div class="gate"><h3><span class="id">G0</span>环境（你自己查）</h3>
+    <pre class="cmd">xcodebuild -version &amp;&amp; swift --version &amp;&amp; ffprobe -version | head -1 &amp;&amp; mediamtx --version &amp;&amp; xcodegen --version &amp;&amp; ls "/Library/NDI SDK for Apple" &amp;&amp; xctrace list templates | grep -i metal</pre>
+    <p class="note" style="margin:0">全部有输出才算过。NDI 那行到 W2 前补上即可。</p></div>
+  <div class="gate"><h3><span class="id">G1</span>契约复审（人工）</h3>
+    <dl><dt>自动</dt><dd>SwitcherContractsTests 全绿；make lint 绿。</dd>
+    <dt>人工</dt><dd>读 docs/CONTRACTS.md，逐条对设计方案 §1.1 的词和 §4 的结构；Stats 字段名与测试标准 §7 逐字一致；Command 覆盖 §9.1 每一条；32 块帧号的理由写明了。</dd>
+    <dt>不过</dt><dd>退回 P1 改，不开 W1。W1 期间任何契约改动走 docs/contract-changes/ 提案，由你批。</dd></dl></div>
+  <div class="gate"><h3><span class="id">G2</span>M0 核心循环</h3>
+    <dl><dt>入口</dt><dd>w1-* 五个分支的报告都在，各自测试全绿。</dd>
+    <dt>自动</dt><dd><span class="k">make gate2</span>（10 分钟）+ <span class="k">make gate2-1h</span>（你触发）。通过：V1 本机参考线 avg ≤ 2 ms、V2 = 0、V3 p99 ≤ 4 ms、V4 设计外 = 0、V5 ≤ 2 帧。</dd>
+    <dt>人工</dt><dd>QuickTime 打开 out.mov，帧号块在走、色块随 Cut 变、闪光每秒一次；tail stats.jsonl 每秒一行字段齐；--preview 窗口与文件一致；活动监视器 10 分钟内存平。</dd>
+    <dt>不过</dt><dd>V1 / 零分配 → W1-C；V2 V3 V5 → W1-B；V4 → W1-B 或 W1-A；文件问题 → W1-E。</dd></dl></div>
+  <div class="gate"><h3><span class="id">G3</span>M1 切换 + M2 音频 + M3 输出 + M5 控制</h3>
+    <dl><dt>自动</dt><dd><span class="k">make gate3</span>：V1–V7、A1–A4、E1–E3、C1–C4；E7–E9 需要你跑 sudo 的 netem 脚本。硬性：V6 无混合帧、A1 = 0、A7 = 0、E7 其他路 0 丢帧、C3 = 0、C4 = 0。</dd>
+    <dt>人工</dt><dd>docs/checklists/G3.md：开 App、键盘切换、T-bar、录 2 分钟拍手对音画、推本地 MediaMTX 并断网恢复、curl 状态与画面一致、USB 摄像头拔插。</dd>
+    <dt>不过</dt><dd>按指标退回 W2-A / B / C / D / E。</dd></dl></div>
+  <div class="gate"><h3><span class="id">G4</span>M4 输入 + M6 叠加与其它输出</h3>
+    <dl><dt>自动</dt><dd><span class="k">make gate4</span>：V1–V9、A1–A4、E1–E3、C1–C5、NDI 回环 L1、三种 SDK 编译矩阵。</dd>
+    <dt>人工</dt><dd>docs/checklists/G4.md：每种输入类型、四路叠加、抠像、三种新转场、多画面到外接屏、虚拟摄像头、Companion 六项、ISO 对齐。</dd>
+    <dt>产出</dt><dd>必须带 BLOCKED 清单及解锁条件。</dd></dl></div>
+  <div class="gate"><h3><span class="id">G5</span>发布门槛（测试标准 §6）</h3>
+    <dl><dt>五条</dt><dd>L0–L2 全过；L3 现有设备上无 S0 / S1；L4 8 小时通过（硬性）；L5 无退步；已知问题列表更新。</dd>
+    <dt>另加</dt><dd>公证包 spctl 通过；Sparkle appcast 可用。</dd>
+    <dt>不过</dt><dd>任何硬性项不过就不发，列出阻塞项和归属会话。</dd></dl></div>
+</div>
+
+<h2 id="s5"><span class="num">5</span>会话怎么跑</h2>
+<ol>
+  <li><b>一个会话 = 一个 prompt。</b>新开 Claude Code 会话，用下面卡片上的"复制 前言 + 本段"，粘贴，开头加一句"请在独立的 git worktree 里工作"。</li>
+  <li><b>并行。</b>同一波次的会话各开一个窗口同时跑。它们只动各自目录，check-ownership 会拦越界。</li>
+  <li><b>不 push、不 merge。</b>功能会话只在自己分支提交。检查点会话按 prompt 里的顺序合并。</li>
+  <li><b>报告。</b>每个会话结束必有 reports/分支名.md。你只看三块：测试表、BLOCKED 项、契约疑问。</li>
+  <li><b>契约变更。</b>任何会话提出 docs/contract-changes/*.md，你批了之后由契约会话改，其他会话 rebase。</li>
+  <li><b>推理档位。</b>P1、W1-B、W1-C、W1-D 用最高档位；界面和文档会话可以低一档。</li>
+  <li><b>真设备互斥。</b>W2-A 和 W2-E 用摄像头 / 声卡的测试错开。</li>
+</ol>
+
+<h2 id="s6"><span class="num">6</span>硬件与 SDK 阻塞矩阵</h2>
+<div class="tbl"><table>
+<tr><th>缺什么</th><th>阻塞的测试</th><th>哪个会话</th><th>解锁方式</th></tr>
+<tr><td>Xcode + CLT</td><td>一切</td><td class="id">P0 起</td><td>App Store 装 Xcode 26，xcode-select</td></tr>
+<tr><td>Homebrew + ffmpeg / mediamtx / xcodegen</td><td class="mono">E2 E3 E4 E5 E7–E9</td><td class="id">P0 W1-E W2-D</td><td>brew install</td></tr>
+<tr><td>NDI SDK</td><td>NDI 发送、NDI 接收、NDI 回环 L1</td><td class="id">W2-D W3-A</td><td>ndi.video 注册下载</td></tr>
+<tr><td>DeckLink SDK</td><td>DeckLink target 编译</td><td class="id">W3-A</td><td>Blackmagic 官网下载到 ~/SDKs/DeckLink</td></tr>
+<tr><td>DeckLink 硬件</td><td class="mono">DeckLink 的 L1 L2 S5</td><td class="id">W3-A</td><td>Mini Recorder 或 UltraStudio</td></tr>
+<tr><td>UVC 采集卡 + USB 摄像头</td><td class="mono">S5 热插拔、UVC 的 L1 L2</td><td class="id">W2-A</td><td>Cam Link 4K 一类 + 任意 USB 摄像头</td></tr>
+<tr><td>USB 音频接口 + 回环线</td><td class="mono">A5 监听延迟</td><td class="id">W2-E</td><td>接口 + 3.5 mm 线</td></tr>
+<tr><td>外接显示器</td><td>外部显示、L2 秒表法、120 / 60 Hz 解耦</td><td class="id">W2-B W3-C</td><td>任意 HDMI 显示器</td></tr>
+<tr><td>HDMI 采集卡（回环）</td><td>L2 回环法、显示路径验证</td><td class="id">W3-C</td><td>与 UVC 采集卡可以是同一块</td></tr>
+<tr><td>Apple Developer Program</td><td>虚拟摄像头激活、公证、Sparkle 签名</td><td class="id">W3-C W4-B</td><td>付费账号 + Team ID</td></tr>
+<tr><td>Companion</td><td class="mono">C5</td><td class="id">W3-D</td><td>免费安装</td></tr>
+<tr><td>M1 Air 8 GB</td><td class="mono">S4 热降频、L5 真实基线</td><td class="id">W4-A</td><td>借一台</td></tr>
+</table></div>
+
+<h2 id="s7"><span class="num">7</span>待你拍板的决策</h2>
+<p class="note">prompt 里已按默认值写。改了哪条，就改对应会话的 prompt。</p>
+<div class="tbl"><table>
+<tr><th>#</th><th>决策</th><th>默认值</th><th>改的话影响</th></tr>
+<tr><td class="id">1</td><td>产品名</td><td>代号 Switcher，UI 不出现 vMix</td><td class="id">P0 lint、W2-B 文案</td></tr>
+<tr><td class="id">2</td><td>转场集合</td><td>Cut / Fade / Wipe / Zoom / Stinger，不做 Merge / Fly / Quick Play</td><td class="id">P1 枚举、W2-B 按钮</td></tr>
+<tr><td class="id">3</td><td>Tally 颜色</td><td>PGM 红 / PVW 绿</td><td class="id">W2-B</td></tr>
+<tr><td class="id">4</td><td>帧号块数</td><td>32 块 28 位</td><td class="id">P1、W1-A</td></tr>
+<tr><td class="id">5</td><td>仓库根</td><td>直接在 /Users/plus/plusmix git init，规格移到 docs/spec/</td><td class="id">P0</td></tr>
+<tr><td class="id">6</td><td>HTTP / WS 库</td><td>Hummingbird 2</td><td class="id">W2-C</td></tr>
+<tr><td class="id">7</td><td>工程生成</td><td>XcodeGen</td><td class="id">P0</td></tr>
+<tr><td class="id">8</td><td>部署目标</td><td>macOS 15（NSView.displayLink 需要 14+，测试矩阵要当前和上一个大版本）</td><td class="id">P0</td></tr>
+<tr><td class="id">9</td><td>推流层</td><td>HaishinKit 能接编码帧就用；否则 libavformat 动态链接</td><td class="id">W2-D</td></tr>
+<tr><td class="id">10</td><td>vMix 兼容层</td><td>做，独立 target，默认关，发布前问律师</td><td class="id">W3-D</td></tr>
+<tr><td class="id">11</td><td>Stream Deck</td><td>官方插件和 Companion 模块二选一做完整</td><td class="id">W3-D</td></tr>
+</table></div>
+
+<h2 id="s8"><span class="num">8</span>Prompt 库</h2>
+<p>每个会话一张卡。"复制 前言 + 本段"会把 00 通用前言拼在前面，直接粘进新会话即可。单独文件在仓库的 docs/plan/prompts/ 目录；本页由 <span class="k">scripts/gen-prompt-page.py</span> 从那里生成，卡片上的状态标签按仓库里分支的状态自动算（{{GENERATED}}）。</p>
+<div class="lib-tools"><button id="openAll">展开全部</button><button id="closeAll">收起全部</button><span class="note">序号是执行顺序；同一个十位数的是同一波次（4x 是 G3 之后的契约落地与续做）。</span></div>
+<div id="lib">
+{{LIB}}
+</div>
+</main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite">已复制</div>
+<script>
+(function(){
+  var toast=document.getElementById('toast'),tid;
+  function say(t){toast.textContent=t;toast.classList.add('show');clearTimeout(tid);tid=setTimeout(function(){toast.classList.remove('show')},1600)}
+  function textOf(id){var el=document.getElementById(id);return el?el.textContent:''}
+  document.querySelectorAll('button.copy').forEach(function(b){
+    b.addEventListener('click',function(){
+      var body=textOf(b.dataset.pre),txt=body;
+      if(b.dataset.pre2&&b.dataset.pre!=='pre-00'){txt=textOf('pre-00')+'\n\n---\n\n'+body}
+      if(b.dataset.pre==='pre-01'){txt=body}
+      function ok(){say('已复制 '+txt.length+' 字');b.classList.add('ok');setTimeout(function(){b.classList.remove('ok')},1600)}
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(ok,function(){fallback()})}else{fallback()}
+      function fallback(){var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');ok()}catch(e){say('复制失败，请手动选中')}document.body.removeChild(ta)}
+    });
+  });
+  document.getElementById('openAll').addEventListener('click',function(){document.querySelectorAll('details.card').forEach(function(d){d.open=true})});
+  document.getElementById('closeAll').addEventListener('click',function(){document.querySelectorAll('details.card').forEach(function(d){d.open=false})});
+  var nav=document.getElementById('navlib'),h='';
+  document.querySelectorAll('details.card').forEach(function(d){
+    var code=d.querySelector('.code').textContent.split('·')[1].trim(),name=d.querySelector('.name').textContent,cls=d.classList.contains('w')?'w':(d.classList.contains('g')?'g':'p');
+    h+='<a class="'+cls+'" href="#'+d.id+'"><span class="id">'+code+'</span>'+name+'</a>';
+  });
+  nav.innerHTML=h;
+  nav.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){var d=document.querySelector(a.getAttribute('href'));if(d)d.open=true})});
+})();
+</script>
+
+</body></html>
