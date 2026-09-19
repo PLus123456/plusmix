@@ -1,6 +1,6 @@
 // 多画面布局（设计方案 §5 步骤 6；W3-B 交付 4）。
 //
-// 布局从哪来（提案 009 的过渡做法）：状态里第一个 kind = multiview 的输出的 `settings.extra["layout"]`：
+// 布局从哪来（提案 010 的过渡做法）：状态里第一个 kind = multiview 的输出的 `settings.extra["layout"]`：
 //   - 字符串 = 预设名：pgmPvw+grid（默认：上 PVW / PGM、下按路数 4×2 / 6×3 / 8×4，= W1-C 的几何）、pgmPvw+4x2、pgmPvw+2x2、3x3、4x4
 //   - 对象 {"preset": "3x3", "safeArea": true, "meters": true} = 预设 + 装饰开关
 //   - 对象 {"cells": [{"source": "program" | "preview" | 3, "rect": {x, y, width, height}}], "safeArea": …, "meters": …} = 自定义

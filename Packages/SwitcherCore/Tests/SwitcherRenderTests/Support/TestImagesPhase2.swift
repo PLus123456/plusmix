@@ -160,7 +160,7 @@ extension ReferenceStates {
         return s
     }
 
-    /// 画中画边框：效果格 "border"（提案 009 过渡做法）。
+    /// 画中画边框：效果格 "border"（提案 010 过渡做法）。
     static func borderEffect(width: Double = 0.006, color: (Int, Int, Int) = (255, 255, 255)) -> EffectSlot {
         EffectSlot(id: "border", enabled: true, params: ["width": .number(width), "color": .array([.number(Double(color.0)), .number(Double(color.1)), .number(Double(color.2))])])
     }
@@ -182,7 +182,7 @@ extension ReferenceStates {
         return s
     }
 
-    /// 抠像参数（提案 008 的口径；绿幕图的光照 / 噪声在容差内）。
+    /// 抠像参数（提案 009 的口径；绿幕图的光照 / 噪声在容差内）。
     static func keyer(enabled: Bool = true, tolerance: Double = 0.15, softness: Double = 0.1, spill: Double = 0.5) -> KeyerSettings {
         KeyerSettings(enabled: enabled, keyColor: TestImages.greenScreenKey, tolerance: tolerance, softness: softness, spillSuppression: spill)
     }
@@ -233,7 +233,7 @@ extension ReferenceStates {
         return s
     }
 
-    /// 多画面布局：把 layout JSON 放进 kind = multiview 的输出的 extra["layout"]（提案 009 过渡做法）。
+    /// 多画面布局：把 layout JSON 放进 kind = multiview 的输出的 extra["layout"]（提案 010 过渡做法）。
     static func withMultiviewLayout(_ state: MixerState, _ layout: JSONValue) -> MixerState {
         var s = state
         s.outputs = [OutputState(number: 9, kind: .multiview, name: "多画面", enabled: true,

@@ -25,7 +25,7 @@ public struct MetalRendererOptions: Sendable {
     public var outputRingSize: Int = 8
     /// 是否画多画面（关掉省 GPU；测试基线用）。
     public var multiview: Bool = true
-    /// PVW 也画叠加（W3-B；提案 009 过渡做法：等每通道的 previewOn 落地前一刀切）。默认关，PVW = 纯输入。
+    /// PVW 也画叠加（W3-B；提案 010 过渡做法：等每通道的 previewOn 落地前一刀切）。默认关，PVW = 纯输入。
     public var overlaysInPreview: Bool = false
     /// 把 PVW 转成 NV12 填进 RenderedFrame.preview（NDI / 外部输出要 PVW 时开；多一趟 compute 和一个缓冲环）。默认关。
     public var previewOutput: Bool = false

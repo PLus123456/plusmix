@@ -1,4 +1,4 @@
-// 抠像（设计方案 §5、提案 008 的口径；W3-B 交付 2）：绿幕合成图 → 与已知 alpha 的掩膜 IoU ≥ 0.95、溢色抑制、柔化、关掉不动像素。
+// 抠像（设计方案 §5、提案 009 的口径；W3-B 交付 2）：绿幕合成图 → 与已知 alpha 的掩膜 IoU ≥ 0.95、溢色抑制、柔化、关掉不动像素。
 import CoreGraphics
 import XCTest
 import SwitcherContracts

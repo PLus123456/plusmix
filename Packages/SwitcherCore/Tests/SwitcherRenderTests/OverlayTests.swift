@@ -58,7 +58,7 @@ final class OverlayTests: XCTestCase {
         }
     }
 
-    /// 画中画边框：效果格 "border"（提案 009 过渡做法）→ rect 外扩一圈白；没有效果格就没有边框。
+    /// 画中画边框：效果格 "border"（提案 010 过渡做法）→ rect 外扩一圈白；没有效果格就没有边框。
     func testV8_pipBorderDrawnFromEffectSlot() throws {
         let s = ReferenceStates.pipBorder()
         let bm = try render(s)

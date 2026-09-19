@@ -4,7 +4,7 @@
 // - 工作色彩空间 BGRA8 gamma 域（决策 6），所有混合在 gamma 域直接做。
 // - 输入纹理三种：NV12（Y 平面 r8 + CbCr 平面 rg8）、BGRA（bgra8，alpha 预乘）、UYVY（bgrg422，硬件解包后给 (Cr, Y, Cb)）。
 //   YCbCr → RGB 在片段着色器里做，BT.709 / BT.601 / BT.2020 矩阵，limited / full 两种范围。
-// - 抠像（提案 008 的口径）：转成 RGB 之后在 BT.709 的 (Cb, Cr) 平面算到键色的距离，半径内全透、柔化带内 smoothstep、
+// - 抠像（提案 009 的口径）：转成 RGB 之后在 BT.709 的 (Cb, Cr) 平面算到键色的距离，半径内全透、柔化带内 smoothstep、
 //   留下的像素做溢色抑制（减掉色度在键色方向上的正分量，亮度不变），输出预乘 alpha。
 // - Wipe（W3-B）：新画面整幅画上来，片段按自己在目标里的位置算遮罩 alpha（硬边 = step，软边 = smoothstep）。
 // - 输出 RGB → NV12（BT.709 limited）由 compute kernel 写进 IOSurface 平面（以 r8Uint / rg8Uint 视图写，整数精确）。
@@ -115,7 +115,7 @@ static inline float4 fetch(float2 uv, constant DrawUniforms &u,
     }
 }
 
-// MARK: - 抠像（提案 008）：BT.709 色度平面上的距离；输入 / 输出都是预乘 RGBA
+// MARK: - 抠像（提案 009）：BT.709 色度平面上的距离；输入 / 输出都是预乘 RGBA
 
 static inline float4 applyKey(float4 c, constant DrawUniforms &u) {
     float a0 = c.a;

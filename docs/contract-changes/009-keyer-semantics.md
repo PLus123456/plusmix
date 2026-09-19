@@ -1,4 +1,4 @@
-# 008 KeyerSettings 四个参数的口径（只改文档注释，不改类型 / JSON）
+# 009 KeyerSettings 四个参数的口径（只改文档注释，不改类型 / JSON）
 
 提出会话 / 分支：W3-B / w3-compositor2（2026-09-19）
 状态：**待批**（不改任何公开签名和 JSON 键；批了由契约会话把下面的口径抄进 `Input.swift` 的 `KeyerSettings` 注释和 CONTRACTS.md §2.4。渲染器已按这个口径实现，不等批。）

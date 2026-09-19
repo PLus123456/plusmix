@@ -16,7 +16,7 @@ enum CompositorPasses {
         /// 多画面布局（快照 sequence 变了才重新解析）。
         let layout: MultiviewLayoutTable
         let frameIndex: UInt64
-        /// PVW 也画叠加（提案 009 过渡做法）。
+        /// PVW 也画叠加（提案 010 过渡做法）。
         var overlaysInPreview = false
     }
 
@@ -545,7 +545,7 @@ enum OverlayRenderer {
 
 /// 效果格的标识（契约 EffectSlot.id；视频效果由合成会话定义）。
 enum EffectIDs {
-    /// 画中画边框：params {"width": 占节目高的比例（默认 0.006，钳 0–0.1）, "color": [r, g, b] 0–255（默认白）}。提案 009 的过渡做法。
+    /// 画中画边框：params {"width": 占节目高的比例（默认 0.006，钳 0–0.1）, "color": [r, g, b] 0–255（默认白）}。提案 010 的过渡做法。
     static let border = "border"
 }
 
@@ -584,7 +584,7 @@ enum OverlayDecoration {
     }
 }
 
-/// 抠像参数 → uniforms（提案 008 的口径）。
+/// 抠像参数 → uniforms（提案 009 的口径）。
 enum Keyer {
     @inline(__always)
     static func fill(_ u: inout DrawUniforms, _ k: KeyerSettings) {

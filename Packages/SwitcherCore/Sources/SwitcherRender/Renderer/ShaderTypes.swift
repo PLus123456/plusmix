@@ -28,7 +28,7 @@ struct DrawUniforms {
     var matrix: Int32 = 0
     /// 标签纹理数组切片。
     var slice: Int32 = 0
-    /// 1 = 抠像（提案 008 的口径）。
+    /// 1 = 抠像（提案 009 的口径）。
     var keyer: Int32 = 0
     /// Wipe 遮罩：0 无，1 左→右，2 右→左，3 上→下，4 下→上，5 对角（WipeMode）。
     var wipeMode: Int32 = 0
