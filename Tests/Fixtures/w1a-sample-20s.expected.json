@@ -3,7 +3,21 @@
     "channels" : 1,
     "sampleCount" : 960000,
     "sampleRate" : 48000,
-    "startSeconds" : 0
+    "startSeconds" : 0,
+    "timeline" : {
+      "applied" : "avfoundation",
+      "avfoundationStartSeconds" : 0,
+      "codec" : "aac",
+      "containerOffsetSeconds" : 0,
+      "correctionSeconds" : 0,
+      "editListMediaTime" : 2112,
+      "ffmpegCorrectionSeconds" : 0,
+      "hasEditList" : true,
+      "isFragmented" : false,
+      "mode" : "auto",
+      "primingAddedBackSamples" : 0,
+      "primingTrimmedSamples" : 2112
+    }
   },
   "av" : {
     "clickCount" : 20,
@@ -12,151 +26,203 @@
     "matchedCount" : 20,
     "maxAbsMs" : 0,
     "meanMs" : 0,
+    "offSecondCount" : 0,
+    "onSecond" : {
+      "count" : 20,
+      "driftOverSpanMs" : 0,
+      "maxAbsMs" : 0,
+      "meanMs" : 0,
+      "slopeMsPerSecond" : 0,
+      "spanSeconds" : 19,
+      "stdMs" : 0
+    },
     "pairs" : [
       {
         "clickTimeSeconds" : 0,
         "flashIndex" : 0,
         "flashTimeSeconds" : 0,
         "genTimeMs" : 1000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 0
       },
       {
         "clickTimeSeconds" : 1,
         "flashIndex" : 60,
         "flashTimeSeconds" : 1,
         "genTimeMs" : 2000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 60
       },
       {
         "clickTimeSeconds" : 2,
         "flashIndex" : 120,
         "flashTimeSeconds" : 2,
         "genTimeMs" : 3000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 120
       },
       {
         "clickTimeSeconds" : 3,
         "flashIndex" : 180,
         "flashTimeSeconds" : 3,
         "genTimeMs" : 4000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 180
       },
       {
         "clickTimeSeconds" : 4,
         "flashIndex" : 240,
         "flashTimeSeconds" : 4,
         "genTimeMs" : 5000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 240
       },
       {
         "clickTimeSeconds" : 5,
         "flashIndex" : 300,
         "flashTimeSeconds" : 5,
         "genTimeMs" : 6000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 300
       },
       {
         "clickTimeSeconds" : 6,
         "flashIndex" : 360,
         "flashTimeSeconds" : 6,
         "genTimeMs" : 7000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 360
       },
       {
         "clickTimeSeconds" : 7,
         "flashIndex" : 420,
         "flashTimeSeconds" : 7,
         "genTimeMs" : 8000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 420
       },
       {
         "clickTimeSeconds" : 8,
         "flashIndex" : 480,
         "flashTimeSeconds" : 8,
         "genTimeMs" : 9000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 480
       },
       {
         "clickTimeSeconds" : 9,
         "flashIndex" : 540,
         "flashTimeSeconds" : 9,
         "genTimeMs" : 10000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 540
       },
       {
         "clickTimeSeconds" : 10,
         "flashIndex" : 600,
         "flashTimeSeconds" : 10,
         "genTimeMs" : 11000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 600
       },
       {
         "clickTimeSeconds" : 11,
         "flashIndex" : 660,
         "flashTimeSeconds" : 11,
         "genTimeMs" : 12000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 660
       },
       {
         "clickTimeSeconds" : 12,
         "flashIndex" : 720,
         "flashTimeSeconds" : 12,
         "genTimeMs" : 13000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 720
       },
       {
         "clickTimeSeconds" : 13,
         "flashIndex" : 780,
         "flashTimeSeconds" : 13,
         "genTimeMs" : 14000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 780
       },
       {
         "clickTimeSeconds" : 14,
         "flashIndex" : 840,
         "flashTimeSeconds" : 14,
         "genTimeMs" : 15000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 840
       },
       {
         "clickTimeSeconds" : 15,
         "flashIndex" : 900,
         "flashTimeSeconds" : 15,
         "genTimeMs" : 16000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 900
       },
       {
         "clickTimeSeconds" : 16,
         "flashIndex" : 960,
         "flashTimeSeconds" : 16,
         "genTimeMs" : 17000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 960
       },
       {
         "clickTimeSeconds" : 17,
         "flashIndex" : 1020,
         "flashTimeSeconds" : 17,
         "genTimeMs" : 18000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 1020
       },
       {
         "clickTimeSeconds" : 18,
         "flashIndex" : 1080,
         "flashTimeSeconds" : 18,
         "genTimeMs" : 19000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 1080
       },
       {
         "clickTimeSeconds" : 19,
         "flashIndex" : 1140,
         "flashTimeSeconds" : 19,
         "genTimeMs" : 20000,
-        "offsetMs" : 0
+        "offsetMs" : 0,
+        "onSecondTick" : true,
+        "tick" : 1140
       }
     ],
     "passA2" : true,
+    "programFps" : 60,
     "slopeMsPerSecond" : 0,
     "spanSeconds" : 19,
+    "startTick" : 0,
     "stdMs" : 0,
     "thresholdMs" : 16.666666666666668
   },

@@ -11,9 +11,14 @@ public enum MediaReader {
         public var frames: [ProbeFrame]
     }
     public struct AudioResult: Sendable {
+        /// `startSeconds` 是 AVFoundation 解码输出第一个样本的 PTS（编排层按容器 / priming 修正后再改）。
         public var info: ProbeAudioInfo
         /// 单声道（多声道取平均）。
         public var samples: [Float]
+        /// 编码（直通样本格式描述的子类型："aac " / "lpcm" / …）。
+        public var codec: String
+        /// AVFoundation 从解码输出头上裁掉的样本数（直通第一个样本的 TrimDurationAtStart；容器有 elst 时按 elst，没有时它对 AAC 自己按 2112 裁）。
+        public var primingTrimmedSamples: Int
     }
 
     public enum ReaderError: Error, CustomStringConvertible {
@@ -83,10 +88,27 @@ public enum MediaReader {
 
     // MARK: 音频
 
-    /// 读第一条音轨为单声道 float；没有音轨返回 nil。时间线：第 0 个样本 = 第一个解码块的 PTS。
+    /// 读第一条音轨为单声道 float；没有音轨返回 nil。时间线：第 0 个样本 = 第一个解码块的 PTS（AVFoundation 口径；
+    /// 没有编辑列表的分片文件它会把轨归零并裁 2112 样本 priming，编排层 `FrameProbe.load` 按 `MP4Index` 修正——见 MP4Index 的说明）。
     public static func readAudio(url: URL) async throws -> AudioResult? {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return nil }
+        // 直通读第一个样本：编码类型与 AVFoundation 打算裁掉的 priming 样本数
+        var codec = ""
+        var trimmed = 0
+        do {
+            let pass = try AVAssetReader(asset: asset)
+            let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+            pass.add(out)
+            if pass.startReading(), let sb = out.copyNextSampleBuffer() {
+                if let fd = CMSampleBufferGetFormatDescription(sb) { codec = fourCC(CMFormatDescriptionGetMediaSubType(fd)) }
+                if let att = CMGetAttachment(sb, key: kCMSampleBufferAttachmentKey_TrimDurationAtStart, attachmentModeOut: nil) {
+                    let t = CMTimeMakeFromDictionary(att as! CFDictionary)
+                    if t.isValid, t.timescale > 0 { trimmed = Int(t.value) }
+                }
+            }
+            pass.cancelReading()
+        }
         let reader = try AVAssetReader(asset: asset)
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
@@ -127,7 +149,13 @@ public enum MediaReader {
         }
         if reader.status == .failed { throw ReaderError.readerFailed(reader.error?.localizedDescription ?? "unknown") }
         let info = ProbeAudioInfo(sampleRate: sampleRate, channels: channels, startSeconds: start ?? 0, sampleCount: samples.count)
-        return AudioResult(info: info, samples: samples)
+        // 直通样本的 trim 是按格式描述的采样率计的；解码输出采样率相同（AAC-LC 48 kHz 就是 48 kHz），不换算
+        return AudioResult(info: info, samples: samples, codec: codec, primingTrimmedSamples: trimmed)
+    }
+
+    static func fourCC(_ v: FourCharCode) -> String {
+        let bytes = [UInt8(v >> 24 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)]
+        return String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: 灰度采样

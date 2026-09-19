@@ -79,4 +79,9 @@ public final class NV12PixelBufferPool: @unchecked Sendable {
 
     /// 当前空闲的缓冲数（诊断用）。
     public var freeCount: Int { buffers.reduce(0) { $0 + (isFree($1) ? 1 : 0) } }
+
+    /// 对池里每个缓冲做一件事（预热用：噪声渲染器给每个缓冲预建纹理）。不改变引用计数。
+    func forEachBuffer(_ body: (CVPixelBuffer) throws -> Void) rethrows {
+        for b in buffers { try b._withUnsafeGuaranteedRef { try body($0) } }
+    }
 }
