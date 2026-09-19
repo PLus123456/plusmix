@@ -169,3 +169,124 @@ extension XCTestCase {
         return true
     }
 }
+
+// MARK: - L1 参考实现（提案 005 验收：与 W2-A 的 SwitcherInputsHarness/LatencyFrameSlot 同一算法，抄到测试里当参考；引擎的实现在 Engine/InputLatencyRecorder.swift）
+
+/// 包一层真帧槽，按拍记下"返回了哪一帧（ingressTime、是不是新帧）"；256 项原子环，渲染线程写、消费者线程读。
+final class ReferenceLatencySlot: FrameSlot, ArrivalPacedFrameSlot, @unchecked Sendable {
+    let inner: LockFreeFrameSlot
+    let spec: TickClockSpec
+    static let ringSize = 256
+    private let ticks: UnsafeMutablePointer<Atomic<Int64>>
+    private let ingress: UnsafeMutablePointer<Atomic<UInt64>>
+    private let flags: UnsafeMutablePointer<Atomic<UInt64>>   // 0 = 没帧，1 = 重复上一帧，2 = 新帧
+    private var lastSequence: UInt64 = 0
+    private var hasLast = false
+
+    init(inner: LockFreeFrameSlot, spec: TickClockSpec) {
+        self.inner = inner
+        self.spec = spec
+        ticks = .allocate(capacity: Self.ringSize)
+        ingress = .allocate(capacity: Self.ringSize)
+        flags = .allocate(capacity: Self.ringSize)
+        for i in 0..<Self.ringSize {
+            (ticks + i).initialize(to: Atomic(Int64.min))
+            (ingress + i).initialize(to: Atomic(0))
+            (flags + i).initialize(to: Atomic(0))
+        }
+    }
+    deinit {
+        ticks.deinitialize(count: Self.ringSize); ticks.deallocate()
+        ingress.deinitialize(count: Self.ringSize); ingress.deallocate()
+        flags.deinitialize(count: Self.ringSize); flags.deallocate()
+    }
+    var capacity: Int { inner.capacity }
+    func push(_ frame: Frame) { inner.push(frame) }
+    var stats: FrameSlotStats { inner.stats }
+    func configurePacing(_ options: PacingOptions) { inner.configurePacing(options) }
+    var pacingStats: PacingStats { inner.pacingStats }
+    func latest(atOrBefore time: HostTime) -> Frame? {
+        let f = inner.latest(atOrBefore: time)
+        record(tick: spec.tick(at: time), frame: f)
+        return f
+    }
+    func latest(forTick tickTime: HostTime) -> Frame? {
+        let f = inner.latest(forTick: tickTime)
+        record(tick: spec.tick(at: tickTime), frame: f)
+        return f
+    }
+    private func record(tick: Tick, frame: Frame?) {
+        let i = Int(tick.rawValue & Int64(Self.ringSize - 1))
+        var flag: UInt64 = 0
+        var ing: UInt64 = 0
+        if let frame {
+            ing = frame.ingressTime.ticks
+            flag = (hasLast && frame.sequence == lastSequence) ? 1 : 2
+            lastSequence = frame.sequence
+            hasLast = true
+        }
+        (ingress + i).pointee.store(ing, ordering: .relaxed)
+        (flags + i).pointee.store(flag, ordering: .relaxed)
+        (ticks + i).pointee.store(tick.rawValue, ordering: .releasing)
+    }
+    func entry(forTick tick: Tick) -> (ingressTime: HostTime, isNew: Bool)? {
+        let i = Int(tick.rawValue & Int64(Self.ringSize - 1))
+        guard (ticks + i).pointee.load(ordering: .acquiring) == tick.rawValue else { return nil }
+        let flag = (flags + i).pointee.load(ordering: .relaxed)
+        guard flag != 0 else { return nil }
+        return (HostTime(ticks: (ingress + i).pointee.load(ordering: .relaxed)), flag == 2)
+    }
+}
+
+/// 参考消费者：consume 入口打戳（= 编码器入口），对每路查 ReferenceLatencySlot 算 L1；只算新帧，进槽早于 t0 的帧不算。
+final class ReferenceLatencyConsumer: FrameConsumer, @unchecked Sendable {
+    let consumerName = "l1-reference"
+    let slots: [(number: Int, slot: ReferenceLatencySlot)]
+    let t0: HostTime
+    private let samples: [UnsafeMutablePointer<Int64>]
+    private let counts: UnsafeMutablePointer<Atomic<Int>>
+    private let reusedTicks: UnsafeMutablePointer<Atomic<Int>>
+    let capacity = 1 << 16
+    init(slots: [(number: Int, slot: ReferenceLatencySlot)], t0: HostTime) {
+        self.slots = slots
+        self.t0 = t0
+        samples = slots.map { _ in
+            let p = UnsafeMutablePointer<Int64>.allocate(capacity: 1 << 16)
+            p.initialize(repeating: 0, count: 1 << 16)
+            return p
+        }
+        counts = .allocate(capacity: slots.count)
+        reusedTicks = .allocate(capacity: slots.count)
+        for i in 0..<slots.count { (counts + i).initialize(to: Atomic(0)); (reusedTicks + i).initialize(to: Atomic(0)) }
+    }
+    deinit {
+        for p in samples { p.deallocate() }
+        counts.deinitialize(count: slots.count); counts.deallocate()
+        reusedTicks.deinitialize(count: slots.count); reusedTicks.deallocate()
+    }
+    func consume(_ frame: RenderedFrame) {
+        let now = HostClock.now()
+        var i = 0
+        while i < slots.count {
+            if let e = slots[i].slot.entry(forTick: frame.tick) {
+                if e.isNew, e.ingressTime.ticks >= t0.ticks {
+                    let n = (counts + i).pointee.load(ordering: .relaxed)
+                    if n < capacity {
+                        samples[i][n] = (now - e.ingressTime).ticks
+                        (counts + i).pointee.store(n + 1, ordering: .releasing)
+                    }
+                } else if !e.isNew {
+                    (reusedTicks + i).pointee.add(1, ordering: .relaxed)
+                }
+            }
+            i += 1
+        }
+    }
+    /// 某路：样本数、平均 ms、最大 ms、重复拍数。
+    func stats(forInput number: Int) -> (samples: Int, meanMs: Double, maxMs: Double, reusedTicks: Int)? {
+        guard let i = slots.firstIndex(where: { $0.number == number }) else { return nil }
+        let n = (counts + i).pointee.load(ordering: .acquiring)
+        let v = (0..<n).map { HostDuration(ticks: samples[i][$0]).milliseconds }
+        return (n, v.isEmpty ? 0 : v.reduce(0, +) / Double(v.count), v.max() ?? 0, (reusedTicks + i).pointee.load(ordering: .relaxed))
+    }
+}
