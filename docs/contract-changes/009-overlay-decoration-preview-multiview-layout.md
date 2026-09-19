@@ -37,8 +37,8 @@ public var slideFrom: OverlayEdge? = nil          // enum: left, right, top, bot
 public var multiview: MultiviewLayoutSettings? = nil
 
 public struct MultiviewLayoutSettings: Hashable, Codable, Sendable {
-    /// 预设名："pgmPvw+4x2"（默认，= W1-C 的布局）、"pgmPvw+2x2"、"3x3"、"4x4"；custom 非空时忽略。
-    public var preset: String = "pgmPvw+4x2"
+    /// 预设名："pgmPvw+grid"（默认，= W1-C 的布局：下半按路数 4×2 / 6×3 / 8×4）、"pgmPvw+4x2"、"pgmPvw+2x2"、"3x3"、"4x4"；custom 非空时忽略。
+    public var preset: String = "pgmPvw+grid"
     /// 自定义格子：source = program / preview / input(n)，rect 归一化。
     public var custom: [MultiviewCell] = []
     /// PGM / PVW 格画安全框（EBU R95：动作安全 3.5%，字幕安全 5%）。
@@ -69,7 +69,7 @@ public struct MultiviewCell: Hashable, Codable, Sendable {
 | 锚点 | 无 | 缩放动画绕 rect 中心 |
 | PVW 预览 | `MetalRendererOptions.overlaysInPreview`（`OfflineRenderer.options` 同名） | true 时 PVW 画所有 `isVisible` 的叠加（与 PGM 同一套）；默认 false，`v8-preview-pvw.png` 不变 |
 | 滑入方向 | 无 | 离 rect 最近的边；整幅 rect 从底边 |
-| 多画面布局 | `OutputState(kind: .multiview).settings.extra["layout"]`：字符串预设名，或对象 `{"cells": [{"source": "program" \| "preview" \| 3, "rect": {x, y, width, height}}], "safeArea": true, "meters": true}` | 快照 sequence 变了才解析一次，解析进预分配的定长表（渲染线程零分配）；解析失败退回默认布局 |
+| 多画面布局 | `OutputState(kind: .multiview).settings.extra["layout"]`：字符串预设名（pgmPvw+grid / pgmPvw+4x2 / pgmPvw+2x2 / 3x3 / 4x4），或对象 `{"preset": "3x3", "safeArea": true, "meters": true}`，或对象 `{"cells": [{"source": "program" \| "preview" \| 3, "rect": {x, y, width, height}}], "safeArea": true, "meters": true}` | 快照 sequence 变了才解析一次，解析进预分配的定长表（渲染线程零分配）；认不出 / 没有合法格子退回默认布局。App 用 `MultiviewLayout.placements(layout:inputs:width:height:)` 拿任意布局的格子几何 |
 
 批了之后：渲染器优先读正式字段，`extra["layout"]` / `effects["border"]` 保留一个版本作后备。
 
