@@ -327,3 +327,115 @@ final class MediaMTXHarness {
         return files.filter { $0.pathExtension == "mp4" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 }
+
+// MARK: - W3-E：无障碍树遍历、本地化扫描
+
+extension AppTest {
+    /// 需要 label 的角色（按钮类、输入类）。
+    static let labeledRoles: Set<NSAccessibility.Role> = [
+        .button, .checkBox, .radioButton, .popUpButton, .menuButton, .slider, .textField, .comboBox, .incrementor, .textArea,
+        .colorWell, .disclosureTriangle, .link, .radioGroup,
+    ]
+
+    /// 沿 NSAccessibility 树走一遍，返回缺 label / title 的控件（"角色 @ 路径"）。
+    static func accessibilityViolations(in root: Any) -> [String] {
+        var out: [String] = []
+        walkAccessibility(root, path: "", depth: 0) { element, role, path in
+            guard labeledRoles.contains(role) else { return }
+            let label = element.accessibilityLabel() ?? ""
+            let title = element.accessibilityTitle() ?? ""
+            if label.trimmingCharacters(in: .whitespaces).isEmpty && title.trimmingCharacters(in: .whitespaces).isEmpty {
+                out.append("\(role.rawValue) @ \(path)")
+            }
+        }
+        return out
+    }
+
+    /// 遍历到的（需要 label 的角色的）控件数。
+    static func accessibilityControlCount(in root: Any) -> Int {
+        var n = 0
+        walkAccessibility(root, path: "", depth: 0) { _, role, _ in if labeledRoles.contains(role) { n += 1 } }
+        return n
+    }
+
+    private static func walkAccessibility(_ node: Any, path: String, depth: Int, visit: (any NSAccessibilityProtocol, NSAccessibility.Role, String) -> Void) {
+        guard depth < 80, let element = node as? any NSAccessibilityProtocol else { return }
+        let role = element.accessibilityRole() ?? NSAccessibility.Role(rawValue: "?")
+        let name = element.accessibilityLabel() ?? element.accessibilityTitle() ?? String(describing: type(of: node))
+        let here = path.isEmpty ? "\(role.rawValue)(\(name))" : "\(path) > \(role.rawValue)(\(name))"
+        if element.isAccessibilityElement() { visit(element, role, here) }
+        var children: [Any] = element.accessibilityChildren() ?? []
+        if children.isEmpty, let view = node as? NSView { children = view.subviews }
+        for child in children { walkAccessibility(child, path: here, depth: depth + 1, visit: visit) }
+    }
+
+    /// 格式串里的占位符（%d、%@、%.1f、%2$@ …）按顺序。
+    static func formatSpecifiers(_ s: String) -> [String] {
+        let regex = try! NSRegularExpression(pattern: #"%(\d+\$)?[-+ 0#]*\d*(\.\d+)?(ld|lld|d|u|f|s|@|%)"#)
+        return regex.matches(in: s, range: NSRange(s.startIndex..., in: s)).map { String(s[Range($0.range, in: s)!]) }.filter { $0 != "%%" }
+    }
+
+    /// 目录下所有 .swift 文件。
+    static func swiftFiles(in directory: URL) throws -> [URL] {
+        guard let e = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) else { return [] }
+        var files: [URL] = []
+        for case let url as URL in e where url.pathExtension == "swift" { files.append(url) }
+        return files.sorted { $0.path < $1.path }
+    }
+
+    /// 源码里 L("键") / L10n.string("键" 的键。
+    static func localizationKeysUsed(in directory: URL) throws -> Set<String> {
+        let regex = try NSRegularExpression(pattern: #"\b(?:L|L10n\.string|L10n\.format)\(\s*"((?:[^"\\]|\\.)*)""#)
+        var keys = Set<String>()
+        for file in try swiftFiles(in: directory) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for m in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                if let r = Range(m.range(at: 1), in: text) { keys.insert(String(text[r])) }
+            }
+        }
+        return keys
+    }
+
+    /// 写死在字符串字面量里的中文（CJK）文案；注释、日志 / 断言行、`// l10n-exempt` 行不算。
+    static func chineseLiteralViolations(in directory: URL) throws -> [String] {
+        let cjk = try NSRegularExpression(pattern: #"[一-鿿　-〿！-～]"#)
+        let literal = try NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*""#)
+        let exempt = ["NSLog(", "print(", "preconditionFailure(", "fatalError(", "assertionFailure(", "os_log", "l10n-exempt", "Logger("]
+        var out: [String] = []
+        for file in try swiftFiles(in: directory) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            var inBlockString = false
+            for (i, rawLine) in text.components(separatedBy: "\n").enumerated() {
+                if rawLine.contains("\"\"\"") { inBlockString.toggle(); continue }
+                if inBlockString { continue }
+                let line = stripLineComment(rawLine)
+                if exempt.contains(where: { line.contains($0) }) { continue }
+                for m in literal.matches(in: line, range: NSRange(line.startIndex..., in: line)) {
+                    guard let r = Range(m.range, in: line) else { continue }
+                    let s = String(line[r])
+                    if cjk.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil {
+                        out.append("\(file.lastPathComponent):\(i + 1) \(s)")
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// 去掉行尾 // 注释（引号外的 //）。
+    static func stripLineComment(_ line: String) -> String {
+        var inString = false
+        var previous: Character = " "
+        var index = line.startIndex
+        while index < line.endIndex {
+            let c = line[index]
+            if c == "\"" && previous != "\\" { inString.toggle() }
+            if !inString && c == "/" && line.index(after: index) < line.endIndex && line[line.index(after: index)] == "/" {
+                return String(line[..<index])
+            }
+            previous = c
+            index = line.index(after: index)
+        }
+        return line
+    }
+}
