@@ -183,6 +183,51 @@ final class ShortcutAndShowTests: XCTestCase {
         m.kind = .image
         m.imagePath = "/tmp/b.png"
         XCTAssertEqual(try m.makeConfig().source, .image(path: "/tmp/b.png"))
+        // W3-E 补的三种：DeckLink / NDI / 纯音频设备
+        m.kind = .decklink
+        XCTAssertThrowsError(try m.makeConfig())
+        m.decklinkDeviceID = "decklink-0"
+        XCTAssertEqual(try m.makeConfig().source, .decklink(deviceID: "decklink-0"))
+        m.kind = .ndi
+        XCTAssertThrowsError(try m.makeConfig())
+        m.ndiSourceName = "MACHINE (Cam)"
+        XCTAssertEqual(try m.makeConfig().source, .ndi(sourceName: "MACHINE (Cam)"))
+        m.kind = .audio
+        XCTAssertThrowsError(try m.makeConfig())
+        m.audioDeviceUID = "AppleUSBAudioEngine:1"
+        XCTAssertEqual(try m.makeConfig().source, .audio(deviceUID: "AppleUSBAudioEngine:1"))
+        // 屏幕：窗口 / 应用 + 帧率 + 系统音频
+        m.kind = .screen
+        m.screenKind = .window
+        XCTAssertThrowsError(try m.makeConfig(), "还没选窗口")
+        m.windowID = 4242
+        m.screenFrameRate = .fps30
+        m.captureAudio = true
+        XCTAssertEqual(try m.makeConfig().source, .screen(target: .window(id: 4242), frameRate: .fps30, captureAudio: true))
+        m.screenKind = .application
+        m.applicationBundleID = "com.apple.Keynote"
+        XCTAssertEqual(try m.makeConfig().source, .screen(target: .application(bundleID: "com.apple.Keynote"), frameRate: .fps30, captureAudio: true))
+        // 合成源的全部参数
+        m.kind = .synthetic
+        m.syntheticBackground = .noise
+        m.noiseAmplitude = 20
+        m.noiseSeed = 9
+        m.patternID = 5
+        m.jitterMs = 2
+        m.dropEveryN = 100
+        m.clockDriftPpm = 50
+        m.syntheticAudio = true
+        m.audioDriftPpm = -30
+        m.syntheticWidth = 1280
+        m.syntheticHeight = 720
+        if case .synthetic(let s) = try m.makeConfig().source {
+            XCTAssertEqual(s, SyntheticSourceSettings(frameRate: .fps60, width: 1280, height: 720, background: .noise(level: 128, amplitude: 20, seed: 9),
+                                                      patternID: 5, jitterMs: 2, dropEveryN: 100, clockDriftPpm: 50, audio: true, audioDriftPpm: -30))
+        } else {
+            XCTFail("应是合成源")
+        }
+        XCTAssertEqual(AddInputModel.Kind.allCases.count, 8, "设计方案 §6 的八种输入")
+        XCTAssertEqual(AddInputModel.Kind.allCases.map(\.inputKind), [.synthetic, .camera, .decklink, .screen, .file, .image, .ndi, .audio])
         var state = MixerState()
         state.inputs = [AppTest.syntheticConfig(number: 1), AppTest.syntheticConfig(number: 2), AppTest.syntheticConfig(number: 4)]
         XCTAssertEqual(AddInputModel.nextFreeNumber(in: state, maxInputs: 16), 3)

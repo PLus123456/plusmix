@@ -45,6 +45,8 @@ final class TransitionPanelView: NSView {
         durationControl.target = self; durationControl.action = #selector(durationChanged)
         durationControl.translatesAutoresizingMaskIntoConstraints = false
         durationControl.controlSize = .small
+        durationControl.setAccessibilityLabel(L("transition.durationLabel"))
+        durationControl.cell?.setAccessibilityLabel(L("transition.durationLabel"))
         for (i, b) in overlayButtons.enumerated() {
             b.tag = i + 1
             b.target = self
@@ -53,13 +55,13 @@ final class TransitionPanelView: NSView {
         }
         for b in [wipeButton, zoomButton, stingerButton] {
             b.isEnabled = false
-            b.toolTip = "W3-B 做"
+            b.toolTip = L("transition.pendingW3B")
         }
         for b in [cutButton, fadeButton, wipeButton, zoomButton, stingerButton, ftbButton] {
             b.widthAnchor.constraint(equalToConstant: Theme.transitionColumnWidth - 16).isActive = true
         }
-        cutButton.toolTip = "空格"
-        fadeButton.toolTip = "回车"
+        cutButton.toolTip = L("key.space")
+        fadeButton.toolTip = L("key.return")
         ftbButton.toolTip = "F"
         tbar.onProgress = { [weak self] p in self?.send?(.tbar(progress: p)) }
 
@@ -109,7 +111,7 @@ final class TransitionPanelView: NSView {
         for (i, b) in overlayButtons.enumerated() {
             let o = state.overlays[i]
             Theme.setHighlighted(b, o.on)
-            b.toolTip = o.input.map { "Overlay \(i + 1)：输入 \($0)" } ?? "Overlay \(i + 1)：还没指定输入（在缩略图格子上点 \(i + 1)）"
+            b.toolTip = o.input.map { L("transition.overlayInput", i + 1, $0) } ?? L("transition.overlayNoInput", i + 1, i + 1)
         }
         tbar.apply(state: state)
     }

@@ -16,8 +16,8 @@ enum CommandFeedback: Equatable {
 
     var message: String {
         switch self {
-        case .rejected(let c, let reason): "命令被拒：\(Self.describe(c)) — \(reason)"
-        case .ignored(let c): "命令被忽略：\(Self.describe(c))（状态没变）"
+        case .rejected(let c, let reason): L("feedback.rejected", Self.describe(c), reason)
+        case .ignored(let c): L("feedback.ignored", Self.describe(c))
         }
     }
 
@@ -47,14 +47,14 @@ final class ControlRuntime {
     /// 已发出的 UI 命令数（测试看）。
     private(set) var commandsSent: UInt64 = 0
 
-    init(stateMachine: StateMachine, engine: Engine, api: APIServerConfiguration?, hotkeyTable: HotkeyTable) {
+    init(stateMachine: StateMachine, engine: Engine, api: APIServerConfiguration?, hotkeyTable: HotkeyTable, midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault()) {
         let bus = CommandBus(stateMachine: stateMachine)
         let feed = StateFeed(stateMachine: stateMachine) { [weak engine] in engine?.clock?.spec }
         self.bus = bus
         self.feed = feed
         apiServer = api.map { APIServer(bus: bus, feed: feed, configuration: $0) }
         hotkeys = HotkeyDispatcher(bus: bus, table: hotkeyTable)
-        midi = MIDIController(bus: bus, table: MIDIMapTable.loadUserTableOrDefault())
+        midi = MIDIController(bus: bus, table: midiTable)
     }
 
     /// 起：命令循环 → 推送源 → API → MIDI。API / MIDI 起不来不算错（记原因，节目照跑）。
@@ -68,7 +68,7 @@ final class ControlRuntime {
                 try await server.start()
                 apiError = nil
             } catch {
-                apiError = "API 起不来（\(server.configuration.host):\(server.configuration.port)）：\(error)"
+                apiError = L("notice.apiFailed", "\(server.configuration.host):\(server.configuration.port)", "\(error)")
                 NSLog("%@", apiError!)
             }
         }
@@ -76,7 +76,7 @@ final class ControlRuntime {
             try midi.start()
             midiError = nil
         } catch {
-            midiError = "MIDI 起不来：\(error)"
+            midiError = L("notice.midiFailed", "\(error)")
             NSLog("%@", midiError!)
         }
     }

@@ -100,10 +100,9 @@ final class UISmokeTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.durationTicks == 120 }, "2 s @ 60 fps = 120 拍，实际 \(session.state.transition.durationTicks)")
 
         // 11. Master 推子 / 静音
-        wc.mixerPanel.fader.doubleValue = -12
-        wc.mixerPanel.fader.performClick(nil)
+        wc.mixerPanel.model.setBusGain(.master, dB: -12)
         XCTAssertTrue(AppTest.waitUntil(2) { abs(session.state.audio.buses[0].gainDb - (-12)) < 0.01 }, "推子应发 busGain")
-        wc.mixerPanel.muteButton.performClick(nil)
+        wc.mixerPanel.model.setBusMute(.master, on: true)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.buses[0].muted })
 
         // 12. 录制 / 推流按钮：录制按钮发 startRecord → Recorder 真起来（Stats.encoder[i].state = recording → "● 录制中"）→ stopRecord →

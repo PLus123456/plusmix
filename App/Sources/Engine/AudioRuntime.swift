@@ -35,7 +35,7 @@ final class AudioRuntime {
             fallback.output = .null
             engine = try! AudioEngine(stateMachine: stateMachine, configuration: fallback)   // 空设备不依赖硬件，建不起来是编程错误
             self.device = .null
-            fallbackReason = "音频设备「\(device.spec)」建不起来（\(error)），退到空设备"
+            fallbackReason = L("notice.audioDeviceFallback", device.spec, "\(error)")
             NSLog("%@", fallbackReason!)
         }
     }

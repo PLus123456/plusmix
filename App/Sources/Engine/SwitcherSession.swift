@@ -74,7 +74,7 @@ final class SwitcherSession {
     var displaySource: any DisplayFrameSource { renderer }
 
     init(show: Show, settings: AppSettings = AppSettings(), inputFactory: any InputFactory = DefaultInputFactory(),
-         hotkeyTable: HotkeyTable = HotkeyTable.loadUserTableOrDefault()) throws {
+         hotkeyTable: HotkeyTable = HotkeyTable.loadUserTableOrDefault(), midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault()) throws {
         let initial = show.makeState()
         try initial.validate()
         name = show.name
@@ -94,7 +94,7 @@ final class SwitcherSession {
         outputs.fallbackDirectory = settings.recordFallbackDirectory
         outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
         aux = AuxOutputRuntime(engine: engine, source: renderer, format: format)
-        control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable)
+        control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable)
         lastSnapshot = stateMachine.publisher.latest
         let audioEngine = audio.engine
         engine.audioStatsProvider = { audioEngine.audioCounters }
@@ -122,7 +122,7 @@ final class SwitcherSession {
         do {
             try await audio.start(clock: spec)
         } catch {
-            notify("音频引擎起不来：\(error)")
+            notify(L("notice.audioFailed", "\(error)"))
         }
         try await engine.start(t0: t0)
         isRunning = true
@@ -234,13 +234,13 @@ final class SwitcherSession {
 
     private func handle(outputEvent event: OutputRuntime.Event) {
         switch event {
-        case .recordingStarted(let n, let url): notify("录制 \(n) 开始：\(url.lastPathComponent)")
-        case .recordingStopped(let n, let url, let frames, let seconds): notify("录制 \(n) 已停：\(url.lastPathComponent)，\(frames) 帧 / \(String(format: "%.2f", seconds)) s")
+        case .recordingStarted(let n, let url): notify(L("notice.recordingStarted", n, url.lastPathComponent))
+        case .recordingStopped(let n, let url, let frames, let seconds): notify(L("notice.recordingStopped", n, url.lastPathComponent, Int(frames), seconds))
         case .recordingFailed(_, let message): notify(message)
         case .recordingDiskLow(let n, let mb): notify("录制 \(n)：磁盘剩余 \(Int(mb)) MB")
         case .recordingSwitchedToFallback(let n, let url): notify("录制 \(n)：磁盘满，已切到备用目录：\(url.lastPathComponent)")
-        case .streamStarted(let n): notify("推流 \(n) 开始")
-        case .streamStopped(let n): notify("推流 \(n) 已停")
+        case .streamStarted(let n): notify(L("notice.streamStarted", n))
+        case .streamStopped(let n): notify(L("notice.streamStopped", n))
         case .streamFailed(_, let message): notify(message)
         }
     }
@@ -269,4 +269,7 @@ final class SwitcherSession {
 
     /// 当前状态存成节目文件。
     func makeShow() -> Show { Show(name: name, state: state, layout: layout) }
+
+    /// 没有 session 时给面板用的空状态机（MIDI 映射面板要一个 MIDIController）。
+    static func detachedStateMachine() -> StateMachine { StateMachine(initialState: MixerState()) }
 }

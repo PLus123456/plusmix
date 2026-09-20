@@ -31,8 +31,8 @@ final class ShowDocuments {
     }
 
     /// 空节目：没有输入，带一个默认录制输出（录到 recordDirectory，默认 ~/Movies/Switcher），PGM / PVW 都是黑场。
-    static func emptyShow(name: String = "未命名", recordDirectory: String = ShowDocuments.defaultRecordDirectory) -> Show {
-        let record = OutputState(number: 1, kind: .record, name: "录制", enabled: false,
+    static func emptyShow(name: String = L("show.untitled"), recordDirectory: String = ShowDocuments.defaultRecordDirectory) -> Show {
+        let record = OutputState(number: 1, kind: .record, name: L("show.defaultRecordName"), enabled: false,
                                  settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
                                                           record: RecordSettings(directory: recordDirectory)))
         let state = MixerState(outputs: [record])
@@ -40,7 +40,7 @@ final class ShowDocuments {
     }
 
     /// 空节目，录制目录用本对象的。
-    func emptyShow(name: String = "未命名") -> Show { Self.emptyShow(name: name, recordDirectory: recordDirectory) }
+    func emptyShow(name: String = L("show.untitled")) -> Show { Self.emptyShow(name: name, recordDirectory: recordDirectory) }
 
     /// 文件里来的节目：录制 / 推流的 enabled 一律清掉。文档里的"应该在跑"只对 headless 的场景文件有意义；App 里输出只由用户动作（按钮 / 快捷键 / API）起，
     /// 打开一个保存时正在录制 / 推流的节目（含退出时自动存的 LastSession）不能自己开录（G3 2026-09-19 定，W2-B2 报告 §4 第 2 条，契约提案 007 B-1）。

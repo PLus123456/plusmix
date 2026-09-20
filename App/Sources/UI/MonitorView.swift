@@ -54,10 +54,10 @@ final class MonitorView: NSView {
         let number = target == .program ? state.program : state.preview
         if number == MixerState.noInput {
             numberLabel.stringValue = "—"
-            nameLabel.stringValue = "黑场"
+            nameLabel.stringValue = L("monitor.black")
         } else {
             numberLabel.stringValue = "\(number)"
-            nameLabel.stringValue = state.input(number)?.name ?? "（不存在的输入 \(number)）"
+            nameLabel.stringValue = state.input(number)?.name ?? L("monitor.missingInput", number)
         }
         if target == .program, state.ftb.on {
             roleLabel.stringValue = "PGM · FTB"

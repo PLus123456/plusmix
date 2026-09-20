@@ -38,7 +38,7 @@ final class AudioWiringTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(6) { peak = masterPeak(); return (peak ?? -200) > -40 }, "Master 应有读数（≈ −20 dBFS），实际 \(String(describing: peak))")
         XCTAssertEqual(peak ?? 0, -20, accuracy: 3, "1 kHz −20 dBFS 的峰值")
         XCTAssertTrue(AppTest.waitUntil(2) { wc.mixerPanel.displayedPeak != "−∞ dBFS" }, "调音台读数：\(wc.mixerPanel.displayedPeak)")
-        XCTAssertTrue(AppTest.waitUntil(2) { wc.mixerPanel.meter.level != nil }, "表的条子（AudioEngineStatus，50 ms）应有电平")
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.mixerPanel.meters.busPeakDb[.master] != nil }, "表的条子（AudioEngineStatus，50 ms）应有电平")
         let status = session.audio.status
         print("Master 峰值 \(peak!) dBFS；调音台 \(wc.mixerPanel.displayedPeak)；status Master \(status.buses.first { $0.bus == .master }?.peakDb ?? [])；输入对齐 \(status.inputs.map { "\($0.number): primed \($0.primed) aligned \($0.aligned) 年龄 \($0.ageSetpointFrames) 帧" })；设备 \(status.device.kind) \(status.device.name)")
 

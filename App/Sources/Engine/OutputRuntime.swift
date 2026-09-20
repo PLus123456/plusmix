@@ -334,7 +334,7 @@ final class OutputRuntime {
             lastResults[number] = r
             onEvent?(.recordingStopped(output: number, url: r.url, frames: r.videoFrames, seconds: r.durationSeconds))
         case .failure(let e):
-            onEvent?(.recordingFailed(output: number, message: "录制 \(number) 封口失败：\(e)"))
+            onEvent?(.recordingFailed(output: number, message: L("notice.recordingFinishFailed", number, "\(e)")))
         }
         rebuildStats()
         // 停的过程中又被打开：按最新快照再起一次
@@ -439,7 +439,7 @@ final class OutputRuntime {
     private func startStream(_ output: OutputState) {
         let settings = output.settings
         guard let streamSettings = settings.stream, !streamSettings.url.isEmpty else {
-            let message = "推流 \(output.number) 没有地址"
+            let message = L("notice.streamNoURL", output.number)
             failed[output.number] = message
             onEvent?(.streamFailed(output: output.number, message: message))
             return
@@ -452,7 +452,7 @@ final class OutputRuntime {
             stream = try StreamOutput(configuration: cfg, transportFactory: HaishinKitTransportFactory(format: format, video: video))
             try stream.start()
         } catch {
-            let message = "推流 \(output.number) 起不来：\(error)"
+            let message = L("notice.streamFailed", output.number, "\(error)")
             NSLog("%@", message)
             failed[output.number] = message
             onEvent?(.streamFailed(output: output.number, message: message))

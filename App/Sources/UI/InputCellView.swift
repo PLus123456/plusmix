@@ -8,6 +8,8 @@ import SwitcherRender
 final class InputCellView: NSView {
     let number: Int
     var send: ((Command) -> Void)?
+    /// 右键"设置…"。
+    var onOpenSettings: ((Int) -> Void)?
     let display = MetalDisplayView(frame: .zero)
     private let titleBar = PanelView(color: Theme.tallyOff)
     private let numberLabel = Theme.monoLabel("", size: 12, color: .white)
@@ -29,7 +31,7 @@ final class InputCellView: NSView {
             b.tag = k
             return b
         }
-        muteButton = Theme.toggleButton("静音", target: nil, action: nil)
+        muteButton = Theme.toggleButton(L("mixer.mute"), target: nil, action: nil)
         muteButton.controlSize = .mini
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -104,13 +106,13 @@ final class InputCellView: NSView {
         case .live?, nil:
             statusLabel.isHidden = true
         case .noSignal?:
-            statusLabel.stringValue = "无信号"
+            statusLabel.stringValue = L("input.noSignal")
             statusLabel.isHidden = false
         case .error(let message)?:
             statusLabel.stringValue = message
             statusLabel.isHidden = false
         }
-        toolTip = "\(config.number) \(config.name)（\(config.kind)）\n点击 = 选 PVW，Shift 点击 = 直切 PGM"
+        toolTip = L("cell.tooltip", config.number, config.name, L("addInput.kind.\(config.kind.rawValue)"))
     }
 
     /// 缩略图取多画面纹理里的哪一块（index = 在 MixerState.inputs 里的序号）。
@@ -128,20 +130,24 @@ final class InputCellView: NSView {
     /// 右键：重命名 / 删除（稿子里每格的 Close；完整的输入设置在 W3-E）。
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
-        menu.addItem(withTitle: "重命名…", action: #selector(renamePressed), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "删除输入 \(number)", action: #selector(removePressed), keyEquivalent: "").target = self
+        menu.addItem(withTitle: L("cell.menu.settings"), action: #selector(settingsPressed), keyEquivalent: "").target = self
+        menu.addItem(withTitle: L("cell.menu.rename"), action: #selector(renamePressed), keyEquivalent: "").target = self
+        menu.addItem(withTitle: L("cell.menu.remove", number), action: #selector(removePressed), keyEquivalent: "").target = self
         return menu
     }
+
+    @objc private func settingsPressed() { onOpenSettings?(number) }
 
     @objc private func renamePressed() {
         guard let window else { return }
         let alert = NSAlert()
-        alert.messageText = "重命名输入 \(number)"
+        alert.messageText = L("cell.rename.title", number)
         let field = NSTextField(string: config.name)
         field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        field.setAccessibilityLabel(L("cell.rename.field"))
         alert.accessoryView = field
-        alert.addButton(withTitle: "好")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: L("common.ok"))
+        alert.addButton(withTitle: L("common.cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 guard let self, response == .alertFirstButtonReturn else { return }
