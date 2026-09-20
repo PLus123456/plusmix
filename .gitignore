@@ -35,6 +35,3 @@ reports/**/*.jsonl
 .idea/
 .vscode/
 *.swp
-
-# Python 字节码（scripts/*.py 跑一次就会生成）
-__pycache__/

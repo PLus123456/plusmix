@@ -40,3 +40,19 @@
 
 引擎起来前 App 只是把输入建好、注册好，没有别的动作；如果 W1-B2 认为"停顿后余量重置"该由组装方触发，请给一个引擎入口
 （例如 `engine.resetPacing(forInput:)`），App 在 missed_render 跳变时调。目前 App 什么都没做。
+
+## G4 复核（2026-09-21 00:43，g4 分支，W1-B2 合入后的引擎；prompt 60 交接第 4 条）
+
+真 App（Debug，从 Bash 起 `Switcher --show <两路 30 fps 合成源 +音频> --stats … --no-api --audio-device null`），stats.jsonl 头 10 行：
+
+| 距第一行 | tick | jitter_ms | missed_render | per_input 1 / 2（fps, dup, drop） | latency_ms |
+|---|---|---|---|---|---|
+| 0 s | 89 | **467.55** | **28** | 44.6, 28, **12** | 25.97 |
+| 1 s | 148 | 0.03 | 28 | 30.1, 57, 12 | 9.32 |
+| 2 s | 209 | 0.03 | 28 | 29.7, 87, 12 | 8.71 |
+| 3–9 s | … | 0.02–0.03 | 28 | 30.0, +30/s, **12 不再涨** | 8.7 |
+
+- **停顿之后的恢复已经好了**：drop 停在第一秒的 12（停顿期间被帧槽淘汰的），第二秒起 dup +30/s（30 进 60 的设计内重复）、L1 8.7 ms、再没有丢帧——不再像 W2-B2 看到的那样 3 s 内每秒 +30 drop、画面黑。W1-B2 的初值 / 上限 / 起流块作废起了作用，本单"引擎侧"部分可以关。
+- **启动停顿本身还在**：第一秒 467 ms（W2-B2 那次 377 ms），28 拍 missed_render。headless 从不出现；只在真 App 第一次建窗口 / Metal 管线 / 音频设备那一刻。这是 App / 显示路径（W2-B）或渲染器首帧管线编译（W1-C）的事，与 reports/issues/G4-w1-core-missed-render-bursts-under-daemon-activity.md 里"整个进程被拖住"是同一类现象；
+  建议 W2-B / W3-E2 在 App 里把引擎的 `start` 推迟到主窗口第一次 display link 回调之后（或先跑一帧离线渲染把管线预热），再量一次。
+- 产物：本次 stats.jsonl 在 G4 会话的 scratchpad（`stall/stats.jsonl`），表里的数字是全部信息。

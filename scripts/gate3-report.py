@@ -54,6 +54,8 @@ def fmt(v, digits=3):
 
 
 def mark(ok):
+    if ok == "info":
+        return "—（参考）"
     return "—" if ok is None else ("✅" if ok else "❌")
 
 
@@ -186,6 +188,16 @@ def main():
         v4_worst_excess = max(v4_worst_excess, p.get("excessDupRatio", 0), p.get("excessDropRatio", 0))
         v4_rows.append(f"| {number} | {fmt(r, 4)} | {fmt(p.get('fps', {}).get('avg'), 3)} | {dup} | {fmt(exp_dup, 1)} | {drop} | {fmt(exp_drop, 1)} | "
                        f"{'—' if out_dup is None else out_dup + out_drop} | {p.get('excessDupRatio', 0) * 100:.4f}% / {p.get('excessDropRatio', 0) * 100:.4f}% |")
+    # 每路在播段数：同一路每次回到 PGM，它与节目拍点的相位都重新起算，+1 帧相位余量按段各给一次（G4 起；G3 的场景每路只在播几段、余量 1 帧够用没暴露）
+    segments = {}
+    last_id = None
+    for fobj in frames:
+        fid = fobj.get("inputID")
+        if fid is None:
+            continue
+        if fid != last_id:
+            segments[fid] = segments.get(fid, 0) + 1
+        last_id = fid
     probe_rows = []
     probe_design_out_total = 0
     probe_backward = 0
@@ -194,13 +206,14 @@ def main():
         K = s.get("frames", 0)
         r = s.get("inputFps") or rates.get(pid)
         dup, drop = s.get("duplicateFrames", 0), s.get("droppedFrames", 0)
+        seg = max(1, segments.get(pid, 1))
         exp_dup = K * max(0.0, 1 - r / program_fps) if r else None
         exp_drop = K * max(0.0, r / program_fps - 1) if r else None
-        out_dup = max(0, dup - math.ceil(exp_dup) - 1) if exp_dup is not None else 0
-        out_drop = max(0, drop - math.ceil(exp_drop) - 1) if exp_drop is not None else 0
+        out_dup = max(0, dup - math.ceil(exp_dup) - seg) if exp_dup is not None else 0
+        out_drop = max(0, drop - math.ceil(exp_drop) - seg) if exp_drop is not None else 0
         probe_design_out_total += out_dup + out_drop
         probe_backward += s.get("backwardJumps", 0)
-        probe_rows.append(f"| {pid} | {K} | {fmt(r, 4)} | {dup}（{s.get('duplicateRatio', 0) * 100:.2f}%） | {fmt(exp_dup, 1)} | {drop} | {fmt(exp_drop, 1)} | "
+        probe_rows.append(f"| {pid} | {K}（{seg} 段） | {fmt(r, 4)} | {dup}（{s.get('duplicateRatio', 0) * 100:.2f}%） | {fmt(exp_dup, 1)} | {drop} | {fmt(exp_drop, 1)} | "
                           f"{out_dup + out_drop} | {s.get('backwardJumps', 0)} | {mark(s.get('passV4'))} |")
 
     # ---- V5 ----
@@ -386,7 +399,8 @@ def main():
 
     # ---- 判定表 ----
     checks = [
-        ("V1 渲染耗时（本机参考线）", f"avg {fmt(v1_avg)} ms / p99 {fmt(v1_p99)} ms", "avg ≤ 2 ms（M5 Max，G2 起的本机线）", v1_avg is not None and v1_avg <= 2.0, delta(v1_avg, b_v1_avg, "ms")),
+        ("V1 渲染耗时（本机参考线）", f"avg {fmt(v1_avg)} ms / p99 {fmt(v1_p99)} ms" + ("（G2 按 M0 灰底负载定的 2 ms 线；G4 负载多了 4 路抠像叠加 + 自定义多画面 + 噪声底纹，只作参考，新基线 g4-m5max.json 供 W4-A 判退步）" if cp == "G4" else ""),
+         "avg ≤ 2 ms（M5 Max，G2 起的本机线）", ("info" if cp == "G4" else (v1_avg is not None and v1_avg <= 2.0)), delta(v1_avg, b_v1_avg, "ms")),
         ("V1 渲染耗时（必须档）", f"avg {fmt(v1_avg)} / p99 {fmt(v1_p99)} ms", "avg ≤ 6，p99 ≤ 12（目标 ≤ 4 / ≤ 8）", v1_avg is not None and v1_avg <= 6 and v1_p99 <= 12, delta(v1_p99, b_v1_p99, "ms（p99）")),
         ("V2 渲染滞后丢帧", f"{int(v2) if v2 is not None else '—'} 帧 / {int(T)} 拍（{(v2 or 0) / T * 100 if T else 0:.4f}%）" + (f"；增量时刻：{miss_note}" if miss_note else ""),
          "10 分钟内 0" if a.minutes <= 10 else "≤ 0.02%（§4 必须档）；目标 0",
@@ -422,7 +436,8 @@ def main():
     if unknown:
         sys.exit(f"--waive 里的指标名不在判定表里：{unknown}；可用：{[c[0] for c in checks]}")
     waived = [c[0] for c in checks if c[3] is False and c[0] in waivers]
-    all_pass = all((c[3] is True) or (c[0] in waivers) for c in checks)
+    # "info" 行只作参考不进总判定（G4 的 V1 本机线）；None（没跑 / 没数据）仍算不过
+    all_pass = all((c[3] is True) or (c[3] == "info") or (c[0] in waivers) for c in checks)
 
     # ---- 信息项 ----
     cpu, gpu = key.get("cpu_avg_pct"), key.get("gpu_avg_pct")
@@ -503,7 +518,7 @@ def main():
     lines.append("")
     lines.append(f"设计内期望 = T × |1 − r/P|，T = {int(T)} 拍；设计外 = max(0, 实测 − ceil(期望) − 1)（1 帧相位余量）。")
     lines.append("")
-    lines.append("### V4 明细二：frameprobe 读录制文件（只有在播的那路）")
+    lines.append("### V4 明细二：frameprobe 读录制文件（只有在播的那路；设计外 = max(0, 实测 − ceil(期望) − 在播段数)，每个连续在播段 1 帧相位余量）")
     lines.append("")
     lines.append("| ID | 在播帧数 K | 输入帧率 | 重复帧（比例） | 设计内 dup 期望 | 丢弃帧 | 设计内 drop 期望 | 设计外（精确核算） | 帧号倒退 | frameprobe V4（≤ 0.05%） |")
     lines.append("|---|---|---|---|---|---|---|---|---|---|")

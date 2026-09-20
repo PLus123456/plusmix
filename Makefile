@@ -159,5 +159,4 @@ gate4-matrix:
 	$(MAKE) gate4-report
 
 gate4-report:
-	python3 scripts/gate3-report.py --checkpoint G4 --out-dir .build/gate4/10min --label 10min --minutes 10 --show scenarios/g4-show.json --script scenarios/g4.json \
-	  --baseline "" --run-report reports/G4-run-10min.md --notes reports/G4-notes.md --report reports/G4.md
+	scripts/gate4-report.sh --label 10min --baseline $(GATE4_PREVIOUS)

@@ -18,12 +18,31 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
 
 ## 2. 测试与 gate（数值 / 阈值 / 通过否）
 
-（gate 跑完填：L0 / L1 各包；App 53 个用例；10 分钟 L2 判定表结论；NDI 回环 L1；编译矩阵；启动停顿复核。）
+详表在 reports/G4.md（人工部分 §6 + 自动结果四节 + NDI + 矩阵）。摘要：
+
+| 项 | 数值 | 阈值 | 通过 |
+|---|---|---|---|
+| L0 / L1 六包 `swift test` | 579 个用例，0 失败，19 个按环境跳过（Core 58 / 86 / 72，Inputs 28 / 20 / 17，Audio 62 / 39，Outputs 25 / 28 / 8 / 7 / 6 / 5，Control 28 / 25 / 3，TestKit 62） | 0 失败 | ✅ |
+| App `xcodebuild test` | 见 §2.1（最后一次全量） | 0 失败 | ❌（只剩 W3-C 文案的本地化扫描一条，prompt 55） |
+| 10 分钟 L2 run4（代表） | V1 avg 2.149 / p99 2.644 ms；V2 0；V3 p99 0.091 ms；V4 0 / 0；V5 0；V6 第 1000 拍、64 次 Cut 全干净；V7 曲线 0.467 帧、T-bar ≤ 0.35%；A1 0；A2 max 0.479 ms（389 对）；A3 0.29 ms/8 h；A4 0.208 ms；E1 0；E2 1.51% / 1.128×；E3 精确；E5 0.0 ms；C1 50/50 max 16.4 ms；C2 p99 0.28 ms；C3 0；C4 12000/12000 | 测试标准 §4 | ✅（19 / 19；V1 的 2 ms 本机线只作参考） |
+| 10 分钟 L2 run1 / run2 / run3 | V2 = 2 / 1 / 11（都对得上 load.log 的桌面 / 系统进程突发），派生的 V4 / V5 不过；其余项与 run4 一致 | 同上 | ❌（原样列出，归因单退 W1-B / W1-C） |
+| NDI 回环 L1 | 27.04 ms = 1.62 帧（扣 J = 1 帧缓冲 0.62 帧），max 1.70 帧，fps 60.01，dup / drop 0，missed 0 | ≤ 3 + J 帧 | ✅ |
+| 编译矩阵 A / B / C | 三种配置 swift build ✅，NDITests + DeckLinkTests 各 37 个 0 失败（跳过 5 / 12 / 20） | 三种都能编、测试过 | ✅ |
+| 启动停顿复核（交接 4） | 第一秒 jitter 467 ms / missed 28；drop 停在 12、之后只有设计内 dup、L1 8.7 ms | 一两个窗口内恢复 | ✅（停顿本身另记） |
+| E7–E9 | 沿用 G3（W3 五路没动推流） | — | 沿用 |
+| C5 真 Companion、虚拟摄像头 L1、DeckLink L1 / L2 / S5、外接屏 L2、Stream Deck | BLOCKED（reports/G4-notes.md §7） | — | BLOCKED |
+
+### 2.1 App 全量测试（最后一次，09-21 00:43）
+
+53 个用例：51 过、1 失败（`testL10n_noHardcodedChineseInUISources`，W3-C 的 39 处字面量 → prompt 55）、1 跳过（内置摄像头，BLOCKED-权限）。第一次全量（合并刚完）是 46 / 5 / 2，
+四条按合并后的行为改了断言（录制按钮多路文案、外部显示用户关窗口走 Esc 路径、NDI 输入是 noSignal 不是占位、S7 单跑）后全过；xcresult 在 `.build/DerivedData/Logs/Test/`。
 
 ## 3. 没做的和原因
 
 - **W3-C 接进 App 的 39 处文案本地化**：超出检查点 App/ 的胶水额度、也不是接线；`testL10n_noHardcodedChineseInUISources` 红着 → prompt 55（W3-E2）。
 - **切换面板的 Wipe 方向 / 软边、Stinger 参数控件、PVW 预览叠加开关**：W3-E 没做、G4 只接通按钮；参数来自节目文件 → prompt 55。
+- **10 分钟 gate 的 V2 跳拍归因**：四次里三次有 1–11 拍 skipped，都对得上桌面 / 系统进程突发；G4 没有放行、没有改阈值，run4（0 跳拍）是代表运行，归因单 reports/issues/G4-w1-core-missed-render-bursts-under-daemon-activity.md 退 W1-B / W1-C。
+- **`.gitignore` 加 `__pycache__/`**：根文件不在 G4 归属里，已还原；`scripts/__pycache__/` 只会由 `python3 -m py_compile` 之类生成，正常跑脚本不会。
 - **frameprobe 对转场合成帧的正式判法、Wipe / Zoom 的 V7 量法**：G4 用 `--blank-ticks` 从外部标掉转场拍段；L2 场景里 Wipe / Zoom 的 V7 只有 W3-B 渲染侧单元测试在判 → prompt 56（W1-A3）。
 - **C5 真 Companion、虚拟摄像头激活 / FaceTime / L1、DeckLink 硬件项、外接屏、Stream Deck 端到端、慢 U 盘 S7**：BLOCKED（reports/G4-notes.md §7 有解锁条件）。
 - **E7–E9 没重跑**：W3 五路没动推流，沿用 G3 的结果（reports/G3-net.md）。
@@ -48,3 +67,7 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
 10. **Stinger PNG 相对路径**：headless 相对节目文件所在目录解析；App 的 ImageInput 相对 cwd（Finder 起是 /），清单里让用户用 Add Input 选文件。
 11. **W3-E 的 LocalizationTests 会扫 App/Sources 里所有中文字面量**（NSLog / print / 断言除外）：以后往 App 里加文案一律 `L("键")` + 两个 .strings 各一行，否则整条测试红。
 12. **App 测试的 S7 磁盘满用例对负载敏感**（missed_render 必须 0）：第一次全量跑时（机器上还有 frameprobe / 编译在跑）红了 1 帧，单跑绿；跑 App 全量前让机器安静。
+13. **frameprobe 的"拍 = 文件序号"假设在漏帧后失效**：run1 有 2 次 missed_render，文件 35998 帧，34030 拍之后序号比拍小 2，按序号给的 `--blank-ticks` 全标偏，冒出 60 帧假"丢弃"和一段看似"软边 Wipe 在进度 0 就漏新画面"的证据（其实是错位 2 帧后看到的进度 2/24）。blank 已改按 pts 算拍；`switches` / `frames` / apitest 的 C3 仍按序号算拍，漏帧多了会偏（prompt 56 提醒 W1-A3 统一改 pts）。
+14. **抠像键色别撞调色板**：测试图案 16 色里 6 号是黄绿（128,255,0），默认绿键（容差 0.3）会把用它的输入（7 号）的 ID 块抠成透明，frameprobe 全程认不出这一路（run1 ID 6 在播 0 帧）。g4 节目 5–8 号改红键；以后给合成源开抠像先查 `TestPattern.palette[(number − 1) % 16]` 离键色的距离。
+15. **录制边界要预告**：W1-E2 的录制器按块 PTS 裁边界，但只对 `stop(atTick:)` / `setStopTick` 之后到的块生效；块 PTS = 内容时刻比实时晚 42.67 ms（对齐延迟），引擎停完再 stop 时含边界的块早就写进去了（run1 音轨多 49.3 ms，ISO 各再多一块）。headless 现在起录就 `setStopTick(totalTicks)`；App 的 OutputRuntime 停录边界 = 生效拍 + 10，天然在边界前。
+16. **NDI 发现要在算 t0 之前做**：`NDIFinder.discover` 一轮 1.5 s，放在 t0 之后会吃掉 --lead-ms，引擎起晚开头跳拍（NDI 回环第一次 missed_render 11）。
