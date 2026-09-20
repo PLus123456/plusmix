@@ -21,3 +21,17 @@ command 的 JSON 形状与 `Command` 枚举的 Codable 一致（例如 `{"cut":{
 | `g3.json` | `switcher-headless make-scenario --preset g3 --minutes 10 --out scenarios/g3.json` | 第 1000 拍 Cut（V6）、第 3000 拍 Fade 30（V7）、3600 / 3660 / 3720 拍 T-bar 25 / 50 / 75%（各 60 拍）、3780 拍提交；120 s 起每 5 s Cut（PVW 跟着推到下一路）；122.5 s 起每 30 s 开关 Overlay 1。C 系列客户端从 150 s 起插自己的 cut |
 
 生成逻辑在 `Tools/switcher-headless/Sources/switcher-headless/Factories.swift` 的 `G3Factory`。之后 G4 / W4-A 各加自己的场景。
+
+**G4 起 `g3-show.json` 的八路底纹换成灰底 + 噪声 ±24**（`background: {"noise": {"level": 原灰度, "amplitude": 24, "seed": 输入号}}`，提案 006 / W1-A2 落地，
+G3 交接第 2 条）：纯灰底压不出设定码率，E2 在长跑里没有可判对象。名义灰度不变（V6 / V7 的中心均值 ≈ level），但 GPU / CPU 占用比灰底高，
+**与 `baselines/g3-m5max.json` 的 S3 不可比**；M0 / G2 的文件保留灰底。
+
+## G4 起
+
+| 文件 | 生成命令 | 内容 |
+|---|---|---|
+| `g4-show.json` + `g4-stinger.png` | `switcher-headless make-show --preset g4 --out scenarios/g4-show.json`（PNG 写在同目录） | 1080p60；1–8 号同 g3（噪声底纹），**5–8 号开抠像**（契约 `keyer`，默认绿键色：灰噪声上画面不变，只付着色器代价；真绿幕在 docs/checklists/G4.md 人工看）；**9 号图片输入** = 带 alpha 的 Stinger PNG（路径相对节目文件；图形只在下 20% 和左右两侧，不碰测试图案 / 闪光块 / 中心采样区）；**Overlay 1–4** = 5 / 6 / 7 / 8 号，位置左下 / 右下 / 左中 / 右中，动画 fade 15 / slide 20 / zoom 20 / cut；转场参数 Wipe 左→右软边 0.1、Stinger 9 号第 12 拍换底；输出 = 录制 + **多画面自定义布局**（`extra["layout"]`：PGM / PVW 上半 + 8 路 4×2，safeArea + meters，提案 010 过渡口径） |
+| `g4.json` | `switcher-headless make-scenario --preset g4 --minutes 10 --out scenarios/g4.json` | 前 2 分钟同 g3（1000 Cut、3000 Fade 30、3600–3780 T-bar）；**120 s 起每 5 s 一次转场按 Cut → Fade → Wipe → Zoom → Stinger 轮流**（非 Cut 24 拍 = 0.4 s：`setTransition` 在 t − 1、`autoTransition` 在 t，切完 d + 1 拍推 PVW）；**122.5 s 起每 15 s 翻一路叠加**（1 → 2 → 3 → 4 循环）。C 系列客户端从 150 s 起在 x.7 s 相位插 cut（gate4.sh `--c1-phase 0.7`）。gate4.sh 把每次非 Cut 转场的 [t + 1, t + d] 拍交给 `frameprobe --blank-ticks`（合成帧没有单一输入身份） |
+| `g4-ndi-show.json` | `switcher-headless make-show --preset g4-ndi --out scenarios/g4-ndi-show.json [--ndi-name "Switcher G4 loop"]` | NDI 回环 L1（scripts/gate4-ndi.sh）：1 号 60 fps 噪声 +音频 作 PGM，2 号 `ndi(sourceName:)` = headless `--ndi-send` 的发送端名（不含 "(" 时按本机发现列表的后缀解析），放 PVW |
+
+生成逻辑在 `Tools/switcher-headless/Sources/switcher-headless/G4Factory.swift`。

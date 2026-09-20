@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""G3 检查点报告生成（scripts/gate3.sh 第 6 步）。
+"""G3 / G4 检查点报告生成（scripts/gate3.sh / gate4.sh 的最后一步；--checkpoint 选口径文字，判定逻辑同一份）。
 
 一次运行的产物（out-dir：environment.txt、stats.jsonl、summary.json / .md、probe-*.json / .md、frames.json、ffprobe.json、
 packets-v.csv、ffprobe-errors.txt、summary-c.json / report-c.md、headless.log、load.log）
@@ -87,7 +87,11 @@ def main():
     ap.add_argument("--notes", required=True)
     ap.add_argument("--report", required=True)
     ap.add_argument("--waive", action="append", default=[], help="个案放行：'<判定表里的指标名>=<理由>'，可多次；硬性项不接受")
+    ap.add_argument("--checkpoint", default="G3", help="G3 / G4：标题与说明文字；判定逻辑相同")
+    ap.add_argument("--blank-ticks", default="", help="gate4：frameprobe --blank-ticks 用的拍段（只为写进报告）")
+    ap.add_argument("--extra-note", action="append", default=[], help="附在运行说明后的一行（可多次）")
     a = ap.parse_args()
+    cp = a.checkpoint
     waivers = {}
     for w in a.waive:
         if "=" not in w:
@@ -425,18 +429,46 @@ def main():
     tail = "\n".join(headless_log.strip().splitlines()[-24:])
 
     lines = []
-    lines.append(f"## 运行 {a.label}：{a.minutes:g} 分钟 G3 场景")
+    lines.append(f"## 运行 {a.label}：{a.minutes:g} 分钟 {cp} 场景")
     lines.append("")
     lines.append(f"- 日期：{env.get('date', '?')}；提交：`{env.get('commit', '?')}`（{env.get('branch', '?')}，未提交改动 {env.get('dirty', '?')} 个文件）")
     lines.append(f"- 机器：{env.get('cpu', '?')}，{env.get('cores', '?')} 核，{env.get('memory_gb', '?')} GB；macOS {env.get('macos', '?')}；{env.get('xcode', '?')}")
     lines.append(f"- 电源：{env.get('power', '?')}；温度 / 降频：{env.get('thermal', '无记录')}")
     lines.append(f"- 负载：跑前 {env.get('load_before', '?')} → 跑后 {env.get('load_after', '?')}；跑前占 CPU 的进程：{env.get('top_processes_before', '?')}")
     lines.append(f"- 运行期间：GPU 占用 > 50% 的秒数 {gpu_busy_seconds}（最高 {gpu_max:.0f}%）；负载采样 {'有（' + str(len(load_samples)) + ' 条，5 s 一次，load.log）' if load_samples else '无'}")
-    lines.append(f"- 场景：`{a.script}`（{scenario.get('durationTicks', '?')} 拍，{len(scenario.get('events', []))} 个事件：第 1000 拍 Cut、第 3000 拍 Fade 30、3600/3660/3720 拍 T-bar 25/50/75%、120 s 起每 5 s Cut、122.5 s 起每 30 s 开关 Overlay 1）；节目：`{a.show}`（{show.get('mixer', {}).get('format', {}).get('width', '?')}×{show.get('mixer', {}).get('format', {}).get('height', '?')}@{program_fps:g}）")
+    event_kinds = {}
+    for e in scenario.get("events", []):
+        k = next(iter(e.get("command", {"?": None}).keys()))
+        if k == "setTransition":
+            k = "setTransition:" + str(e["command"]["setTransition"].get("type"))
+        event_kinds[k] = event_kinds.get(k, 0) + 1
+    kinds_text = "、".join(f"{k} {v}" for k, v in sorted(event_kinds.items()))
+    if cp == "G4":
+        scenario_text = ("前 2 分钟同 G3（第 1000 拍 Cut、第 3000 拍 Fade 30、3600/3660/3720 拍 T-bar 25/50/75%），120 s 起每 5 s 按 Cut / Fade / Wipe / Zoom / Stinger 轮流"
+                         "（非 Cut 24 拍），122.5 s 起每 15 s 翻一路叠加（1–4 循环）")
+    else:
+        scenario_text = "第 1000 拍 Cut、第 3000 拍 Fade 30、3600/3660/3720 拍 T-bar 25/50/75%、120 s 起每 5 s Cut、122.5 s 起每 30 s 开关 Overlay 1"
+    lines.append(f"- 场景：`{a.script}`（{scenario.get('durationTicks', '?')} 拍，{len(scenario.get('events', []))} 个事件：{kinds_text}；{scenario_text}）；节目：`{a.show}`（{show.get('mixer', {}).get('format', {}).get('width', '?')}×{show.get('mixer', {}).get('format', {}).get('height', '?')}@{program_fps:g}）")
     lines.append("  - 输入：" + "；".join(input_lines))
-    lines.append(f"- 命令：`switcher-headless run --show {a.show} --script {a.script} --duration {int(a.minutes * 60)} --stats {out}/stats.jsonl --record {out}/out.mov --iso-audio 4 --audio-device null --api`；客户端 `scripts/apitest/apitest.py run --c1-start 150 …`")
+    if cp == "G4":
+        keyed = [i["number"] for i in show.get("inputs", []) if (i.get("settings") or {}).get("keyer", {}).get("enabled")]
+        ovl = [(o.get("input"), (o.get("animation") or {}).get("kind"), (o.get("animation") or {}).get("durationTicks")) for o in show.get("mixer", {}).get("overlays", [])]
+        mv = next((o for o in show.get("outputs", []) if o.get("kind") == "multiview"), None)
+        lines.append(f"  - 新负载：抠像开在输入 {keyed}；Overlay 1–4 = {ovl}；多画面输出 {'自定义布局（cells ' + str(len(((mv or {}).get('settings') or {}).get('extra', {}).get('layout', {}).get('cells', []))) + '，safeArea / meters）' if mv else '无'}；"
+                     f"Wipe {show.get('mixer', {}).get('transition', {}).get('wipe')}，Stinger {show.get('mixer', {}).get('transition', {}).get('stinger')}（{next((i['name'] for i in show.get('inputs', []) if 'image' in i['source']), '无图片输入')}）")
+        blank_count = 0
+        if a.blank_ticks:
+            for part in a.blank_ticks.split(","):
+                lo, hi = part.split("-")
+                blank_count += int(hi) - int(lo) + 1
+        lines.append(f"  - frameprobe 的 `--blank-ticks`：非 Cut 转场的中间拍 [t + 1, t + d]，共 {a.blank_ticks.count('-')} 段 {blank_count} 拍当作解不出（转场合成帧没有单一输入身份；"
+                     f"V4 的引擎侧 stats.jsonl 计数全程照算，V5 总帧数不受影响；第 t 拍 = 纯旧画面 + 整秒闪光帧保留）")
+    for n in a.extra_note:
+        lines.append(f"- {n}")
+    api_extra = " --c1-phase 0.7" if cp == "G4" else ""
+    lines.append(f"- 命令：`switcher-headless run --show {a.show} --script {a.script} --duration {int(a.minutes * 60)} --stats {out}/stats.jsonl --record {out}/out.mov --iso-audio 4 --audio-device null --api`；客户端 `scripts/apitest/apitest.py run --c1-start 150{api_extra} …`")
     lines.append("")
-    lines.append("### G3 判定（落地方案 §4 G3 + G3 prompt 第 2 条 b；阈值按测试标准 §4）")
+    lines.append(f"### {cp} 判定（落地方案 §4 {cp} + {cp} prompt 第 2 条；阈值按测试标准 §4）")
     lines.append("")
     lines.append("| 指标 | 数值 | 阈值 | 通过 | 与上一版本的差 |")
     lines.append("|---|---|---|---|---|")
@@ -446,7 +478,8 @@ def main():
             m = f"⚠️ 放行（{waivers[name]}）"
         lines.append(f"| {name} | {value} | {thr} | {m} | {d} |")
     verdict = "✅ 通过" + (f"（含放行 {len(waived)} 项）" if waived else "") if all_pass else "❌ 未通过"
-    lines.append(f"| **总判定（自动项）** | E7–E9 见 reports/G3-net.md（scripts/gate3-net.sh，需要 sudo 起 netem 代理） | | **{verdict}** | 基线：{a.baseline or '无（本次即基线）'} |")
+    net_note = "E7–E9 见 reports/G3-net.md（scripts/gate3-net.sh，需要 sudo 起 netem 代理）" if cp == "G3" else "E7–E9 沿用 G3（reports/G3-net.md；W3 五路没动推流），NDI 回环 L1 见 reports/G4-ndi.md，编译矩阵见 reports/G4-matrix.md"
+    lines.append(f"| **总判定（自动项）** | {net_note} | | **{verdict}** | 基线：{a.baseline or '无（本次即基线）'} |")
     lines.append("")
     lines.append("### 其它指标（信息；阈值按测试标准 §4）")
     lines.append("")
@@ -504,16 +537,18 @@ def main():
     with open(a.run_report, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
-    notes = read_text(a.notes, "# G3 检查点报告\n\n（reports/G3-notes.md 还没写）\n")
-    runs = sorted(glob.glob(os.path.join(os.path.dirname(a.run_report) or ".", "G3-run-*.md")),
-                  key=lambda p: (0 if p.endswith("G3-run-10min.md") else 1, p))
-    net = read_text(os.path.join(os.path.dirname(a.run_report) or ".", "G3-net.md")).strip()
-    parts = [notes.rstrip() + "\n", "\n---\n\n# 自动结果（scripts/gate3.sh 生成，每次运行一节）\n",
+    rdir = os.path.dirname(a.run_report) or "."
+    notes = read_text(a.notes, f"# {cp} 检查点报告\n\n（reports/{cp}-notes.md 还没写）\n")
+    runs = sorted(glob.glob(os.path.join(rdir, f"{cp}-run-*.md")), key=lambda p: (0 if p.endswith(f"{cp}-run-10min.md") else 1, p))
+    # G3：网络损伤那节；G4：NDI 回环 L1 + 编译矩阵两节（各自的脚本生成），E7–E9 沿用 G3
+    extras = [read_text(os.path.join(rdir, f)).strip() for f in (["G3-net.md"] if cp == "G3" else ["G4-ndi.md", "G4-matrix.md"])]
+    parts = [notes.rstrip() + "\n", f"\n---\n\n# 自动结果（scripts/gate{cp[1:]}.sh 生成，每次运行一节）\n",
              f"\n生成时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
     for r in runs:
         parts.append("\n" + read_text(r).rstrip() + "\n")
-    if net:
-        parts.append("\n" + net + "\n")
+    for x in extras:
+        if x:
+            parts.append("\n" + x + "\n")
     with open(a.report, "w", encoding="utf-8") as f:
         f.write("".join(parts))
     print(f"{'通过' if all_pass else '未通过'}：{a.run_report} → {a.report}")

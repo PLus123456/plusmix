@@ -6,7 +6,12 @@ import SwitcherRender
 import SwitcherAudio
 import SwitcherAudioIntegration
 import SwitcherOutputs
+import SwitcherNDISend
 import SwitcherControl
+import SwitcherTally
+import VMixCompat
+import SwitcherInputs
+import SwitcherNDI
 import SwitcherTestKit
 
 /// run 子命令的参数。
@@ -28,6 +33,14 @@ struct RunOptions: Sendable {
     var api: APIServerConfiguration? = nil
     /// W2-E A4：另起 N 个录制器（PGM 视频 + 前 N 路带音频输入各自的 ISO 音轨），文件名 <record 去掉扩展名>.iso<编号>.mov。
     var isoAudio: Int = 0
+    /// --compat：第三方 API 兼容层（W3-D VMixCompat，默认关；C5 用）。nil = 不起。
+    var compat: VMixCompatConfiguration? = nil
+    /// --tally-port：W3-D 的 tally 流（WS /tally + GET /tally）；nil = 不起。
+    var tallyPort: Int? = nil
+    /// --ndi-send <名字>：起 W2-D 的 NDISender 送 PGM（+ Master 音频），gate4-ndi 的回环发送端。
+    var ndiSend: String? = nil
+    /// --ndi-jitter-frames：节目里 NDI 输入的抖动缓冲深度（W3-A，0–2，默认 1）。
+    var ndiJitterFrames: Int = 1
 }
 
 /// 音频输出：--audio-device null|default|<名字> → 集成层（W2-E AudioEngine）的设备选择。空设备 = W1-D 假时钟，不出声，gate 用。
@@ -52,9 +65,13 @@ enum AudioOutputChoice {
 final class EncoderStatsSource: @unchecked Sendable {
     private let recorders: [Recorder]
     private let last = Mutex<[(counters: RecorderCounters, at: HostTime)?]>([])
+    /// --ndi-send 的发送端：排在录制器之后（它不在节目文件的 outputs 里，是命令行加的，G4 的 NDI 回环工装）。
+    private let ndi: NDISender?
+    private let lastNDI = Mutex<(counters: NDISendCounters, at: HostTime)?>(nil)
 
-    init(recorders: [Recorder]) {
+    init(recorders: [Recorder], ndi: NDISender? = nil) {
         self.recorders = recorders
+        self.ndi = ndi
         last.withLock { $0 = Array(repeating: nil, count: recorders.count) }
     }
 
@@ -66,10 +83,20 @@ final class EncoderStatsSource: @unchecked Sendable {
             box = current.map { ($0, now) }
             return p
         }
-        return current.enumerated().map { i, c in
+        var entries = current.enumerated().map { i, c in
             let window = previous[i].map { max((now - $0.at).seconds, 1e-3) } ?? 1
             return c.statsEntry(previous: previous[i]?.counters, windowSeconds: window, state: recorders[i].state.statsName)
         }
+        if let ndi {
+            let snapshot = ndi.countersSnapshot
+            let prev = lastNDI.withLock { box -> (counters: NDISendCounters, at: HostTime)? in
+                let p = box
+                box = (snapshot, now)
+                return p
+            }
+            entries.append(ndi.statsEntry(previous: prev?.counters, windowSeconds: prev.map { max((now - $0.at).seconds, 1e-3) } ?? 1))
+        }
+        return entries
     }
 }
 
@@ -138,32 +165,64 @@ final class HeadlessSession: @unchecked Sendable {
         let spec = TickClockSpec(t0: t0, frameRate: format.frameRate)
         let lastTick = Tick(totalTicks - 1)
 
-        // 1. 输入：只接合成源（G2 / M0）。每路自己的帧槽（W1-B）+ 像素池（W1-A）；带音频的路另起一个独立的合成音频源写进 C 环（W1-D）。
+        // 0. NDI 发送端（--ndi-send，G4 的 NDI 回环工装）：先于输入起——节目里的 NDI 输入要在发现列表里找到它；帧要等引擎起了才来。
+        var ndiSender: NDISender?
+        if let name = options.ndiSend {
+            guard NDISender.isAvailable else { throw CLIError("--ndi-send 需要 NDI SDK（编译时没探测到 /Library/NDI SDK for Apple）") }
+            let sender = NDISender(configuration: NDISender.Configuration(name: name, format: format, source: .program))
+            try sender.start()
+            engine.addConsumer(sender)
+            ndiSender = sender
+        }
+
+        // 1. 输入：合成源（G2 / M0）；G4 起另接图片（W2-A ImageInput，Stinger 的 alpha 图层）和 NDI（W3-A NDIInput，回环 L1）。
+        //    合成源每路自己的帧槽（W1-B）+ 像素池（W1-A）；带音频的路另起一个独立的合成音频源写进 C 环（W1-D）。
         //    时间线：视频第 k 帧的 pts = 节目拍点 − 提前量（默认半个节目帧，8.3 ms @60）。提前量模拟真设备"帧在它该被合成的拍之前到达"：
         //    没有它，pts 恰好落在拍点上的帧到达时刻与拍点只差唤醒 + 画帧的几十微秒到几毫秒，带 ±3 ms 抖动的那路每帧都在赌"先到还是拍先到"，
         //    一半重复一半丢（冒烟跑实测 50%），量到的是拍点竞态而不是引擎的挑帧规则。音频（click）不带提前量，t0 = 节目第 0 拍，
         //    这样闪光帧在第 60k 拍合成、click 在 t0 + k s，录制文件里两者同刻（A2 = 0 才是对的）。
+        //    图片 / NDI 用 W2-A 的 ProgramTiming（同一个拍点时钟）：图片每拍 pts = 拍点；NDI pts = 到达 − 抖动 + J × 帧间隔（W3-A §1.2）。
         let programFrameSeconds = format.frameDuration.doubleValue
         let inputLeadMs = options.inputLeadMs ?? programFrameSeconds * 500
         let videoT0 = t0 - HostDuration(milliseconds: inputLeadMs)
+        let timing = ProgramTiming(format: format, clock: spec)
         var inputs: [SyntheticVideoInput] = []
+        var otherInputs: [any Input] = []
         var audioInputs: [(number: Int, ring: CAudioRing, settings: InputAudioSettings, source: SyntheticAudioInput)] = []
         for cfg in initialState.inputs {
-            guard case .synthetic(let settings) = cfg.source else {
-                throw CLIError("G2 只接合成源：输入 \(cfg.number)「\(cfg.name)」是 \(cfg.kind)")
-            }
             let slot = LockFreeFrameSlot(capacity: 3)
-            let timeline = SyntheticTimeline(t0: videoT0, frameRate: settings.frameRate)
-            let input = try SyntheticVideoInput(number: cfg.number, name: cfg.name, settings: settings, videoSlot: slot,
-                                                audioRing: nil, timeline: timeline, seed: UInt64(cfg.number))
-            engine.registerInput(number: cfg.number, slot: slot)
-            inputs.append(input)
-            if settings.audio {
-                let ring = CAudioRing(channelCount: 2)
-                let source = SyntheticAudioInput(number: cfg.number, name: "\(cfg.name) 音频", frameRate: format.frameRate,
-                                                 driftPpm: settings.audioDriftPpm, audioRing: ring,
-                                                 timeline: SyntheticTimeline(t0: t0, frameRate: format.frameRate))
-                audioInputs.append((cfg.number, ring, cfg.settings.audio, source))
+            switch cfg.source {
+            case .synthetic(let settings):
+                let timeline = SyntheticTimeline(t0: videoT0, frameRate: settings.frameRate)
+                let input = try SyntheticVideoInput(number: cfg.number, name: cfg.name, settings: settings, videoSlot: slot,
+                                                    audioRing: nil, timeline: timeline, seed: UInt64(cfg.number))
+                engine.registerInput(number: cfg.number, slot: slot)
+                inputs.append(input)
+                if settings.audio {
+                    let ring = CAudioRing(channelCount: 2)
+                    let source = SyntheticAudioInput(number: cfg.number, name: "\(cfg.name) 音频", frameRate: format.frameRate,
+                                                     driftPpm: settings.audioDriftPpm, audioRing: ring,
+                                                     timeline: SyntheticTimeline(t0: t0, frameRate: format.frameRate))
+                    audioInputs.append((cfg.number, ring, cfg.settings.audio, source))
+                }
+            case .image(let path):
+                // 相对路径相对节目文件所在目录（scenarios/g4-show.json 旁边的 g4-stinger.png）
+                let resolved = path.hasPrefix("/") ? path : options.showURL.deletingLastPathComponent().appendingPathComponent(path).path
+                let input = try ImageInput(number: cfg.number, name: cfg.name, path: resolved, timing: timing, videoSlot: slot)
+                engine.registerInput(number: cfg.number, slot: slot)
+                otherInputs.append(input)
+            case .ndi(let sourceName):
+                guard NDIInput.isSDKAvailable else { throw CLIError("输入 \(cfg.number)「\(cfg.name)」是 NDI，但 \(SwitcherNDIInfo.unavailableMessage)") }
+                let resolved = try NDILoop.resolveSourceName(sourceName)
+                var ndiOptions = NDIInput.Options()
+                ndiOptions.jitterBufferFrames = options.ndiJitterFrames
+                let input = NDIInput(number: cfg.number, name: cfg.name, sourceName: resolved, timing: timing, videoSlot: slot,
+                                     audioRing: nil, options: ndiOptions)
+                engine.registerInput(number: cfg.number, slot: slot)
+                otherInputs.append(input)
+                print("NDI 输入 \(cfg.number)：源「\(resolved)」，抖动缓冲 \(options.ndiJitterFrames) 帧")
+            default:
+                throw CLIError("headless 只接合成源 / 图片 / NDI：输入 \(cfg.number)「\(cfg.name)」是 \(cfg.kind)")
             }
         }
 
@@ -179,6 +238,7 @@ final class HeadlessSession: @unchecked Sendable {
             hints.producerBlockFrames = entry.source.blockFrames
             try audioEngine.registerInput(number: entry.number, ring: entry.ring, hints: hints)
         }
+        if let sender = ndiSender, !audioInputs.isEmpty { _ = try audioEngine.addConsumer(sender, source: .master) }
 
         // 3. 录制：Recorder 是 PGM 帧的消费者（有界队列 + 自己的编码线程）；Master 块由 AudioEngine 的消费者泵喂给它
         //    （块 PTS = 块首 − 对齐延迟 = 内容采集时刻，与视频拍点同一时基；G2 自建泵没扣混音器年龄，A2 −18 ms 就是这么来的）。
@@ -220,8 +280,8 @@ final class HeadlessSession: @unchecked Sendable {
         var gpu: GPUUtilization?
         var statsPublisher: StatsPublisher?
         if options.statsURL != nil || apiServer != nil {
-            if let rec = recorder {
-                let source = EncoderStatsSource(recorders: [rec] + isoRecorders.map(\.0))
+            if recorder != nil || ndiSender != nil {
+                let source = EncoderStatsSource(recorders: (recorder.map { [$0] } ?? []) + isoRecorders.map(\.0), ndi: ndiSender)
                 engine.encoderStatsProvider = { source.entries() }
             }
             engine.audioStatsProvider = { audioEngine.audioCounters }
@@ -242,11 +302,18 @@ final class HeadlessSession: @unchecked Sendable {
             statsPublisher = publisher
         }
 
-        // 4b. API（W2-C）：先于引擎起，让客户端在第 0 拍前就能连上。
-        if let server = apiServer {
-            await stateFeed.start()
-            try await server.start()
+        // 4b. API（W2-C）：先于引擎起，让客户端在第 0 拍前就能连上。兼容层（W3-D VMixCompat，--compat）与 tally 流（--tally-port）同一个总线 / 推送源。
+        let compat = options.compat.map { VMixCompatServer(bus: commandBus, feed: stateFeed, configuration: $0) }
+        let tallyPublisher = options.tallyPort.map { _ in TallyPublisher(stateMachine: stateMachine) { [weak engine] in engine?.clock?.spec } }
+        var tallyServer: TallyServer?
+        if let tallyPublisher, let port = options.tallyPort {
+            tallyServer = TallyServer(publisher: tallyPublisher, configuration: TallyServerConfiguration(host: "0.0.0.0", port: port))
         }
+        if apiServer != nil || compat != nil || tallyServer != nil { await stateFeed.start() }
+        if let server = apiServer { try await server.start() }
+        if let compat { try await compat.start() }
+        if let tallyPublisher { await tallyPublisher.start() }
+        if let tallyServer { try await tallyServer.start() }
 
         // 5. 场景：全部预排程到状态机，按拍应用（跳过的拍也逐拍走，命令不会漏）。
         if let sc = scenario {
@@ -257,13 +324,18 @@ final class HeadlessSession: @unchecked Sendable {
         //    它的入口环只存 256 块 ≈ 1.4 s，起点之前的块留在里面等第一个压缩视频样本到了才会被丢掉）→ 引擎（start 里 prepare 渲染器，lead 要盖住它）
         try await audioEngine.start(clock: spec)
         for input in inputs { try input.start() }
+        for input in otherInputs { try input.start() }
         for entry in audioInputs { try entry.source.start() }
         if let rec = recorder { try rec.start(at: RecordingStart(clock: spec, tick: .zero)) }
         for (iso, _) in isoRecorders { try iso.start(at: RecordingStart(clock: spec, tick: .zero)) }
         if stopRequested {
             await apiServer?.stop()
+            await compat?.stop()
+            await tallyServer?.stop()
+            await tallyPublisher?.stop()
             await stateFeed.stop()
-            await shutdownEarly(inputs: inputs, audioInputs: audioInputs.map(\.source), recorder: recorder, audioEngine: audioEngine, writer: writer)
+            await shutdownEarly(inputs: inputs, others: otherInputs, audioInputs: audioInputs.map(\.source), recorder: recorder, ndi: ndiSender,
+                                audioEngine: audioEngine, writer: writer)
             return
         }
         try await engine.start(t0: t0, firstTick: .zero, lastTick: lastTick)
@@ -272,11 +344,11 @@ final class HeadlessSession: @unchecked Sendable {
         guard let clock = engine.clock else { throw CLIError("引擎没有时钟") }
         print("""
             switcher-headless \(SwitcherVersion.current)
-              节目：\(show.name)（\(options.showURL.path)）\(format.width)×\(format.height)@\(format.frameRate)，\(inputs.count) 路合成源，\(audioInputs.count) 路音频
+              节目：\(show.name)（\(options.showURL.path)）\(format.width)×\(format.height)@\(format.frameRate)，\(inputs.count) 路合成源\(otherInputs.isEmpty ? "" : " + \(otherInputs.count) 路图片 / NDI")，\(audioInputs.count) 路音频
               场景：\(options.scriptURL?.path ?? "无")（\(scenario?.events.count ?? 0) 个事件）
               时长：\(totalTicks) 拍（\(String(format: "%.1f", options.durationSeconds)) s）  t0 距现在 \(String(format: "%.0f", leadLeft)) ms\(leadLeft < 0 ? "  ⚠️ 起晚了，开头会跳拍" : "")  合成源提前量 \(String(format: "%.2f", inputLeadMs)) ms
               音频：\(options.audioDevice)（对齐延迟 \(String(format: "%.2f", audioEngine.alignmentDuration.milliseconds)) ms，消费者流\(audioEngine.resamplesToHostClock ? "重采样到 host 时钟" : "不重采样")）  录制：\(options.recordURL?.path ?? "无")\(isoRecorders.isEmpty ? "" : "（+ \(isoRecorders.count) 路 ISO 音轨）")  stats：\(options.statsURL?.path ?? "无")  GPU 占用：\(gpu == nil ? "不可用" : "IOKit")
-              API：\(apiServer.flatMap(\.baseURL).map { "\($0.absoluteString)/api/v1（WS /api/v1/events）\(options.api?.token == nil ? "" : "，token 鉴权开")" } ?? "关")
+              API：\(apiServer.flatMap(\.baseURL).map { "\($0.absoluteString)/api/v1（WS /api/v1/events）\(options.api?.token == nil ? "" : "，token 鉴权开")" } ?? "关")  兼容层：\(options.compat.map { "\($0.host) TCP \($0.tcpPort) / HTTP \($0.httpPort)" } ?? "关")  tally：\(options.tallyPort.map { "0.0.0.0:\($0)" } ?? "关")  NDI 发送：\(options.ndiSend ?? "关")
               时钟实时策略：\(clock.isRealtime ? "已生效" : "⚠️ 未生效（V3 会超）")
             """)
 
@@ -289,8 +361,10 @@ final class HeadlessSession: @unchecked Sendable {
         }
         let interrupted = stopRequested
 
-        // 7b. 先停 API（不再收命令、关掉 WS），推送源等引擎停了再停（最后几拍的快照还要推）
+        // 7b. 先停入口（API / 兼容层 / tally：不再收命令、关掉连接），推送源等引擎停了再停（最后几拍的快照还要推）
         await apiServer?.stop()
+        await compat?.stop()
+        await tallyServer?.stop()
 
         // 8. 停。跑满的情况：时钟已派完最后一拍、不会再挑帧，先停视频源再停引擎——反过来的话引擎排空在途帧的那几十毫秒里视频源还在 push，
         //    满槽挤掉的帧会被记成 dropped，stats 最后一行的 V4 精确核算每路多出 2–3 帧（W1-B 报告 §4 第 13 条）。
@@ -300,9 +374,15 @@ final class HeadlessSession: @unchecked Sendable {
         if interrupted {
             await engine.stop()
             for input in inputs { input.stop() }
+            for input in otherInputs { input.stop() }
         } else {
             for input in inputs { input.stop() }
+            for input in otherInputs { input.stop() }
             await engine.stop()
+        }
+        if let sender = ndiSender {
+            engine.removeConsumer(sender)
+            sender.stop()
         }
         let boundary = Tick((engine.counters.lastTick?.rawValue ?? -1) + 1)
         var recordResult: RecordingResult?
@@ -343,11 +423,13 @@ final class HeadlessSession: @unchecked Sendable {
         for entry in audioInputs { entry.source.stop() }
         statsPublisher?.stop()   // 先停采样再关文件；最后一行是停机前那一秒的
         writer?.close()
+        await tallyPublisher?.stop()
         await stateFeed.stop()
 
         // 9. 汇总（stdout；数字来源都是各对象的计数器，正式指标以 stats.jsonl / frameprobe 为准）
-        printSummary(clock: clock, inputs: inputs, audioInputs: audioInputs.map { (number: $0.number, source: $0.source) }, audioStatus: audioStatus,
-                     recorder: recorder, recordResult: recordResult, writer: writer, interrupted: interrupted)
+        printSummary(clock: clock, inputs: inputs, others: otherInputs, audioInputs: audioInputs.map { (number: $0.number, source: $0.source) },
+                     audioStatus: audioStatus, recorder: recorder, recordResult: recordResult, writer: writer, interrupted: interrupted,
+                     ndi: ndiSender, compat: compat, tally: tallyPublisher)
     }
 
     /// 录制封口，带看门狗：nil = 超时。
@@ -366,22 +448,25 @@ final class HeadlessSession: @unchecked Sendable {
         }
     }
 
-    private func shutdownEarly(inputs: [SyntheticVideoInput], audioInputs: [SyntheticAudioInput], recorder: Recorder?,
-                               audioEngine: AudioEngine, writer: StatsWriter?) async {
+    private func shutdownEarly(inputs: [SyntheticVideoInput], others: [any Input], audioInputs: [SyntheticAudioInput], recorder: Recorder?,
+                               ndi: NDISender?, audioEngine: AudioEngine, writer: StatsWriter?) async {
         if let rec = recorder {
             _ = await stopRecorder(rec, atTick: .zero, timeoutSeconds: 10)
         }
         await audioEngine.stop()
         for a in audioInputs { a.stop() }
         for input in inputs { input.stop() }
+        for input in others { input.stop() }
+        ndi?.stop()
         writer?.close()
         print("引擎启动前收到信号，已收尾退出")
         exitCode = 130
     }
 
-    private func printSummary(clock: ProgramClock, inputs: [SyntheticVideoInput], audioInputs: [(number: Int, source: SyntheticAudioInput)],
+    private func printSummary(clock: ProgramClock, inputs: [SyntheticVideoInput], others: [any Input], audioInputs: [(number: Int, source: SyntheticAudioInput)],
                               audioStatus a: AudioEngineStatus, recorder: Recorder?,
-                              recordResult: RecordingResult?, writer: StatsWriter?, interrupted: Bool) {
+                              recordResult: RecordingResult?, writer: StatsWriter?, interrupted: Bool,
+                              ndi: NDISender?, compat: VMixCompatServer?, tally: TallyPublisher?) {
         let c = engine.counters
         func ms(_ d: HostDuration?) -> String { d.map { String(format: "%.3f", $0.milliseconds) } ?? "—" }
         var lines: [String] = []
@@ -396,6 +481,21 @@ final class HeadlessSession: @unchecked Sendable {
                 pacing = "；到达余量 \(String(format: "%.2f", ps.margin.milliseconds)) ms（窗口最大到达延迟 \(String(format: "%.2f", ps.windowMaxLatency.milliseconds)) ms，迟到 \(ps.lateFrames)，抬 \(ps.raises) / 降 \(ps.decreases)）"
             }
             lines.append("  输入 \(input.number)：生成 \(k.generated)，设定丢 \(k.droppedByDesign)，池不够 \(k.poolStarved)，迟到 \(k.late)，唤醒 max \(String(format: "%.3f", Double(k.wakeLatencyMaxNs) / 1e6)) ms；帧槽 pushed \(s?.pushed ?? 0) consumed \(s?.consumed ?? 0) reused \(s?.reused ?? 0) dropped \(s?.dropped ?? 0)" + pacing)
+        }
+        for input in others {
+            var pacing = ""
+            if let ps = engine.pacingStats(forInput: input.number) {
+                pacing = "；到达余量 \(String(format: "%.2f", ps.margin.milliseconds)) ms（窗口最大到达延迟 \(String(format: "%.2f", ps.windowMaxLatency.milliseconds)) ms，迟到 \(ps.lateFrames)）"
+            }
+            let s = input.videoSlot?.stats
+            var detail = ""
+            if let ndi = input as? NDIInput {
+                let c = ndi.ndiCounters
+                detail = "；收 \(c.framesReceived) 帧 / 推 \(c.framesPushed)，SDK 丢 \(c.sdkVideoDropped)，格式不支持 \(c.framesUnsupported)，池耗尽 \(c.framesPoolExhausted)，重连 \(c.reconnects)，抖动均值 / 最大 \(String(format: "%.2f / %.2f", c.jitterMeanMs, c.jitterMaxMs)) ms" + (ndi.lastError.map { "；\($0)" } ?? "")
+            } else if let image = input as? ImageInput {
+                detail = "；\(image.imageWidth)×\(image.imageHeight)" + (image.lastError.map { "；\($0)" } ?? "")
+            }
+            lines.append("  输入 \(input.number)（\(input.kind)）：状态 \(input.state)；帧槽 pushed \(s?.pushed ?? 0) consumed \(s?.consumed ?? 0) reused \(s?.reused ?? 0) dropped \(s?.dropped ?? 0)" + detail + pacing)
         }
         lines.append("  音频：\(a.blocksRendered) 块，dropouts \(a.counters.dropouts)，underruns \(a.counters.underruns)，不连续 \(a.discontinuities)，实时违规 \(a.realtimeViolations)，队列丢块 \(a.tapDrops)；设备 \(a.device.kind) \(a.device.name)：\(a.device.callbacks) 块，最晚醒 / 抖动 \(String(format: "%.3f", a.device.maxJitterMs)) ms；对齐延迟 \(String(format: "%.2f", a.alignmentMs)) ms")
         for i in a.inputs {
@@ -419,9 +519,21 @@ final class HeadlessSession: @unchecked Sendable {
         if let w = writer {
             lines.append("  stats：\(w.url.path) 写 \(w.writtenLines) 行，丢 \(w.droppedLines)，清洗 \(w.sanitizedLines)")
         }
-        if apiServer != nil {
+        if apiServer != nil || compat != nil {
             let b = commandBus.counters, f = stateFeed.counters
             lines.append("  API：命令 \(b.applied) 条应用（其中 \(b.ignored) 条被 reducer 忽略）/ \(b.rejected) 条拒绝 / \(b.queued) 条排过队；推送快照 \(f.snapshots) 条、stats \(f.stats) 条、唤醒 \(f.wakeups) 次")
+        }
+        if let compat {
+            let c = compat.counters
+            lines.append("  兼容层：函数 \(c.functions)（出错 \(c.functionErrors)），TCP 连接 \(c.tcpConnectionsAccepted)，XML \(c.xmlServed) 次，tally 事件 \(c.tallyEvents)，ACTS 事件 \(c.actsEvents)")
+        }
+        if let tally {
+            let c = tally.counters
+            lines.append("  tally 流：\(c)")
+        }
+        if let ndi {
+            let c = ndi.countersSnapshot
+            lines.append("  NDI 发送：收 \(c.framesReceived) 帧 / 发 \(c.framesSent) / 队列丢 \(c.skipped)，转换失败 \(c.conversionFailures)，音频块 \(c.audioBlocksSent) / 丢 \(c.audioBlocksDropped)，转换 \(c.conversion)\(c.usingGPU ? "(GPU)" : "(CPU)") 最近 \(String(format: "%.2f", c.lastConvertMs)) ms，连接 \(c.connections)\(c.unavailable ? "，SDK 不可用" : "")")
         }
         print(lines.joined(separator: "\n"))
     }

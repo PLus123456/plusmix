@@ -11,7 +11,9 @@
 #
 # 合并提交（检查点会话 G2–G5 把功能分支合进来）：被合进来的内容不算本分支的改动。分支上只要有合并提交，就沿第一父链
 # 逐个提交结算：普通提交 = 相对父提交的 diff；合并提交 = 相对"自动合并结果"（git merge-tree --write-tree）的 diff，
-# 也就是只剩冲突解决 / 合并时手改的部分（这正是检查点的"胶水"）。同一文件在多个提交里改动的行数相加。
+# 也就是只剩冲突解决 / 合并时手改的部分。同一文件在多个提交里改动的行数相加。
+# 自动合并结果里带冲突标记的文件（两个功能分支改了同一处），它在合并提交里的改动是"冲突解决"，只列出来不计胶水额度
+# （G4 起：W3-C / W3-E 都动了 App/ 的 8 个文件，解决冲突本身不是检查点在写功能）；合并提交里改的其它文件照常按胶水额度算。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -83,10 +85,20 @@ collect_committed() {
     p1=$(git rev-parse --verify --quiet "$c^1")
     p2=$(git rev-parse --verify --quiet "$c^2" || true)
     if [ -n "$p2" ]; then
-      # 自动合并的树；有冲突时 merge-tree 退出 1 但仍写出带冲突标记的树，diff 出来的就是解决冲突的改动
+      # 自动合并的树；有冲突时 merge-tree 退出 1 但仍写出带冲突标记的树，diff 出来的就是解决冲突 + 合并时手改的改动
       tree=$(git merge-tree --write-tree "$p1" "$p2" 2>/dev/null | head -1)
       [ -n "$tree" ] || tree=$p1
-      git -c core.quotePath=false diff --numstat --no-renames "$tree" "$c"
+      local line path
+      while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        path=${line#*	}; path=${path#*	}
+        if git cat-file -e "$tree:$path" 2>/dev/null && git show "$tree:$path" 2>/dev/null | grep -q '^<<<<<<< '; then
+          # collect_committed 在命令替换的子 shell 里跑，数组传不出来，写临时文件
+          printf '%s(%s) @%s\n' "$path" "$(printf '%s' "$line" | awk -F'\t' '{printf "+%s/-%s", $1, $2}')" "${c:0:7}" >> "$conflict_file"
+        else
+          printf '%s\n' "$line"
+        fi
+      done < <(git -c core.quotePath=false diff --numstat --no-renames "$tree" "$c")
     else
       git -c core.quotePath=false diff --numstat --no-renames "$p1" "$c"
     fi
@@ -96,7 +108,12 @@ merged_note=""
 if [ -n "$(git rev-list --merges --first-parent "$mb..$branch" | head -1)" ]; then
   merged_note="（含合并提交：被合入分支的内容不算本分支改动，只算合并时的手改）"
 fi
+conflict_file=$(mktemp -t check-ownership-conflicts)
+trap 'rm -f "$conflict_file"' EXIT
 changes=$(collect_committed)
+if [ -s "$conflict_file" ]; then
+  yellow "[check-ownership] 合并提交里的冲突解决（自动合并结果带冲突标记的文件，不计胶水额度）：$(tr '\n' ' ' < "$conflict_file")"
+fi
 if [ "$include_wt" = 1 ]; then
   # 未提交的改动：工作树相对分支顶（只在该分支已 checkout 时有意义）；未跟踪文件按行数全算新增
   changes+=$'\n'$(git -c core.quotePath=false diff --numstat --no-renames "$branch")

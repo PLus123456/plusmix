@@ -129,3 +129,35 @@ gate3-report:
 	python3 scripts/gate3-report.py --out-dir .build/gate3/10min --label 10min --minutes 10 --show scenarios/g3-show.json --script scenarios/g3.json \
 	  --baseline "" --run-report reports/G3-run-10min.md --notes reports/G3-notes.md --report reports/G3.md
 
+
+# ---------- G4 检查点（M4 输入 + M6 叠加与其它输出）----------
+# make gate4        L0 + L1（六个包 swift test，含 W3-B 扩展后的 V8 参考图集 + 两个工具冒烟）→ 10 分钟 G4 场景（scripts/gate4.sh：五种转场轮流、Overlay 1–4 动画、
+#                   抠像开、多画面自定义布局；V1–V7、A1–A4、E1–E3、E5、C1–C4）→ reports/G4-run-10min.md + reports/G4.md，并写 baselines/g4-m5max.json
+#                   （与 g3-m5max.json 比只作参考：底纹换成噪声、负载加了抠像 / 叠加，不可比）
+# make gate4-run    只跑 10 分钟场景（跳过 L0 / L1）；make gate4-1h 60 分钟版（用户触发）
+# make gate4-ndi    NDI 回环 L1（headless --ndi-send → NDIInput，60 s，reports/G4-ndi.md）；make gate4-matrix 编译矩阵三种配置（reports/G4-matrix.md）
+# make gate4-report 只用已有产物重拼 reports/G4.md（改了 G4-notes.md 或跑完 gate4-ndi / gate4-matrix 之后用）
+# E7–E9 沿用 G3（reports/G3-net.md，W3 五路没动推流）；C5 真 Companion 与 V8 / V9 的人工部分在 docs/checklists/G4.md。数据留在 .build/gate4/<label>/（不入库）。
+GATE4_BASELINE ?= baselines/g4-m5max.json
+GATE4_PREVIOUS ?= baselines/g3-m5max.json
+.PHONY: gate4 gate4-run gate4-1h gate4-ndi gate4-matrix gate4-report
+gate4: test-packages test-tools
+	scripts/gate4.sh --minutes 10 --label 10min --baseline $(GATE4_PREVIOUS) --write-baseline $(GATE4_BASELINE)
+
+gate4-run:
+	scripts/gate4.sh --minutes 10 --label 10min --baseline $(GATE4_PREVIOUS) --write-baseline $(GATE4_BASELINE)
+
+gate4-1h:
+	scripts/gate4.sh --minutes 60 --label 1h --baseline $(GATE4_BASELINE)
+
+gate4-ndi:
+	scripts/gate4-ndi.sh
+	$(MAKE) gate4-report
+
+gate4-matrix:
+	scripts/gate4-matrix.sh
+	$(MAKE) gate4-report
+
+gate4-report:
+	python3 scripts/gate3-report.py --checkpoint G4 --out-dir .build/gate4/10min --label 10min --minutes 10 --show scenarios/g4-show.json --script scenarios/g4.json \
+	  --baseline "" --run-report reports/G4-run-10min.md --notes reports/G4-notes.md --report reports/G4.md

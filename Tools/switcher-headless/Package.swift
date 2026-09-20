@@ -3,6 +3,7 @@
 // G2 接线：Engine + MetalRenderer + SyntheticVideoInput × N + 合成音频 + 混音（空设备）+ VideoEncoder / Recorder + StatsWriter。
 // W2-C：--api 起 SwitcherControl 的 CommandBus + StateFeed + APIServer（C 系列测试不依赖 App）。
 // G3：音频换用 W2-E 的 SwitcherAudioIntegration.AudioEngine（对齐延迟 / AFV / 消费者泵 / 真设备重采样），--iso-audio 起 ISO 音轨录制器（A4）。
+// G4：接图片输入（Stinger 的 alpha 图层）、NDI 输入 + NDI 发送（回环 L1）、W3-D 的兼容层 / tally（--compat / --tally-port，C5）。
 // 依赖方向：Tools 在最外层，可以依赖所有包（scripts/check-deps.sh）。
 import PackageDescription
 
@@ -11,6 +12,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     dependencies: [
         .package(path: "../../Packages/SwitcherCore"),
+        .package(path: "../../Packages/SwitcherInputs"),
         .package(path: "../../Packages/SwitcherAudio"),
         .package(path: "../../Packages/SwitcherOutputs"),
         .package(path: "../../Packages/SwitcherControl"),
@@ -25,8 +27,13 @@ let package = Package(
                 .product(name: "SwitcherRender", package: "SwitcherCore"),
                 .product(name: "SwitcherAudio", package: "SwitcherAudio"),
                 .product(name: "SwitcherAudioIntegration", package: "SwitcherAudio"),
+                .product(name: "SwitcherInputs", package: "SwitcherInputs"),
+                .product(name: "SwitcherNDI", package: "SwitcherInputs"),
                 .product(name: "SwitcherOutputs", package: "SwitcherOutputs"),
+                .product(name: "SwitcherNDISend", package: "SwitcherOutputs"),
                 .product(name: "SwitcherControl", package: "SwitcherControl"),
+                .product(name: "SwitcherTally", package: "SwitcherControl"),
+                .product(name: "VMixCompat", package: "SwitcherControl"),
                 .product(name: "SwitcherTestKit", package: "SwitcherTestKit"),
             ]
         ),

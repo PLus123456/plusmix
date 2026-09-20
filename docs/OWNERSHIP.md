@@ -41,7 +41,7 @@
 | W3-C | 输出二期 | `w3-outputs2` | `Packages/SwitcherOutputs/Sources/External/` `Packages/SwitcherOutputs/Sources/VirtualCamera/` `Packages/SwitcherOutputs/Sources/ISO/` `Packages/SwitcherOutputs/Tests/ExternalTests/` `Packages/SwitcherOutputs/Tests/VirtualCameraTests/` `Packages/SwitcherOutputs/Tests/ISOTests/` `Packages/SwitcherOutputs/Package.swift` `CameraExtension/` `App/` `project.yml` | App 里只做对应窗口与设置入口；project.yml 只加扩展 target |
 | W3-D | 控制二期 | `w3-control2` | `Packages/SwitcherControl/Sources/VMixCompat/` `Packages/SwitcherControl/Sources/Tally/` `Packages/SwitcherControl/Tests/VMixCompatTests/` `Packages/SwitcherControl/Tests/TallyTests/` `Packages/SwitcherControl/Package.swift` `Tools/streamdeck-plugin/` `docs/integrations/` `scripts/apitest/` | Package.swift 只许加 Tally / VMixCompat 两个 target 和它们的依赖；scripts/apitest/ 是 C5 的 Companion 模拟脚本（prompt 53 测试段点名的位置，用户 2026-09-19 批，同 W2-C 先例） |
 | W3-E | 界面二期 | `w3-app2` | `App/` | |
-| G4 | M4 M6 集成 | `g4` | `Tools/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `docs/checklists/` `docs/OWNERSHIP.md` `docs/plan/prompts/` `docs/spec/导播台测试标准.md` `~Packages/*:50` `~App/:50` | 规则同 G2 / G3（测试标准同 G3：只改口径不改阈值） |
+| G4 | M4 M6 集成 | `g4` | `Tools/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `docs/checklists/` `docs/OWNERSHIP.md` `docs/plan/prompts/` `docs/spec/导播台测试标准.md` `project.yml` `~Packages/*:50` `~App/:50` | 规则同 G2 / G3（测试标准同 G3：只改口径不改阈值）；project.yml 只加 App 对本仓库包产品的依赖（G4：SwitcherNDI / SwitcherDeckLink / VMixCompat，接 W3-A / W3-D，同 W2-B2 / W3-C 先例，**等用户认领**）；App/ 里 W3-C / W3-E 重叠实现的收口（prompt 54 / W3-E 报告 §3 指定由 G4 做）与冲突解决见补充规则 5 |
 | W4-A | 长稳与性能 | `w4-soak` | `scripts/soak/` `scripts/perf/` `baselines/` `reports/` `Tools/switcher-headless/` | headless 只加参数 |
 | W4-B | 发布工程 | `w4-release` | `scripts/release/` `.github/` `project.yml` `App/Resources/` `docs/release/` | |
 | W4-C | 文档样例 | `w4-docs` | `docs/` `!docs/spec/` `!docs/plan/` `Samples/` `README.md` | |
@@ -53,5 +53,5 @@
 2. **共享测试素材目录**在仓库根：`Tests/Fixtures/`（W1-A、W1-E 产出，W2-A 消费）和 `Tests/References/`（W1-C、W3-B 的参考图）。放包外是因为它们跨包共用，且不会被 SwiftPM 当成 target。
 3. **THIRD_PARTY/**：W1-D 内嵌 libsamplerate / libebur128 时放许可证的地方（它的 prompt 要求）；之后谁再内嵌第三方源码谁加目录。
 4. **挂进 make lint 的新检查**：把脚本放在 `scripts/` 下、名字以 `check-` 或 `lint-` 开头，Makefile 会自动带上（`scripts/check-rt-symbols.sh` 就是这么进来的），不用改 Makefile。
-5. 脚本只看**已提交**的改动：功能分支 = merge-base(main, 分支) → 分支顶；检查点分支（有合并提交）= 沿第一父链逐提交结算，合并提交只算相对自动合并结果的手改（冲突解决与胶水）。加 `--include-working-tree` 可以把未提交的也算上，方便会话提交前自查。
+5. 脚本只看**已提交**的改动：功能分支 = merge-base(main, 分支) → 分支顶；检查点分支（有合并提交）= 沿第一父链逐提交结算，合并提交只算相对自动合并结果的手改。其中**自动合并结果里带冲突标记的文件**（两个功能分支改了同一处，G4 合 W3-C / W3-E 时 App/ 有 8 个），它在合并提交里的改动是冲突解决，脚本单独列出、不计胶水额度（解决冲突不是检查点在写功能）；合并提交里改的其它文件（删重复实现、改调用点）照常计胶水额度。加 `--include-working-tree` 可以把未提交的也算上，方便会话提交前自查。
 6. **检查点会话可以写 `docs/checklists/`（人工清单，prompt 要求）、改本文件（认领冲突解决、给续做会话加行）、加 `docs/plan/prompts/` 里的续做 prompt**：检查点是产生后续工作项的地方，把决定落成 prompt 和归属行才算持久化（用户 2026-09-18 批，G3 报告 §7 第 1 条）。续做会话的分支名带 `-2` 后缀（`w1-core-2` 之类），从 G3 合入后的 main 开。检查点在用户授权后还可以把各报告里等拍板的**口径**问题落进 `docs/spec/导播台测试标准.md`（阈值仍只有用户能改；用户 2026-09-19 授权 G3）。

@@ -39,7 +39,7 @@
   },
   "inputs" : [
     {
-      "name" : "合成 1 · 30 灰 64 +音频",
+      "name" : "合成 1 · 30 灰 64±24 +音频",
       "number" : 1,
       "settings" : {
         "audio" : {
@@ -90,8 +90,10 @@
             "audio" : true,
             "audioDriftPpm" : 0,
             "background" : {
-              "gray" : {
-                "level" : 64
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 64,
+                "seed" : 1
               }
             },
             "clockDriftPpm" : 0,
@@ -108,7 +110,7 @@
       }
     },
     {
-      "name" : "合成 2 · 60 灰 192 +音频(ISO +100 ppm)",
+      "name" : "合成 2 · 60 灰 192±24 +音频(ISO +100 ppm)",
       "number" : 2,
       "settings" : {
         "audio" : {
@@ -159,8 +161,10 @@
             "audio" : true,
             "audioDriftPpm" : 100,
             "background" : {
-              "gray" : {
-                "level" : 192
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 192,
+                "seed" : 2
               }
             },
             "clockDriftPpm" : 0,
@@ -177,7 +181,7 @@
       }
     },
     {
-      "name" : "合成 3 · 59.94 灰 96 +音频(ISO -100 ppm)",
+      "name" : "合成 3 · 59.94 灰 96±24 +音频(ISO -100 ppm)",
       "number" : 3,
       "settings" : {
         "audio" : {
@@ -228,8 +232,10 @@
             "audio" : true,
             "audioDriftPpm" : -100,
             "background" : {
-              "gray" : {
-                "level" : 96
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 96,
+                "seed" : 3
               }
             },
             "clockDriftPpm" : 0,
@@ -246,7 +252,7 @@
       }
     },
     {
-      "name" : "合成 4 · 59.94 灰 128 +音频(ISO +50 ppm)",
+      "name" : "合成 4 · 59.94 灰 128±24 +音频(ISO +50 ppm)",
       "number" : 4,
       "settings" : {
         "audio" : {
@@ -297,8 +303,10 @@
             "audio" : true,
             "audioDriftPpm" : 50,
             "background" : {
-              "gray" : {
-                "level" : 128
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 128,
+                "seed" : 4
               }
             },
             "clockDriftPpm" : 0,
@@ -315,7 +323,7 @@
       }
     },
     {
-      "name" : "合成 5 · 60 灰 144 +100 ppm",
+      "name" : "合成 5 · 60 灰 144±24 +100 ppm",
       "number" : 5,
       "settings" : {
         "audio" : {
@@ -366,8 +374,10 @@
             "audio" : false,
             "audioDriftPpm" : 0,
             "background" : {
-              "gray" : {
-                "level" : 144
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 144,
+                "seed" : 5
               }
             },
             "clockDriftPpm" : 100,
@@ -384,7 +394,7 @@
       }
     },
     {
-      "name" : "合成 6 · 60 灰 160 -100 ppm",
+      "name" : "合成 6 · 60 灰 160±24 -100 ppm",
       "number" : 6,
       "settings" : {
         "audio" : {
@@ -435,8 +445,10 @@
             "audio" : false,
             "audioDriftPpm" : 0,
             "background" : {
-              "gray" : {
-                "level" : 160
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 160,
+                "seed" : 6
               }
             },
             "clockDriftPpm" : -100,
@@ -453,7 +465,7 @@
       }
     },
     {
-      "name" : "合成 7 · 60 灰 176 ±3 ms",
+      "name" : "合成 7 · 60 灰 176±24 ±3 ms",
       "number" : 7,
       "settings" : {
         "audio" : {
@@ -504,8 +516,10 @@
             "audio" : false,
             "audioDriftPpm" : 0,
             "background" : {
-              "gray" : {
-                "level" : 176
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 176,
+                "seed" : 7
               }
             },
             "clockDriftPpm" : 0,
@@ -522,7 +536,7 @@
       }
     },
     {
-      "name" : "合成 8 · 60 灰 208",
+      "name" : "合成 8 · 60 灰 208±24",
       "number" : 8,
       "settings" : {
         "audio" : {
@@ -573,8 +587,10 @@
             "audio" : false,
             "audioDriftPpm" : 0,
             "background" : {
-              "gray" : {
-                "level" : 208
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 208,
+                "seed" : 8
               }
             },
             "clockDriftPpm" : 0,
