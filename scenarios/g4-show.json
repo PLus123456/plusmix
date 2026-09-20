@@ -352,8 +352,8 @@
           "enabled" : true,
           "keyColor" : {
             "blue" : 0,
-            "green" : 255,
-            "red" : 0
+            "green" : 0,
+            "red" : 255
           },
           "softness" : 0.1,
           "spillSuppression" : 0.5,
@@ -423,8 +423,8 @@
           "enabled" : true,
           "keyColor" : {
             "blue" : 0,
-            "green" : 255,
-            "red" : 0
+            "green" : 0,
+            "red" : 255
           },
           "softness" : 0.1,
           "spillSuppression" : 0.5,
@@ -494,8 +494,8 @@
           "enabled" : true,
           "keyColor" : {
             "blue" : 0,
-            "green" : 255,
-            "red" : 0
+            "green" : 0,
+            "red" : 255
           },
           "softness" : 0.1,
           "spillSuppression" : 0.5,
@@ -565,8 +565,8 @@
           "enabled" : true,
           "keyColor" : {
             "blue" : 0,
-            "green" : 255,
-            "red" : 0
+            "green" : 0,
+            "red" : 255
           },
           "softness" : 0.1,
           "spillSuppression" : 0.5,

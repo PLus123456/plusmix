@@ -134,7 +134,12 @@ def main():
     grays = {}
     input_lines = []
     for inp in show.get("inputs", []):
-        s = inp["source"]["synthetic"]["settings"]
+        syn = inp["source"].get("synthetic")
+        if not syn:   # G4 起节目里有图片（Stinger PNG）/ NDI 输入：没有帧率 / 灰度，不参与 V4 的设计内核算
+            kind = next(iter(inp["source"].keys()))
+            input_lines.append(f"{inp['number']}. {inp['name']}（{kind}）")
+            continue
+        s = syn["settings"]
         r = s["frameRate"]["numerator"] / s["frameRate"]["denominator"] * (1 + s.get("clockDriftPpm", 0) / 1e6)
         pid = s.get("patternID")
         if pid is None:

@@ -6,7 +6,7 @@ import SwitcherContracts
 /// G4 检查点的节目文件与场景（prompt 60 第 2 条 L2：五种转场轮流、Overlay 1–4 动画、抠像开、多画面开；测试标准 §3 V6 / V7 / A4 的做法）。
 ///
 /// 与 G3 的差别（1–4 号、V6 / V7 锚点、C 系列相位全部沿用 G3，基线可与 g3 场景的 V1 相比只差新负载）：
-/// - 5–8 号输入开抠像（契约 `InputSettings.keyer`，默认绿键色：灰噪声底纹上没有绿色，画面不变但着色器按 W3-B 的口径逐采样点算，
+/// - 5–8 号输入开抠像（契约 `InputSettings.keyer`，键色红：灰噪声底纹与这四路的 ID 色上都没有红，画面不变但着色器按 W3-B 的口径逐采样点算，
 ///   量的是抠像的代价；真绿幕的抠像质量由 W3-B 的 IoU 用例和 docs/checklists/G4.md 的人工项看）。
 /// - Overlay 1–4 各挂 5–8 号（fade 15 / slide 20 / zoom 20 / cut），位置避开测试图案（左上）、闪光块（右上）和 frameprobe 的中心采样区（宽高各 1/4）。
 /// - 9 号是带 alpha 的静态 PNG（`stingerFileName`，make-show 时写在节目文件旁边；路径相对节目文件），做 Stinger 的叠层：
@@ -33,7 +33,9 @@ enum G4Factory {
     static func show(width: Int = 1920, height: Int = 1080) -> Show {
         var inputs = G3Factory.show(width: width, height: height).inputs
         for i in inputs.indices where inputs[i].number >= 5 {
-            inputs[i].settings.keyer = KeyerSettings(enabled: true)   // 默认绿键色、容差 0.3、柔化 0.1、溢色 0.5（提案 009 的口径）
+            // 键色用红（255,0,0）而不是默认绿：7 号的 ID 块是调色板 6 号黄绿（128,255,0），绿键会把它抠成透明，frameprobe 就认不出输入 7 了
+            // （G4 第一次 10 分钟跑就是这样：ID 6 在播 0 帧）。红离 5–8 号的 ID 色（品红 / 金 / 黄绿 / 天蓝）与灰噪声底都远，画面不变，只付着色器代价。
+            inputs[i].settings.keyer = KeyerSettings(enabled: true, keyColor: RGB8(red: 255, green: 0, blue: 0))   // 容差 0.3、柔化 0.1、溢色 0.5（提案 009 的口径）
             inputs[i].name += " 抠像"
         }
         inputs.append(InputConfig(number: stingerInput, name: "Stinger PNG（带 alpha）", source: .image(path: stingerFileName)))

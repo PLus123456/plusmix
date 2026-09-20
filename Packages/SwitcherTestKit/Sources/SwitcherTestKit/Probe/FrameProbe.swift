@@ -65,10 +65,10 @@ public enum FrameProbe {
         FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         if isDir.boolValue {
             let r = try MediaReader.readRawNV12Directory(url: url, width: options.rawWidth, height: options.rawHeight, fps: options.fps ?? options.rawFps)
-            return Loaded(source: url.path, info: r.info, frames: blank(r.frames, options: options), audio: nil, clicks: [], samples: [], fps: options.fps ?? options.rawFps)
+            return Loaded(source: url.path, info: r.info, frames: blank(r.frames, options: options, fps: options.fps ?? options.rawFps), audio: nil, clicks: [], samples: [], fps: options.fps ?? options.rawFps)
         }
         let v = try await MediaReader.readVideo(url: url)
-        let frames = blank(v.frames, options: options)
+        let frames = blank(v.frames, options: options, fps: options.fps ?? (v.info.nominalFps > 0 ? v.info.nominalFps : 60))
         var audio: ProbeAudioInfo?
         var clicks: [ClickEvent] = []
         var samples: [Float] = []
@@ -86,11 +86,12 @@ public enum FrameProbe {
         return Loaded(source: url.path, info: v.info, frames: frames, audio: audio, clicks: clicks, samples: samples, fps: fps)
     }
 
-    /// `options.blankTicks` 里的帧置成解不出（见 Options.blankTicks）。
-    static func blank(_ frames: [ProbeFrame], options: Options) -> [ProbeFrame] {
+    /// `options.blankTicks` 里的帧置成解不出（见 Options.blankTicks）。拍号按 pts 算（tick = startTick + round(pts × fps)），
+    /// 不按文件序号：文件里漏了帧（missed_render）之后序号与拍就错位了（G4 第一次跑 2 次跳拍，34030 拍之后全部错 2 帧，标记就标偏了）。
+    static func blank(_ frames: [ProbeFrame], options: Options, fps: Double) -> [ProbeFrame] {
         guard !options.blankTicks.isEmpty else { return frames }
         return frames.map { f in
-            let tick = options.startTick + Int64(f.index)
+            let tick = options.startTick + (fps > 0 ? Int64((f.ptsSeconds * fps).rounded()) : Int64(f.index))
             guard options.blankTicks.contains(where: { $0.contains(tick) }) else { return f }
             return ProbeFrame(index: f.index, ptsSeconds: f.ptsSeconds, frameNumber: nil, inputID: nil, genTimeMs: nil, flash: false, gray: f.gray)
         }

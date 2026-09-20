@@ -161,11 +161,9 @@ final class HeadlessSession: @unchecked Sendable {
     private var stopRequested: Bool { stopRequests.load(ordering: .acquiring) > 0 }
 
     func run() async throws {
-        let t0 = HostClock.now() + HostDuration(milliseconds: options.leadMs)
-        let spec = TickClockSpec(t0: t0, frameRate: format.frameRate)
-        let lastTick = Tick(totalTicks - 1)
-
-        // 0. NDI 发送端（--ndi-send，G4 的 NDI 回环工装）：先于输入起——节目里的 NDI 输入要在发现列表里找到它；帧要等引擎起了才来。
+        // 0. 慢的准备工作放在算 t0 之前（否则吃掉 --lead-ms，引擎起晚开头跳拍——gate4-ndi 第一次跑 missed_render 11 就是发现器的 1.5 s 造成的）：
+        //    NDI 发送端（--ndi-send，G4 的 NDI 回环工装）先起——节目里的 NDI 输入要在发现列表里找到它，帧要等引擎起了才来；
+        //    节目里 ndi 输入的源名在这里解析好（不含 "(" 的名字 = 本机发送端，按后缀在发现列表里找，每轮 1.5 s、最多 10 s）。
         var ndiSender: NDISender?
         if let name = options.ndiSend {
             guard NDISender.isAvailable else { throw CLIError("--ndi-send 需要 NDI SDK（编译时没探测到 /Library/NDI SDK for Apple）") }
@@ -174,6 +172,17 @@ final class HeadlessSession: @unchecked Sendable {
             engine.addConsumer(sender)
             ndiSender = sender
         }
+        var resolvedNDINames: [Int: String] = [:]
+        for cfg in initialState.inputs {
+            if case .ndi(let sourceName) = cfg.source {
+                guard NDIInput.isSDKAvailable else { throw CLIError("输入 \(cfg.number)「\(cfg.name)」是 NDI，但 \(SwitcherNDIInfo.unavailableMessage)") }
+                resolvedNDINames[cfg.number] = try NDILoop.resolveSourceName(sourceName)
+            }
+        }
+
+        let t0 = HostClock.now() + HostDuration(milliseconds: options.leadMs)
+        let spec = TickClockSpec(t0: t0, frameRate: format.frameRate)
+        let lastTick = Tick(totalTicks - 1)
 
         // 1. 输入：合成源（G2 / M0）；G4 起另接图片（W2-A ImageInput，Stinger 的 alpha 图层）和 NDI（W3-A NDIInput，回环 L1）。
         //    合成源每路自己的帧槽（W1-B）+ 像素池（W1-A）；带音频的路另起一个独立的合成音频源写进 C 环（W1-D）。
@@ -212,8 +221,7 @@ final class HeadlessSession: @unchecked Sendable {
                 engine.registerInput(number: cfg.number, slot: slot)
                 otherInputs.append(input)
             case .ndi(let sourceName):
-                guard NDIInput.isSDKAvailable else { throw CLIError("输入 \(cfg.number)「\(cfg.name)」是 NDI，但 \(SwitcherNDIInfo.unavailableMessage)") }
-                let resolved = try NDILoop.resolveSourceName(sourceName)
+                let resolved = resolvedNDINames[cfg.number] ?? sourceName
                 var ndiOptions = NDIInput.Options()
                 ndiOptions.jitterBufferFrames = options.ndiJitterFrames
                 let input = NDIInput(number: cfg.number, name: cfg.name, sourceName: resolved, timing: timing, videoSlot: slot,
@@ -328,6 +336,12 @@ final class HeadlessSession: @unchecked Sendable {
         for entry in audioInputs { try entry.source.start() }
         if let rec = recorder { try rec.start(at: RecordingStart(clock: spec, tick: .zero)) }
         for (iso, _) in isoRecorders { try iso.start(at: RecordingStart(clock: spec, tick: .zero)) }
+        // 预告停止边界（W1-E2 `setStopTick`）：总拍数一开始就知道。stop(atTick:) 要是等引擎停了才调，边界之前送到的越界音频块已经写进文件
+        // （G4 第一次 10 分钟跑音轨多 49 ms ≈ 对齐延迟 + 一块：块 PTS 比实时晚 42.67 ms，引擎停时录制器还没收到含边界的块，
+        // 之后到的块没有边界可比就照写）。预告之后录制器按块 PTS 裁到边界；Ctrl-C 提前停时 stop(atTick:) 会把边界改早（没有越界内容时允许）。
+        let announcedStop = Tick(totalTicks)
+        if let rec = recorder { rec.setStopTick(announcedStop) }
+        for (iso, _) in isoRecorders { iso.setStopTick(announcedStop) }
         if stopRequested {
             await apiServer?.stop()
             await compat?.stop()

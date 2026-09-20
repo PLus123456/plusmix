@@ -31,8 +31,23 @@ run_config() { # $1 名字 $2 说明 $3... 环境变量赋值
   if env "$@" swift build --package-path "$pkg" > "$blog" 2>&1; then bres="✅"; else bres="❌（看 $blog）"; ok=0; fi
   if [ "$run_tests" = 1 ] && [ "$ok" = 1 ]; then
     if env "$@" swift test --package-path "$pkg" --filter 'NDITests|DeckLinkTests' > "$tlog" 2>&1; then tres="✅"; else tres="❌（看 $tlog）"; ok=0; fi
-    # Xcode 27 的 swift test 每个 target 各印一次 "Executed N tests"
-    tsum=$(grep -E 'Executed [0-9]+ tests?, with [0-9]+ failures? .* skipped' "$tlog" | awk '{e+=$2; f+=$5; s+=$8} END {printf "%d 个（失败 %d，跳过 %d）", e, f, s}' | sed 's/个（失败 0，跳过/个（0 失败，跳过/')
+    # 只数每个 .xctest target 的汇总行（Xcode 27 的 swift test 对每个类、每个 target、"All tests" 各印一次 Executed）；
+    # 行形如 "Executed 20 tests, with 2 tests skipped and 0 failures (0 unexpected)"
+    tsum=$(python3 - "$tlog" <<'PYSUM'
+import re, sys
+lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().split("\n")
+e = s = f = 0; parts = []
+for i, l in enumerate(lines):
+    m = re.match(r"Test Suite '(\w+)\.xctest' (passed|failed)", l)
+    if not m: continue
+    n = lines[i + 1] if i + 1 < len(lines) else ""
+    x = re.search(r"Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?(\d+) failures?", n)
+    if not x or x.group(1) == "0": continue   # --filter 之外的 target 印 "Executed 0 tests"，不列
+    e += int(x.group(1)); s += int(x.group(2) or 0); f += int(x.group(3))
+    parts.append(f"{m.group(1)} {x.group(1)}（跳过 {x.group(2) or 0}）")
+print(f"{e} 个，失败 {f}，跳过 {s}：" + "、".join(parts))
+PYSUM
+)
     [ -n "$tsum" ] || tsum=$(grep -E 'Executed [0-9]+ tests?' "$tlog" | tail -1)
   fi
   [ "$ok" = 1 ] || all_ok=0
