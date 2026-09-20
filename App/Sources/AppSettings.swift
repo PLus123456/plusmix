@@ -11,6 +11,7 @@
 // W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）。命令行参数优先于 UserDefaults。
 import Foundation
 import SwitcherControl
+import VMixCompat
 
 struct AppSettings: Equatable, Sendable {
     /// 音频输出设备的选择（与 headless 的 --audio-device 同一套写法）。
@@ -66,6 +67,15 @@ struct AppSettings: Equatable, Sendable {
     static let defaultCompatLayerPort = 8099
 
     /// API 配置；关掉时 nil。
+    /// 第三方 API 兼容层（W3-D VMixCompat）的配置；开关关着 = nil（不监听任何端口）。TCP 端口来自偏好设置，HTTP 端口用默认（8088），只听本机。
+    var compatConfiguration: VMixCompatConfiguration? {
+        guard compatLayerEnabled else { return nil }
+        var c = VMixCompatConfiguration()
+        c.enabled = true
+        c.tcpPort = compatLayerPort
+        return c
+    }
+
     var apiConfiguration: APIServerConfiguration? {
         guard apiEnabled else { return nil }
         return APIServerConfiguration(host: apiHost, port: apiPort, token: apiToken)

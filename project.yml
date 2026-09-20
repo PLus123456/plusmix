@@ -73,6 +73,10 @@ targets:
       - package: SwitcherCore
         product: SwitcherRender
       - package: SwitcherInputs
+      - package: SwitcherInputs
+        product: SwitcherNDI                 # G4：App 接 W3-A 的 NDI 输入（InputFactory）
+      - package: SwitcherInputs
+        product: SwitcherDeckLink            # G4：App 接 W3-A 的 DeckLink 输入（InputFactory）
       - package: SwitcherAudio
       - package: SwitcherAudio
         product: SwitcherAudioIntegration   # W2-B2：App 接 W2-E 的 AudioEngine
@@ -86,6 +90,8 @@ targets:
       - package: SwitcherOutputs
         product: SwitcherVirtualCamera       # W3-C：虚拟摄像头桥 + 扩展安装
       - package: SwitcherControl
+      - package: SwitcherControl
+        product: VMixCompat                  # G4：偏好设置里的第三方 API 兼容层开关（W3-D）
       - package: SwitcherTestKit
       - target: SwitcherCameraExtension      # W3-C：嵌到 Contents/Library/SystemExtensions/
         embed: true

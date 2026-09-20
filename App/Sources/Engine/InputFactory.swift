@@ -6,6 +6,8 @@ import Foundation
 import SwitcherContracts
 import SwitcherEngine
 import SwitcherInputs
+import SwitcherDeckLink
+import SwitcherNDI
 import SwitcherAudio
 import SwitcherTestKit
 
@@ -72,7 +74,17 @@ struct DefaultInputFactory: InputFactory {
         case .image:
             let input = try ImageInput(config: config, timing: timing, videoSlot: slot)
             return MadeInput(input: input, audioRing: nil, audioBlockFrames: AudioFormat.defaultBlockFrames)
-        case .decklink, .ndi, .audio:
+        case .decklink:
+            // W3-A（G4 接线）：没驱动 / 没卡 / SDK 没编进来都不抛，state 带文案（noSignal 等设备、error = SDK 缺）；内嵌音频 2 声道进环
+            let ring = CAudioRing(channelCount: 2)
+            let input = try DeckLinkInput(config: config, timing: timing, videoSlot: slot, audioRing: ring)
+            return MadeInput(input: input, audioRing: ring, audioBlockFrames: 1024)
+        case .ndi:
+            // W3-A（G4 接线）：源不在就等它出现（noSignal + 文案）；抖动缓冲用默认 1 帧（提案 008 批了以后从节目文件读）
+            let ring = CAudioRing(channelCount: 2)
+            let input = try NDIInput(config: config, timing: timing, videoSlot: slot, audioRing: ring)
+            return MadeInput(input: input, audioRing: ring, audioBlockFrames: 1024)
+        case .audio:
             throw InputFactoryError.unsupported(config.kind)
         }
     }

@@ -94,7 +94,8 @@ final class SwitcherSession {
         outputs.fallbackDirectory = settings.recordFallbackDirectory
         outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
         aux = AuxOutputRuntime(engine: engine, source: renderer, format: format)
-        control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable)
+        control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable,
+                                 compat: settings.compatConfiguration)
         lastSnapshot = stateMachine.publisher.latest
         let audioEngine = audio.engine
         engine.audioStatsProvider = { audioEngine.audioCounters }

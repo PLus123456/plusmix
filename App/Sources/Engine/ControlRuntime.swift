@@ -1,11 +1,12 @@
 // 控制层接线（W2-B2 接缝 2、3）：W2-C 的 CommandBus（UI / 快捷键 / MIDI / API 的统一入口）+ StateFeed（状态推送源）+ APIServer
 // （HTTP / WS，默认 127.0.0.1:8765）+ HotkeyDispatcher（用户表 ~/Library/Application Support/Switcher/hotkeys.json，没有就默认表）
-// + MIDIController（映射编辑是 W3-E；这里只起来）。
+// + MIDIController（映射编辑是 W3-E；这里只起来）+ 第三方 API 兼容层（W3-D VMixCompat，偏好设置开关，默认关；G4 接线）。
 // 起停顺序（reports/w2-control.md §5 第 1 条）：feed.start → api.start（先于引擎，客户端第 0 拍前就能连上）；停：api → 引擎 → feed。
 import AppKit
 import SwitcherContracts
 import SwitcherEngine
 import SwitcherControl
+import VMixCompat
 
 /// 一条命令走完总线之后给 UI 的反馈（状态行提示用）。
 enum CommandFeedback: Equatable {
@@ -34,8 +35,12 @@ final class ControlRuntime {
     let apiServer: APIServer?
     let hotkeys: HotkeyDispatcher
     let midi: MIDIController
+    /// 第三方 API 兼容层（nil = 偏好设置里关着）。
+    let compat: VMixCompatServer?
     /// API 起不来的原因（端口被占等）；起来了为 nil。
     private(set) var apiError: String?
+    /// 兼容层起不来的原因。
+    private(set) var compatError: String?
     /// MIDI 起不来的原因。
     private(set) var midiError: String?
     private(set) var isRunning = false
@@ -47,12 +52,14 @@ final class ControlRuntime {
     /// 已发出的 UI 命令数（测试看）。
     private(set) var commandsSent: UInt64 = 0
 
-    init(stateMachine: StateMachine, engine: Engine, api: APIServerConfiguration?, hotkeyTable: HotkeyTable, midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault()) {
+    init(stateMachine: StateMachine, engine: Engine, api: APIServerConfiguration?, hotkeyTable: HotkeyTable, midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault(),
+         compat: VMixCompatConfiguration? = nil) {
         let bus = CommandBus(stateMachine: stateMachine)
         let feed = StateFeed(stateMachine: stateMachine) { [weak engine] in engine?.clock?.spec }
         self.bus = bus
         self.feed = feed
         apiServer = api.map { APIServer(bus: bus, feed: feed, configuration: $0) }
+        self.compat = compat.map { VMixCompatServer(bus: bus, feed: feed, configuration: $0) }
         hotkeys = HotkeyDispatcher(bus: bus, table: hotkeyTable)
         midi = MIDIController(bus: bus, table: midiTable)
     }
@@ -72,6 +79,15 @@ final class ControlRuntime {
                 NSLog("%@", apiError!)
             }
         }
+        if let compat {
+            do {
+                try await compat.start()
+                compatError = nil
+            } catch {
+                compatError = "\(error)"
+                NSLog("第三方 API 兼容层起不来：%@", compatError!)
+            }
+        }
         do {
             try midi.start()
             midiError = nil
@@ -84,6 +100,7 @@ final class ControlRuntime {
     /// 先停 API（不再收命令、关掉 WS）；引擎停了之后再 `finish()` 停推送源。
     func stopAPI() async {
         await apiServer?.stop()
+        await compat?.stop()
         midi.stop()
     }
 
