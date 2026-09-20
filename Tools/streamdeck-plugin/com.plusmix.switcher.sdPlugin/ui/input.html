@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Switcher 输入</title>
+  <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="输入编号">
+    <sdpi-textfield setting="input" placeholder="1" pattern="[0-9]*" required></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="颜色">
+    <div style="opacity:.75">红 = 在 PGM，绿 = 在 PVW，红底绿边 = 转场中两边都在。</div>
+  </sdpi-item>
+  <hr />
+  <sdpi-item label="Switcher 地址">
+    <sdpi-textfield setting="host" global placeholder="127.0.0.1" default="127.0.0.1"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="API 端口">
+    <sdpi-textfield setting="port" global placeholder="8765" default="8765" pattern="[0-9]*"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Token（可空）">
+    <sdpi-password setting="token" global></sdpi-password>
+  </sdpi-item>
+</body>
+</html>

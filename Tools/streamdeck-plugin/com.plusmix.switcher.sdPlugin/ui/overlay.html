@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Switcher 叠加</title>
+  <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="叠加通道">
+    <sdpi-select setting="channel" default="1">
+      <option value="1">Overlay 1</option>
+      <option value="2">Overlay 2</option>
+      <option value="3">Overlay 3</option>
+      <option value="4">Overlay 4</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="输入编号（可空）">
+    <sdpi-textfield setting="input" placeholder="留空 = 用通道当前输入" pattern="[0-9]*"></sdpi-textfield>
+  </sdpi-item>
+  <hr />
+  <sdpi-item label="Switcher 地址">
+    <sdpi-textfield setting="host" global placeholder="127.0.0.1" default="127.0.0.1"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="API 端口">
+    <sdpi-textfield setting="port" global placeholder="8765" default="8765" pattern="[0-9]*"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Token（可空）">
+    <sdpi-password setting="token" global></sdpi-password>
+  </sdpi-item>
+</body>
+</html>

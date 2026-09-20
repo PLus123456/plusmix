@@ -1,0 +1,112 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "Switcher",
+  "Version": "0.1.0.0",
+  "Author": "Switcher",
+  "Description": "Switcher 导播台的按钮：切换、转场、叠加、录制、推流、FTB；按钮颜色就是 tally（PGM 红、PVW 绿）。",
+  "URL": "https://github.com/PLus123456/plusmix",
+  "Category": "Switcher",
+  "CategoryIcon": "imgs/plugin/category-icon",
+  "Icon": "imgs/plugin/icon",
+  "CodePath": "bin/plugin.js",
+  "UUID": "com.plusmix.switcher",
+  "SDKVersion": 2,
+  "Software": { "MinimumVersion": "6.6" },
+  "OS": [
+    { "Platform": "mac", "MinimumVersion": "13" },
+    { "Platform": "windows", "MinimumVersion": "10" }
+  ],
+  "Nodejs": { "Version": "20", "Debug": "enabled" },
+  "Actions": [
+    {
+      "Name": "Cut",
+      "UUID": "com.plusmix.switcher.cut",
+      "Icon": "imgs/actions/cut/icon",
+      "Tooltip": "PGM / PVW 对调",
+      "PropertyInspectorPath": "ui/connection.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Auto / Fade",
+      "UUID": "com.plusmix.switcher.auto",
+      "Icon": "imgs/actions/auto/icon",
+      "Tooltip": "按已选转场开始，或指定时长的 Fade",
+      "PropertyInspectorPath": "ui/auto.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Preview",
+      "UUID": "com.plusmix.switcher.preview",
+      "Icon": "imgs/actions/preview/icon",
+      "Tooltip": "选一路到 PVW；颜色 = 这路的 tally",
+      "PropertyInspectorPath": "ui/input.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Program",
+      "UUID": "com.plusmix.switcher.program",
+      "Icon": "imgs/actions/program/icon",
+      "Tooltip": "直切一路到 PGM；颜色 = 这路的 tally",
+      "PropertyInspectorPath": "ui/input.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Tally",
+      "UUID": "com.plusmix.switcher.tally",
+      "Icon": "imgs/actions/tally/icon",
+      "Tooltip": "只显示一路的 tally（按下 = 选到 PVW）",
+      "PropertyInspectorPath": "ui/input.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Overlay",
+      "UUID": "com.plusmix.switcher.overlay",
+      "Icon": "imgs/actions/overlay/icon",
+      "Tooltip": "叠加通道 1–4 开关",
+      "PropertyInspectorPath": "ui/overlay.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Record",
+      "UUID": "com.plusmix.switcher.record",
+      "Icon": "imgs/actions/record/icon",
+      "Tooltip": "录制开关",
+      "PropertyInspectorPath": "ui/output.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Stream",
+      "UUID": "com.plusmix.switcher.stream",
+      "Icon": "imgs/actions/stream/icon",
+      "Tooltip": "推流开关",
+      "PropertyInspectorPath": "ui/output.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Fade to Black",
+      "UUID": "com.plusmix.switcher.ftb",
+      "Icon": "imgs/actions/ftb/icon",
+      "Tooltip": "FTB 开关",
+      "PropertyInspectorPath": "ui/connection.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    }
+  ]
+}
