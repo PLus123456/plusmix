@@ -104,7 +104,9 @@
 "bottom.record" = "Record";
 "bottom.recordState" = "Record · %@";
 "bottom.recordStateTip" = "Record output is on; recorder state %@";
+"bottom.recordStateMany" = "Record · %@ (%d)";
 "bottom.recording" = "● Recording";
+"bottom.recordingMany" = "● Recording (%d)";
 "bottom.statusLine" = "Status line";
 "bottom.stream" = "Stream";
 "bottom.streamReconnecting" = "Stream · reconnecting (attempt %d)";

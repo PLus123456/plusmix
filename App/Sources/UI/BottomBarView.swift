@@ -122,13 +122,13 @@ final class BottomBarView: NSView {
         if let record = records.first(where: \.enabled) ?? records.first {
             let actual = encoderEntry(forOutput: record.number)?.state ?? "idle"
             let enabledCount = records.filter(\.enabled).count
-            let suffix = enabledCount > 1 ? " ×\(enabledCount)" : ""   // PGM + ISO 几路一起在录（不含中文，免得进本地化表）
             switch (record.enabled, actual) {
             case (true, "recording"):
-                recordButton.title = L("bottom.recording") + suffix
+                // PGM + ISO 几路一起在录时带路数（W3-C）；文案键是 W3-E 的 L10n 表（G4 合并时加 bottom.recordingMany / recordStateMany）
+                recordButton.title = enabledCount > 1 ? L("bottom.recordingMany", enabledCount) : L("bottom.recording")
                 recordButton.toolTip = nil
             case (true, let s):
-                recordButton.title = L("bottom.recordState", s) + suffix
+                recordButton.title = enabledCount > 1 ? L("bottom.recordStateMany", s, enabledCount) : L("bottom.recordState", s)
                 recordButton.toolTip = L("bottom.recordStateTip", s)
             default:
                 recordButton.title = L("bottom.record")

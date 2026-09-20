@@ -104,7 +104,9 @@
 "bottom.record" = "录制";
 "bottom.recordState" = "录制 · %@";
 "bottom.recordStateTip" = "录制输出已打开，录制器状态 %@";
+"bottom.recordStateMany" = "录制 · %@（%d 路）";
 "bottom.recording" = "● 录制中";
+"bottom.recordingMany" = "● 录制中（%d 路）";
 "bottom.statusLine" = "状态行";
 "bottom.stream" = "推流";
 "bottom.streamReconnecting" = "推流 · 重连中（第 %d 次）";

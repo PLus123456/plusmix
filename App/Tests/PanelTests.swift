@@ -280,7 +280,7 @@ final class PanelTests: XCTestCase {
         let w = try XCTUnwrap(session.aux.external.windows[number])
         XCTAssertEqual(w.spec.source, .input(number: 1), "任一输入 = 多画面纹理里那一格（Aux 语义）")
         XCTAssertEqual(w.spec.displayID, screen)
-        w.closeOutput()
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number) == nil && session.aux.external.windows.isEmpty }, "关窗口应移除输出")
+        w.onCloseRequested?()   // = 用户在外部窗口按 Esc（W3-C：组装方收到后删输出；closeOutput 是管理器按快照关窗口用的）
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number) == nil && session.aux.external.windows.isEmpty }, "用户关窗口应移除输出")
     }
 }

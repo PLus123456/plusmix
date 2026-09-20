@@ -135,14 +135,19 @@ final class ShortcutAndShowTests: XCTestCase {
     }
 
     /// 还没实现的输入类型（DeckLink / NDI 在 W3-A）是占位：加进去不崩，格子显示提示；不存在的摄像头 uniqueID 是无信号（等它出现），不是占位。
-    func testShow_unsupportedInputKindIsPlaceholder() throws {
+    /// G4 合并前这条测的是"NDI 输入是带 W3-A 文案的占位"；W3-A 接上后（G4 胶水）源不在 = noSignal + 等它出现（W3-A 报告 §4 第 4 条的口径），
+    /// 没 SDK 的机器上是 error + "NDI SDK 未编译进来" 文案；两种都不是"占位"。
+    func testShow_ndiInputWithoutSourceWaitsAsNoSignal() throws {
         let session = try AppTest.freshSession()
         session.send(.addInput(config: InputConfig(number: 5, name: "NDI 源", source: .ndi(sourceName: "MACHINE (src)"))))
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.count == 1 })
         XCTAssertTrue(AppTest.waitUntil(5) {
-            if case .error(let m)? = session.inputs.runtimeState(of: 5) { return m.contains("W3-A") }
-            return false
-        }, "W3-A 之前 NDI 输入应是带文案的占位：\(String(describing: session.inputs.runtimeState(of: 5)))")
+            switch session.inputs.runtimeState(of: 5) {
+            case .noSignal?: return true
+            case .error(let m)?: return m.contains("SDK")
+            default: return false
+            }
+        }, "NDI 源不在应是 noSignal（等源出现）或无 SDK 文案：\(String(describing: session.inputs.runtimeState(of: 5)))")
         XCTAssertEqual(AppTest.controller.windowController.inputStrip.cells[5]?.displayedName, "NDI 源")
         session.send(.removeInput(input: 5))
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.isEmpty && session.inputs.runtimeState(of: 5) == nil })
