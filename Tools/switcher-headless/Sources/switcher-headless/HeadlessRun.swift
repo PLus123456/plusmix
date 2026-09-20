@@ -307,19 +307,10 @@ final class HeadlessSession: @unchecked Sendable {
         let boundary = Tick((engine.counters.lastTick?.rawValue ?? -1) + 1)
         var recordResult: RecordingResult?
         if let rec = recorder {
-            // 边界之后的音频块不再送录制器：块 PTS = 块首 − 对齐延迟，含边界的块要等 对齐延迟 + 一块 + 泵周期 才到，等够再摘消费者。
-            // 否则录制器封口期间还在收块，它的漂移硬校正会对"边界之后"的块补静音（W1-E 的 drainAudio 先查漂移后查 stopTime），
-            // 每次补的静音随墙钟增长，appendPCM 每 4096 帧等 200 ms 超时——W2-E 的 45 s 冒烟跑封口卡了 3 分钟
-            // （问题单 reports/issues/W2E-w1-outputs-recorder-drift-check-before-stop.md；W1-E 修好后可以先 stop 再摘）。
-            if let token = recorderAudioToken {
-                let boundaryTime = spec.time(of: boundary)
-                let deadline = boundaryTime + audioEngine.alignmentDuration + audioEngine.blockDuration * 2 + HostDuration(milliseconds: 6)
-                let wait = deadline - HostClock.now()
-                if wait.ticks > 0 { try? await Task.sleep(for: .nanoseconds(Int(wait.nanoseconds))) }
-                audioEngine.removeConsumer(token)
-                recorderAudioToken = nil
-                for (_, t) in isoRecorders { audioEngine.removeConsumer(t) }
-            }
+            // W1-E2 起录制器自己把两轨裁到边界拍：stop(atTick:) 可以在含边界的音频块到达之前调，之后到的越界块入口就丢并计数
+            // （RecorderCounters.audioFramesBeyondStop / audioFramesDroppedAfterStop）。G3 之前这里先等"含边界的块"送到、摘消费者、再 stop，
+            // 反而把边界后 1.5 拍的音频先写进了文件（E5 音轨多 24 ms，reports/G3-notes.md §11）；G4 撤掉（prompt 60 末节第 1 条），
+            // 消费者在封口之后再摘（摘不摘都不影响文件，只是别让泵给已停的录制器白送块）。
             let before = rec.counters
             let result = await stopRecorder(rec, atTick: boundary, timeoutSeconds: options.stopTimeoutSeconds)
             switch result {
@@ -345,6 +336,8 @@ final class HeadlessSession: @unchecked Sendable {
             case nil: print("  ISO 封口超时")
             }
         }
+        if let token = recorderAudioToken { audioEngine.removeConsumer(token); recorderAudioToken = nil }
+        for (_, t) in isoRecorders { audioEngine.removeConsumer(t) }
         let audioStatus = audioEngine.status
         await audioEngine.stop()
         for entry in audioInputs { entry.source.stop() }
@@ -418,7 +411,7 @@ final class HeadlessSession: @unchecked Sendable {
         if let rec = recorder {
             let k = rec.counters
             if let r = recordResult {
-                lines.append("  录制：\(r.url.path)  视频 \(r.videoFrames) 帧 / 音频 \(r.audioFrames) 样本 / \(String(format: "%.3f", r.durationSeconds)) s / \(r.videoBytes / 1024) KB；编码 skipped \(r.encoder.skipped)，被 writer 拒 \(k.videoFramesRejected)，音频块丢 \(k.audioBlocksDropped)，音频漂移 \(String(format: "%.3f", k.audioDrift.milliseconds)) ms，硬校正 \(k.audioCorrections)，停止拍 \(r.stopTick)")
+                lines.append("  录制：\(r.url.path)  视频 \(r.videoFrames) 帧 / 音频 \(r.audioFrames) 样本 / \(String(format: "%.3f", r.durationSeconds)) s / \(r.videoBytes / 1024) KB；编码 skipped \(r.encoder.skipped)，被 writer 拒 \(k.videoFramesRejected)，音频块丢 \(k.audioBlocksDropped)，音频漂移 \(String(format: "%.3f", k.audioDrift.milliseconds)) ms，硬校正 \(k.audioCorrections)，停止拍 \(r.stopTick)，越界丢弃 视频 \(k.videoFramesBeyondStop) 帧 / 音频 \(k.audioFramesBeyondStop) + 停后 \(k.audioFramesDroppedAfterStop) 样本")
             } else {
                 lines.append("  录制：状态 \(rec.state)，视频 \(k.videoFrames) 帧，编码 skipped \(k.encoder.skipped)")
             }
