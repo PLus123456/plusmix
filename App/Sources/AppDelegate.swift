@@ -1,15 +1,19 @@
 // Switcher App —— AppKit 主程序（W2-B：显示路径 + 主界面骨架；W2-B2：接上输入 / 命令 / API / 音频 / 录制 / 推流 / Stats）。
 // 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：自动保存 → 停引擎。
-// 菜单：节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加）、切换（Cut / Fade / FTB；快捷键表来自 HotkeyTable）、窗口（调音台）。
+// 菜单：节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加）、切换（Cut / Fade / FTB；快捷键表来自 HotkeyTable）、
+// 输出（W3-C：ISO 分路、外部输出、多画面窗口、虚拟摄像头的安装 / 卸载 / 启用）、窗口（调音台 / 多画面）。
 // 启动参数与设置见 AppSettings。
 import AppKit
 import SwitcherContracts
 import SwitcherControl
+import SwitcherVirtualCamera
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var controller: AppController!
     private var recentMenu: NSMenu?
+    private var externalMenuItem: NSMenuItem?
+    private var virtualCameraStatusItem: NSMenuItem?
     private var settings = AppSettings()
 
     /// 在 xctest 宿主里（不恢复上次节目、不弹错误框）。
@@ -103,10 +107,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         main.addItem(submenu(transition, title: "切换"))
 
+        // W3-C：输出菜单
+        let output = NSMenu(title: "输出")
+        output.delegate = self
+        output.addItem(withTitle: "ISO 分路录制…", action: #selector(isoPanel), keyEquivalent: "")
+        let external = NSMenuItem(title: "外部输出", action: nil, keyEquivalent: "")
+        external.submenu = NSMenu(title: "外部输出")
+        output.addItem(external)
+        externalMenuItem = external
+        output.addItem(withTitle: "多画面窗口", action: #selector(toggleMultiview), keyEquivalent: "")
+        output.addItem(.separator())
+        let camera = NSMenu(title: "虚拟摄像头")
+        camera.addItem(withTitle: "启用 / 停用虚拟摄像头输出", action: #selector(toggleVirtualCamera), keyEquivalent: "")
+        camera.addItem(.separator())
+        camera.addItem(withTitle: "安装 / 激活扩展…", action: #selector(installExtension), keyEquivalent: "")
+        camera.addItem(withTitle: "卸载扩展", action: #selector(uninstallExtension), keyEquivalent: "")
+        camera.addItem(withTitle: "查询扩展状态", action: #selector(refreshExtension), keyEquivalent: "")
+        camera.addItem(.separator())
+        let status = camera.addItem(withTitle: "状态：未知", action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        virtualCameraStatusItem = status
+        output.addItem(submenu(camera, title: "虚拟摄像头"))
+        main.addItem(submenu(output, title: "输出"))
+
         let windowMenu = NSMenu(title: "窗口")
         windowMenu.addItem(withTitle: "最小化", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "缩放", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
         windowMenu.addItem(withTitle: "调音台", action: #selector(toggleMixer), keyEquivalent: "")
+        windowMenu.addItem(withTitle: "多画面", action: #selector(toggleMultiview), keyEquivalent: "")
         main.addItem(submenu(windowMenu, title: "窗口"))
         NSApp.windowsMenu = windowMenu
 
@@ -157,4 +185,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.send(.ftb(on: !s.state.ftb.on))
     }
     @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
+
+    // MARK: 输出（W3-C）
+
+    @objc private func isoPanel() { controller.windowController.presentISOPanel(relativeTo: controller.windowController.bottomBar.isoButton) }
+    @objc private func toggleMultiview() { controller.windowController.toggleMultiviewWindow() }
+
+    /// 有 enabled 的虚拟摄像头输出就删掉（停），没有就加一个（起）。
+    @objc private func toggleVirtualCamera() {
+        guard let s = controller.session else { return }
+        if let existing = s.state.outputs.first(where: { $0.kind == .virtualCamera }) {
+            s.send(.removeOutput(output: existing.number))
+        } else {
+            let number = (s.state.outputs.map(\.number).max() ?? 0) + 1
+            s.send(.addOutput(config: OutputState(number: number, kind: .virtualCamera, name: "虚拟摄像头", enabled: true, settings: OutputSettings(source: .program))))
+        }
+    }
+
+    @objc private func installExtension() { controller.session?.aux.installer.activate() }
+    @objc private func uninstallExtension() { controller.session?.aux.installer.deactivate() }
+    @objc private func refreshExtension() { controller.session?.aux.installer.refresh() }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    /// 打开"输出"菜单时重建外部输出子菜单（显示器 × 源，按当前快照打勾）和虚拟摄像头状态行。
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.title == "输出" else { return }
+        if let item = externalMenuItem {
+            item.submenu = controller.windowController.externalOutputMenu() ?? NSMenu(title: "外部输出")
+        }
+        if let status = virtualCameraStatusItem, let s = controller.session {
+            status.title = "状态：扩展 \(SystemExtensionInstaller.describe(s.aux.installer.status))；输出 \(s.aux.virtualCameraStatusText)"
+        }
+    }
 }

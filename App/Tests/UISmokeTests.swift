@@ -122,8 +122,9 @@ final class UISmokeTests: XCTestCase {
             XCTAssertTrue(r.url.path.hasPrefix(AppTest.controller.documents.recordDirectory), "测试宿主录到临时目录，不碰 ~/Movies")
         }
         XCTAssertFalse(wc.bottomBar.streamButton.isEnabled, "空节目没有推流输出")
-        XCTAssertFalse(wc.bottomBar.externalButton.isEnabled, "外部输出 W3-C")
-        XCTAssertFalse(wc.bottomBar.multiviewButton.isEnabled, "多画面窗口 W3-E")
+        XCTAssertTrue(wc.bottomBar.externalButton.isEnabled, "外部输出（W3-C 接上了）")
+        XCTAssertTrue(wc.bottomBar.multiviewButton.isEnabled, "多画面窗口（W3-C 接上了）")
+        XCTAssertTrue(wc.bottomBar.isoButton.isEnabled, "ISO 面板（W3-C）")
 
         // 13. 调音台收起 / 展开
         XCTAssertTrue(wc.isMixerPanelVisible)

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- ad-hoc 签名（没有 DEVELOPMENT_TEAM）时用的空权限表。有 Team ID 时 project.yml 自动换成 Switcher-signed.entitlements
+	     （含 com.apple.developer.system-extension.install：受限权限，ad-hoc 带着它 Xcode 会拒绝构建）。 -->
+</dict>
+</plist>

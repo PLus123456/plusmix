@@ -47,6 +47,7 @@ final class AppController {
         } else {
             documents = ShowDocuments(defaults: defaults)
         }
+        windowController.defaultRecordDirectory = documents.recordDirectory
     }
 
     private func applyTestHostOverrides() {
@@ -197,6 +198,8 @@ final class AppController {
             values["mainWindowFrame"] = .string(NSStringFromRect(frame))
         }
         values["mixerPanelVisible"] = .bool(windowController.isMixerPanelVisible)
+        windowController.multiviewWindow?.save(into: &values)
+        values["multiviewWindowVisible"] = .bool(windowController.isMultiviewWindowVisible)
         return ShowLayout(values: values)
     }
 

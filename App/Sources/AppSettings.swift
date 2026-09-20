@@ -5,7 +5,9 @@
 //   --api-listen <host:port> 本地 API 监听地址（默认 127.0.0.1:8765；端口 0 = 系统分配，测试用）
 //   --api-token <token>      API 的简单 token 鉴权（默认关）
 //   --no-api                 不起 API
-// 同名 UserDefaults 键：audioOutputDevice / apiEnabled / apiListen / apiToken。命令行参数优先于 UserDefaults。
+//   --record-fallback <目录>  录制目标盘满 / 低于下限时自动切到这个目录继续录（W3-C，S7 目标档）；不设 = 只停录制并提示
+//   --record-min-free-mb <N> 录制目录剩余空间低于 N MB 就停该路录制（默认 200）
+// 同名 UserDefaults 键：audioOutputDevice / apiEnabled / apiListen / apiToken / recordFallbackDirectory / recordMinimumFreeMB。命令行参数优先于 UserDefaults。
 import Foundation
 import SwitcherControl
 
@@ -39,6 +41,8 @@ struct AppSettings: Equatable, Sendable {
         static let apiEnabled = "apiEnabled"
         static let apiListen = "apiListen"
         static let apiToken = "apiToken"
+        static let recordFallbackDirectory = "recordFallbackDirectory"
+        static let recordMinimumFreeMB = "recordMinimumFreeMB"
     }
 
     var audioDevice: AudioDevice = .systemDefault
@@ -48,6 +52,10 @@ struct AppSettings: Equatable, Sendable {
     var apiToken: String?
     var showURL: URL?
     var statsURL: URL?
+    /// 磁盘满时的备用录制目录（nil = 只停录制）。
+    var recordFallbackDirectory: String?
+    /// 录制目录剩余空间下限（MB），低于就停该路。
+    var recordMinimumFreeMB = 200
 
     /// API 配置；关掉时 nil。
     var apiConfiguration: APIServerConfiguration? {
@@ -65,6 +73,8 @@ struct AppSettings: Equatable, Sendable {
             s.apiPort = parsed.port
         }
         if let token = defaults.string(forKey: Keys.apiToken), !token.isEmpty { s.apiToken = token }
+        if let dir = defaults.string(forKey: Keys.recordFallbackDirectory), !dir.isEmpty { s.recordFallbackDirectory = dir }
+        if defaults.object(forKey: Keys.recordMinimumFreeMB) != nil { s.recordMinimumFreeMB = max(0, defaults.integer(forKey: Keys.recordMinimumFreeMB)) }
 
         func value(after flag: String) -> String? {
             guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
@@ -80,6 +90,8 @@ struct AppSettings: Equatable, Sendable {
         }
         if let v = value(after: "--api-token") { s.apiToken = v.isEmpty ? nil : v }
         if arguments.contains("--no-api") { s.apiEnabled = false }
+        if let v = value(after: "--record-fallback") { s.recordFallbackDirectory = v.isEmpty ? nil : v }
+        if let v = value(after: "--record-min-free-mb"), let n = Int(v) { s.recordMinimumFreeMB = max(0, n) }
         return s
     }
 }

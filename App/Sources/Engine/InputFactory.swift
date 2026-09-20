@@ -20,9 +20,9 @@ struct MadeInput {
 /// 把一路输入配置变成运行对象。
 protocol InputFactory {
     /// - Parameters:
-    ///   - slot: 组装方建好的帧槽，实现只往里 push。
+    ///   - slot: 组装方建好的帧槽（W3-C 起是 InputFrameTee：主槽给引擎，分支给 ISO 录制），实现只往里 push。
     ///   - timing: 节目时钟（格式 + 拍点）。引擎 start 前 t0 = 引擎的 t0；引擎已起时 = "现在之后第 3 拍"（见 SwitcherSession.programTiming）。
-    func makeInput(config: InputConfig, slot: LockFreeFrameSlot, timing: ProgramTiming) throws -> MadeInput
+    func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput
 }
 
 enum InputFactoryError: Error, CustomStringConvertible {
@@ -42,7 +42,7 @@ struct DefaultInputFactory: InputFactory {
         HostDuration(seconds: timing.format.frameDuration.doubleValue / 2)
     }
 
-    func makeInput(config: InputConfig, slot: LockFreeFrameSlot, timing: ProgramTiming) throws -> MadeInput {
+    func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput {
         switch config.source {
         case .synthetic(let settings):
             let videoTimeline = SyntheticTimeline(t0: timing.clock.t0 - Self.syntheticLead(timing), frameRate: settings.frameRate)
