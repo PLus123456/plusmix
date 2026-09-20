@@ -10,30 +10,42 @@ import Foundation
 import Synchronization
 import SwitcherContracts
 
-/// 一套标签切片。
+/// 一套标签切片：下标 = 输入编号的切片 inputSlices 个（0 号不用），末尾再加 2 个固定切片 "PGM" / "PVW"（多画面的节目 / 预监格用，W3-B）。
 final class LabelSet: @unchecked Sendable {
     static let width = 512
     static let height = 48
+    /// 末尾固定切片数（PGM、PVW）。
+    static let extraSlices = 2
     let texture: any MTLTexture
     /// 每个切片当前画的文字（"" = 空白）。
     var texts: [String]
 
-    init(device: any MTLDevice, slices: Int) throws {
+    init(device: any MTLDevice, inputSlices: Int) throws {
+        let total = max(1, inputSlices) + LabelSet.extraSlices
         let d = MTLTextureDescriptor()
         d.textureType = .type2DArray
         d.pixelFormat = .bgra8Unorm
         d.width = LabelSet.width
         d.height = LabelSet.height
-        d.arrayLength = max(1, slices)
+        d.arrayLength = total
         d.usage = .shaderRead
         d.storageMode = .shared
         guard let t = device.makeTexture(descriptor: d) else { throw RenderError.resource("建不出标签纹理数组") }
         t.label = "labels"
         texture = t
-        texts = Array(repeating: "", count: max(1, slices))
+        texts = Array(repeating: "", count: total)
     }
 
+    /// 切片总数（含末尾两个）。
     var slices: Int { texts.count }
+    /// 输入编号必须 < 这个数才有切片。
+    var inputSlices: Int { texts.count - LabelSet.extraSlices }
+    /// "PGM" 的切片。
+    static func programSlice(totalSlices: Int) -> Int { totalSlices - 2 }
+    /// "PVW" 的切片。
+    static func previewSlice(totalSlices: Int) -> Int { totalSlices - 1 }
+    var programSlice: Int { LabelSet.programSlice(totalSlices: slices) }
+    var previewSlice: Int { LabelSet.previewSlice(totalSlices: slices) }
 }
 
 /// 把文字画进 BGRA 预乘缓冲并写入切片。非实时线程用。
@@ -83,11 +95,16 @@ enum LabelPainter {
         input.name.isEmpty ? "\(input.number)" : "\(input.number)  \(input.name)"
     }
 
-    /// 状态里每个切片该显示的文字。
+    /// 状态里每个切片该显示的文字（slices = 总数，含末尾的 PGM / PVW 两个）。
     static func wantedTexts(for state: MixerState, slices: Int) -> [String] {
         var wanted = Array(repeating: "", count: slices)
-        for input in state.inputs where input.number > 0 && input.number < slices {
+        let inputSlices = slices - LabelSet.extraSlices
+        for input in state.inputs where input.number > 0 && input.number < inputSlices {
             wanted[input.number] = labelText(for: input)
+        }
+        if slices >= 2 {
+            wanted[LabelSet.programSlice(totalSlices: slices)] = "PGM"
+            wanted[LabelSet.previewSlice(totalSlices: slices)] = "PVW"
         }
         return wanted
     }
@@ -123,8 +140,8 @@ final class LabelRenderer: @unchecked Sendable {
     private let submittedFrames: () -> UInt64
     private let completedFrames: () -> UInt64
 
-    init(device: any MTLDevice, slices: Int, submittedFrames: @escaping () -> UInt64, completedFrames: @escaping () -> UInt64) throws {
-        sets = [try LabelSet(device: device, slices: slices), try LabelSet(device: device, slices: slices)]
+    init(device: any MTLDevice, inputSlices: Int, submittedFrames: @escaping () -> UInt64, completedFrames: @escaping () -> UInt64) throws {
+        sets = [try LabelSet(device: device, inputSlices: inputSlices), try LabelSet(device: device, inputSlices: inputSlices)]
         scratch = UnsafeMutableRawPointer.allocate(byteCount: LabelSet.width * LabelSet.height * 4, alignment: 16)
         self.submittedFrames = submittedFrames
         self.completedFrames = completedFrames

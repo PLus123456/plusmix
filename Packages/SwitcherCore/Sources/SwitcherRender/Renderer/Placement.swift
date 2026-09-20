@@ -28,6 +28,17 @@ struct PixelRect {
     func insetBy(_ inset: Float) -> PixelRect {
         PixelRect(x: x + inset, y: y + inset, width: max(0, width - 2 * inset), height: max(0, height - 2 * inset))
     }
+
+    /// 四边各外扩 inset。
+    func outsetBy(_ inset: Float) -> PixelRect {
+        PixelRect(x: x - inset, y: y - inset, width: width + 2 * inset, height: height + 2 * inset)
+    }
+
+    /// 绕中心按 scale 缩放。
+    func scaled(_ scale: Float) -> PixelRect {
+        let w = width * scale, h = height * scale
+        return PixelRect(x: x + (width - w) / 2, y: y + (height - h) / 2, width: w, height: h)
+    }
 }
 
 enum Placement {
@@ -62,6 +73,7 @@ enum Placement {
         let halfShift = rot * (SIMD2(fw, fh) * 0.5)
         u.posMatrix = lin
         u.posOffset = toNDC * (center - halfShift) + SIMD2(-1, 1)
+        u.targetSize = SIMD2(Float(targetWidth), Float(targetHeight))
 
         // uv：裁切区域，翻转就是反向
         var uvo = SIMD2(cl, ct), uvs = SIMD2(uvW, uvH)
@@ -82,6 +94,7 @@ enum Placement {
         let toNDC = simd_float2x2(diagonal: SIMD2(2 / Float(targetWidth), -2 / Float(targetHeight)))
         u.posMatrix = toNDC * simd_float2x2(diagonal: SIMD2(dest.width, dest.height))
         u.posOffset = toNDC * SIMD2(dest.x, dest.y) + SIMD2(-1, 1)
+        u.targetSize = SIMD2(Float(targetWidth), Float(targetHeight))
         u.uvOrigin = SIMD2(0, 0)
         u.uvSize = SIMD2(1, 1)
         u.taps = 1
