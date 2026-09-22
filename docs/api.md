@@ -259,6 +259,35 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 }
 ```
 
+#### `setOverlayDecoration`
+
+改叠加通道的装饰：画中画边框、锚点、是否在 PVW 里预览。
+
+| 参数 | 含义 |
+|---|---|
+| `channel` | 1–4 |
+| `border` | {width: 占节目高的比例, color: {red, green, blue}} 或 null（不画） |
+| `anchor` | topLeft / top / topRight / left / center / right / bottomLeft / bottom / bottomRight；缩放动画绕它缩 |
+| `previewOn` | true = 这一路也画进 PVW |
+
+```json
+{
+  "setOverlayDecoration" : {
+    "anchor" : "bottomRight",
+    "border" : {
+      "color" : {
+        "blue" : 255,
+        "green" : 255,
+        "red" : 255
+      },
+      "width" : 0.006
+    },
+    "channel" : 1,
+    "previewOn" : true
+  }
+}
+```
+
 ### 音频
 
 #### `audioGain`
@@ -349,6 +378,50 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 }
 ```
 
+#### `setMonitorMode`
+
+耳机监听方式：AFL（推子后）/ PFL（推子前）。
+
+| 参数 | 含义 |
+|---|---|
+| `mode` | afl / pfl |
+
+```json
+{
+  "setMonitorMode" : {
+    "mode" : "pfl"
+  }
+}
+```
+
+#### `setBusEffects`
+
+整体替换一条总线的效果链；链顺序 = 处理顺序，enabled = false 的格旁路。
+
+| 参数 | 含义 |
+|---|---|
+| `bus` | 0 = master, 1 = busA, 2 = busB, 3 = headphones |
+| `effects` | [{id, enabled, params}]：id 与参数键见 CONTRACTS.md §2.4 |
+
+```json
+{
+  "setBusEffects" : {
+    "bus" : 0,
+    "effects" : [
+      {
+        "enabled" : true,
+        "id" : "peakLimiter",
+        "params" : {
+          "attackSeconds" : 0.012,
+          "decaySeconds" : 0.024,
+          "preGainDb" : 0
+        }
+      }
+    ]
+  }
+}
+```
+
 ### 输出
 
 #### `startRecord`
@@ -415,6 +488,42 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 }
 ```
 
+#### `setOutputEnabled`
+
+非录制 / 推流输出（NDI / 外部显示 / 虚拟摄像头 / 多画面）的目标开关；record / stream 被拒。
+
+| 参数 | 含义 |
+|---|---|
+| `output` | 输出编号 |
+| `on` | true = 应该在跑 |
+
+```json
+{
+  "setOutputEnabled" : {
+    "on" : true,
+    "output" : 3
+  }
+}
+```
+
+#### `renameOutput`
+
+改一个输出的显示名。
+
+| 参数 | 含义 |
+|---|---|
+| `output` | 输出编号 |
+| `name` | 新名字 |
+
+```json
+{
+  "renameOutput" : {
+    "name" : "大屏",
+    "output" : 3
+  }
+}
+```
+
 ### 输入表
 
 #### `setInputSettings`
@@ -432,6 +541,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
     "input" : 1,
     "settings" : {
       "audio" : {
+        "afv" : true,
         "delayMs" : 40,
         "gainDb" : -3,
         "muted" : false,
@@ -511,6 +621,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
       "number" : 5,
       "settings" : {
         "audio" : {
+          "afv" : true,
           "delayMs" : 0,
           "gainDb" : 0,
           "muted" : false,
@@ -591,6 +702,30 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 {
   "removeInput" : {
     "input" : 5
+  }
+}
+```
+
+#### `setInputSource`
+
+换一路输入的来源（文件路径 / 播完动作 / 屏幕目标 / 帧率 / NDI 源名与带宽 / DeckLink 接口……）；编号、名字、设置、PGM / PVW / 叠加引用全部保留。
+
+| 参数 | 含义 |
+|---|---|
+| `input` | 输入编号 |
+| `source` | InputSource；kind 由它推出 |
+
+```json
+{
+  "setInputSource" : {
+    "input" : 1,
+    "source" : {
+      "ndi" : {
+        "bandwidth" : "lowest",
+        "jitterBufferFrames" : 2,
+        "sourceName" : "MAC (Cam 1)"
+      }
+    }
   }
 }
 ```
@@ -713,6 +848,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
     "show" : {
       "audio" : {
         "afv" : false,
+        "alignmentFrames" : 2048,
         "buses" : [
           {
             "bus" : 0,
@@ -747,7 +883,8 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
             "muted" : false
           }
         ],
-        "monitorMode" : "afl"
+        "monitorMode" : "afl",
+        "monitorPoint" : "preDelayLine"
       },
       "inputs" : [
         {
@@ -755,6 +892,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
           "number" : 1,
           "settings" : {
             "audio" : {
+              "afv" : true,
               "delayMs" : 0,
               "gainDb" : 0,
               "muted" : false,
@@ -839,12 +977,14 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
         },
         "overlays" : [
           {
+            "anchor" : "center",
             "animProgress" : 0,
             "animation" : {
               "durationTicks" : 0,
               "kind" : "cut"
             },
             "on" : false,
+            "previewOn" : false,
             "rect" : {
               "height" : 1,
               "width" : 1,
@@ -853,12 +993,14 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
             }
           },
           {
+            "anchor" : "center",
             "animProgress" : 0,
             "animation" : {
               "durationTicks" : 0,
               "kind" : "cut"
             },
             "on" : false,
+            "previewOn" : false,
             "rect" : {
               "height" : 1,
               "width" : 1,
@@ -867,12 +1009,14 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
             }
           },
           {
+            "anchor" : "center",
             "animProgress" : 0,
             "animation" : {
               "durationTicks" : 0,
               "kind" : "cut"
             },
             "on" : false,
+            "previewOn" : false,
             "rect" : {
               "height" : 1,
               "width" : 1,
@@ -881,12 +1025,14 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
             }
           },
           {
+            "anchor" : "center",
             "animProgress" : 0,
             "animation" : {
               "durationTicks" : 0,
               "kind" : "cut"
             },
             "on" : false,
+            "previewOn" : false,
             "rect" : {
               "height" : 1,
               "width" : 1,

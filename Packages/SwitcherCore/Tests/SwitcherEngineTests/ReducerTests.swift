@@ -286,6 +286,29 @@ final class ReducerTests: XCTestCase {
             Row("setOutputSettings", .setOutputSettings(output: 2, settings: OutputSettings(source: .preview))) { $0.outputs[1].settings = OutputSettings(source: .preview) },
             Row("setOutputSettings 不存在", .setOutputSettings(output: 4, settings: OutputSettings())) { _ in },
             Row("loadShow 整体替换并清瞬态", .loadShow(show: show)) { $0 = show.makeState() },
+
+            // P3：提案 010 A4 / 012 的六条新命令
+            Row("setOverlayDecoration", .setOverlayDecoration(channel: 2, border: OverlayBorder(width: 0.01, color: RGB8(red: 255, green: 0, blue: 0)),
+                                                              anchor: .bottomRight, previewOn: true)) {
+                $0.overlays[1].border = OverlayBorder(width: 0.01, color: RGB8(red: 255, green: 0, blue: 0))
+                $0.overlays[1].anchor = .bottomRight
+                $0.overlays[1].previewOn = true },
+            Row("setOverlayDecoration 通道越界拒绝", .setOverlayDecoration(channel: 5, border: nil, anchor: .center, previewOn: true)) { _ in },
+            Row("setMonitorMode", .setMonitorMode(mode: .pfl)) { $0.audio.monitorMode = .pfl },
+            Row("setBusEffects", .setBusEffects(bus: .busA, effects: [EffectSlot(id: "peakLimiter")])) {
+                $0.audio.buses[Bus.busA.rawValue].effects = [EffectSlot(id: "peakLimiter")] },
+            Row("setOutputEnabled 非录制 / 推流", before: { $0.outputs.append(OutputState(number: 3, kind: .ndi, name: "NDI")) },
+                .setOutputEnabled(output: 3, on: true)) { $0.outputs[2].enabled = true },
+            Row("setOutputEnabled 录制输出被拒（走 startRecord）", .setOutputEnabled(output: 1, on: true)) { _ in },
+            Row("setOutputEnabled 推流输出被拒（走 startStream）", .setOutputEnabled(output: 2, on: true)) { _ in },
+            Row("setOutputEnabled 不存在", .setOutputEnabled(output: 9, on: true)) { _ in },
+            Row("renameOutput", .renameOutput(output: 2, name: "主推流")) { $0.outputs[1].name = "主推流" },
+            Row("renameOutput 不存在", .renameOutput(output: 9, name: "x")) { _ in },
+            Row("setInputSource 保留编号 / 名字 / 设置 / 引用",
+                before: { $0.overlays[0].input = 3; $0.overlays[0].on = true; $0.inputs[2].settings.audio.gainDb = -6 },
+                .setInputSource(input: 3, source: .ndi(sourceName: "MAC (Cam)", bandwidth: .lowest, jitterBufferFrames: 2))) {
+                $0.inputs[2].source = .ndi(sourceName: "MAC (Cam)", bandwidth: .lowest, jitterBufferFrames: 2) },
+            Row("setInputSource 不存在", .setInputSource(input: 9, source: .image(path: "/a.png"))) { _ in },
         ]
         var covered = Set<String>()
         for row in rows {
@@ -297,7 +320,7 @@ final class ReducerTests: XCTestCase {
             XCTAssertEqual(actual, expected, row.name)
             covered.insert(Self.caseName(row.command))
         }
-        XCTAssertEqual(covered.count, 27, "27 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
+        XCTAssertEqual(covered.count, Self.allCaseNames.count, "33 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
     }
 
     func testW1B_reduce_isPureAndDoesNotMutateInput() {
@@ -312,6 +335,38 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(reducer.advance(a, to: Tick(1)).transition.progress, 0)
     }
 
+    /// 提案 012 B：换来源不碰编号 / 名字 / 设置，也不碰 PGM / PVW / 叠加引用（与 removeInput + addInput 的关键区别）。
+    func testP3_setInputSource_keepsNumberNameSettingsAndReferences() {
+        var s = Self.baseState()
+        s.overlays[0].input = 2
+        s.overlays[0].on = true
+        s.inputs[1].settings.audio.gainDb = -12
+        s.inputs[1].name = "主持人"
+        let after = reducer.reduce(s, .setInputSource(input: 2, source: .file(path: "/a.mov", endAction: .loop, rate: 1)), at: Tick(7))
+        XCTAssertEqual(after.inputs[1].source, .file(path: "/a.mov", endAction: .loop, rate: 1))
+        XCTAssertEqual(after.inputs[1].kind, .file, "kind 由 source 推出")
+        XCTAssertEqual(after.inputs[1].number, 2)
+        XCTAssertEqual(after.inputs[1].name, "主持人")
+        XCTAssertEqual(after.inputs[1].settings.audio.gainDb, -12)
+        XCTAssertEqual(after.program, s.program)
+        XCTAssertEqual(after.preview, s.preview)
+        XCTAssertEqual(after.overlays[0].input, 2, "叠加引用保留")
+        // 对照：removeInput 会清掉引用
+        let removed = reducer.reduce(s, .removeInput(input: 2), at: Tick(7))
+        XCTAssertNil(removed.overlays[0].input)
+    }
+
+    /// 提案 012：相同值的命令 reducer 原样返回（状态机据此把回执的 applied 置 false）。
+    func testP3_newCommands_sameValueLeavesStateUnchanged() {
+        var s = Self.baseState()
+        s.outputs.append(OutputState(number: 3, kind: .ndi, name: "NDI", enabled: true))
+        XCTAssertEqual(reducer.reduce(s, .setOutputEnabled(output: 3, on: true), at: Tick(1)), s)
+        XCTAssertEqual(reducer.reduce(s, .renameOutput(output: 3, name: "NDI"), at: Tick(1)), s)
+        XCTAssertEqual(reducer.reduce(s, .setMonitorMode(mode: s.audio.monitorMode), at: Tick(1)), s)
+        XCTAssertEqual(reducer.reduce(s, .setBusEffects(bus: .master, effects: []), at: Tick(1)), s)
+        XCTAssertEqual(reducer.reduce(s, .setOverlayDecoration(channel: 1, border: nil, anchor: .center, previewOn: false), at: Tick(1)), s)
+    }
+
     func testW1B_loadShow_invalidStateIsRejected() {
         var bad = Self.baseState()
         bad.inputs.append(bad.inputs[0]) // 重复编号
@@ -320,8 +375,11 @@ final class ReducerTests: XCTestCase {
     }
 
     static let allCaseNames = ["cut", "fade", "setTransition", "autoTransition", "setPreview", "setProgram", "tbar", "ftb", "overlay", "setOverlay",
-                               "audioGain", "mute", "busGain", "busMute", "setAFV", "startRecord", "stopRecord", "startStream", "stopStream",
-                               "setInputSettings", "renameInput", "addInput", "removeInput", "addOutput", "removeOutput", "setOutputSettings", "loadShow"]
+                               "setOverlayDecoration",
+                               "audioGain", "mute", "busGain", "busMute", "setAFV", "setMonitorMode", "setBusEffects",
+                               "startRecord", "stopRecord", "startStream", "stopStream", "setOutputEnabled", "renameOutput",
+                               "setInputSettings", "renameInput", "addInput", "removeInput", "setInputSource",
+                               "addOutput", "removeOutput", "setOutputSettings", "loadShow"]
 
     static func caseName(_ c: Command) -> String {
         switch c {
@@ -335,19 +393,25 @@ final class ReducerTests: XCTestCase {
         case .ftb: "ftb"
         case .overlay: "overlay"
         case .setOverlay: "setOverlay"
+        case .setOverlayDecoration: "setOverlayDecoration"
         case .audioGain: "audioGain"
         case .mute: "mute"
         case .busGain: "busGain"
         case .busMute: "busMute"
         case .setAFV: "setAFV"
+        case .setMonitorMode: "setMonitorMode"
+        case .setBusEffects: "setBusEffects"
         case .startRecord: "startRecord"
         case .stopRecord: "stopRecord"
         case .startStream: "startStream"
         case .stopStream: "stopStream"
+        case .setOutputEnabled: "setOutputEnabled"
+        case .renameOutput: "renameOutput"
         case .setInputSettings: "setInputSettings"
         case .renameInput: "renameInput"
         case .addInput: "addInput"
         case .removeInput: "removeInput"
+        case .setInputSource: "setInputSource"
         case .addOutput: "addOutput"
         case .removeOutput: "removeOutput"
         case .setOutputSettings: "setOutputSettings"

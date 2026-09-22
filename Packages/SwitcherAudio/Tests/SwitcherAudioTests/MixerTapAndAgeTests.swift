@@ -171,7 +171,7 @@ final class MixerTapAndAgeTests: XCTestCase {
     /// 延迟补偿 100 ms 的输入路由到 Master + 耳机：默认耳机取延迟线前（click 比 Master 早 4800 样本）；
     /// `setMonitorPoint(.postDelayLine)` 后与 Master 同刻。独听 PFL / AFL 同样遵守。
     func testMonitor_headphonesTakePreDelayLineSignalByDefault_postDelayLineWhenSelected() {
-        func clickPositions(point: MonitorPoint?, solo: Bool, mode: MonitorMode) -> (master: Int, headphones: Int) {
+        func clickPositions(point: SwitcherAudio.MonitorPoint?, solo: Bool, mode: MonitorMode) -> (master: Int, headphones: Int) {
             let rig = OfflineRig()
             rig.addSource(slot: 0, resampling: .locked, generator: { _, start, n, buf in
                 for i in 0..<n { let s = start + Int64(i); buf[i] = (s >= 20_000 && s < 20_048) ? 1 : 0 }
@@ -202,7 +202,7 @@ final class MixerTapAndAgeTests: XCTestCase {
 
     /// 监听点不改电平：AFL 推子后（含增益 / AFV / 声像）、PFL 推子前，与路由矩阵用例同一组期望值。
     func testMonitor_monitorPointDoesNotChangeLevels() {
-        for point in [MonitorPoint.preDelayLine, .postDelayLine] {
+        for point in [SwitcherAudio.MonitorPoint.preDelayLine, .postDelayLine] {
             for mode in [MonitorMode.afl, .pfl] {
                 let rig = OfflineRig()
                 rig.addSource(slot: 0, generator: { _, start, n, buf in

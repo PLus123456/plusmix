@@ -140,6 +140,46 @@ final class AudioBridgeTests: XCTestCase {
         XCTAssertEqual(AudioProgramGate.gains(for: off), [1: 1, 2: 1, 3: 1, 4: 1])
     }
 
+    /// 每路 AFV 开关（用户 2026-09-22 批）：afv = false 的路门控增益恒 1，PGM 切走也不变、转场中也不进淡变。
+    func testA_afvPerInputOffKeepsGainOne() {
+        var s = ReducerTests.baseState()
+        s.audio.afv = true
+        s.inputs[2].settings.audio.afv = false           // 3 号不跟随视频（主持人话筒）
+        // 空闲：PGM = 1 号，3 号仍是 1（参与门控的 2 / 4 号是 0）
+        XCTAssertEqual(AudioProgramGate.gains(for: s), [1: 1, 2: 0, 3: 1, 4: 0])
+        // PGM 切到 2 号：3 号还是 1
+        var switched = s
+        switched.program = 2
+        switched.preview = 1
+        XCTAssertEqual(AudioProgramGate.gains(for: switched), [1: 0, 2: 1, 3: 1, 4: 0])
+        // 转场进行中（1 → 2）：3 号不进 from / to 的等幅曲线，仍是 1
+        var t = s
+        t.transition.startTick = Tick(0)
+        t.transition.progress = 0.5
+        let g = AudioProgramGate.gains(for: t)
+        XCTAssertEqual(g[3], 1, "afv = false 的路不进交叉淡变")
+        XCTAssertEqual(Double(g[1]!), cos(Double.pi / 4), accuracy: 1e-6)
+        XCTAssertEqual(Double(g[2]!), sin(Double.pi / 4), accuracy: 1e-6)
+        // 3 号自己在 PGM 上时也是 1（与"参与门控且在 PGM"同值，不冲突）
+        var onProgram = s
+        onProgram.program = 3
+        XCTAssertEqual(AudioProgramGate.gains(for: onProgram)[3], 1)
+        // 全局 AFV 关：全部 1（每路那一位不起作用）
+        var off = s
+        off.audio.afv = false
+        XCTAssertEqual(AudioProgramGate.gains(for: off), [1: 1, 2: 1, 3: 1, 4: 1])
+    }
+
+    /// 改了某路的 afv 位要发 inputAudioSettings 事件（音频侧据此重算该路增益）。
+    func testA_afvPerInputChangeEmitsInputAudioSettings() {
+        let from = ReducerTests.baseState()
+        var to = from
+        to.inputs[2].settings.audio.afv = false
+        let events = AudioStateBridge.diff(from: from, to: to, tick: Tick(10), clock: TickClockSpec(t0: .zero, frameRate: .fps60))
+        let changed = events.contains { if case .inputAudioSettings(let n, let s) = $0 { return n == 3 && !s.afv } else { return false } }
+        XCTAssertTrue(changed, "每路 AFV 开关变了要发 inputAudioSettings：\(events)")
+    }
+
     // MARK: FTB
 
     func testFTB_toggleEmitsRamp_startTickAndDurationMatchStateMachine_reversalKeepsLevel() async {

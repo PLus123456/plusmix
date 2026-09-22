@@ -88,6 +88,44 @@ final class VirtualCameraTests: XCTestCase {
         XCTAssertEqual(output.countersSnapshot.framesIn, 60, "stop 之后不再收")
     }
 
+    /// 提案 013：虚拟摄像头在 Stats 里的一项。frames = 排进 sink stream 的帧；dropped = 三种丢的和；state 在 013 的列表里。
+    func testP3_013_virtualCameraStatsEntry() throws {
+        let output = VirtualCameraOutput(format: .hd1080p60)
+        output.retryInterval = HostDuration(milliseconds: 200)
+        // idle
+        var e = output.statsEntry(output: 5)
+        XCTAssertEqual(e.output, 5)
+        XCTAssertEqual(e.kind, "virtualCamera")
+        XCTAssertEqual(e.state, "idle")
+        XCTAssertEqual(e.frames, 0)
+        XCTAssertEqual(e.dropped, 0)
+        XCTAssertTrue(Stats.DisplayEntry.kinds.contains(e.kind))
+        // 找设备中（扩展没装 / 没激活）
+        output.start()
+        e = output.statsEntry(output: 5)
+        XCTAssertEqual(e.state, "waitingExtension")
+        // 送几帧：没有设备 → dropped 递增、frames 不动（有签名的扩展时 frames 才涨，见 BLOCKED-签名）
+        let spec = TickClockSpec(t0: .now(), frameRate: .fps60)
+        let frame = nv12Frame(pts: .now())
+        for i in 0..<10 {
+            let t = spec.time(of: Tick(Int64(i)))
+            output.consume(RenderedFrame(tick: Tick(Int64(i)), tickTime: t, program: frame, submitTime: t, gpuStart: t, gpuEnd: t))
+            usleep(5_000)
+        }
+        _ = waitUntil(2) { output.statsEntry(output: 5).dropped >= 10 }
+        e = output.statsEntry(output: 5)
+        let c = output.countersSnapshot
+        XCTAssertEqual(e.frames, c.framesSent, "frames = 已送出（与 countersSnapshot 同源，铁律 4）")
+        XCTAssertEqual(e.dropped, c.droppedQueueFull &+ c.droppedNoDevice &+ c.droppedSink)
+        XCTAssertGreaterThanOrEqual(e.dropped, 10)
+        XCTAssertTrue(Stats.DisplayEntry.states.contains(e.state), e.state)
+        // 停掉
+        output.stop()
+        XCTAssertEqual(output.statsEntry(output: 5).state, "stopped")
+        // 与 W3-C2（prompt 65）复核的对照：有签名扩展时 state = publishing、frames 随送出递增
+        if output.state == .connected { XCTAssertEqual(output.statsEntry(output: 5).state, "publishing") }
+    }
+
     func testInstaller_statusMapping() {
         XCTAssertEqual(SystemExtensionInstaller.status(for: .completed, version: "0.1.0"), .installed(version: "0.1.0"))
         XCTAssertEqual(SystemExtensionInstaller.status(for: .willCompleteAfterReboot, version: "0.1.0"), .needsReboot)

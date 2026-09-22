@@ -52,9 +52,9 @@ final class DeckLinkHardwareTests: XCTestCase {
     }
 
     func testDeckLink_connectionNames() {
-        let c: DeckLinkConnection = [.sdi, .hdmi]
+        let c: SwitcherDeckLink.DeckLinkConnection = [.sdi, .hdmi]   // 契约里有同名的"单个口"枚举（提案 008），这里是位集
         XCTAssertEqual(c.names, ["SDI", "HDMI"])
-        XCTAssertEqual(DeckLinkConnection(rawValue: 0).names, [])
+        XCTAssertEqual(SwitcherDeckLink.DeckLinkConnection(rawValue: 0).names, [])
     }
 
     /// L1：真卡 + 真引擎（SDI 信号源接上，任意格式）。
