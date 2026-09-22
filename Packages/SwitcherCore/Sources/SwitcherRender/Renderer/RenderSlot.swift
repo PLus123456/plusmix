@@ -53,7 +53,7 @@ final class RenderSlot: @unchecked Sendable {
     var heldFrames: [Frame?]
     /// 输出 NV12 缓冲（环里挑的）。
     var outputBuffer: CVPixelBuffer?
-    /// PVW / 多画面的 NV12 输出（MetalRendererOptions.previewOutput / multiviewOutput 打开时才有）。
+    /// PVW / 多画面的 NV12 输出（状态里有 enabled 且 source 是它的输出时才有；选项 previewOutput / multiviewOutput 是强制开的覆盖）。
     var previewBuffer: CVPixelBuffer?
     var multiviewBuffer: CVPixelBuffer?
     var commandBuffer: (any MTLCommandBuffer)?
