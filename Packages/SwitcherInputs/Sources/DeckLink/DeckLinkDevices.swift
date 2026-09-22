@@ -2,7 +2,8 @@ import CSwitcherDeckLink
 import Foundation
 import SwitcherContracts
 
-/// 输入接口（BMDVideoConnection 位集）。进契约（`InputSource.decklink` 加 connection）要走提案 008。
+/// 输入接口（BMDVideoConnection 位集）：一台卡支持哪几个口。
+/// 契约里的同名类型 `SwitcherContracts.DeckLinkConnection`（提案 008）是**单个**口（选哪个），两者用下面的 init 互转。
 public struct DeckLinkConnection: OptionSet, Hashable, Sendable, Codable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -12,6 +13,23 @@ public struct DeckLinkConnection: OptionSet, Hashable, Sendable, Codable {
     public static let component = DeckLinkConnection(rawValue: 1 << 3)
     public static let composite = DeckLinkConnection(rawValue: 1 << 4)
     public static let sVideo = DeckLinkConnection(rawValue: 1 << 5)
+
+    /// 契约里的单个口 → 位集里的那一位（提案 008）。
+    public init(_ single: SwitcherContracts.DeckLinkConnection) {
+        switch single {
+        case .sdi: self = .sdi
+        case .hdmi: self = .hdmi
+        case .opticalSDI: self = .opticalSDI
+        case .component: self = .component
+        case .composite: self = .composite
+        case .sVideo: self = .sVideo
+        }
+    }
+
+    /// 位集里包含的口，按契约的单个口列出（UI 的下拉用）。
+    public var supported: [SwitcherContracts.DeckLinkConnection] {
+        SwitcherContracts.DeckLinkConnection.allCases.filter { contains(DeckLinkConnection($0)) }
+    }
 
     /// 名字列表（UI 用）。
     public var names: [String] {

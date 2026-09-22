@@ -16,13 +16,18 @@ public struct ExternalDisplaySpec: Hashable, Sendable {
         self.fallbackToMain = fallbackToMain
     }
 
-    /// `OutputSettings.extra` 里的键。
-    public static let displayIDKey = "displayID"
-    public static let fallbackKey = "fallbackToMain"
+    /// `OutputSettings.extra` 里的过渡键（提案 013 落地后只作后备，保留一个版本）。
+    public static let displayIDKey = DisplayOutputSettings.legacyDisplayIDKey
+    public static let fallbackKey = DisplayOutputSettings.legacyFallbackKey
 
-    /// 从输出设置读。
+    /// 从输出设置读：正式字段 `settings.display`（提案 013）优先，没有才读过渡键。
     public init(settings: OutputSettings) {
         source = settings.source
+        if let d = settings.display {
+            displayID = d.displayID
+            fallbackToMain = d.fallbackToMain
+            return
+        }
         if case .number(let n)? = settings.extra[Self.displayIDKey], n >= 0, n <= Double(UInt32.max) {
             displayID = UInt32(n)
         } else {
@@ -31,11 +36,12 @@ public struct ExternalDisplaySpec: Hashable, Sendable {
         if case .bool(let b)? = settings.extra[Self.fallbackKey] { fallbackToMain = b } else { fallbackToMain = false }
     }
 
-    /// 写回输出设置。
+    /// 写回输出设置：只写正式字段，顺手清掉过渡键。
     public func apply(to settings: inout OutputSettings) {
         settings.source = source
-        if let displayID { settings.extra[Self.displayIDKey] = .number(Double(displayID)) } else { settings.extra.removeValue(forKey: Self.displayIDKey) }
-        if fallbackToMain { settings.extra[Self.fallbackKey] = .bool(true) } else { settings.extra.removeValue(forKey: Self.fallbackKey) }
+        settings.display = DisplayOutputSettings(displayID: displayID, fallbackToMain: fallbackToMain)
+        settings.extra.removeValue(forKey: Self.displayIDKey)
+        settings.extra.removeValue(forKey: Self.fallbackKey)
     }
 
     /// 一份新的输出设置（其他字段默认）。

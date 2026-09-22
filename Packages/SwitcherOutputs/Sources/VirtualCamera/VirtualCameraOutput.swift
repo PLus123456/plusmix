@@ -68,6 +68,22 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
     public var state: State { lock.withLock { stateValue } }
     public var countersSnapshot: Counters { lock.withLock { counters } }
 
+    /// 这个虚拟摄像头在 Stats 里的一项（提案 013，铁律 4：菜单 / API / 测试读同一个结构）。
+    /// frames = 排进 sink stream 的帧；dropped = 本对象队列满 + 没设备 + sink 队列满丢的三项之和；
+    /// state：idle → "idle"、searching → "waitingExtension"（扩展没装 / 没激活 / 刚拔）、connected → "publishing"、stopped → "stopped"。
+    public func statsEntry(output: Int) -> Stats.DisplayEntry {
+        let (c, st) = lock.withLock { (counters, stateValue) }
+        let name: String
+        switch st {
+        case .idle: name = "idle"
+        case .searching: name = "waitingExtension"
+        case .connected: name = "publishing"
+        case .stopped: name = "stopped"
+        }
+        return Stats.DisplayEntry(output: output, kind: "virtualCamera", frames: c.framesSent,
+                                  dropped: c.droppedQueueFull &+ c.droppedNoDevice &+ c.droppedSink, state: name)
+    }
+
     /// 起线程；找设备在线程上做（找不到不算错）。
     public func start() {
         lock.withLock {

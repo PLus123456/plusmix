@@ -50,6 +50,24 @@ public final class NDIInput: Input, @unchecked Sendable {
         /// 只要音频。
         case audioOnly
 
+        /// 契约里的带宽（`InputSource.ndi` 的 case，提案 008）→ 这里的带宽。
+        public init(_ b: NDIBandwidth) {
+            switch b {
+            case .highest: self = .highest
+            case .lowest: self = .lowest
+            case .audioOnly: self = .audioOnly
+            }
+        }
+
+        /// 反过来：这里的带宽 → 契约里的带宽。
+        public var contractValue: NDIBandwidth {
+            switch self {
+            case .highest: .highest
+            case .lowest: .lowest
+            case .audioOnly: .audioOnly
+            }
+        }
+
         var raw: sw_ndi_bandwidth {
             switch self {
             case .highest: SW_NDI_BANDWIDTH_HIGHEST
@@ -61,9 +79,9 @@ public final class NDIInput: Input, @unchecked Sendable {
 
     /// 可调参数。
     public struct Options: Sendable, Hashable {
-        /// 带宽模式。
+        /// 带宽模式。默认值 = 从 `InputSource.ndi` 的 case 取（提案 008）；与默认不同 = 调用方显式给了，以这里为准。
         public var bandwidth: Bandwidth = .highest
-        /// 抖动缓冲深度（帧），0–2；pts 比"最快路径到达时刻"晚这么多帧。
+        /// 抖动缓冲深度（帧），0–2；pts 比"最快路径到达时刻"晚这么多帧。默认值的处理同 `bandwidth`。
         public var jitterBufferFrames: Int = 1
         /// 无信号门限：帧间隔 × N。
         public var noSignalMultiplier: Int = 3
@@ -156,9 +174,16 @@ public final class NDIInput: Input, @unchecked Sendable {
     /// 从 InputSource.ndi 构造。
     public convenience init(config: InputConfig, timing: ProgramTiming, videoSlot: any FrameSlot, audioRing: (any AudioRing)? = nil,
                             options: Options = Options()) throws {
-        guard case .ndi(let sourceName) = config.source else { throw NDIInputError.notAnNDISource(config.source.kind) }
+        guard case .ndi(let sourceName, let bandwidth, let jitter) = config.source else { throw NDIInputError.notAnNDISource(config.source.kind) }
+        // 提案 008：带宽与抖动缓冲从 case 取；Options 里的值与默认不同 = 调用方显式给了，以 Options 为准
+        var o = options
+        let defaults = Options()
+        if o.bandwidth == defaults.bandwidth { o.bandwidth = Bandwidth(bandwidth) }
+        if o.jitterBufferFrames == defaults.jitterBufferFrames {
+            o.jitterBufferFrames = min(max(jitter, Options.jitterBufferRange.lowerBound), Options.jitterBufferRange.upperBound)
+        }
         self.init(number: config.number, name: config.name, sourceName: sourceName, timing: timing, videoSlot: videoSlot,
-                  audioRing: audioRing, options: options)
+                  audioRing: audioRing, options: o)
     }
 
     deinit {
