@@ -1,4 +1,5 @@
-// SwitcherInputs —— 输入一期（W2-A）：摄像头 / UVC（CameraInput）、屏幕（ScreenInput）、文件（FileInput）、图片（ImageInput）。
+// SwitcherInputs —— 输入一期（W2-A）：摄像头 / UVC（CameraInput）、屏幕（ScreenInput）、文件（FileInput）、图片（ImageInput）；
+// 纯音频设备（W2-A2：AudioDeviceInput + AudioInputDevices，Core Audio 输入设备 → 音频环，没有画面）。
 //
 // 共同规则（设计方案 §3.6、§6；CONTRACTS.md §2.3、§2.4、§6 T8）：
 // - 每路输入自带线程，只往组装方注入的 `FrameSlot` / `AudioRing` 里写，从不碰渲染线程和音频线程；
@@ -9,6 +10,9 @@
 // - 热插拔：AVCaptureDevice 连接 / 断开通知；断开进 noSignal，回来自动重建会话，编号和 InputSettings 不变。
 // - 权限：未授权 → `.error(message:)`（文案指到系统设置），之后轮询授权状态，授权后自动恢复，不用重启。
 // - 输入线程可以锁、可以分配（它们不是实时线程）；帧槽 push / 环 write 本身是无锁的。
+//   唯一的例外是 `AudioDeviceInput`：它的取样回调跑在 Core Audio 的 IO 线程（系统的音频实时线程），
+//   那里一条都不许犯（无锁、无分配、无日志、无系统调用、不碰 Swift 对象），所以回调只写一块预分配的交接区，
+//   写环 / 采样率转换交给它自己的泵线程。细节见 Audio/AudioCaptureFIFO.swift 顶上的注释。
 //
 // 输入需要知道节目时钟（`ProgramTiming`：格式 + 拍点时钟）：摄像头按节目帧率协商格式，屏幕默认跟节目帧率，
 // 文件把播放位置锚到拍点，图片每拍把 pts 刷新为拍点。组装方在引擎 start 之前定 t0，传给输入。

@@ -17,7 +17,7 @@ import SwitcherContracts
 ///   编号和 InputSettings 不变（它们不在这个对象里）。设备一开始不在：noSignal，等它来。
 /// - 权限：未授权 → `.error(清楚文案)`，每秒轮询授权状态，授权后自动建会话，不用重启。
 /// - 线程：会话管理在 `sessionQueue`（串行），采集回调在 `captureQueue`（串行，= 这路输入的线程；只有它 push / write）。
-public final class CameraInput: NSObject, Input, @unchecked Sendable {
+public final class CameraInput: NSObject, Input, HotplugMonitorable, @unchecked Sendable {
     /// 可调参数。
     public struct Options: Sendable, Hashable {
         /// 无信号门限：期望帧间隔 × N。
@@ -65,18 +65,11 @@ public final class CameraInput: NSObject, Input, @unchecked Sendable {
     /// 设备名（找到设备后有值）。
     public var deviceName: String? { deviceNameBox.withLock { $0 } }
     /// 热插拔事件记录（S5 计时用）。
-    public struct HotplugEvents: Hashable, Sendable {
-        public var disconnects: UInt64 = 0
-        public var connects: UInt64 = 0
-        public var lastDisconnectAt: HostTime?
-        public var lastConnectAt: HostTime?
-        /// 最近一次进 live 的时刻。
-        public var lastLiveAt: HostTime?
-        /// 最近一次状态变化的时刻。
-        public var lastStateChangeAt: HostTime?
-    }
-    public var hotplugEvents: HotplugEvents { hotplugBox.withLock { $0 } }
-    private let hotplugBox = Mutex<HotplugEvents>(HotplugEvents())
+    public typealias HotplugEvents = InputHotplugEvents
+    public var hotplugEvents: InputHotplugEvents { hotplugBox.withLock { $0 } }
+    /// `HotplugMonitorable`：提示语里的设备叫法。
+    public var hotplugDeviceLabel: String { deviceName ?? uniqueID }
+    private let hotplugBox = Mutex<InputHotplugEvents>(InputHotplugEvents())
 
     /// 置状态并记时刻。
     private func setState(_ new: InputState) {
