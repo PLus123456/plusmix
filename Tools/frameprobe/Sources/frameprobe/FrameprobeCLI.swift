@@ -27,6 +27,7 @@ struct FrameprobeCLI {
                 [--discontinuities] 顺带做波形不连续检测（A1 第三项：跳变 > 0.5 满幅、click ±1 ms 排除） [--click-margin-ms 1]
       synth     生成合成源样例 .mov（VideoToolbox H.264）或原始 NV12 帧目录       --out x.mov [--seconds 20] [--width W --height H] [--fps 60] [--bitrate B] [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D] [--raw-dir DIR --raw-frames N]
     通用：--size WxH（原始 NV12 目录的尺寸，默认 1920x1080）  --markdown（人读表）  --out PATH（JSON 写到文件）  --version
+          --blank-ticks a-b,c-d,…（这些拍的帧当作解不出：转场中间帧没有单一输入身份，G4 的 gate4.sh 从场景文件算出来；tick = --start-tick + 序号）
     """
 
     static func main() async {
@@ -124,6 +125,13 @@ struct FrameprobeCLI {
         }
         o.discontinuities = p.flags.contains("discontinuities")
         if let v = try p.double("click-margin-ms") { o.discontinuityMarginMs = v }
+        if let s = p.options["blank-ticks"], !s.isEmpty {
+            for part in s.split(separator: ",") {
+                let ab = part.split(separator: "-")
+                guard ab.count == 2, let a = Int64(ab[0]), let b = Int64(ab[1]), a <= b else { throw CLIError("--blank-ticks 形如 7201-7224,7501-7524（拍号闭区间，逗号分隔）") }
+                o.blankTicks.append(a...b)
+            }
+        }
         if let s = p.options["size"] {
             let wh = s.lowercased().split(separator: "x")
             guard wh.count == 2, let w = Int(wh[0]), let h = Int(wh[1]) else { throw CLIError("--size 形如 1920x1080") }

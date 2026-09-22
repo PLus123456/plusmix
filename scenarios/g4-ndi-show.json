@@ -1,0 +1,292 @@
+{
+  "audio" : {
+    "afv" : false,
+    "buses" : [
+      {
+        "bus" : 0,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      },
+      {
+        "bus" : 1,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      },
+      {
+        "bus" : 2,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      },
+      {
+        "bus" : 3,
+        "effects" : [
+
+        ],
+        "gainDb" : 0,
+        "muted" : false
+      }
+    ],
+    "monitorMode" : "afl"
+  },
+  "inputs" : [
+    {
+      "name" : "合成 1 · 60 灰 128±24 +音频",
+      "number" : 1,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "synthetic" : {
+          "settings" : {
+            "audio" : true,
+            "audioDriftPpm" : 0,
+            "background" : {
+              "noise" : {
+                "amplitude" : 24,
+                "level" : 128,
+                "seed" : 1
+              }
+            },
+            "clockDriftPpm" : 0,
+            "dropEveryN" : 0,
+            "frameRate" : {
+              "denominator" : 1,
+              "numerator" : 60
+            },
+            "height" : 1080,
+            "jitterMs" : 0,
+            "width" : 1920
+          }
+        }
+      }
+    },
+    {
+      "name" : "NDI 回环（Switcher G4 loop）",
+      "number" : 2,
+      "settings" : {
+        "audio" : {
+          "delayMs" : 0,
+          "gainDb" : 0,
+          "muted" : false,
+          "pan" : 0,
+          "routing" : {
+            "busA" : false,
+            "busB" : false,
+            "headphones" : false,
+            "master" : true
+          },
+          "solo" : false
+        },
+        "crop" : {
+          "bottom" : 0,
+          "left" : 0,
+          "right" : 0,
+          "top" : 0
+        },
+        "effects" : [
+
+        ],
+        "keyer" : {
+          "enabled" : false,
+          "keyColor" : {
+            "blue" : 0,
+            "green" : 255,
+            "red" : 0
+          },
+          "softness" : 0.1,
+          "spillSuppression" : 0.5,
+          "tolerance" : 0.3
+        },
+        "transform" : {
+          "flipHorizontal" : false,
+          "flipVertical" : false,
+          "offsetX" : 0,
+          "offsetY" : 0,
+          "rotationDegrees" : 0,
+          "scale" : 1
+        }
+      },
+      "source" : {
+        "ndi" : {
+          "sourceName" : "Switcher G4 loop"
+        }
+      }
+    }
+  ],
+  "layout" : {
+
+  },
+  "mixer" : {
+    "format" : {
+      "frameRate" : {
+        "denominator" : 1,
+        "numerator" : 60
+      },
+      "height" : 1080,
+      "width" : 1920
+    },
+    "ftb" : {
+      "durationTicks" : 30,
+      "level" : 0,
+      "on" : false
+    },
+    "overlays" : [
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      },
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      },
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      },
+      {
+        "animProgress" : 0,
+        "animation" : {
+          "durationTicks" : 0,
+          "kind" : "cut"
+        },
+        "on" : false,
+        "rect" : {
+          "height" : 1,
+          "width" : 1,
+          "x" : 0,
+          "y" : 0
+        }
+      }
+    ],
+    "preview" : 2,
+    "program" : 1,
+    "transition" : {
+      "durationTicks" : 30,
+      "progress" : 0,
+      "source" : "auto",
+      "stinger" : {
+        "cutAtTick" : 0
+      },
+      "type" : "fade",
+      "wipe" : {
+        "direction" : "leftToRight",
+        "softness" : 0
+      }
+    }
+  },
+  "name" : "g4-ndi",
+  "outputs" : [
+    {
+      "enabled" : true,
+      "kind" : "record",
+      "name" : "录制",
+      "number" : 1,
+      "settings" : {
+        "audio" : {
+          "bitrateBps" : 160000,
+          "codec" : "aac"
+        },
+        "extra" : {
+
+        },
+        "record" : {
+          "container" : "mov",
+          "directory" : ".",
+          "fileNamePattern" : "{show}-{date}-{time}",
+          "fragmentIntervalSeconds" : 1,
+          "remuxToMP4" : false
+        },
+        "source" : {
+          "program" : {
+
+          }
+        },
+        "video" : {
+          "bitrateBps" : 6000000,
+          "codec" : "h264",
+          "keyframeIntervalFrames" : 120
+        }
+      }
+    }
+  ],
+  "schemaVersion" : 1
+}

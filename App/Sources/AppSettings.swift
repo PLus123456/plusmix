@@ -1,17 +1,21 @@
-// 启动参数与用户设置（W2-B2）。设置面板是 W3-E 的；本期只有命令行参数 + UserDefaults 键，面板做好后改的还是这几个键。
+// 启动参数与用户设置（W2-B2；W3-E 的偏好设置面板读写同一组键）。
 //   --show <路径>            启动时打开这个节目文件（不走"上次"）
 //   --stats <路径>           把每秒的 Stats 也写进 stats.jsonl
 //   --audio-device <spec>    音频输出设备：default（系统默认，跟随变更）/ null（空设备，不出声，CI 用）/ <设备名>（精确或包含）
 //   --api-listen <host:port> 本地 API 监听地址（默认 127.0.0.1:8765；端口 0 = 系统分配，测试用）
 //   --api-token <token>      API 的简单 token 鉴权（默认关）
 //   --no-api                 不起 API
-// 同名 UserDefaults 键：audioOutputDevice / apiEnabled / apiListen / apiToken。命令行参数优先于 UserDefaults。
+//   --record-fallback <目录>  录制目标盘满 / 低于下限时自动切到这个目录继续录（W3-C，S7 目标档）；不设 = 只停录制并提示
+//   --record-min-free-mb <N> 录制目录剩余空间低于 N MB 就停该路录制（默认 200）
+// 同名 UserDefaults 键：audioOutputDevice / apiEnabled / apiListen / apiToken / recordFallbackDirectory / recordMinimumFreeMB；
+// W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）。命令行参数优先于 UserDefaults。
 import Foundation
 import SwitcherControl
+import VMixCompat
 
 struct AppSettings: Equatable, Sendable {
     /// 音频输出设备的选择（与 headless 的 --audio-device 同一套写法）。
-    enum AudioDevice: Equatable, Sendable {
+    enum AudioDevice: Equatable, Sendable, Hashable {
         case systemDefault
         case null
         case named(String)
@@ -39,6 +43,10 @@ struct AppSettings: Equatable, Sendable {
         static let apiEnabled = "apiEnabled"
         static let apiListen = "apiListen"
         static let apiToken = "apiToken"
+        static let recordFallbackDirectory = "recordFallbackDirectory"
+        static let recordMinimumFreeMB = "recordMinimumFreeMB"
+        static let compatLayerEnabled = "compatLayerEnabled"
+        static let compatLayerPort = "compatLayerPort"
     }
 
     var audioDevice: AudioDevice = .systemDefault
@@ -46,10 +54,28 @@ struct AppSettings: Equatable, Sendable {
     var apiHost = "127.0.0.1"
     var apiPort = APIServerConfiguration.defaultPort
     var apiToken: String?
+    /// 第三方 API 兼容层（VMixCompat）开关与 TCP 端口；默认关（设计方案 §9.3、落地方案 §2 第 7 条）。
+    var compatLayerEnabled = false
+    var compatLayerPort = AppSettings.defaultCompatLayerPort
     var showURL: URL?
     var statsURL: URL?
+    /// 磁盘满时的备用录制目录（nil = 只停录制）。
+    var recordFallbackDirectory: String?
+    /// 录制目录剩余空间下限（MB），低于就停该路。
+    var recordMinimumFreeMB = 200
+
+    static let defaultCompatLayerPort = 8099
 
     /// API 配置；关掉时 nil。
+    /// 第三方 API 兼容层（W3-D VMixCompat）的配置；开关关着 = nil（不监听任何端口）。TCP 端口来自偏好设置，HTTP 端口用默认（8088），只听本机。
+    var compatConfiguration: VMixCompatConfiguration? {
+        guard compatLayerEnabled else { return nil }
+        var c = VMixCompatConfiguration()
+        c.enabled = true
+        c.tcpPort = compatLayerPort
+        return c
+    }
+
     var apiConfiguration: APIServerConfiguration? {
         guard apiEnabled else { return nil }
         return APIServerConfiguration(host: apiHost, port: apiPort, token: apiToken)
@@ -65,6 +91,12 @@ struct AppSettings: Equatable, Sendable {
             s.apiPort = parsed.port
         }
         if let token = defaults.string(forKey: Keys.apiToken), !token.isEmpty { s.apiToken = token }
+        if let dir = defaults.string(forKey: Keys.recordFallbackDirectory), !dir.isEmpty { s.recordFallbackDirectory = dir }
+        if defaults.object(forKey: Keys.recordMinimumFreeMB) != nil { s.recordMinimumFreeMB = max(0, defaults.integer(forKey: Keys.recordMinimumFreeMB)) }
+        if defaults.object(forKey: Keys.compatLayerEnabled) != nil { s.compatLayerEnabled = defaults.bool(forKey: Keys.compatLayerEnabled) }
+        if defaults.object(forKey: Keys.compatLayerPort) != nil, defaults.integer(forKey: Keys.compatLayerPort) > 0 {
+            s.compatLayerPort = defaults.integer(forKey: Keys.compatLayerPort)
+        }
 
         func value(after flag: String) -> String? {
             guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
@@ -80,6 +112,18 @@ struct AppSettings: Equatable, Sendable {
         }
         if let v = value(after: "--api-token") { s.apiToken = v.isEmpty ? nil : v }
         if arguments.contains("--no-api") { s.apiEnabled = false }
+        if let v = value(after: "--record-fallback") { s.recordFallbackDirectory = v.isEmpty ? nil : v }
+        if let v = value(after: "--record-min-free-mb"), let n = Int(v) { s.recordMinimumFreeMB = max(0, n) }
         return s
+    }
+
+    /// 偏好设置面板：把可持久化的项写回 UserDefaults（同一组键；showURL / statsURL 是启动参数，不存）。
+    func save(to defaults: UserDefaults) {
+        defaults.set(audioDevice.spec, forKey: Keys.audioDevice)
+        defaults.set(apiEnabled, forKey: Keys.apiEnabled)
+        defaults.set("\(apiHost):\(apiPort)", forKey: Keys.apiListen)
+        if let apiToken, !apiToken.isEmpty { defaults.set(apiToken, forKey: Keys.apiToken) } else { defaults.removeObject(forKey: Keys.apiToken) }
+        defaults.set(compatLayerEnabled, forKey: Keys.compatLayerEnabled)
+        defaults.set(compatLayerPort, forKey: Keys.compatLayerPort)
     }
 }

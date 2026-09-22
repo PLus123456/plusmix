@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Switcher 连接</title>
+  <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Switcher 地址">
+    <sdpi-textfield setting="host" global placeholder="127.0.0.1" default="127.0.0.1"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="API 端口">
+    <sdpi-textfield setting="port" global placeholder="8765" default="8765" pattern="[0-9]*"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Token（可空）">
+    <sdpi-password setting="token" global></sdpi-password>
+  </sdpi-item>
+  <sdpi-item label="说明">
+    <div style="opacity:.75">在 Switcher 的设置里打开本地 API（默认 127.0.0.1:8765）。这些是全局设置，所有按钮共用。</div>
+  </sdpi-item>
+</body>
+</html>

@@ -40,6 +40,8 @@ final class SwitcherSession {
     let inputs: InputRuntime
     let audio: AudioRuntime
     let outputs: OutputRuntime
+    /// 外部显示窗口 + 虚拟摄像头（W3-C）。
+    let aux: AuxOutputRuntime
     let control: ControlRuntime
     /// 界面布局（Show.layout 原样带着）。
     var layout: ShowLayout
@@ -72,7 +74,7 @@ final class SwitcherSession {
     var displaySource: any DisplayFrameSource { renderer }
 
     init(show: Show, settings: AppSettings = AppSettings(), inputFactory: any InputFactory = DefaultInputFactory(),
-         hotkeyTable: HotkeyTable = HotkeyTable.loadUserTableOrDefault()) throws {
+         hotkeyTable: HotkeyTable = HotkeyTable.loadUserTableOrDefault(), midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault()) throws {
         let initial = show.makeState()
         try initial.validate()
         name = show.name
@@ -86,15 +88,23 @@ final class SwitcherSession {
         let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
         self.engine = engine
         audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice)
-        inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
-        outputs = OutputRuntime(engine: engine, audio: audio, format: format, showName: show.name)
-        control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable)
+        let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
+        self.inputs = inputs
+        outputs = OutputRuntime(engine: engine, audio: audio, inputs: inputs, format: format, showName: show.name)
+        outputs.fallbackDirectory = settings.recordFallbackDirectory
+        outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
+        aux = AuxOutputRuntime(engine: engine, source: renderer, format: format)
+        control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable,
+                                 compat: settings.compatConfiguration)
         lastSnapshot = stateMachine.publisher.latest
         let audioEngine = audio.engine
         engine.audioStatsProvider = { audioEngine.audioCounters }
         engine.encoderStatsProvider = outputs.statsProvider
         control.onFeedback = { [weak self] feedback in self?.notify(feedback.message) }
         outputs.onEvent = { [weak self] event in self?.handle(outputEvent: event) }
+        outputs.sendCommand = { [weak self] command in self?.send(command) }
+        aux.onEvent = { [weak self] event in self?.handle(auxEvent: event) }
+        aux.sendCommand = { [weak self] command in self?.send(command) }
         control.bus.addObserver(outputs.commandTicks)   // 起停命令的生效拍 → 录制起止拍
     }
 
@@ -113,7 +123,7 @@ final class SwitcherSession {
         do {
             try await audio.start(clock: spec)
         } catch {
-            notify("音频引擎起不来：\(error)")
+            notify(L("notice.audioFailed", "\(error)"))
         }
         try await engine.start(t0: t0)
         isRunning = true
@@ -126,6 +136,7 @@ final class SwitcherSession {
         statsHub = hub
         outputs.clock = spec
         outputs.reconcile(state)
+        aux.reconcile(state)
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pollSnapshot() }
         }
@@ -140,6 +151,7 @@ final class SwitcherSession {
         pollTimer = nil
         await control.stopAPI()
         await outputs.stopAll()
+        aux.stopAll()
         statsHub?.stop()
         statsHub = nil
         inputs.stopAll()
@@ -167,6 +179,7 @@ final class SwitcherSession {
         state = newState
         if inputsChanged { inputs.reconcile(newState, timing: programTiming()) }
         if outputsChanged { outputs.reconcile(newState) }
+        if outputsChanged || inputsChanged { aux.reconcile(newState) }
         for observer in stateObservers { observer.block(newState) }
     }
 
@@ -222,12 +235,23 @@ final class SwitcherSession {
 
     private func handle(outputEvent event: OutputRuntime.Event) {
         switch event {
-        case .recordingStarted(let n, let url): notify("录制 \(n) 开始：\(url.lastPathComponent)")
-        case .recordingStopped(let n, let url, let frames, let seconds): notify("录制 \(n) 已停：\(url.lastPathComponent)，\(frames) 帧 / \(String(format: "%.2f", seconds)) s")
+        case .recordingStarted(let n, let url): notify(L("notice.recordingStarted", n, url.lastPathComponent))
+        case .recordingStopped(let n, let url, let frames, let seconds): notify(L("notice.recordingStopped", n, url.lastPathComponent, Int(frames), seconds))
         case .recordingFailed(_, let message): notify(message)
-        case .streamStarted(let n): notify("推流 \(n) 开始")
-        case .streamStopped(let n): notify("推流 \(n) 已停")
+        case .recordingDiskLow(let n, let mb): notify("录制 \(n)：磁盘剩余 \(Int(mb)) MB")
+        case .recordingSwitchedToFallback(let n, let url): notify("录制 \(n)：磁盘满，已切到备用目录：\(url.lastPathComponent)")
+        case .streamStarted(let n): notify(L("notice.streamStarted", n))
+        case .streamStopped(let n): notify(L("notice.streamStopped", n))
         case .streamFailed(_, let message): notify(message)
+        }
+    }
+
+    private func handle(auxEvent event: AuxOutputRuntime.Event) {
+        switch event {
+        case .externalDisplay(let n, let status): notify("外部输出 \(n)：\(status)")
+        case .virtualCameraStarted: notify("虚拟摄像头输出已启用")
+        case .virtualCameraStopped: notify("虚拟摄像头输出已停")
+        case .extensionStatus(let s): notify("虚拟摄像头扩展：\(s)")
         }
     }
 
@@ -246,4 +270,7 @@ final class SwitcherSession {
 
     /// 当前状态存成节目文件。
     func makeShow() -> Show { Show(name: name, state: state, layout: layout) }
+
+    /// 没有 session 时给面板用的空状态机（MIDI 映射面板要一个 MIDIController）。
+    static func detachedStateMachine() -> StateMachine { StateMachine(initialState: MixerState()) }
 }

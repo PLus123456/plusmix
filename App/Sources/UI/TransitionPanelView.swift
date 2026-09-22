@@ -1,5 +1,6 @@
 // 中列：转场按钮（Cut / Fade / Wipe / Zoom / Stinger / FTB）、时长预设、Overlay 1–4 开关、T-bar、时钟。
-// 本期只有 Cut / Fade 可用，Wipe / Zoom / Stinger 置灰（W3-B 做渲染）；FTB 是开关；Overlay 开关只改 on，不改通道用的输入
+// Wipe / Zoom / Stinger 在 W3-B 合入后（G4）接通：点 = setTransition(type, 当前时长) + autoTransition，参数（Wipe 方向 / 软边、Stinger 输入 / 换底拍）
+// 来自节目文件（控件归 W3-E2，prompt 55）；FTB 是开关；Overlay 开关只改 on，不改通道用的输入
 // （给通道选输入在缩略图格子的小按钮和底栏的叠加面板）。所有动作只发 Command，显示只读快照。
 import AppKit
 import SwitcherContracts
@@ -41,25 +42,26 @@ final class TransitionPanelView: NSView {
 
         cutButton.target = self; cutButton.action = #selector(cutPressed)
         fadeButton.target = self; fadeButton.action = #selector(fadePressed)
+        wipeButton.target = self; wipeButton.action = #selector(autoPressed(_:)); wipeButton.tag = 1
+        zoomButton.target = self; zoomButton.action = #selector(autoPressed(_:)); zoomButton.tag = 2
+        stingerButton.target = self; stingerButton.action = #selector(autoPressed(_:)); stingerButton.tag = 3
         ftbButton.target = self; ftbButton.action = #selector(ftbPressed)
         durationControl.target = self; durationControl.action = #selector(durationChanged)
         durationControl.translatesAutoresizingMaskIntoConstraints = false
         durationControl.controlSize = .small
+        durationControl.setAccessibilityLabel(L("transition.durationLabel"))
+        durationControl.cell?.setAccessibilityLabel(L("transition.durationLabel"))
         for (i, b) in overlayButtons.enumerated() {
             b.tag = i + 1
             b.target = self
             b.action = #selector(overlayPressed(_:))
             b.controlSize = .small
         }
-        for b in [wipeButton, zoomButton, stingerButton] {
-            b.isEnabled = false
-            b.toolTip = "W3-B 做"
-        }
         for b in [cutButton, fadeButton, wipeButton, zoomButton, stingerButton, ftbButton] {
             b.widthAnchor.constraint(equalToConstant: Theme.transitionColumnWidth - 16).isActive = true
         }
-        cutButton.toolTip = "空格"
-        fadeButton.toolTip = "回车"
+        cutButton.toolTip = L("key.space")
+        fadeButton.toolTip = L("key.return")
         ftbButton.toolTip = "F"
         tbar.onProgress = { [weak self] p in self?.send?(.tbar(progress: p)) }
 
@@ -100,6 +102,9 @@ final class TransitionPanelView: NSView {
         frameRate = state.format.frameRate
         Theme.setHighlighted(ftbButton, state.ftb.on, color: Theme.ftbActive)
         Theme.setHighlighted(fadeButton, state.transition.isActive && state.transition.type == .fade)
+        Theme.setHighlighted(wipeButton, state.transition.isActive && state.transition.type == .wipe)
+        Theme.setHighlighted(zoomButton, state.transition.isActive && state.transition.type == .zoom)
+        Theme.setHighlighted(stingerButton, state.transition.isActive && state.transition.type == .stinger)
         let seconds = Double(state.transition.durationTicks) / Double(frameRate.nominalFramesPerSecond)
         if let i = Self.durationPresets.firstIndex(where: { abs($0 - seconds) < 0.01 }) {
             durationControl.selectedSegment = i
@@ -109,7 +114,7 @@ final class TransitionPanelView: NSView {
         for (i, b) in overlayButtons.enumerated() {
             let o = state.overlays[i]
             Theme.setHighlighted(b, o.on)
-            b.toolTip = o.input.map { "Overlay \(i + 1)：输入 \($0)" } ?? "Overlay \(i + 1)：还没指定输入（在缩略图格子上点 \(i + 1)）"
+            b.toolTip = o.input.map { L("transition.overlayInput", i + 1, $0) } ?? L("transition.overlayNoInput", i + 1, i + 1)
         }
         tbar.apply(state: state)
     }
@@ -122,6 +127,13 @@ final class TransitionPanelView: NSView {
     @objc private func cutPressed() { send?(.cut) }
 
     @objc private func fadePressed() { send?(.fade(durationTicks: state.transition.durationTicks)) }
+
+    /// Wipe / Zoom / Stinger：先把类型（时长不变）写进状态，再起 auto 转场；之后 T-bar 也按这个类型推（G4 接通）。
+    @objc private func autoPressed(_ sender: NSButton) {
+        let type: TransitionType = sender.tag == 1 ? .wipe : (sender.tag == 2 ? .zoom : .stinger)
+        send?(.setTransition(type: type, durationTicks: state.transition.durationTicks))
+        send?(.autoTransition)
+    }
 
     @objc private func ftbPressed() { send?(.ftb(on: !state.ftb.on)) }
 

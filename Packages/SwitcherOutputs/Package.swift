@@ -7,7 +7,9 @@
 //   switcher-record-probe    W1-E：命令行录制器，E6 崩溃恢复测试的子进程，也用来生成 Tests/Fixtures/pattern.mov
 //   SwitcherStreaming        W2-D：StreamOutput（RTMP / RTMPS / SRT，HaishinKit 只当连接 + 封装层，编码是我们自己的）
 //   SwitcherNDISend          W2-D：NDISender（NDI SDK 在时真发；不在时空实现，Stats 标 unavailable）
-//   External / VirtualCamera / ISO  W3-C 加
+//   SwitcherExternal         W3-C：ExternalDisplayOutput（全屏窗口 + MetalDisplayView，PGM / PVW / 多画面 / Aux 输入，显示器插拔）
+//   SwitcherISO              W3-C：InputFrameTee / ISOFrameTap（每路输入的视频 ISO）、SharedTickPlanner（同一拍起停）、磁盘保护（S7）
+//   SwitcherVirtualCamera    W3-C：VirtualCameraOutput（PGM → CMIO 扩展的 sink stream）、SystemExtensionInstaller；扩展本体在 CameraExtension/
 import Foundation
 import PackageDescription
 
@@ -38,6 +40,9 @@ let package = Package(
         .library(name: "SwitcherOutputs", targets: ["SwitcherOutputs"]),
         .library(name: "SwitcherStreaming", targets: ["SwitcherStreaming"]),
         .library(name: "SwitcherNDISend", targets: ["SwitcherNDISend"]),
+        .library(name: "SwitcherExternal", targets: ["SwitcherExternal"]),
+        .library(name: "SwitcherISO", targets: ["SwitcherISO"]),
+        .library(name: "SwitcherVirtualCamera", targets: ["SwitcherVirtualCamera"]),
         .executable(name: "switcher-record-probe", targets: ["switcher-record-probe"]),
     ],
     dependencies: [
@@ -70,6 +75,35 @@ let package = Package(
             swiftSettings: ndiSendSwiftSettings,
             linkerSettings: ndiSendLinkerSettings
         ),
+        // W3-C：外部显示只要契约 + 渲染包的显示视图（SwitcherRender 是 SwitcherCore 的产品，依赖方向合法）
+        .target(
+            name: "SwitcherExternal",
+            dependencies: [
+                .product(name: "SwitcherContracts", package: "SwitcherCore"),
+                .product(name: "SwitcherRender", package: "SwitcherCore"),
+            ],
+            path: "Sources/External"
+        ),
+        // W3-C：ISO 分路要 Recorder（本包）和 W1-B 的 LockFreeFrameSlot（分支槽，SwitcherEngine 产品）
+        .target(
+            name: "SwitcherISO",
+            dependencies: [
+                "SwitcherOutputs",
+                .product(name: "SwitcherContracts", package: "SwitcherCore"),
+                .product(name: "SwitcherEngine", package: "SwitcherCore"),
+            ],
+            path: "Sources/ISO"
+        ),
+        // W3-C：虚拟摄像头桥（CoreMediaIO 客户端 API + SystemExtensions）；Shared/ 里的常量同时编进 CameraExtension target（project.yml 按路径引用）
+        .target(
+            name: "SwitcherVirtualCamera",
+            dependencies: [
+                "SwitcherOutputs",
+                .product(name: "SwitcherContracts", package: "SwitcherCore"),
+            ],
+            path: "Sources/VirtualCamera",
+            linkerSettings: [.linkedFramework("CoreMediaIO"), .linkedFramework("SystemExtensions")]
+        ),
         .executableTarget(
             name: "switcher-record-probe",
             dependencies: [
@@ -86,6 +120,21 @@ let package = Package(
             name: "StreamingTests",
             dependencies: ["SwitcherStreaming", "SwitcherOutputs", .product(name: "SwitcherContracts", package: "SwitcherCore")],
             path: "Tests/StreamingTests"
+        ),
+        .testTarget(
+            name: "ExternalTests",
+            dependencies: ["SwitcherExternal", .product(name: "SwitcherContracts", package: "SwitcherCore"), .product(name: "SwitcherRender", package: "SwitcherCore")],
+            path: "Tests/ExternalTests"
+        ),
+        .testTarget(
+            name: "ISOTests",
+            dependencies: ["SwitcherISO", "SwitcherOutputs", .product(name: "SwitcherContracts", package: "SwitcherCore"), .product(name: "SwitcherEngine", package: "SwitcherCore")],
+            path: "Tests/ISOTests"
+        ),
+        .testTarget(
+            name: "VirtualCameraTests",
+            dependencies: ["SwitcherVirtualCamera", "SwitcherOutputs", .product(name: "SwitcherContracts", package: "SwitcherCore")],
+            path: "Tests/VirtualCameraTests"
         ),
         .testTarget(
             name: "NDISendTests",

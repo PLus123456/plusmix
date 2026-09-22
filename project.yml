@@ -59,6 +59,12 @@ targets:
         INFOPLIST_FILE: App/Info.plist   # 手写，见文件内注释；不用 XcodeGen 生成（它会把版本写死成 1.0）
         GENERATE_INFOPLIST_FILE: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        # W3-C：权限表按 DEVELOPMENT_TEAM 选——空（ad-hoc）用空表 App/Switcher.entitlements，有 Team ID 用 App/Switcher-signed.entitlements
+        # （system-extension.install 是受限权限，ad-hoc 带着它 Xcode 拒绝构建）。写法：$(DEVELOPMENT_TEAM:default=adhoc) → "adhoc" 或 Team ID，
+        # 再查 SWITCHER_ENTITLEMENTS_<它>，只定义了 adhoc 那个，其他（任何 Team ID）落到 default 的签名表。
+        SWITCHER_TEAM_KIND: "$(DEVELOPMENT_TEAM:default=adhoc)"
+        SWITCHER_ENTITLEMENTS_adhoc: App/Switcher.entitlements
+        CODE_SIGN_ENTITLEMENTS: "$(SWITCHER_ENTITLEMENTS_$(SWITCHER_TEAM_KIND):default=App/Switcher-signed.entitlements)"
     dependencies:
       - package: SwitcherCore
         product: SwitcherContracts
@@ -67,14 +73,47 @@ targets:
       - package: SwitcherCore
         product: SwitcherRender
       - package: SwitcherInputs
+      - package: SwitcherInputs
+        product: SwitcherNDI                 # G4：App 接 W3-A 的 NDI 输入（InputFactory）
+      - package: SwitcherInputs
+        product: SwitcherDeckLink            # G4：App 接 W3-A 的 DeckLink 输入（InputFactory）
       - package: SwitcherAudio
       - package: SwitcherAudio
         product: SwitcherAudioIntegration   # W2-B2：App 接 W2-E 的 AudioEngine
       - package: SwitcherOutputs
       - package: SwitcherOutputs
         product: SwitcherStreaming           # W2-B2：App 接 W2-D 的 StreamOutput
+      - package: SwitcherOutputs
+        product: SwitcherExternal            # W3-C：外部显示窗口
+      - package: SwitcherOutputs
+        product: SwitcherISO                 # W3-C：ISO 分路 + 磁盘保护
+      - package: SwitcherOutputs
+        product: SwitcherVirtualCamera       # W3-C：虚拟摄像头桥 + 扩展安装
       - package: SwitcherControl
+      - package: SwitcherControl
+        product: VMixCompat                  # G4：偏好设置里的第三方 API 兼容层开关（W3-D）
       - package: SwitcherTestKit
+      - target: SwitcherCameraExtension      # W3-C：嵌到 Contents/Library/SystemExtensions/
+        embed: true
+        codeSign: true
+
+  # W3-C：虚拟摄像头的 CMIO 系统扩展（CameraExtension/）。产品名 = bundle ID（系统扩展的 bundle 名要求）。
+  # 共享常量从 SwitcherVirtualCamera 的 Shared/ 目录按路径编进来。签名需要 Team ID（DEVELOPMENT_TEAM）；没有只能编译。
+  SwitcherCameraExtension:
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: CameraExtension/Sources
+      - path: Packages/SwitcherOutputs/Sources/VirtualCamera/Shared
+    settings:
+      base:
+        PRODUCT_NAME: com.example.switcher.camera-extension
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.switcher.camera-extension
+        INFOPLIST_FILE: CameraExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: CameraExtension/CameraExtension.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
 
   SwitcherTests:
     type: bundle.unit-test
@@ -93,6 +132,7 @@ schemes:
     build:
       targets:
         Switcher: all
+        SwitcherCameraExtension: all
         SwitcherTests: [test]
     run:
       config: Debug

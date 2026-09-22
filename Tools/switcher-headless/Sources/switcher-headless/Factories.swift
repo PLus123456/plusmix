@@ -61,9 +61,12 @@ enum M0Factory {
 }
 
 /// G3 检查点的节目文件与场景（G3 prompt 第 2 条 b；测试标准 §3 V6 / V7 / A4 的做法）。
-/// 与 M0 的差别：1 号灰度 64、2 号灰度 192（V7 的 A / B），1–4 号带合成音频（A4 的四路 ISO 音轨；2–4 号不送 Master，
+/// 与 M0 的差别：底纹是灰底 + 噪声（G4 起；M0 / G2 保留纯灰底，基线不可比），1 号灰度 64、2 号灰度 192（V7 的 A / B），1–4 号带合成音频（A4 的四路 ISO 音轨；2–4 号不送 Master，
 /// 免得四个满幅 click 叠在一起削波、A2 只看 1 号的 click），Overlay 1 预配成右下角画中画（不盖住测试图案和中心采样区）。
 enum G3Factory {
+    /// 噪声底纹幅度（full-range 电平）：W1-A2 报告 §2 用 24 时 E2 6.002 Mbps / 峰值 1.08×；64 ± 24 与 192 ± 24 都不越界，V7 的中心均值不偏。
+    static let noiseAmplitude: UInt8 = 24
+
     /// 灰度按 V7 要求：A = 64（1 号）、B = 192（2 号）；其余错开 ≥ 16 级，frameprobe 的标称灰度容差是 6。
     static func show(width: Int = 1920, height: Int = 1080) -> Show {
         struct Spec { let rate: FrameRate; let gray: UInt8; let drift: Double; let jitter: Double; let audio: Bool; let audioDrift: Double; let toMaster: Bool }
@@ -79,11 +82,13 @@ enum G3Factory {
         ]
         let inputs = specs.enumerated().map { i, s -> InputConfig in
             let number = i + 1
+            // 底纹：灰度 s.gray 上叠 ±24 的零均值噪声（提案 006 / W1-A2；G4 起换上，prompt 60 末节第 2 条）——纯灰底压不出设定码率，E2 无法在
+            // 长跑里判；噪声只动亮度、四样解码块不加噪、中心 1/4 均值仍 = level（V6 / V7 不受影响）。seed = 输入号，每路噪声不同。
             let settings = SyntheticSourceSettings(frameRate: s.rate, width: width, height: height,
-                                                   background: .gray(level: s.gray), patternID: nil,
+                                                   background: .noise(level: s.gray, amplitude: noiseAmplitude, seed: UInt64(number)), patternID: nil,
                                                    jitterMs: s.jitter, dropEveryN: 0, clockDriftPpm: s.drift,
                                                    audio: s.audio, audioDriftPpm: s.audioDrift)
-            var name = "合成 \(number) · \(s.rate) 灰 \(s.gray)"
+            var name = "合成 \(number) · \(s.rate) 灰 \(s.gray)±\(noiseAmplitude)"
             if s.drift != 0 { name += String(format: " %+.0f ppm", s.drift) }
             if s.jitter != 0 { name += " ±\(Int(s.jitter)) ms" }
             if s.audio { name += s.toMaster ? " +音频" : String(format: " +音频(ISO %+.0f ppm)", s.audioDrift) }

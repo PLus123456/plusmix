@@ -4,6 +4,9 @@
 // - 工作色彩空间 BGRA8 gamma 域（决策 6），所有混合在 gamma 域直接做。
 // - 输入纹理三种：NV12（Y 平面 r8 + CbCr 平面 rg8）、BGRA（bgra8，alpha 预乘）、UYVY（bgrg422，硬件解包后给 (Cr, Y, Cb)）。
 //   YCbCr → RGB 在片段着色器里做，BT.709 / BT.601 / BT.2020 矩阵，limited / full 两种范围。
+// - 抠像（提案 009 的口径）：转成 RGB 之后在 BT.709 的 (Cb, Cr) 平面算到键色的距离，半径内全透、柔化带内 smoothstep、
+//   留下的像素做溢色抑制（减掉色度在键色方向上的正分量，亮度不变），输出预乘 alpha。
+// - Wipe（W3-B）：新画面整幅画上来，片段按自己在目标里的位置算遮罩 alpha（硬边 = step，软边 = smoothstep）。
 // - 输出 RGB → NV12（BT.709 limited）由 compute kernel 写进 IOSurface 平面（以 r8Uint / rg8Uint 视图写，整数精确）。
 // - DrawUniforms 的字段顺序、大小必须与 ShaderTypes.swift 逐字段一致（两边都有 static_assert / 断言）。
 #include <metal_stdlib>
@@ -32,9 +35,20 @@ struct DrawUniforms {
     int      fullRange;    // 0 = limited(16–235) 1 = full(0–255)
     int      matrix;       // 0 = BT.709 1 = BT.601 2 = BT.2020
     int      slice;        // 标签纹理数组的切片
-    int      pad0, pad1, pad2;
+    int      keyer;        // 1 = 抠像
+    int      wipeMode;     // 0 无 1 左→右 2 右→左 3 上→下 4 下→上 5 对角
+    int      pad0;
+    float2   targetSize;   // 目标纹理尺寸（像素）
+    float2   keyChroma;    // 键色 (Cb, Cr)，−0.5…0.5
+    float2   keyRange;     // (全透半径, 柔化带宽度)
+    float2   keyNormal;    // 键色色度的单位向量（CPU 算好）
+    float    keySpill;     // 溢色抑制 0–1
+    float    wipeEdge;     // 擦边位置 0–1
+    float    wipeSoftness; // 软边宽度（占场的比例）
+    float    pad1;
+    float2   pad2;
 };
-static_assert(sizeof(DrawUniforms) == 112, "DrawUniforms 布局变了，同步改 ShaderTypes.swift");
+static_assert(sizeof(DrawUniforms) == 160, "DrawUniforms 布局变了，同步改 ShaderTypes.swift");
 
 struct QuadOut {
     float4 position [[position]];
@@ -101,6 +115,52 @@ static inline float4 fetch(float2 uv, constant DrawUniforms &u,
     }
 }
 
+// MARK: - 抠像（提案 009）：BT.709 色度平面上的距离；输入 / 输出都是预乘 RGBA
+
+static inline float4 applyKey(float4 c, constant DrawUniforms &u) {
+    float a0 = c.a;
+    float3 rgb = a0 > 0.0 ? c.rgb / a0 : float3(0.0);
+    float y = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+    float2 chroma = float2((rgb.b - y) / 1.8556, (rgb.r - y) / 1.5748);
+    float d = distance(chroma, u.keyChroma);
+    float radius = u.keyRange.x, ramp = u.keyRange.y;
+    float alpha = ramp > 0.0 ? smoothstep(radius, radius + ramp, d) : step(radius, d);
+    float proj = dot(chroma, u.keyNormal);
+    if (u.keySpill > 0.0 && proj > 0.0) {
+        chroma -= u.keySpill * proj * u.keyNormal;
+        float r = y + 1.5748 * chroma.y;
+        float b = y + 1.8556 * chroma.x;
+        float g = (y - 0.2126 * r - 0.0722 * b) / 0.7152;
+        rgb = saturate(float3(r, g, b));
+    }
+    float a = alpha * a0;
+    return float4(rgb * a, a);
+}
+
+/// 下采样路径（缩略图 / 画中画）的 half 版：同一套公式，half 精度（色度距离误差 ~5e-4，远小于最小容差 0.005）。
+static inline half4 applyKeyHalf(half4 c, constant DrawUniforms &u) {
+    half a0 = c.a;
+    half3 rgb = a0 > 0.0h ? c.rgb / a0 : half3(0.0h);
+    half y = 0.2126h * rgb.r + 0.7152h * rgb.g + 0.0722h * rgb.b;
+    half2 chroma = half2((rgb.b - y) * (1.0h / 1.8556h), (rgb.r - y) * (1.0h / 1.5748h));
+    half2 key = half2(u.keyChroma);
+    half d = distance(chroma, key);
+    half radius = half(u.keyRange.x), ramp = half(u.keyRange.y);
+    half alpha = ramp > 0.0h ? smoothstep(radius, radius + ramp, d) : step(radius, d);
+    half2 kn = half2(u.keyNormal);
+    half spill = half(u.keySpill);
+    half proj = dot(chroma, kn);
+    if (spill > 0.0h && proj > 0.0h) {
+        chroma -= spill * proj * kn;
+        half r = y + 1.5748h * chroma.y;
+        half b = y + 1.8556h * chroma.x;
+        half g = (y - 0.2126h * r - 0.0722h * b) * (1.0h / 0.7152h);
+        rgb = saturate(half3(r, g, b));
+    }
+    half a = alpha * a0;
+    return half4(rgb * a, a);
+}
+
 // MARK: - 下采样用的 half 精度版（缩略图 / 画中画的 taps×taps 盒式滤波；1:1 的路径保持 float 以保证 V9 的电平精度）
 // 实测（reports/w1-compositor.md）：60 fps 节奏下 GPU 时钟很低，8 个 1/4 缩略图 4×4 taps 用 float 要 1.2 ms，half 0.4 ms。
 
@@ -146,6 +206,24 @@ static inline half4 fetchHalf(float2 uv, constant DrawUniforms &u,
     }
 }
 
+// MARK: - Wipe 遮罩：按片段在目标里的位置
+
+static inline float wipeAlpha(float2 position, constant DrawUniforms &u) {
+    float2 p = position / u.targetSize;
+    float f;
+    switch (u.wipeMode) {
+    case 1: f = p.x; break;
+    case 2: f = 1.0 - p.x; break;
+    case 3: f = p.y; break;
+    case 4: f = 1.0 - p.y; break;
+    case 5: f = (p.x + p.y) * 0.5; break;
+    default: return 1.0;
+    }
+    float e = u.wipeEdge, s = u.wipeSoftness;
+    if (s <= 0.0) return f < e ? 1.0 : 0.0;
+    return 1.0 - smoothstep(e - 0.5 * s, e + 0.5 * s, f);
+}
+
 // MARK: - 片段：输入 / 纯色
 
 fragment float4 quadFragment(QuadOut in [[stage_in]],
@@ -154,25 +232,39 @@ fragment float4 quadFragment(QuadOut in [[stage_in]],
                              texture2d<float> tex1 [[texture(1)]],
                              texture2d<half> tex0h [[texture(2)]],
                              texture2d<half> tex1h [[texture(3)]]) {
+    float4 color;
     if (u.format == DrawFormatSolid) {
-        return u.tint;
-    }
-    int taps = clamp(u.taps, 1, 4);
-    if (taps == 1) {
-        // 1:1 或放大：float 精度，采样点正好落在纹素中心时逐电平精确
-        return fetch(in.uv, u, tex0, tex1) * u.tint;
-    }
-    // 下采样：在目标像素的足迹内均匀取 taps×taps 个点做盒式滤波（第一版代替 mipmap，见报告），half 精度
-    float inv = 1.0 / float(taps);
-    half4 acc = half4(0.0h);
-    for (int j = 0; j < taps; ++j) {
-        for (int i = 0; i < taps; ++i) {
-            float2 o = (float2(float(i), float(j)) + 0.5) * inv - 0.5;
-            acc += fetchHalf(in.uv + o * u.sampleStep, u, tex0h, tex1h);
+        color = u.tint;
+    } else {
+        int taps = clamp(u.taps, 1, 4);
+        if (taps == 1) {
+            // 1:1 或放大：float 精度，采样点正好落在纹素中心时逐电平精确
+            color = fetch(in.uv, u, tex0, tex1);
+            if (u.keyer != 0) color = applyKey(color, u);
+        } else {
+            // 下采样：在目标像素的足迹内均匀取 taps×taps 个点做盒式滤波（第一版代替 mipmap，见报告），half 精度；抠像逐采样点做
+            // 累加与缩放保持 half（与 W1-C 逐位相同，参考图不变）。
+            // 抠像：2×2（画中画）逐采样点抠，边缘干净；4×4（缩略图）先滤波再抠一次——每像素 16 次抠像在 60 fps 的低 GPU 时钟下
+            // 要 1 ms 以上（V1 实测），缩略图看不出差别（reports/w3-compositor2.md §2）。
+            bool keyPerTap = u.keyer != 0 && taps == 2;
+            float inv = 1.0 / float(taps);
+            half4 acc = half4(0.0h);
+            for (int j = 0; j < taps; ++j) {
+                for (int i = 0; i < taps; ++i) {
+                    float2 o = (float2(float(i), float(j)) + 0.5) * inv - 0.5;
+                    half4 s = fetchHalf(in.uv + o * u.sampleStep, u, tex0h, tex1h);
+                    if (keyPerTap) s = applyKeyHalf(s, u);
+                    acc += s;
+                }
+            }
+            acc *= half(inv * inv);
+            color = float4(acc);
+            if (u.keyer != 0 && !keyPerTap) color = applyKey(color, u);
         }
+        color *= u.tint;   // 预乘颜色整体乘不透明度
     }
-    acc *= half(inv * inv);
-    return float4(acc) * u.tint;   // 预乘颜色整体乘不透明度
+    if (u.wipeMode != 0) color *= wipeAlpha(in.position.xy, u);
+    return color;
 }
 
 // MARK: - 片段：标签（预渲染的文字纹理数组）

@@ -11,24 +11,53 @@ final class V8ReferenceTests: XCTestCase {
     static let psnrThreshold = 40.0
     static let ssimThreshold = 0.98
 
-    /// V8 的参考图集：名字、状态、取哪张输出。
-    static let cases: [(name: String, state: MixerState, target: OfflineRenderTarget)] = [
-        ("v8-fixed-pgm", ReferenceStates.fixed(), .program),
-        ("v8-fade50-pgm", ReferenceStates.fade50(), .program),
-        ("v8-ftb100-pgm", ReferenceStates.ftb100(), .program),
-        ("v8-preview-pvw", ReferenceStates.fixed(), .preview),
-        ("v8-fixed-multiview", ReferenceStates.fixed(), .multiview),
+    /// 一张参考图：名字、状态、取哪张输出、PVW 是否叠加。
+    struct RefCase {
+        let name: String
+        let state: MixerState
+        let target: OfflineRenderTarget
+        var overlaysInPreview = false
+    }
+
+    /// V8 的参考图集。前五张是 W1-C 的（状态不变，改了实现也必须逐像素一致）；其余是 W3-B 加的（每张为什么这样见 Tests/References/README.md）。
+    static let cases: [RefCase] = [
+        RefCase(name: "v8-fixed-pgm", state: ReferenceStates.fixed(), target: .program),
+        RefCase(name: "v8-fade50-pgm", state: ReferenceStates.fade50(), target: .program),
+        RefCase(name: "v8-ftb100-pgm", state: ReferenceStates.ftb100(), target: .program),
+        RefCase(name: "v8-preview-pvw", state: ReferenceStates.fixed(), target: .preview),
+        RefCase(name: "v8-fixed-multiview", state: ReferenceStates.fixed(), target: .multiview),
+        // W3-B
+        RefCase(name: "v8-overlay-order-pgm", state: ReferenceStates.overlayOrder(), target: .program),
+        RefCase(name: "v8-pip-border-pgm", state: ReferenceStates.pipBorder(), target: .program),
+        RefCase(name: "v8-keyer-pgm", state: ReferenceStates.keyed(), target: .program),
+        RefCase(name: "v8-wipe50-l2r-pgm", state: ReferenceStates.wipe50(.leftToRight), target: .program),
+        RefCase(name: "v8-wipe50-r2l-pgm", state: ReferenceStates.wipe50(.rightToLeft), target: .program),
+        RefCase(name: "v8-wipe50-t2b-pgm", state: ReferenceStates.wipe50(.topToBottom), target: .program),
+        RefCase(name: "v8-wipe50-b2t-pgm", state: ReferenceStates.wipe50(.bottomToTop), target: .program),
+        RefCase(name: "v8-wipe50-diag-pgm", state: ReferenceStates.wipe50(.diagonal), target: .program),
+        RefCase(name: "v8-wipe50-l2r-soft-pgm", state: ReferenceStates.wipe50(.leftToRight, softness: 0.2), target: .program),
+        RefCase(name: "v8-zoom50-pgm", state: ReferenceStates.zoom50(), target: .program),
+        RefCase(name: "v8-stinger-mid-pgm", state: ReferenceStates.stingerMid(), target: .program),
+        RefCase(name: "v8-overlay-slide50-pgm", state: ReferenceStates.overlaySlide50(), target: .program),
+        RefCase(name: "v8-overlay-zoom50-pgm", state: ReferenceStates.overlayZoom50(), target: .program),
+        RefCase(name: "v8-preview-overlays-pvw", state: ReferenceStates.fixed8(), target: .preview, overlaysInPreview: true),
+        RefCase(name: "v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview),
+        RefCase(name: "v8-multiview-3x3", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"), target: .multiview),
+        RefCase(name: "v8-multiview-custom", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout), target: .multiview),
     ]
 
     // 测试类串行跑，共用一个离线渲染器省得每个用例重建纹理；OfflineRenderer 不是 Sendable，所以显式声明不做并发检查
     nonisolated(unsafe) private static let renderer: OfflineRenderer = {
         do { return try OfflineRenderer() } catch { fatalError("建不出离线渲染器：\(error)") }
     }()
-    private static let inputs = TestImages.referenceInputs()
+    private static let inputs = TestImages.phase2ReferenceInputs()
 
     /// 渲染一个 case，按环境变量决定写参考图还是比对。返回 (psnr, ssim)。
     @discardableResult
-    func compare(_ name: String, state: MixerState, target: OfflineRenderTarget, file: StaticString = #filePath, line: UInt = #line) throws -> (Double, Double) {
+    func compare(_ name: String, state: MixerState, target: OfflineRenderTarget, overlaysInPreview: Bool = false,
+                 file: StaticString = #filePath, line: UInt = #line) throws -> (Double, Double) {
+        Self.renderer.overlaysInPreview = overlaysInPreview
+        defer { Self.renderer.overlaysInPreview = false }
         let image = try Self.renderer.renderOffline(state: state, inputs: Self.inputs, size: Self.size, target: target)
         let refURL = RepoPaths.references.appendingPathComponent("\(name).png")
         if RepoPaths.generatingReferences {
@@ -79,7 +108,33 @@ final class V8ReferenceTests: XCTestCase {
 
     /// 所有 case 一次跑完（gen-references.sh 用这个 filter）。
     func testV8_generateOrCompareAllReferences() throws {
-        for c in Self.cases { try compare(c.name, state: c.state, target: c.target) }
+        for c in Self.cases { try compare(c.name, state: c.state, target: c.target, overlaysInPreview: c.overlaysInPreview) }
+    }
+
+    // MARK: - W3-B 加的参考图（每张一个测试，方便单独跑；结构性检查在 OverlayTests / KeyerTests / TransitionTests / MultiviewLayoutTests）
+
+    func testV8_overlayOrderMatchesReference() throws { try compare("v8-overlay-order-pgm", state: ReferenceStates.overlayOrder(), target: .program) }
+    func testV8_pipBorderMatchesReference() throws { try compare("v8-pip-border-pgm", state: ReferenceStates.pipBorder(), target: .program) }
+    func testV8_keyerMatchesReference() throws { try compare("v8-keyer-pgm", state: ReferenceStates.keyed(), target: .program) }
+    func testV8_wipe50AllDirectionsMatchReference() throws {
+        try compare("v8-wipe50-l2r-pgm", state: ReferenceStates.wipe50(.leftToRight), target: .program)
+        try compare("v8-wipe50-r2l-pgm", state: ReferenceStates.wipe50(.rightToLeft), target: .program)
+        try compare("v8-wipe50-t2b-pgm", state: ReferenceStates.wipe50(.topToBottom), target: .program)
+        try compare("v8-wipe50-b2t-pgm", state: ReferenceStates.wipe50(.bottomToTop), target: .program)
+        try compare("v8-wipe50-diag-pgm", state: ReferenceStates.wipe50(.diagonal), target: .program)
+        try compare("v8-wipe50-l2r-soft-pgm", state: ReferenceStates.wipe50(.leftToRight, softness: 0.2), target: .program)
+    }
+    func testV8_zoom50MatchesReference() throws { try compare("v8-zoom50-pgm", state: ReferenceStates.zoom50(), target: .program) }
+    func testV8_stingerMidMatchesReference() throws { try compare("v8-stinger-mid-pgm", state: ReferenceStates.stingerMid(), target: .program) }
+    func testV8_overlayAnimationsMatchReference() throws {
+        try compare("v8-overlay-slide50-pgm", state: ReferenceStates.overlaySlide50(), target: .program)
+        try compare("v8-overlay-zoom50-pgm", state: ReferenceStates.overlayZoom50(), target: .program)
+    }
+    func testV8_previewWithOverlaysMatchesReference() throws { try compare("v8-preview-overlays-pvw", state: ReferenceStates.fixed8(), target: .preview, overlaysInPreview: true) }
+    func testV8_multiviewLayoutsMatchReference() throws {
+        try compare("v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview)
+        try compare("v8-multiview-3x3", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"), target: .multiview)
+        try compare("v8-multiview-custom", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout), target: .multiview)
     }
 
     // MARK: - 不依赖参考图的结构性检查（参考图错了这些也会报）
@@ -179,7 +234,7 @@ final class V8ReferenceTests: XCTestCase {
         s.overlays = Array(repeating: OverlayState(), count: 4)
         let bm = Bitmap(try Self.renderer.renderOffline(state: s, inputs: Self.inputs, size: CGSize(width: 320, height: 180)))
         XCTAssertEqual(bm.pixel(160, 90).r + bm.pixel(160, 90).g + bm.pixel(160, 90).b, 0)
-        s.program = 7   // 没这路
+        s.program = 9   // 没这路（W3-B 起输入表带 5–8 路，用 9）
         let bm2 = Bitmap(try Self.renderer.renderOffline(state: s, inputs: Self.inputs, size: CGSize(width: 320, height: 180)))
         XCTAssertEqual(bm2.pixel(10, 10).r + bm2.pixel(10, 10).g + bm2.pixel(10, 10).b, 0)
     }

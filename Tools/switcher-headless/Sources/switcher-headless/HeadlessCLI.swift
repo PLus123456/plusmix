@@ -3,6 +3,7 @@ import Foundation
 import SwitcherContracts
 import SwitcherControl
 import SwitcherRender
+import VMixCompat
 
 /// 子命令分发。run 子命令构造 `HeadlessSession`（同步部分），装 Ctrl-C，起 Task 跑引擎，然后主线程进 run loop（--preview 时是 NSApp 的）。
 enum HeadlessCLI {
@@ -11,8 +12,10 @@ enum HeadlessCLI {
       switcher-headless [run] --show show.json --script scenario.json --duration 600 --stats stats.jsonl [--record out.mov]
                         [--preview] [--audio-device null|default|<设备名>] [--lead-ms 1000] [--input-lead-ms 8.33] [--stop-timeout 60] [--no-gpu-stats]
                         [--api] [--api-listen 127.0.0.1:8765] [--api-token <token>] [--iso-audio N]
-      switcher-headless make-show --out scenarios/m0-show.json [--width 1920 --height 1080] [--preset m0|g3]
-      switcher-headless make-scenario --out scenarios/m0.json [--minutes 60] [--fps 60] [--inputs 8] [--preset m0|g3]
+                        [--compat] [--compat-listen 127.0.0.1] [--compat-tcp-port 8099] [--compat-http-port 8088] [--tally-port N]
+                        [--ndi-send <名字>] [--ndi-jitter-frames 1]
+      switcher-headless make-show --out scenarios/m0-show.json [--width 1920 --height 1080] [--preset m0|g3|g4|g4-ndi] [--ndi-name <名字>]
+      switcher-headless make-scenario --out scenarios/m0.json [--minutes 60] [--fps 60] [--inputs 8] [--preset m0|g3|g4]
       switcher-headless summarize --stats stats.jsonl [--baseline baselines/m0-m5max.json] [--write-baseline out.json]
                         [--v1-avg-ms 2] [--json] [--meta key=value]…
     --duration 是秒；场景文件更短时以场景为准。--audio-device 默认 default（系统默认输出设备，会出声），gate 用 null。
@@ -20,6 +23,10 @@ enum HeadlessCLI {
     --api：起本地 HTTP + WebSocket API（W2-C；默认 127.0.0.1:8765，--api-listen 改地址 / 端口，--api-token 开鉴权）；每秒一行 Stats 同时推给 API。
     --iso-audio N：另起 N 个录制器（PGM 视频 + 前 N 路带音频输入各自的 ISO 音轨，A4 用），文件名 <record 去扩展名>.iso<编号>.mov。
     --preset g3：G3 检查点的节目 / 场景（scenarios/g3-show.json、g3.json；第 1000 拍 Cut、第 3000 拍 Fade 30、T-bar 25/50/75、之后每 5 s 切一次、每 30 s 开关 Overlay 1）。
+    --preset g4：G4 检查点（scenarios/g4-show.json + g4-stinger.png、g4.json；前 2 分钟同 g3，之后每 5 s 按 Cut / Fade / Wipe / Zoom / Stinger 轮流、每 15 s 翻一路叠加；
+                5–8 号开抠像、多画面自定义布局）。--preset g4-ndi：NDI 回环 L1 的两路节目（2 号 = NDI 输入，名字给 --ndi-name，默认 "Switcher G4 loop"）。
+    --compat：起 W3-D 的第三方 API 兼容层（默认关；TCP 8099 / HTTP 8088，只听 --compat-listen 的地址）；--tally-port N：起 tally 流（WS /tally、GET /tally）。
+    --ndi-send <名字>：把 PGM（+ Master 音频）用 W2-D 的 NDISender 发出去；节目里 ndi 输入的名字不含 "(" 时按本机发送端解析（NDI 回环）。
     Ctrl-C：停时钟 → 渲染器排空 → 录制封口 → 退出；再按一次立即退出。
     """
 
@@ -28,6 +35,7 @@ enum HeadlessCLI {
         "show", "script", "duration", "stats", "record", "audio-device", "lead-ms", "input-lead-ms", "stop-timeout",
         "out", "width", "height", "minutes", "fps", "inputs", "baseline", "write-baseline", "v1-avg-ms", "meta",
         "api-listen", "api-token", "iso-audio", "preset",
+        "compat-listen", "compat-tcp-port", "compat-http-port", "tally-port", "ndi-send", "ndi-jitter-frames", "ndi-name",
     ]
 
     static func dispatch(_ args: [String]) throws {
@@ -58,7 +66,10 @@ enum HeadlessCLI {
                                  audioDevice: p.string("audio-device") ?? "default",
                                  leadMs: try p.double("lead-ms") ?? 1000, gpuStats: !p.has("no-gpu-stats"),
                                  inputLeadMs: try p.double("input-lead-ms"), stopTimeoutSeconds: try p.double("stop-timeout") ?? 60,
-                                 api: try apiOptions(p), isoAudio: try p.int("iso-audio") ?? 0)
+                                 api: try apiOptions(p), isoAudio: try p.int("iso-audio") ?? 0,
+                                 compat: try compatOptions(p), tallyPort: try p.int("tally-port"),
+                                 ndiSend: p.string("ndi-send"), ndiJitterFrames: try p.int("ndi-jitter-frames") ?? 1)
+        guard (0...2).contains(options.ndiJitterFrames) else { throw CLIError("--ndi-jitter-frames 只能是 0–2") }
         let session = try HeadlessSession(options: options)
         SignalHandling.install(session)
         if options.preview {
@@ -95,6 +106,17 @@ enum HeadlessCLI {
         return config
     }
 
+    /// --compat [--compat-listen host] [--compat-tcp-port N] [--compat-http-port N] → 兼容层配置；没给 --compat 就不起（W3-D：默认关）。
+    static func compatOptions(_ p: ParsedArguments) throws -> VMixCompatConfiguration? {
+        guard p.has("compat") else { return nil }
+        var config = VMixCompatConfiguration()
+        config.enabled = true
+        if let host = p.string("compat-listen") { config.host = host }
+        if let port = try p.int("compat-tcp-port") { config.tcpPort = port }
+        if let port = try p.int("compat-http-port") { config.httpPort = port }
+        return config
+    }
+
     // MARK: make-show / make-scenario
 
     static func makeShow(_ p: ParsedArguments) throws {
@@ -104,7 +126,13 @@ enum HeadlessCLI {
         switch p.string("preset") ?? "m0" {
         case "m0": show = M0Factory.show(width: width, height: height)
         case "g3": show = G3Factory.show(width: width, height: height)
-        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3）")
+        case "g4":
+            show = G4Factory.show(width: width, height: height)
+            let png = out.deletingLastPathComponent().appendingPathComponent(G4Factory.stingerFileName)
+            try G4Factory.writeStingerImage(to: png, width: width, height: height)
+            print("写入 \(png.path)（Stinger 用的 alpha PNG，\(width)×\(height)）")
+        case "g4-ndi": show = G4Factory.ndiLoopShow(senderName: p.string("ndi-name") ?? "Switcher G4 loop", width: width, height: height)
+        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3 / g4 / g4-ndi）")
         }
         try show.save().write(to: out, options: .atomic)
         print("写入 \(out.path)：\(show.inputs.count) 路输入，\(show.mixer.format.width)×\(show.mixer.format.height)@\(show.mixer.format.frameRate)")
@@ -116,7 +144,11 @@ enum HeadlessCLI {
         switch p.string("preset") ?? "m0" {
         case "m0": scenario = M0Factory.scenario(minutes: try p.int("minutes") ?? 60, fps: try p.double("fps") ?? 60, inputs: try p.int("inputs") ?? 8)
         case "g3": scenario = G3Factory.scenario(minutes: try p.int("minutes") ?? 10, fps: try p.double("fps") ?? 60, inputs: try p.int("inputs") ?? 8)
-        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3）")
+        case "g4":
+            scenario = G4Factory.scenario(minutes: try p.int("minutes") ?? 10, fps: try p.double("fps") ?? 60, inputs: try p.int("inputs") ?? 8)
+            let windows = G4Factory.compositeWindows(scenario)
+            print("非 Cut 转场的中间拍（frameprobe --blank-ticks）：\(windows.count) 段，共 \(windows.reduce(0) { $0 + Int($1.count) }) 拍，例如 \(windows.prefix(3).map { "\($0.lowerBound)-\($0.upperBound)" }.joined(separator: ","))")
+        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3 / g4）")
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

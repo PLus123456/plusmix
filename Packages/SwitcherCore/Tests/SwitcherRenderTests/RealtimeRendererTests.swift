@@ -55,7 +55,8 @@ final class RealtimeRendererTests: XCTestCase {
         // 预热 2 秒（纹理表填满、标签画好），然后只在 render() 内部计数
         let counting = SharedFlag()
         engine.beforeRender = { tick in
-            if tick.rawValue == 120 { if !underInstruments { MallocProbe.start() }; counting.value = true; print("T1：第 120 拍开始计数 \(Date())") }
+            // 先 print 再开钩子：Date 的字符串化走 ICU，会在渲染线程上分配，开了钩子之后就会被记成"Swift 代码的分配"（W3-B 撞上，release 下 17 次）
+            if tick.rawValue == 120 { print("T1：第 120 拍开始计数 \(Date())"); if !underInstruments { MallocProbe.start() }; counting.value = true }
         }
         engine.afterRender = { tick, _ in
             if counting.value, tick.rawValue == 120 + Int64(seconds * 60) { if !underInstruments { MallocProbe.stop() }; counting.value = false; print("T1：第 \(tick.rawValue) 拍停止计数 \(Date())") }

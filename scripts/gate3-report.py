@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""G3 检查点报告生成（scripts/gate3.sh 第 6 步）。
+"""G3 / G4 检查点报告生成（scripts/gate3.sh / gate4.sh 的最后一步；--checkpoint 选口径文字，判定逻辑同一份）。
 
 一次运行的产物（out-dir：environment.txt、stats.jsonl、summary.json / .md、probe-*.json / .md、frames.json、ffprobe.json、
 packets-v.csv、ffprobe-errors.txt、summary-c.json / report-c.md、headless.log、load.log）
@@ -17,7 +17,7 @@ packets-v.csv、ffprobe-errors.txt、summary-c.json / report-c.md、headless.log
   A3：同一序列的最小二乘斜率 × 8 h ≤ 16 ms（10 分钟外推，信息为主）。
   A4：frameprobe av 多文件（PGM + ISO 音轨）同一事件 click 时刻极差最大值 ≤ 16.7 ms（目标 1 ms）。
   E2：ffprobe 视频包表：10 s 滑窗平均码率与设定值之差 ≤ 10%（目标 5%）；1 s 窗峰值 ≤ 1.5×（目标 1.2×）。
-  E3：关键帧间隔与设定值之差 ≤ ±1 帧（目标精确）。E5（信息）：ffprobe 无错；视频时长与运行拍数差 ≤ 1 帧；音视频轨道差 ≤ 20 ms。
+  E3：关键帧间隔与设定值之差 ≤ ±1 帧（目标精确）。E5：ffprobe 无错；视频时长与运行拍数差 ≤ 1 帧；音视频轨道差 ≤ 20 ms（G4 起判定项：W1-E2 的录制器自己截两轨）。
   C1–C4：scripts/apitest evaluate 的 summary-c.json（C3 / C4 硬性）。
 硬性项（V6、A1、C3、C4）不能 --waive。
 """
@@ -54,6 +54,8 @@ def fmt(v, digits=3):
 
 
 def mark(ok):
+    if ok == "info":
+        return "—（参考）"
     return "—" if ok is None else ("✅" if ok else "❌")
 
 
@@ -87,7 +89,11 @@ def main():
     ap.add_argument("--notes", required=True)
     ap.add_argument("--report", required=True)
     ap.add_argument("--waive", action="append", default=[], help="个案放行：'<判定表里的指标名>=<理由>'，可多次；硬性项不接受")
+    ap.add_argument("--checkpoint", default="G3", help="G3 / G4：标题与说明文字；判定逻辑相同")
+    ap.add_argument("--blank-ticks", default="", help="gate4：frameprobe --blank-ticks 用的拍段（只为写进报告）")
+    ap.add_argument("--extra-note", action="append", default=[], help="附在运行说明后的一行（可多次）")
     a = ap.parse_args()
+    cp = a.checkpoint
     waivers = {}
     for w in a.waive:
         if "=" not in w:
@@ -130,16 +136,25 @@ def main():
     grays = {}
     input_lines = []
     for inp in show.get("inputs", []):
-        s = inp["source"]["synthetic"]["settings"]
+        syn = inp["source"].get("synthetic")
+        if not syn:   # G4 起节目里有图片（Stinger PNG）/ NDI 输入：没有帧率 / 灰度，不参与 V4 的设计内核算
+            kind = next(iter(inp["source"].keys()))
+            input_lines.append(f"{inp['number']}. {inp['name']}（{kind}）")
+            continue
+        s = syn["settings"]
         r = s["frameRate"]["numerator"] / s["frameRate"]["denominator"] * (1 + s.get("clockDriftPpm", 0) / 1e6)
         pid = s.get("patternID")
         if pid is None:
             pid = (inp["number"] - 1) % 16
         rates[pid] = r
         rates[("number", inp["number"])] = r
-        g = (s.get("background") or {}).get("gray", {}).get("level")
+        bg = s.get("background") or {}
+        g = (bg.get("gray") or {}).get("level")
+        noise = bg.get("noise") or {}
+        if g is None and noise:
+            g = noise.get("level")
         grays[inp["number"]] = g
-        input_lines.append(f"{inp['number']}. {inp['name']}（ID {pid}，{r:.4f} fps，灰 {g}）")
+        input_lines.append(f"{inp['number']}. {inp['name']}（ID {pid}，{r:.4f} fps，灰 {g}" + (f" ± 噪声 {noise.get('amplitude')}" if noise else "") + "）")
     gray_a = grays.get(1, 64)
     gray_b = grays.get(2, 192)
 
@@ -173,6 +188,16 @@ def main():
         v4_worst_excess = max(v4_worst_excess, p.get("excessDupRatio", 0), p.get("excessDropRatio", 0))
         v4_rows.append(f"| {number} | {fmt(r, 4)} | {fmt(p.get('fps', {}).get('avg'), 3)} | {dup} | {fmt(exp_dup, 1)} | {drop} | {fmt(exp_drop, 1)} | "
                        f"{'—' if out_dup is None else out_dup + out_drop} | {p.get('excessDupRatio', 0) * 100:.4f}% / {p.get('excessDropRatio', 0) * 100:.4f}% |")
+    # 每路在播段数：同一路每次回到 PGM，它与节目拍点的相位都重新起算，+1 帧相位余量按段各给一次（G4 起；G3 的场景每路只在播几段、余量 1 帧够用没暴露）
+    segments = {}
+    last_id = None
+    for fobj in frames:
+        fid = fobj.get("inputID")
+        if fid is None:
+            continue
+        if fid != last_id:
+            segments[fid] = segments.get(fid, 0) + 1
+        last_id = fid
     probe_rows = []
     probe_design_out_total = 0
     probe_backward = 0
@@ -181,13 +206,14 @@ def main():
         K = s.get("frames", 0)
         r = s.get("inputFps") or rates.get(pid)
         dup, drop = s.get("duplicateFrames", 0), s.get("droppedFrames", 0)
+        seg = max(1, segments.get(pid, 1))
         exp_dup = K * max(0.0, 1 - r / program_fps) if r else None
         exp_drop = K * max(0.0, r / program_fps - 1) if r else None
-        out_dup = max(0, dup - math.ceil(exp_dup) - 1) if exp_dup is not None else 0
-        out_drop = max(0, drop - math.ceil(exp_drop) - 1) if exp_drop is not None else 0
+        out_dup = max(0, dup - math.ceil(exp_dup) - seg) if exp_dup is not None else 0
+        out_drop = max(0, drop - math.ceil(exp_drop) - seg) if exp_drop is not None else 0
         probe_design_out_total += out_dup + out_drop
         probe_backward += s.get("backwardJumps", 0)
-        probe_rows.append(f"| {pid} | {K} | {fmt(r, 4)} | {dup}（{s.get('duplicateRatio', 0) * 100:.2f}%） | {fmt(exp_dup, 1)} | {drop} | {fmt(exp_drop, 1)} | "
+        probe_rows.append(f"| {pid} | {K}（{seg} 段） | {fmt(r, 4)} | {dup}（{s.get('duplicateRatio', 0) * 100:.2f}%） | {fmt(exp_dup, 1)} | {drop} | {fmt(exp_drop, 1)} | "
                           f"{out_dup + out_drop} | {s.get('backwardJumps', 0)} | {mark(s.get('passV4'))} |")
 
     # ---- V5 ----
@@ -323,12 +349,10 @@ def main():
         key_idx = [i for i, p in enumerate(packets) if "K" in p[2]]
         e3_intervals = [b - a_ for a_, b in zip(key_idx, key_idx[1:])]
         e3_max_dev = max(abs(x - target_gop) for x in e3_intervals) if e3_intervals else None
-    # 码率遵从只在内容"压得出"设定码率时才有意义：合成源的灰底 + 帧号块几乎不含信息，VT 编码器本来就不会填充到目标码率
-    # （G3 第一次跑：6 Mbps 设定、实际 0.1 Mbps）。整段平均码率不到设定的 25% 就判"本场景不适用"，E2 以 W1-E / W2-D 的噪声内容用例为准，
-    # 合成源加噪声底纹的单子给 W1-A。不是放宽阈值：阈值不变，只是这次测量没有可判的对象。
+    # E2 直接判（G4 起）：G3 场景的合成源底纹已换成灰底 + 噪声（提案 006 / W1-A2，prompt 60 末节第 2 条），编码器有东西可压。
+    # G3 时灰底压不出设定码率（6 Mbps 设定、实际 0.1 Mbps），当时判"本场景不适用"；现在平均码率远低于设定就是真的不过。
     avg_bps = (prefix[-1] * 8 / t_end) if packets and t_end > 0 else None
-    e2_applicable = avg_bps is not None and avg_bps >= 0.25 * target_bps
-    e2_ok = (e2_win_err is not None and e2_win_err <= 0.10 and e2_peak is not None and e2_peak <= 1.5) if e2_applicable else None
+    e2_ok = e2_win_err is not None and e2_win_err <= 0.10 and e2_peak is not None and e2_peak <= 1.5
     e3_ok = e3_max_dev is not None and e3_max_dev <= 1
     vstream = next((s for s in ffp.get("streams", []) if s.get("codec_type") == "video"), {})
     astream = next((s for s in ffp.get("streams", []) if s.get("codec_type") == "audio"), {})
@@ -375,7 +399,8 @@ def main():
 
     # ---- 判定表 ----
     checks = [
-        ("V1 渲染耗时（本机参考线）", f"avg {fmt(v1_avg)} ms / p99 {fmt(v1_p99)} ms", "avg ≤ 2 ms（M5 Max，G2 起的本机线）", v1_avg is not None and v1_avg <= 2.0, delta(v1_avg, b_v1_avg, "ms")),
+        ("V1 渲染耗时（本机参考线）", f"avg {fmt(v1_avg)} ms / p99 {fmt(v1_p99)} ms" + ("（G2 按 M0 灰底负载定的 2 ms 线；G4 负载多了 4 路抠像叠加 + 自定义多画面 + 噪声底纹，只作参考，新基线 g4-m5max.json 供 W4-A 判退步）" if cp == "G4" else ""),
+         "avg ≤ 2 ms（M5 Max，G2 起的本机线）", ("info" if cp == "G4" else (v1_avg is not None and v1_avg <= 2.0)), delta(v1_avg, b_v1_avg, "ms")),
         ("V1 渲染耗时（必须档）", f"avg {fmt(v1_avg)} / p99 {fmt(v1_p99)} ms", "avg ≤ 6，p99 ≤ 12（目标 ≤ 4 / ≤ 8）", v1_avg is not None and v1_avg <= 6 and v1_p99 <= 12, delta(v1_p99, b_v1_p99, "ms（p99）")),
         ("V2 渲染滞后丢帧", f"{int(v2) if v2 is not None else '—'} 帧 / {int(T)} 拍（{(v2 or 0) / T * 100 if T else 0:.4f}%）" + (f"；增量时刻：{miss_note}" if miss_note else ""),
          "10 分钟内 0" if a.minutes <= 10 else "≤ 0.02%（§4 必须档）；目标 0",
@@ -393,10 +418,11 @@ def main():
         ("A3 A/V 漂移", f"整秒闪光序列斜率 {fmt(a3_slope, 5)} ms/s × 8 h = {fmt(a3_8h, 2)} ms（{a.minutes:g} 分钟外推）" if a3_slope is not None else "—", "× 8 h ≤ 16 ms（目标 ≤ 5；8 小时实跑归 W4-A）", a3_ok, "—"),
         ("A4 多文件对齐", a4_value, "≤ 1 帧（目标 ≤ 1 ms）", a4_ok, "—"),
         ("E1 编码滞后跳帧", f"{int(e1) if e1 is not None else '—'}（stats.jsonl encoder[] 全部条目的 skipped 之和：PGM 录制器 + ISO 录制器）", "标准负载下 0", None if e1 is None else e1 == 0, "—"),
-        ("E2 码率遵从", (f"设定 {target_bps / 1e6:.1f} Mbps：整段平均 {fmt(avg_bps / 1e6 if avg_bps else None, 3)} Mbps，10 s 滑窗最大误差 {fmt(e2_win_err * 100 if e2_win_err is not None else None, 2)}%，1 s 峰值 {fmt(e2_peak, 3)}×（{len(packets)} 个视频包）"
-                       + ("" if e2_applicable else "。**本场景不适用**：合成源灰底压不出设定码率（平均 < 25% 设定），E2 以 W1-E `VideoEncoderTests` / W2-D `MediaMTXTests.testE2E3`（噪声内容）为准；合成源加噪声底纹的单子 reports/issues/G3-w1-testkit-synthetic-noise-for-E2.md")),
+        ("E2 码率遵从", f"设定 {target_bps / 1e6:.1f} Mbps：整段平均 {fmt(avg_bps / 1e6 if avg_bps else None, 3)} Mbps，10 s 滑窗最大误差 {fmt(e2_win_err * 100 if e2_win_err is not None else None, 2)}%，1 s 峰值 {fmt(e2_peak, 3)}×（{len(packets)} 个视频包）",
          "误差 ≤ 10%，峰值 ≤ 1.5×（目标 5% / 1.2×）", e2_ok, "—"),
         ("E3 关键帧间隔", f"设定 {target_gop}：{len(e3_intervals)} 个间隔，最大偏差 {e3_max_dev if e3_max_dev is not None else '—'} 帧" + (f"（min {min(e3_intervals)} / max {max(e3_intervals)}）" if e3_intervals else ""), "≤ ±1 帧（目标精确）", e3_ok, "—"),
+        ("E5 文件完整性", f"ffprobe 错误 {'无' if not ffprobe_errors else ffprobe_errors[:120]}；视频时长 {fmt(v_dur)} s（与 {expected_run} 拍差 {fmt(e5_dur_err_frames, 2)} 帧）；音轨 {fmt(a_dur)} s，音视频差 {fmt(e5_av_diff_ms, 1)} ms",
+         "无错；时长差 ≤ 1 帧；音视频差 ≤ 20 ms（W1-E2 起录制器自己截两轨，G4 起判）", e5_ok, "—"),
         ("C1 命令延迟", f"{c1.get('count', 0)} 次：画面里找到 {c1.get('measured', 0)}，通过 {c1.get('pass', 0)}；min {fmt(c1.get('min_ms'), 2)} / mean {fmt(c1.get('mean_ms'), 2)} / max {fmt(c1.get('max_ms'), 2)} ms，RTT p50 {fmt(c1.get('rtt_p50_ms'))} ms" if c1 else "没跑 C 系列",
          "≤ 1 拍 + 该次 RTT", c1_ok if c1 else None, "—"),
         ("C2 状态推送延迟", f"{c2.get('count', 0)} 条快照：相对拍点 p99 {fmt(c2.get('fromTick_p99_ms'), 2)} ms（p50 {fmt(c2.get('fromTick_p50_ms'), 2)}）；发布→客户端 p99 {fmt(c2.get('fromPublish_p99_ms'))} ms；纯传输 p99 {fmt(c2.get('transport_p99_ms'))} ms" if c2 else "没跑 C 系列",
@@ -410,8 +436,8 @@ def main():
     if unknown:
         sys.exit(f"--waive 里的指标名不在判定表里：{unknown}；可用：{[c[0] for c in checks]}")
     waived = [c[0] for c in checks if c[3] is False and c[0] in waivers]
-    not_applicable = {"E2 码率遵从"} if not e2_applicable else set()
-    all_pass = all((c[3] is True) or (c[0] in waivers) or (c[0] in not_applicable) for c in checks)
+    # "info" 行只作参考不进总判定（G4 的 V1 本机线）；None（没跑 / 没数据）仍算不过
+    all_pass = all((c[3] is True) or (c[3] == "info") or (c[0] in waivers) for c in checks)
 
     # ---- 信息项 ----
     cpu, gpu = key.get("cpu_avg_pct"), key.get("gpu_avg_pct")
@@ -423,18 +449,46 @@ def main():
     tail = "\n".join(headless_log.strip().splitlines()[-24:])
 
     lines = []
-    lines.append(f"## 运行 {a.label}：{a.minutes:g} 分钟 G3 场景")
+    lines.append(f"## 运行 {a.label}：{a.minutes:g} 分钟 {cp} 场景")
     lines.append("")
     lines.append(f"- 日期：{env.get('date', '?')}；提交：`{env.get('commit', '?')}`（{env.get('branch', '?')}，未提交改动 {env.get('dirty', '?')} 个文件）")
     lines.append(f"- 机器：{env.get('cpu', '?')}，{env.get('cores', '?')} 核，{env.get('memory_gb', '?')} GB；macOS {env.get('macos', '?')}；{env.get('xcode', '?')}")
     lines.append(f"- 电源：{env.get('power', '?')}；温度 / 降频：{env.get('thermal', '无记录')}")
     lines.append(f"- 负载：跑前 {env.get('load_before', '?')} → 跑后 {env.get('load_after', '?')}；跑前占 CPU 的进程：{env.get('top_processes_before', '?')}")
     lines.append(f"- 运行期间：GPU 占用 > 50% 的秒数 {gpu_busy_seconds}（最高 {gpu_max:.0f}%）；负载采样 {'有（' + str(len(load_samples)) + ' 条，5 s 一次，load.log）' if load_samples else '无'}")
-    lines.append(f"- 场景：`{a.script}`（{scenario.get('durationTicks', '?')} 拍，{len(scenario.get('events', []))} 个事件：第 1000 拍 Cut、第 3000 拍 Fade 30、3600/3660/3720 拍 T-bar 25/50/75%、120 s 起每 5 s Cut、122.5 s 起每 30 s 开关 Overlay 1）；节目：`{a.show}`（{show.get('mixer', {}).get('format', {}).get('width', '?')}×{show.get('mixer', {}).get('format', {}).get('height', '?')}@{program_fps:g}）")
+    event_kinds = {}
+    for e in scenario.get("events", []):
+        k = next(iter(e.get("command", {"?": None}).keys()))
+        if k == "setTransition":
+            k = "setTransition:" + str(e["command"]["setTransition"].get("type"))
+        event_kinds[k] = event_kinds.get(k, 0) + 1
+    kinds_text = "、".join(f"{k} {v}" for k, v in sorted(event_kinds.items()))
+    if cp == "G4":
+        scenario_text = ("前 2 分钟同 G3（第 1000 拍 Cut、第 3000 拍 Fade 30、3600/3660/3720 拍 T-bar 25/50/75%），120 s 起每 5 s 按 Cut / Fade / Wipe / Zoom / Stinger 轮流"
+                         "（非 Cut 24 拍），122.5 s 起每 15 s 翻一路叠加（1–4 循环）")
+    else:
+        scenario_text = "第 1000 拍 Cut、第 3000 拍 Fade 30、3600/3660/3720 拍 T-bar 25/50/75%、120 s 起每 5 s Cut、122.5 s 起每 30 s 开关 Overlay 1"
+    lines.append(f"- 场景：`{a.script}`（{scenario.get('durationTicks', '?')} 拍，{len(scenario.get('events', []))} 个事件：{kinds_text}；{scenario_text}）；节目：`{a.show}`（{show.get('mixer', {}).get('format', {}).get('width', '?')}×{show.get('mixer', {}).get('format', {}).get('height', '?')}@{program_fps:g}）")
     lines.append("  - 输入：" + "；".join(input_lines))
-    lines.append(f"- 命令：`switcher-headless run --show {a.show} --script {a.script} --duration {int(a.minutes * 60)} --stats {out}/stats.jsonl --record {out}/out.mov --iso-audio 4 --audio-device null --api`；客户端 `scripts/apitest/apitest.py run --c1-start 150 …`")
+    if cp == "G4":
+        keyed = [i["number"] for i in show.get("inputs", []) if (i.get("settings") or {}).get("keyer", {}).get("enabled")]
+        ovl = [(o.get("input"), (o.get("animation") or {}).get("kind"), (o.get("animation") or {}).get("durationTicks")) for o in show.get("mixer", {}).get("overlays", [])]
+        mv = next((o for o in show.get("outputs", []) if o.get("kind") == "multiview"), None)
+        lines.append(f"  - 新负载：抠像开在输入 {keyed}；Overlay 1–4 = {ovl}；多画面输出 {'自定义布局（cells ' + str(len(((mv or {}).get('settings') or {}).get('extra', {}).get('layout', {}).get('cells', []))) + '，safeArea / meters）' if mv else '无'}；"
+                     f"Wipe {show.get('mixer', {}).get('transition', {}).get('wipe')}，Stinger {show.get('mixer', {}).get('transition', {}).get('stinger')}（{next((i['name'] for i in show.get('inputs', []) if 'image' in i['source']), '无图片输入')}）")
+        blank_count = 0
+        if a.blank_ticks:
+            for part in a.blank_ticks.split(","):
+                lo, hi = part.split("-")
+                blank_count += int(hi) - int(lo) + 1
+        lines.append(f"  - frameprobe 的 `--blank-ticks`：非 Cut 转场的中间拍 [t + 1, t + d]，共 {a.blank_ticks.count('-')} 段 {blank_count} 拍当作解不出（转场合成帧没有单一输入身份；"
+                     f"V4 的引擎侧 stats.jsonl 计数全程照算，V5 总帧数不受影响；第 t 拍 = 纯旧画面 + 整秒闪光帧保留）")
+    for n in a.extra_note:
+        lines.append(f"- {n}")
+    api_extra = " --c1-phase 0.7" if cp == "G4" else ""
+    lines.append(f"- 命令：`switcher-headless run --show {a.show} --script {a.script} --duration {int(a.minutes * 60)} --stats {out}/stats.jsonl --record {out}/out.mov --iso-audio 4 --audio-device null --api`；客户端 `scripts/apitest/apitest.py run --c1-start 150{api_extra} …`")
     lines.append("")
-    lines.append("### G3 判定（落地方案 §4 G3 + G3 prompt 第 2 条 b；阈值按测试标准 §4）")
+    lines.append(f"### {cp} 判定（落地方案 §4 {cp} + {cp} prompt 第 2 条；阈值按测试标准 §4）")
     lines.append("")
     lines.append("| 指标 | 数值 | 阈值 | 通过 | 与上一版本的差 |")
     lines.append("|---|---|---|---|---|")
@@ -442,17 +496,15 @@ def main():
         m = mark(ok)
         if ok is False and name in waivers:
             m = f"⚠️ 放行（{waivers[name]}）"
-        elif name in not_applicable:
-            m = "⏭ 本场景不适用（以专项用例为准）"
         lines.append(f"| {name} | {value} | {thr} | {m} | {d} |")
-    verdict = "✅ 通过" + (f"（含放行 {len(waived)} 项）" if waived else "") + (f"（{len(not_applicable)} 项本场景不适用）" if not_applicable else "") if all_pass else "❌ 未通过"
-    lines.append(f"| **总判定（自动项）** | E7–E9 见 reports/G3-net.md（scripts/gate3-net.sh，需要 sudo 起 netem 代理） | | **{verdict}** | 基线：{a.baseline or '无（本次即基线）'} |")
+    verdict = "✅ 通过" + (f"（含放行 {len(waived)} 项）" if waived else "") if all_pass else "❌ 未通过"
+    net_note = "E7–E9 见 reports/G3-net.md（scripts/gate3-net.sh，需要 sudo 起 netem 代理）" if cp == "G3" else "E7–E9 沿用 G3（reports/G3-net.md；W3 五路没动推流），NDI 回环 L1 见 reports/G4-ndi.md，编译矩阵见 reports/G4-matrix.md"
+    lines.append(f"| **总判定（自动项）** | {net_note} | | **{verdict}** | 基线：{a.baseline or '无（本次即基线）'} |")
     lines.append("")
     lines.append("### 其它指标（信息；阈值按测试标准 §4）")
     lines.append("")
     lines.append("| 指标 | 数值 | 阈值 | 通过 | 与上一版本的差 |")
     lines.append("|---|---|---|---|---|")
-    lines.append(f"| E5 文件完整性 | ffprobe 错误 {'无' if not ffprobe_errors else ffprobe_errors[:120]}；视频时长 {fmt(v_dur)} s（与 {expected_run} 拍差 {fmt(e5_dur_err_frames, 2)} 帧）；音轨 {fmt(a_dur)} s，音视频差 {fmt(e5_av_diff_ms, 1)} ms | 无错；≤ 1 帧；≤ 20 ms | {mark(e5_ok)} | — |")
     lines.append(f"| S2 内存增长 | {fmt(rss_slope, 2)} MB/h（RSS {fmt(rss_min, 0)} → {fmt(rss_max, 0)} MB；{'已丢前 30 min' if a.minutes >= 60 else '不足 1 h，整段拟合仅供参考'}） | ≤ 10 MB/h | {mark(None if rss_slope is None else rss_slope <= 10)} | {delta(rss_max, b_rss, 'MB（RSS max）', 1)} |")
     lines.append(f"| S3 占用 | CPU avg {fmt(cpu, 1)}%（100 = 一核）/ GPU avg {fmt(gpu, 1)}%（IOKit Device Utilization） | CPU ≤ 60%，GPU ≤ 50% | {mark(None if cpu is None else cpu <= 60 and (gpu or 0) <= 50)} | CPU {delta(cpu, b_cpu, '%', 1)}；GPU {delta(gpu, b_gpu, '%', 1)} |")
     lines.append(f"| 切换汇总 | {len(sw_list)} 次（{', '.join(f'{k} {v}' for k, v in sorted(kinds.items())) or '无'}），所有 Cut 干净：{mark(switches.get('allCutsClean'))} | — | — | — |")
@@ -466,7 +518,7 @@ def main():
     lines.append("")
     lines.append(f"设计内期望 = T × |1 − r/P|，T = {int(T)} 拍；设计外 = max(0, 实测 − ceil(期望) − 1)（1 帧相位余量）。")
     lines.append("")
-    lines.append("### V4 明细二：frameprobe 读录制文件（只有在播的那路）")
+    lines.append("### V4 明细二：frameprobe 读录制文件（只有在播的那路；设计外 = max(0, 实测 − ceil(期望) − 在播段数)，每个连续在播段 1 帧相位余量）")
     lines.append("")
     lines.append("| ID | 在播帧数 K | 输入帧率 | 重复帧（比例） | 设计内 dup 期望 | 丢弃帧 | 设计内 drop 期望 | 设计外（精确核算） | 帧号倒退 | frameprobe V4（≤ 0.05%） |")
     lines.append("|---|---|---|---|---|---|---|---|---|---|")
@@ -505,16 +557,18 @@ def main():
     with open(a.run_report, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
-    notes = read_text(a.notes, "# G3 检查点报告\n\n（reports/G3-notes.md 还没写）\n")
-    runs = sorted(glob.glob(os.path.join(os.path.dirname(a.run_report) or ".", "G3-run-*.md")),
-                  key=lambda p: (0 if p.endswith("G3-run-10min.md") else 1, p))
-    net = read_text(os.path.join(os.path.dirname(a.run_report) or ".", "G3-net.md")).strip()
-    parts = [notes.rstrip() + "\n", "\n---\n\n# 自动结果（scripts/gate3.sh 生成，每次运行一节）\n",
+    rdir = os.path.dirname(a.run_report) or "."
+    notes = read_text(a.notes, f"# {cp} 检查点报告\n\n（reports/{cp}-notes.md 还没写）\n")
+    runs = sorted(glob.glob(os.path.join(rdir, f"{cp}-run-*.md")), key=lambda p: (0 if p.endswith(f"{cp}-run-10min.md") else 1, p))
+    # G3：网络损伤那节；G4：NDI 回环 L1 + 编译矩阵两节（各自的脚本生成），E7–E9 沿用 G3
+    extras = [read_text(os.path.join(rdir, f)).strip() for f in (["G3-net.md"] if cp == "G3" else ["G4-ndi.md", "G4-matrix.md"])]
+    parts = [notes.rstrip() + "\n", f"\n---\n\n# 自动结果（scripts/gate{cp[1:]}.sh 生成，每次运行一节）\n",
              f"\n生成时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
     for r in runs:
         parts.append("\n" + read_text(r).rstrip() + "\n")
-    if net:
-        parts.append("\n" + net + "\n")
+    for x in extras:
+        if x:
+            parts.append("\n" + x + "\n")
     with open(a.report, "w", encoding="utf-8") as f:
         f.write("".join(parts))
     print(f"{'通过' if all_pass else '未通过'}：{a.run_report} → {a.report}")

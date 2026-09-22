@@ -6,6 +6,8 @@ import Foundation
 import SwitcherContracts
 import SwitcherEngine
 import SwitcherInputs
+import SwitcherDeckLink
+import SwitcherNDI
 import SwitcherAudio
 import SwitcherTestKit
 
@@ -20,9 +22,9 @@ struct MadeInput {
 /// 把一路输入配置变成运行对象。
 protocol InputFactory {
     /// - Parameters:
-    ///   - slot: 组装方建好的帧槽，实现只往里 push。
+    ///   - slot: 组装方建好的帧槽（W3-C 起是 InputFrameTee：主槽给引擎，分支给 ISO 录制），实现只往里 push。
     ///   - timing: 节目时钟（格式 + 拍点）。引擎 start 前 t0 = 引擎的 t0；引擎已起时 = "现在之后第 3 拍"（见 SwitcherSession.programTiming）。
-    func makeInput(config: InputConfig, slot: LockFreeFrameSlot, timing: ProgramTiming) throws -> MadeInput
+    func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput
 }
 
 enum InputFactoryError: Error, CustomStringConvertible {
@@ -30,7 +32,7 @@ enum InputFactoryError: Error, CustomStringConvertible {
     case unsupported(InputKind)
     var description: String {
         switch self {
-        case .unsupported(let kind): "\(kind) 输入还没有实现（W3-A）"
+        case .unsupported(let kind): L("input.unsupported", L("addInput.kind.\(kind.rawValue)"))
         }
     }
 }
@@ -42,7 +44,7 @@ struct DefaultInputFactory: InputFactory {
         HostDuration(seconds: timing.format.frameDuration.doubleValue / 2)
     }
 
-    func makeInput(config: InputConfig, slot: LockFreeFrameSlot, timing: ProgramTiming) throws -> MadeInput {
+    func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput {
         switch config.source {
         case .synthetic(let settings):
             let videoTimeline = SyntheticTimeline(t0: timing.clock.t0 - Self.syntheticLead(timing), frameRate: settings.frameRate)
@@ -51,7 +53,7 @@ struct DefaultInputFactory: InputFactory {
             guard settings.audio else { return MadeInput(input: video, audioRing: nil, audioBlockFrames: AudioFormat.defaultBlockFrames) }
             // 音频用不带提前量的时间线：第 k 个 click 在 t0 + k s，与第 60k 拍的闪光同刻（A2 = 0 才对）
             let ring = CAudioRing(channelCount: 2)
-            let audio = SyntheticAudioInput(number: config.number, name: "\(config.name) 音频", frameRate: timing.format.frameRate,
+            let audio = SyntheticAudioInput(number: config.number, name: L("input.audioName", config.name), frameRate: timing.format.frameRate,
                                             driftPpm: settings.audioDriftPpm, audioRing: ring,
                                             timeline: SyntheticTimeline(t0: timing.clock.t0, frameRate: timing.format.frameRate))
             return MadeInput(input: SyntheticPairInput(video: video, audio: audio), audioRing: ring, audioBlockFrames: audio.blockFrames)
@@ -72,7 +74,17 @@ struct DefaultInputFactory: InputFactory {
         case .image:
             let input = try ImageInput(config: config, timing: timing, videoSlot: slot)
             return MadeInput(input: input, audioRing: nil, audioBlockFrames: AudioFormat.defaultBlockFrames)
-        case .decklink, .ndi, .audio:
+        case .decklink:
+            // W3-A（G4 接线）：没驱动 / 没卡 / SDK 没编进来都不抛，state 带文案（noSignal 等设备、error = SDK 缺）；内嵌音频 2 声道进环
+            let ring = CAudioRing(channelCount: 2)
+            let input = try DeckLinkInput(config: config, timing: timing, videoSlot: slot, audioRing: ring)
+            return MadeInput(input: input, audioRing: ring, audioBlockFrames: 1024)
+        case .ndi:
+            // W3-A（G4 接线）：源不在就等它出现（noSignal + 文案）；抖动缓冲用默认 1 帧（提案 008 批了以后从节目文件读）
+            let ring = CAudioRing(channelCount: 2)
+            let input = try NDIInput(config: config, timing: timing, videoSlot: slot, audioRing: ring)
+            return MadeInput(input: input, audioRing: ring, audioBlockFrames: 1024)
+        case .audio:
             throw InputFactoryError.unsupported(config.kind)
         }
     }

@@ -1,0 +1,2382 @@
+{
+  "durationTicks" : 36000,
+  "events" : [
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 1000
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 30
+        }
+      },
+      "tick" : 3000
+    },
+    {
+      "command" : {
+        "tbar" : {
+          "progress" : 0.25
+        }
+      },
+      "tick" : 3600
+    },
+    {
+      "command" : {
+        "tbar" : {
+          "progress" : 0.5
+        }
+      },
+      "tick" : 3660
+    },
+    {
+      "command" : {
+        "tbar" : {
+          "progress" : 0.75
+        }
+      },
+      "tick" : 3720
+    },
+    {
+      "command" : {
+        "tbar" : {
+          "progress" : 1
+        }
+      },
+      "tick" : 3780
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 7200
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : true
+        }
+      },
+      "tick" : 7350
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 7500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 7525
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 7799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 7800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 7825
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 8099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 8100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 8125
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : true
+        }
+      },
+      "tick" : 8250
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 8399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 8400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 8425
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 8700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 8701
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 9000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 9025
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : true
+        }
+      },
+      "tick" : 9150
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 9299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 9300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 9325
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 9599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 9600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 9625
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 9899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 9900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 9925
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : true
+        }
+      },
+      "tick" : 10050
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 10200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 10201
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 10500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 10525
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 10799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 10800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 10825
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : false
+        }
+      },
+      "tick" : 10950
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 11099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 11100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 11125
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 11399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 11400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 11425
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 11700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 11701
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : false
+        }
+      },
+      "tick" : 11850
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 12000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 12025
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 12299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 12300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 12325
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 12599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 12600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 12625
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : false
+        }
+      },
+      "tick" : 12750
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 12899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 12900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 12925
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 13200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 13201
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 13500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 13525
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : false
+        }
+      },
+      "tick" : 13650
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 13799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 13800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 13825
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 14099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 14100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 14125
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 14399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 14400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 14425
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : true
+        }
+      },
+      "tick" : 14550
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 14700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 14701
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 15000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 15025
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 15299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 15300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 15325
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : true
+        }
+      },
+      "tick" : 15450
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 15599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 15600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 15625
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 15899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 15900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 15925
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 16200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 16201
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : true
+        }
+      },
+      "tick" : 16350
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 16500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 16525
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 16799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 16800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 16825
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 17099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 17100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 17125
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : true
+        }
+      },
+      "tick" : 17250
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 17399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 17400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 17425
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 17700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 17701
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 18000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 18025
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : false
+        }
+      },
+      "tick" : 18150
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 18299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 18300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 18325
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 18599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 18600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 18625
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 18899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 18900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 18925
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : false
+        }
+      },
+      "tick" : 19050
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 19200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 19201
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 19500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 19525
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 19799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 19800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 19825
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : false
+        }
+      },
+      "tick" : 19950
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 20099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 20100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 20125
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 20399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 20400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 20425
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 20700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 20701
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : false
+        }
+      },
+      "tick" : 20850
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 21000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 21025
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 21299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 21300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 21325
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 21599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 21600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 21625
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : true
+        }
+      },
+      "tick" : 21750
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 21899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 21900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 21925
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 22200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 22201
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 22500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 22525
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : true
+        }
+      },
+      "tick" : 22650
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 22799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 22800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 22825
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 23099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 23100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 23125
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 23399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 23400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 23425
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : true
+        }
+      },
+      "tick" : 23550
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 23700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 23701
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 24000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 24025
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 24299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 24300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 24325
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : true
+        }
+      },
+      "tick" : 24450
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 24599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 24600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 24625
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 24899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 24900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 24925
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 25200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 25201
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : false
+        }
+      },
+      "tick" : 25350
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 25500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 25525
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 25799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 25800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 25825
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 26099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 26100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 26125
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : false
+        }
+      },
+      "tick" : 26250
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 26399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 26400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 26425
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 26700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 26701
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 27000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 27025
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : false
+        }
+      },
+      "tick" : 27150
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 27299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 27300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 27325
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 27599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 27600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 27625
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 27899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 27900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 27925
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : false
+        }
+      },
+      "tick" : 28050
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 28200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 28201
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 28500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 28525
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 28799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 28800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 28825
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : true
+        }
+      },
+      "tick" : 28950
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 29099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 29100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 29125
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 29399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 29400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 29425
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 29700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 29701
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : true
+        }
+      },
+      "tick" : 29850
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 30000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 30025
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 30299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 30300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 30325
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 30599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 30600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 30625
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : true
+        }
+      },
+      "tick" : 30750
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 30899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 30900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 30925
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 31200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 31201
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 31500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 31525
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : true
+        }
+      },
+      "tick" : 31650
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 31799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 31800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 31825
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 32099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 32100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 32125
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 32399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 32400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 32425
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 1,
+          "on" : false
+        }
+      },
+      "tick" : 32550
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 32700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 32701
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 33000
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 33025
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 33299
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 33300
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 33325
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 2,
+          "on" : false
+        }
+      },
+      "tick" : 33450
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 33599
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 33600
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 2
+        }
+      },
+      "tick" : 33625
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 33899
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 33900
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 3
+        }
+      },
+      "tick" : 33925
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 34200
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 4
+        }
+      },
+      "tick" : 34201
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 3,
+          "on" : false
+        }
+      },
+      "tick" : 34350
+    },
+    {
+      "command" : {
+        "fade" : {
+          "durationTicks" : 24
+        }
+      },
+      "tick" : 34500
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 5
+        }
+      },
+      "tick" : 34525
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "wipe"
+        }
+      },
+      "tick" : 34799
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 34800
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 6
+        }
+      },
+      "tick" : 34825
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "zoom"
+        }
+      },
+      "tick" : 35099
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 35100
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 7
+        }
+      },
+      "tick" : 35125
+    },
+    {
+      "command" : {
+        "overlay" : {
+          "channel" : 4,
+          "on" : false
+        }
+      },
+      "tick" : 35250
+    },
+    {
+      "command" : {
+        "setTransition" : {
+          "durationTicks" : 24,
+          "type" : "stinger"
+        }
+      },
+      "tick" : 35399
+    },
+    {
+      "command" : {
+        "autoTransition" : {
+
+        }
+      },
+      "tick" : 35400
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 8
+        }
+      },
+      "tick" : 35425
+    },
+    {
+      "command" : {
+        "cut" : {
+
+        }
+      },
+      "tick" : 35700
+    },
+    {
+      "command" : {
+        "setPreview" : {
+          "input" : 1
+        }
+      },
+      "tick" : 35701
+    }
+  ]
+}

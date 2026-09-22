@@ -36,6 +36,10 @@ public enum FrameProbe {
         public var discontinuities = false
         /// 不连续检测的 click 排除窗口：click 起点前后各 marginMs（click 本身按 1 ms 计）。
         public var discontinuityMarginMs = 1.0
+        /// 这些拍（tick = startTick + 帧序号）的帧当作解不出（帧号 / ID / 时间戳置 nil、闪光置 false，灰度保留）：转场中间帧是两路的合成，
+        /// 帧号行与 ID 块在不同拍翻转、颜色是混合值，按输入身份统计的 V4 / V6 / C3 对它们没有定义（G4 checkpoint，`frameprobe --blank-ticks`）。
+        /// 总帧数（V5）不受影响；引擎侧的 stats.jsonl 计数全程照算。
+        public var blankTicks: [ClosedRange<Int64>] = []
         public init() {}
     }
 
@@ -61,9 +65,10 @@ public enum FrameProbe {
         FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         if isDir.boolValue {
             let r = try MediaReader.readRawNV12Directory(url: url, width: options.rawWidth, height: options.rawHeight, fps: options.fps ?? options.rawFps)
-            return Loaded(source: url.path, info: r.info, frames: r.frames, audio: nil, clicks: [], samples: [], fps: options.fps ?? options.rawFps)
+            return Loaded(source: url.path, info: r.info, frames: blank(r.frames, options: options, fps: options.fps ?? options.rawFps), audio: nil, clicks: [], samples: [], fps: options.fps ?? options.rawFps)
         }
         let v = try await MediaReader.readVideo(url: url)
+        let frames = blank(v.frames, options: options, fps: options.fps ?? (v.info.nominalFps > 0 ? v.info.nominalFps : 60))
         var audio: ProbeAudioInfo?
         var clicks: [ClickEvent] = []
         var samples: [Float] = []
@@ -78,7 +83,18 @@ public enum FrameProbe {
             samples = a.samples
         }
         let fps = options.fps ?? (v.info.nominalFps > 0 ? v.info.nominalFps : 60)
-        return Loaded(source: url.path, info: v.info, frames: v.frames, audio: audio, clicks: clicks, samples: samples, fps: fps)
+        return Loaded(source: url.path, info: v.info, frames: frames, audio: audio, clicks: clicks, samples: samples, fps: fps)
+    }
+
+    /// `options.blankTicks` 里的帧置成解不出（见 Options.blankTicks）。拍号按 pts 算（tick = startTick + round(pts × fps)），
+    /// 不按文件序号：文件里漏了帧（missed_render）之后序号与拍就错位了（G4 第一次跑 2 次跳拍，34030 拍之后全部错 2 帧，标记就标偏了）。
+    static func blank(_ frames: [ProbeFrame], options: Options, fps: Double) -> [ProbeFrame] {
+        guard !options.blankTicks.isEmpty else { return frames }
+        return frames.map { f in
+            let tick = options.startTick + (fps > 0 ? Int64((f.ptsSeconds * fps).rounded()) : Int64(f.index))
+            guard options.blankTicks.contains(where: { $0.contains(tick) }) else { return f }
+            return ProbeFrame(index: f.index, ptsSeconds: f.ptsSeconds, frameNumber: nil, inputID: nil, genTimeMs: nil, flash: false, gray: f.gray)
+        }
     }
 
     /// 由解码结果与容器索引算音轨时间轴的修正（`AudioTimeline` 的说明）。

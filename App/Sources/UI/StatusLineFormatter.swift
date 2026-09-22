@@ -24,23 +24,23 @@ enum StatusLineFormatter {
 
     static func fields(current: Stats, previous: Stats?, format: ProgramFormat) -> [Field] {
         var out: [Field] = []
-        out.append(Field(label: "节目", value: "\(format.width)×\(format.height) \(format.frameRate)"))
+        out.append(Field(label: L("status.program"), value: "\(format.width)×\(format.height) \(format.frameRate)"))
         out.append(Field(label: "fps", value: outputFPS(current: current, previous: previous).map { String(format: "%.1f", $0) } ?? "—"))
         out.append(Field(label: "render", value: String(format: "%.2f ms", current.renderMs)))
         out.append(Field(label: "GPU", value: String(format: "%.0f%%", current.gpuPct)))
         out.append(Field(label: "CPU", value: String(format: "%.0f%%", current.cpuPct)))
-        out.append(Field(label: "丢帧", value: "\(current.missedRender)"))
+        out.append(Field(label: L("status.missed"), value: "\(current.missedRender)"))
         if let e = activeEncoder(in: current) {
-            out.append(Field(label: "编码跳帧", value: "\(e.skipped)"))
-            out.append(Field(label: "码率", value: bitrateText(e.bitrate)))
+            out.append(Field(label: L("status.encoderSkipped"), value: "\(e.skipped)"))
+            out.append(Field(label: L("status.bitrate"), value: bitrateText(e.bitrate)))
         } else {
-            out.append(Field(label: "编码跳帧", value: "—"))
-            out.append(Field(label: "码率", value: "—"))
+            out.append(Field(label: L("status.encoderSkipped"), value: "—"))
+            out.append(Field(label: L("status.bitrate"), value: "—"))
         }
         if let e = current.encoder.first(where: { $0.diskFreeMb > 0 }) {
-            out.append(Field(label: "磁盘", value: diskText(megabytes: e.diskFreeMb)))
+            out.append(Field(label: L("status.disk"), value: diskText(megabytes: e.diskFreeMb)))
         } else {
-            out.append(Field(label: "磁盘", value: "—"))
+            out.append(Field(label: L("status.disk"), value: "—"))
         }
         return out
     }

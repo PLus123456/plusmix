@@ -3,8 +3,10 @@
 #   1. 禁词：产品文案、类型名、UI 字符串里不许出现竞品名（docs/plan/prompts/00-通用前言.md 铁律 6）。
 #      扫描代码与资源树：Packages/ App/ Tools/ CameraExtension/ project.yml。
 #      不扫 docs/（规格和 UI 稿本来就提到它们）、reports/、scripts/、根目录 .md。
-#      唯一例外：模块名 VMixCompat（落地方案 §2 指定的第三方 API 兼容层 target，默认不编译进产品）。
+#      例外 1：模块名 VMixCompat（落地方案 §2 指定的第三方 API 兼容层 target，默认不编译进产品）。
 #      这个 token 本身允许出现；除此之外任何形式（字符串、注释、其他标识符）都不行。
+#      例外 2（提案 011，用户 2026-09-19 批）：兼容层里对方协议规定的字面量（XML 根元素名），客户端靠它识别文档，没法改名。
+#      只放行 Packages/SwitcherControl/Sources/VMixCompat/ 下、同一行带 `lint:allow-protocol-literal` 标记的行；标记出现在别的目录不算数。
 #   2. 版本号一致：project.yml 的 MARKETING_VERSION == SwitcherContracts/Version.swift 的 SwitcherVersion.current。
 #   3. 包骨架约束：每个 Package.swift 必须是 tools-version 6.0、swiftLanguageModes [.v6]、平台 macOS 15。
 set -uo pipefail
@@ -23,8 +25,10 @@ grep_common=(-rIn --exclude-dir=.build --exclude-dir=.swiftpm --exclude-dir='*.x
 
 # 把允许的 token 抹掉再匹配：这样 "VMixCompat" 过，"vMix API" / "VMixCompatServer 之外的 vmix 变体" 不过。
 allowed_token='VMixCompat'
-hits=$( { grep "${grep_common[@]}" -i 'vmix' "${scan_roots[@]}" 2>/dev/null || true; } \
-        | sed "s/${allowed_token}//g" | grep -i 'vmix' || true )
+raw_hits=$( { grep "${grep_common[@]}" -i 'vmix' "${scan_roots[@]}" 2>/dev/null || true; } )
+# 例外 2：VMixCompat 目录下带标记的行（提案 011）。在抹掉 token 之前过滤，因为路径里也有这个 token。
+raw_hits=$(printf '%s\n' "$raw_hits" | grep -v -E '^Packages/SwitcherControl/Sources/VMixCompat/[^:]*:[0-9]+:.*lint:allow-protocol-literal' || true)
+hits=$(printf '%s\n' "$raw_hits" | sed "s/${allowed_token}//g" | grep -i 'vmix' || true)
 hits2=$( { grep "${grep_common[@]}" -w 'OBS' "${scan_roots[@]}" 2>/dev/null || true; } )
 hits3=$( { grep "${grep_common[@]}" -i -E 'obs[-_ ]?studio|obsproject' "${scan_roots[@]}" 2>/dev/null || true; } )
 all_hits=$(printf '%s\n%s\n%s\n' "$hits" "$hits2" "$hits3" | sed '/^$/d' | sort -u)
