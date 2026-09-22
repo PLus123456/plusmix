@@ -1,4 +1,4 @@
-## 56 W1-A3 frameprobe 认出转场合成帧 + Wipe / Zoom 的进度量法（测试工装续做）
+## 62 W1-A3 frameprobe 认出转场合成帧 + Wipe / Zoom 的进度量法（测试工装续做）
 分支：w1-testkit-3（从 G4 合入后的 main 开）。只准动：Packages/SwitcherTestKit/、Tools/frameprobe/、Tests/Fixtures/。
 先读：reports/issues/G4-w1-testkit-frameprobe-wipe-zoom-progress.md；reports/w3-compositor2.md §3 第 4 条、§2 的 V7 量法；测试标准 §2.3、§3 V4 / V6 / V7；
 scripts/gate4.sh 里 `--blank-ticks` 那段（G4 的临时做法）。

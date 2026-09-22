@@ -1,7 +1,7 @@
 # 008 InputSource 的 DeckLink / NDI 来源参数：输入接口、带宽模式、抖动缓冲深度
 
 提出会话 / 分支：W3-A / w3-inputs2（worktree 原名 claude/decklink-ndi-inputs-da4ad2，已改名）
-状态：**待批**
+状态：**已批**（用户 2026-09-22，按 G4 报告 §8 第 2 条。由契约会话 P3（docs/plan/prompts/61）落地：两个 case 加关联值 + 两个枚举 + InputSource 显式 init(from:)，W3-A 的 DeckLinkInput / NDIInput 改从 case 取值填 Options（Options 保留为覆盖），App InputFactory / headless 构造点跟改；Add Input 表单里选接口 / 带宽 / 抖动缓冲归 W3-E2 / prompt 63）。
 
 ## 改什么
 
