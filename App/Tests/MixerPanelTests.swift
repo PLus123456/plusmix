@@ -60,15 +60,15 @@ final class MixerPanelTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.afv })
         XCTAssertTrue(AppTest.waitUntil(3) { session.audio.status.afv })
 
-        // 监听：PFL（契约没有 setMonitorMode 命令，过渡期经 loadShow 整体替换，提案 012）；输入 / PGM 不变
+        // 监听：PFL（提案 012 落地后走 setMonitorMode，不再 loadShow 整体替换）；输入 / PGM 不变
         panel.model.setMonitorMode(.pfl)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.monitorMode == .pfl }, "监听点应变成 PFL")
         XCTAssertEqual(session.state.inputs.count, 2)
         XCTAssertEqual(session.state.program, 1)
         XCTAssertTrue(AppTest.waitUntil(3) { session.audio.status.monitorMode == .pfl }, "音频引擎应跟着换监听点")
-        XCTAssertEqual(session.inputs.runtimeState(of: 1), .live, "loadShow 不重建输入")
+        XCTAssertEqual(session.inputs.runtimeState(of: 1), .live, "改监听方式不重建输入")
 
-        // 总线效果链（同样经 loadShow 过渡）
+        // 总线效果链（同样一条命令，提案 012）
         panel.model.setBusEffects(.master, [AudioEffectParams.peakLimiter(attackSeconds: 0.01, decaySeconds: 0.02, preGainDb: 1)])
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.first?.id == AudioEffectParams.peakLimiterID })
         XCTAssertEqual(AudioEffectParams.number(session.state.audio.buses[0].effects[0], "preGainDb"), 1)
