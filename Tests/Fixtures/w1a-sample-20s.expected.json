@@ -149,7 +149,6 @@
         "clickTimeSeconds" : 12,
         "flashIndex" : 720,
         "flashTimeSeconds" : 12,
-        "genTimeMs" : 13000,
         "offsetMs" : 0,
         "onSecondTick" : true,
         "tick" : 720
@@ -239,7 +238,7 @@
           0,
           0
         ],
-        "key" : "gen:1000"
+        "key" : "#0"
       },
       {
         "clickSpreadMs" : 0,
@@ -252,7 +251,7 @@
           1,
           1
         ],
-        "key" : "gen:2000"
+        "key" : "#1"
       },
       {
         "clickSpreadMs" : 0,
@@ -265,7 +264,7 @@
           2,
           2
         ],
-        "key" : "gen:3000"
+        "key" : "#2"
       },
       {
         "clickSpreadMs" : 0,
@@ -278,7 +277,7 @@
           3,
           3
         ],
-        "key" : "gen:4000"
+        "key" : "#3"
       },
       {
         "clickSpreadMs" : 0,
@@ -291,7 +290,7 @@
           4,
           4
         ],
-        "key" : "gen:5000"
+        "key" : "#4"
       },
       {
         "clickSpreadMs" : 0,
@@ -304,7 +303,7 @@
           5,
           5
         ],
-        "key" : "gen:6000"
+        "key" : "#5"
       },
       {
         "clickSpreadMs" : 0,
@@ -317,7 +316,7 @@
           6,
           6
         ],
-        "key" : "gen:7000"
+        "key" : "#6"
       },
       {
         "clickSpreadMs" : 0,
@@ -330,7 +329,7 @@
           7,
           7
         ],
-        "key" : "gen:8000"
+        "key" : "#7"
       },
       {
         "clickSpreadMs" : 0,
@@ -343,7 +342,7 @@
           8,
           8
         ],
-        "key" : "gen:9000"
+        "key" : "#8"
       },
       {
         "clickSpreadMs" : 0,
@@ -356,7 +355,7 @@
           9,
           9
         ],
-        "key" : "gen:10000"
+        "key" : "#9"
       },
       {
         "clickSpreadMs" : 0,
@@ -369,7 +368,7 @@
           10,
           10
         ],
-        "key" : "gen:11000"
+        "key" : "#10"
       },
       {
         "clickSpreadMs" : 0,
@@ -382,7 +381,7 @@
           11,
           11
         ],
-        "key" : "gen:12000"
+        "key" : "#11"
       },
       {
         "clickSpreadMs" : 0,
@@ -395,7 +394,7 @@
           12,
           12
         ],
-        "key" : "gen:13000"
+        "key" : "#12"
       },
       {
         "clickSpreadMs" : 0,
@@ -408,7 +407,7 @@
           13,
           13
         ],
-        "key" : "gen:14000"
+        "key" : "#13"
       },
       {
         "clickSpreadMs" : 0,
@@ -421,7 +420,7 @@
           14,
           14
         ],
-        "key" : "gen:15000"
+        "key" : "#14"
       },
       {
         "clickSpreadMs" : 0,
@@ -434,7 +433,7 @@
           15,
           15
         ],
-        "key" : "gen:16000"
+        "key" : "#15"
       },
       {
         "clickSpreadMs" : 0,
@@ -447,7 +446,7 @@
           16,
           16
         ],
-        "key" : "gen:17000"
+        "key" : "#16"
       },
       {
         "clickSpreadMs" : 0,
@@ -460,7 +459,7 @@
           17,
           17
         ],
-        "key" : "gen:18000"
+        "key" : "#17"
       },
       {
         "clickSpreadMs" : 0,
@@ -473,7 +472,7 @@
           18,
           18
         ],
-        "key" : "gen:19000"
+        "key" : "#18"
       },
       {
         "clickSpreadMs" : 0,
@@ -486,7 +485,7 @@
           19,
           19
         ],
-        "key" : "gen:20000"
+        "key" : "#19"
       }
     ],
     "files" : [
@@ -1203,105 +1202,78 @@
     },
     {
       "flash" : false,
-      "frameNumber" : 351,
-      "genTimeMs" : 12700,
       "gray" : 183,
       "index" : 702,
-      "inputID" : 1,
       "ptsSeconds" : 11.7
     },
     {
       "flash" : false,
-      "frameNumber" : 351,
-      "genTimeMs" : 12700,
       "gray" : 178.33333333333334,
       "index" : 703,
       "ptsSeconds" : 11.716666666666667
     },
     {
       "flash" : false,
-      "frameNumber" : 352,
-      "genTimeMs" : 12733,
       "gray" : 174,
       "index" : 704,
       "ptsSeconds" : 11.733333333333333
     },
     {
       "flash" : false,
-      "frameNumber" : 352,
-      "genTimeMs" : 12733,
       "gray" : 170.33333333333334,
       "index" : 705,
       "ptsSeconds" : 11.75
     },
     {
       "flash" : false,
-      "frameNumber" : 353,
-      "genTimeMs" : 12766,
       "gray" : 166,
       "index" : 706,
       "ptsSeconds" : 11.766666666666667
     },
     {
       "flash" : false,
-      "frameNumber" : 353,
-      "genTimeMs" : 12766,
       "gray" : 161,
       "index" : 707,
       "ptsSeconds" : 11.783333333333333
     },
     {
       "flash" : false,
-      "frameNumber" : 354,
-      "genTimeMs" : 12800,
       "gray" : 157.33333333333334,
       "index" : 708,
       "ptsSeconds" : 11.8
     },
     {
       "flash" : false,
-      "frameNumber" : 354,
-      "genTimeMs" : 12800,
       "gray" : 153,
       "index" : 709,
       "ptsSeconds" : 11.816666666666666
     },
     {
       "flash" : false,
-      "frameNumber" : 355,
-      "genTimeMs" : 12833,
       "gray" : 148,
       "index" : 710,
       "ptsSeconds" : 11.833333333333334
     },
     {
       "flash" : false,
-      "frameNumber" : 355,
-      "genTimeMs" : 12833,
       "gray" : 145,
       "index" : 711,
       "ptsSeconds" : 11.85
     },
     {
       "flash" : false,
-      "frameNumber" : 356,
-      "genTimeMs" : 12866,
       "gray" : 140,
       "index" : 712,
       "ptsSeconds" : 11.866666666666667
     },
     {
       "flash" : false,
-      "frameNumber" : 356,
-      "genTimeMs" : 12866,
       "gray" : 135.33333333333334,
       "index" : 713,
       "ptsSeconds" : 11.883333333333333
     },
     {
       "flash" : false,
-      "frameNumber" : 357,
-      "genTimeMs" : 12900,
       "gray" : 132,
       "index" : 714,
       "ptsSeconds" : 11.9
@@ -1314,107 +1286,80 @@
     },
     {
       "flash" : false,
-      "frameNumber" : 716,
-      "genTimeMs" : 12933,
       "gray" : 123,
       "index" : 716,
       "ptsSeconds" : 11.933333333333334
     },
     {
       "flash" : false,
-      "frameNumber" : 717,
-      "genTimeMs" : 12950,
       "gray" : 119,
       "index" : 717,
       "ptsSeconds" : 11.95
     },
     {
       "flash" : false,
-      "frameNumber" : 718,
-      "genTimeMs" : 12966,
       "gray" : 114.66666666666667,
       "index" : 718,
       "ptsSeconds" : 11.966666666666667
     },
     {
       "flash" : false,
-      "frameNumber" : 719,
-      "genTimeMs" : 12983,
       "gray" : 110,
       "index" : 719,
       "ptsSeconds" : 11.983333333333333
     },
     {
       "flash" : true,
-      "frameNumber" : 720,
-      "genTimeMs" : 13000,
       "gray" : 106.33333333333333,
       "index" : 720,
       "ptsSeconds" : 12
     },
     {
       "flash" : false,
-      "frameNumber" : 721,
-      "genTimeMs" : 13016,
       "gray" : 102,
       "index" : 721,
       "ptsSeconds" : 12.016666666666667
     },
     {
       "flash" : false,
-      "frameNumber" : 722,
-      "genTimeMs" : 13033,
       "gray" : 97,
       "index" : 722,
       "ptsSeconds" : 12.033333333333333
     },
     {
       "flash" : false,
-      "frameNumber" : 723,
-      "genTimeMs" : 13050,
       "gray" : 94,
       "index" : 723,
       "ptsSeconds" : 12.05
     },
     {
       "flash" : false,
-      "frameNumber" : 724,
-      "genTimeMs" : 13066,
       "gray" : 89,
       "index" : 724,
       "ptsSeconds" : 12.066666666666666
     },
     {
       "flash" : false,
-      "frameNumber" : 725,
-      "genTimeMs" : 13083,
       "gray" : 84.33333333333333,
       "index" : 725,
       "ptsSeconds" : 12.083333333333334
     },
     {
       "flash" : false,
-      "frameNumber" : 726,
-      "genTimeMs" : 13100,
       "gray" : 81,
       "index" : 726,
       "ptsSeconds" : 12.1
     },
     {
       "flash" : false,
-      "frameNumber" : 727,
-      "genTimeMs" : 13116,
       "gray" : 76.33333333333333,
       "index" : 727,
       "ptsSeconds" : 12.116666666666667
     },
     {
       "flash" : false,
-      "frameNumber" : 728,
-      "genTimeMs" : 13133,
       "gray" : 72,
       "index" : 728,
-      "inputID" : 0,
       "ptsSeconds" : 12.133333333333333
     },
     {
@@ -2654,11 +2599,11 @@
         ],
         "excessDropRatio" : 0,
         "excessDuplicateRatio" : 0,
-        "frames" : 872,
+        "frames" : 871,
         "inputFps" : 60,
         "inputID" : 0,
         "passV4" : true,
-        "uniqueFrames" : 872
+        "uniqueFrames" : 871
       },
       {
         "backwardJumps" : 0,
@@ -2670,7 +2615,7 @@
         "dropRatio" : 0,
         "droppedFrames" : 0,
         "duplicateFrames" : 151,
-        "duplicateRatio" : 0.49834983498349833,
+        "duplicateRatio" : 0.5,
         "duplicateRuns" : [
           {
             "frameNumber" : 200,
@@ -3430,18 +3375,18 @@
         ],
         "excessDropRatio" : 0,
         "excessDuplicateRatio" : 0,
-        "frames" : 303,
+        "frames" : 302,
         "inputFps" : 30,
         "inputID" : 1,
         "passV4" : true,
-        "uniqueFrames" : 152
+        "uniqueFrames" : 151
       }
     ],
     "programFps" : 60,
     "totalFrames" : 1200,
     "truncated" : false,
-    "undecodableFrames" : 1,
-    "unidentifiedFrames" : 25
+    "undecodableFrames" : 27,
+    "unidentifiedFrames" : 27
   },
   "switches" : {
     "allCutsClean" : true,
@@ -3485,17 +3430,17 @@
         "to" : 1
       },
       {
-        "betweenFrames" : 25,
+        "betweenFrames" : 27,
         "cleanCut" : false,
         "from" : 1,
-        "index" : 728,
+        "index" : 729,
         "kind" : "transition",
-        "lastFromIndex" : 702,
+        "lastFromIndex" : 701,
         "mixedAfter" : false,
-        "mixedAt" : true,
+        "mixedAt" : false,
         "mixedBefore" : true,
-        "ptsSeconds" : 12.133333333333333,
-        "tick" : 728,
+        "ptsSeconds" : 12.15,
+        "tick" : 729,
         "to" : 0
       }
     ]

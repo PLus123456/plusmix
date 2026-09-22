@@ -12,13 +12,32 @@ import VideoToolbox
 /// 混合在 NV12 上逐字节线性插值。音轨是 `TestSignal`（click 与闪光共用 t0），AAC / PCM / 无三选一。
 /// 视频 PTS = n / fps，音频 PTS = 样本序号 / 48000，两者的零点都是 t0，所以文件里闪光与 click 严格同刻。
 public enum SampleMovieWriter {
-    /// 脚本事件。
+    /// 脚本事件。转场的几何与 W3-B 的渲染器一致：Fade = 逐像素混合，Wipe = 擦边位置 = 进度（软边取 50% 点），
+    /// Zoom = 新画面绕画面中心按进度缩放。
     public enum Event: Hashable, Sendable {
         case cut(tick: Int)
         case fade(tick: Int, durationTicks: Int)
+        case wipe(tick: Int, durationTicks: Int, direction: WipeDirection, softness: Double)
+        case zoom(tick: Int, durationTicks: Int)
         var tick: Int {
             switch self {
-            case .cut(let t), .fade(let t, _): t
+            case .cut(let t), .fade(let t, _), .wipe(let t, _, _, _), .zoom(let t, _): t
+            }
+        }
+        /// 转场类型。
+        public var type: TransitionType {
+            switch self {
+            case .cut: .cut
+            case .fade: .fade
+            case .wipe: .wipe
+            case .zoom: .zoom
+            }
+        }
+        /// 时长（拍）；Cut 是 0。
+        public var durationTicks: Int {
+            switch self {
+            case .cut: 0
+            case .fade(_, let d), .wipe(_, let d, _, _), .zoom(_, let d): d
             }
         }
     }
@@ -102,30 +121,38 @@ public enum SampleMovieWriter {
             public var topFrame: Int64
             /// 新画面盖上去的比例 0–1。
             public var progress: Double
+            /// 进行中的转场类型（progress > 0 时有意义）。
+            public var type: TransitionType = .fade
+            /// Wipe 的方向与软边。
+            public var wipe = WipeParams()
         }
 
-        /// 拍 n 时：当前节目源（Cut 立即换、Fade 到 D 拍换）与进行中 Fade 的进度。
+        /// 拍 n 时：当前节目源（Cut 立即换、转场到 D 拍换）与进行中转场的进度。
         public func pick(tick n: Int) -> Pick {
             var currentIsA = true
             var progress = 0.0
+            var type = TransitionType.fade
+            var wipe = WipeParams()
             for e in sortedEvents where e.tick <= n {
-                switch e {
-                case .cut:
+                if case .cut = e {
                     currentIsA.toggle()
                     progress = 0
-                case .fade(let s, let d):
-                    let k = n - s
-                    if k >= d {
-                        currentIsA.toggle()
-                        progress = 0
-                    } else {
-                        progress = Double(k) / Double(d)
-                    }
+                    continue
+                }
+                let k = n - e.tick
+                if k >= e.durationTicks {
+                    currentIsA.toggle()
+                    progress = 0
+                } else {
+                    progress = Double(k) / Double(e.durationTicks)
+                    type = e.type
+                    if case .wipe(_, _, let direction, let softness) = e { wipe = WipeParams(direction: direction, softness: softness) }
                 }
             }
             let t = clock.time(of: Tick(Int64(n)))
             let fa = a.clock.tick(at: t).rawValue, fb = b.clock.tick(at: t).rawValue
-            return Pick(baseIsA: currentIsA, baseFrame: currentIsA ? fa : fb, topFrame: currentIsA ? fb : fa, progress: progress)
+            return Pick(baseIsA: currentIsA, baseFrame: currentIsA ? fa : fb, topFrame: currentIsA ? fb : fa, progress: progress,
+                        type: type, wipe: wipe)
         }
 
         /// 把第 n 拍画进 NV12 缓冲（`scratch` 是同尺寸的第二个缓冲，混合时用）。
@@ -135,7 +162,11 @@ public enum SampleMovieWriter {
             TestPattern.draw(base.content(of: p.baseFrame), into: pb)
             if p.progress > 0 {
                 TestPattern.draw(top.content(of: p.topFrame), into: scratch)
-                SampleMovieWriter.blendNV12(into: pb, top: scratch, progress: p.progress)
+                switch p.type {
+                case .wipe: SampleMovieWriter.wipeNV12(into: pb, top: scratch, progress: p.progress, wipe: p.wipe)
+                case .zoom: SampleMovieWriter.zoomNV12(into: pb, top: scratch, progress: p.progress)
+                default: SampleMovieWriter.blendNV12(into: pb, top: scratch, progress: p.progress)
+                }
             }
             if spec.noise > 0 { SampleMovieWriter.addLumaNoise(pb, amplitude: spec.noise, seed: UInt64(n)) }
         }
@@ -160,6 +191,95 @@ public enum SampleMovieWriter {
                 let tr = (tp + y * tbpr).assumingMemoryBound(to: UInt8.self)
                 for x in 0..<width {
                     br[x] = UInt8((Float(br[x]) * q + Float(tr[x]) * p).rounded())
+                }
+            }
+        }
+    }
+
+    /// Wipe：新画面整幅盖上，每个像素按自己在画面里的位置算遮罩 alpha（与 W3-B `Compositor.metal` 的 `wipeAlpha` 逐字一致：
+    /// 硬边 `f < e`，软边 `1 − smoothstep(e − s/2, e + s/2, f)`，擦边位置 e = 进度，f 按方向取归一化坐标）。
+    /// 色度按 2×2 块中心算 alpha（渲染器是逐像素算完再下采样，边上差半个色度样本，对帧号 / 灰度的判读没有影响）。
+    public static func wipeNV12(into base: CVPixelBuffer, top: CVPixelBuffer, progress: Double, wipe: WipeParams) {
+        CVPixelBufferLockBaseAddress(base, [])
+        CVPixelBufferLockBaseAddress(top, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(top, .readOnly)
+            CVPixelBufferUnlockBaseAddress(base, [])
+        }
+        let w = CVPixelBufferGetWidth(base), h = CVPixelBufferGetHeight(base)
+        let e = Float(min(max(progress, 0), 1)), soft = Float(min(max(wipe.softness, 0), 1))
+        func alpha(_ px: Float, _ py: Float) -> Float {
+            let f: Float
+            switch wipe.direction {
+            case .leftToRight: f = px
+            case .rightToLeft: f = 1 - px
+            case .topToBottom: f = py
+            case .bottomToTop: f = 1 - py
+            case .diagonal: f = (px + py) * 0.5
+            }
+            if soft <= 0 { return f < e ? 1 : 0 }
+            let t = min(max((f - (e - 0.5 * soft)) / soft, 0), 1)
+            return 1 - t * t * (3 - 2 * t)
+        }
+        for plane in 0..<2 {
+            guard let bp = CVPixelBufferGetBaseAddressOfPlane(base, plane), let tp = CVPixelBufferGetBaseAddressOfPlane(top, plane) else { continue }
+            let rows = CVPixelBufferGetHeightOfPlane(base, plane)
+            let columns = CVPixelBufferGetWidthOfPlane(base, plane)
+            let bbpr = CVPixelBufferGetBytesPerRowOfPlane(base, plane), tbpr = CVPixelBufferGetBytesPerRowOfPlane(top, plane)
+            for y in 0..<rows {
+                let br = (bp + y * bbpr).assumingMemoryBound(to: UInt8.self)
+                let tr = (tp + y * tbpr).assumingMemoryBound(to: UInt8.self)
+                let py = plane == 0 ? (Float(y) + 0.5) / Float(h) : (Float(2 * y) + 1) / Float(h)
+                for x in 0..<columns {
+                    let px = plane == 0 ? (Float(x) + 0.5) / Float(w) : (Float(2 * x) + 1) / Float(w)
+                    let p = alpha(px, py), q = 1 - p
+                    if plane == 0 {
+                        br[x] = UInt8((Float(br[x]) * q + Float(tr[x]) * p).rounded())
+                    } else {
+                        br[2 * x] = UInt8((Float(br[2 * x]) * q + Float(tr[2 * x]) * p).rounded())
+                        br[2 * x + 1] = UInt8((Float(br[2 * x + 1]) * q + Float(tr[2 * x + 1]) * p).rounded())
+                    }
+                }
+            }
+        }
+    }
+
+    /// Zoom：新画面绕画面中心按进度缩放（尺度 = 进度，`PixelRect.scaled`），盖在旧画面上，不透明。
+    /// 取样用最近邻（素材只用来量新画面的边在哪，内部细节不参与判定）。
+    public static func zoomNV12(into base: CVPixelBuffer, top: CVPixelBuffer, progress: Double) {
+        CVPixelBufferLockBaseAddress(base, [])
+        CVPixelBufferLockBaseAddress(top, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(top, .readOnly)
+            CVPixelBufferUnlockBaseAddress(base, [])
+        }
+        let w = Double(CVPixelBufferGetWidth(base)), h = Double(CVPixelBufferGetHeight(base))
+        let scale = min(max(progress, 0), 1)
+        let dw = w * scale, dh = h * scale
+        let x0 = (w - dw) / 2, y0 = (h - dh) / 2
+        guard dw >= 1, dh >= 1 else { return }
+        for plane in 0..<2 {
+            guard let bp = CVPixelBufferGetBaseAddressOfPlane(base, plane), let tp = CVPixelBufferGetBaseAddressOfPlane(top, plane) else { continue }
+            let rows = CVPixelBufferGetHeightOfPlane(base, plane)
+            let columns = CVPixelBufferGetWidthOfPlane(base, plane)
+            let bbpr = CVPixelBufferGetBytesPerRowOfPlane(base, plane), tbpr = CVPixelBufferGetBytesPerRowOfPlane(top, plane)
+            let sub = plane == 0 ? 1.0 : 2.0
+            for y in 0..<rows {
+                let py = (Double(y) + 0.5) * sub
+                guard py >= y0, py < y0 + dh else { continue }
+                let sy = min(rows - 1, max(0, Int((py - y0) / scale / sub)))
+                let br = (bp + y * bbpr).assumingMemoryBound(to: UInt8.self)
+                let tr = (tp + sy * tbpr).assumingMemoryBound(to: UInt8.self)
+                for x in 0..<columns {
+                    let px = (Double(x) + 0.5) * sub
+                    guard px >= x0, px < x0 + dw else { continue }
+                    let sx = min(columns - 1, max(0, Int((px - x0) / scale / sub)))
+                    if plane == 0 {
+                        br[x] = tr[sx]
+                    } else {
+                        br[2 * x] = tr[2 * sx]
+                        br[2 * x + 1] = tr[2 * sx + 1]
+                    }
                 }
             }
         }

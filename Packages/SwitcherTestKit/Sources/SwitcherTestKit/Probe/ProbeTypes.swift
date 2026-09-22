@@ -32,6 +32,11 @@ public struct ProbeFrame: Hashable, Codable, Sendable {
         self.init(index: index, ptsSeconds: ptsSeconds, frameNumber: decoded.frameNumber, inputID: decoded.inputID,
                   genTimeMs: decoded.hostTimeMs, flash: decoded.flash, gray: gray)
     }
+
+    /// 由 `PatternProbe` 的读数建（灰度取中心采样区，与老口径同一个数）。
+    public init(index: Int, ptsSeconds: Double, reading: PatternProbe.Reading) {
+        self.init(index: index, ptsSeconds: ptsSeconds, decoded: reading.decoded, gray: reading.centerGray)
+    }
 }
 
 /// 音轨里找到的一个 click。
