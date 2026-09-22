@@ -304,22 +304,24 @@ enum CompositorPasses {
         }
     }
 
-    /// §5 步骤 3：Overlay 1 → 4（PGM 和开了 overlaysInPreview 的 PVW 共用）。下标循环，见 inputConfig 的说明。
+    /// §5 步骤 3：Overlay 1 → 4。下标循环，见 inputConfig 的说明。
+    /// `previewPass` = 这一遍画的是 PVW：只画 `previewOn` 的通道（`context.overlaysInPreview` 是"全部预览"总开关，两者取或，提案 010）。
     static func encodeOverlays(state: MixerState, inputs: RenderInputTable, slot: RenderSlot, context: Context,
-                               encoder: any MTLRenderCommandEncoder, width: Int, height: Int) {
+                               encoder: any MTLRenderCommandEncoder, width: Int, height: Int, previewPass: Bool = false) {
         let overlayCount = state.overlays.count
         let fullScissor = MTLScissorRect(x: 0, y: 0, width: width, height: height)
         var k = 0
         while k < overlayCount {
             let o = state.overlays[k]
             k += 1
+            if previewPass && !context.overlaysInPreview && !o.previewOn { continue }
             guard OverlayRenderer.isDrawable(o), let input = o.input else { continue }
             let placement = OverlayRenderer.placement(o)
             guard placement.opacity > 0 else { continue }
             guard let (tex, cfg) = lookup(input, state: state, inputs: inputs, slot: slot, context: context) else { continue }
             let dest = PixelRect(placement.rect, in: width, height)
             let opacity = placement.opacity
-            if let border = OverlayDecoration.border(for: cfg) {
+            if let border = OverlayDecoration.border(for: o, config: cfg) {
                 let outer = dest.outsetBy(Float(border.width) * Float(height))
                 let sc = scissor(outer, width: width, height: height)
                 if sc.width > 0 && sc.height > 0 {
@@ -344,9 +346,8 @@ enum CompositorPasses {
         if let (tex, cfg) = lookup(state.preview, state: state, inputs: inputs, slot: slot, context: context) {
             drawInput(tex, config: cfg, dest: full, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
         }
-        if context.overlaysInPreview {
-            encodeOverlays(state: state, inputs: inputs, slot: slot, context: context, encoder: encoder, width: width, height: height)
-        }
+        encodeOverlays(state: state, inputs: inputs, slot: slot, context: context, encoder: encoder,
+                       width: width, height: height, previewPass: true)
     }
 
     // MARK: - §5 步骤 6：多画面
@@ -504,9 +505,18 @@ enum OverlayRenderer {
         o.isVisible && o.animProgress > 0
     }
 
-    /// slide 从哪条边进：离 rect 最近的边；并列时底 > 顶 > 左 > 右（整幅 rect 从底边，下三分之一自然向上滑入）。
+    /// slide 从哪条边进：`OverlayAnimation.slideFrom` 指定的那条（提案 010），
+    /// nil 时是离 rect 最近的边；并列时底 > 顶 > 左 > 右（整幅 rect 从底边，下三分之一自然向上滑入）。
     @inline(__always)
-    static func slideEdge(for r: NormalizedRect) -> Edge {
+    static func slideEdge(for r: NormalizedRect, from explicit: OverlayEdge? = nil) -> Edge {
+        if let explicit {
+            switch explicit {
+            case .left: return .left
+            case .right: return .right
+            case .top: return .top
+            case .bottom: return .bottom
+            }
+        }
         let dl = r.x, dr = 1 - (r.x + r.width), dt = r.y, db = 1 - (r.y + r.height)
         var edge = Edge.bottom
         var best = db
@@ -516,7 +526,8 @@ enum OverlayRenderer {
         return edge
     }
 
-    /// animProgress → (画在哪, 不透明度)。cut：p > 0 就完整显示；fade：不透明度 = p；slide：从最近的边平移进来；zoom：绕 rect 中心缩放。
+    /// animProgress → (画在哪, 不透明度)。cut：p > 0 就完整显示；fade：不透明度 = p；
+    /// slide：从 `slideFrom`（没给就是最近的）那条边平移进来；zoom：绕 `anchor` 缩放（默认 center，提案 010）。
     @inline(__always)
     static func placement(_ o: OverlayState) -> (rect: NormalizedRect, opacity: Float) {
         let p = min(max(o.animProgress, 0), 1)
@@ -529,7 +540,7 @@ enum OverlayRenderer {
         case .slide:
             var moved = r
             let back = 1 - p
-            switch slideEdge(for: r) {
+            switch slideEdge(for: r, from: o.animation.slideFrom) {
             case .left: moved.x = r.x - back * (r.x + r.width)
             case .right: moved.x = r.x + back * (1 - r.x)
             case .top: moved.y = r.y - back * (r.y + r.height)
@@ -538,8 +549,24 @@ enum OverlayRenderer {
             return (moved, 1)
         case .zoom:
             let w = r.width * p, h = r.height * p
-            return (NormalizedRect(x: r.x + (r.width - w) / 2, y: r.y + (r.height - h) / 2, width: w, height: h), 1)
+            let (u, v) = o.anchor.unitPoint
+            return (NormalizedRect(x: r.x + (r.width - w) * u, y: r.y + (r.height - h) * v, width: w, height: h), 1)
         }
+    }
+}
+
+extension CompositorPasses {
+    /// 状态里有没有 enabled 且 source 是该画面的输出（提案 010 / W3-B §4 第 5 条的裁定：
+    /// `RenderedFrame.preview` / `.multiview` 据此自动填）。下标循环，渲染线程每拍调，零分配。
+    @inline(__always)
+    static func wants(_ source: OutputSource, in state: MixerState) -> Bool {
+        let outputs = state.outputs
+        var i = 0
+        while i < outputs.count {
+            if outputs[i].enabled && outputs[i].settings.source == source { return true }
+            i += 1
+        }
+        return false
     }
 }
 
@@ -549,7 +576,8 @@ enum EffectIDs {
     static let border = "border"
 }
 
-/// 叠加通道的装饰（现在只有边框）。
+/// 叠加通道的装饰（现在只有边框）。提案 010 落地后正式字段 `OverlayState.border` 优先，
+/// 过渡做法（该输入效果链里的 "border" 格）保留一个版本作后备。
 enum OverlayDecoration {
     struct Border {
         var width: Double
@@ -557,7 +585,22 @@ enum OverlayDecoration {
         var color: SIMD4<Float>
     }
 
-    /// 输入的效果链里第一个启用的 "border"；没有为 nil。下标循环、只 retain，渲染线程可调。
+    /// 这一路叠加的边框：先看 `OverlayState.border`（正式字段），没有才看输入效果链里的 "border" 格（过渡做法）。
+    /// 下标循环、只 retain，渲染线程可调。
+    @inline(__always)
+    static func border(for overlay: OverlayState, config: InputConfig?) -> Border? {
+        if let b = overlay.border { return resolve(b) }
+        return border(for: config)
+    }
+
+    /// 正式字段 → 渲染参数：宽钳 0–0.1，颜色转预乘（alpha 1 所以就是除 255）。
+    @inline(__always)
+    static func resolve(_ b: OverlayBorder) -> Border {
+        Border(width: min(max(b.width, 0), 0.1),
+               color: SIMD4<Float>(Float(b.color.red) / 255, Float(b.color.green) / 255, Float(b.color.blue) / 255, 1))
+    }
+
+    /// 后备：输入的效果链里第一个启用的 "border"；没有为 nil。下标循环、只 retain，渲染线程可调。
     static func border(for config: InputConfig?) -> Border? {
         guard let config else { return nil }
         let effects = config.settings.effects

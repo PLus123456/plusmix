@@ -52,6 +52,9 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
     public var encoderStatsProvider: (@Sendable () -> [Stats.EncoderEntry])?
     /// 音频统计来源（W2-E 接线）。
     public var audioStatsProvider: (@Sendable () -> Stats.AudioCounters)?
+    /// Stats.display[] 的供数方（提案 013）：显示类输出（外部显示窗口、虚拟摄像头、多画面窗口、主界面监视器）。
+    /// 组装方（App 的 StatsHub）设；headless 不设 = 空数组。采样线程上调，要快。
+    public var displayStatsProvider: (@Sendable () -> [Stats.DisplayEntry])?
     /// GPU 占用来源（没有公开 API；G2 若用 powermetrics / IOKit 采到就从这里灌，否则 0）。
     public var gpuPercentProvider: (@Sendable () -> Double)?
 
@@ -289,6 +292,7 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         let jitter = clock?.jitter ?? JitterRecorder(capacity: 1)
         return assembler.make(now: now, wallClock: wallClock, jitter: jitter, inputs: inputs,
                               encoder: encoderStatsProvider?() ?? [],
+                              display: displayStatsProvider?() ?? [],
                               audio: audioStatsProvider?() ?? Stats.AudioCounters(dropouts: 0, underruns: 0),
                               gpuPct: gpuPercentProvider?() ?? 0)
     }

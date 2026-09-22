@@ -140,6 +140,11 @@ public struct MixerReducer: MixerReducing {
             var a = animation
             a.durationTicks = max(a.durationTicks, 0)
             s.overlays[i].animation = a
+        case .setOverlayDecoration(let channel, let border, let anchor, let previewOn):
+            guard let i = Self.overlayIndex(channel) else { return state }
+            s.overlays[i].border = border
+            s.overlays[i].anchor = anchor
+            s.overlays[i].previewOn = previewOn
 
         // 音频
         case .audioGain(let input, let dB):
@@ -156,6 +161,11 @@ public struct MixerReducer: MixerReducing {
             s.audio.buses[i].muted = on
         case .setAFV(let on):
             s.audio.afv = on
+        case .setMonitorMode(let mode):
+            s.audio.monitorMode = mode
+        case .setBusEffects(let bus, let effects):
+            guard let i = Self.busIndex(bus, in: s) else { return state }
+            s.audio.buses[i].effects = effects
 
         // 输出
         case .startRecord(let output):
@@ -170,6 +180,14 @@ public struct MixerReducer: MixerReducing {
         case .stopStream(let output):
             guard let i = Self.outputIndex(output, kind: .stream, in: s) else { return state }
             s.outputs[i].enabled = false
+        case .setOutputEnabled(let output, let on):
+            // record / stream 走 startRecord / startStream（语义与起止拍绑定），这里拒绝
+            guard let i = s.outputs.firstIndex(where: { $0.number == output }),
+                  s.outputs[i].kind != .record, s.outputs[i].kind != .stream else { return state }
+            s.outputs[i].enabled = on
+        case .renameOutput(let output, let name):
+            guard let i = s.outputs.firstIndex(where: { $0.number == output }) else { return state }
+            s.outputs[i].name = name
 
         // 输入表
         case .setInputSettings(let input, let settings):
@@ -190,6 +208,10 @@ public struct MixerReducer: MixerReducing {
             if s.program == input { s.program = MixerState.noInput }
             if s.preview == input { s.preview = MixerState.noInput }
             for k in s.overlays.indices where s.overlays[k].input == input { s.overlays[k].input = nil }
+        case .setInputSource(let input, let source):
+            // 编号 / 名字 / 设置 / PGM / PVW / 叠加引用全部保留；kind 由 source 推出，不另存
+            guard let i = Self.inputIndex(input, in: s) else { return state }
+            s.inputs[i].source = source
 
         // 输出表
         case .addOutput(let config):

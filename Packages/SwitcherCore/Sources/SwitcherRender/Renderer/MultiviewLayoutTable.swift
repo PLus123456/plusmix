@@ -1,6 +1,10 @@
 // 多画面布局（设计方案 §5 步骤 6；W3-B 交付 4）。
 //
-// 布局从哪来（提案 010 的过渡做法）：状态里第一个 kind = multiview 的输出的 `settings.extra["layout"]`：
+// 布局从哪来（提案 010 已落地）：状态里第一个 kind = multiview 的输出的 `settings.multiview`
+// （`MultiviewLayoutSettings`：preset / custom / safeArea / meters）。nil 时回退到过渡键 `settings.extra["layout"]`
+// （保留一个版本；旧节目文件由 `Show.load` 一次性搬进正式字段，这条回退只为还没经过 load 的内存状态）。
+//
+// 过渡键 `extra["layout"]` 的形态：
 //   - 字符串 = 预设名：pgmPvw+grid（默认：上 PVW / PGM、下按路数 4×2 / 6×3 / 8×4，= W1-C 的几何）、pgmPvw+4x2、pgmPvw+2x2、3x3、4x4
 //   - 对象 {"preset": "3x3", "safeArea": true, "meters": true} = 预设 + 装饰开关
 //   - 对象 {"cells": [{"source": "program" | "preview" | 3, "rect": {x, y, width, height}}], "safeArea": …, "meters": …} = 自定义
@@ -99,19 +103,47 @@ final class MultiviewLayoutTable {
         cells = Array(repeating: MultiviewCellSpec(), count: MultiviewLayoutTable.capacity)
     }
 
-    /// 从状态解析（渲染线程；零分配）。
-    func parse(state: MixerState, width: Int, height: Int) {
-        let inputs = state.inputs
-        parse(layout: MultiviewLayout.layoutValue(in: state), inputCount: inputs.count, width: width, height: height) { inputs[$0].number }
+    /// 状态里第一个 kind = multiview 的输出的正式布局字段；没有为 nil。下标循环（渲染线程也调它）。
+    static func settings(in state: MixerState) -> MultiviewLayoutSettings? {
+        let outputs = state.outputs
+        var i = 0
+        while i < outputs.count {
+            if outputs[i].kind == .multiview { return outputs[i].settings.multiview }
+            i += 1
+        }
+        return nil
     }
 
-    /// 核心：layout 值 + 输入编号 → 表。
+    /// 从状态解析（渲染线程；零分配）。正式字段优先，没有才读过渡键。
+    func parse(state: MixerState, width: Int, height: Int) {
+        let inputs = state.inputs
+        if let s = MultiviewLayoutTable.settings(in: state) {
+            parse(settings: s, inputCount: inputs.count, width: width, height: height) { inputs[$0].number }
+        } else {
+            parse(layout: MultiviewLayout.layoutValue(in: state), inputCount: inputs.count, width: width, height: height) { inputs[$0].number }
+        }
+    }
+
+    /// 核心：正式字段 + 输入编号 → 表（提案 010）。下标循环、只 retain，渲染线程可调。
+    func parse(settings: MultiviewLayoutSettings?, inputCount: Int, width: Int, height: Int, inputNumber: (Int) -> Int) {
+        let w = Float(width), h = Float(height)
+        reset(width: w, height: h)
+        var preset = MultiviewPreset.pgmPvwGrid
+        guard let settings else { return applyPreset(preset, inputCount: inputCount, width: w, height: h, inputNumber: inputNumber) }
+        safeArea = settings.safeArea
+        meters = settings.meters
+        if !settings.custom.isEmpty {
+            parseCustom(settings.custom, width: w, height: h)
+            if cellCount > 0 { return }
+        }
+        preset = MultiviewPreset.named(settings.preset) ?? .pgmPvwGrid
+        applyPreset(preset, inputCount: inputCount, width: w, height: h, inputNumber: inputNumber)
+    }
+
+    /// 过渡键（`extra["layout"]`）版：layout 值 + 输入编号 → 表。正式字段落地后只作后备。
     func parse(layout: JSONValue?, inputCount: Int, width: Int, height: Int, inputNumber: (Int) -> Int) {
         let w = Float(width), h = Float(height)
-        border = MultiviewGeometry.border(height: h)
-        cellCount = 0
-        safeArea = false
-        meters = false
+        reset(width: w, height: h)
         var preset = MultiviewPreset.pgmPvwGrid
         var custom = false
         if let layout {
@@ -133,6 +165,18 @@ final class MultiviewLayoutTable {
             }
         }
         if custom { return }
+        applyPreset(preset, inputCount: inputCount, width: w, height: h, inputNumber: inputNumber)
+    }
+
+    private func reset(width w: Float, height h: Float) {
+        border = MultiviewGeometry.border(height: h)
+        cellCount = 0
+        safeArea = false
+        meters = false
+    }
+
+    /// 预设布局 → 表。
+    private func applyPreset(_ preset: MultiviewPreset, inputCount: Int, width w: Float, height h: Float, inputNumber: (Int) -> Int) {
         switch preset {
         case .pgmPvwGrid, .pgmPvw4x2, .pgmPvw2x2:
             let pvw = MultiviewGeometry.monitor(program: false, width: w, height: h)
@@ -169,7 +213,35 @@ final class MultiviewLayoutTable {
         cellCount += 1
     }
 
-    /// 自定义格子：source 是 "program" / "preview" / 数字；rect 归一化，钳到画面内；缺 rect 或 source 的格子忽略。
+    /// 自定义格子（正式字段）：`OutputSource.multiview` 的格子忽略（格子不能套自己）；rect 钳到画面内，空格子忽略。
+    private func parseCustom(_ cells: [MultiviewCell], width w: Float, height h: Float) {
+        var i = 0
+        while i < cells.count && cellCount < MultiviewLayoutTable.capacity {
+            let c = cells[i]
+            i += 1
+            var kind = MultiviewCellSpec.Kind.program
+            var input = 0
+            switch c.source {
+            case .program: kind = .program
+            case .preview: kind = .preview
+            case .input(let n):
+                guard n >= 1 else { continue }
+                kind = .input
+                input = n
+            case .multiview:
+                continue
+            }
+            let x = min(max(c.rect.x, 0), 1)
+            let y = min(max(c.rect.y, 0), 1)
+            let width = min(max(c.rect.width, 0), 1 - x)
+            let height = min(max(c.rect.height, 0), 1 - y)
+            guard width > 0, height > 0 else { continue }
+            // 与过渡键那条路径逐字相同的算式（先转 Float 再乘），两条路径的像素坐标才逐位一致
+            append(kind, input, (Float(x) * w, Float(y) * h, Float(width) * w, Float(height) * h))
+        }
+    }
+
+    /// 自定义格子（过渡键）：source 是 "program" / "preview" / 数字；rect 归一化，钳到画面内；缺 rect 或 source 的格子忽略。
     private func parseCustom(_ arr: [JSONValue], width w: Float, height h: Float) {
         var i = 0
         while i < arr.count && cellCount < MultiviewLayoutTable.capacity {
@@ -198,5 +270,19 @@ final class MultiviewLayoutTable {
             guard width > 0, height > 0 else { continue }
             append(kind, input, (Float(x) * w, Float(y) * h, Float(width) * w, Float(height) * h))
         }
+    }
+}
+
+extension MultiviewLayout {
+    /// 状态里第一个 kind = multiview 的输出的正式布局字段（提案 010）；没有为 nil。
+    public static func layoutSettings(in state: MixerState) -> MultiviewLayoutSettings? {
+        MultiviewLayoutTable.settings(in: state)
+    }
+
+    /// 正式字段版的全部格子（提案 010）。settings nil = 默认布局。
+    public static func placements(settings: MultiviewLayoutSettings?, inputs: [Int], width: Int, height: Int) -> [MultiviewCellPlacement] {
+        let table = MultiviewLayoutTable()
+        table.parse(settings: settings, inputCount: inputs.count, width: width, height: height) { inputs[$0] }
+        return placements(table: table, width: width, height: height)
     }
 }
