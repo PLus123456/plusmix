@@ -98,6 +98,46 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(StatsSummary.percentile((1...1000).map(Double.init), 0.99), 990)
     }
 
+    /// 提案 013：`StatsSummary.displays` 按 (output, kind) 分组——显示类输出会中途出现 / 消失，
+    /// 不能像 encoder 那样按下标；frames / dropped 取末行 − 首行，state 取末行与全程出现过的状态。
+    func testP3_statsSummary_displaysGroupedByOutputAndKind() throws {
+        func line(_ i: Int, _ display: [Stats.DisplayEntry]) -> Stats {
+            Stats(ts: 1000 + Double(i), tick: Tick(Int64(i) * 60), renderMs: 1, missedRender: 0, jitterMs: 0,
+                  perInput: [:], encoder: [], audio: Stats.AudioCounters(dropouts: 0, underruns: 0),
+                  rssMb: 1, cpuPct: 1, gpuPct: 0, display: display)
+        }
+        let s = StatsSummary(lines: [
+            line(0, [Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 10, dropped: 0, state: "presenting"),
+                     Stats.DisplayEntry(output: 0, kind: "monitor", frames: 5, dropped: 0, state: "presenting")]),
+            // 第 2 行：外部显示掉线，虚拟摄像头才开起来（中途出现）
+            line(1, [Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 70, dropped: 1, state: "noDisplay"),
+                     Stats.DisplayEntry(output: 0, kind: "monitor", frames: 65, dropped: 0, state: "presenting"),
+                     Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 0, dropped: 3, state: "waitingExtension")]),
+            // 第 3 行：监视器这一项消失（窗口关了）
+            line(2, [Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 130, dropped: 1, state: "presenting"),
+                     Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 55, dropped: 3, state: "publishing")]),
+        ])
+        let d = try XCTUnwrap(s.displays)
+        XCTAssertEqual(d.map { "\($0.output)/\($0.kind)" }, ["0/monitor", "3/externalDisplay", "4/virtualCamera"], "按输出编号升序、同编号按 kind")
+        let ext = try XCTUnwrap(d.first { $0.kind == "externalDisplay" })
+        XCTAssertEqual([ext.frames, ext.dropped], [120, 1], "末行 − 首行")
+        XCTAssertEqual(ext.lastState, "presenting")
+        XCTAssertEqual(ext.states, ["presenting": 2, "noDisplay": 1], "全程出现过的状态各几行")
+        let cam = try XCTUnwrap(d.first { $0.kind == "virtualCamera" })
+        XCTAssertEqual([cam.frames, cam.dropped], [55, 0], "中途出现的：只按它出现过的那几行算")
+        XCTAssertEqual(cam.lastState, "publishing")
+        let mon = try XCTUnwrap(d.first { $0.kind == "monitor" })
+        XCTAssertEqual(mon.frames, 60, "中途消失的：末次出现 − 首次出现")
+        // 往返
+        XCTAssertEqual(try JSONDecoder().decode(StatsSummary.self, from: try JSONEncoder().encode(s)), s)
+        // P3 之前的基线没有 displays 键：解出来是 nil（与 P2 的可选字段同一做法）
+        var old = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(s)) as! [String: Any]
+        old["displays"] = nil
+        XCTAssertNil(try JSONDecoder().decode(StatsSummary.self, from: try JSONSerialization.data(withJSONObject: old)).displays)
+        // 没有 display 项的文件：空数组而不是 nil
+        XCTAssertEqual(StatsSummary(lines: [line(0, []), line(1, [])]).displays, [])
+    }
+
     /// 手写 5 行 jsonl，avg / p99 / max 与手算一致。
     func testW1A_statsSummary_handWrittenJsonlMatchesHandCalculation() throws {
         let text = """

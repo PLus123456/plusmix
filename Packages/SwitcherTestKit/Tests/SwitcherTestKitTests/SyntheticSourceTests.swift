@@ -57,7 +57,9 @@ final class SyntheticSourceTests: XCTestCase {
             XCTAssertEqual(r.decoded.flash, i % 60 == 0)
             XCTAssertEqual(r.format, .nv12)
             XCTAssertEqual(r.pts, timeline.videoClock(driftPpm: 0).time(of: Tick(Int64(i))))
-            XCTAssertEqual(r.decoded.hostTimeMs, UInt32(truncatingIfNeeded: r.pts.nanoseconds / 1_000_000))
+            // 图案的毫秒字段只有 28 位（TestPattern.dataMask），比的时候要一起掩掉：
+            // 不掩的话机器连续唤醒超过 2^28 ms ≈ 3.1 天就整片红（见 reports/issues/P3-w1-testkit-hosttimems-28bit-mask.md）
+            XCTAssertEqual(r.decoded.hostTimeMs, UInt32(truncatingIfNeeded: r.pts.nanoseconds / 1_000_000) & TestPattern.dataMask)
             if i > 0 { XCTAssertGreaterThan(r.pts, records[i - 1].pts); XCTAssertGreaterThanOrEqual(r.ingress, records[i - 1].ingress) }
             let late = (r.ingress - r.pts).milliseconds
             maxLateMs = max(maxLateMs, late); minLateMs = min(minLateMs, late); sumLateMs += late
