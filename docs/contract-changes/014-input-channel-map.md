@@ -40,7 +40,7 @@ case decklink(deviceID: String, connection: DeckLinkConnection = .auto, channels
 ## 为什么不放 `InputAudioSettings`
 
 `InputAudioSettings`（路由 / 增益 / 静音 / 声像 / 延迟）是**混音侧**的参数，从 `MixerState` 快照读、运行中可改。
-声道映射是**采集侧**的：它决定输入往环里写什么，而输入对象today 不看 MixerState（契约 `Input` 协议里没有状态入口），
+声道映射是**采集侧**的：它决定输入往环里写什么，而输入对象现在不看 MixerState（契约 `Input` 协议里没有状态入口），
 改它等于重建这一路输入——和"换设备"是同一类操作。所以放在 `InputSource` 里（= 这路输入"接的是什么"）更合口径。
 如果希望它运行中可改不重建，那就是另一件事（输入要能看快照），范围比本提案大得多，建议单独提。
 
