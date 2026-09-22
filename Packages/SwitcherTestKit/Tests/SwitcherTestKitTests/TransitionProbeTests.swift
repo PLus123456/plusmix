@@ -89,7 +89,7 @@ final class TransitionProbeTests: XCTestCase {
                 let hi = lo + Double(direction == .leftToRight ? r.width : r.height)
                 return edge > lo && edge < hi
             }
-            // 解码区没被切开时，四样证据必须指向同一路；中心区与 ID 邻域分属两边也算合成帧
+            // 解码区哪块都没被切开时，这几块还得都在擦边的同一侧；中心区与 ID 邻域分属两边同样是合成帧
             let sides = rects.map { r -> Bool in
                 let mid = Double(direction == .leftToRight ? r.x : r.y) + Double(direction == .leftToRight ? r.width : r.height) / 2
                 return mid < edge      // true = 新画面那边
