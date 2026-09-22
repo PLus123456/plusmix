@@ -131,17 +131,17 @@ A（都在）/ B（只有 NDI）/ C（都不在）三种配置 `swift build` + N
 | E7–E9 | W2-D / G3 | 沿用 G3 结果 | W3 五路没动推流；重跑要 `sudo scripts/netem.sh serve` + `make gate3-net` |
 | 纯音频设备输入 | W3-E 的 Add Input 有页、没有运行实现 | 未实现 | 需要 Core Audio 输入 → 环的 `AudioDeviceInput`，归属待定（W3-A 范围外） |
 
-## 8. 等用户定的（2026-09-22 已裁定的标出来）
+## 8. 等用户定的（2026-09-22 两轮裁定后全部有了结论）
 
 1. **已定（2026-09-22）**：§5 的两条归属——App/ 收口 + 接线的 13 个文件由用户认领、列进 OWNERSHIP 的 G4 行；project.yml 进 G4 行。`make lint BRANCH=g4` 全绿。
 2. **已批（2026-09-22）**：提案 007 / 008 / 009 / 010 / 012 一次批了（011 早已落地），由一次契约会话 P3 落地（prompt 61，分支 p3-contracts，从 G4 合入后的 main 开），顺序 007 → 010 → 012 → 008 → 009；
-   续做 prompt 改号：W1-A3 = 62（不依赖 P3，可并行）、W3-E2 = 63（从 P3 合入后的 main 开，四个提案留给界面的项都写进去了）。012"顺带的疑问"1（每路 AFV 参与开关）**没拍板**，P3 不做。
+   续做 prompt 改号：W1-A3 = 62（不依赖 P3，可并行）、W3-E2 = 63（从 P3 合入后的 main 开，四个提案留给界面的项都写进去了）。012"顺带的疑问"1（每路 AFV 参与开关）**同日第二轮批了**：`InputAudioSettings.afv: Bool = true`，加进 P3（prompt 61 第 4 条），界面归 W3-E2。
 3. **已确认（2026-09-22）**：§6.2 的两处口径——frameprobe 在播段 +1 帧相位余量按每个连续在播段各算（测试标准 §3 V4）；V1 的 2 ms 本机参考线自 G4 起只作参考、W4-A 的 L5 以 baselines/g4-m5max.json 为基线（测试标准修订行已注明）。
-4. W3-A 报告 §4 的两条口径：NDI 的 pts = 到达 − 抖动 + J × 帧间隔（把抖动缓冲用 pts 表达，引擎的到达余量不重复付）；驱动 / 设备 / 源不在时用 noSignal + 文案而不是 error（会自己好的用 noSignal）。G4 按 W3-A 的做法跑了 NDI 回环，建议接受。
-5. W3-C 报告 §4：外部显示 / 虚拟摄像头的帧数不在 Stats 里（显示类输出没有位置）；显示器 ID 放 `extra["displayID"]`；Aux 全分辨率归谁（渲染器出每路纹理 vs 本包自己画）。G4 把 W3-E 的键名对齐到 displayID，其余没动。
-6. W3-B 报告 §4：Stinger 第 0 拍 / cutAtTick 的注释、`RenderedFrame.preview / multiview` 由谁决定开（现在是 `MetalRendererOptions`，headless 没开 NV12 输出）。
-7. W3-D 报告 §4：`reportedVersion` 报本产品版本、Stream Deck 插件 UUID `com.plusmix.switcher` 是否随 G5 换。
-8. 纯音频设备输入的归属（§7 最后一行）。
+4. **已定（2026-09-22，用户"4–8 也都做"，按 G4 建议）**：W3-A 报告 §4 第 2 / 4 条两条口径接受——NDI 的 pts = 到达 − 抖动 + J × 帧间隔（音频块同加 J × T）；驱动 / 设备 / 源不在用 noSignal + 文案、不会自己好的才是 error；连 deviceID 格式（§4 第 3 条）一起由 P3 写进契约注释与 CONTRACTS（prompt 61 第 5 / 7 条）。
+5. **已定（2026-09-22，用户"4–8 也都做"，按 G4 建议）**：W3-C 报告 §4——显示类输出进 Stats（`display[]`）+ 显示器 ID 正式字段（`OutputSettings.display`）→ 提案 013（已批，P3 落地，填数方 External / VirtualCamera / App StatsHub）；Aux 全分辨率由 SwitcherOutputs 自己画输入帧、不动渲染器 → 新会话 W3-C2（prompt 65，分支 w3-outputs-3，从 P3 后开）。
+6. **已定（2026-09-22，用户"4–8 也都做"，按 G4 建议）**：W3-B 报告 §4 第 3 / 4 / 5 条——Stinger cutAtTick 的两句进注释；OutputSource.multiview 在自定义格子里被忽略写进注释；RenderedFrame.preview / multiview 改成"状态里有 enabled 且 source = preview / multiview 的输出就自动填"，MetalRendererOptions 保留为强制开——都在 P3（渲染器一行走胶水，prompt 61 第 7 条）。
+7. **已定（2026-09-22，用户"4–8 也都做"，按 G4 建议）**：W3-D 报告 §4 第 4 / 5 条——`reportedVersion` 继续报本产品版本；Stream Deck 插件 UUID 随 W4-B 定正式 bundle id 域名时一起换（prompt 71 第 6 条，OWNERSHIP W4-B 行加了 Tools/streamdeck-plugin/），不等 G5。
+8. **已定（2026-09-22，用户"4–8 也都做"，按 G4 建议）**：纯音频设备输入归新会话 W2-A2（prompt 64，分支 w2-inputs-2，SwitcherInputs 里实现 AudioDeviceInput + 设备列表 + harness），App 接线归 W3-E2（prompt 63 第 7 条）。
 
 ## 9. 给下一个会话的坑
 

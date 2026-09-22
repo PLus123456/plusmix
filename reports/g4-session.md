@@ -83,3 +83,9 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
    012 的"顺带的疑问"1（每路 AFV 参与开关）用户没提，P3 不做，仍等拍板。
 
 没动的：§8 第 4–8 条（W3-A / W3-C / W3-B / W3-D 报告 §4 的口径、纯音频设备输入归属）仍等用户。
+
+**第二轮（同日）**：用户"每路 AFV 开关批了，加进 P3；4–8 也都做；之后你来合并"。落地：
+- 每路 AFV → prompt 61 第 4 条（`InputAudioSettings.afv`，读数方 AudioEngine / AudioProgramGate，P3 行加 Integration/ 与 Engine Audio*），界面开关 → prompt 63。
+- §8 第 4–8 条全部按 G4 建议定下：W3-A 两条口径 + deviceID 格式 → P3 注释 / CONTRACTS；W3-C → 新提案 **013**（display[] + OutputSettings.display，已批，P3 落地）+ 新会话 **W3-C2 = prompt 65**（Aux 全分辨率由本包自己画，分支 w3-outputs-3）；
+  W3-B 三条 → P3（渲染器一行走胶水）；W3-D → reportedVersion 不动、插件 UUID 随 W4-B 的 bundle id 定（prompt 71 第 6 条、OWNERSHIP W4-B 行加 Tools/streamdeck-plugin/）；纯音频设备输入 → 新会话 **W2-A2 = prompt 64**（分支 w2-inputs-2）。
+- g4 由本会话按用户授权 `--no-ff` 合入 main（记录见下一段与 git log）。
