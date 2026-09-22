@@ -1,7 +1,7 @@
 # 010 叠加通道的边框 / 锚点 / PVW 预览标志、滑入方向，多画面布局的正式字段
 
 提出会话 / 分支：W3-B / w3-compositor2（2026-09-19）
-状态：**已批**（用户 2026-09-22，按 G4 报告 §8 第 2 条。由契约会话 P3（docs/plan/prompts/61）落地 A1–A3 正式字段；A4 由 P3 定（建议加 `setOverlayDecoration(channel:border:anchor:previewOn:)`，多画面布局走 setOutputSettings）；渲染器改读正式字段、下面的"过渡做法"保留一个版本作后备；旧 Show 的一次性转换放哪由 P3 定；设置面板归 W3-E2 / prompt 63。）
+状态：**已落地**（p3-contracts，2026-09-23，提交 cb85fbe…c73aab2）：A1–A3 的正式字段全部加上（`OverlayState.border / anchor / previewOn`、`OverlayAnimation.slideFrom`、`OutputSettings.multiview: MultiviewLayoutSettings?`，`MultiviewCell.source` 复用 `OutputSource`、其中 `.multiview` 被渲染器忽略）。**A4 由 P3 定：加 `Command.setOverlayDecoration(channel:border:anchor:previewOn:)`**——扩 `setOverlay` 的参数会改它已经在用的 JSON 形态；多画面布局走现有 `setOutputSettings`。reducer 规则：通道不在 1–4 拒绝，三项整体替换（相同值 reducer 原样返回，回执 applied = false）。渲染器的两个单一读取点改成正式字段优先、过渡做法（`effects["border"]` / `extra["layout"]`）保留一个版本作后备，两条路径逐像素相同（有用例）；`MetalRendererOptions.overlaysInPreview` 保留为"全部预览"总开关，与每通道 `previewOn` 取或。**旧 Show 的一次性转换由 P3 定：放在契约的 `Show.load` 里（`Show.migratingLegacyKeys()`）**，App / headless / 测试读同一份，幂等、正式字段已有值的不动、搬完清旧键。`scenarios/g4-show.json` 由 `make-show --preset g4` 重新生成（格子 rect 逐位不变）。设置面板归 W3-E2 / prompt 63。
 
 ## A. 改什么（类型）
 

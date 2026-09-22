@@ -1,7 +1,7 @@
 # 008 InputSource 的 DeckLink / NDI 来源参数：输入接口、带宽模式、抖动缓冲深度
 
 提出会话 / 分支：W3-A / w3-inputs2（worktree 原名 claude/decklink-ndi-inputs-da4ad2，已改名）
-状态：**已批**（用户 2026-09-22，按 G4 报告 §8 第 2 条。由契约会话 P3（docs/plan/prompts/61）落地：两个 case 加关联值 + 两个枚举 + InputSource 显式 init(from:)，W3-A 的 DeckLinkInput / NDIInput 改从 case 取值填 Options（Options 保留为覆盖），App InputFactory / headless 构造点跟改；Add Input 表单里选接口 / 带宽 / 抖动缓冲归 W3-E2 / prompt 63）。
+状态：**已落地**（p3-contracts，2026-09-23，提交 cb85fbe…c73aab2）：两个 case 加带默认值的关联值 + `DeckLinkConnection` / `NDIBandwidth` 两个枚举，`InputSource` 写了显式 `init(from:)`（只有 decklink / ndi 自己解，其余 case 交给一个形态逐字相同的内部枚举，JSON 一个字节没变，键名快照钉住）。`DeckLinkInput` / `NDIInput` 的 `init(config:)` 从 case 取值填 `Options`；Options 保留为覆盖的判据：DeckLink 的 `connection` 非 nil = 显式给了，NDI 的 `bandwidth` / `jitterBufferFrames` 与默认不同 = 显式给了（两项的默认值与契约默认相同，只能这么判，已写进注释并有用例）。App `InputFactory` 走的就是 `init(config:)` 不用改；headless 的 NDI 构造点跟改（`--ndi-jitter-frames` 仍是覆盖）。`deviceID` 的三种格式写进了 case 注释与 CONTRACTS.md §2.4。Add Input 表单归 W3-E2 / prompt 63。
 
 ## 改什么
 
