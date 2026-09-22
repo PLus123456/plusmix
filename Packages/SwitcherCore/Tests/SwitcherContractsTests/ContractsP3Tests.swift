@@ -276,6 +276,17 @@ final class ContractsP3Tests: XCTestCase {
         XCTAssertEqual(kept.outputs[0].settings.multiview?.preset, "4x4")
         XCTAssertEqual(kept.outputs[1].settings.display, DisplayOutputSettings(displayID: 1, fallbackToMain: false))
 
+        // 非有限 / 越界的数不会崩（JSON 解不出 NaN，但内存里的 JSONValue 可以带）
+        var junk = state
+        junk.inputs[0].settings.effects = [EffectSlot(id: OverlayBorder.legacyEffectID,
+                                                      params: ["width": .number(.nan), "color": .array([.number(.infinity), -5, 999])])]
+        junk.outputs[0].settings.extra[MultiviewLayoutSettings.legacyExtraKey] =
+            .object(["cells": .array([.object(["source": .number(1e20), "rect": .object(["x": 0, "y": 0, "width": 1, "height": 1])])])])
+        let hardened = Show(name: "脏", state: junk).migratingLegacyKeys()
+        XCTAssertEqual(hardened.mixer.overlays[0].border?.color, RGB8(red: 0, green: 0, blue: 255), "非有限的分量给 0，越界的钳住")
+        XCTAssertEqual(hardened.mixer.overlays[0].border?.width, OverlayBorder.defaultWidth, "NaN 宽度当没给")
+        XCTAssertEqual(hardened.outputs[0].settings.multiview?.custom, [], "编号超出范围的格子忽略（不崩）")
+
         // 没有叠加通道用那路输入时，效果格留着（渲染器的后备路径还认它）
         var unused = state
         unused.overlays[0].input = nil

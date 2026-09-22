@@ -141,7 +141,8 @@ public struct Show: Hashable, Codable, Sendable {
             movedFrom.insert(n)
         }
         for i in show.inputs.indices where movedFrom.contains(show.inputs[i].number) {
-            show.inputs[i].settings.effects.removeAll { $0.id == OverlayBorder.legacyEffectID }
+            // 只清掉搬走的那种（启用的）；停用的边框格是"配过但关了"，留着
+            show.inputs[i].settings.effects.removeAll { $0.enabled && $0.id == OverlayBorder.legacyEffectID }
         }
         return show
     }
@@ -211,7 +212,7 @@ extension MultiviewLayoutSettings {
                     switch c["source"] {
                     case .string("program")?: source = .program
                     case .string("preview")?: source = .preview
-                    case .number(let n)? where n >= 1: source = .input(number: Int(n))
+                    case .number(let n)? where n >= 1 && n < 1_000_000: source = .input(number: Int(n))
                     default: continue
                     }
                     func num(_ k: String) -> Double { if case .number(let d)? = r[k] { return d } else { return 0 } }
@@ -238,10 +239,11 @@ extension OverlayBorder {
     /// 效果格参数 → 正式字段：width（占节目高比例）、color（[r, g, b] 0–255）。
     public init(legacyParams params: [String: JSONValue]) {
         self.init()
-        if case .number(let w)? = params["width"] { width = min(max(w, 0), 0.1) }
+        if case .number(let w)? = params["width"], w.isFinite { width = min(max(w, 0), 0.1) }
         if case .array(let a)? = params["color"], a.count >= 3 {
             func comp(_ i: Int) -> UInt8 {
-                if case .number(let v) = a[i] { return UInt8(min(max(v, 0), 255)) } else { return 0 }
+                guard case .number(let v) = a[i], v.isFinite else { return 0 }
+                return UInt8(min(max(v, 0), 255))
             }
             color = RGB8(red: comp(0), green: comp(1), blue: comp(2))
         }
