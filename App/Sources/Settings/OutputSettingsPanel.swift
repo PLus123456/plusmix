@@ -47,13 +47,11 @@ final class OutputSettingsModel: ObservableObject {
 
     func nextOutputNumber() -> Int { (state.outputs.map(\.number).max() ?? 0) + 1 }
 
-    /// 整体替换一个输出（改名 / 改 enabled 时用）：删掉再加回同编号，设置带着。
-    private func replace(_ output: OutputState) {
-        send?(.removeOutput(output: output.number))
-        send?(.addOutput(config: output))
-        var s = state
-        if let i = s.outputs.firstIndex(where: { $0.number == output.number }) { s.outputs[i] = output }
-        state = s
+    /// 改开关（提案 012 的 setOutputEnabled）：本地先改，再发命令。record / stream 走 startRecord / startStream，被 reducer 拒。
+    private func setEnabled(_ number: Int, _ on: Bool) {
+        guard let i = state.outputs.firstIndex(where: { $0.number == number }), state.outputs[i].enabled != on else { return }
+        state.outputs[i].enabled = on
+        send?(.setOutputEnabled(output: number, on: on))
     }
 
     /// 改设置：本地先改（表单立刻响应），再发 setOutputSettings。
@@ -71,12 +69,13 @@ final class OutputSettingsModel: ObservableObject {
         send?(.removeOutput(output: number))
     }
 
+    /// 改名（提案 012 的 renameOutput）：不再删了重加，运行表不会看到"消失 → 再出现"。
     func rename(_ number: Int, _ name: String) {
-        guard var o = state.output(number) else { return }
+        guard let i = state.outputs.firstIndex(where: { $0.number == number }) else { return }
         let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, trimmed != o.name else { return }
-        o.name = trimmed
-        replace(o)
+        guard !trimmed.isEmpty, trimmed != state.outputs[i].name else { return }
+        state.outputs[i].name = trimmed
+        send?(.renameOutput(output: number, name: trimmed))
     }
 
     private func add(_ output: OutputState) {
@@ -164,13 +163,19 @@ final class OutputSettingsModel: ObservableObject {
         let n = nextOutputNumber()
         let screenName = NSScreen.screen(number: screenNumber)?.localizedName ?? "\(screenNumber)"
         add(OutputState(number: n, kind: .externalDisplay, name: L("outputSettings.external.name", screenName), enabled: true,
-                        settings: OutputSettings(source: source, extra: [OutputExtras.displayNumber: .number(Double(screenNumber))])))
+                        // fallbackToMain 显式写 false：保持 G4 的行为（显示器不在就收起窗口等它回来）。
+                        // 契约的默认是 true，面板上的开关归 W3-E2。
+                        settings: OutputSettings(source: source, display: DisplayOutputSettings(displayID: screenNumber, fallbackToMain: false))))
         return n
     }
 
     func setExternalDisplay(_ number: Int, screenNumber: UInt32?, source: OutputSource?) {
         updateOutput(number) { s in
-            if let screenNumber { s.extra[OutputExtras.displayNumber] = .number(Double(screenNumber)) }
+            if let screenNumber {
+                var d = s.display ?? DisplayOutputSettings()
+                d.displayID = screenNumber
+                s.display = d
+            }
             if let source { s.source = source }
         }
     }
@@ -201,13 +206,9 @@ final class OutputSettingsModel: ObservableObject {
     var virtualCameraOutput: OutputState? { state.outputs.first { $0.kind == .virtualCamera } }
 
     func setVirtualCamera(enabled: Bool, source: OutputSource) {
-        if var o = virtualCameraOutput {
+        if let o = virtualCameraOutput {
             if o.settings.source != source { updateOutput(o.number) { $0.source = source } }
-            if o.enabled != enabled {
-                o.enabled = enabled
-                o.settings.source = source
-                replace(o)
-            }
+            setEnabled(o.number, enabled)
         } else {
             add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: source)))
         }

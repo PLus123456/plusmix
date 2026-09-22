@@ -114,25 +114,25 @@ final class MixerModel: ObservableObject {
     func setBusMute(_ bus: Bus, on: Bool) { send?(.busMute(bus: bus, on: on)) }
     func setAFV(on: Bool) { send?(.setAFV(on: on)) }
 
-    /// 监听点：契约没有命令，过渡期 loadShow 整体替换（提案 012）。
+    /// 监听方式 PFL / AFL（提案 012 的 setMonitorMode；不再 loadShow 整体替换，转场进行中也不会被 resetTransientState 打断）。
     func setMonitorMode(_ mode: MonitorMode) {
         guard state.audio.monitorMode != mode else { return }
-        var s = state
-        s.audio.monitorMode = mode
-        replaceWholeState(s)
+        state.audio.monitorMode = mode
+        send?(.setMonitorMode(mode: mode))
     }
 
-    /// 总线效果链：同上。
+    /// 总线效果链（提案 012 的 setBusEffects）。
     func setBusEffects(_ bus: Bus, _ effects: [EffectSlot]) {
         guard let i = state.audio.buses.firstIndex(where: { $0.bus == bus }), state.audio.buses[i].effects != effects else { return }
-        var s = state
-        s.audio.buses[i].effects = effects
-        replaceWholeState(s)
+        state.audio.buses[i].effects = effects
+        send?(.setBusEffects(bus: bus, effects: effects))
     }
 
-    private func replaceWholeState(_ s: MixerState) {
-        state = s
-        send?(.loadShow(show: Show(name: "", state: s)))
+    /// 某一路参不参与 AFV 门控（`InputAudioSettings.afv`，用户 2026-09-22 批）：走 setInputSettings，没有单独的命令。
+    func setInputAFV(_ input: Int, on: Bool) {
+        guard let i = state.inputs.firstIndex(where: { $0.number == input }), state.inputs[i].settings.audio.afv != on else { return }
+        state.inputs[i].settings.audio.afv = on
+        send?(.setInputSettings(input: input, settings: state.inputs[i].settings))
     }
 
     func busState(_ bus: Bus) -> BusState { state.audio.buses.first { $0.bus == bus } ?? BusState(bus: bus) }

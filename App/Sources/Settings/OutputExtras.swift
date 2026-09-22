@@ -1,22 +1,21 @@
-// `OutputSettings.extra`（契约里各输出会话的附加项，自由 JSON）里 App 用到的键，集中在这里免得散落：
-//   外部显示：displayID = 显示器编号（NSScreenNumber / CGDirectDisplayID）——键名以 W3-C 的运行表为准（ExternalDisplaySpec.displayIDKey，
-//   G4 合并时把 W3-E 原来的 display.number 改成它，面板加的输出 AuxOutputRuntime 才会开窗口）；fallbackToMain 是 W3-C 的另一个键，面板不碰
+// `OutputSettings.extra`（契约里各输出会话的附加项，自由 JSON）里 App 还在用的键，集中在这里免得散落：
 //   NDI 发送：ndi.groups = 分组；ndi.conversion 是 W2-D 定的（NDISender.Configuration.Conversion.extraKey）
-//   多画面：layout = 布局名（W3-B 的多画面布局，App 只存不解释）
+// 提案 010 / 013 落地后，显示器 ID 与多画面布局都是正式字段（`OutputSettings.display` / `.multiview`），不再走 extra：
+// 读的时候正式字段优先、过渡键作后备（保留一个版本），写的时候只写正式字段；旧节目文件由 `Show.load` 一次性搬迁。
 import AppKit
 import SwitcherContracts
 import SwitcherExternal
 
 enum OutputExtras {
-    static let displayNumber = ExternalDisplaySpec.displayIDKey
     static let ndiGroups = "ndi.groups"
     static let ndiConversion = "ndi.conversion"
-    static let multiviewLayout = "layout"
 
     static let ndiConversions = ["auto", "gpu", "cpu"]
 
+    /// 外部显示输出的显示器编号（提案 013 的正式字段；过渡键 `extra["displayID"]` 作后备）。
     static func displayNumber(of output: OutputState) -> UInt32? {
-        if case .number(let n)? = output.settings.extra[displayNumber], n >= 0, n <= Double(UInt32.max) { return UInt32(n) }
+        if let id = output.settings.display?.displayID { return id }
+        if case .number(let n)? = output.settings.extra[ExternalDisplaySpec.displayIDKey], n >= 0, n <= Double(UInt32.max) { return UInt32(n) }
         return nil
     }
 
