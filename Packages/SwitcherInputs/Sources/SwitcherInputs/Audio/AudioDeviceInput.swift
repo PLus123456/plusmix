@@ -157,6 +157,7 @@ public final class AudioDeviceInput: Input, HotplugMonitorable, @unchecked Senda
     private var hardwareSubscription: AudioInputDevices.Subscription?
     private var pollTimer: DispatchSourceTimer?
     private var restoreSampleRate: Double?
+    private var restoreSampleRateDevice: AudioObjectID = 0
 
     // MARK: 生命周期
 
@@ -280,7 +281,8 @@ public final class AudioDeviceInput: Input, HotplugMonitorable, @unchecked Senda
         buildSession(device: device, info: info)
     }
 
-    private func buildSession(device: AudioObjectID, info: AudioInputDeviceInfo) {
+    private func buildSession(device: AudioObjectID, info initialInfo: AudioInputDeviceInfo) {
+        var info = initialInfo
         deviceNameBox.withLock { $0 = info.name }
         var format = AudioInputDevices.inputStreamFormat(device)
         guard format.mFormatID == kAudioFormatLinearPCM, format.mChannelsPerFrame > 0 else {
@@ -300,8 +302,11 @@ public final class AudioDeviceInput: Input, HotplugMonitorable, @unchecked Senda
             let previous = rate
             if AudioInputDevices.setNominalSampleRate(device, target, timeout: HostDuration(milliseconds: 1500)) {
                 restoreSampleRate = previous
+                restoreSampleRateDevice = device
                 rate = target
                 format = AudioInputDevices.inputStreamFormat(device)
+                // IO 块大小可能跟着采样率变，后面的槽大小 / 泵周期 / 看门狗都按新的算
+                info = AudioInputDevices.info(of: device) ?? info
             }
         }
         var converter: AudioRateConverter?
@@ -397,12 +402,14 @@ public final class AudioDeviceInput: Input, HotplugMonitorable, @unchecked Senda
         convertingBox.store(false, ordering: .relaxed)
     }
 
-    /// 我们改过设备采样率就还原（别的程序还在用同一台设备）。
+    /// 我们改过设备采样率就还原（别的程序还在用同一台设备）。记的是"改过的那台"，
+    /// 不是 `deviceID`——会话在建起来之前失败时 `deviceID` 还是 0。
     private func restoreDeviceSampleRate() {
-        if let previous = restoreSampleRate, deviceID != 0 {
-            AudioInputDevices.setNominalSampleRate(deviceID, previous, timeout: HostDuration(milliseconds: 500))
+        if let previous = restoreSampleRate, restoreSampleRateDevice != 0 {
+            AudioInputDevices.setNominalSampleRate(restoreSampleRateDevice, previous, timeout: HostDuration(milliseconds: 500))
         }
         restoreSampleRate = nil
+        restoreSampleRateDevice = 0
     }
 
     /// 交接区每槽的帧数：设备块大小的两倍，钳在 1024…4096。
