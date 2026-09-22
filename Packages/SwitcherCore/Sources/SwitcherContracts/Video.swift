@@ -117,6 +117,14 @@ public struct Frame: @unchecked Sendable {
     /// IOSurface 背后的像素，NV12 / BGRA / UYVY 之一。
     public let pixelBuffer: CVPixelBuffer
     /// 入口打的戳：这帧对应的采集时刻，已换算成 host time（铁律 5）。挑帧规则比的就是它。
+    ///
+    /// 拿不到真正采集时刻的源按下面的口径折算（用户 2026-09-22 定）：
+    /// - **网络源（NDI 之类）**：发送端的时间戳是另一台机器的钟、且是"提交"时刻，不能用。
+    ///   pts = 到达时刻 − 本帧抖动 + J × 帧间隔（J = `InputSource.ndi` 的 `jitterBufferFrames`）——
+    ///   走最快路径到的帧 pts 比到达晚 J 帧，慢的帧被抖动那一项抵掉。抖动缓冲用 pts 表达而不是扣着帧不推，
+    ///   是唯一不会和引擎的到达余量重复付延迟的做法（扣着不推、推时打"真实"pts 的话，余量估计器会把扣的时间当成 d 再加一遍）。
+    ///   同一路的音频块 hostTime 同样加 J × 帧间隔，否则 A/V 差 J 帧。
+    /// - **文件输入**：pts = 拍点 − 半帧（W2-A 口径）。
     public let pts: HostTime
     /// 这帧的标称时长（输入帧率的倒数）。
     public let duration: HostDuration

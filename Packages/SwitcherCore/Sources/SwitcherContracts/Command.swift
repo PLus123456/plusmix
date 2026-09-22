@@ -1,6 +1,8 @@
 // 命令（设计方案 §9.1）：UI、快捷键、MIDI、API 都只发命令，不直接改状态。
 
 /// 一条命令的内容。覆盖 §9.1 列出的全部，另加几条后续会话必然要用的（转场选择、总线、输出与叠加的设置）。
+/// 32 个 case（P3 按提案 010 / 012 加了 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、
+/// renameOutput、setInputSource；对照见 CONTRACTS.md §8）。
 /// JSON 形态由 Swift 合成的 Codable 决定：`{"fade":{"durationTicks":30}}`、无参数的是 `{"cut":{}}`；
 /// 快照钉在 SwitcherContractsTests 里，是 HTTP API 的 wire format。
 public enum Command: Hashable, Codable, Sendable {
@@ -25,13 +27,21 @@ public enum Command: Hashable, Codable, Sendable {
     case overlay(channel: Int, on: Bool, input: Int?)
     /// 改叠加通道的位置尺寸与进出动画。
     case setOverlay(channel: Int, rect: NormalizedRect, animation: OverlayAnimation)
+    /// 改叠加通道的装饰：边框（nil = 不画）、锚点、PVW 预览标志（提案 010 A4，P3 定）。
+    /// 与 setOverlay 分开是为了不改它的 JSON 形态（W2-C 的客户端已经在用）。
+    case setOverlayDecoration(channel: Int, border: OverlayBorder?, anchor: OverlayAnchor, previewOn: Bool)
 
     // 音频
     case audioGain(input: Int, dB: Double)
     case mute(input: Int, on: Bool)
     case busGain(bus: Bus, dB: Double)
     case busMute(bus: Bus, on: Bool)
+    /// AFV 全局总开关。每路参不参与由 `InputAudioSettings.afv` 定（走 setInputSettings）。
     case setAFV(on: Bool)
+    /// 耳机监听方式 PFL / AFL（提案 012）。监听点（延迟线前 / 后）是 `AudioState.monitorPoint`，走 Show，不是这条。
+    case setMonitorMode(mode: MonitorMode)
+    /// 整体替换一条总线的效果链（提案 012）。链顺序 = 处理顺序，`enabled = false` 的格旁路。
+    case setBusEffects(bus: Bus, effects: [EffectSlot])
 
     // 输出（output = OutputState.number；kind 不匹配的命令被拒）
     case startRecord(output: Int)
@@ -39,6 +49,11 @@ public enum Command: Hashable, Codable, Sendable {
     /// §9.1 的 startStream(dest)：dest 就是编号为 output 的 stream 输出，其 url / key 在它的设置里。
     case startStream(output: Int)
     case stopStream(output: Int)
+    /// 非录制 / 推流输出（ndi / externalDisplay / virtualCamera / multiview）的目标开关（提案 012）。
+    /// record / stream 被拒：它们走 startRecord / startStream，语义与起止拍绑定。
+    case setOutputEnabled(output: Int, on: Bool)
+    /// 改输出显示名（提案 012）。
+    case renameOutput(output: Int, name: String)
 
     // 输入表
     /// 整体替换一路输入的设置（reducer 先 `clamped()`）。
@@ -47,6 +62,9 @@ public enum Command: Hashable, Codable, Sendable {
     /// 编号已存在则拒绝。
     case addInput(config: InputConfig)
     case removeInput(input: Int)
+    /// 换一路输入的来源（提案 012）：编号、名字、设置、PGM / PVW / 叠加引用全部保留，kind 由 source 推出。
+    /// 与 removeInput + addInput 的区别就在这里——后者会清掉 PGM / PVW / 叠加对它的引用，直播中不可接受。
+    case setInputSource(input: Int, source: InputSource)
 
     // 输出表
     case addOutput(config: OutputState)

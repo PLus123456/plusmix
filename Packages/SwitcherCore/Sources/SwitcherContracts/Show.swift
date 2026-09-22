@@ -106,17 +106,44 @@ public struct Show: Hashable, Codable, Sendable {
     public func save() throws -> Data { try Show.fileEncoder.encode(self) }
 
     /// 读文件：先看 schemaVersion，当前版本直接解，旧版本走 `migrate`，缺字段或未知版本抛错。
+    /// 解出来之后做一次性的过渡键搬迁（`migratingLegacyKeys()`），所以 App / headless 都不用各写一份。
     public static func load(from data: Data) throws -> Show {
         struct Header: Decodable { let schemaVersion: Int? }
         let header: Header
         do { header = try fileDecoder.decode(Header.self, from: data) } catch { throw ShowError.malformed("不是 JSON 对象：\(error)") }
         guard let version = header.schemaVersion else { throw ShowError.malformed("缺少 schemaVersion") }
         if version == currentSchemaVersion {
-            let show = try fileDecoder.decode(Show.self, from: data)
+            let show = try fileDecoder.decode(Show.self, from: data).migratingLegacyKeys()
             try show.makeState().validate()
             return show
         }
         return try migrate(from: try fileDecoder.decode(JSONValue.self, from: data), schemaVersion: version)
+    }
+
+    /// 过渡键 → 正式字段的一次性搬迁（提案 010 / 013；`schemaVersion` 不升，全部字段带默认值）。
+    /// 幂等：正式字段已经有值的不动；搬完清掉旧键，写出只写正式字段。放在这里是为了 App / headless / 测试读同一份。
+    ///
+    /// - `OutputSettings.extra["layout"]` → `OutputSettings.multiview`（010）；
+    /// - `OutputSettings.extra["displayID"]` / `["fallbackToMain"]` → `OutputSettings.display`（013）；
+    /// - 某路输入效果链里的 `EffectSlot(id: "border")` → 用到它的叠加通道的 `OverlayState.border`（010）。
+    ///   没有叠加通道用这路输入时不动（渲染器的后备路径还认它）。
+    public func migratingLegacyKeys() -> Show {
+        var show = self
+        for i in show.outputs.indices { show.outputs[i].settings = show.outputs[i].settings.migratingLegacyKeys() }
+        // 边框：叠加通道 → 它用的输入 → 那路效果链里第一个启用的 "border" 格
+        var movedFrom = Set<Int>()
+        for k in show.mixer.overlays.indices {
+            guard show.mixer.overlays[k].border == nil, let n = show.mixer.overlays[k].input,
+                  let input = show.inputs.first(where: { $0.number == n }),
+                  let slot = input.settings.effects.first(where: { $0.enabled && $0.id == OverlayBorder.legacyEffectID })
+            else { continue }
+            show.mixer.overlays[k].border = OverlayBorder(legacyParams: slot.params)
+            movedFrom.insert(n)
+        }
+        for i in show.inputs.indices where movedFrom.contains(show.inputs[i].number) {
+            show.inputs[i].settings.effects.removeAll { $0.id == OverlayBorder.legacyEffectID }
+        }
+        return show
     }
 
     /// 迁移占位：目前只有 v1，没有旧版本可迁。将来出 v2 时在这里逐级升级（v1 → v2 → …），旧版本文件要能读（设计方案 §4）。
@@ -124,11 +151,99 @@ public struct Show: Hashable, Codable, Sendable {
         switch schemaVersion {
         case currentSchemaVersion:
             let data = try JSONEncoder().encode(document)
-            let show = try fileDecoder.decode(Show.self, from: data)
+            let show = try fileDecoder.decode(Show.self, from: data).migratingLegacyKeys()
             try show.makeState().validate()
             return show
         default:
             throw ShowError.unsupportedSchemaVersion(schemaVersion)
+        }
+    }
+}
+
+extension OutputSettings {
+    /// `extra` 里的过渡键 → 正式字段（提案 010 / 013）。正式字段已有值的不动；搬完清掉旧键。幂等。
+    public func migratingLegacyKeys() -> OutputSettings {
+        var s = self
+        if s.multiview == nil, let v = s.extra[MultiviewLayoutSettings.legacyExtraKey] {
+            s.multiview = MultiviewLayoutSettings(legacyValue: v)
+        }
+        s.extra.removeValue(forKey: MultiviewLayoutSettings.legacyExtraKey)
+        if s.display == nil {
+            var displayID: UInt32?
+            var fallback = false
+            var found = false
+            if case .number(let n)? = s.extra[DisplayOutputSettings.legacyDisplayIDKey], n >= 0, n <= Double(UInt32.max) {
+                displayID = UInt32(n)
+                found = true
+            }
+            if case .bool(let b)? = s.extra[DisplayOutputSettings.legacyFallbackKey] {
+                fallback = b
+                found = true
+            }
+            // 过渡键的默认是"不退回"（`ExternalDisplaySpec` 的 false），正式字段的默认是"退回"；
+            // 只有出现过旧键的才搬，搬的时候按旧键的原值走，不改语义。
+            if found { s.display = DisplayOutputSettings(displayID: displayID, fallbackToMain: fallback) }
+        }
+        s.extra.removeValue(forKey: DisplayOutputSettings.legacyDisplayIDKey)
+        s.extra.removeValue(forKey: DisplayOutputSettings.legacyFallbackKey)
+        return s
+    }
+}
+
+extension MultiviewLayoutSettings {
+    /// 过渡键名（`OutputSettings.extra`）。
+    public static let legacyExtraKey = "layout"
+
+    /// 过渡键的值 → 正式字段：字符串 = 预设名；对象 = {preset / cells / safeArea / meters}；认不出的给默认布局。
+    public init(legacyValue v: JSONValue) {
+        self.init()
+        switch v {
+        case .string(let name):
+            preset = name
+        case .object(let o):
+            if case .string(let name)? = o["preset"] { preset = name }
+            if case .bool(let b)? = o["safeArea"] { safeArea = b }
+            if case .bool(let b)? = o["meters"] { meters = b }
+            if case .array(let arr)? = o["cells"] {
+                for e in arr {
+                    guard case .object(let c) = e, case .object(let r)? = c["rect"] else { continue }
+                    let source: OutputSource
+                    switch c["source"] {
+                    case .string("program")?: source = .program
+                    case .string("preview")?: source = .preview
+                    case .number(let n)? where n >= 1: source = .input(number: Int(n))
+                    default: continue
+                    }
+                    func num(_ k: String) -> Double { if case .number(let d)? = r[k] { return d } else { return 0 } }
+                    custom.append(MultiviewCell(source: source,
+                                                rect: NormalizedRect(x: num("x"), y: num("y"), width: num("width"), height: num("height"))))
+                }
+            }
+        default:
+            break
+        }
+    }
+}
+
+extension DisplayOutputSettings {
+    /// 过渡键名（`OutputSettings.extra`；W3-C 的 `ExternalDisplaySpec.displayIDKey` / `fallbackKey`）。
+    public static let legacyDisplayIDKey = "displayID"
+    public static let legacyFallbackKey = "fallbackToMain"
+}
+
+extension OverlayBorder {
+    /// 过渡做法里边框效果格的 id（`InputSettings.effects`）。
+    public static let legacyEffectID = "border"
+
+    /// 效果格参数 → 正式字段：width（占节目高比例）、color（[r, g, b] 0–255）。
+    public init(legacyParams params: [String: JSONValue]) {
+        self.init()
+        if case .number(let w)? = params["width"] { width = min(max(w, 0), 0.1) }
+        if case .array(let a)? = params["color"], a.count >= 3 {
+            func comp(_ i: Int) -> UInt8 {
+                if case .number(let v) = a[i] { return UInt8(min(max(v, 0), 255)) } else { return 0 }
+            }
+            color = RGB8(red: comp(0), green: comp(1), blue: comp(2))
         }
     }
 }

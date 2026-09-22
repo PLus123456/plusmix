@@ -7,6 +7,12 @@ public enum InputKind: String, Codable, Sendable, CaseIterable {
 
 /// 输入的运行时状态（设计方案 §6 无信号 / 热插拔 / 权限）。由输入自己的线程写，UI / 引擎读；实现要保证读写原子。
 /// 未 `start()` 或已 `stop()` 时是 `noSignal`。
+///
+/// `noSignal` 与 `error` 的分界（W3-A 口径，用户 2026-09-22 定）：**会不会自己好**。
+/// - 会自己好 → `noSignal`，另给 `lastError` 文案说明：驱动没装、设备不在 / 被拔了、NDI 源还没出现、外接显示器拔了。
+///   装上驱动、插回设备、源上线之后输入自己恢复，不用用户在界面上重来。
+/// - 不会自己好 → `error(message:)`：SDK 没编进来（可选 target 没开）、起流失败、权限被拒。
+///   要么重新编译、要么去系统设置改权限、要么换配置，输入自己等不回来。
 public enum InputState: Hashable, Sendable, Codable {
     case live
     case noSignal
@@ -68,19 +74,37 @@ public struct SyntheticSourceSettings: Hashable, Codable, Sendable {
     }
 }
 
+/// DeckLink 输入接口（BMDVideoConnection 的单个位；提案 008）。
+public enum DeckLinkConnection: String, Codable, Sendable, CaseIterable {
+    case sdi, hdmi, opticalSDI, component, composite, sVideo
+}
+
+/// NDI 接收带宽（NDIlib_recv_bandwidth；提案 008）。多画面缩略图用 `lowest` 省一半以上带宽 / 解码。
+public enum NDIBandwidth: String, Codable, Sendable, CaseIterable {
+    case highest, lowest, audioOnly
+}
+
 /// 一路输入"接的是什么"。`kind` 由它决定，不另外存。
 public enum InputSource: Hashable, Codable, Sendable {
     /// AVCaptureDevice.uniqueID。UVC 采集卡也走这里。
     case camera(uniqueID: String)
-    /// DeckLink 设备的持久标识（W3-A 定具体格式，先用字符串）。
-    case decklink(deviceID: String)
+    /// DeckLink 设备的持久标识 + 输入接口（提案 008）。
+    ///
+    /// `deviceID` 的格式（W3-A 定，用户 2026-09-22 确认）：
+    /// - 卡有 `BMDDeckLinkPersistentID` 属性时 `peid:<十进制 int64>`（`DeckLinkDeviceInfo.persistentID` 就是它）；
+    /// - 没有该属性的老卡 `model:<型号>#<同型号内序号>`；
+    /// - 空串 = 第一台有输入的卡。
+    ///
+    /// `connection` nil = 不改卡上的当前设置（Desktop Video Setup 里选的那个）。
+    case decklink(deviceID: String, connection: DeckLinkConnection? = nil)
     /// 屏幕 / 窗口 / 应用；frameRate nil = 跟节目帧率。
     case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
     /// 视频文件；rate = 播放速率（1 = 正常）。
     case file(path: String, endAction: FileEndAction, rate: Double)
     case image(path: String)
-    /// NDI 源名（"机器名 (源名)"）。
-    case ndi(sourceName: String)
+    /// NDI 源名（"机器名 (源名)"）+ 带宽模式 + 抖动缓冲深度（帧，0–2；提案 008）。
+    /// 抖动缓冲直接决定这路的延迟，也决定 `Frame.pts` 的口径（见 `Frame.pts`）。
+    case ndi(sourceName: String, bandwidth: NDIBandwidth = .highest, jitterBufferFrames: Int = 1)
     /// Core Audio 设备 UID（纯音频输入）。
     case audio(deviceUID: String)
     case synthetic(settings: SyntheticSourceSettings)
@@ -96,6 +120,59 @@ public enum InputSource: Hashable, Codable, Sendable {
         case .ndi: .ndi
         case .audio: .audio
         case .synthetic: .synthetic
+        }
+    }
+
+    /// 抖动缓冲深度的合法范围（帧）。
+    public static let ndiJitterBufferRange = 0...2
+    /// 抖动缓冲深度的默认值（帧）。
+    public static let defaultNDIJitterBufferFrames = 1
+
+    enum CodingKeys: String, CodingKey {
+        case camera, decklink, screen, file, image, ndi, audio, synthetic
+    }
+    enum DeckLinkKeys: String, CodingKey { case deviceID, connection }
+    enum NDIKeys: String, CodingKey { case sourceName, bandwidth, jitterBufferFrames }
+
+    /// 显式解码（提案 008）：只有 decklink / ndi 两个 case 自己解，好让老文件里缺 connection / bandwidth /
+    /// jitterBufferFrames 的对象按默认值解（合成的 Codable 对缺键会报错）。其余 case 原样交给合成的解码，
+    /// JSON 形态一个字节不变（`SwitcherContractsTests` 的键名快照钉住）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if c.contains(.decklink) {
+            let d = try c.nestedContainer(keyedBy: DeckLinkKeys.self, forKey: .decklink)
+            self = .decklink(deviceID: try d.decode(String.self, forKey: .deviceID),
+                             connection: try d.decodeIfPresent(DeckLinkConnection.self, forKey: .connection))
+            return
+        }
+        if c.contains(.ndi) {
+            let d = try c.nestedContainer(keyedBy: NDIKeys.self, forKey: .ndi)
+            self = .ndi(sourceName: try d.decode(String.self, forKey: .sourceName),
+                        bandwidth: try d.decodeIfPresent(NDIBandwidth.self, forKey: .bandwidth) ?? .highest,
+                        jitterBufferFrames: try d.decodeIfPresent(Int.self, forKey: .jitterBufferFrames)
+                            ?? InputSource.defaultNDIJitterBufferFrames)
+            return
+        }
+        self = try InputSource.synthesizedDecoding(decoder)
+    }
+
+    /// 合成的解码（除 decklink / ndi 外的 case）。`Synthesized` 的 JSON 形态与 `InputSource` 逐字相同。
+    private static func synthesizedDecoding(_ decoder: any Decoder) throws -> InputSource {
+        enum Synthesized: Hashable, Codable, Sendable {
+            case camera(uniqueID: String)
+            case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
+            case file(path: String, endAction: FileEndAction, rate: Double)
+            case image(path: String)
+            case audio(deviceUID: String)
+            case synthetic(settings: SyntheticSourceSettings)
+        }
+        switch try Synthesized(from: decoder) {
+        case .camera(let id): return .camera(uniqueID: id)
+        case .screen(let t, let r, let a): return .screen(target: t, frameRate: r, captureAudio: a)
+        case .file(let p, let e, let r): return .file(path: p, endAction: e, rate: r)
+        case .image(let p): return .image(path: p)
+        case .audio(let uid): return .audio(deviceUID: uid)
+        case .synthetic(let st): return .synthetic(settings: st)
         }
     }
 }
@@ -203,6 +280,11 @@ public struct InputAudioSettings: Hashable, Codable, Sendable {
     public var pan: Double
     /// 延迟补偿（§3.6）：把这路音频相对视频推迟 0–500 ms，修采集卡自身的 A/V 偏差。由混音器的延迟线实现。
     public var delayMs: Int
+    /// 这一路参不参与 AFV 门控（用户 2026-09-22 批，012"顺带的疑问"1）：
+    /// - true（默认）= 跟随视频：`AudioState.afv` 开时按 PGM 门控，转场时进交叉淡变；
+    /// - false = 不跟随视频：门控增益恒 1，一直按自己的推子 / 静音 / 路由出声，也不进转场的 from / to
+    ///   （主持人话筒的用法）。`AudioState.afv` 关时所有路都恒 1，这一位不起作用。
+    public var afv: Bool
 
     /// 延迟补偿的合法范围（ms）。
     public static let delayRangeMs = 0...500
@@ -210,14 +292,32 @@ public struct InputAudioSettings: Hashable, Codable, Sendable {
     public static let gainRangeDb = -96.0...24.0
 
     public init(routing: BusRouting = .masterOnly, gainDb: Double = 0, muted: Bool = false, solo: Bool = false,
-                pan: Double = 0, delayMs: Int = 0) {
+                pan: Double = 0, delayMs: Int = 0, afv: Bool = true) {
         self.routing = routing
         self.gainDb = gainDb
         self.muted = muted
         self.solo = solo
         self.pan = pan
         self.delayMs = delayMs
+        self.afv = afv
     }
+
+    enum CodingKeys: String, CodingKey { case routing, gainDb, muted, solo, pan, delayMs, afv }
+
+    /// 老 Show 没有 afv 键：缺键 = true（参与门控，与加这一位之前的行为相同）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        routing = try c.decodeIfPresent(BusRouting.self, forKey: .routing) ?? .masterOnly
+        gainDb = try c.decodeIfPresent(Double.self, forKey: .gainDb) ?? 0
+        muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+        solo = try c.decodeIfPresent(Bool.self, forKey: .solo) ?? false
+        pan = try c.decodeIfPresent(Double.self, forKey: .pan) ?? 0
+        delayMs = try c.decodeIfPresent(Int.self, forKey: .delayMs) ?? 0
+        afv = try c.decodeIfPresent(Bool.self, forKey: .afv) ?? true
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["routing", "gainDb", "muted", "solo", "pan", "delayMs", "afv"]
 }
 
 /// 效果链里的一格（占位）。`id` 是效果标识（例如 "parametricEQ"），参数是自由 JSON；具体定义由音频 / 合成会话给。
@@ -235,17 +335,26 @@ public struct EffectSlot: Hashable, Codable, Sendable {
     }
 }
 
-/// 抠像参数（占位，W3-B 细化时走契约提案）。YCbCr 颜色距离 + 溢色抑制（设计方案 §5）。
+/// 抠像参数（YCbCr 颜色距离 + 溢色抑制，设计方案 §5）。四个数的口径由提案 009 钉死，
+/// 渲染器 `Shaders/Compositor.metal` 的 `applyKey`（uniforms 在 `Renderer/CompositorPasses.swift` 的 `Keyer.fill`）就是定义：
+/// UI 的滑杆、`docs/api.md` 的 setInputSettings 说明、别的渲染实现都按同一口径。
+/// 输出是预乘 alpha（`rgb × alpha`），进 source-over 混合管线；抠像对该输入出现的每一处
+/// （PGM 底、转场新画面、叠加、PVW、多画面缩略图）都生效。
 public struct KeyerSettings: Hashable, Codable, Sendable {
     /// 是否抠像。
     public var enabled: Bool
-    /// 键色。
+    /// 键色，full-range 8-bit RGB。渲染器把它按 BT.709 换成色度 (Cb, Cr)（归一化到 −0.5…+0.5），
+    /// **只比色度不比亮度**：绿幕上的阴影（同色度、低亮度）也被抠掉——这是 §5"YCbCr 空间的颜色距离"的第一版取舍。
     public var keyColor: RGB8
-    /// 颜色距离容差 0–1。
+    /// 颜色距离容差 0–1：完全抠掉的色度距离半径 = `tolerance × 0.5`。
+    /// 像素色度到键色色度的欧氏距离 d ≤ 半径 → alpha 0。
     public var tolerance: Double
-    /// 边缘柔化 0–1。
+    /// 边缘柔化 0–1：柔化带宽度 = `softness × 0.25`（色度距离单位）。
+    /// d 落在 [半径, 半径 + 带宽] 内时 alpha 用 smoothstep 从 0 升到 1；0 = 硬边。
     public var softness: Double
-    /// 溢色抑制强度 0–1。
+    /// 溢色抑制强度 0–1：留下来的像素把色度在键色方向上的正分量减掉这个比例
+    /// （c′ = c − s·max(0, c·k̂)·k̂），亮度不变，所以溢色边缘变成同亮度的灰而不是变暗。
+    /// 键色是灰（没有色度方向）时不做抑制。
     public var spillSuppression: Double
     public init(enabled: Bool = false, keyColor: RGB8 = RGB8(red: 0, green: 255, blue: 0),
                 tolerance: Double = 0.3, softness: Double = 0.1, spillSuppression: Double = 0.5) {

@@ -2,8 +2,9 @@ import Foundation
 
 /// stats.jsonl 的一行（测试标准 §7；P2 按已批提案 001 / 002 / 004 / 005 扩了 per_input、encoder、audio 三节）。字段名逐字：
 /// ts、tick、render_ms、missed_render、jitter_ms、per_input{fps, dup, drop, latency_ms, latency_max_ms}、
-/// encoder[{skipped, bitrate, frames, dropped, disk_free_mb, reconnects, state}]、audio{dropouts, underruns, discontinuities, meters}、
-/// rss_mb、cpu_pct、gpu_pct。UI 状态行、API、测试三方读同一个结构，不许各自另算（铁律 4）。
+/// encoder[{skipped, bitrate, frames, dropped, disk_free_mb, reconnects, state}]、display[{output, kind, frames, dropped, state}]、
+/// audio{dropouts, underruns, discontinuities, meters}、rss_mb、cpu_pct、gpu_pct。
+/// UI 状态行、API、测试三方读同一个结构，不许各自另算（铁律 4）。
 ///
 /// 口径（每秒一行，"窗口" = 上一行到这一行之间）：
 /// - `ts`：Unix 时间（秒，含小数），采样那一刻的墙钟。
@@ -15,11 +16,13 @@ import Foundation
 ///   latency_ms / latency_max_ms = 提案 005 的 L1（见 `PerInput`）。
 /// - `encoder[i]`：与 MixerState.outputs 里带编码器的输出同序。skipped = E1 编码滞后跳帧累计；bitrate = 窗口内平均输出码率（bit/s）；
 ///   frames / dropped / disk_free_mb / reconnects / state = 提案 001 / 002（见 `EncoderEntry`）。
+/// - `display[i]`：提案 013，显示类输出（外部显示窗口、虚拟摄像头、多画面窗口、主界面监视器）各一项，无固定顺序，按 `output` / `kind` 认。
+///   frames = 已呈现 / 已送出帧数累计；dropped = 没赶上刷新 / 被扩展丢弃的帧数累计；state 见 `DisplayEntry.states`。
 /// - `audio`：A1，dropouts = 输出回调超时累计，underruns = 缓冲欠载累计，discontinuities = 波形不连续累计；meters = 表读数（提案 004，见 `AudioCounters`）。
 /// - `rss_mb`：进程 RSS（MB）；`cpu_pct`：进程 CPU（100 = 一个核）；`gpu_pct`：GPU 占用。
 /// 累计值单调不减，任意两行相减就是窗口内的增量。
 ///
-/// 兼容：P2 之前写的 stats.jsonl 没有新字段，解码时缺键给默认值（0 / "idle" / 空）；写出时总是写全。
+/// 兼容：P2 / P3 之前写的 stats.jsonl 没有新字段，解码时缺键给默认值（0 / "idle" / 空数组 / 空）；写出时总是写全。
 public struct Stats: Hashable, Codable, Sendable {
     /// JSON 键 ts：Unix 时间（秒）。
     public var ts: Double
@@ -35,6 +38,8 @@ public struct Stats: Hashable, Codable, Sendable {
     public var perInput: [Int: PerInput]
     /// JSON 键 encoder。
     public var encoder: [EncoderEntry]
+    /// JSON 键 display（提案 013）：显示类输出（外部显示窗口、虚拟摄像头、多画面窗口、主界面监视器）各一项。
+    public var display: [DisplayEntry]
     /// JSON 键 audio。
     public var audio: AudioCounters
     /// JSON 键 rss_mb。
@@ -128,6 +133,44 @@ public struct Stats: Hashable, Codable, Sendable {
         }
         /// JSON 键名。
         public static let jsonKeys = ["skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "state"]
+    }
+
+    /// display 的元素（提案 013）：显示类输出没有编码器，帧数 / 丢帧 / 状态进这里。
+    public struct DisplayEntry: Hashable, Codable, Sendable {
+        /// 输出编号（`MixerState.outputs` 里的 number）；主界面的监视器视图不是输出，用 0。
+        public var output: Int
+        /// "externalDisplay" / "virtualCamera" / "multiviewWindow" / "monitor"。
+        public var kind: String
+        /// 已呈现（显示）/ 已送出（虚拟摄像头扩展收到）的帧数，累计。
+        public var frames: UInt64
+        /// 没赶上显示刷新 / 被扩展丢弃的帧数，累计。
+        public var dropped: UInt64
+        /// "idle" / "presenting" / "noDisplay"（显示器不在：退回主屏或黑着等）/ "waitingExtension"（扩展未激活）/
+        /// "publishing" / "stopped" / "failed"。
+        public var state: String
+        public init(output: Int, kind: String, frames: UInt64 = 0, dropped: UInt64 = 0, state: String = "idle") {
+            self.output = output
+            self.kind = kind
+            self.frames = frames
+            self.dropped = dropped
+            self.state = state
+        }
+        enum CodingKeys: String, CodingKey { case output, kind, frames, dropped, state }
+        /// 缺键给 0 / "idle"。
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            output = try c.decode(Int.self, forKey: .output)
+            kind = try c.decode(String.self, forKey: .kind)
+            frames = try c.decodeIfPresent(UInt64.self, forKey: .frames) ?? 0
+            dropped = try c.decodeIfPresent(UInt64.self, forKey: .dropped) ?? 0
+            state = try c.decodeIfPresent(String.self, forKey: .state) ?? "idle"
+        }
+        /// JSON 键名。
+        public static let jsonKeys = ["output", "kind", "frames", "dropped", "state"]
+        /// kind 的合法值。
+        public static let kinds = ["externalDisplay", "virtualCamera", "multiviewWindow", "monitor"]
+        /// state 的合法值。
+        public static let states = ["idle", "presenting", "noDisplay", "waitingExtension", "publishing", "stopped", "failed"]
     }
 
     /// audio 一节。
@@ -233,7 +276,8 @@ public struct Stats: Hashable, Codable, Sendable {
     }
 
     public init(ts: Double, tick: Tick, renderMs: Double, missedRender: UInt64, jitterMs: Double, perInput: [Int: PerInput],
-                encoder: [EncoderEntry], audio: AudioCounters, rssMb: Double, cpuPct: Double, gpuPct: Double) {
+                encoder: [EncoderEntry], audio: AudioCounters, rssMb: Double, cpuPct: Double, gpuPct: Double,
+                display: [DisplayEntry] = []) {
         self.ts = ts
         self.tick = tick
         self.renderMs = renderMs
@@ -241,6 +285,7 @@ public struct Stats: Hashable, Codable, Sendable {
         self.jitterMs = jitterMs
         self.perInput = perInput
         self.encoder = encoder
+        self.display = display
         self.audio = audio
         self.rssMb = rssMb
         self.cpuPct = cpuPct
@@ -253,14 +298,31 @@ public struct Stats: Hashable, Codable, Sendable {
         case missedRender = "missed_render"
         case jitterMs = "jitter_ms"
         case perInput = "per_input"
-        case encoder, audio
+        case encoder, display, audio
         case rssMb = "rss_mb"
         case cpuPct = "cpu_pct"
         case gpuPct = "gpu_pct"
     }
 
+    /// 老 stats.jsonl 没有 display（提案 013）：缺键 = 空数组。写出总是写全。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ts = try c.decode(Double.self, forKey: .ts)
+        tick = try c.decode(Tick.self, forKey: .tick)
+        renderMs = try c.decode(Double.self, forKey: .renderMs)
+        missedRender = try c.decode(UInt64.self, forKey: .missedRender)
+        jitterMs = try c.decode(Double.self, forKey: .jitterMs)
+        perInput = try c.decode([Int: PerInput].self, forKey: .perInput)
+        encoder = try c.decode([EncoderEntry].self, forKey: .encoder)
+        display = try c.decodeIfPresent([DisplayEntry].self, forKey: .display) ?? []
+        audio = try c.decode(AudioCounters.self, forKey: .audio)
+        rssMb = try c.decode(Double.self, forKey: .rssMb)
+        cpuPct = try c.decode(Double.self, forKey: .cpuPct)
+        gpuPct = try c.decode(Double.self, forKey: .gpuPct)
+    }
+
     /// 顶层键名，按测试标准 §7 的顺序。
-    public static let jsonKeys = ["ts", "tick", "render_ms", "missed_render", "jitter_ms", "per_input", "encoder", "audio", "rss_mb", "cpu_pct", "gpu_pct"]
+    public static let jsonKeys = ["ts", "tick", "render_ms", "missed_render", "jitter_ms", "per_input", "encoder", "display", "audio", "rss_mb", "cpu_pct", "gpu_pct"]
 
     /// 写 jsonl 用的编码器：键排序、不转义斜杠、不换行。非有限的浮点值会抛错，写入方要先处理。
     public static let lineEncoder: JSONEncoder = {
