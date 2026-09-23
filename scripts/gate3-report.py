@@ -115,6 +115,25 @@ def main():
     switches = switches.get("switches", switches) if isinstance(switches.get("switches"), dict) else switches
     fade = load_json(os.path.join(out, "probe-fade.json"), {}) or {}
     fade = fade.get("fade", fade)
+    def curve_of(name):
+        # W1-A3 的 frameprobe wipe / zoom：找到带 passV7 / maxDeviationFrames 的那一层（不依赖外壳键名）
+        def walk(x):
+            if isinstance(x, dict):
+                if "passV7" in x and "maxDeviationFrames" in x:
+                    return x
+                for v in x.values():
+                    r = walk(v)
+                    if r is not None:
+                        return r
+            elif isinstance(x, list):
+                for v in x:
+                    r = walk(v)
+                    if r is not None:
+                        return r
+            return None
+        return walk(load_json(os.path.join(out, name), {}) or {})
+    wipe_curve = curve_of("probe-wipe.json")
+    zoom_curve = curve_of("probe-zoom.json")
     av = load_json(os.path.join(out, "probe-av.json"), {}) or {}
     av = av.get("av", av)
     av_multi = load_json(os.path.join(out, "probe-av-multi.json"), {}) or {}
@@ -271,7 +290,21 @@ def main():
         else:
             tbar_rows.append(f"{p:.2f} → 没有帧")
     v7_tbar_ok = tbar_worst is not None and len(tbar_rows) == 3 and tbar_worst <= 0.02
-    v7_ok = v7_curve_ok and v7_tbar_ok
+    # G4 起：Wipe / Zoom 的进度曲线（W1-A3 的 frameprobe wipe / zoom），与 Fade 同口径 ≤ 1 帧；G4 场景里两种各取第一次
+    wz_rows = []
+    wz_ok = True
+    for wz_label, c in (("Wipe", wipe_curve), ("Zoom", zoom_curve)):
+        if c:
+            ok = c.get("passV7") is True and c.get("monotonic") is True
+            wz_ok = wz_ok and ok
+            wz_rows.append(f"{wz_label} @ {c.get('startTick')}（{c.get('durationTicks')} 拍{'，' + str(c.get('direction')) if c.get('direction') else ''}）："
+                           f"最大偏差 {c.get('maxDeviationFrames', 0):.3f} 帧（{len(c.get('samples', []))} 个样本），单调 {c.get('monotonic')}")
+        elif cp == "G4":
+            wz_ok = False
+            wz_rows.append(f"{wz_label}：没有 probe-{wz_label.lower()}.json（frameprobe {wz_label.lower()} 没跑）")
+    if wz_rows:
+        v7_curve_value += "；" + "；".join(wz_rows)
+    v7_ok = v7_curve_ok and v7_tbar_ok and wz_ok
 
     # ---- A1 / A2 / A3 / A4 ----
     a1 = (key.get("audio_dropouts") or 0) + (key.get("audio_underruns") or 0)
@@ -411,7 +444,7 @@ def main():
         ("V5 帧计数一致性", f"文件 {total_frames} 帧 − 运行 {expected_run} 拍 = {v5_delta:+d} 帧" if v5_delta is not None else "—", "|Δ| ≤ 2 帧", v5_delta is not None and abs(v5_delta) <= 2, "—"),
         ("V6 切换准确性", v6_value, "Cut 恰在第 1000 拍、前后无混合帧；所有 Cut 干净（硬性）", v6_ok, "—"),
         ("V7 转场进度精度", v7_curve_value + "；T-bar " + "；".join(tbar_rows) + (f"；最大映射误差 {tbar_worst * 100:.2f}%" if tbar_worst is not None else ""),
-         "曲线误差 ≤ 1 帧；T-bar 映射误差 ≤ 2%（目标 ≤ 1%）", v7_ok, "—"),
+         ("曲线误差 ≤ 1 帧（Fade / Wipe / Zoom）；T-bar 映射误差 ≤ 2%（目标 ≤ 1%）" if cp == "G4" else "曲线误差 ≤ 1 帧；T-bar 映射误差 ≤ 2%（目标 ≤ 1%）"), v7_ok, "—"),
         ("A1 音频断裂", f"超时 + 欠载 = {int(a1)}；泵线程流式不连续检测 {disc if disc is not None else '—'}（信息项，见口径说明）", "0（硬性）", a1 == 0, "—"),
         ("A2 A/V 偏移", (f"整秒闪光 {len(exact)} 对：均值 {a2_mean:+.3f} ms，标准差 {a2_std:.3f}，最大 {a2_max:.3f} ms；全部配对 {av.get('matchedCount')} 对均值 {fmt(av.get('meanMs'))} ms（含 59.94 在播段的假象）" if exact else "没有可配对的闪光 / click"),
          "整秒配对最大绝对值 ≤ 16.7 ms（目标 ≤ 5；音频超前为正）", a2_ok, "—"),
@@ -477,6 +510,9 @@ def main():
         lines.append(f"  - 新负载：抠像开在输入 {keyed}；Overlay 1–4 = {ovl}；多画面输出 {'自定义布局（cells ' + str(len(((mv or {}).get('settings') or {}).get('extra', {}).get('layout', {}).get('cells', []))) + '，safeArea / meters）' if mv else '无'}；"
                      f"Wipe {show.get('mixer', {}).get('transition', {}).get('wipe')}，Stinger {show.get('mixer', {}).get('transition', {}).get('stinger')}（{next((i['name'] for i in show.get('inputs', []) if 'image' in i['source']), '无图片输入')}）")
         blank_count = 0
+        if not a.blank_ticks:
+            lines.append("  - frameprobe 自证解码（W1-A3）默认开：转场合成帧由帧内五条证据（两行 CRC + ID 距离、码字块纯度、ID 块四象限、底色一致、节奏）判成解不出，"
+                         "不再用 `--blank-ticks`（gate4.sh --legacy-blank-ticks 可回到 G4 第一版从场景文件标拍段的口径；两种口径下 V4 / V5 / V6 的结论一致，W1-A3 报告 §2.2）")
         if a.blank_ticks:
             for part in a.blank_ticks.split(","):
                 lo, hi = part.split("-")
@@ -531,7 +567,8 @@ def main():
     lines.append("### 文件（本机路径，不入库）")
     lines.append("")
     for name in ["stats.jsonl", "out.mov", "headless.log", "apitest.log", "environment.txt", "load.log", "summary.md", "summary.json", "probe-stats.json", "probe-stats.md",
-                 "probe-switches.json", "probe-switches.md", "probe-fade.json", "probe-fade.md", "frames.json", "probe-av.json", "probe-av.md",
+                 "probe-switches.json", "probe-switches.md", "probe-fade.json", "probe-fade.md", "probe-wipe.json", "probe-wipe.md", "probe-zoom.json", "probe-zoom.md",
+                 "frames.json", "probe-av.json", "probe-av.md",
                  "probe-av-multi.json", "probe-av-multi.md", "ffprobe.json", "packets-v.csv", "session.json", "report-c.md", "summary-c.json"]:
         p = os.path.join(out, name)
         if os.path.exists(p):
@@ -545,7 +582,8 @@ def main():
     lines.append(tail)
     lines.append("```")
     lines.append("")
-    for title, fname in [("frameprobe switches（V6）", "probe-switches.md"), ("frameprobe fade（V7）", "probe-fade.md"), ("frameprobe av（A2 / A3）", "probe-av.md"),
+    for title, fname in [("frameprobe switches（V6）", "probe-switches.md"), ("frameprobe fade（V7）", "probe-fade.md"), ("frameprobe wipe（V7）", "probe-wipe.md"),
+                         ("frameprobe zoom（V7）", "probe-zoom.md"), ("frameprobe av（A2 / A3）", "probe-av.md"),
                          ("frameprobe av 多文件（A4）", "probe-av-multi.md"), ("C 系列（scripts/apitest evaluate）", "report-c.md"), ("frameprobe stats 原表", "probe-stats.md")]:
         text = read_text(os.path.join(out, fname)).strip()
         if text:

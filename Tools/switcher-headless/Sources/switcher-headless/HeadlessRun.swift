@@ -198,6 +198,7 @@ final class HeadlessSession: @unchecked Sendable {
         var inputs: [SyntheticVideoInput] = []
         var otherInputs: [any Input] = []
         var audioInputs: [(number: Int, ring: CAudioRing, settings: InputAudioSettings, source: SyntheticAudioInput)] = []
+        var deviceAudioInputs: [(number: Int, ring: CAudioRing)] = []   // 纯音频设备（W2-A2）：环注册进音频引擎；输入对象在 otherInputs 里起停
         for cfg in initialState.inputs {
             let slot = LockFreeFrameSlot(capacity: 3)
             switch cfg.source {
@@ -231,8 +232,17 @@ final class HeadlessSession: @unchecked Sendable {
                 engine.registerInput(number: cfg.number, slot: slot)
                 otherInputs.append(input)
                 print("NDI 输入 \(cfg.number)：源「\(resolved)」，带宽 \(ndiOptions.bandwidth.rawValue)，抖动缓冲 \(ndiOptions.jitterBufferFrames) 帧")
+            case .audio:
+                // W2-A2：Core Audio 设备 → 环（IOProc 零分配、泵线程写环）；没有视频——槽注册了也永远挑不到帧、画黑（契约 Input.videoSlot 的口径）。
+                // 声道映射（提案 014）从 case 取；设备不在 = noSignal + 文案，插上会自己好；权限被拒 = error。端到端 A2（回环线）靠它跑。
+                let ring = CAudioRing(channelCount: 2)
+                let input = try AudioDeviceInput(config: cfg, audioRing: ring)
+                engine.registerInput(number: cfg.number, slot: slot)
+                otherInputs.append(input)
+                deviceAudioInputs.append((cfg.number, ring))
+                print("纯音频输入 \(cfg.number)「\(cfg.name)」：Core Audio 设备，环 2 声道")
             default:
-                throw CLIError("headless 只接合成源 / 图片 / NDI：输入 \(cfg.number)「\(cfg.name)」是 \(cfg.kind)")
+                throw CLIError("headless 只接合成源 / 图片 / NDI / 纯音频设备：输入 \(cfg.number)「\(cfg.name)」是 \(cfg.kind)")
             }
         }
 
@@ -251,7 +261,13 @@ final class HeadlessSession: @unchecked Sendable {
             hints.producerBlockFrames = entry.source.blockFrames
             try audioEngine.registerInput(number: entry.number, ring: entry.ring, hints: hints)
         }
-        if let sender = ndiSender, !audioInputs.isEmpty { _ = try audioEngine.addConsumer(sender, source: .master) }
+        for entry in deviceAudioInputs {
+            var hints = AudioInputHints()
+            hints.producerBlockFrames = 1024   // 设备 IO 块本机 512、走采样率转换约 558；给 1024 稳妥（同 App 的摄像头 / DeckLink，W2-A2 问题单）
+            try audioEngine.registerInput(number: entry.number, ring: entry.ring, hints: hints)
+        }
+        let hasAudio = !audioInputs.isEmpty || !deviceAudioInputs.isEmpty
+        if let sender = ndiSender, hasAudio { _ = try audioEngine.addConsumer(sender, source: .master) }
 
         // 3. 录制：Recorder 是 PGM 帧的消费者（有界队列 + 自己的编码线程）；Master 块由 AudioEngine 的消费者泵喂给它
         //    （块 PTS = 块首 − 对齐延迟 = 内容采集时刻，与视频拍点同一时基；G2 自建泵没扣混音器年龄，A2 −18 ms 就是这么来的）。
@@ -262,16 +278,16 @@ final class HeadlessSession: @unchecked Sendable {
             let outputSettings = show.outputs.first { $0.kind == .record }?.settings
             let cfg = Recorder.Configuration(url: url, format: format,
                                              video: outputSettings?.video ?? VideoEncodeSettings(),
-                                             audio: audioInputs.isEmpty ? nil : (outputSettings?.audio ?? AudioEncodeSettings()),
+                                             audio: hasAudio ? (outputSettings?.audio ?? AudioEncodeSettings()) : nil,
                                              audioChannels: 2,
                                              fragmentIntervalSeconds: outputSettings?.record?.fragmentIntervalSeconds ?? 1,
                                              remuxToMP4: outputSettings?.record?.remuxToMP4 ?? false,
                                              name: "record")
             let rec = Recorder(configuration: cfg)
             engine.addConsumer(rec)
-            if !audioInputs.isEmpty { recorderAudioToken = try audioEngine.addConsumer(rec, source: .master) }
+            if hasAudio { recorderAudioToken = try audioEngine.addConsumer(rec, source: .master) }
             recorder = rec
-            // A4：ISO 音轨录制器（视频仍是 PGM——每路视频 ISO 是 W3-C 的事）
+            // A4：ISO 音轨录制器（视频仍是 PGM——每路视频 ISO 是 W3-C 的事）；编号表只取合成音频源（A4 要的是 click），纯音频设备不进 --iso-audio
             guard options.isoAudio <= audioInputs.count else {
                 throw CLIError("--iso-audio \(options.isoAudio) 超过带音频的输入数 \(audioInputs.count)")
             }

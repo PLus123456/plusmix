@@ -3,20 +3,21 @@
 #   scenarios/g4-show.json（G3 的 8 路噪声底纹合成源 + 5–8 号抠像 + Overlay 1–4 各挂一路 + 9 号 Stinger PNG + 多画面自定义布局）
 #   scenarios/g4.json（前 2 分钟同 G3：1000 Cut / 3000 Fade 30 / T-bar；120 s 起每 5 s 按 Cut / Fade / Wipe / Zoom / Stinger 轮流、每 15 s 翻一路叠加）
 #   ＋ scripts/apitest 客户端（C1 从 150 s 起、相位 x.7 s 避开 0.4 s 的转场；C4 随后）
-#   → frameprobe（非 Cut 转场的中间拍用 --blank-ticks 标成解不出：合成帧没有单一输入身份，见 scripts/gate3-report.py --checkpoint G4 的说明）
+#   → frameprobe（W1-A3 起自证解码默认开：转场合成帧由帧内证据判成解不出，不再需要 --blank-ticks；--legacy-blank-ticks 回到 G4 第一版从场景文件标拍段的口径）
+#   → frameprobe wipe / zoom（V7：场景里第一次 Wipe / Zoom 的进度曲线，W1-A3 的量法）
 #   → ffprobe（E2 / E3 / E5）→ summarize → apitest evaluate（C1–C4）→ scripts/gate3-report.py --checkpoint G4 → reports/G4-run-<label>.md → reports/G4.md。
 #   L0 / L1（各包 swift test，含 W3-B 的 V8 参考图集）由 make gate4 在本脚本之前跑；NDI 回环 L1 是 scripts/gate4-ndi.sh，编译矩阵是 scripts/gate4-matrix.sh，
 #   E7–E9 沿用 G3（reports/G3-net.md：W3 五路没动推流），C5 的真 Companion 是人工项（docs/checklists/G4.md）。
 #
 # 用法：scripts/gate4.sh [--minutes 10] [--label 10min] [--baseline baselines/g3-m5max.json] [--write-baseline baselines/g4-m5max.json]
 #                        [--out-dir .build/gate4/<label>] [--no-build] [--skip-run] [--no-api] [--port 8765] [--c1-start 150] [--c1-phase 0.7] [--iso-audio 4]
-#                        [--waive '指标名=理由']
+#                        [--waive '指标名=理由'] [--legacy-blank-ticks]
 # 采集数据留在 out-dir，不入库；报告里写路径。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="/opt/homebrew/bin:$PATH"
 
-minutes=10; label=""; baseline=""; write_baseline=""; out_dir=""; do_build=1; do_run=1; do_api=1; port=8765; c1_start=150; c1_phase=0.7; iso_audio=4; waives=()
+minutes=10; label=""; baseline=""; write_baseline=""; out_dir=""; do_build=1; do_run=1; do_api=1; port=8765; c1_start=150; c1_phase=0.7; iso_audio=4; waives=(); legacy_blank=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --minutes) minutes="$2"; shift 2 ;;
@@ -32,6 +33,7 @@ while [ $# -gt 0 ]; do
     --c1-phase) c1_phase="$2"; shift 2 ;;
     --iso-audio) iso_audio="$2"; shift 2 ;;
     --waive) waives+=(--waive "$2"); shift 2 ;;
+    --legacy-blank-ticks) legacy_blank=1; shift ;;
     -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "不认识的参数：$1" >&2; exit 2 ;;
   esac
@@ -101,7 +103,26 @@ for e in sc["events"]:
 print(",".join(f"{a}-{b}" for a, b in windows))
 PY
 )
-step "frameprobe --blank-ticks：$(echo "$blank_ticks" | tr ',' '\n' | wc -l | tr -d ' ') 段（首 3 段 $(echo "$blank_ticks" | cut -d, -f1-3)）"
+if [ "$legacy_blank" = 1 ]; then
+  step "frameprobe --blank-ticks（老口径）：$(echo "$blank_ticks" | tr ',' '\n' | wc -l | tr -d ' ') 段（首 3 段 $(echo "$blank_ticks" | cut -d, -f1-3)）"
+else
+  step "frameprobe 自证解码（W1-A3）默认开，不带 --blank-ticks（场景里非 Cut 转场 $(echo "$blank_ticks" | tr ',' '\n' | wc -l | tr -d ' ') 段，只写进报告作对照）"
+  blank_ticks=""
+fi
+# V7 的 Wipe / Zoom：场景里第一次 setTransition(wipe|zoom) + autoTransition 的拍与时长；方向从节目文件取
+read -r wipe_at wipe_d zoom_at zoom_d wipe_dir <<< "$(python3 - "$script" "$show" <<'PY'
+import json, sys
+sc = json.load(open(sys.argv[1])); show = json.load(open(sys.argv[2]))
+pending = None; first = {}
+for e in sc["events"]:
+    c = e["command"]
+    if "setTransition" in c: pending = (c["setTransition"]["type"], c["setTransition"]["durationTicks"])
+    elif "autoTransition" in c and pending:
+        first.setdefault(pending[0], (e["tick"], pending[1])); pending = None
+w = first.get("wipe", (0, 0)); z = first.get("zoom", (0, 0))
+print(w[0], w[1], z[0], z[1], show["mixer"]["transition"].get("wipe", {}).get("direction", "leftToRight"))
+PY
+)"
 
 # ---- 2. 跑：headless（--api、录制、ISO 音轨、stats）+ apitest 客户端 ----
 stats="$out_dir/stats.jsonl"; movie="$out_dir/out.mov"; run_log="$out_dir/headless.log"; session="$out_dir/session.json"
@@ -120,7 +141,7 @@ if [ "$do_run" = 1 ]; then
     done ) &
   sampler_pid=$!
   "$headless" run --show "$show" --script "$script" --duration "$duration" --stats "$stats" --record "$movie" --iso-audio "$iso_audio" \
-      --audio-device null "${api_args[@]}" > "$run_log" 2>&1 &
+      --audio-device null ${api_args[@]+"${api_args[@]}"} > "$run_log" 2>&1 &
   headless_pid=$!
   trap 'kill $headless_pid $sampler_pid 2>/dev/null' EXIT
   client_status=0
@@ -143,6 +164,7 @@ fi
 [ -s "$movie" ] || { red "没有 $movie"; exit 1; }
 
 # ---- 3. frameprobe ----
+# 注意：macOS 自带 bash 3.2 在 set -u 下把空数组的 "${arr[@]}" 当未定义变量，空数组一律写成 ${arr[@]+"${arr[@]}"}（bt / api_args / waives）
 input_fps=$(python3 - "$show" <<'PY'
 import json, sys
 show = json.load(open(sys.argv[1]))
@@ -160,22 +182,30 @@ print(",".join(parts))
 PY
 )
 program_fps=$(python3 -c "import json,sys; fr=json.load(open('$show'))['mixer']['format']['frameRate']; print(fr['numerator']/fr['denominator'])")
-bt=(--blank-ticks "$blank_ticks")
+bt=(); [ -n "$blank_ticks" ] && bt=(--blank-ticks "$blank_ticks")
 step "frameprobe stats（V4 / V5）"
-"$frameprobe" stats "$movie" --fps "$program_fps" --input-fps "$input_fps" --max-events 20 "${bt[@]}" --out "$out_dir/probe-stats.json" --markdown > "$out_dir/probe-stats.md"
+"$frameprobe" stats "$movie" --fps "$program_fps" --input-fps "$input_fps" --max-events 20 ${bt[@]+"${bt[@]}"} --out "$out_dir/probe-stats.json" --markdown > "$out_dir/probe-stats.md"
 step "frameprobe switches（V6）"
-"$frameprobe" switches "$movie" "${bt[@]}" --out "$out_dir/probe-switches.json" --markdown > "$out_dir/probe-switches.md"
+"$frameprobe" switches "$movie" ${bt[@]+"${bt[@]}"} --out "$out_dir/probe-switches.json" --markdown > "$out_dir/probe-switches.md"
 step "frameprobe fade（V7 曲线：第 3000 拍 Fade 30，A = 64 / B = 192）"
 "$frameprobe" fade "$movie" --fade-at 3000 --duration 30 --gray-a 64 --gray-b 192 --out "$out_dir/probe-fade.json" --markdown > "$out_dir/probe-fade.md"
+if [ "${wipe_at:-0}" -gt 0 ]; then
+  step "frameprobe wipe（V7：第 $wipe_at 拍 Wipe $wipe_dir $wipe_d 拍，W1-A3 的擦边 50% 点量法）"
+  "$frameprobe" wipe "$movie" --at "$wipe_at" --duration "$wipe_d" --wipe-direction "$wipe_dir" --fps "$program_fps" --out "$out_dir/probe-wipe.json" --markdown > "$out_dir/probe-wipe.md"
+fi
+if [ "${zoom_at:-0}" -gt 0 ]; then
+  step "frameprobe zoom（V7：第 $zoom_at 拍 Zoom $zoom_d 拍，中心行带新画面宽度）"
+  "$frameprobe" zoom "$movie" --at "$zoom_at" --duration "$zoom_d" --fps "$program_fps" --out "$out_dir/probe-zoom.json" --markdown > "$out_dir/probe-zoom.md"
+fi
 step "frameprobe frames（V7 T-bar 映射 + C3 逐帧输入 ID）"
-"$frameprobe" frames "$movie" --fps "$program_fps" "${bt[@]}" --out "$out_dir/frames.json" > /dev/null
+"$frameprobe" frames "$movie" --fps "$program_fps" ${bt[@]+"${bt[@]}"} --out "$out_dir/frames.json" > /dev/null
 step "frameprobe av（A2 / A3）"
-"$frameprobe" av "$movie" --fps "$program_fps" "${bt[@]}" --out "$out_dir/probe-av.json" --markdown > "$out_dir/probe-av.md"
+"$frameprobe" av "$movie" --fps "$program_fps" ${bt[@]+"${bt[@]}"} --out "$out_dir/probe-av.json" --markdown > "$out_dir/probe-av.md"
 iso_files=$(ls "$out_dir"/out.iso*.mov 2>/dev/null | sort)
 if [ -n "$iso_files" ]; then
   step "frameprobe av 多文件（A4：PGM + ISO 音轨 $(echo "$iso_files" | wc -l | tr -d ' ') 个）"
   # shellcheck disable=SC2086
-  "$frameprobe" av "$movie" $iso_files --fps "$program_fps" "${bt[@]}" --out "$out_dir/probe-av-multi.json" --markdown > "$out_dir/probe-av-multi.md"
+  "$frameprobe" av "$movie" $iso_files --fps "$program_fps" ${bt[@]+"${bt[@]}"} --out "$out_dir/probe-av-multi.json" --markdown > "$out_dir/probe-av-multi.md"
 fi
 step "ffprobe（E2 / E3 / E5）"
 ffprobe -v error -show_entries format=duration:stream=index,codec_type,codec_name,nb_frames,avg_frame_rate,width,height,duration,start_time -of json "$movie" > "$out_dir/ffprobe.json" 2>/dev/null || true

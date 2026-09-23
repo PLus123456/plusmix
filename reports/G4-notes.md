@@ -150,3 +150,69 @@ A（都在）/ B（只有 NDI）/ C（都不在）三种配置 `swift build` + N
 - `scripts/*.py` 跑一次会生成 `scripts/__pycache__/`（.gitignore 已加）。
 - g4 场景的 V4 有两个口径：frameprobe 在播段口径排除了转场中间拍（--blank-ticks），引擎侧 stats.jsonl 全程；两者都要 0。
 - G4 基线 `baselines/g4-m5max.json` 与 g3 不可比（噪声底纹 + 新负载）；W4-A 的 L5 从 g4 起算。
+- **macOS 自带 bash 3.2 在 `set -u` 下把空数组的 `"${arr[@]}"` 当未定义变量**：gate4.sh 改成默认不带 `--blank-ticks` 后第一次跑在 frameprobe 那一步炸掉（10 分钟白跑一半——运行产物还在，`--skip-run --no-build` 能只重做后半段）。空数组一律写 `${arr[@]+"${arr[@]}"}`。
+- **frameprobe 自证解码（W1-A3）让全片扫描慢了**：36000 帧的文件一次 `stats` / `frames` / `av` 各约 3–4 分钟（1080p，release，M5 Max），gate4.sh 的后半段（5 次全片扫描 + wipe / zoom）要 15–20 分钟，整条 gate4 约半小时；后台跑、盯日志的 GATE4_EXIT。
+- **P3 的夹具 `Tests/SwitcherContractsTests/Fixtures/g4-show-before-p3.json` 与 `scenarios/g4-show.json` 是绑着的**（`testP3_oldShowFilesStillLoadWithSameSemantics` 逐字段比 inputs / overlays / audio / multiview）：改 g4 节目的任何一路输入，夹具要同步改，否则 SwitcherContractsTests 红。
+
+## 10. 续做分支合入（2026-09-23，G4 会话续做；用户："都完事了，你检查一下，之后再合一下"）
+
+三个续做分支都从 G4 合入后的 main（367bbb9）开，检查后按依赖顺序 `--no-ff` 合进 g4，再由 g4 快进到 main：
+
+| 顺序 | 分支 | 顶 | 提交数 | 报告 | 合并 | 检查结论 |
+|---|---|---|---|---|---|---|
+| 1 | p3-contracts（P3，prompt 61） | 0d7334b | 22 | reports/p3-contracts.md | b914b23，无冲突 | 六提案 + 每路 AFV 全落地；614 个包用例全绿、gate4 p3c 19 / 19、lint 全绿；改过一处测试内阈值（抖动均值 0.8 → 1.2 ms，用户 2026-09-23 批）、测试标准 §7 加 display[]（用户让 P3 直接加） |
+| 2 | w1-testkit-3（W1-A3，prompt 62） | 69bea5c | 7 | reports/w1-testkit-3.md | 2c86e74，只有 docs/OWNERSHIP.md 相邻两行（P3 行 / W1-A3 行各自加了测试标准 token）冲突，两行各取各的 | frameprobe 自证解码 + Wipe / Zoom 量法；68 个用例全绿；测试标准 §2.1 三条口径（用户批）；gate4.sh 没接（scripts/ 不归它）→ 本次接上 |
+| 3 | w2-inputs-2（W2-A2，prompt 64） | 4114cb5 | 19（其中 12 个是叠在下面的 P3 ca1baa5） | reports/w2-inputs-2.md | 3c79e23，无冲突 | AudioDeviceInput + 提案 014（用户批并指定 W2-A2 落地）；本包 49 个用例 0 失败；没做的全归档成问题单（W2A2-g5-pending-items） |
+
+归属：三个分支相对各自基线都在允许范围内（W2-A2 相对 P3 的 ca1baa5 查：32 个文件都在 OWNERSHIP W2-A2 行里，行里多出的 7 个文件是用户批 014 时给的）；
+P3 / W1-A3 各自把 `docs/spec/导播台测试标准.md` `docs/OWNERSHIP.md` 加进自己那行并写明是用户让改的，合并后 `make lint BRANCH=g4` 对合并提交只算手改，全绿（见 §10.3）。
+
+### 10.1 合并后检查点做的胶水与工装（G4 目录内；Inputs 包 18 行胶水）
+
+| 事 | 来源 | 落点 |
+|---|---|---|
+| gate4.sh 接 W1-A3：frameprobe 自证默认开、不再带 `--blank-ticks`（`--legacy-blank-ticks` 回老口径）；V7 加 `frameprobe wipe / zoom`（场景里第一次 Wipe / Zoom，方向从节目文件取）；gate3-report.py 的 V7 行合并判 Fade / Wipe / Zoom ≤ 1 帧，说明段改写 | W1-A3 报告 §3 第 1 条 | scripts/gate4.sh、scripts/gate3-report.py |
+| g4 节目 5 / 6 号的 ID 改成无红分量的调色板 9（深绿）/ 15（蓝绿）：溢色抑制 0.5 把品红 / 金的 ID 块拉离标称色 40 > 24，这两路在播全程解不出 | W1-A3 问题单 W1A3-g4-keyer-spill-breaks-pattern-id | G4Factory + 重生成 scenarios/g4-show.json（与 P3 版只差两个 patternID） |
+| headless 接纯音频设备输入（`.audio` → AudioDeviceInput，环注册进音频引擎，producerBlockFrames 1024；有设备音频时录制 / NDI 发送照带；`--iso-audio` 仍只取合成源）。冒烟：g3 节目加一路内置麦克风 `{"audio":{"deviceUID":"BuiltInMicrophoneDevice"}}` 跑 3 s 并录制——日志「纯音频输入 9「麦克风」：Core Audio 设备，环 2 声道」，音频 838 块 dropouts 0 / underruns 0，文件 h264 + aac 各 3.000 s，stats 里 9 号 per_input 全 0（没有视频，符合口径） | W2-A2 问题单 W2A2-g5-headless-audio-device-input | Tools/switcher-headless/HeadlessRun.swift |
+| `switcher-input-probe audio-device` 子命令入口（实现在 W2-A2 的 harness 里，差 18 行接线） | W2-A2 问题单 W2A2-w2-inputs-probe-audio-device-subcommand | Packages/SwitcherInputs/Sources/switcher-input-probe/main.swift（胶水 18 / 50） |
+| 新 prompt 66 W3-B2（多画面纯音频格 / 真实电平表 / 名字标签、删 010 过渡读取，可选 PVW 环按需）+ OWNERSHIP 行 | W2-A2 问题单 W2A2-w3-compositor2-multiview-audio-only-cell、P3 报告 §4 第 1 条 / §5 第 1 条 | docs/plan/prompts/66、docs/OWNERSHIP.md |
+| prompt 63 补 W2-A2 的接线细节 / 014 声道选择 / 纯音频输入条占位；prompt 65 补删 External 过渡读取 | W2-A2 问题单 W2A2-w3-app-3-audio-device-input-wiring、P3 报告 §4 第 1–2 条 | docs/plan/prompts/63、65 |
+| 提案 015（`fallbackToMain` 默认 true → false，与 W3-C 运行时一致）**待批** | P3 报告 §4 第 2 条 | docs/contract-changes/015 |
+| 清单 §9：W2-A2 的六项人工 / 硬件项 | W2-A2 问题单 W2A2-user-manual-hardware-tests | docs/checklists/G4.md |
+
+### 10.2 测试（合并后 + 胶水后，`make test` 全量，2026-09-23 12:10–13:00，机器上没有别的会话）
+
+| 步骤 | 结果 |
+|---|---|
+| 六个包 `swift test` | **655 个用例 0 失败、21 跳过**：SwitcherCore 79 / 90 / 73（跳 1）、SwitcherInputs 55（跳 6）/ 25（跳 2）/ 25（跳 3）、SwitcherAudio 62（跳 2）/ 41（跳 3）、SwitcherOutputs 6 / 25 / 28 / 8（跳 2）/ 7 / 6（跳 1）、SwitcherControl 25（跳 1）/ 3 / 28、SwitcherTestKit 69。跳过的都是原有的 BLOCKED-硬件 / 权限 / 手动项。W2-A2 报告说的两条 NDI 回环计时断言这次没红（机器空着）。 |
+| 第一次全量在 SwitcherContracts 红了一条 | `ContractsP3Tests.testP3_oldShowFilesStillLoadWithSameSemantics`：它把改写前的 g4 节目夹具搬迁后与现在的 `scenarios/g4-show.json` 逐字段比，本次把 5 / 6 号的 patternID 改成 9 / 15 后 inputs 不再相等。夹具（P3 的 `Tests/SwitcherContractsTests/Fixtures/g4-show-before-p3.json`）同步补两行 patternID（Core 包胶水 2 行），用例的语义（旧键搬迁 = 新文件）不变；单跑 10 / 10，再全量 0 失败。 |
+| 两个工具冒烟 | 通过 |
+| App `xcodebuild test` | 只有 `LocalizationTests.testL10n_noHardcodedChineseInUISources` 一条红（W3-C 的 39 处文案，G4 / P3 / W2-A2 都带着它放行，归 W3-E2 / prompt 63）；`MAKETEST_EXIT=2` 就是它 |
+| `make build` 全量 | 六包 + 两工具 + App 全部编过（Xcode 27 swiftbuild 那四行 "exit code 0 but produced no further output" 是已知噪声） |
+
+### 10.3 gate4（合并后一次 10 分钟，标签 g4b，2026-09-23 13:02–13:12 跑、13:12–13:30 出报告；自证口径 + 新 ID + 多画面真渲染；机器上没有别的会话）
+
+`scripts/gate4.sh --minutes 10 --label g4b --baseline baselines/g4-m5max.json`（不写基线）→ **19 / 19 ✅**（reports/G4-run-g4b.md，产物 `.build/gate4/g4b/`）。
+第一遍在 frameprobe 那一步炸了（bash 3.2 + `set -u` 的空数组，§9），运行产物完好，修好后 `--skip-run --no-build` 只重做后半段。
+
+| 指标 | g4b | G4 run4（基线） | 说明 |
+|---|---|---|---|
+| V1 avg / p99 | 2.094 / 2.859 ms | 2.149 / 2.652 ms | P3 起 headless 每拍多一次多画面 NV12 转换（W3-B §4 第 5 条落地），avg 反而低 0.055 ms，p99 高 0.2 ms，都在 G4 四次运行的散布里；必须档 / 目标档都过 |
+| V2 / V5 | 0 / +0 | 0 / +0 | — |
+| V3 p99 / max | 0.043 / 0.143 ms | 0.091 / 0.121 ms | — |
+| V4 | 精确核算 0 / frameprobe 在播段 0 / 倒退 0（平均帧率口径最大 0.0111%） | 0 / 0 / 0 | **自证口径**：不再用 `--blank-ticks`，解不出 ID 的 1273 帧全是转场中间帧（C3 比对 34727 帧、不一致 0）；5 / 6 号换 ID 后在播段都能认出来 |
+| V6 | 第 1000 拍 Cut 干净；全程 **90** 次 Cut 不干净 0 | 64 次 | 多出来的 26 次 = 19 次 Stinger 的第 cutAtTick 拍换底（自证口径下 Stinger 的 Cut 保留，W1-A3 §2.2）+ Wipe / Zoom 完成拍 |
+| V7 | Fade 0.493 帧；**Wipe @7800 leftToRight 0.071 帧、Zoom @8100 0.002 帧**（各 23 个样本，单调）；T-bar 最大映射误差 0.33% | Fade 0.467 帧；Wipe / Zoom 量不了 | 新增两条来自 W1-A3 的 `frameprobe wipe / zoom` |
+| A1–A4 | 0；整秒 199 对最大 0.000 ms；漂移 0.00 ms/8h；A4 极差 0.208 ms | 同量级 | — |
+| E1 / E2 / E3 / E5 | 0；6.002 Mbps 误差 1.61%；GOP 120 精确；时长差 0、音视频差 0.0 ms | 同 | — |
+| C1–C4 | 50 / 50，mean 6.69 ms；C2 p99 1.8 ms；C3 0 不一致；C4 12000 / 12000 | 同 | — |
+| S2 / S3 | 90.1 MB/h（10 分钟外推，仅参考，G4 也红）；CPU 51.2% / GPU 28.4% | 79.9 MB/h；50.7% / 30.5% | S2 归 W4-A 的 8 小时实跑 |
+
+**基线不动**：`baselines/g4-m5max.json` 仍是 G4 run4。合并后的 V1 / V3 / S3 都在 G4 四次运行的散布里，没有退步也没有值得换基线的改善；W4-A 的 L5 继续以它为基线（多画面真渲染的代价已经在 g4b 里量过，没有可见变化）。
+
+### 10.4 仍等用户的
+
+1. **NDI 回环两条计时断言在整包负载下偶发超阈值**（W2-A2 问题单 W2A2-w3-inputs2-ndi-audio-interval-flaky-under-load）：阈值贴着理论值（24.667 ms / 71.667 ms），差 0.25–0.7 ms 就过线，单跑稳过。
+   建议：给两条各加一个写明理由的调度余量（+2 ms），或改成 p99 / 次数上限；按铁律 9 由用户定，检查点不动。
+2. **提案 015**（上表）。
+3. W2-A2 问题单 4-1…4-5 的硬件 / 手动项（清单 §9）。

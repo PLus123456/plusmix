@@ -89,3 +89,9 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
 - §8 第 4–8 条全部按 G4 建议定下：W3-A 两条口径 + deviceID 格式 → P3 注释 / CONTRACTS；W3-C → 新提案 **013**（display[] + OutputSettings.display，已批，P3 落地）+ 新会话 **W3-C2 = prompt 65**（Aux 全分辨率由本包自己画，分支 w3-outputs-3）；
   W3-B 三条 → P3（渲染器一行走胶水）；W3-D → reportedVersion 不动、插件 UUID 随 W4-B 的 bundle id 定（prompt 71 第 6 条、OWNERSHIP W4-B 行加 Tools/streamdeck-plugin/）；纯音频设备输入 → 新会话 **W2-A2 = prompt 64**（分支 w2-inputs-2）。
 - g4 由本会话按用户授权 `--no-ff` 合入 main（记录见下一段与 git log）。
+
+## 7. 续做分支合入（2026-09-23，本会话续）
+
+用户："P3（prompt 61）、W1-A3（62）、W2-A2（64）都完事了，你检查一下，之后再合一下，好像又要加东西，你也看看"。
+检查 → 合并（P3 → W1-A3 → W2-A2，只有 OWNERSHIP 相邻两行一处冲突）→ 检查点胶水（gate4.sh 接自证与 Wipe / Zoom、g4 节目 5 / 6 号换 ID、headless 与探针接纯音频设备）→ 全量测试 + 一次 gate4 → 新 prompt 66 / 提案 015 / 清单 §9 → g4 快进到 main。
+明细与数字在 reports/G4-notes.md §10（reports/G4.md 同步）。

@@ -8,6 +8,8 @@
 //                                             真引擎 + 真渲染器跑，量每路 L1（ingressTime → 编码器入口）
 //   switcher-input-probe hotplug --camera <uniqueID> [--cycles 20] [--timeout 120]   S5：用户手动拔插，这里计时
 //   switcher-input-probe permission --camera 0 | --screen 0 [--seconds 60]           S6：打印状态变化，看授权后是否自动恢复
+//   switcher-input-probe audio-device [--uid <deviceUID> --seconds N] [--channels 4,5] [--no-force-48k] [--no-convert]
+//                                             纯音频设备输入（W2-A2）：列设备 / 跑 N 秒报块数、断裂、hostTime 单调性、块间隔分布
 //
 // 摄像头 / 屏幕需要 TCC 权限：从 Claude / 脚本直接跑没有提示会被拒；用 Scripts/probe-app.sh 包成 .app 跑（它的 Info.plist 带用途说明）。
 import AVFoundation
@@ -292,6 +294,22 @@ case "run":
     }
     sem.wait()
     if let e = box.error { fail("run 失败：\(e)") }
+
+case "audio-device":
+    // W2-A2 的纯音频设备探针：实现全在 SwitcherInputsHarness.AudioDeviceProbe，这里只是命令行入口（G4 续做合入时按 W2-A2 的问题单接的，胶水）
+    if let uid = opts.string("uid") {
+        let seconds = opts.double("seconds", 10)
+        var audioOptions = AudioDeviceInput.Options()
+        if opts.has("no-force-48k") { audioOptions.forceSampleRate48k = false }
+        if opts.has("no-convert") { audioOptions.convertSampleRate = false }
+        if let map = opts.string("channels") { audioOptions.channelMap = map.split(separator: ",").compactMap { Int($0) } }   // 提案 014 的声道映射
+        let run = try AudioDeviceProbe.run(uid: uid, seconds: seconds, channelCount: opts.int("channels-in-ring", 2),
+                                           options: audioOptions) { print("[\(stamp())] \($0)") }
+        for line in AudioDeviceProbe.report(run) { print(line) }
+        exit(run.breaks == 0 && run.nonMonotonic == 0 && run.state == .live ? 0 : 2)
+    } else {
+        for line in AudioDeviceProbe.deviceLines() { print(line) }
+    }
 
 case "hotplug":
     guard let id = opts.string("camera") else { fail("要 --camera <uniqueID>") }

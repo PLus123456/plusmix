@@ -38,6 +38,17 @@ enum G4Factory {
             // （G4 第一次 10 分钟跑就是这样：ID 6 在播 0 帧）。红离 5–8 号的 ID 色（品红 / 金 / 黄绿 / 天蓝）与灰噪声底都远，画面不变，只付着色器代价。
             inputs[i].settings.keyer = KeyerSettings(enabled: true, keyColor: RGB8(red: 255, green: 0, blue: 0))   // 容差 0.3、柔化 0.1、溢色 0.5（提案 009 的口径）
             inputs[i].name += " 抠像"
+            // 溢色抑制 0.5 会把"红分量最高"的 ID 色往灰里拉：5 号的品红（4）、6 号的金（5）在播时 ID 块离标称色 40 > 契约阈值 24，frameprobe 整段解不出
+            // （W1-A3 对照跑发现，reports/issues/W1A3-g4-keyer-spill-breaks-pattern-id.md）。换成调色板里没有红分量的两色：深绿（9）、蓝绿（15）；
+            // 7 号黄绿（6）/ 8 号天蓝（7）本来就不受影响。抠像负载不变，只是 ID 块换了颜色；基线不受影响。
+            if case .synthetic(var s) = inputs[i].source, s.patternID == nil {
+                switch inputs[i].number {
+                case 5: s.patternID = 9
+                case 6: s.patternID = 15
+                default: break
+                }
+                inputs[i].source = .synthetic(settings: s)
+            }
         }
         inputs.append(InputConfig(number: stingerInput, name: "Stinger PNG（带 alpha）", source: .image(path: stingerFileName)))
         var overlays = Array(repeating: OverlayState(), count: MixerState.overlayCount)
