@@ -1,7 +1,7 @@
 import Foundation
 import SwitcherContracts
 
-/// S5 热插拔计时（用户手动拔插，这里只计时、计数、验证编号不变）。
+/// 热插拔计时（用户手动拔插，这里只计时、计数、验证编号不变）：摄像头是 S5，纯音频设备是 S4。
 ///
 /// 每个周期：等设备断开（输入进 noSignal，记 CameraInput 收到断开通知的时刻）→ 提示插回 → 等回到 live，
 /// 恢复时间 = live 时刻 − 收到连接通知的时刻（不含用户插回的手速）。全程进程不崩就是"崩溃 0"。
@@ -33,7 +33,7 @@ public enum HotplugTimer {
     }
 
     /// 阻塞当前线程直到 cycles 次完成或超时。`log` 给用户看提示。
-    public static func run(input: CameraInput, cycles: Int, cycleTimeoutSeconds: Double, log: (String) -> Void) -> Result {
+    public static func run(input: some HotplugMonitorable, cycles: Int, cycleTimeoutSeconds: Double, log: (String) -> Void) -> Result {
         var records: [CycleRecord] = []
         let numberBefore = input.number
         var timedOut = false
@@ -46,7 +46,7 @@ public enum HotplugTimer {
             return cond()
         }
         for k in 1...max(cycles, 1) {
-            log("[\(k)/\(cycles)] 请拔掉设备「\(input.deviceName ?? input.uniqueID)」……")
+            log("[\(k)/\(cycles)] 请拔掉设备「\(input.hotplugDeviceLabel)」……")
             let disconnectCountBefore = input.hotplugEvents.disconnects
             guard wait(cycleTimeoutSeconds, until: { input.state != .live && input.hotplugEvents.disconnects > disconnectCountBefore }) else {
                 log("  等待断开超时（\(cycleTimeoutSeconds) s），中止"); timedOut = true; break

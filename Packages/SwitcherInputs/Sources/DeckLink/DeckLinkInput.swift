@@ -29,8 +29,8 @@ public enum DeckLinkInputError: Error, Equatable, CustomStringConvertible {
 /// - 热插拔：IDeckLinkDiscovery 通知 + 每秒轮询兜底；设备被拔 → 关会话、noSignal、文案；回来（同一持久 ID）→ 自动重开，
 ///   编号和 InputSettings 不变（不在这个对象里）。设备一开始不在：noSignal，等它来。驱动没装：noSignal + 指到 Desktop Video 的文案。
 /// - 时间戳：pts = 帧的硬件参考时间经一阶滤波校准到 host time（方法见 sw_decklink.h 校准器一节）；ingressTime = push 前一刻。
-/// - 音频：内嵌音频（options.audioChannels 路，int16 / int32）由桥接层转成 float32 平面，按环的声道数映射后写环，
-///   块首 host time 由包的流时间换到硬件钟再校准。
+/// - 音频：内嵌音频（options.audioChannels 路，int16 / int32）由桥接层转成 float32 平面，按声道映射（提案 014，
+///   `InputChannelMap` 的口径）挑出环的声道数那几路写环，块首 host time 由包的流时间换到硬件钟再校准。
 public final class DeckLinkInput: Input, @unchecked Sendable {
     /// 可调参数。
     public struct Options: Sendable, Hashable {
@@ -38,7 +38,12 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
         /// 两边都没有就不改卡上的当前设置。非 nil = 调用方显式指定，覆盖 case 里的值。
         public var connection: SwitcherContracts.DeckLinkConnection? = nil
         /// 内嵌音频声道数（2–16）；0 = 不开。环的声道数少于它时多的丢。
+        /// 实际开的路数 = max(它, 声道映射用得上的最大下标 + 1)，再按 SDK 只认的 2 / 8 / 16 往上取（`embeddedAudioChannels`）。
         public var audioChannels = 2
+        /// 声道映射（内嵌音频的声道下标；口径见 `InputChannelMap` / 契约 `InputSource` 的"声道映射"）。
+        /// nil = 从 `InputSource.decklink(deviceID:connection:channels:)` 取（提案 014；case 里也是空 = 取前几路）；
+        /// 非 nil = 调用方显式给了，覆盖 case 里的值（与 `connection` 同一口径）。
+        public var channelMap: [Int]? = nil
         /// 音频样本类型：16 或 32（bmdAudioSampleType）。
         public var audioSampleType = 32
         /// 无信号看门狗门限：帧间隔 × N。
@@ -136,6 +141,8 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
     private let surfaces = DeckLinkSurfaceTracker()
     private let planeTable: UnsafeMutablePointer<UnsafePointer<Float>>
     private let planeTableCapacity = AudioFormat.maxChannels
+    /// 环的第 d 路想要内嵌音频的第几路（声道映射算好的表，init 里填，回调里只读）。
+    private let requestedSourceChannel: UnsafeMutablePointer<Int>
     // 以下只在 sessionQueue 上碰
     private var session: OpaquePointer?
     private var hotplugToken: Int32 = 0
@@ -164,21 +171,37 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
         sessionQueue = DispatchQueue(label: "switcher.decklink.session.\(number)", qos: .userInitiated)
         planeTable = .allocate(capacity: planeTableCapacity)
         planeTable.initialize(repeating: UnsafePointer(bitPattern: 8)!, count: planeTableCapacity)
+        // 声道映射先算成"环的第 d 路想要内嵌音频的第几路"，回调里只查表再按实际声道数钳（不碰 Swift 数组）
+        requestedSourceChannel = .allocate(capacity: planeTableCapacity)
+        for d in 0..<planeTableCapacity {
+            requestedSourceChannel[d] = InputChannelMap.requestedChannel(forDestination: d, map: options.channelMap ?? [])
+        }
+    }
+
+    /// 实际要开的内嵌音频路数：max(Options.audioChannels, 声道映射用得上的最大下标 + 1)，按 SDK 认的 2 / 8 / 16 往上取；
+    /// `requested` 为 0（不开音频）时仍是 0。
+    static func embeddedAudioChannels(requested: Int, map: [Int], ringChannels: Int) -> Int {
+        guard requested > 0 else { return 0 }
+        let needed = max(requested, InputChannelMap.requiredSourceChannels(map: map, destinationChannels: ringChannels))
+        for n in [2, 8, 16] where needed <= n { return n }
+        return 16
     }
 
     /// 从 InputSource.decklink 构造。
     public convenience init(config: InputConfig, timing: ProgramTiming, videoSlot: any FrameSlot, audioRing: (any AudioRing)? = nil,
                             options: Options = Options()) throws {
-        guard case .decklink(let id, let connection) = config.source else { throw DeckLinkInputError.notADeckLinkSource(config.source.kind) }
-        // 提案 008：接口从 case 取；Options 里显式给了（非 nil）就以 Options 为准
+        guard case .decklink(let id, let connection, let channels) = config.source else { throw DeckLinkInputError.notADeckLinkSource(config.source.kind) }
+        // 提案 008 / 014：接口、声道映射从 case 取；Options 里显式给了（非 nil）就以 Options 为准
         var o = options
         if o.connection == nil { o.connection = connection }
+        if o.channelMap == nil { o.channelMap = channels }
         self.init(number: config.number, name: config.name, deviceID: id, timing: timing, videoSlot: videoSlot, audioRing: audioRing, options: o)
     }
 
     deinit {
         stop()
         planeTable.deallocate()
+        requestedSourceChannel.deallocate()
     }
 
     // MARK: 生命周期
@@ -235,7 +258,9 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
         var cfg = sw_decklink_session_config()
         cfg.connection = options.connection.map { DeckLinkConnection($0).rawValue } ?? 0
         cfg.initial_display_mode = options.initialDisplayMode
-        cfg.audio_channels = audioRing == nil ? 0 : Int32(min(max(options.audioChannels, 0), 16))
+        cfg.audio_channels = audioRing.map {
+            Int32(Self.embeddedAudioChannels(requested: options.audioChannels, map: options.channelMap ?? [], ringChannels: $0.channelCount))
+        } ?? 0
         cfg.audio_sample_type = Int32(options.audioSampleType == 16 ? 16 : 32)
         cfg.calibration_shift = Int32(options.calibrationShift)
         cfg.max_pool_buffers = Int32(options.poolMaxBuffers)
@@ -432,7 +457,7 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
         let channels = min(ring.channelCount, planeTableCapacity)
         let src = Int(info.channel_count)
         for c in 0..<channels {
-            let sc = src == 1 ? 0 : min(c, src - 1)
+            let sc = InputChannelMap.clamp(requestedSourceChannel[c], sourceChannels: src)
             guard let p = planes[sc] else { return }
             planeTable[c] = p
         }
