@@ -37,3 +37,12 @@ dyld[…]: Symbol not found: _swift_initBorrow
    G4 报告 §9"生成物别提交"那条改成"这几个要提交、别让 xcodebuild / swift build 顺手改掉"。
 2. 或者在各 Package.swift 里给 swift-collections / swift-crypto / swift-nio 加上限（`.upToNextMinor`），等确认新版本在最低系统上能跑再放开。
 3. 升依赖作为单独的事做（W4-A / W4-B），升完在 macOS 15 / 26 两个系统上各起一次 frameprobe / App。
+
+## 处理结果（2026-09-23，W3-E2 / `w3-app-3`，用户批"Package.resolved 入库"）
+
+按建议 1 做了：`Packages/SwitcherOutputs/Package.resolved`、`Packages/SwitcherTestKit/Package.resolved`、`Tools/frameprobe/Package.resolved` 入库（提交 `7a7a63a`），
+版本与 `Tools/switcher-headless/Package.resolved` 同一套（29 个 pin 逐个相同；Outputs 只有 haishinkit.swift 2.2.5 / logboard 2.6.0 两个）。
+- 从零编（另起 scratch path）的 frameprobe 不再引用 `_swift_initBorrow`，debug / release 都能起；六个包 + 两个工具 `swift build` 之后这三个文件不被改写。
+- G4 报告 §9"生成物别提交"对这三个文件不再适用：**它们要提交，别删、别让 xcodebuild / swift package update 顺手改掉**；
+  `Packages/SwitcherControl/Package.resolved` 照旧会被 xcodebuild 写进工作区的 pin（haishinkit / logboard、originHash），提交前 `git checkout` 它。
+- 建议 2（Package.swift 加上限）与 3（升依赖）没做，留给 W4-A / W4-B。

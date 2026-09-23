@@ -2,7 +2,7 @@
 
 提出会话 / 分支：W3-E2 / `w3-app-3`（2026-09-23；prompt 63 交付第 2 条："现有命令只有 setTransition(type:durationTicks:)，这两组参数目前只能 loadShow 整体替换——
 先按替换做并写清楚；若嫌不妥，写提案加 setTransitionParams"。prompt 原文写的编号是 013，但 013 已是显示类输出那条，顺延到 016）
-状态：**待批**
+状态：**已落地**（用户 2026-09-23 批："016 批了"；由提出会话 W3-E2 / `w3-app-3` 落地：`6193f56` 契约 + reducer、`e41eeb4` 校验器 / 命令目录 / docs/api.md、`91c9322` App 改发新命令。落地细节与正文的出入见文末"落地记录"）
 
 ## 改什么
 
@@ -49,3 +49,12 @@ JSON：`{"setTransitionParams":{"wipe":{"direction":"topToBottom","softness":0.2
 ## 怎么迁移
 
 只加命令，不加字段：`Show.schemaVersion` 不升，老 JSON 命令原样可解。不批的话 App 继续用 loadShow 整体替换（上面三条毛病照旧，已写进 reports/w3-app-3.md §3）。
+
+## 落地记录（2026-09-23，W3-E2）
+
+- 契约 / reducer 按上表五条实现，没有出入；`stinger.input = 0` 也拒（0 是黑场、不是输入，与 overlay 的输入引用同一口径），校验器与 reducer 一致（`testValidator_agreesWithReducer` 各加了合法 / 非法两条）。
+- 校验器的理由是"Stinger 用的输入 n 不存在"（HTTP 400）；"转场进行中"随拍变，照旧只由 reducer 定（回执 applied = false）。
+- `Command` 33 → 34，`docs/api.md` 34 条；CONTRACTS.md §2.5 / §2.6 / §8 / §9 第 5 条同步（顺带把"比 §9.1 多几个命令"数对）。
+- App：`TransitionParamsModel` 只在 `transition.isActive` 时延后（叠加进出动画 / FTB 渐变不再挡）；发出后别的来源抢先起了转场（会被拒）的，转场结束后补发。
+  反证：新 App 用例对着旧实现（loadShow）跑，红在"别的来源改的总线增益被盖回""叠加动画挡住参数""命令日志里是 loadShow"。
+- 没做：`removeInput` 删掉 stinger 用的那一路时不清 `transition.stinger.input`（overlay 的引用会清）。本提案没写这条，没动；记在 reports/w3-app-3.md §4。
