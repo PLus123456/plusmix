@@ -1,14 +1,10 @@
 // 多画面布局（设计方案 §5 步骤 6；W3-B 交付 4）。
 //
-// 布局从哪来（提案 010 已落地）：状态里第一个 kind = multiview 的输出的 `settings.multiview`
-// （`MultiviewLayoutSettings`：preset / custom / safeArea / meters）。nil 时回退到过渡键 `settings.extra["layout"]`
-// （保留一个版本；旧节目文件由 `Show.load` 一次性搬进正式字段，这条回退只为还没经过 load 的内存状态）。
-//
-// 过渡键 `extra["layout"]` 的形态：
-//   - 字符串 = 预设名：pgmPvw+grid（默认：上 PVW / PGM、下按路数 4×2 / 6×3 / 8×4，= W1-C 的几何）、pgmPvw+4x2、pgmPvw+2x2、3x3、4x4
-//   - 对象 {"preset": "3x3", "safeArea": true, "meters": true} = 预设 + 装饰开关
-//   - 对象 {"cells": [{"source": "program" | "preview" | 3, "rect": {x, y, width, height}}], "safeArea": …, "meters": …} = 自定义
-//   - 没有 / 认不出 / cells 为空 → 默认布局
+// 布局从哪来：状态里第一个 kind = multiview 的输出的 `settings.multiview`（提案 010 的正式字段 `MultiviewLayoutSettings`：
+// preset / custom / safeArea / meters）；nil、预设名认不出、custom 里没有一个合法格子 → 默认布局
+// （pgmPvw+grid：上 PVW / PGM、下按路数 4×2 / 6×3 / 8×4，= W1-C 的几何）。
+// 过渡键 `settings.extra["layout"]` 的后备读取 P3 保留了一个版本，W3-B2 删掉（P3 报告 §4 第 1 条）：旧节目文件由 `Show.load`
+// 一次性搬进正式字段；没经过 load 的内存状态里的过渡键不再起作用（渲染成默认布局）。
 // 解析结果放进预分配的定长表：渲染线程只在快照 sequence 变了时解析一次，解析本身零分配（下标循环、枚举载荷只 retain）。
 // App 的几何 API（MultiviewLayout.placements）走同一份 `Geometry`，用 Double 算；渲染表用 Float，与 W1-C 的像素算式逐字相同。
 import simd
@@ -114,14 +110,10 @@ final class MultiviewLayoutTable {
         return nil
     }
 
-    /// 从状态解析（渲染线程；零分配）。正式字段优先，没有才读过渡键。
+    /// 从状态解析（渲染线程；零分配）。只读正式字段 `settings.multiview`，过渡键 `extra["layout"]` 忽略。
     func parse(state: MixerState, width: Int, height: Int) {
         let inputs = state.inputs
-        if let s = MultiviewLayoutTable.settings(in: state) {
-            parse(settings: s, inputCount: inputs.count, width: width, height: height) { inputs[$0].number }
-        } else {
-            parse(layout: MultiviewLayout.layoutValue(in: state), inputCount: inputs.count, width: width, height: height) { inputs[$0].number }
-        }
+        parse(settings: MultiviewLayoutTable.settings(in: state), inputCount: inputs.count, width: width, height: height) { inputs[$0].number }
     }
 
     /// 核心：正式字段 + 输入编号 → 表（提案 010）。下标循环、只 retain，渲染线程可调。
@@ -137,34 +129,6 @@ final class MultiviewLayoutTable {
             if cellCount > 0 { return }
         }
         preset = MultiviewPreset.named(settings.preset) ?? .pgmPvwGrid
-        applyPreset(preset, inputCount: inputCount, width: w, height: h, inputNumber: inputNumber)
-    }
-
-    /// 过渡键（`extra["layout"]`）版：layout 值 + 输入编号 → 表。正式字段落地后只作后备。
-    func parse(layout: JSONValue?, inputCount: Int, width: Int, height: Int, inputNumber: (Int) -> Int) {
-        let w = Float(width), h = Float(height)
-        reset(width: w, height: h)
-        var preset = MultiviewPreset.pgmPvwGrid
-        var custom = false
-        if let layout {
-            switch layout {
-            case .string(let name):
-                preset = MultiviewPreset.named(name) ?? .pgmPvwGrid
-            case .object(let o):
-                if case .bool(let b)? = o["safeArea"] { safeArea = b }
-                if case .bool(let b)? = o["meters"] { meters = b }
-                if case .array(let arr)? = o["cells"], !arr.isEmpty {
-                    custom = true
-                    parseCustom(arr, width: w, height: h)
-                    if cellCount == 0 { custom = false }
-                } else if case .string(let name)? = o["preset"] {
-                    preset = MultiviewPreset.named(name) ?? .pgmPvwGrid
-                }
-            default:
-                break
-            }
-        }
-        if custom { return }
         applyPreset(preset, inputCount: inputCount, width: w, height: h, inputNumber: inputNumber)
     }
 
@@ -236,38 +200,7 @@ final class MultiviewLayoutTable {
             let width = min(max(c.rect.width, 0), 1 - x)
             let height = min(max(c.rect.height, 0), 1 - y)
             guard width > 0, height > 0 else { continue }
-            // 与过渡键那条路径逐字相同的算式（先转 Float 再乘），两条路径的像素坐标才逐位一致
-            append(kind, input, (Float(x) * w, Float(y) * h, Float(width) * w, Float(height) * h))
-        }
-    }
-
-    /// 自定义格子（过渡键）：source 是 "program" / "preview" / 数字；rect 归一化，钳到画面内；缺 rect 或 source 的格子忽略。
-    private func parseCustom(_ arr: [JSONValue], width w: Float, height h: Float) {
-        var i = 0
-        while i < arr.count && cellCount < MultiviewLayoutTable.capacity {
-            defer { i += 1 }
-            guard case .object(let c) = arr[i], case .object(let r)? = c["rect"] else { continue }
-            var kind = MultiviewCellSpec.Kind.input
-            var input = 0
-            switch c["source"] {
-            case .string(let s)?:
-                if s == "program" { kind = .program } else if s == "preview" { kind = .preview } else { continue }
-            case .number(let n)?:
-                guard n >= 1, n < 1_000_000 else { continue }
-                input = Int(n)
-            default:
-                continue
-            }
-            var x = 0.0, y = 0.0, width = 0.0, height = 0.0
-            if case .number(let v)? = r["x"] { x = v }
-            if case .number(let v)? = r["y"] { y = v }
-            if case .number(let v)? = r["width"] { width = v }
-            if case .number(let v)? = r["height"] { height = v }
-            x = min(max(x, 0), 1)
-            y = min(max(y, 0), 1)
-            width = min(max(width, 0), 1 - x)
-            height = min(max(height, 0), 1 - y)
-            guard width > 0, height > 0 else { continue }
+            // 先转 Float 再乘：W3-B 过渡键那条路径的算式，参考图 v8-multiview-custom 的像素坐标靠它逐位不变（P3 报告 §5 第 4 条）
             append(kind, input, (Float(x) * w, Float(y) * h, Float(width) * w, Float(height) * h))
         }
     }

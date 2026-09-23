@@ -16,7 +16,7 @@ enum CompositorPasses {
         /// 多画面布局（快照 sequence 变了才重新解析）。
         let layout: MultiviewLayoutTable
         let frameIndex: UInt64
-        /// PVW 也画叠加（提案 010 过渡做法）。
+        /// PVW 画全部叠加的总开关（提案 010：与每通道的 `OverlayState.previewOn` 取或）。
         var overlaysInPreview = false
     }
 
@@ -321,7 +321,7 @@ enum CompositorPasses {
             guard let (tex, cfg) = lookup(input, state: state, inputs: inputs, slot: slot, context: context) else { continue }
             let dest = PixelRect(placement.rect, in: width, height)
             let opacity = placement.opacity
-            if let border = OverlayDecoration.border(for: o, config: cfg) {
+            if let border = OverlayDecoration.border(for: o) {
                 let outer = dest.outsetBy(Float(border.width) * Float(height))
                 let sc = scissor(outer, width: width, height: height)
                 if sc.width > 0 && sc.height > 0 {
@@ -570,14 +570,9 @@ extension CompositorPasses {
     }
 }
 
-/// 效果格的标识（契约 EffectSlot.id；视频效果由合成会话定义）。
-enum EffectIDs {
-    /// 画中画边框：params {"width": 占节目高的比例（默认 0.006，钳 0–0.1）, "color": [r, g, b] 0–255（默认白）}。提案 010 的过渡做法。
-    static let border = "border"
-}
-
-/// 叠加通道的装饰（现在只有边框）。提案 010 落地后正式字段 `OverlayState.border` 优先，
-/// 过渡做法（该输入效果链里的 "border" 格）保留一个版本作后备。
+/// 叠加通道的装饰（现在只有边框）：只读正式字段 `OverlayState.border`（提案 010）。
+/// 过渡做法（该输入效果链里的 "border" 格）P3 保留了一个版本的后备，W3-B2 删掉（P3 报告 §4 第 1 条）：
+/// 旧节目文件由 `Show.load` 一次性搬进正式字段，没经过 load 的内存状态里的效果格不再画边框。
 enum OverlayDecoration {
     struct Border {
         var width: Double
@@ -585,12 +580,11 @@ enum OverlayDecoration {
         var color: SIMD4<Float>
     }
 
-    /// 这一路叠加的边框：先看 `OverlayState.border`（正式字段），没有才看输入效果链里的 "border" 格（过渡做法）。
-    /// 下标循环、只 retain，渲染线程可调。
+    /// 这一路叠加的边框；`OverlayState.border` 为 nil 就没有。渲染线程可调（零分配）。
     @inline(__always)
-    static func border(for overlay: OverlayState, config: InputConfig?) -> Border? {
-        if let b = overlay.border { return resolve(b) }
-        return border(for: config)
+    static func border(for overlay: OverlayState) -> Border? {
+        guard let b = overlay.border else { return nil }
+        return resolve(b)
     }
 
     /// 正式字段 → 渲染参数：宽钳 0–0.1，颜色转预乘（alpha 1 所以就是除 255）。
@@ -598,32 +592,6 @@ enum OverlayDecoration {
     static func resolve(_ b: OverlayBorder) -> Border {
         Border(width: min(max(b.width, 0), 0.1),
                color: SIMD4<Float>(Float(b.color.red) / 255, Float(b.color.green) / 255, Float(b.color.blue) / 255, 1))
-    }
-
-    /// 后备：输入的效果链里第一个启用的 "border"；没有为 nil。下标循环、只 retain，渲染线程可调。
-    static func border(for config: InputConfig?) -> Border? {
-        guard let config else { return nil }
-        let effects = config.settings.effects
-        var i = 0
-        while i < effects.count {
-            let e = effects[i]
-            i += 1
-            guard e.enabled, e.id == EffectIDs.border else { continue }
-            var width = 0.006
-            if case .number(let w)? = e.params["width"] { width = min(max(w, 0), 0.1) }
-            var color = SIMD4<Float>(1, 1, 1, 1)
-            if case .array(let a)? = e.params["color"], a.count >= 3 {
-                var c = SIMD4<Float>(0, 0, 0, 1)
-                var j = 0
-                while j < 3 {
-                    if case .number(let v) = a[j] { c[j] = Float(min(max(v, 0), 255)) / 255 }
-                    j += 1
-                }
-                color = c
-            }
-            return Border(width: width, color: color)
-        }
-        return nil
     }
 }
 

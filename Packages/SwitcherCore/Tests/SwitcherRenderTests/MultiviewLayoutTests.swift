@@ -236,40 +236,48 @@ final class MultiviewLayoutTests: XCTestCase {
 
     // MARK: P3（提案 010 落地：正式字段 `OutputSettings.multiview`）
 
-    /// 正式字段与过渡键给同一个布局时，格子表逐字相同、渲染出来逐像素相同；正式字段优先。
-    func testP3_officialMultiviewFieldMatchesLegacyExtraKey() throws {
+    /// 多画面布局只认正式字段 `OutputSettings.multiview`；过渡键 `extra["layout"]` W3-B2 起被忽略（P3 报告 §4 第 1 条）。
+    /// P3 时这条叫 testP3_officialMultiviewFieldMatchesLegacyExtraKey，前一半验"正式字段与过渡键格子表逐字相同、渲染逐像素相同"。
+    /// 过渡键那条路径删掉之后，这一半改成"只有过渡键 = 默认布局（不是旧布局）"；"正式字段 = W3-B 当年用过渡键画的像素"由参考图
+    /// v8-multiview-*（状态已改走正式字段、图没重生成）钉住。后一半（正式字段优先、multiview 格忽略、非法格忽略、64 格截断）原样。
+    func testP3_multiviewReadsOnlyOfficialFieldLegacyExtraKeyIgnored() throws {
         let inputs = [1, 2, 3, 4, 5, 6, 7, 8]
-        // 预设 + 装饰开关
-        for name in MultiviewLayout.presetNames {
-            let legacy = MultiviewLayout.placements(layout: .string(name), inputs: inputs, width: 1920, height: 1080)
-            let official = MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: name), inputs: inputs, width: 1920, height: 1080)
-            XCTAssertEqual(official, legacy, "预设 \(name)")
+        let base = ReferenceStates.fixed8()                 // 没有多画面输出 = 默认布局
+        let defaultPixels = Bitmap(try render(base).multiview).bgra
+        let defaultCells = MultiviewLayout.placements(settings: nil, inputs: inputs, width: 1920, height: 1080)
+
+        // 1. 只有过渡键（没经过 Show.load 的内存状态，例如 API 直接 addOutput 的）：五个预设名、对象写法、自定义格子都渲染成默认布局
+        var legacyValues: [JSONValue] = MultiviewLayout.presetNames.map { .string($0) }
+        legacyValues.append(["preset": "3x3", "safeArea": true, "meters": true])
+        legacyValues.append(ReferenceStates.customLayoutLegacyJSON)
+        let table = MultiviewLayoutTable()
+        for legacy in legacyValues {
+            let s = ReferenceStates.withLegacyExtraLayout(base, legacy)
+            XCTAssertNil(MultiviewLayout.layoutSettings(in: s), "过渡键不算布局：\(legacy)")
+            table.parse(state: s, width: 1920, height: 1080)
+            XCTAssertEqual(MultiviewLayout.placements(table: table, width: 1920, height: 1080), defaultCells, "只有过渡键 \(legacy) 时格子表 = 默认布局")
+            XCTAssertFalse(table.safeArea, "过渡键里的 safeArea 不起作用")
+            XCTAssertFalse(table.meters, "过渡键里的 meters 不起作用")
+            XCTAssertEqual(Bitmap(try render(s).multiview).bgra, defaultPixels, "只有过渡键 \(legacy) 时渲染 = 默认布局")
         }
-        // 认不出的预设名两边都退回默认
-        XCTAssertEqual(MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: "nonsense"), inputs: inputs, width: 1920, height: 1080),
-                       MultiviewLayout.placements(layout: nil, inputs: inputs, width: 1920, height: 1080))
+        // 认不出的预设名（正式字段）也退回默认
+        XCTAssertEqual(MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: "nonsense"), inputs: inputs, width: 1920, height: 1080), defaultCells)
 
-        // 自定义格子：用 W3-B 的过渡键布局 + 由它搬过来的正式字段
-        let legacyLayout = ReferenceStates.customLayoutLegacyJSON
-        let officialLayout = MultiviewLayoutSettings(legacyValue: legacyLayout)
+        // 2. 同一个布局写成正式字段（= Show.load 搬迁的结果）照常生效：与参考图用的布局逐位相同，渲染不是默认布局
+        let officialLayout = MultiviewLayoutSettings(legacyValue: ReferenceStates.customLayoutLegacyJSON)
         XCTAssertEqual(officialLayout, ReferenceStates.customLayout, "参考图用的正式字段布局与 W3-B 的过渡键布局逐位相同")
-        XCTAssertEqual(MultiviewLayout.placements(settings: officialLayout, inputs: inputs, width: 1920, height: 1080),
-                       MultiviewLayout.placements(layout: legacyLayout, inputs: inputs, width: 1920, height: 1080))
+        let officialState = ReferenceStates.withMultiviewLayout(base, officialLayout)
+        let officialPixels = Bitmap(try render(officialState).multiview).bgra
+        XCTAssertNotEqual(officialPixels, defaultPixels)
 
-        // 真渲染：逐像素相同
-        let legacyState = ReferenceStates.withLegacyExtraLayout(ReferenceStates.fixed8(), legacyLayout)
-        var officialState = ReferenceStates.fixed8()
-        officialState.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
-                                             settings: OutputSettings(source: .multiview, multiview: officialLayout))]
-        XCTAssertEqual(Bitmap(try render(officialState).multiview).bgra, Bitmap(try render(legacyState).multiview).bgra)
-
-        // 正式字段优先：两边都给、值不同 → 按正式字段
-        var both = legacyState
-        both.outputs[0].settings.multiview = MultiviewLayoutSettings(preset: "3x3")
-        var only3x3 = ReferenceStates.fixed8()
-        only3x3.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
-                                       settings: OutputSettings(source: .multiview, multiview: MultiviewLayoutSettings(preset: "3x3")))]
-        XCTAssertEqual(Bitmap(try render(both).multiview).bgra, Bitmap(try render(only3x3).multiview).bgra)
+        // 3. 两边都给、值不同 → 只按正式字段（旧键在不在结果都一样）
+        var both = officialState
+        both.outputs[0].settings.extra[MultiviewLayoutSettings.legacyExtraKey] = "3x3"
+        XCTAssertEqual(Bitmap(try render(both).multiview).bgra, officialPixels, "旧键不影响正式字段")
+        var only3x3 = ReferenceStates.withLegacyExtraLayout(base, ReferenceStates.customLayoutLegacyJSON)
+        only3x3.outputs[0].settings.multiview = MultiviewLayoutSettings(preset: "3x3")
+        XCTAssertEqual(Bitmap(try render(only3x3).multiview).bgra, Bitmap(try render(ReferenceStates.withMultiviewPreset(base, "3x3")).multiview).bgra,
+                       "正式字段 3x3 + 旧键自定义格子 → 按 3x3")
 
         // 自定义格子里的 multiview 源被忽略（格子不能套自己）
         let selfRef = MultiviewLayoutSettings(custom: [MultiviewCell(source: .multiview, rect: .full),

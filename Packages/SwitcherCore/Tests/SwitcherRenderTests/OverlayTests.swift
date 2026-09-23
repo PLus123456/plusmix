@@ -186,34 +186,39 @@ final class OverlayTests: XCTestCase {
 
     // MARK: P3（提案 010 落地：正式字段 / previewOn / slideFrom / anchor）
 
-    /// 正式字段 `OverlayState.border` 与过渡做法 `effects["border"]` 给同一个边框时逐像素相同；正式字段优先。
-    func testP3_borderOfficialFieldMatchesEffectSlotPixelForPixel() throws {
-        var legacy = ReferenceStates.pipBorder()
-        legacy.overlays[2].border = nil
-        legacy.inputs[3].settings.effects = [ReferenceStates.borderEffect()]   // 输入 4 的效果格，白边 0.006
-        var official = legacy
-        official.inputs[3].settings.effects = []
-        official.overlays[2].border = OverlayBorder()                  // 同样的默认白边 0.006
-        XCTAssertEqual(try render(official).bgra, try render(legacy).bgra, "正式字段与过渡字段的边框应逐像素相同")
-
-        // 彩色 + 自定义宽度也相同
-        var legacyRed = legacy
-        legacyRed.inputs[3].settings.effects = [ReferenceStates.borderEffect(width: 0.02, color: (255, 0, 0))]
-        var officialRed = official
-        officialRed.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
-        XCTAssertEqual(try render(officialRed).bgra, try render(legacyRed).bgra)
-
-        // 正式字段优先：两边都给、值不同 → 按正式字段画
-        var both = legacy
-        both.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
-        XCTAssertEqual(try render(both).bgra, try render(officialRed).bgra, "正式字段优先于效果格")
-
-        // 解析层：border == nil 时回落到效果格，都没有就是 nil
-        XCTAssertEqual(OverlayDecoration.border(for: official.overlays[2], config: official.inputs[3])?.width, 0.006)
-        XCTAssertEqual(OverlayDecoration.border(for: legacy.overlays[2], config: legacy.inputs[3])?.width, 0.006)
+    /// 画中画边框只认正式字段 `OverlayState.border`；过渡做法（输入效果链里的 "border" 格）W3-B2 起被忽略（P3 报告 §4 第 1 条）。
+    /// P3 时这条叫 testP3_borderOfficialFieldMatchesEffectSlotPixelForPixel，验"两条路径逐像素相同、正式字段优先"。后备删掉之后，
+    /// 原来的每组对照都保留，期望从"与效果格画的相同"换成"效果格什么都不画"；"正式字段 = W3-B 当年用效果格画的像素"由参考图
+    /// v8-pip-border-pgm（状态已改走正式字段、图没重生成）钉住。
+    func testP3_borderReadsOnlyOfficialFieldLegacyEffectSlotIgnored() throws {
+        let official = ReferenceStates.pipBorder()                     // 正式字段，默认白边 0.006
         var none = official
-        none.overlays[2].border = nil
-        XCTAssertNil(OverlayDecoration.border(for: none.overlays[2], config: none.inputs[3]))
+        none.overlays[2].border = nil                                  // 没有任何边框
+        let nonePixels = try render(none).bgra
+        XCTAssertNotEqual(try render(official).bgra, nonePixels, "正式字段照样画边框")
+
+        // 1. 只有效果格（没经过 Show.load 的内存状态，例如 API 直接改的）：不画，与"没有边框"逐像素相同
+        var legacyOnly = none
+        legacyOnly.inputs[3].settings.effects = [ReferenceStates.borderEffect()]
+        XCTAssertEqual(try render(legacyOnly).bgra, nonePixels, "效果格 border 不再画边框")
+        // 彩色 + 自定义宽度的效果格同样被忽略
+        var legacyRed = none
+        legacyRed.inputs[3].settings.effects = [ReferenceStates.borderEffect(width: 0.02, color: (255, 0, 0))]
+        XCTAssertEqual(try render(legacyRed).bgra, nonePixels)
+
+        // 2. 两边都给、值不同：只按正式字段画，效果格在不在结果都一样
+        var officialRed = none
+        officialRed.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
+        var both = officialRed
+        both.inputs[3].settings.effects = [ReferenceStates.borderEffect()]   // 白边效果格
+        let bothBitmap = try render(both)
+        XCTAssertEqual(bothBitmap.bgra, try render(officialRed).bgra, "效果格不影响正式字段")
+        let rr = bothBitmap.pixel(80, 216)   // rect 左边外 16 px，在 0.02 × 1080 = 21.6 px 的红边里
+        XCTAssertTrue(rr.r > 240 && rr.g < 20 && rr.b < 20, "按正式字段画红边 0.02，得 \(rr)")
+
+        // 3. 解析层：只看 OverlayState.border，nil 就是 nil（不再回落到效果格）
+        XCTAssertEqual(OverlayDecoration.border(for: official.overlays[2])?.width, 0.006)
+        XCTAssertNil(OverlayDecoration.border(for: legacyOnly.overlays[2]), "border 为 nil 时不回落到效果格")
         // 宽度钳到 0–0.1
         XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: 5)).width, 0.1)
         XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: -1)).width, 0)
