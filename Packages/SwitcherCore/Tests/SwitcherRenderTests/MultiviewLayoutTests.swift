@@ -28,11 +28,11 @@ final class MultiviewLayoutTests: XCTestCase {
         return (inner.x * Double(width) + (iw - cw) / 2, inner.y * Double(height) + (ih - ch) / 2, cw, ch)
     }
 
-    func checkCells(_ state: MixerState, layout: JSONValue?, file: StaticString = #filePath, line: UInt = #line) throws {
+    func checkCells(_ state: MixerState, layout: MultiviewLayoutSettings?, file: StaticString = #filePath, line: UInt = #line) throws {
         let r = try render(state)
         let mv = Bitmap(r.multiview)
         let pgm = Bitmap(r.program), pvw = Bitmap(r.preview)
-        let placements = MultiviewLayout.placements(layout: layout, inputs: state.inputs.map(\.number), width: 1920, height: 1080)
+        let placements = MultiviewLayout.placements(settings: layout, inputs: state.inputs.map(\.number), width: 1920, height: 1080)
         XCTAssertFalse(placements.isEmpty, file: file, line: line)
         let sx = Int(0.8 * 1920), sy = Int(0.8 * 1080)
         for (i, cell) in placements.enumerated() {
@@ -68,12 +68,12 @@ final class MultiviewLayoutTests: XCTestCase {
     func testMultiview_defaultLayoutUnchangedAndUsedAsFallback() throws {
         let s = ReferenceStates.fixed8()
         try checkCells(s, layout: nil)
-        let bogus = ReferenceStates.withMultiviewLayout(s, "nonsense")
-        try checkCells(bogus, layout: "nonsense")
+        let bogus = ReferenceStates.withMultiviewPreset(s, "nonsense")
+        try checkCells(bogus, layout: MultiviewLayoutSettings(preset: "nonsense"))
         XCTAssertEqual(try render(s).multiview.width, 1920)
         XCTAssertEqual(Bitmap(try render(bogus).multiview).bgra, Bitmap(try render(s).multiview).bgra, "认不出的布局应退回默认，与没布局逐像素一致")
         // 默认布局的几何 API 与 placements 一致
-        let p = MultiviewLayout.placements(layout: nil, inputs: s.inputs.map(\.number), width: 1920, height: 1080)
+        let p = MultiviewLayout.placements(settings: nil, inputs: s.inputs.map(\.number), width: 1920, height: 1080)
         XCTAssertEqual(p[0].source, .preview)
         XCTAssertEqual(p[1].source, .program)
         XCTAssertEqual(p[0].inner, MultiviewLayout.monitorCell(program: false, width: 1920, height: 1080))
@@ -82,16 +82,16 @@ final class MultiviewLayoutTests: XCTestCase {
             XCTAssertEqual(p[2 + i].source, .input(number: i + 1))
             XCTAssertEqual(p[2 + i].inner, MultiviewLayout.inputCell(index: i, inputCount: 8, width: 1920, height: 1080))
         }
-        // 多画面输出的 extra["layout"] 从状态里找
-        XCTAssertNil(MultiviewLayout.layoutValue(in: s))
-        XCTAssertEqual(MultiviewLayout.layoutValue(in: bogus), "nonsense")
+        // 多画面输出的布局从状态里找（正式字段 settings.multiview）
+        XCTAssertNil(MultiviewLayout.layoutSettings(in: s))
+        XCTAssertEqual(MultiviewLayout.layoutSettings(in: bogus)?.preset, "nonsense")
     }
 
     /// 预设 pgmPvw+2x2：上半 PVW / PGM，下半 2×2 放前 4 路。
     func testV8_multiviewPreset_pgmPvw2x2() throws {
-        let s = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2")
-        try checkCells(s, layout: "pgmPvw+2x2")
-        let p = MultiviewLayout.placements(layout: "pgmPvw+2x2", inputs: s.inputs.map(\.number), width: 1920, height: 1080)
+        let s = ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "pgmPvw+2x2")
+        try checkCells(s, layout: MultiviewLayoutSettings(preset: "pgmPvw+2x2"))
+        let p = MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: "pgmPvw+2x2"), inputs: s.inputs.map(\.number), width: 1920, height: 1080)
         XCTAssertEqual(p.count, 6)
         XCTAssertEqual(p.suffix(4).map(\.source), [.input(number: 1), .input(number: 2), .input(number: 3), .input(number: 4)])
         XCTAssertGreaterThan(p[2].inner.width, 0.4, "2×2 的格子应接近半宽")
@@ -101,9 +101,10 @@ final class MultiviewLayoutTests: XCTestCase {
 
     /// 预设 3x3：九宫格，PGM、PVW、输入 1–7。
     func testV8_multiviewPreset_3x3() throws {
-        let s = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3")
-        try checkCells(s, layout: "3x3")
-        let p = MultiviewLayout.placements(layout: "3x3", inputs: s.inputs.map(\.number), width: 1920, height: 1080)
+        let s = ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3")
+        let preset3x3 = MultiviewLayoutSettings(preset: "3x3")
+        try checkCells(s, layout: preset3x3)
+        let p = MultiviewLayout.placements(settings: preset3x3, inputs: s.inputs.map(\.number), width: 1920, height: 1080)
         XCTAssertEqual(p.count, 9)
         XCTAssertEqual(p[0].source, .program)
         XCTAssertEqual(p[1].source, .preview)
@@ -113,54 +114,63 @@ final class MultiviewLayoutTests: XCTestCase {
         // 输入少于 7 路时后面的格子留黑：只给 3 路
         var few = s
         few.inputs = Array(few.inputs.prefix(3))
-        let pf = MultiviewLayout.placements(layout: "3x3", inputs: few.inputs.map(\.number), width: 1920, height: 1080)
+        let pf = MultiviewLayout.placements(settings: preset3x3, inputs: few.inputs.map(\.number), width: 1920, height: 1080)
         XCTAssertEqual(pf.count, 5)
         let mv = Bitmap(try render(few).multiview)
         let emptyCell = p[8]
         let e = mv.pixel(Int((emptyCell.inner.x + emptyCell.inner.width / 2) * 1920), Int((emptyCell.inner.y + emptyCell.inner.height / 2) * 1080))
         XCTAssertEqual(e.r + e.g + e.b, 0, "没用到的格子留黑")
         // 4x4 也认
-        XCTAssertEqual(MultiviewLayout.placements(layout: "4x4", inputs: s.inputs.map(\.number), width: 1920, height: 1080).count, 10)
+        XCTAssertEqual(MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: "4x4"), inputs: s.inputs.map(\.number), width: 1920, height: 1080).count, 10)
         XCTAssertEqual(Set(MultiviewLayout.presetNames), ["pgmPvw+grid", "pgmPvw+4x2", "pgmPvw+2x2", "3x3", "4x4"])
     }
 
-    /// 自定义 JSON：格子按给的 rect 放，source 可以是 "program" / "preview" / 输入号；不存在的输入画黑格 + 灰边。
+    /// 自定义格子：按给的 rect 放，source 可以是 program / preview / 输入号；不存在的输入画黑格 + 灰边。
     func testV8_multiviewCustomJSONLayout() throws {
         let s = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout)
         try checkCells(s, layout: ReferenceStates.customLayout)
-        let p = MultiviewLayout.placements(layout: ReferenceStates.customLayout, inputs: s.inputs.map(\.number), width: 1920, height: 1080)
+        let p = MultiviewLayout.placements(settings: ReferenceStates.customLayout, inputs: s.inputs.map(\.number), width: 1920, height: 1080)
         XCTAssertEqual(p.count, 7)
         XCTAssertEqual(p[0].source, .program)
         XCTAssertEqual(p[0].outer, NormalizedRect(x: 0, y: 0, width: 0.7, height: 0.7))
         XCTAssertEqual(p[6].source, .input(number: 5))
         // 引用不存在的输入
-        let missing: JSONValue = ["cells": [["source": 42, "rect": ["x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5]]]]
+        let missing = MultiviewLayoutSettings(custom: [MultiviewCell(source: .input(number: 42), rect: NormalizedRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5))])
         let m = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), missing)
         let mv = Bitmap(try render(m).multiview)
         let c = mv.pixel(Int(0.35 * 1920), Int(0.35 * 1080))
         XCTAssertEqual(c.r + c.g + c.b, 0)
         let b = mv.pixel(Int(0.1 * 1920) + 1, Int(0.35 * 1080))
         XCTAssertTrue(Self.close(b, (71, 71, 71, 255), tolerance: 8), "不存在的输入 tally off，得 \(b)")
-        // 越界的 rect 被钳到画面内、缺 rect 的格子忽略、超过 64 格截断
-        var many: [JSONValue] = []
-        for i in 0..<80 { many.append(["source": .number(Double(i % 8 + 1)), "rect": ["x": .number(Double(i % 10) * 0.1), "y": .number(Double(i / 10) * 0.1), "width": 0.1, "height": 0.1]]) }
-        XCTAssertEqual(MultiviewLayout.placements(layout: ["cells": .array(many)], inputs: [1, 2, 3, 4, 5, 6, 7, 8], width: 1920, height: 1080).count, 64)
-        // 全部格子都缺 rect → 没有一个合法格子 → 退回默认布局（PVW、PGM、输入 1）
-        XCTAssertEqual(MultiviewLayout.placements(layout: ["cells": [["source": 1]]], inputs: [1], width: 1920, height: 1080).map(\.source), [.preview, .program, .input(number: 1)])
+        // 越界的 rect 被钳到画面内、空 rect 的格子忽略、超过 64 格截断
+        let many = MultiviewLayoutSettings(custom: (0..<80).map { i in
+            MultiviewCell(source: .input(number: i % 8 + 1), rect: NormalizedRect(x: Double(i % 10) * 0.1, y: Double(i / 10) * 0.1, width: 0.1, height: 0.1))
+        })
+        XCTAssertEqual(MultiviewLayout.placements(settings: many, inputs: [1, 2, 3, 4, 5, 6, 7, 8], width: 1920, height: 1080).count, 64)
+        let clamped = MultiviewLayout.placements(settings: MultiviewLayoutSettings(custom: [MultiviewCell(source: .program, rect: NormalizedRect(x: 0.8, y: -0.5, width: 0.5, height: 1))]),
+                                                 inputs: [1], width: 1920, height: 1080)
+        XCTAssertEqual(clamped.count, 1)
+        let o = try XCTUnwrap(clamped.first).outer
+        XCTAssertEqual(o.x, 0.8, accuracy: 1e-6, "越界的 rect 钳到画面内")
+        XCTAssertEqual(o.y, 0, accuracy: 1e-6)
+        XCTAssertEqual(o.width, 0.2, accuracy: 1e-6)
+        XCTAssertEqual(o.height, 1, accuracy: 1e-6)
+        // 全部格子都是空 rect → 没有一个合法格子 → 退回默认布局（PVW、PGM、输入 1）
+        let allEmpty = MultiviewLayoutSettings(custom: [MultiviewCell(source: .input(number: 1), rect: NormalizedRect(x: 0.2, y: 0.2, width: 0, height: 0.3))])
+        XCTAssertEqual(MultiviewLayout.placements(settings: allEmpty, inputs: [1], width: 1920, height: 1080).map(\.source), [.preview, .program, .input(number: 1)])
         // 空 cells → 默认布局
-        XCTAssertEqual(MultiviewLayout.placements(layout: ["cells": []], inputs: [1, 2], width: 1920, height: 1080).map(\.source),
-                       MultiviewLayout.placements(layout: nil, inputs: [1, 2], width: 1920, height: 1080).map(\.source))
+        XCTAssertEqual(MultiviewLayout.placements(settings: MultiviewLayoutSettings(custom: []), inputs: [1, 2], width: 1920, height: 1080).map(\.source),
+                       MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080).map(\.source))
     }
 
     /// 安全框（PGM / PVW 格，EBU R95：3.5% 动作安全、5% 字幕安全）与电平表占位（输入格右侧的暗条）。
     func testMultiview_safeAreaAndMeterPlaceholders() throws {
-        let layout: JSONValue = ["cells": [
-            ["source": "program", "rect": ["x": 0.0, "y": 0.0, "width": 0.6, "height": 0.6]],
-            ["source": 8, "rect": ["x": 0.6, "y": 0.0, "width": 0.4, "height": 0.4]],
-        ], "safeArea": true, "meters": true]
+        let cells = [MultiviewCell(source: .program, rect: NormalizedRect(x: 0.0, y: 0.0, width: 0.6, height: 0.6)),
+                     MultiviewCell(source: .input(number: 8), rect: NormalizedRect(x: 0.6, y: 0.0, width: 0.4, height: 0.4))]
+        let layout = MultiviewLayoutSettings(custom: cells, safeArea: true, meters: true)
         let s = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), layout)
         let mv = Bitmap(try render(s).multiview)
-        let p = MultiviewLayout.placements(layout: layout, inputs: s.inputs.map(\.number), width: 1920, height: 1080)
+        let p = MultiviewLayout.placements(settings: layout, inputs: s.inputs.map(\.number), width: 1920, height: 1080)
         let pgm = p[0].inner
         // 动作安全线在内框 3.5% 处：竖线上的像素应明显亮于它右边 8 px 的 PGM 内容（输入 1 渐变在左侧很暗）
         let lineX = Int((pgm.x + pgm.width * 0.035) * 1920), midY = Int((pgm.y + pgm.height * 0.5) * 1080)
@@ -170,8 +180,7 @@ final class MultiviewLayoutTests: XCTestCase {
         let onTitle = mv.pixel(titleX, midY), besideTitle = mv.pixel(titleX + 8, midY)
         XCTAssertGreaterThan(onTitle.r + onTitle.g + onTitle.b, besideTitle.r + besideTitle.g + besideTitle.b + 150, "5% 处应有字幕安全线")
         // 没开 safeArea 的同一布局：那里没有线
-        var plainLayout = layout
-        if case .object(var o) = plainLayout { o["safeArea"] = false; o["meters"] = false; plainLayout = .object(o) }
+        let plainLayout = MultiviewLayoutSettings(custom: cells, safeArea: false, meters: false)
         let plain = Bitmap(try render(ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), plainLayout)).multiview)
         let off = plain.pixel(lineX, midY), offBeside = plain.pixel(lineX + 8, midY)
         XCTAssertLessThan(abs(off.r + off.g + off.b - offBeside.r - offBeside.g - offBeside.b), 40)
@@ -187,29 +196,33 @@ final class MultiviewLayoutTests: XCTestCase {
 
     /// tally 边框跟状态走：切 PGM / PVW、开叠加，格子边框颜色随之变。
     func testMultiview_tallyBordersFollowState() throws {
-        var s = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3")
+        var s = ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3")
+        let preset3x3 = MultiviewLayoutSettings(preset: "3x3")
         s.overlays = Array(repeating: OverlayState(), count: 4)
         s.program = 3
         s.preview = 5
-        try checkCells(s, layout: "3x3")
+        try checkCells(s, layout: preset3x3)
         s.overlays[3] = OverlayState(input: 7, on: true, rect: .bottomRightQuarter, animProgress: 1)
         XCTAssertTrue(s.tally(ofInput: 7).program)
-        try checkCells(s, layout: "3x3")
+        try checkCells(s, layout: preset3x3)
         // 转场中 PVW 也算在 PGM
         s.transition = TransitionState(type: .fade, durationTicks: 30, progress: 0.5, source: .auto, startTick: Tick(0))
         XCTAssertTrue(s.tally(ofInput: 5).program)
-        try checkCells(s, layout: "3x3")
+        try checkCells(s, layout: preset3x3)
     }
 
     /// 名字：每路输入的标签 + PGM / PVW 格的标签（LabelSet 末尾两个切片）。
+    /// （W3-B2 起切片按槽分配、槽里记输入编号，见 MultiviewLabelTests；这里只看文字和渲染出来的标签条。）
     func testMultiview_labelsIncludeProgramAndPreview() throws {
         let s = ReferenceStates.fixed8()
-        let texts = LabelPainter.wantedTexts(for: s, slices: 9 + LabelSet.extraSlices)
-        XCTAssertEqual(texts.count, 11)
-        XCTAssertEqual(texts[1], "1  摄像机 1")
-        XCTAssertEqual(texts[8], "8  Cam 8")
-        XCTAssertEqual(texts[LabelSet.programSlice(totalSlices: 11)], "PGM")
-        XCTAssertEqual(texts[LabelSet.previewSlice(totalSlices: 11)], "PVW")
+        let table = MultiviewLayoutTable()
+        table.parse(state: s, width: 1920, height: 1080)
+        let c = LabelPainter.contents(for: s, layout: table, inputSlots: 9, keeping: nil)
+        XCTAssertEqual(c.texts.count, 9 + LabelSet.extraSlices)
+        XCTAssertEqual(c.texts[0], "1  摄像机 1")
+        XCTAssertEqual(c.texts[7], "8  Cam 8")
+        XCTAssertEqual(c.texts[9], "PGM")
+        XCTAssertEqual(c.texts[10], "PVW")
         // 渲染：默认布局 PGM 格左下角有标签条（55% 黑底 + 白字）。取条内、文字左边留白处的一个像素：应比同一位置没有标签条时暗。
         let r = try render(s)
         let mv = Bitmap(r.multiview)
@@ -226,39 +239,48 @@ final class MultiviewLayoutTests: XCTestCase {
 
     // MARK: P3（提案 010 落地：正式字段 `OutputSettings.multiview`）
 
-    /// 正式字段与过渡键给同一个布局时，格子表逐字相同、渲染出来逐像素相同；正式字段优先。
-    func testP3_officialMultiviewFieldMatchesLegacyExtraKey() throws {
+    /// 多画面布局只认正式字段 `OutputSettings.multiview`；过渡键 `extra["layout"]` W3-B2 起被忽略（P3 报告 §4 第 1 条）。
+    /// P3 时这条叫 testP3_officialMultiviewFieldMatchesLegacyExtraKey，前一半验"正式字段与过渡键格子表逐字相同、渲染逐像素相同"。
+    /// 过渡键那条路径删掉之后，这一半改成"只有过渡键 = 默认布局（不是旧布局）"；"正式字段 = W3-B 当年用过渡键画的像素"由参考图
+    /// v8-multiview-*（状态已改走正式字段、图没重生成）钉住。后一半（正式字段优先、multiview 格忽略、非法格忽略、64 格截断）原样。
+    func testP3_multiviewReadsOnlyOfficialFieldLegacyExtraKeyIgnored() throws {
         let inputs = [1, 2, 3, 4, 5, 6, 7, 8]
-        // 预设 + 装饰开关
-        for name in MultiviewLayout.presetNames {
-            let legacy = MultiviewLayout.placements(layout: .string(name), inputs: inputs, width: 1920, height: 1080)
-            let official = MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: name), inputs: inputs, width: 1920, height: 1080)
-            XCTAssertEqual(official, legacy, "预设 \(name)")
+        let base = ReferenceStates.fixed8()                 // 没有多画面输出 = 默认布局
+        let defaultPixels = Bitmap(try render(base).multiview).bgra
+        let defaultCells = MultiviewLayout.placements(settings: nil, inputs: inputs, width: 1920, height: 1080)
+
+        // 1. 只有过渡键（没经过 Show.load 的内存状态，例如 API 直接 addOutput 的）：五个预设名、对象写法、自定义格子都渲染成默认布局
+        var legacyValues: [JSONValue] = MultiviewLayout.presetNames.map { .string($0) }
+        legacyValues.append(["preset": "3x3", "safeArea": true, "meters": true])
+        legacyValues.append(ReferenceStates.customLayoutLegacyJSON)
+        let table = MultiviewLayoutTable()
+        for legacy in legacyValues {
+            let s = ReferenceStates.withLegacyExtraLayout(base, legacy)
+            XCTAssertNil(MultiviewLayout.layoutSettings(in: s), "过渡键不算布局：\(legacy)")
+            table.parse(state: s, width: 1920, height: 1080)
+            XCTAssertEqual(MultiviewLayout.placements(table: table, width: 1920, height: 1080), defaultCells, "只有过渡键 \(legacy) 时格子表 = 默认布局")
+            XCTAssertFalse(table.safeArea, "过渡键里的 safeArea 不起作用")
+            XCTAssertFalse(table.meters, "过渡键里的 meters 不起作用")
+            XCTAssertEqual(Bitmap(try render(s).multiview).bgra, defaultPixels, "只有过渡键 \(legacy) 时渲染 = 默认布局")
         }
-        // 认不出的预设名两边都退回默认
-        XCTAssertEqual(MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: "nonsense"), inputs: inputs, width: 1920, height: 1080),
-                       MultiviewLayout.placements(layout: nil, inputs: inputs, width: 1920, height: 1080))
+        // 认不出的预设名（正式字段）也退回默认
+        XCTAssertEqual(MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: "nonsense"), inputs: inputs, width: 1920, height: 1080), defaultCells)
 
-        // 自定义格子：用 W3-B 的过渡键布局 + 由它搬过来的正式字段
-        let legacyLayout = ReferenceStates.customLayout
-        let officialLayout = MultiviewLayoutSettings(legacyValue: legacyLayout)
-        XCTAssertEqual(MultiviewLayout.placements(settings: officialLayout, inputs: inputs, width: 1920, height: 1080),
-                       MultiviewLayout.placements(layout: legacyLayout, inputs: inputs, width: 1920, height: 1080))
+        // 2. 同一个布局写成正式字段（= Show.load 搬迁的结果）照常生效：与参考图用的布局逐位相同，渲染不是默认布局
+        let officialLayout = MultiviewLayoutSettings(legacyValue: ReferenceStates.customLayoutLegacyJSON)
+        XCTAssertEqual(officialLayout, ReferenceStates.customLayout, "参考图用的正式字段布局与 W3-B 的过渡键布局逐位相同")
+        let officialState = ReferenceStates.withMultiviewLayout(base, officialLayout)
+        let officialPixels = Bitmap(try render(officialState).multiview).bgra
+        XCTAssertNotEqual(officialPixels, defaultPixels)
 
-        // 真渲染：逐像素相同
-        let legacyState = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), legacyLayout)
-        var officialState = ReferenceStates.fixed8()
-        officialState.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
-                                             settings: OutputSettings(source: .multiview, multiview: officialLayout))]
-        XCTAssertEqual(Bitmap(try render(officialState).multiview).bgra, Bitmap(try render(legacyState).multiview).bgra)
-
-        // 正式字段优先：两边都给、值不同 → 按正式字段
-        var both = legacyState
-        both.outputs[0].settings.multiview = MultiviewLayoutSettings(preset: "3x3")
-        var only3x3 = ReferenceStates.fixed8()
-        only3x3.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
-                                       settings: OutputSettings(source: .multiview, multiview: MultiviewLayoutSettings(preset: "3x3")))]
-        XCTAssertEqual(Bitmap(try render(both).multiview).bgra, Bitmap(try render(only3x3).multiview).bgra)
+        // 3. 两边都给、值不同 → 只按正式字段（旧键在不在结果都一样）
+        var both = officialState
+        both.outputs[0].settings.extra[MultiviewLayoutSettings.legacyExtraKey] = "3x3"
+        XCTAssertEqual(Bitmap(try render(both).multiview).bgra, officialPixels, "旧键不影响正式字段")
+        var only3x3 = ReferenceStates.withLegacyExtraLayout(base, ReferenceStates.customLayoutLegacyJSON)
+        only3x3.outputs[0].settings.multiview = MultiviewLayoutSettings(preset: "3x3")
+        XCTAssertEqual(Bitmap(try render(only3x3).multiview).bgra, Bitmap(try render(ReferenceStates.withMultiviewPreset(base, "3x3")).multiview).bgra,
+                       "正式字段 3x3 + 旧键自定义格子 → 按 3x3")
 
         // 自定义格子里的 multiview 源被忽略（格子不能套自己）
         let selfRef = MultiviewLayoutSettings(custom: [MultiviewCell(source: .multiview, rect: .full),
@@ -374,15 +396,12 @@ final class MultiviewLayoutTests: XCTestCase {
     func testMultiview_layoutTableParseDoesNotAllocate() throws {
         try XCTSkipUnless(MallocProbe.isAvailable, "找不到 malloc_logger 符号")
         let table = MultiviewLayoutTable()
-        var official = ReferenceStates.fixed8()
-        official.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
-                                        settings: OutputSettings(source: .multiview,
-                                                                 multiview: MultiviewLayoutSettings(legacyValue: ReferenceStates.customLayout)))]
         let states = [ReferenceStates.fixed8(),
-                      ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"),
+                      ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3"),
                       ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout),
-                      official,                                                        // 正式字段这条路径也零分配（提案 010）
-                      ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2")]
+                      ReferenceStates.withLegacyExtraLayout(ReferenceStates.fixed8(), ReferenceStates.customLayoutLegacyJSON),
+                      ReferenceStates.audioOnly3x3(),                                  // 纯音频格的标记也在这次解析里算（W3-B2）
+                      ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "pgmPvw+2x2")]
         for s in states { table.parse(state: s, width: 1920, height: 1080) }   // 预热
         MallocProbe.start()
         for _ in 0..<5 { for s in states { table.parse(state: s, width: 1920, height: 1080) } }

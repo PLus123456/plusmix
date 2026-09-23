@@ -17,7 +17,26 @@ final class RealtimeRendererTests: XCTestCase {
         let renderer = try MetalRenderer(options: options)
         try renderer.prepare(format: .hd1080p60, maxInputs: 9)
         let engine = FakeEngine(renderer: renderer, format: .hd1080p60, inputs: FakeInputs.nv12(count: 8), state: LoadStates.eightInputsFourOverlays())
+        // 诊断（W3-B2）：SWITCHER_V1_METERS=1 时另一条线程按 20 Hz 喂电平表，多画面的 5 个输入格 + PGM 格画真实电平（默认负载仍是 W3-B 的占位表，数字可比）
+        let feedMeters = env["SWITCHER_V1_METERS"] == "1"
+        let stopFeeding = SharedFlag()
+        let feederDone = DispatchSemaphore(value: 0)
+        if feedMeters {
+            Thread {
+                var k = 0
+                while !stopFeeding.value {
+                    var inputs: [Int: [Double]] = [:]
+                    for n in 1...8 { inputs[n] = [-3 - Double((k + n * 7) % 50), -3 - Double((k + n * 5) % 50)] }
+                    renderer.setMeters(ReferenceStates.meters(inputs: inputs, master: [-8 - Double(k % 20), -10]))
+                    k += 1
+                    usleep(50_000)
+                }
+                feederDone.signal()
+            }.start()
+        }
         engine.run(seconds: seconds)
+        stopFeeding.value = true
+        if feedMeters { feederDone.wait() }
         let fallbacks = renderer.outputFallbackCount, created = renderer.textureCreateCount
         renderer.shutdown()
         let all = engine.sink.renderMs
@@ -32,9 +51,10 @@ final class RealtimeRendererTests: XCTestCase {
         let submitMean = submitLag.reduce(0, +) / Double(submitLag.count)
         let gpuStartLag = engine.sink.samples.dropFirst(60).map { ($0.gpuStart - $0.submitTime).milliseconds }
         let gpuStartMean = gpuStartLag.reduce(0, +) / Double(gpuStartLag.count)
-        print(String(format: "V1 render_ms（多画面 %@）：帧数 %d，平均 %.3f ms，p50 %.3f，p99 %.3f，最大 %.3f；唤醒延迟平均 %.3f ms；拍点→提交平均 %.3f ms；提交→GPU 开始平均 %.3f ms；GPU 执行平均 %.3f ms；skipped %d",
-                     options.multiview ? "开" : "关", ms.count, mean, p50, p99, maxV, engine.meanWakeLagMs, submitMean, gpuStartMean, gpuMean, Int(engine.skipped.load(ordering: .relaxed))))
-        print("V1：纹理表建纹理 \(created) 次（应 = 8 路 × 4 缓冲 × 2 平面 + 输出环 8 × 2 = 80），输出环退回池子 \(fallbacks) 次（应为 0）")
+        print(String(format: "V1 render_ms（多画面 %@%@）：帧数 %d，平均 %.3f ms，p50 %.3f，p99 %.3f，最大 %.3f；唤醒延迟平均 %.3f ms；拍点→提交平均 %.3f ms；提交→GPU 开始平均 %.3f ms；GPU 执行平均 %.3f ms；skipped %d",
+                     options.multiview ? "开" : "关", feedMeters ? "，电平表按 20 Hz 喂真实读数" : "", ms.count, mean, p50, p99, maxV,
+                     engine.meanWakeLagMs, submitMean, gpuStartMean, gpuMean, Int(engine.skipped.load(ordering: .relaxed))))
+        print("V1：纹理表建纹理 \(created) 次（应 = 8 路 × 4 缓冲 × 2 平面 = 64；输出环的纹理 W3-B2 起在建环时包好，不进纹理表），输出环退回池子 \(fallbacks) 次（应为 0）")
         XCTAssertLessThanOrEqual(mean, 6, "V1 平均 render_ms 超过必须档 6 ms")
         XCTAssertLessThanOrEqual(p99, 12, "V1 p99 render_ms 超过必须档 12 ms")
         XCTAssertEqual(engine.skipped.load(ordering: .relaxed), 0, "标准负载下不该跳拍")

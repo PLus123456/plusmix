@@ -11,12 +11,19 @@ final class V8ReferenceTests: XCTestCase {
     static let psnrThreshold = 40.0
     static let ssimThreshold = 0.98
 
-    /// 一张参考图：名字、状态、取哪张输出、PVW 是否叠加。
+    /// 一张参考图：名字、状态、取哪张输出、PVW 是否叠加、渲染前依次喂给电平表的读数（W3-B2）。
     struct RefCase {
         let name: String
         let state: MixerState
         let target: OfflineRenderTarget
         var overlaysInPreview = false
+        var meters: [MeterFeedCall] = []
+    }
+
+    /// 一次 `setMeters(_:at:)`。
+    struct MeterFeedCall {
+        let meters: Stats.AudioCounters.Meters?
+        let at: HostTime
     }
 
     /// V8 的参考图集。前五张是 W1-C 的（状态不变，改了实现也必须逐像素一致）；其余是 W3-B 加的（每张为什么这样见 Tests/References/README.md）。
@@ -41,24 +48,39 @@ final class V8ReferenceTests: XCTestCase {
         RefCase(name: "v8-overlay-slide50-pgm", state: ReferenceStates.overlaySlide50(), target: .program),
         RefCase(name: "v8-overlay-zoom50-pgm", state: ReferenceStates.overlayZoom50(), target: .program),
         RefCase(name: "v8-preview-overlays-pvw", state: ReferenceStates.fixed8(), target: .preview, overlaysInPreview: true),
-        RefCase(name: "v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview),
-        RefCase(name: "v8-multiview-3x3", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"), target: .multiview),
+        RefCase(name: "v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview),
+        RefCase(name: "v8-multiview-3x3", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3"), target: .multiview),
         RefCase(name: "v8-multiview-custom", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout), target: .multiview),
+        // W3-B2（每张为什么这样见 Tests/References/README.md 第三节；结构性检查在 MultiviewMetersTests）
+        RefCase(name: "v8-multiview-audio-only-3x3", state: ReferenceStates.audioOnly3x3(), target: .multiview),
+        RefCase(name: "v8-multiview-meters", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout),
+                target: .multiview, meters: ReferenceStates.referenceMeterCalls),
     ]
 
     // 测试类串行跑，共用一个离线渲染器省得每个用例重建纹理；OfflineRenderer 不是 Sendable，所以显式声明不做并发检查
-    nonisolated(unsafe) private static let renderer: OfflineRenderer = {
+    nonisolated(unsafe) static let renderer: OfflineRenderer = {
         do { return try OfflineRenderer() } catch { fatalError("建不出离线渲染器：\(error)") }
     }()
-    private static let inputs = TestImages.phase2ReferenceInputs()
+    static let inputs = TestImages.phase2ReferenceInputs()
 
     /// 渲染一个 case，按环境变量决定写参考图还是比对。返回 (psnr, ssim)。
     @discardableResult
-    func compare(_ name: String, state: MixerState, target: OfflineRenderTarget, overlaysInPreview: Bool = false,
+    func compare(_ name: String, state: MixerState, target: OfflineRenderTarget, overlaysInPreview: Bool = false, meters: [MeterFeedCall] = [],
                  file: StaticString = #filePath, line: UInt = #line) throws -> (Double, Double) {
-        Self.renderer.overlaysInPreview = overlaysInPreview
-        defer { Self.renderer.overlaysInPreview = false }
-        let image = try Self.renderer.renderOffline(state: state, inputs: Self.inputs, size: Self.size, target: target)
+        try Self.compare(name, state: state, target: target, overlaysInPreview: overlaysInPreview, meters: meters, file: file, line: line)
+    }
+
+    /// 同上，别的测试类也能用（共用同一个离线渲染器）。电平表读数按顺序喂完再渲染，渲染完清掉。
+    @discardableResult
+    static func compare(_ name: String, state: MixerState, target: OfflineRenderTarget, overlaysInPreview: Bool = false, meters: [MeterFeedCall] = [],
+                        file: StaticString = #filePath, line: UInt = #line) throws -> (Double, Double) {
+        renderer.overlaysInPreview = overlaysInPreview
+        for call in meters { renderer.setMeters(call.meters, at: call.at) }
+        defer {
+            renderer.overlaysInPreview = false
+            renderer.setMeters(nil)
+        }
+        let image = try renderer.renderOffline(state: state, inputs: inputs, size: size, target: target)
         let refURL = RepoPaths.references.appendingPathComponent("\(name).png")
         if RepoPaths.generatingReferences {
             try PNG.write(image, to: refURL)
@@ -76,7 +98,7 @@ final class V8ReferenceTests: XCTestCase {
         let psnr = ImageMetrics.psnr(a, b)
         let ssim = ImageMetrics.ssim(a, b)
         print("V8 \(name)：PSNR \(psnr.isInfinite ? "∞" : String(format: "%.2f", psnr)) dB，SSIM \(String(format: "%.4f", ssim))")
-        XCTAssertTrue(psnr >= Self.psnrThreshold || ssim >= Self.ssimThreshold,
+        XCTAssertTrue(psnr >= psnrThreshold || ssim >= ssimThreshold,
                       "\(name)：PSNR \(psnr) dB / SSIM \(ssim) 都不达标（≥ 40 dB 或 ≥ 0.98）", file: file, line: line)
         return (psnr, ssim)
     }
@@ -108,7 +130,7 @@ final class V8ReferenceTests: XCTestCase {
 
     /// 所有 case 一次跑完（gen-references.sh 用这个 filter）。
     func testV8_generateOrCompareAllReferences() throws {
-        for c in Self.cases { try compare(c.name, state: c.state, target: c.target, overlaysInPreview: c.overlaysInPreview) }
+        for c in Self.cases { try compare(c.name, state: c.state, target: c.target, overlaysInPreview: c.overlaysInPreview, meters: c.meters) }
     }
 
     // MARK: - W3-B 加的参考图（每张一个测试，方便单独跑；结构性检查在 OverlayTests / KeyerTests / TransitionTests / MultiviewLayoutTests）
@@ -132,8 +154,8 @@ final class V8ReferenceTests: XCTestCase {
     }
     func testV8_previewWithOverlaysMatchesReference() throws { try compare("v8-preview-overlays-pvw", state: ReferenceStates.fixed8(), target: .preview, overlaysInPreview: true) }
     func testV8_multiviewLayoutsMatchReference() throws {
-        try compare("v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview)
-        try compare("v8-multiview-3x3", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"), target: .multiview)
+        try compare("v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview)
+        try compare("v8-multiview-3x3", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3"), target: .multiview)
         try compare("v8-multiview-custom", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout), target: .multiview)
     }
 

@@ -29,9 +29,9 @@ public struct MetalRendererOptions: Sendable {
     /// 一路都没开就是纯输入（`v8-preview-pvw.png` 的口径不变）。
     public var overlaysInPreview: Bool = false
     /// 强制把 PVW 转成 NV12 填进 `RenderedFrame.preview`。默认关：状态里有 enabled 且 source = preview 的输出时自动填，
-    /// 这一项只是强制开的覆盖（多一趟 compute）。
+    /// 这一项只是强制开的覆盖（多一趟 compute）。强制开时 PVW 的输出环在 prepare 里建；否则状态第一次要它时由后台线程建（W3-B2）。
     public var previewOutput: Bool = false
-    /// 强制把多画面转成 NV12 填进 `RenderedFrame.multiview`（需要 multiview = true）。默认关，自动填的条件同上。
+    /// 强制把多画面转成 NV12 填进 `RenderedFrame.multiview`（需要 multiview = true）。默认关，自动填的条件与环的建法同上。
     public var multiviewOutput: Bool = false
     public init() {}
 }
@@ -74,14 +74,16 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     private var slots: [RenderSlot] = []
     private var table: SurfaceTextureTable?
     private var ring: OutputBufferRing?
-    private var previewRing: OutputBufferRing?
-    private var multiviewRing: OutputBufferRing?
+    /// PVW / 多画面的 NV12 输出环：按需建（W3-B2，见 AuxOutputRings.swift）。
+    private var auxRings: AuxOutputRings?
     private var labels: LabelRenderer?
     private var format: ProgramFormat?
     private var frameDuration: HostDuration = .zero
     /// 多画面布局表：只有渲染线程碰；快照 sequence 变了才重新解析。
     private let layout = MultiviewLayoutTable()
     private var layoutSequence: UInt64 = .max
+    /// 多画面电平表的读数通道（W3-B2）：setMeters 写、渲染线程每帧读。跟渲染器同寿命（prepare 之前也能喂）。
+    private let meterFeed = MultiviewMeterFeed()
 
     /// 在途帧数（已提交未完成）。
     let inflight = Atomic<Int>(0)
@@ -122,22 +124,24 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
             let targets = try RenderTargets(device: device, width: format.width, height: format.height, label: "slot\(i)")
             newSlots.append(RenderSlot(index: i, targets: targets, maxInputs: max(1, maxInputs)))
         }
-        // 输入：每路最多约 8 个池缓冲 × 2 平面；输出环 × 2 平面
+        // 输入：每路最多约 8 个池缓冲 × 2 平面；输出环的纹理 W3-B2 起在建环时包好、不进这张表，余量留给环被占满时退回池子的缓冲
         let tbl = SurfaceTextureTable(device: device, capacity: max(1, maxInputs) * 16 + options.outputRingSize * 2 + 8)
-        let rng = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize)
-        // 填不填由每拍的状态定（提案 010），所以环总是建好：prepare 时还没有状态，渲染线程又不许分配
-        let pvwRing = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize)
-        let mvRing = options.multiview ? try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize) : nil
-        let lbl = try LabelRenderer(device: device, inputSlices: max(1, maxInputs),
-                                    submittedFrames: { [weak self] in self?.submitted.load(ordering: .acquiring) ?? 0 },
+        let rng = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize, device: device)
+        // PVW / 多画面的 NV12 环（W3-B2 可选项）：强制开的在这里建；其余等渲染线程第一次看到状态要它时由后台线程建。
+        // P3 时两个环总是在这里建（prepare 时没有状态、渲染线程又不许分配），没有这类输出时 1080p / ringSize 8 各白占约 25 MB
+        var eager: [AuxOutputRings.Kind] = []
+        if options.previewOutput { eager.append(.preview) }
+        if options.multiview && options.multiviewOutput { eager.append(.multiview) }
+        let aux = try AuxOutputRings(device: device, width: format.width, height: format.height, count: options.outputRingSize, eager: eager)
+        // 标签：输入槽按输入表容量要，LabelSet 封顶 64（多画面最多 64 格）
+        let lbl = try LabelRenderer(device: device, inputSlots: max(1, maxInputs),
                                     completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
         stateLock.lock()
         resources = res
         slots = newSlots
         table = tbl
         ring = rng
-        previewRing = pvwRing
-        multiviewRing = mvRing
+        auxRings = aux
         labels = lbl
         layoutSequence = .max
         self.format = format
@@ -149,6 +153,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         latestCompletedSlot.store(-1, ordering: .releasing)
         stateLock.unlock()
         lbl.start()
+        aux.start()
         let t = Thread { [self] in completionLoop() }
         t.name = "switcher.render.completion"
         t.qualityOfService = .userInteractive
@@ -163,7 +168,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     }
 
     private func renderInsidePool(tick: Tick, at tickTime: HostTime, snapshot: MixerSnapshot, inputs: RenderInputTable) -> RenderVerdict {
-        guard let resources, let table, let ring, let labels, !slots.isEmpty else { return .skipped }
+        guard let resources, let table, let ring, let auxRings, let labels, !slots.isEmpty else { return .skipped }
         RenderSignposts.begin(.frame)
         defer { RenderSignposts.end(.frame) }
         // T3：GPU 压着 maxInflight 帧没完成 → 跳过这一拍，不等
@@ -175,16 +180,18 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         let frameIndex = submitted.load(ordering: .relaxed)
         let slot = slots[Int(frameIndex % UInt64(slots.count))]
         labels.noteSnapshot(snapshot)
-        let labelSet = options.multiview ? labels.current : nil
+        // 标签线程画好了新的一套就在这一帧接手（改名的下一帧就是新名字，见 LabelRenderer）
+        let labelSet = options.multiview ? labels.acquire(frame: frameIndex) : nil
 
-        guard let output = ring.next(), let unmanaged = CVPixelBufferGetIOSurface(output) else {
+        guard let out = ring.nextSlot() else {
             skipped.wrappingAdd(1, ordering: .relaxed)
             RenderSignposts.event("skip-no-output-buffer")
             return .skipped
         }
-        let surface = unmanaged.takeUnretainedValue()
+        let output = out.buffer
         let width = slot.targets.width, height = slot.targets.height
-        guard let program = nv12Target(surface: surface, table: table, width: width, height: height, frame: frameIndex),
+        // 环里的缓冲建环时就包好了纹理；只有环被消费者占满、退回池子分配的缓冲才走纹理表
+        guard let program = out.target ?? nv12Target(output, table: table, width: width, height: height, frame: frameIndex),
               let cb = commandQueue.makeCommandBufferWithUnretainedReferences() else {
             skipped.wrappingAdd(1, ordering: .relaxed)
             RenderSignposts.event("skip-resource")
@@ -197,19 +204,19 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         slot.outputBuffer = output
         slot.commandBuffer = cb
         // PVW / 多画面的 NV12 输出：状态里有 enabled 且 source 是它的输出就填（提案 010），选项是强制开的覆盖；
-        // 环拿不到缓冲就这一帧不出，不拖 PGM
+        // 环还没建好（第一次要的那一两帧，后台线程在建）或拿不到缓冲，这一帧就不出，不拖 PGM
         let state = snapshot.state
         var outputs = CompositorPasses.FrameOutputs(program: program)
         if options.previewOutput || CompositorPasses.wants(.preview, in: state),
-           let previewRing, let pb = previewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
-           let t = nv12Target(surface: s.takeUnretainedValue(), table: table, width: width, height: height, frame: frameIndex) {
-            slot.previewBuffer = pb
+           let previewRing = auxRings.ring(.preview), let s = previewRing.nextSlot(),
+           let t = s.target ?? nv12Target(s.buffer, table: table, width: width, height: height, frame: frameIndex) {
+            slot.previewBuffer = s.buffer
             outputs.preview = t
         }
-        if options.multiviewOutput || CompositorPasses.wants(.multiview, in: state),
-           let multiviewRing, let pb = multiviewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
-           let t = nv12Target(surface: s.takeUnretainedValue(), table: table, width: width, height: height, frame: frameIndex) {
-            slot.multiviewBuffer = pb
+        if options.multiview, options.multiviewOutput || CompositorPasses.wants(.multiview, in: state),
+           let multiviewRing = auxRings.ring(.multiview), let s = multiviewRing.nextSlot(),
+           let t = s.target ?? nv12Target(s.buffer, table: table, width: width, height: height, frame: frameIndex) {
+            slot.multiviewBuffer = s.buffer
             outputs.multiview = t
         }
         if snapshot.sequence != layoutSequence {
@@ -218,6 +225,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         }
         var context = CompositorPasses.Context(resources: resources, table: table, labels: labelSet, layout: layout, frameIndex: frameIndex)
         context.overlaysInPreview = options.overlaysInPreview
+        if options.multiview { context.meters = meterFeed.acquire(now: tickTime) }
         CompositorPasses.encodeFrame(state: state, inputs: inputs, slot: slot, context: context, commandBuffer: cb,
                                      outputs: outputs, multiview: options.multiview)
 
@@ -232,9 +240,11 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         return .submitted
     }
 
-    /// IOSurface 的两个平面包成整数视图（表里按 IOSurfaceID 缓存，稳态零分配）。
+    /// 退回池子分配的输出缓冲（环被消费者占满时）：IOSurface 的两个平面包成整数视图，表里按 IOSurfaceID 缓存。
     @inline(__always)
-    private func nv12Target(surface: IOSurfaceRef, table: SurfaceTextureTable, width: Int, height: Int, frame: UInt64) -> CompositorPasses.NV12Target? {
+    private func nv12Target(_ pixelBuffer: CVPixelBuffer, table: SurfaceTextureTable, width: Int, height: Int, frame: UInt64) -> CompositorPasses.NV12Target? {
+        guard let unmanaged = CVPixelBufferGetIOSurface(pixelBuffer) else { return nil }
+        let surface = unmanaged.takeUnretainedValue()
         guard let luma = table.texture(surface: surface, plane: 0, format: .r8Uint, width: width, height: height, usage: .shaderWrite, frame: frame),
               let chroma = table.texture(surface: surface, plane: 1, format: .rg8Uint, width: (width + 1) / 2, height: (height + 1) / 2,
                                          usage: .shaderWrite, frame: frame) else { return nil }
@@ -250,13 +260,13 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
             completionThread = nil
         }
         labels?.stop()
+        auxRings?.stop()
         stateLock.lock()
         resources = nil
         slots = []
         table = nil
         ring = nil
-        previewRing = nil
-        multiviewRing = nil
+        auxRings = nil
         labels = nil
         format = nil
         latestCompletedSlot.store(-1, ordering: .releasing)
@@ -302,6 +312,31 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         finished.signal()
     }
 
+    // MARK: - 多画面电平表（W3-B2）
+
+    /// 把表读数递给多画面的电平表。组装方（App / headless）在**非实时线程**调：每秒 Stats 发布时喂 `stats.audio.meters`，
+    /// 想让表更活可以更密（例如 App 按 50 ms 的表读数拼一份同形态的 Meters）；不许在音频实时回调里调（这里分配、拿锁）。
+    /// - 输入格读 `meters.inputs[n]`，PGM 格读 master 总线，PVW 格读当前 PVW 那路输入；只用峰值（契约没有 RMS）。
+    /// - 峰值保持 1 s 按 `time`（喂数时刻）算；超过 3 s 没喂新数，渲染线程就当没有读数（输入格退回占位）。
+    /// - nil = 清掉（例如音频引擎停了）。多条线程同时调会按锁串行，渲染线程从不等它。
+    public func setMeters(_ meters: Stats.AudioCounters.Meters?, at time: HostTime = HostClock.now()) {
+        meterFeed.write(meters, at: time)
+    }
+
+    /// 渲染线程接手新电平表的次数（测试看）。
+    var meterAdoptions: Int { meterFeed.adoptions.load(ordering: .relaxed) }
+
+    /// 标签线程交出新一套标签的次数、最近一次的时刻（测试 / 报告看改名的延迟）。
+    var labelPublishes: Int {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return labels?.publishedCount.load(ordering: .acquiring) ?? 0
+    }
+    var lastLabelPublishTime: HostTime? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard let ticks = labels?.lastPublishTicks.load(ordering: .relaxed), ticks > 0 else { return nil }
+        return HostTime(ticks: ticks)
+    }
+
     // MARK: - DisplayFrameSource
 
     public var displayCommandQueue: any MTLCommandQueue { commandQueue }
@@ -323,7 +358,21 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
 
     // MARK: - 给测试 / 报告看的计数
 
-    /// 预热后应为 0：稳态每个 IOSurface 都命中。
+    /// PVW / 多画面的输出环建了没有、后台线程建过几次、常驻多少字节（W3-B2 按需建）。
+    func isAuxRingBuilt(_ kind: AuxOutputRings.Kind) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return auxRings?.isBuilt(kind) ?? false
+    }
+    var auxRingBuilds: Int {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return auxRings?.builds.load(ordering: .relaxed) ?? 0
+    }
+    var auxRingResidentBytes: Int {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return auxRings?.residentBytes ?? 0
+    }
+
+    /// 预热后应为 0：稳态每个 IOSurface 都命中。W3-B2 起输出环的纹理不进这张表（建环时包好），这里只剩输入。
     var textureCreateCount: Int { table?.createCount ?? 0 }
     /// 环里没空闲缓冲、退回池子分配的次数；稳态应为 0。
     var outputFallbackCount: Int { ring?.fallbackCount ?? 0 }

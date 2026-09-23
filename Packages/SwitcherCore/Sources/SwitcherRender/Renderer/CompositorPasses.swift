@@ -3,6 +3,7 @@
 // 这是唯一编码这些 pass 的地方：实时路径（MetalRenderer.render）和离线路径（OfflineRenderer）都调 `encodeFrame`，
 // 只是目标纹理和命令缓冲区不同。渲染线程调用时零分配：所有参数都是值或预建对象，uniforms 在栈上。
 // W3-B：转场 Wipe / Zoom / Stinger、叠加的 slide / zoom 动画与边框、抠像、多画面布局表、PVW / 多画面的 NV12 输出。
+// W3-B2：多画面的纯音频格（深灰底 + 名字 + 电平表）、真实电平表（MultiviewMeters.swift 递来的定长表）。
 @preconcurrency import Metal
 import simd
 import SwitcherContracts
@@ -16,8 +17,10 @@ enum CompositorPasses {
         /// 多画面布局（快照 sequence 变了才重新解析）。
         let layout: MultiviewLayoutTable
         let frameIndex: UInt64
-        /// PVW 也画叠加（提案 010 过渡做法）。
+        /// PVW 画全部叠加的总开关（提案 010：与每通道的 `OverlayState.previewOn` 取或）。
         var overlaysInPreview = false
+        /// 多画面电平表这一帧的读数；nil = 没有数据（输入格画占位，PGM / PVW 格不画表）。
+        var meters: MultiviewMeterTable? = nil
     }
 
     /// 一个 NV12 输出目标（IOSurface 两个平面的整数视图）。
@@ -321,7 +324,7 @@ enum CompositorPasses {
             guard let (tex, cfg) = lookup(input, state: state, inputs: inputs, slot: slot, context: context) else { continue }
             let dest = PixelRect(placement.rect, in: width, height)
             let opacity = placement.opacity
-            if let border = OverlayDecoration.border(for: o, config: cfg) {
+            if let border = OverlayDecoration.border(for: o) {
                 let outer = dest.outsetBy(Float(border.width) * Float(height))
                 let sc = scissor(outer, width: width, height: height)
                 if sc.width > 0 && sc.height > 0 {
@@ -356,19 +359,27 @@ enum CompositorPasses {
     static let tallyPreviewColor = SIMD4<Float>(0.1, 0.8, 0.1, 1)
     static let tallyOffColor = SIMD4<Float>(0.28, 0.28, 0.28, 1)
     static let cellBackground = SIMD4<Float>(0, 0, 0, 1)
+    /// 纯音频输入格的底（W3-B2，用户 2026-09-23 定）：深灰，与"没信号"的黑分得开。
+    static let audioOnlyBackground = SIMD4<Float>(0.15, 0.15, 0.15, 1)
     /// 安全框线（预乘 70% 白）。
     static let safeAreaColor = SIMD4<Float>(0.7, 0.7, 0.7, 0.7)
-    /// 电平表占位：条底（预乘 70% 黑）和刻度（预乘 50% 白）。
+    /// 电平表：条底（预乘 70% 黑）和刻度（预乘 50% 白），没有读数时就是这两样（= W3-B 的占位）。
     static let meterBackground = SIMD4<Float>(0, 0, 0, 0.7)
     static let meterTick = SIMD4<Float>(0.5, 0.5, 0.5, 0.5)
+    /// 电平表的三段颜色（不透明）：< −18 dBFS 绿、−18…−6 黄、≥ −6 红（分段点见 MeterScale）。
+    static let meterGreen = SIMD4<Float>(0.20, 0.78, 0.25, 1)
+    static let meterYellow = SIMD4<Float>(0.95, 0.78, 0.10, 1)
+    static let meterRed = SIMD4<Float>(0.92, 0.12, 0.10, 1)
 
-    /// 按布局表画：每格 tally 边框 + 黑底 + 内容 + 名字；PGM / PVW 格可选安全框，输入格可选电平表占位。
+    /// 按布局表画：每格 tally 边框 + 底 + 内容 + 名字；PGM / PVW 格可选安全框，meters 开时输入格 / PGM / PVW 格画电平表；
+    /// 纯音频输入格 = 深灰底 + 电平表（总是画）+ 名字，不画画面。
     static func encodeMultiview(state: MixerState, inputs: RenderInputTable, slot: RenderSlot, context: Context,
                                 encoder: any MTLRenderCommandEncoder, targets: RenderTargets) {
         let width = targets.width, height = targets.height
         let h = Float(height)
         let layout = context.layout
         let border = layout.border
+        let meters = context.meters
         let fullScissor = MTLScissorRect(x: 0, y: 0, width: width, height: height)
         var i = 0
         while i < layout.cellCount {
@@ -383,6 +394,10 @@ enum CompositorPasses {
                          borderColor: isProgram ? tallyProgramColor : tallyPreviewColor, border: border,
                          width: width, height: height, context: context, encoder: encoder)
                 if layout.safeArea { drawSafeArea(inner, width: width, height: height, context: context, encoder: encoder) }
+                // PGM 格 = Master 总线，PVW 格 = 当前 PVW 那路输入。没有读数就不画（这两格 W3-B 起就没有占位条，参考图不变）
+                if layout.meters, let meters, let levels = isProgram ? meters.programLevels : meters.levels(forInput: state.preview) {
+                    drawMeter(inner, levels: levels, width: width, height: height, context: context, encoder: encoder)
+                }
                 if let labels = context.labels {
                     drawCellLabel(labels, slice: isProgram ? labels.programSlice : labels.previewSlice, inner: inner, cellHeight: rect.height,
                                   frameHeight: h, width: width, height: height, context: context, encoder: encoder)
@@ -392,15 +407,19 @@ enum CompositorPasses {
                 let tally = state.tally(ofInput: number)
                 let color = tally.program ? tallyProgramColor : (tally.preview ? tallyPreviewColor : tallyOffColor)
                 drawSolid(color, dest: rect, width: width, height: height, context: context, encoder: encoder)
-                drawSolid(cellBackground, dest: inner, width: width, height: height, context: context, encoder: encoder)
-                if let (tex, cfg) = lookup(number, state: state, inputs: inputs, slot: slot, context: context) {
+                drawSolid(cell.audioOnly ? audioOnlyBackground : cellBackground, dest: inner, width: width, height: height, context: context, encoder: encoder)
+                // 纯音频输入没有画面（引擎挑帧恒为 nil）；输入表里万一还有它的帧（刚从有画面的来源换过来）也不画
+                if !cell.audioOnly, let (tex, cfg) = lookup(number, state: state, inputs: inputs, slot: slot, context: context) {
                     encoder.setScissorRect(scissor(inner, width: width, height: height))
                     drawInput(tex, config: cfg, dest: inner, opacity: 1, blend: false, width: width, height: height, context: context, encoder: encoder)
                     encoder.setScissorRect(fullScissor)
                 }
-                if layout.meters { drawMeterPlaceholder(inner, width: width, height: height, context: context, encoder: encoder) }
-                if let labels = context.labels, number > 0, number < labels.inputSlices {
-                    drawCellLabel(labels, slice: number, inner: inner, cellHeight: rect.height, frameHeight: h,
+                // 电平表：纯音频格总是画（它是这一格唯一的内容），其它输入格看 meters 开关；这一路没有读数就是占位
+                if cell.audioOnly || layout.meters {
+                    drawMeter(inner, levels: meters?.levels(forInput: number), width: width, height: height, context: context, encoder: encoder)
+                }
+                if let labels = context.labels, let slice = labels.slice(forInput: number) {
+                    drawCellLabel(labels, slice: slice, inner: inner, cellHeight: rect.height, frameHeight: h,
                                   width: width, height: height, context: context, encoder: encoder)
                 }
             }
@@ -443,19 +462,72 @@ enum CompositorPasses {
         }
     }
 
-    /// 电平表占位：格子右侧一条 3% 宽的暗条，四道刻度。真实电平在 Stats.audio.meters 里（铁律 4），第一版这里只画位置。
+    /// 电平表的位置：格子内框右侧一条 3% 宽（≥ 4 px）的竖条，四周留 2 px。
     @inline(__always)
-    static func drawMeterPlaceholder(_ inner: PixelRect, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+    static func meterStrip(_ inner: PixelRect) -> PixelRect {
         let sw = max(4, (inner.width * 0.03).rounded())
         let pad: Float = 2
-        let strip = PixelRect(x: inner.x + inner.width - sw - pad, y: inner.y + pad, width: sw, height: max(0, inner.height - 2 * pad))
+        return PixelRect(x: inner.x + inner.width - sw - pad, y: inner.y + pad, width: sw, height: max(0, inner.height - 2 * pad))
+    }
+
+    /// 电平表：暗条 → 两个声道的峰值条与峰值保持线（有读数时）→ 四道刻度（表高 1/5…4/5 = −48 / −36 / −24 / −12 dBFS）。
+    /// levels = (峰值 L, 峰值 R, 保持 L, 保持 R) dBFS；nil = 没有读数，只画暗条和刻度（与 W3-B 的占位逐像素相同）。
+    /// 数只来自 Stats.audio.meters（铁律 4），经 setMeters → MultiviewMeterFeed 递进来，这里只画。
+    @inline(__always)
+    static func drawMeter(_ inner: PixelRect, levels: SIMD4<Float>?, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+        let strip = meterStrip(inner)
         drawSolid(meterBackground, dest: strip, width: width, height: height, context: context, encoder: encoder)
+        if let levels { drawMeterLevels(strip, levels: levels, width: width, height: height, context: context, encoder: encoder) }
         var k = 1
         while k <= 4 {
             let y = strip.y + strip.height * Float(k) / 5
-            drawSolid(meterTick, dest: PixelRect(x: strip.x, y: y, width: sw, height: 1), width: width, height: height, context: context, encoder: encoder)
+            drawSolid(meterTick, dest: PixelRect(x: strip.x, y: y, width: strip.width, height: 1), width: width, height: height, context: context, encoder: encoder)
             k += 1
         }
+    }
+
+    /// 峰值条（−60…0 dBFS 线性，分段上色）与峰值保持线。条区 = 暗条收进 1 px；左右声道各占一半，中间 1 px 缝（条区不到 5 px 宽时不留缝）。
+    /// 保持线高 = 画面高 / 540（1080p 下 2 px），上沿在保持电平处，颜色按它所在的分段；保持电平与峰值相同时它落在条顶里、看不出来。
+    @inline(__always)
+    static func drawMeterLevels(_ strip: PixelRect, levels: SIMD4<Float>, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+        let area = PixelRect(x: strip.x + 1, y: strip.y + 1, width: max(0, strip.width - 2), height: max(0, strip.height - 2))
+        guard area.width > 0, area.height > 0 else { return }
+        let gap: Float = area.width >= 5 ? 1 : 0
+        let bw = (area.width - gap) / 2
+        let holdHeight = max(1, (Float(height) / 540).rounded())
+        var ch = 0
+        while ch < 2 {
+            let x = ch == 0 ? area.x : area.x + bw + gap
+            let peak = MeterScale.fraction(levels[ch])
+            let hold = MeterScale.fraction(levels[2 + ch])
+            drawMeterSegment(area, x: x, barWidth: bw, from: 0, to: min(peak, MeterScale.yellowFrom), color: meterGreen,
+                             width: width, height: height, context: context, encoder: encoder)
+            drawMeterSegment(area, x: x, barWidth: bw, from: MeterScale.yellowFrom, to: min(peak, MeterScale.redFrom), color: meterYellow,
+                             width: width, height: height, context: context, encoder: encoder)
+            drawMeterSegment(area, x: x, barWidth: bw, from: MeterScale.redFrom, to: peak, color: meterRed,
+                             width: width, height: height, context: context, encoder: encoder)
+            if hold > 0 {
+                let y = min(area.y + area.height * (1 - hold), area.y + area.height - holdHeight)
+                drawSolid(meterColor(forFraction: hold), dest: PixelRect(x: x, y: y, width: bw, height: holdHeight),
+                          width: width, height: height, context: context, encoder: encoder)
+            }
+            ch += 1
+        }
+    }
+
+    /// 条的一段：表高比例 [a, b)（从下往上）；空段不画。
+    @inline(__always)
+    static func drawMeterSegment(_ area: PixelRect, x: Float, barWidth: Float, from a: Float, to b: Float, color: SIMD4<Float>,
+                                 width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+        guard b > a else { return }
+        drawSolid(color, dest: PixelRect(x: x, y: area.y + area.height * (1 - b), width: barWidth, height: area.height * (b - a)),
+                  width: width, height: height, context: context, encoder: encoder)
+    }
+
+    /// 表高比例 → 分段颜色。
+    @inline(__always)
+    static func meterColor(forFraction f: Float) -> SIMD4<Float> {
+        f >= MeterScale.redFrom ? meterRed : (f >= MeterScale.yellowFrom ? meterYellow : meterGreen)
     }
 
     // MARK: - 输出：RGB → NV12
@@ -570,14 +642,9 @@ extension CompositorPasses {
     }
 }
 
-/// 效果格的标识（契约 EffectSlot.id；视频效果由合成会话定义）。
-enum EffectIDs {
-    /// 画中画边框：params {"width": 占节目高的比例（默认 0.006，钳 0–0.1）, "color": [r, g, b] 0–255（默认白）}。提案 010 的过渡做法。
-    static let border = "border"
-}
-
-/// 叠加通道的装饰（现在只有边框）。提案 010 落地后正式字段 `OverlayState.border` 优先，
-/// 过渡做法（该输入效果链里的 "border" 格）保留一个版本作后备。
+/// 叠加通道的装饰（现在只有边框）：只读正式字段 `OverlayState.border`（提案 010）。
+/// 过渡做法（该输入效果链里的 "border" 格）P3 保留了一个版本的后备，W3-B2 删掉（P3 报告 §4 第 1 条）：
+/// 旧节目文件由 `Show.load` 一次性搬进正式字段，没经过 load 的内存状态里的效果格不再画边框。
 enum OverlayDecoration {
     struct Border {
         var width: Double
@@ -585,12 +652,11 @@ enum OverlayDecoration {
         var color: SIMD4<Float>
     }
 
-    /// 这一路叠加的边框：先看 `OverlayState.border`（正式字段），没有才看输入效果链里的 "border" 格（过渡做法）。
-    /// 下标循环、只 retain，渲染线程可调。
+    /// 这一路叠加的边框；`OverlayState.border` 为 nil 就没有。渲染线程可调（零分配）。
     @inline(__always)
-    static func border(for overlay: OverlayState, config: InputConfig?) -> Border? {
-        if let b = overlay.border { return resolve(b) }
-        return border(for: config)
+    static func border(for overlay: OverlayState) -> Border? {
+        guard let b = overlay.border else { return nil }
+        return resolve(b)
     }
 
     /// 正式字段 → 渲染参数：宽钳 0–0.1，颜色转预乘（alpha 1 所以就是除 255）。
@@ -598,32 +664,6 @@ enum OverlayDecoration {
     static func resolve(_ b: OverlayBorder) -> Border {
         Border(width: min(max(b.width, 0), 0.1),
                color: SIMD4<Float>(Float(b.color.red) / 255, Float(b.color.green) / 255, Float(b.color.blue) / 255, 1))
-    }
-
-    /// 后备：输入的效果链里第一个启用的 "border"；没有为 nil。下标循环、只 retain，渲染线程可调。
-    static func border(for config: InputConfig?) -> Border? {
-        guard let config else { return nil }
-        let effects = config.settings.effects
-        var i = 0
-        while i < effects.count {
-            let e = effects[i]
-            i += 1
-            guard e.enabled, e.id == EffectIDs.border else { continue }
-            var width = 0.006
-            if case .number(let w)? = e.params["width"] { width = min(max(w, 0), 0.1) }
-            var color = SIMD4<Float>(1, 1, 1, 1)
-            if case .array(let a)? = e.params["color"], a.count >= 3 {
-                var c = SIMD4<Float>(0, 0, 0, 1)
-                var j = 0
-                while j < 3 {
-                    if case .number(let v) = a[j] { c[j] = Float(min(max(v, 0), 255)) / 255 }
-                    j += 1
-                }
-                color = c
-            }
-            return Border(width: width, color: color)
-        }
-        return nil
     }
 }
 

@@ -58,8 +58,9 @@ final class OverlayTests: XCTestCase {
         }
     }
 
-    /// 画中画边框：效果格 "border"（提案 010 过渡做法）→ rect 外扩一圈白；没有效果格就没有边框。
-    func testV8_pipBorderDrawnFromEffectSlot() throws {
+    /// 画中画边框：正式字段 `OverlayState.border`（提案 010）→ rect 外扩一圈；没有就没有边框。
+    /// （W3-B 时这条用例叫 testV8_pipBorderDrawnFromEffectSlot，读的是效果格 "border"；W3-B2 删了过渡读取，改验正式字段，断言一条没少。）
+    func testV8_pipBorderDrawnFromOfficialField() throws {
         let s = ReferenceStates.pipBorder()
         let bm = try render(s)
         // rect (0.05, 0.05, 0.3, 0.3) → x 96–672、y 54–378；边框 0.006 × 1080 = 6.48 px
@@ -70,19 +71,19 @@ final class OverlayTests: XCTestCase {
         let outside = bm.pixel(84, 216)
         XCTAssertFalse(outside.r > 240 && outside.g > 240 && outside.b > 240, "边框外 12 px 应是底，得 \(outside)")
         var noBorder = s
-        noBorder.inputs[3].settings.effects = []
+        noBorder.overlays[2].border = nil
         let q = try render(noBorder).pixel(93, 216)
-        XCTAssertFalse(q.r > 240 && q.g > 240 && q.b > 240, "没有效果格不该有边框，得 \(q)")
+        XCTAssertFalse(q.r > 240 && q.g > 240 && q.b > 240, "border 为 nil 不该有边框，得 \(q)")
         // 彩色边框 + 自定义宽度
         var red = s
-        red.inputs[3].settings.effects = [ReferenceStates.borderEffect(width: 0.02, color: (255, 0, 0))]
+        red.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
         let rr = try render(red).pixel(80, 216)   // 0.02 × 1080 = 21.6 px
         XCTAssertTrue(rr.r > 240 && rr.g < 20 && rr.b < 20, "红边 0.02，得 \(rr)")
-        // 解析：宽度钳到 0–0.1，颜色缺省白
-        let d = OverlayDecoration.border(for: red.inputs[3])
-        XCTAssertEqual(d?.width, 0.02)
-        XCTAssertEqual(OverlayDecoration.border(for: InputConfig(number: 1, name: "", source: .image(path: ""), settings: InputSettings(effects: [EffectSlot(id: "border", params: ["width": 5])])))?.width, 0.1)
-        XCTAssertNil(OverlayDecoration.border(for: InputConfig(number: 1, name: "", source: .image(path: ""), settings: InputSettings(effects: [EffectSlot(id: "border", enabled: false)]))))
+        // 解析：宽度钳到 0–0.1，颜色换成预乘（alpha 1），缺省白
+        XCTAssertEqual(OverlayDecoration.resolve(red.overlays[2].border!).width, 0.02)
+        XCTAssertEqual(OverlayDecoration.resolve(red.overlays[2].border!).color, SIMD4<Float>(1, 0, 0, 1))
+        XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: 5)).width, 0.1)
+        XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder()).color, SIMD4<Float>(1, 1, 1, 1))
     }
 
     /// 进出动画的几何（纯函数）：cut / fade / slide / zoom 对 animProgress 的解释。
@@ -185,32 +186,39 @@ final class OverlayTests: XCTestCase {
 
     // MARK: P3（提案 010 落地：正式字段 / previewOn / slideFrom / anchor）
 
-    /// 正式字段 `OverlayState.border` 与过渡做法 `effects["border"]` 给同一个边框时逐像素相同；正式字段优先。
-    func testP3_borderOfficialFieldMatchesEffectSlotPixelForPixel() throws {
-        let legacy = ReferenceStates.pipBorder()                       // 输入 4 的效果格，白边 0.006
-        var official = legacy
-        official.inputs[3].settings.effects = []
-        official.overlays[2].border = OverlayBorder()                  // 同样的默认白边 0.006
-        XCTAssertEqual(try render(official).bgra, try render(legacy).bgra, "正式字段与过渡字段的边框应逐像素相同")
-
-        // 彩色 + 自定义宽度也相同
-        var legacyRed = legacy
-        legacyRed.inputs[3].settings.effects = [ReferenceStates.borderEffect(width: 0.02, color: (255, 0, 0))]
-        var officialRed = official
-        officialRed.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
-        XCTAssertEqual(try render(officialRed).bgra, try render(legacyRed).bgra)
-
-        // 正式字段优先：两边都给、值不同 → 按正式字段画
-        var both = legacy
-        both.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
-        XCTAssertEqual(try render(both).bgra, try render(officialRed).bgra, "正式字段优先于效果格")
-
-        // 解析层：border == nil 时回落到效果格，都没有就是 nil
-        XCTAssertEqual(OverlayDecoration.border(for: official.overlays[2], config: official.inputs[3])?.width, 0.006)
-        XCTAssertEqual(OverlayDecoration.border(for: legacy.overlays[2], config: legacy.inputs[3])?.width, 0.006)
+    /// 画中画边框只认正式字段 `OverlayState.border`；过渡做法（输入效果链里的 "border" 格）W3-B2 起被忽略（P3 报告 §4 第 1 条）。
+    /// P3 时这条叫 testP3_borderOfficialFieldMatchesEffectSlotPixelForPixel，验"两条路径逐像素相同、正式字段优先"。后备删掉之后，
+    /// 原来的每组对照都保留，期望从"与效果格画的相同"换成"效果格什么都不画"；"正式字段 = W3-B 当年用效果格画的像素"由参考图
+    /// v8-pip-border-pgm（状态已改走正式字段、图没重生成）钉住。
+    func testP3_borderReadsOnlyOfficialFieldLegacyEffectSlotIgnored() throws {
+        let official = ReferenceStates.pipBorder()                     // 正式字段，默认白边 0.006
         var none = official
-        none.overlays[2].border = nil
-        XCTAssertNil(OverlayDecoration.border(for: none.overlays[2], config: none.inputs[3]))
+        none.overlays[2].border = nil                                  // 没有任何边框
+        let nonePixels = try render(none).bgra
+        XCTAssertNotEqual(try render(official).bgra, nonePixels, "正式字段照样画边框")
+
+        // 1. 只有效果格（没经过 Show.load 的内存状态，例如 API 直接改的）：不画，与"没有边框"逐像素相同
+        var legacyOnly = none
+        legacyOnly.inputs[3].settings.effects = [ReferenceStates.borderEffect()]
+        XCTAssertEqual(try render(legacyOnly).bgra, nonePixels, "效果格 border 不再画边框")
+        // 彩色 + 自定义宽度的效果格同样被忽略
+        var legacyRed = none
+        legacyRed.inputs[3].settings.effects = [ReferenceStates.borderEffect(width: 0.02, color: (255, 0, 0))]
+        XCTAssertEqual(try render(legacyRed).bgra, nonePixels)
+
+        // 2. 两边都给、值不同：只按正式字段画，效果格在不在结果都一样
+        var officialRed = none
+        officialRed.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
+        var both = officialRed
+        both.inputs[3].settings.effects = [ReferenceStates.borderEffect()]   // 白边效果格
+        let bothBitmap = try render(both)
+        XCTAssertEqual(bothBitmap.bgra, try render(officialRed).bgra, "效果格不影响正式字段")
+        let rr = bothBitmap.pixel(80, 216)   // rect 左边外 16 px，在 0.02 × 1080 = 21.6 px 的红边里
+        XCTAssertTrue(rr.r > 240 && rr.g < 20 && rr.b < 20, "按正式字段画红边 0.02，得 \(rr)")
+
+        // 3. 解析层：只看 OverlayState.border，nil 就是 nil（不再回落到效果格）
+        XCTAssertEqual(OverlayDecoration.border(for: official.overlays[2])?.width, 0.006)
+        XCTAssertNil(OverlayDecoration.border(for: legacyOnly.overlays[2]), "border 为 nil 时不回落到效果格")
         // 宽度钳到 0–0.1
         XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: 5)).width, 0.1)
         XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: -1)).width, 0)

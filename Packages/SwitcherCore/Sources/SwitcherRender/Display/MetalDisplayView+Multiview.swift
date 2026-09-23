@@ -1,8 +1,10 @@
 // 多画面纹理里每个格子的位置：输入缩略图（W2-B）就是 MetalDisplayView 以 target = .multiview、sourceRect = 某个格子来画的。
 // 几何与 CompositorPasses.encodeMultiview 用的是同一份 MultiviewGeometry / MultiviewLayoutTable（那边 Float 像素坐标，这边 Double 归一化）；
 // App 的测试用 OfflineRenderer 画一张多画面对着采样，改了那边的布局这边会红。
-// W3-B：布局可配（预设 / 自定义 JSON，见 MultiviewLayoutTable.swift 头注释），`placements` 给任意布局的格子；
-// `grid` / `inputCell` / `monitorCell` 仍是默认布局（pgmPvw+grid）的几何，W2-B 的缩略图接线继续用。
+// W3-B：布局可配（预设 / 自定义格子，正式字段 `OutputSettings.multiview`，见 MultiviewLayoutTable.swift 头注释），
+// `placements(settings:…)` 给任意布局的格子；`grid` / `inputCell` / `monitorCell` 仍是默认布局（pgmPvw+grid）的几何，W2-B 的缩略图接线继续用。
+// W3-B2 删了过渡键 `extra["layout"]` 的读取（`layoutValue(in:)`、`placements(layout:…)` 两个 API 一起删，仓库里没有别的调用方）。
+// 名字标签只在渲染器里画（CompositorPasses.drawCellLabel），这里的显示视图只贴多画面纹理的一块，不另画名字。
 import SwitcherContracts
 
 /// 多画面里一个格子：源、外框（含 tally 边框）、内框（画内容的那块），都归一化到纹理尺寸。
@@ -25,26 +27,7 @@ public enum MultiviewLayout {
     /// 预设名：pgmPvw+grid（默认）、pgmPvw+4x2、pgmPvw+2x2、3x3、4x4。
     public static var presetNames: [String] { MultiviewPreset.names.map(\.0) }
 
-    /// 状态里第一个 kind = multiview 的输出的过渡键 extra["layout"]；没有为 nil。下标循环（渲染线程也调它）。
-    /// 正式字段（`layoutSettings(in:)`，定义在 MultiviewLayoutTable.swift）优先，这条只作后备（保留一个版本）。
-    public static func layoutValue(in state: MixerState) -> JSONValue? {
-        let outputs = state.outputs
-        var i = 0
-        while i < outputs.count {
-            if outputs[i].kind == .multiview { return outputs[i].settings.extra["layout"] }
-            i += 1
-        }
-        return nil
-    }
-
-    /// 任意布局的全部格子（按绘制顺序）。layout = 过渡键 extra["layout"] 的值（nil = 默认）；inputs = 输入编号（按 MixerState.inputs 顺序）。
-    public static func placements(layout: JSONValue?, inputs: [Int], width: Int, height: Int) -> [MultiviewCellPlacement] {
-        let table = MultiviewLayoutTable()
-        table.parse(layout: layout, inputCount: inputs.count, width: width, height: height) { inputs[$0] }
-        return placements(table: table, width: width, height: height)
-    }
-
-    /// 解析好的表 → 格子。
+    /// 解析好的表 → 格子（按绘制顺序）。正式字段版的入口 `placements(settings:inputs:width:height:)` 在 MultiviewLayoutTable.swift。
     static func placements(table: MultiviewLayoutTable, width: Int, height: Int) -> [MultiviewCellPlacement] {
         let w = Double(width), h = Double(height)
         let border = MultiviewGeometry.border(height: h)

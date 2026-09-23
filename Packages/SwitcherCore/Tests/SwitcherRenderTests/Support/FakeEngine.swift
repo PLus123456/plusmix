@@ -16,6 +16,9 @@ final class CollectingSink: RenderSink, @unchecked Sendable {
         let submitTime: HostTime
         let gpuStart: HostTime
         let gpuEnd: HostTime
+        /// 这一帧有没有 PVW / 多画面的 NV12（只记有没有，不扣缓冲）。
+        var hasPreview = false
+        var hasMultiview = false
         var renderMs: Double { (gpuEnd - tickTime).milliseconds }
     }
     private let lock = NSLock()
@@ -25,17 +28,25 @@ final class CollectingSink: RenderSink, @unchecked Sendable {
     /// 模拟一个慢消费者：持有最近 N 帧（含输出缓冲）。
     var holdDepth = 0
     private(set) var held: [RenderedFrame] = []
+    /// 只留这几拍的帧（跑之前设好；按拍号取，不像 holdDepth 那样一直扣着最近几帧的输出缓冲）。
+    var keepTicks: Set<Int64> = []
+    private var keptFrames: [Int64: RenderedFrame] = [:]
 
     func renderer(_ renderer: any Renderer, didComplete frame: RenderedFrame) {
         lock.lock()
-        samples.append(Sample(tick: frame.tick, tickTime: frame.tickTime, submitTime: frame.submitTime, gpuStart: frame.gpuStart, gpuEnd: frame.gpuEnd))
+        samples.append(Sample(tick: frame.tick, tickTime: frame.tickTime, submitTime: frame.submitTime, gpuStart: frame.gpuStart, gpuEnd: frame.gpuEnd,
+                              hasPreview: frame.preview != nil, hasMultiview: frame.multiview != nil))
         dispatchTimes.append(HostClock.now())
         if holdDepth > 0 {
             held.append(frame)
             if held.count > holdDepth { held.removeFirst() }
         }
+        if keepTicks.contains(frame.tick.rawValue) { keptFrames[frame.tick.rawValue] = frame }
         lock.unlock()
     }
+
+    /// keepTicks 里某一拍的帧。
+    func kept(_ tick: Int64) -> RenderedFrame? { lock.lock(); defer { lock.unlock() }; return keptFrames[tick] }
 
     var renderMs: [Double] { lock.lock(); defer { lock.unlock() }; return samples.map(\.renderMs) }
     var count: Int { lock.lock(); defer { lock.unlock() }; return samples.count }
@@ -87,6 +98,11 @@ final class FakeEngine: @unchecked Sendable {
 
     func publish(_ state: MixerState, sequence: UInt64, tick: Tick) {
         snapshot.withLock { $0 = MixerSnapshot(state: state, sequence: sequence, tick: tick) }
+    }
+
+    /// 换一个事先建好的快照（在渲染线程的钩子里调也不分配：快照对象在别处建好，这里只换引用）。下一拍生效。
+    func publish(_ prebuilt: MixerSnapshot) {
+        snapshot.withLock { $0 = prebuilt }
     }
 
     /// 跑 duration 秒；startDelay 后的第一拍是第 0 拍。阻塞调用者直到跑完（在主线程上想同时泵 run loop 用 startAsync）。
@@ -197,8 +213,9 @@ enum LoadStates {
         }
         guard !legacy else { return s }
         if keyer { for i in 4..<8 { s.inputs[i].settings.keyer = ReferenceStates.keyer() } }
-        s.inputs[4].settings.effects = [ReferenceStates.borderEffect()]
-        s.inputs[5].settings.effects = [ReferenceStates.borderEffect(width: 0.01, color: (255, 200, 0))]
+        // 叠加 1 / 2（输入 5 / 6）带边框：W3-B 时写在输入 5 / 6 的效果格里，W3-B2 起走正式字段（负载不变，同样两圈边框）
+        s.overlays[0].border = OverlayBorder()
+        s.overlays[1].border = OverlayBorder(width: 0.01, color: RGB8(red: 255, green: 200, blue: 0))
         return customLayout ? ReferenceStates.withMultiviewLayout(s, ReferenceStates.customLayout) : s
     }
 }
