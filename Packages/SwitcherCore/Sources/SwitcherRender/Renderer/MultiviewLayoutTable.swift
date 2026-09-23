@@ -94,7 +94,7 @@ final class MultiviewLayoutTable {
     private(set) var cellCount = 0
     /// PGM / PVW 格画安全框。
     private(set) var safeArea = false
-    /// 输入格画电平表占位。
+    /// 输入格与 PGM / PVW 格画电平表（有读数画真实电平，输入格没读数画占位；纯音频格不看这个开关，总是画）。
     private(set) var meters = false
     /// tally 边框宽（像素）。
     private(set) var border: Float = 4
