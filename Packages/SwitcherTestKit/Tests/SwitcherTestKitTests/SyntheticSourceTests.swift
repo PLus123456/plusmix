@@ -57,7 +57,9 @@ final class SyntheticSourceTests: XCTestCase {
             XCTAssertEqual(r.decoded.flash, i % 60 == 0)
             XCTAssertEqual(r.format, .nv12)
             XCTAssertEqual(r.pts, timeline.videoClock(driftPpm: 0).time(of: Tick(Int64(i))))
-            XCTAssertEqual(r.decoded.hostTimeMs, UInt32(truncatingIfNeeded: r.pts.nanoseconds / 1_000_000))
+            // 图案里的毫秒是 28 位（契约 `TestPattern.Content` 会 & dataMask），期望值也得掩码：
+            // host time 从开机起算，开机超过 2²⁸ ms（3.1 天）之后不掩码就差一个 2²⁸（W1-A3 在开机 7 天的机器上踩到）
+            XCTAssertEqual(r.decoded.hostTimeMs, UInt32(truncatingIfNeeded: r.pts.nanoseconds / 1_000_000) & TestPattern.dataMask)
             if i > 0 { XCTAssertGreaterThan(r.pts, records[i - 1].pts); XCTAssertGreaterThanOrEqual(r.ingress, records[i - 1].ingress) }
             let late = (r.ingress - r.pts).milliseconds
             maxLateMs = max(maxLateMs, late); minLateMs = min(minLateMs, late); sumLateMs += late
@@ -100,7 +102,10 @@ final class SyntheticSourceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(lates.min()!, -3.0)
         XCTAssertLessThanOrEqual(lates.max()!, 3.0 + 3.0)
         XCTAssertEqual(std, 3 / 3.0.squareRoot(), accuracy: 0.4, "均匀分布 ±3 的标准差 1.73")
-        XCTAssertLessThan(abs(mean), 0.8)
+        // 0.8 → 1.2：mean 里除了零均值的抖动还有一项系统性的画帧 + 交付开销（1080p 那条没配抖动时是 2.17 ms，
+        // 这里 640×360 实测 0.85–0.86），0.8 正压在线上，main 上也 3/3 红。用户 2026-09-23 批了放宽到 1.2。
+        // 问题单 reports/issues/P3-w1-testkit-jitter-mean-bound.md 留着（里面记了"扣掉偏置再判"那个更稳的方向）。
+        XCTAssertLessThan(abs(mean), 1.2)
         // pts 本身不抖：仍是严格的拍点
         let clock = input.timeline!.videoClock(driftPpm: 0)
         for r in collector.all { XCTAssertEqual(r.pts, clock.time(of: Tick(Int64(r.n)))) }

@@ -25,11 +25,13 @@ public struct MetalRendererOptions: Sendable {
     public var outputRingSize: Int = 8
     /// 是否画多画面（关掉省 GPU；测试基线用）。
     public var multiview: Bool = true
-    /// PVW 也画叠加（W3-B；提案 010 过渡做法：等每通道的 previewOn 落地前一刀切）。默认关，PVW = 纯输入。
+    /// PVW 画**所有**叠加的总开关（提案 010）。默认关，这时 PVW 只画 `OverlayState.previewOn` 的那几路；
+    /// 一路都没开就是纯输入（`v8-preview-pvw.png` 的口径不变）。
     public var overlaysInPreview: Bool = false
-    /// 把 PVW 转成 NV12 填进 RenderedFrame.preview（NDI / 外部输出要 PVW 时开；多一趟 compute 和一个缓冲环）。默认关。
+    /// 强制把 PVW 转成 NV12 填进 `RenderedFrame.preview`。默认关：状态里有 enabled 且 source = preview 的输出时自动填，
+    /// 这一项只是强制开的覆盖（多一趟 compute）。
     public var previewOutput: Bool = false
-    /// 把多画面转成 NV12 填进 RenderedFrame.multiview（NDI / 外部输出要多画面时开；需要 multiview = true）。默认关。
+    /// 强制把多画面转成 NV12 填进 `RenderedFrame.multiview`（需要 multiview = true）。默认关，自动填的条件同上。
     public var multiviewOutput: Bool = false
     public init() {}
 }
@@ -123,8 +125,9 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         // 输入：每路最多约 8 个池缓冲 × 2 平面；输出环 × 2 平面
         let tbl = SurfaceTextureTable(device: device, capacity: max(1, maxInputs) * 16 + options.outputRingSize * 2 + 8)
         let rng = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize)
-        let pvwRing = options.previewOutput ? try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize) : nil
-        let mvRing = options.multiviewOutput && options.multiview ? try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize) : nil
+        // 填不填由每拍的状态定（提案 010），所以环总是建好：prepare 时还没有状态，渲染线程又不许分配
+        let pvwRing = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize)
+        let mvRing = options.multiview ? try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize) : nil
         let lbl = try LabelRenderer(device: device, inputSlices: max(1, maxInputs),
                                     submittedFrames: { [weak self] in self?.submitted.load(ordering: .acquiring) ?? 0 },
                                     completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
@@ -193,19 +196,22 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         slot.frameIndex = frameIndex
         slot.outputBuffer = output
         slot.commandBuffer = cb
-        // PVW / 多画面的 NV12 输出（选项开了才有；环拿不到缓冲就这一帧不出，不拖 PGM）
+        // PVW / 多画面的 NV12 输出：状态里有 enabled 且 source 是它的输出就填（提案 010），选项是强制开的覆盖；
+        // 环拿不到缓冲就这一帧不出，不拖 PGM
+        let state = snapshot.state
         var outputs = CompositorPasses.FrameOutputs(program: program)
-        if let previewRing, let pb = previewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
+        if options.previewOutput || CompositorPasses.wants(.preview, in: state),
+           let previewRing, let pb = previewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
            let t = nv12Target(surface: s.takeUnretainedValue(), table: table, width: width, height: height, frame: frameIndex) {
             slot.previewBuffer = pb
             outputs.preview = t
         }
-        if let multiviewRing, let pb = multiviewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
+        if options.multiviewOutput || CompositorPasses.wants(.multiview, in: state),
+           let multiviewRing, let pb = multiviewRing.next(), let s = CVPixelBufferGetIOSurface(pb),
            let t = nv12Target(surface: s.takeUnretainedValue(), table: table, width: width, height: height, frame: frameIndex) {
             slot.multiviewBuffer = pb
             outputs.multiview = t
         }
-        let state = snapshot.state
         if snapshot.sequence != layoutSequence {
             layoutSequence = snapshot.sequence
             layout.parse(state: state, width: width, height: height)

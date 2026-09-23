@@ -65,24 +65,36 @@ final class ExternalDisplayTests: XCTestCase {
         if !NSApp.isRunning { NSApp.finishLaunching() }
     }
 
-    func testSpec_roundTripsThroughOutputSettingsExtra() {
+    /// 提案 013：显示器 ID / 退回策略读写正式字段 `OutputSettings.display`；过渡键 extra 只作读的后备。
+    func testP3_013_specRoundTripsThroughOfficialDisplayField() {
         var settings = OutputSettings(source: .program)
         let spec = ExternalDisplaySpec(displayID: 69734400, source: .input(number: 3), fallbackToMain: true)
         spec.apply(to: &settings)
         XCTAssertEqual(settings.source, .input(number: 3))
-        XCTAssertEqual(settings.extra[ExternalDisplaySpec.displayIDKey], .number(69734400))
-        XCTAssertEqual(settings.extra[ExternalDisplaySpec.fallbackKey], .bool(true))
+        XCTAssertEqual(settings.display, DisplayOutputSettings(displayID: 69734400, fallbackToMain: true))
+        XCTAssertNil(settings.extra[ExternalDisplaySpec.displayIDKey], "写出只写正式字段")
+        XCTAssertNil(settings.extra[ExternalDisplaySpec.fallbackKey])
         XCTAssertEqual(ExternalDisplaySpec(settings: settings), spec)
         // JSON 往返（Show 文件）
         let data = try! JSONEncoder().encode(settings)
         let back = try! JSONDecoder().decode(OutputSettings.self, from: data)
         XCTAssertEqual(ExternalDisplaySpec(settings: back), spec)
-        // 主屏 + 不退回 → extra 里没有键
+        // 主屏 + 不退回
         var plain = settings
         ExternalDisplaySpec(displayID: nil, source: .multiview).apply(to: &plain)
-        XCTAssertNil(plain.extra[ExternalDisplaySpec.displayIDKey])
-        XCTAssertNil(plain.extra[ExternalDisplaySpec.fallbackKey])
+        XCTAssertEqual(plain.display, DisplayOutputSettings(displayID: nil, fallbackToMain: false))
         XCTAssertEqual(ExternalDisplaySpec(settings: plain), ExternalDisplaySpec(displayID: nil, source: .multiview))
+        // 什么都没有（老 Show、也没有过渡键）：主屏 + 不退回（与 P3 之前一样）
+        XCTAssertEqual(ExternalDisplaySpec(settings: OutputSettings(source: .program)),
+                       ExternalDisplaySpec(displayID: nil, source: .program, fallbackToMain: false))
+        // 过渡键作后备：正式字段为 nil 时仍读得出（一个版本）
+        var legacy = OutputSettings(source: .preview)
+        legacy.extra[ExternalDisplaySpec.displayIDKey] = .number(12345)
+        legacy.extra[ExternalDisplaySpec.fallbackKey] = .bool(true)
+        XCTAssertEqual(ExternalDisplaySpec(settings: legacy), ExternalDisplaySpec(displayID: 12345, source: .preview, fallbackToMain: true))
+        // 正式字段优先于过渡键
+        legacy.display = DisplayOutputSettings(displayID: 999, fallbackToMain: false)
+        XCTAssertEqual(ExternalDisplaySpec(settings: legacy), ExternalDisplaySpec(displayID: 999, source: .preview, fallbackToMain: false))
         XCTAssertEqual(ExternalDisplaySpec.describe(.input(number: 2), inputs: [InputConfig(number: 2, name: "机位二", source: .image(path: "/x.png"))]), "输入 2 机位二")
     }
 
@@ -228,8 +240,22 @@ final class ExternalDisplayTests: XCTestCase {
         pump(seconds: 0.1)
         XCTAssertGreaterThanOrEqual(manager.screenChanges, 1)
         XCTAssertEqual(manager.windows[3]?.status, .showing(displayID: id))
+        // 提案 013：每个窗口在 Stats 里一项，frames 随呈现递增，state 在 013 的列表里
+        let entries = manager.statsEntries
+        XCTAssertEqual(entries.map(\.output), [3, 4], "按输出编号升序，每个窗口一项")
+        XCTAssertTrue(entries.allSatisfy { $0.kind == "externalDisplay" })
+        XCTAssertTrue(entries.allSatisfy { Stats.DisplayEntry.states.contains($0.state) }, "\(entries.map(\.state))")
+        XCTAssertEqual(entries.first { $0.output == 3 }?.state, "presenting")
+        XCTAssertEqual(entries.first { $0.output == 4 }?.state, "noDisplay", "显示器不在 → noDisplay")
+        let before = try XCTUnwrap(entries.first { $0.output == 3 }).frames
+        pump(seconds: 0.5)
+        let after = try XCTUnwrap(manager.statsEntries.first { $0.output == 3 }).frames
+        XCTAssertGreaterThan(after, before, "在显示的窗口 frames 应随呈现递增")
+        XCTAssertEqual(after, manager.windows[3]!.displayView.presentedFrames, "与 MetalDisplayView.presentedFrames 同源（铁律 4）")
+
         manager.closeAll()
         XCTAssertTrue(manager.windows.isEmpty)
+        XCTAssertTrue(manager.statsEntries.isEmpty)
     }
 
     /// L2 端到端（秒表法）：镜头前的手机毫秒秒表 → 外部显示上的 PGM，1/1000 s 快门同时拍下两者读差，5 次取中位数，另测摄像头直连显示器作扣除。

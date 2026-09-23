@@ -62,9 +62,10 @@ enum ShowFixtures {
             OutputState(number: 4, kind: .ndi, name: "Switcher PGM", enabled: true,
                         settings: OutputSettings(source: .program, extra: [OutputExtras.ndiGroups: .string("public"), "ndi.conversion": .string("cpu")])),
             OutputState(number: 5, kind: .externalDisplay, name: "投影", enabled: true,
-                        settings: OutputSettings(source: .multiview, extra: [OutputExtras.displayNumber: .number(2)])),
+                        settings: OutputSettings(source: .multiview, display: DisplayOutputSettings(displayID: 2, fallbackToMain: false))),   // 提案 013 的正式字段
             OutputState(number: 6, kind: .virtualCamera, name: "虚拟摄像头", enabled: true, settings: OutputSettings(source: .preview)),
-            OutputState(number: 7, kind: .multiview, name: "多画面", enabled: true, settings: OutputSettings(source: .multiview, extra: ["layout": .string("3x3")])),
+            OutputState(number: 7, kind: .multiview, name: "多画面", enabled: true,
+                        settings: OutputSettings(source: .multiview, multiview: MultiviewLayoutSettings(preset: "3x3"))),   // 提案 010 的正式字段
         ]
         let layout = ShowLayout(values: ["mixerPanelVisible": .bool(false), "mainWindowFrame": .string("{{0, 0}, {1440, 900}}"), "multiviewWindowFrame": .string("{{10, 10}, {800, 450}}")])
         return Show(name: "全字段", inputs: inputs, mixer: mixer, audio: audioState, outputs: outputs, layout: layout)
@@ -88,6 +89,23 @@ final class ShowRoundTripTests: XCTestCase {
         XCTAssertEqual(back.outputs, show.outputs)
         XCTAssertEqual(back.layout, show.layout)
         print("全字段节目文件 \(data.count) 字节")
+    }
+
+    /// 提案 010 / 013：过渡键的节目文件读进来时一次性搬进正式字段（`Show.load` → `migratingLegacyKeys`），旧键清掉。
+    func testShow_legacyExtraKeysMigrateOnLoad() throws {
+        var show = ShowFixtures.fullyPopulated(recordDirectory: "/tmp/rec")
+        // 退回 P3 之前的写法：显示器 ID 与多画面布局都在 extra 里
+        show.outputs[4].settings.display = nil
+        show.outputs[4].settings.extra[DisplayOutputSettings.legacyDisplayIDKey] = .number(2)
+        show.outputs[6].settings.multiview = nil
+        show.outputs[6].settings.extra[MultiviewLayoutSettings.legacyExtraKey] = .string("3x3")
+        let back = try Show.load(from: try show.save())
+        XCTAssertEqual(back.outputs[4].settings.display, DisplayOutputSettings(displayID: 2, fallbackToMain: false))
+        XCTAssertNil(back.outputs[4].settings.extra[DisplayOutputSettings.legacyDisplayIDKey], "旧键搬完清掉")
+        XCTAssertEqual(back.outputs[6].settings.multiview?.preset, "3x3")
+        XCTAssertNil(back.outputs[6].settings.extra[MultiviewLayoutSettings.legacyExtraKey])
+        // App 读的也是正式字段
+        XCTAssertEqual(OutputExtras.displayNumber(of: back.outputs[4]), 2)
     }
 
     /// ShowDocuments：文件里来的节目只清录制 / 推流的 enabled（G3 定），其余原样。

@@ -33,7 +33,9 @@ public struct WipeParams: Hashable, Codable, Sendable {
 public struct StingerParams: Hashable, Codable, Sendable {
     /// 作 stinger 的输入（带 alpha 的文件 / 图片）；nil = 未设置。
     public var input: Int?
-    /// 在 stinger 的第几拍换底。
+    /// 在 stinger 的第几拍换底。按状态机口径，第 s 拍应用命令时 progress = 0（渲染器什么都不叠），
+    /// 第 s + 1 拍才是 stinger 的第一帧，所以 cutAtTick 0 与 1 等价；cutAtTick ≥ durationTicks 等于"完成时换"。
+    /// `TransitionRenderer.stingerShowsNewUnder` 是定义。
     public var cutAtTick: Int
     public init(input: Int? = nil, cutAtTick: Int = 0) {
         self.input = input
@@ -126,15 +128,74 @@ public enum OverlayAnimationKind: String, Codable, Sendable {
     case cut, fade, slide, zoom
 }
 
+/// 画面的一条边（slide 从哪进出；提案 010）。
+public enum OverlayEdge: String, Codable, Sendable, CaseIterable {
+    case left, right, top, bottom
+}
+
 /// 叠加通道的进出动画（W3-B 细化）。durationTicks = 0 等于 cut。
 public struct OverlayAnimation: Hashable, Codable, Sendable {
     /// 动画方式。
     public var kind: OverlayAnimationKind
     /// 动画时长（拍）；0 = cut。
     public var durationTicks: Int
-    public init(kind: OverlayAnimationKind = .cut, durationTicks: Int = 0) {
+    /// slide 从哪条边进出（提案 010）；nil = 离 rect 最近的边（并列时底 > 顶 > 左 > 右，
+    /// 所以整幅 rect 一律从底边、下三分之一自然向上滑入）。只对 kind = slide 有意义。
+    public var slideFrom: OverlayEdge?
+
+    public init(kind: OverlayAnimationKind = .cut, durationTicks: Int = 0, slideFrom: OverlayEdge? = nil) {
         self.kind = kind
         self.durationTicks = durationTicks
+        self.slideFrom = slideFrom
+    }
+
+    enum CodingKeys: String, CodingKey { case kind, durationTicks, slideFrom }
+
+    /// 老 Show 没有 slideFrom：缺键 = nil（提案 010）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(OverlayAnimationKind.self, forKey: .kind)
+        durationTicks = try c.decode(Int.self, forKey: .durationTicks)
+        slideFrom = try c.decodeIfPresent(OverlayEdge.self, forKey: .slideFrom)
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["kind", "durationTicks", "slideFrom"]
+}
+
+/// 画中画边框（提案 010）。
+public struct OverlayBorder: Hashable, Codable, Sendable {
+    /// 边框宽，占节目高的比例（1080p 下 0.006 ≈ 6 px）；渲染器钳到 0–0.1。
+    public var width: Double
+    /// 边框颜色。
+    public var color: RGB8
+    public init(width: Double = 0.006, color: RGB8 = RGB8(red: 255, green: 255, blue: 255)) {
+        self.width = width
+        self.color = color
+    }
+    /// 默认边框宽（占节目高的比例）。
+    public static let defaultWidth = 0.006
+}
+
+/// 叠加的锚点（提案 010）：rect 改尺寸时哪个点不动，缩放动画绕它缩。
+public enum OverlayAnchor: String, Codable, Sendable, CaseIterable {
+    case topLeft, top, topRight, left, center, right, bottomLeft, bottom, bottomRight
+
+    /// 锚点在 rect 内的归一化位置 (u, v)，原点左上：center = (0.5, 0.5)、topLeft = (0, 0)。
+    public var unitPoint: (u: Double, v: Double) {
+        let u: Double
+        switch self {
+        case .topLeft, .left, .bottomLeft: u = 0
+        case .top, .center, .bottom: u = 0.5
+        case .topRight, .right, .bottomRight: u = 1
+        }
+        let v: Double
+        switch self {
+        case .topLeft, .top, .topRight: v = 0
+        case .left, .center, .right: v = 0.5
+        case .bottomLeft, .bottom, .bottomRight: v = 1
+        }
+        return (u, v)
     }
 }
 
@@ -153,19 +214,51 @@ public struct OverlayState: Hashable, Codable, Sendable {
     public var animation: OverlayAnimation
     /// 最近一次 on 变化的拍；空闲为 nil。
     public var startTick: Tick?
+    /// 画中画边框（提案 010）；nil = 不画。
+    public var border: OverlayBorder?
+    /// 位置尺寸的锚点（提案 010）：缩放动画绕它缩。
+    public var anchor: OverlayAnchor
+    /// 在 PVW 里也预览这一路叠加（提案 010）；不影响它上不上 PGM。
+    /// 渲染器把它与 `MetalRendererOptions.overlaysInPreview`（"全部预览"总开关）取或。
+    public var previewOn: Bool
 
     public init(input: Int? = nil, on: Bool = false, rect: NormalizedRect = .full, animProgress: Double = 0,
-                animation: OverlayAnimation = OverlayAnimation(), startTick: Tick? = nil) {
+                animation: OverlayAnimation = OverlayAnimation(), startTick: Tick? = nil,
+                border: OverlayBorder? = nil, anchor: OverlayAnchor = .center, previewOn: Bool = false) {
         self.input = input
         self.on = on
         self.rect = rect
         self.animProgress = animProgress
         self.animation = animation
         self.startTick = startTick
+        self.border = border
+        self.anchor = anchor
+        self.previewOn = previewOn
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case input, on, rect, animProgress, animation, startTick, border, anchor, previewOn
+    }
+
+    /// 老 Show 没有 border / anchor / previewOn：缺键给 nil / center / false（提案 010）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        input = try c.decodeIfPresent(Int.self, forKey: .input)
+        on = try c.decode(Bool.self, forKey: .on)
+        rect = try c.decode(NormalizedRect.self, forKey: .rect)
+        animProgress = try c.decode(Double.self, forKey: .animProgress)
+        animation = try c.decode(OverlayAnimation.self, forKey: .animation)
+        startTick = try c.decodeIfPresent(Tick.self, forKey: .startTick)
+        border = try c.decodeIfPresent(OverlayBorder.self, forKey: .border)
+        anchor = try c.decodeIfPresent(OverlayAnchor.self, forKey: .anchor) ?? .center
+        previewOn = try c.decodeIfPresent(Bool.self, forKey: .previewOn) ?? false
     }
 
     /// 画面上能看见（含进出动画中）。
     public var isVisible: Bool { input != nil && (on || animProgress > 0) }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["input", "on", "rect", "animProgress", "animation", "startTick", "border", "anchor", "previewOn"]
 }
 
 // MARK: - 音频
@@ -213,20 +306,56 @@ public enum MonitorMode: String, Codable, Sendable {
     case afl, pfl
 }
 
+/// 耳机 / 监听总线从对齐延迟线的哪一侧取信号（提案 007；对应混音器的 sw_monitor_point，W1-D2）。
+public enum MonitorPoint: String, Codable, Sendable, CaseIterable {
+    /// 延迟线之前：不带对齐延迟与每路延迟补偿的低延迟监听（默认）。
+    case preDelayLine
+    /// 延迟线之后：与节目画面对齐。
+    case postDelayLine
+}
+
 /// 音频总体状态。每路输入的路由 / 增益 / 静音 / 独听 / 声像 / 延迟在 `MixerState.inputs[i].settings.audio`，只存一份。
 public struct AudioState: Hashable, Codable, Sendable {
     /// 恰好 4 条，顺序 = Bus.allCases。
     public var buses: [BusState]
-    /// 音频跟随视频：转场时相关输入交叉淡变，长度 = 转场时长，起点同一拍（§7）。
+    /// 音频跟随视频（全局总开关）：转场时相关输入交叉淡变，长度 = 转场时长，起点同一拍（§7）。
+    /// false = 所有路的门控增益恒 1；true 时哪几路参与由每路的 `InputAudioSettings.afv` 决定。
     public var afv: Bool
     /// 耳机监听方式。
     public var monitorMode: MonitorMode
+    /// 节目音频相对采集的对齐延迟（48 kHz 帧；提案 007）：每路输入"环年龄 + 对齐延迟线"= 它，
+    /// Master / 总线 / ISO 块的 PTS = 块首样本 host time − 它。2048 帧 = 42.67 ms，与视频内部延迟（≈ 3 帧）同量级。
+    /// 低延迟监听调小、大块生产者调大；运行期改要重建延迟线，所以只走 Show / 设置面板，没有对应命令。
+    public var alignmentFrames: Int
+    /// 耳机 / 监听总线取对齐延迟线之前（低延迟监听，默认）还是之后（与节目画面对齐）。提案 007；同上，没有对应命令。
+    public var monitorPoint: MonitorPoint
 
-    public init(buses: [BusState] = Bus.allCases.map { BusState(bus: $0) }, afv: Bool = false, monitorMode: MonitorMode = .afl) {
+    /// 对齐延迟的默认值（帧）。
+    public static let defaultAlignmentFrames = 2048
+
+    public init(buses: [BusState] = Bus.allCases.map { BusState(bus: $0) }, afv: Bool = false, monitorMode: MonitorMode = .afl,
+                alignmentFrames: Int = AudioState.defaultAlignmentFrames, monitorPoint: MonitorPoint = .preDelayLine) {
         self.buses = buses
         self.afv = afv
         self.monitorMode = monitorMode
+        self.alignmentFrames = alignmentFrames
+        self.monitorPoint = monitorPoint
     }
+
+    enum CodingKeys: String, CodingKey { case buses, afv, monitorMode, alignmentFrames, monitorPoint }
+
+    /// 老 Show / 老快照没有 alignmentFrames / monitorPoint：缺键给默认值（提案 007）。写出总是写全。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        buses = try c.decode([BusState].self, forKey: .buses)
+        afv = try c.decode(Bool.self, forKey: .afv)
+        monitorMode = try c.decode(MonitorMode.self, forKey: .monitorMode)
+        alignmentFrames = try c.decodeIfPresent(Int.self, forKey: .alignmentFrames) ?? AudioState.defaultAlignmentFrames
+        monitorPoint = try c.decodeIfPresent(MonitorPoint.self, forKey: .monitorPoint) ?? .preDelayLine
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["buses", "afv", "monitorMode", "alignmentFrames", "monitorPoint"]
 }
 
 // MARK: - 输出
@@ -237,6 +366,7 @@ public enum OutputKind: String, Codable, Sendable, CaseIterable {
 }
 
 /// 输出送什么画面（外部显示 / NDI / 虚拟摄像头相当于 Aux）。
+/// `multiview` 作 `MultiviewCell.source` 时被渲染器忽略（格子不能套自己，W3-B 口径）。
 public enum OutputSource: Hashable, Codable, Sendable {
     case program
     case preview
@@ -294,7 +424,7 @@ public enum RecordContainer: String, Codable, Sendable {
 
 /// 录制参数（设计方案 §8 录制行）。
 public struct RecordSettings: Hashable, Codable, Sendable {
-    /// 录制目录。
+    /// 录制目录。相对路径的口径（提案 007 B）：headless 相对进程工作目录；App 相对 `~/Movies/Switcher`。
     public var directory: String
     /// 文件名模板，支持 {show} {date} {time} {output}。
     public var fileNamePattern: String
@@ -329,6 +459,80 @@ public struct StreamSettings: Hashable, Codable, Sendable {
     }
 }
 
+/// 多画面的一个自定义格子（提案 010）。
+public struct MultiviewCell: Hashable, Codable, Sendable {
+    /// 格子里放什么：program / preview / input(number:)；`multiview` 无效（渲染器忽略该格，格子不能套自己）。
+    public var source: OutputSource
+    /// 格子在多画面画面里的位置尺寸（归一化，渲染器钳到画面内）。
+    public var rect: NormalizedRect
+    public init(source: OutputSource, rect: NormalizedRect) {
+        self.source = source
+        self.rect = rect
+    }
+}
+
+/// 多画面布局（提案 010；kind = multiview 的输出用）。
+public struct MultiviewLayoutSettings: Hashable, Codable, Sendable {
+    /// 预设名：`pgmPvw+grid`（默认，= W1-C 的布局：上 PVW / PGM，下半按路数 4×2 / 6×3 / 8×4）、
+    /// `pgmPvw+4x2`、`pgmPvw+2x2`、`3x3`、`4x4`。`custom` 非空时忽略；认不出的名字退回默认。
+    public var preset: String
+    /// 自定义格子；非空时代替预设。
+    public var custom: [MultiviewCell]
+    /// PGM / PVW 格画安全框（EBU R95：动作安全 3.5%，字幕安全 5%）。
+    public var safeArea: Bool
+    /// 输入格右侧画电平表占位条。
+    public var meters: Bool
+
+    /// 默认预设名。
+    public static let defaultPreset = "pgmPvw+grid"
+
+    public init(preset: String = MultiviewLayoutSettings.defaultPreset, custom: [MultiviewCell] = [],
+                safeArea: Bool = false, meters: Bool = false) {
+        self.preset = preset
+        self.custom = custom
+        self.safeArea = safeArea
+        self.meters = meters
+    }
+
+    enum CodingKeys: String, CodingKey { case preset, custom, safeArea, meters }
+
+    /// 各键都可缺（提案 010）：只给 `{"safeArea": true}` 也是合法布局。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        preset = try c.decodeIfPresent(String.self, forKey: .preset) ?? MultiviewLayoutSettings.defaultPreset
+        custom = try c.decodeIfPresent([MultiviewCell].self, forKey: .custom) ?? []
+        safeArea = try c.decodeIfPresent(Bool.self, forKey: .safeArea) ?? false
+        meters = try c.decodeIfPresent(Bool.self, forKey: .meters) ?? false
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["preset", "custom", "safeArea", "meters"]
+}
+
+/// 外部显示输出的设置（提案 013；kind = externalDisplay 用）。
+public struct DisplayOutputSettings: Hashable, Codable, Sendable {
+    /// CGDirectDisplayID；nil = 主显示器。显示器 ID 重启后可能变，App 侧另存型号 / 序列号做匹配是界面的事。
+    public var displayID: UInt32?
+    /// 显示器不在时退回主显示器（默认）还是黑着等它回来。
+    public var fallbackToMain: Bool
+    public init(displayID: UInt32? = nil, fallbackToMain: Bool = true) {
+        self.displayID = displayID
+        self.fallbackToMain = fallbackToMain
+    }
+
+    enum CodingKeys: String, CodingKey { case displayID, fallbackToMain }
+
+    /// fallbackToMain 缺键 = true（提案 013）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        displayID = try c.decodeIfPresent(UInt32.self, forKey: .displayID)
+        fallbackToMain = try c.decodeIfPresent(Bool.self, forKey: .fallbackToMain) ?? true
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["displayID", "fallbackToMain"]
+}
+
 /// 一个输出的设置。按 kind 取用相关的子结构，其他留 nil；`extra` 给各输出会话放自己的附加项（占位）。
 public struct OutputSettings: Hashable, Codable, Sendable {
     /// 送什么画面。
@@ -341,17 +545,28 @@ public struct OutputSettings: Hashable, Codable, Sendable {
     public var record: RecordSettings?
     /// 推流参数（kind = stream）。
     public var stream: StreamSettings?
+    /// 多画面布局（kind = multiview；提案 010）；nil = 默认布局。
+    public var multiview: MultiviewLayoutSettings?
+    /// 外部显示设置（kind = externalDisplay；提案 013）；nil = 主显示器、拔掉退回主屏。
+    public var display: DisplayOutputSettings?
     /// 各输出会话的附加设置（占位）。
     public var extra: [String: JSONValue]
     public init(source: OutputSource = .program, video: VideoEncodeSettings? = nil, audio: AudioEncodeSettings? = nil,
-                record: RecordSettings? = nil, stream: StreamSettings? = nil, extra: [String: JSONValue] = [:]) {
+                record: RecordSettings? = nil, stream: StreamSettings? = nil,
+                multiview: MultiviewLayoutSettings? = nil, display: DisplayOutputSettings? = nil,
+                extra: [String: JSONValue] = [:]) {
         self.source = source
         self.video = video
         self.audio = audio
         self.record = record
         self.stream = stream
+        self.multiview = multiview
+        self.display = display
         self.extra = extra
     }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["source", "video", "audio", "record", "stream", "multiview", "display", "extra"]
 }
 
 /// 一个输出的状态：配置 + 目标开关。运行时的帧数 / 丢帧 / 码率在 Stats.encoder 里，不在这里（铁律 4）。
@@ -362,7 +577,10 @@ public struct OutputState: Hashable, Codable, Sendable, Identifiable {
     public var kind: OutputKind
     /// 显示名。
     public var name: String
-    /// 目标状态：true = 应该在跑（startRecord / startStream 置它）。
+    /// 目标状态：true = 应该在跑。record / stream 由 startRecord / startStream 置，其余 kind 由 `setOutputEnabled` 置（提案 012）。
+    /// 节目文件里的 enabled 只对 headless 的场景文件生效（t0 起录 / 起推）；App 打开任何节目文件（含退出时自动存的 LastSession）
+    /// 时把 record / stream 的 enabled 清掉，这两类输出只由用户动作（按钮 / 快捷键 / API）起（提案 007 B 第 1 条，
+    /// App 的 `ShowDocuments.stoppingOutputs` 实现）。
     public var enabled: Bool
     /// 设置。
     public var settings: OutputSettings

@@ -11,13 +11,15 @@ import SwitcherContracts
 public enum AudioControlEvent: Sendable, Hashable {
     /// 输入表变了：新增的配置、删除的编号。音频侧据此挂 / 摘槽位（环由组装方另行注册）。
     case inputsChanged(added: [InputConfig], removed: [Int])
-    /// 某路输入的音频参数（路由 / 增益 / 静音 / 独听 / 声像 / 延迟补偿）变了。
+    /// 某路输入的音频参数（路由 / 增益 / 静音 / 独听 / 声像 / 延迟补偿 / 是否参与 AFV）变了。
+    /// 收到它要顺手重算这一路的门控增益（`afv` 那一位可能翻了）。
     case inputAudioSettings(input: Int, settings: InputAudioSettings)
     /// 总线增益 / 静音变了（恰好 4 条，顺序 = Bus.allCases）。
     case buses([BusState])
     /// 耳机监听方式变了。
     case monitorMode(MonitorMode)
-    /// AFV 开关翻转。音频侧按当前 PGM / PVW / 转场进度重新门控（`AudioProgramGate.gains(for:)`）。
+    /// AFV 全局开关翻转。音频侧按当前 PGM / PVW / 转场进度重新门控（`AudioProgramGate.gains(for:)`）。
+    /// 每路参不参与在 `InputAudioSettings.afv` 里，跟着 `inputAudioSettings` 事件走。
     case afv(on: Bool)
     /// 瞬时切换（Cut / setProgram / 时长 0 的 auto）：PGM from → to，在第 tick 拍（拍点 at）生效。
     case cut(from: Int, to: Int, tick: Tick, at: HostTime)
@@ -43,9 +45,11 @@ public protocol AudioControlEventSink: AnyObject, Sendable {
 /// AFV 门控与 FTB 斜坡的纯函数（音频侧和测试共用一份口径）。
 public enum AudioProgramGate {
     /// 每路输入应有的"跟随视频"增益（0…1）：
-    /// - AFV 关：全部 1（音频不跟随，各路只受自己的推子 / 静音 / 路由控制）。
-    /// - AFV 开：PGM 输入 1；转场进行中 PVW 输入按等幅曲线 sin(p·π/2)、PGM 输入 cos(p·π/2)（p = 进度，新画面盖住旧画面的比例）；
-    ///   其余 0。编号 0（黑场）没有音频。叠加通道不影响门控（W2-E 口径，见报告 §4）。
+    /// - 全局 AFV 关（`AudioState.afv`）：全部 1（音频不跟随，各路只受自己的推子 / 静音 / 路由控制）。
+    /// - 该路的 `InputAudioSettings.afv = false`：恒 1，不跟随视频、也不进转场的交叉淡变（主持人话筒的用法，
+    ///   用户 2026-09-22 批的每路 AFV 开关）。
+    /// - 其余（全局开 + 该路参与）：PGM 输入 1；转场进行中 PVW 输入按等幅曲线 sin(p·π/2)、PGM 输入 cos(p·π/2)
+    ///   （p = 进度，新画面盖住旧画面的比例）；其余 0。编号 0（黑场）没有音频。叠加通道不影响门控（W2-E 口径，见报告 §4）。
     public static func gains(for state: MixerState) -> [Int: Float] {
         var out: [Int: Float] = [:]
         let afv = state.audio.afv
@@ -53,7 +57,7 @@ public enum AudioProgramGate {
         let inTransition = state.transition.isActive
         for input in state.inputs {
             let n = input.number
-            if !afv { out[n] = 1; continue }
+            if !afv || !input.settings.audio.afv { out[n] = 1; continue }
             var g: Float = 0
             if n == state.program {
                 g = inTransition ? Float(cos(p * Double.pi / 2)) : 1

@@ -27,6 +27,11 @@ final class AuxOutputRuntime {
     var onEvent: ((Event) -> Void)?
     /// 用户在外部窗口按 Esc → 删那个输出（经命令总线）。
     var sendCommand: ((Command) -> Void)?
+    /// 界面上的显示视图在 Stats 里的项（提案 013）：主界面监视器（output 0，kind "monitor"）与多画面窗口（kind "multiviewWindow"）。
+    /// 由 `MainWindowController` 注册——那两个视图归界面所有，运行时这里看不到。
+    var uiDisplayEntries: (@MainActor () -> [Stats.DisplayEntry])?
+    /// 当前虚拟摄像头输出的编号（reconcile 时记；没有就是 0）。
+    private var virtualCameraOutput = 0
 
     init(engine: Engine, source: any DisplayFrameSource, format: ProgramFormat) {
         self.engine = engine
@@ -46,7 +51,8 @@ final class AuxOutputRuntime {
     func reconcile(_ state: MixerState) {
         external.reconcile(outputs: state.outputs, inputs: state.inputs, format: state.format)
         for n in externalStatuses.keys where external.windows[n] == nil { externalStatuses.removeValue(forKey: n) }
-        let wantCamera = state.outputs.contains { $0.kind == .virtualCamera && $0.enabled }
+        virtualCameraOutput = state.outputs.first { $0.kind == .virtualCamera && $0.enabled }?.number ?? 0
+        let wantCamera = virtualCameraOutput != 0
         if wantCamera, virtualCamera == nil {
             let cam = VirtualCameraOutput(format: format)
             cam.start()
@@ -69,6 +75,15 @@ final class AuxOutputRuntime {
             cam.stop()
             virtualCamera = nil
         }
+    }
+
+    /// 显示类输出在 Stats 里的全部项（提案 013，铁律 4：菜单 / API / 测试读同一个结构）。主线程调。
+    /// 外部显示窗口与虚拟摄像头由 SwitcherOutputs 的 `statsEntry` 给，界面上的两个视图由 `uiDisplayEntries` 给。
+    var statsEntries: [Stats.DisplayEntry] {
+        var out = external.statsEntries
+        if let cam = virtualCamera { out.append(cam.statsEntry(output: virtualCameraOutput)) }
+        out.append(contentsOf: uiDisplayEntries?() ?? [])
+        return out
     }
 
     /// 虚拟摄像头一行状态（菜单 / 面板）。

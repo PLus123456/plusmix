@@ -182,7 +182,7 @@ final class AlignmentTests: XCTestCase {
     /// 耳机总线默认取延迟线之前的信号：同一路 click 在耳机流里比 Master 早"对齐延迟线"那么多（1089 帧 = 22.7 ms），Master 仍回到整秒；
     /// `monitorPoint = .postDelayLine` 时耳机与 Master 同刻。监听延迟因此只剩环年龄（959 帧 = 20 ms，可用 hints 调小）+ 设备。
     func testMonitor_headphonesBypassAlignmentDelayLineByDefault() async throws {
-        for point in [MonitorPoint.preDelayLine, .postDelayLine] {
+        for point in [SwitcherAudio.MonitorPoint.preDelayLine, .postDelayLine] {   // 契约里有同名类型（提案 007）
             let rig = try await EngineRig(state: States.fourInputs(afv: false)) { $0.monitorPoint = point }
             try rig.addSource(number: 1)
             var s = InputSettings(); s.audio.routing = BusRouting(master: true, headphones: true)

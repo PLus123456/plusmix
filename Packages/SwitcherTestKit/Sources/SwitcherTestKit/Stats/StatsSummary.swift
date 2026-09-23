@@ -12,6 +12,7 @@ import SwitcherContracts
 /// - 设计内重复 = max(0, 1 − 输入 fps / 节目 fps)，设计内丢弃 = max(0, 1 − 节目 fps / 输入 fps)；设计外 = 实测 − 设计内（V4）。
 /// - S2：RSS 对时间线性拟合；文件 ≥ 1 h 时丢掉前 30 min 预热再拟合（§3 S2），否则整段拟合并标注。
 /// - jitter_ms 在 Stats 里已是"窗口内最大值"，这里的 p99 是各窗口最大值的 p99，比逐帧 p99 严。
+/// - P3 起（提案 013）多出 `displays`：显示类输出按 (output, kind) 分组，frames / dropped 取末行 − 首行，state 取末行与全程出现的状态；老文件没有 display 键时是空数组。
 /// - P2 起（提案 001 / 002 / 004 / 005）多出的汇总都是可选字段：encoder 的 `delivery`（frames / dropped / reconnects 取末行 − 首行、disk_free_mb 序列、状态）、
 ///   每路的 `latency`（L1 序列 + 全程最大）、`audioDiscontinuities`、`masterMeters`（Master 峰值 / 真峰值 / LUFS 的序列）。
 ///   老基线（baselines/*.json）没有这些键，解码为 nil；与上一版本比较时只比 verdicts 的 primary，不受影响。
@@ -80,6 +81,18 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         public var states: [String: Int]
     }
 
+    /// 一个显示类输出的汇总（提案 013）：frames / dropped 取末行 − 首行；state 取末行与全程出现的状态（行数）。
+    public struct DisplaySummary: Hashable, Codable, Sendable {
+        /// 输出编号（0 = 主界面监视器）。
+        public var output: Int
+        /// "externalDisplay" / "virtualCamera" / "multiviewWindow" / "monitor"。
+        public var kind: String
+        public var frames: UInt64
+        public var dropped: UInt64
+        public var lastState: String
+        public var states: [String: Int]
+    }
+
     /// Master 表读数的逐行序列（提案 004）：峰值 / 真峰值取 L / R 的较大者；LUFS 瞬时 / 短期逐行；积分响度与 LRA 取末行。
     public struct MasterMeterSummary: Hashable, Codable, Sendable {
         public var peakDb: Series
@@ -107,6 +120,9 @@ public struct StatsSummary: Hashable, Codable, Sendable {
     public var missedRenderRatio: Double
     public var perInput: [Int: InputSummary]
     public var encoders: [EncoderSummary]
+    /// 显示类输出（提案 013，P3 起才有；P3 之前的基线文件里没有这个键，解出来是 nil）。
+    /// 按 (output, kind) 分组，输出编号升序；stats.jsonl 里没有 display 项时是空数组。
+    public var displays: [DisplaySummary]?
     public var audioDropouts: UInt64
     public var audioUnderruns: UInt64
     /// A1 第三项（流式检测，末行 − 首行；提案 004，P2 起才有，老基线为 nil）。
@@ -128,7 +144,7 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         guard let first = lines.first, let last = lines.last else {
             firstTs = 0; lastTs = 0; durationSeconds = 0; firstTick = 0; lastTick = 0; tickSpan = 0; programFps = 0
             renderMs = Series(values: []); jitterMs = Series(values: []); cpuPct = Series(values: []); gpuPct = Series(values: []); rssMb = Series(values: [])
-            missedRender = 0; missedRenderRatio = 0; perInput = [:]; encoders = []; audioDropouts = 0; audioUnderruns = 0
+            missedRender = 0; missedRenderRatio = 0; perInput = [:]; encoders = []; displays = []; audioDropouts = 0; audioUnderruns = 0
             audioDiscontinuities = nil; masterMeters = nil
             rssSlopeMbPerHour = nil; rssFitAfterWarmup = false
             return
@@ -204,6 +220,26 @@ public struct StatsSummary: Hashable, Codable, Sendable {
             return EncoderSummary(index: i, skipped: (entries.last?.skipped ?? 0) &- (entries.first?.skipped ?? 0),
                                   bitrate: Series(values: entries.map(\.bitrate)), delivery: delivery)
         }
+
+        // display[]（提案 013）：按 (output, kind) 分组，不像 encoder 那样按下标——显示类输出的项可能中途出现 / 消失
+        var displayKeys: [(output: Int, kind: String)] = []
+        var seenKeys = Set<String>()
+        for line in lines {
+            for d in line.display where seenKeys.insert("\(d.output)\u{1}\(d.kind)").inserted {
+                displayKeys.append((d.output, d.kind))
+            }
+        }
+        displays = displayKeys
+            .sorted { $0.output != $1.output ? $0.output < $1.output : $0.kind < $1.kind }
+            .map { key in
+                let entries = lines.compactMap { $0.display.first { $0.output == key.output && $0.kind == key.kind } }
+                var states: [String: Int] = [:]
+                for e in entries { states[e.state, default: 0] += 1 }
+                return DisplaySummary(output: key.output, kind: key.kind,
+                                      frames: (entries.last?.frames ?? 0) &- (entries.first?.frames ?? 0),
+                                      dropped: (entries.last?.dropped ?? 0) &- (entries.first?.dropped ?? 0),
+                                      lastState: entries.last?.state ?? "idle", states: states)
+            }
 
         let warmup = durationSeconds >= 3600
         let fitLines = warmup ? lines.filter { $0.ts >= first.ts + 1800 } : lines

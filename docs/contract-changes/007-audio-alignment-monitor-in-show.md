@@ -1,7 +1,7 @@
 # 007 AudioState 加对齐延迟与监听点；CONTRACTS.md 三条口径说明
 
 提出会话 / 分支：G3 / g3（检查点，2026-09-19 合入续做分支时；来源 W2-E 报告 §4 第 1 条、W1-D2 报告 §4 第 2 条、W2-B2 报告 §4 第 2 / 8 条、W1-E2 报告 §5 第 1 条、G2 报告 §7 第 7 条）
-状态：**已批**（用户 2026-09-22，按 G4 报告 §8 第 2 条一次批了 007 / 008 / 009 / 010 / 012。G3 2026-09-19 建议批；由契约会话 P3（docs/plan/prompts/61，分支 p3-contracts）落地：A 加两个字段，B 三条口径进 CONTRACTS.md；设置面板归 W3-E2 / prompt 63）。
+状态：**已落地**（p3-contracts，2026-09-23，提交 cb85fbe…c73aab2）：A 的两个字段进 `AudioState`（`alignmentFrames = 2048`、`monitorPoint`，都带默认值、老文件缺键按默认解），B 的三条口径进 CONTRACTS.md §2.5 与 `MixerState.swift` 的注释。读数方：App `AudioRuntime` 与 headless 建引擎时从 Show 取这两项填 `AudioEngineConfiguration`；headless 没有 `--audio-align` / `--audio-monitor` 这类覆盖参数（只有 `--audio-device` 选设备），所以直接从 show 读。契约与 SwitcherAudio 各有一个 `MonitorPoint`（前者 String / Codable，后者 Int32 / 对应 C 枚举），加了 `SwitcherAudio.MonitorPoint.init(_:)` 互转，调用点按模块限定。设置面板归 W3-E2 / prompt 63。
 
 ## A. 改什么（类型）
 

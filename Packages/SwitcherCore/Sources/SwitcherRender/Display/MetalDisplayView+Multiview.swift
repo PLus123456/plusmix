@@ -25,7 +25,8 @@ public enum MultiviewLayout {
     /// 预设名：pgmPvw+grid（默认）、pgmPvw+4x2、pgmPvw+2x2、3x3、4x4。
     public static var presetNames: [String] { MultiviewPreset.names.map(\.0) }
 
-    /// 状态里第一个 kind = multiview 的输出的 extra["layout"]；没有为 nil。下标循环（渲染线程也调它）。
+    /// 状态里第一个 kind = multiview 的输出的过渡键 extra["layout"]；没有为 nil。下标循环（渲染线程也调它）。
+    /// 正式字段（`layoutSettings(in:)`，定义在 MultiviewLayoutTable.swift）优先，这条只作后备（保留一个版本）。
     public static func layoutValue(in state: MixerState) -> JSONValue? {
         let outputs = state.outputs
         var i = 0
@@ -36,10 +37,15 @@ public enum MultiviewLayout {
         return nil
     }
 
-    /// 任意布局的全部格子（按绘制顺序）。layout = extra["layout"] 的值（nil = 默认）；inputs = 输入编号（按 MixerState.inputs 顺序）。
+    /// 任意布局的全部格子（按绘制顺序）。layout = 过渡键 extra["layout"] 的值（nil = 默认）；inputs = 输入编号（按 MixerState.inputs 顺序）。
     public static func placements(layout: JSONValue?, inputs: [Int], width: Int, height: Int) -> [MultiviewCellPlacement] {
         let table = MultiviewLayoutTable()
         table.parse(layout: layout, inputCount: inputs.count, width: width, height: height) { inputs[$0] }
+        return placements(table: table, width: width, height: height)
+    }
+
+    /// 解析好的表 → 格子。
+    static func placements(table: MultiviewLayoutTable, width: Int, height: Int) -> [MultiviewCellPlacement] {
         let w = Double(width), h = Double(height)
         let border = MultiviewGeometry.border(height: h)
         var result: [MultiviewCellPlacement] = []

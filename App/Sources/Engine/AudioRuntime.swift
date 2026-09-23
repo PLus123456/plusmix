@@ -20,9 +20,12 @@ final class AudioRuntime {
     /// 注册失败（槽位还在淡出摘除中）时的重试次数。
     private(set) var registerRetries = 0
 
-    init(stateMachine: StateMachine, device: AppSettings.AudioDevice) {
+    /// - Parameter audioState: 节目文件里的音频状态；对齐延迟与监听点从它取（提案 007）。
+    init(stateMachine: StateMachine, device: AppSettings.AudioDevice, audioState: AudioState = AudioState()) {
         var config = AudioEngineConfiguration()
         config.output = Self.output(for: device)
+        config.alignmentFrames = max(0, audioState.alignmentFrames)
+        config.monitorPoint = SwitcherAudio.MonitorPoint(audioState.monitorPoint)
         // SW_AUDIO_SILENT=1：真设备也不出声（Master 不映射到设备通道，仍照常处理、照常送录制器）——测试机上跑 xcodebuild test 不吵人
         if ProcessInfo.processInfo.environment["SW_AUDIO_SILENT"] == "1" { config.outputChannelMap = BusChannelMap(master: nil) }
         do {
@@ -31,7 +34,7 @@ final class AudioRuntime {
             fallbackReason = nil
         } catch {
             // 退到空设备：混音、对齐、录制音轨全都照常，只是扬声器没声
-            var fallback = AudioEngineConfiguration()
+            var fallback = config
             fallback.output = .null
             engine = try! AudioEngine(stateMachine: stateMachine, configuration: fallback)   // 空设备不依赖硬件，建不起来是编程错误
             self.device = .null

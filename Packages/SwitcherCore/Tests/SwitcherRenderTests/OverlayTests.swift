@@ -183,6 +183,144 @@ final class OverlayTests: XCTestCase {
         XCTAssertEqual(try render(s).bgra, try render(s, overlaysInPreview: true).bgra)
     }
 
+    // MARK: P3（提案 010 落地：正式字段 / previewOn / slideFrom / anchor）
+
+    /// 正式字段 `OverlayState.border` 与过渡做法 `effects["border"]` 给同一个边框时逐像素相同；正式字段优先。
+    func testP3_borderOfficialFieldMatchesEffectSlotPixelForPixel() throws {
+        let legacy = ReferenceStates.pipBorder()                       // 输入 4 的效果格，白边 0.006
+        var official = legacy
+        official.inputs[3].settings.effects = []
+        official.overlays[2].border = OverlayBorder()                  // 同样的默认白边 0.006
+        XCTAssertEqual(try render(official).bgra, try render(legacy).bgra, "正式字段与过渡字段的边框应逐像素相同")
+
+        // 彩色 + 自定义宽度也相同
+        var legacyRed = legacy
+        legacyRed.inputs[3].settings.effects = [ReferenceStates.borderEffect(width: 0.02, color: (255, 0, 0))]
+        var officialRed = official
+        officialRed.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
+        XCTAssertEqual(try render(officialRed).bgra, try render(legacyRed).bgra)
+
+        // 正式字段优先：两边都给、值不同 → 按正式字段画
+        var both = legacy
+        both.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
+        XCTAssertEqual(try render(both).bgra, try render(officialRed).bgra, "正式字段优先于效果格")
+
+        // 解析层：border == nil 时回落到效果格，都没有就是 nil
+        XCTAssertEqual(OverlayDecoration.border(for: official.overlays[2], config: official.inputs[3])?.width, 0.006)
+        XCTAssertEqual(OverlayDecoration.border(for: legacy.overlays[2], config: legacy.inputs[3])?.width, 0.006)
+        var none = official
+        none.overlays[2].border = nil
+        XCTAssertNil(OverlayDecoration.border(for: none.overlays[2], config: none.inputs[3]))
+        // 宽度钳到 0–0.1
+        XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: 5)).width, 0.1)
+        XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: -1)).width, 0)
+    }
+
+    /// `previewOn` 只开一路时 PVW 只出现那一路；总开关 `overlaysInPreview` 与它取或；PGM 不受影响。
+    func testP3_previewOnShowsOnlyThatChannel() throws {
+        var s = ReferenceStates.fixed8()
+        s.overlays = Array(repeating: OverlayState(), count: 4)
+        let left = NormalizedRect(x: 0.02, y: 0.02, width: 0.3, height: 0.3)
+        let right = NormalizedRect(x: 0.68, y: 0.68, width: 0.3, height: 0.3)
+        s.overlays[0] = OverlayState(input: 7, on: true, rect: left, animProgress: 1)    // 输入 7 外圈青
+        s.overlays[2] = OverlayState(input: 8, on: true, rect: right, animProgress: 1)   // 输入 8 外圈黄
+        func edge(_ bm: Bitmap, _ r: NormalizedRect) -> (r: Int, g: Int, b: Int, a: Int) {
+            bm.pixel(Int((r.x + r.width * 0.1) * 1920), Int((r.y + r.height * 0.5) * 1080))
+        }
+        func isCyan(_ c: (r: Int, g: Int, b: Int, a: Int)) -> Bool { c.g > 150 && c.b > 170 && c.r < 40 }
+        func isYellow(_ c: (r: Int, g: Int, b: Int, a: Int)) -> Bool { c.r > 180 && c.g > 150 && c.b < 60 }
+
+        // 一路都没开 previewOn：PVW 是纯输入（v8-preview-pvw.png 的口径）
+        let none = try render(s, target: .preview)
+        XCTAssertFalse(isCyan(edge(none, left)))
+        XCTAssertFalse(isYellow(edge(none, right)))
+
+        // 只开通道 1 的 previewOn：PVW 只有它
+        var only1 = s
+        only1.overlays[0].previewOn = true
+        let bm1 = try render(only1, target: .preview)
+        XCTAssertTrue(isCyan(edge(bm1, left)), "通道 1 开了 previewOn，PVW 应有它，得 \(edge(bm1, left))")
+        XCTAssertFalse(isYellow(edge(bm1, right)), "通道 3 没开，PVW 不该有它，得 \(edge(bm1, right))")
+
+        // 只开通道 3
+        var only3 = s
+        only3.overlays[2].previewOn = true
+        let bm3 = try render(only3, target: .preview)
+        XCTAssertFalse(isCyan(edge(bm3, left)))
+        XCTAssertTrue(isYellow(edge(bm3, right)))
+
+        // 总开关：两路都画，与"两路都开 previewOn"逐像素相同
+        var both = s
+        both.overlays[0].previewOn = true
+        both.overlays[2].previewOn = true
+        XCTAssertEqual(try render(s, target: .preview, overlaysInPreview: true).bgra, try render(both, target: .preview).bgra)
+
+        // PGM 不受 previewOn 影响
+        XCTAssertEqual(try render(only1).bgra, try render(s).bgra)
+    }
+
+    /// `slideFrom` 四条边各一帧：半程时画中画从指定的那条边平移进来（不给就是离 rect 最近的边）。
+    func testP3_slideFromEachEdge() throws {
+        let pip = NormalizedRect(x: 0.4, y: 0.4, width: 0.2, height: 0.2)
+        var base = ReferenceStates.fixed8()
+        base.overlays = Array(repeating: OverlayState(), count: 4)
+        base.overlays[0] = OverlayState(input: 7, on: true, rect: pip, animProgress: 0.5,
+                                        animation: OverlayAnimation(kind: .slide, durationTicks: 20))
+        // 纯函数：四条边的位置
+        let expected: [(OverlayEdge, (Double, Double))] = [
+            (.left, (pip.x - 0.5 * (pip.x + pip.width), pip.y)),
+            (.right, (pip.x + 0.5 * (1 - pip.x), pip.y)),
+            (.top, (pip.x, pip.y - 0.5 * (pip.y + pip.height))),
+            (.bottom, (pip.x, pip.y + 0.5 * (1 - pip.y))),
+        ]
+        for (edge, want) in expected {
+            var s = base
+            s.overlays[0].animation.slideFrom = edge
+            let p = OverlayRenderer.placement(s.overlays[0])
+            XCTAssertEqual(p.rect.x, want.0, accuracy: 1e-9, "slideFrom \(edge) 的 x")
+            XCTAssertEqual(p.rect.y, want.1, accuracy: 1e-9, "slideFrom \(edge) 的 y")
+            XCTAssertEqual(p.rect.width, pip.width, "平移不改尺寸")
+            XCTAssertEqual(p.rect.height, pip.height)
+            XCTAssertEqual(p.opacity, 1)
+            // 真画一帧：画中画在指定方向那一侧
+            let bm = try render(s)
+            let cx = Int((p.rect.x + p.rect.width / 2) * 1920), cy = Int((p.rect.y + p.rect.height / 2) * 1080)
+            if cx > 4, cx < 1916, cy > 4, cy < 1076 {
+                let c = bm.pixel(cx, cy)
+                XCTAssertNotEqual(abs(c.r - c.g) + abs(c.g - c.b), 0, "移到的位置上应有画中画（不是纯灰底），得 \(c)")
+            }
+        }
+        // 不给 slideFrom：与"最近的边"一致（这个 rect 四边等距，按底 > 顶 > 左 > 右 的优先级取底）
+        XCTAssertNil(base.overlays[0].animation.slideFrom)
+        XCTAssertEqual(OverlayRenderer.placement(base.overlays[0]).rect.y, pip.y + 0.5 * (1 - pip.y), accuracy: 1e-9)
+    }
+
+    /// `anchor`：缩放动画绕锚点缩（默认 center 与 P3 之前逐字相同）。
+    func testP3_zoomAnchor() throws {
+        let pip = NormalizedRect(x: 0.2, y: 0.3, width: 0.4, height: 0.4)
+        var o = OverlayState(input: 7, on: true, rect: pip, animProgress: 0.5, animation: OverlayAnimation(kind: .zoom, durationTicks: 20))
+        // center（默认）：四周各缩一半
+        var p = OverlayRenderer.placement(o)
+        XCTAssertEqual(p.rect.x, pip.x + pip.width * 0.5 * 0.5, accuracy: 1e-9)
+        XCTAssertEqual(p.rect.y, pip.y + pip.height * 0.5 * 0.5, accuracy: 1e-9)
+        // topLeft：左上角不动
+        o.anchor = .topLeft
+        p = OverlayRenderer.placement(o)
+        XCTAssertEqual(p.rect.x, pip.x, accuracy: 1e-9)
+        XCTAssertEqual(p.rect.y, pip.y, accuracy: 1e-9)
+        // bottomRight：右下角不动
+        o.anchor = .bottomRight
+        p = OverlayRenderer.placement(o)
+        XCTAssertEqual(p.rect.x + p.rect.width, pip.x + pip.width, accuracy: 1e-9)
+        XCTAssertEqual(p.rect.y + p.rect.height, pip.y + pip.height, accuracy: 1e-9)
+        // 缩到 1 时锚点无关
+        o.animProgress = 1
+        for a in OverlayAnchor.allCases {
+            o.anchor = a
+            XCTAssertEqual(OverlayRenderer.placement(o).rect, pip, "progress = 1 时 \(a) 都是原 rect")
+        }
+    }
+
     /// 每通道独立：四个通道各放一路，逐个关掉只影响自己。
     func testOverlay_channelsAreIndependent() throws {
         var s = ReferenceStates.fixed8()

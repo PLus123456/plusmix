@@ -34,8 +34,9 @@ public enum DeckLinkInputError: Error, Equatable, CustomStringConvertible {
 public final class DeckLinkInput: Input, @unchecked Sendable {
     /// 可调参数。
     public struct Options: Sendable, Hashable {
-        /// 输入接口；nil = 不改卡上的当前设置。进契约要走提案 008。
-        public var connection: DeckLinkConnection? = nil
+        /// 输入接口；nil = 从 `InputSource.decklink(deviceID:connection:)` 取（提案 008 已落地），
+        /// 两边都没有就不改卡上的当前设置。非 nil = 调用方显式指定，覆盖 case 里的值。
+        public var connection: SwitcherContracts.DeckLinkConnection? = nil
         /// 内嵌音频声道数（2–16）；0 = 不开。环的声道数少于它时多的丢。
         public var audioChannels = 2
         /// 音频样本类型：16 或 32（bmdAudioSampleType）。
@@ -168,8 +169,11 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
     /// 从 InputSource.decklink 构造。
     public convenience init(config: InputConfig, timing: ProgramTiming, videoSlot: any FrameSlot, audioRing: (any AudioRing)? = nil,
                             options: Options = Options()) throws {
-        guard case .decklink(let id) = config.source else { throw DeckLinkInputError.notADeckLinkSource(config.source.kind) }
-        self.init(number: config.number, name: config.name, deviceID: id, timing: timing, videoSlot: videoSlot, audioRing: audioRing, options: options)
+        guard case .decklink(let id, let connection) = config.source else { throw DeckLinkInputError.notADeckLinkSource(config.source.kind) }
+        // 提案 008：接口从 case 取；Options 里显式给了（非 nil）就以 Options 为准
+        var o = options
+        if o.connection == nil { o.connection = connection }
+        self.init(number: config.number, name: config.name, deviceID: id, timing: timing, videoSlot: videoSlot, audioRing: audioRing, options: o)
     }
 
     deinit {
@@ -229,7 +233,7 @@ public final class DeckLinkInput: Input, @unchecked Sendable {
     private func attempt() {
         guard running.load(ordering: .acquiring), session == nil else { return }
         var cfg = sw_decklink_session_config()
-        cfg.connection = options.connection?.rawValue ?? 0
+        cfg.connection = options.connection.map { DeckLinkConnection($0).rawValue } ?? 0
         cfg.initial_display_mode = options.initialDisplayMode
         cfg.audio_channels = audioRing == nil ? 0 : Int32(min(max(options.audioChannels, 0), 16))
         cfg.audio_sample_type = Int32(options.audioSampleType == 16 ? 16 : 32)

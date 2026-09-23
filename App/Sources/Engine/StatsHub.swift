@@ -15,6 +15,12 @@ final class StatsHub: @unchecked Sendable {
     }
     private let box = WriterBox()
     private let gpu: GPUUtilization?
+    /// 显示类输出的最近一次读数（提案 013）：主线程每次 pollSnapshot 刷新，采样线程读同一份，
+    /// 于是 stats.jsonl / API / 状态行拿到的 display[] 完全一样（铁律 4）。
+    private final class DisplayBox: @unchecked Sendable {
+        let entries = Mutex<[Stats.DisplayEntry]>([])
+    }
+    private let displays = DisplayBox()
 
     /// - Parameters:
     ///   - consumers: 采样线程上同步调的消费者（要快；接收方自己跳线程）。
@@ -24,12 +30,19 @@ final class StatsHub: @unchecked Sendable {
         if let gpu {
             engine.gpuPercentProvider = { gpu.deviceUtilizationPercent() }
         }
+        let displays = self.displays
+        engine.displayStatsProvider = { displays.entries.withLock { $0 } }
         let box = self.box
         publisher.addConsumer { stats in _ = box.writer.withLock { $0?.submit(stats) } }
         for c in consumers { publisher.addConsumer(c) }
     }
 
     func start() throws { try publisher.start() }
+
+    /// 刷新显示类输出的读数（主线程，跟着快照轮询走）。下一行 Stats 就带上它。
+    func update(displays entries: [Stats.DisplayEntry]) {
+        displays.entries.withLock { $0 = entries }
+    }
 
     /// 停采样再关文件；最后一行是停机前那一秒的。
     func stop() {

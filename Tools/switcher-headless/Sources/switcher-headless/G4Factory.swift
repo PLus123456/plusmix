@@ -11,7 +11,8 @@ import SwitcherContracts
 /// - Overlay 1–4 各挂 5–8 号（fade 15 / slide 20 / zoom 20 / cut），位置避开测试图案（左上）、闪光块（右上）和 frameprobe 的中心采样区（宽高各 1/4）。
 /// - 9 号是带 alpha 的静态 PNG（`stingerFileName`，make-show 时写在节目文件旁边；路径相对节目文件），做 Stinger 的叠层：
 ///   图形只占下 20% 与左右两侧（不碰顶部图案行、闪光块、中心采样区），Stinger 期间帧号 / ID 照常可解。
-/// - 多画面输出带自定义布局（提案 010 过渡做法 `extra["layout"]`：PGM / PVW 上半 + 8 路 4×2，安全框 + 电平表占位）。
+/// - 多画面输出带自定义布局（提案 010 的正式字段 `OutputSettings.multiview`：PGM / PVW 上半 + 8 路 4×2，安全框 + 电平表占位；
+///   P3 之前写的是过渡键 `extra["layout"]`，格子几何逐字相同）。
 /// - 转场：Wipe 从左到右、软边 0.1；Stinger 用 9 号、第 12 拍换底。
 /// - 场景：120 s 起每 5 s 一次转场，按 Cut → Fade → Wipe → Zoom → Stinger 轮流（非 Cut 都 24 拍 = 0.4 s，在 C1 客户端 x.7 s 的 cut 之前结束），
 ///   122.5 s 起每 15 s 开 / 关一路叠加（1 → 2 → 3 → 4 循环，每路 60 s 翻一次）。
@@ -56,29 +57,30 @@ enum G4Factory {
                                  settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
                                                           record: RecordSettings(directory: ".", fileNamePattern: "{show}-{date}-{time}")))
         let multiview = OutputState(number: 2, kind: .multiview, name: "多画面（自定义布局）", enabled: true,
-                                    settings: OutputSettings(source: .multiview, extra: ["layout": multiviewLayout(inputNumbers: (1...8).map { $0 })]))
+                                    settings: OutputSettings(source: .multiview, multiview: multiviewLayout(inputNumbers: (1...8).map { $0 })))
         return Show(name: "g4", inputs: inputs, mixer: mixer, audio: AudioState(), outputs: [record, multiview])
     }
 
-    /// 自定义多画面布局（提案 010 过渡口径，W3-B `MultiviewLayoutTable.parseCustom`）：上半 PVW / PGM，下半 4×2 输入格，安全框 + 电平表占位。
-    static func multiviewLayout(inputNumbers: [Int]) -> JSONValue {
+    /// 自定义多画面布局（提案 010 的正式字段）：上半 PVW / PGM，下半 4×2 输入格，安全框 + 电平表占位。
+    /// 格子几何与 P3 之前写 `extra["layout"]` 时逐字相同（`MultiviewLayoutTable` 两条解析路径同一套钳位）。
+    static func multiviewLayout(inputNumbers: [Int]) -> MultiviewLayoutSettings {
         let m = 0.005
-        func rect(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> JSONValue {
-            .object(["x": .number(x), "y": .number(y), "width": .number(w), "height": .number(h)])
+        func rect(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> NormalizedRect {
+            NormalizedRect(x: x, y: y, width: w, height: h)
         }
-        var cells: [JSONValue] = [
-            .object(["source": .string("preview"), "rect": rect(m, m, 0.5 - 1.5 * m, 0.5 - 1.5 * m)]),
-            .object(["source": .string("program"), "rect": rect(0.5 + 0.5 * m, m, 0.5 - 1.5 * m, 0.5 - 1.5 * m)]),
+        var cells: [MultiviewCell] = [
+            MultiviewCell(source: .preview, rect: rect(m, m, 0.5 - 1.5 * m, 0.5 - 1.5 * m)),
+            MultiviewCell(source: .program, rect: rect(0.5 + 0.5 * m, m, 0.5 - 1.5 * m, 0.5 - 1.5 * m)),
         ]
         let columns = 4, rows = 2
         let cellW = (1 - Double(columns + 1) * m) / Double(columns)
         let cellH = (0.5 - Double(rows + 1) * m) / Double(rows)
         for (i, n) in inputNumbers.prefix(columns * rows).enumerated() {
             let col = i % columns, row = i / columns
-            cells.append(.object(["source": .number(Double(n)),
-                                  "rect": rect(m + Double(col) * (cellW + m), 0.5 + m + Double(row) * (cellH + m), cellW, cellH)]))
+            cells.append(MultiviewCell(source: .input(number: n),
+                                       rect: rect(m + Double(col) * (cellW + m), 0.5 + m + Double(row) * (cellH + m), cellW, cellH)))
         }
-        return .object(["cells": .array(cells), "safeArea": .bool(true), "meters": .bool(true)])
+        return MultiviewLayoutSettings(custom: cells, safeArea: true, meters: true)
     }
 
     /// 时间线（60 fps 拍数）：前 2 分钟与 G3 相同（1000 Cut、3000 Fade 30、3600–3780 T-bar），120 s 起每 5 s 一次转场按 `rotation` 轮流，

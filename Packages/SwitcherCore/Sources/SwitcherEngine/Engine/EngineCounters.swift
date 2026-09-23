@@ -145,7 +145,7 @@ final class StatsAssembler: @unchecked Sendable {
     }
 
     func make(now: HostTime, wallClock: Date, jitter: JitterRecorder, inputs: [(number: Int, stats: FrameSlotStats)],
-              encoder: [Stats.EncoderEntry], audio: Stats.AudioCounters, gpuPct: Double) -> Stats {
+              encoder: [Stats.EncoderEntry], display: [Stats.DisplayEntry] = [], audio: Stats.AudioCounters, gpuPct: Double) -> Stats {
         let windowSeconds = max((now - lastHost).seconds, 1e-6)
         let renderNs = counters.renderNsSumValue.load(ordering: .acquiring)
         let renderCount = counters.renderCountValue.load(ordering: .acquiring)
@@ -182,6 +182,7 @@ final class StatsAssembler: @unchecked Sendable {
                      audio: audio,
                      rssMb: ProcessMetrics.residentMB(),
                      cpuPct: cpuPct,
-                     gpuPct: gpuPct)   // GPU 占用没有公开 API（powermetrics 要 root），由外部 provider 灌入，否则 0
+                     gpuPct: gpuPct,   // GPU 占用没有公开 API（powermetrics 要 root），由外部 provider 灌入，否则 0
+                     display: display) // 提案 013：显示类输出，组装方（App）供数，headless 没有就是空数组
     }
 }

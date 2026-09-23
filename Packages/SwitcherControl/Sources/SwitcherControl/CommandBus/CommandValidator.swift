@@ -23,12 +23,15 @@ public enum CommandValidator {
             if let r = overlayChannel(channel) { return r }
             if let input, s.input(input) == nil { return "输入 \(input) 不存在" }
             return nil
-        case .setOverlay(let channel, _, _):
+        case .setOverlay(let channel, _, _), .setOverlayDecoration(let channel, _, _, _):
             return overlayChannel(channel)
-        case .audioGain(let input, _), .mute(let input, _), .setInputSettings(let input, _), .renameInput(let input, _), .removeInput(let input):
+        case .audioGain(let input, _), .mute(let input, _), .setInputSettings(let input, _), .renameInput(let input, _),
+             .removeInput(let input), .setInputSource(let input, _):
             return s.input(input) == nil ? "输入 \(input) 不存在" : nil
-        case .busGain(let bus, _), .busMute(let bus, _):
+        case .busGain(let bus, _), .busMute(let bus, _), .setBusEffects(let bus, _):
             return s.audio.buses.contains { $0.bus == bus } ? nil : "总线 \(bus) 不存在"
+        case .setMonitorMode:
+            return nil
         case .startRecord(let output), .stopRecord(let output):
             return outputReference(output, kind: .record, name: "录制", in: s)
         case .startStream(let output), .stopStream(let output):
@@ -41,8 +44,15 @@ public enum CommandValidator {
             if config.number <= 0 { return "输出编号必须 ≥ 1：\(config.number)" }
             if s.output(config.number) != nil { return "输出 \(config.number) 已存在" }
             return nil
-        case .removeOutput(let output), .setOutputSettings(let output, _):
+        case .removeOutput(let output), .setOutputSettings(let output, _), .renameOutput(let output, _):
             return s.output(output) == nil ? "输出 \(output) 不存在" : nil
+        case .setOutputEnabled(let output, _):
+            guard let o = s.output(output) else { return "输出 \(output) 不存在" }
+            switch o.kind {
+            case .record: return "输出 \(output)「\(o.name)」是录制输出，起停走 startRecord / stopRecord"
+            case .stream: return "输出 \(output)「\(o.name)」是推流输出，起停走 startStream / stopStream"
+            default: return nil
+            }
         case .loadShow(let show):
             do { try show.makeState().validate() } catch { return "节目文件不合法：\(error)" }
             return nil

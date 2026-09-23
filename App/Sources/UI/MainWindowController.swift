@@ -162,6 +162,21 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         noticeToken = session.observeNotices { [weak self] message in self?.bottomBar.showNotice(message) }
         if let notice = session.lastNotice { bottomBar.showNotice(notice) }
         multiviewWindow?.restore(from: session.layout)
+        // 提案 013：主界面 PGM 监视器（output 0）与多画面窗口的呈现帧数进 Stats.display[]
+        session.aux.uiDisplayEntries = { [weak self] in self?.displayStatsEntries ?? [] }
+    }
+
+    /// 界面上两个显示视图在 Stats 里的项（提案 013）：PGM 监视器 kind "monitor"、多画面窗口 kind "multiviewWindow"，
+    /// 都不是输出表里的输出，output 用 0。dropped = 拿不到 drawable 的次数（W3-C2 复核细分口径）。
+    private var displayStatsEntries: [Stats.DisplayEntry] {
+        var out = [Stats.DisplayEntry(output: 0, kind: "monitor", frames: programMonitor.display.presentedFrames,
+                                      dropped: programMonitor.display.skipCounters.noDrawable, state: "presenting")]
+        if let w = multiviewWindow {
+            out.append(Stats.DisplayEntry(output: 0, kind: "multiviewWindow", frames: w.displayView.presentedFrames,
+                                          dropped: w.displayView.skipCounters.noDrawable,
+                                          state: w.isShowing ? "presenting" : "idle"))
+        }
+        return out
     }
 
     private func apply(state: MixerState) {

@@ -93,7 +93,7 @@ final class InputSettingsModel: ObservableObject {
     var sourceSummary: String {
         switch config.source {
         case .camera(let id): return L("inputSettings.source.camera", id)
-        case .decklink(let id): return L("inputSettings.source.decklink", id)
+        case .decklink(let id, _): return L("inputSettings.source.decklink", id)   // 接口 / 带宽等 008 的新参数进摘要归 W3-E2
         case .screen(let target, let rate, let audio):
             let t: String
             switch target {
@@ -104,7 +104,7 @@ final class InputSettingsModel: ObservableObject {
             return L("inputSettings.source.screen", t, rate.map { "\($0)" } ?? L("addInput.screen.frameRateProgram"), audio ? L("common.on") : L("common.off"))
         case .file(let path, let end, let rate): return L("inputSettings.source.file", path, L("addInput.file.endAction.\(end.rawValue)"), rate)
         case .image(let path): return L("inputSettings.source.image", path)
-        case .ndi(let name): return L("inputSettings.source.ndi", name)
+        case .ndi(let name, _, _): return L("inputSettings.source.ndi", name)
         case .audio(let uid): return L("inputSettings.source.audio", uid)
         case .synthetic(let s): return L("inputSettings.source.synthetic", "\(s.frameRate)", s.width, s.height)
         }

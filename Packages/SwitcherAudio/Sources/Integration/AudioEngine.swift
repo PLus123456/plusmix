@@ -156,9 +156,9 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let settings = settingsCache[number] ?? latest?.input(number)?.settings.audio ?? InputAudioSettings()
         let rec = SlotRecord(number: number, slot: slot, ring: ring, hints: hints, settings: settings)
         if let s = latest {
-            rec.afvGain = AudioProgramGate.gains(for: s)[number] ?? (s.audio.afv ? 0 : 1)
+            rec.afvGain = AudioProgramGate.gains(for: s)[number] ?? (s.audio.afv && settings.afv ? 0 : 1)
         } else {
-            rec.afvGain = afvOn ? 0 : 1
+            rec.afvGain = afvOn && settings.afv ? 0 : 1
         }
         // 目标年龄：任何相位都能命中的最小值（目标 + P/2 + hf + chunk/2 + P，真设备再加输出提前量），但不超过对齐延迟——超过了延迟线补不回来，
         // 不如压到对齐延迟让年龄正好等于它（生产者块 > 混音块的源每块相位不同，混音器会等到能命中的那一块）；对齐延迟 0 = 旧规则（尽早就绪）
@@ -361,11 +361,14 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             for rec in toRemove { mixer.setAFVGain(slot: rec.slot, 0) }
         case .inputAudioSettings(let n, let s):
             lock.lock()
+            let afvFlipped = slots[n]?.settings.afv != s.afv
             settingsCache[n] = s
             let rec = slots[n]
             rec?.settings = s
             lock.unlock()
             if let rec { applySettings(rec) }
+            // 每路 AFV 开关翻了就立刻按最新状态重算这一路的门控增益（用户 2026-09-22 批）
+            if afvFlipped { applyGates() }
         case .buses(let b):
             lock.lock(); buses = b; lock.unlock()
             applyBuses()
@@ -390,8 +393,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             // 推杆位置在"现在"生效于画面，音频要晚对齐延迟：排到 now + 对齐延迟 再设
             let due = now + alignmentDuration
             lock.lock()
-            deferredGates.append((due, from, Float(cos(pp * Double.pi / 2))))
-            deferredGates.append((due, to, Float(sin(pp * Double.pi / 2))))
+            if participatesInAFV(from) { deferredGates.append((due, from, Float(cos(pp * Double.pi / 2)))) }
+            if participatesInAFV(to) { deferredGates.append((due, to, Float(sin(pp * Double.pi / 2)))) }
             lock.unlock()
         case .transitionEnded(_, _, _, _, let completed):
             lock.lock()
@@ -407,14 +410,21 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         }
     }
 
+    /// 切换 / 转场的交叉淡变。`InputAudioSettings.afv = false` 的路不进 from / to：它的门控增益恒 1（用户 2026-09-22 批）。
     private func crossfade(from: Int, to: Int, frames: Int, start: HostTime) {
         lock.lock()
-        let fromRec = slots[from], toRec = slots[to]
+        let fromRec = participatesInAFV(from) ? slots[from] : nil
+        let toRec = participatesInAFV(to) ? slots[to] : nil
         fromRec?.afvGain = 0
         toRec?.afvGain = 1
         lock.unlock()
         guard fromRec != nil || toRec != nil else { return }
         mixer.crossfade(from: fromRec?.slot, to: toRec?.slot, durationFrames: frames, startHostTime: start)
+    }
+
+    /// 这一路参不参与 AFV 门控（`InputAudioSettings.afv`；不认识的路当参与）。调用方持锁。
+    private func participatesInAFV(_ number: Int) -> Bool {
+        (slots[number]?.settings ?? settingsCache[number])?.afv ?? true
     }
 
     private func setGate(_ number: Int, _ g: Float) {
@@ -443,7 +453,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let afv = afvOn
         var changes: [(Int, Float)] = []
         for (n, rec) in slots where rec.removing == nil {
-            let g = gains[n] ?? (afv ? 0 : 1)
+            let g = gains[n] ?? (afv && rec.settings.afv ? 0 : 1)
             if g != rec.afvGain { rec.afvGain = g; changes.append((rec.slot, g)) }
         }
         lock.unlock()

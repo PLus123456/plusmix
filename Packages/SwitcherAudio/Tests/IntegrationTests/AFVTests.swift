@@ -52,6 +52,85 @@ final class AFVTests: XCTestCase {
         return sqrt(max(0, 0.5 + (toPath ? -term : term)))
     }
 
+    // MARK: 每路 AFV 参与开关（用户 2026-09-22 批）
+
+    /// 某路 `InputAudioSettings.afv = false`：门控增益恒 1，PGM 切走不变、转场中不进交叉淡变；
+    /// 全局 `AudioState.afv` 关 / 开两种都验一遍。
+    func testA_afvPerInputOffKeepsGainOne() async throws {
+        // 3 号不跟随视频（主持人话筒）；1 号 PGM、2 号 PVW 正常参与
+        var state = States.fourInputs(afv: true)
+        state.inputs[2].settings.audio.afv = false
+        let rig = try await EngineRig(state: state)
+        try rig.addSource(number: 1, generator: sine(1000))
+        try rig.addSource(number: 2, generator: sine(1500))
+        try rig.addSource(number: 3, generator: sine(2000))
+        let c3 = try rig.capture(.inputProgram(number: 3))
+
+        func gain(_ n: Int) -> Float {
+            rig.engine.status.inputs.first { $0.number == n }?.afvGain ?? -1
+        }
+
+        // 1. 空闲：3 号恒 1，2 号（PVW，参与门控）是 0
+        await rig.run(seconds: 0.5)
+        XCTAssertEqual(gain(3), 1, "afv = false 的路门控增益恒 1")
+        XCTAssertEqual(gain(1), 1, "PGM")
+        XCTAssertEqual(gain(2), 0, "PVW 参与门控 → 0")
+        let idleRMS = c3.rms(from: rig.t0 + rig.engine.blockDuration * 8, to: rig.t0 + rig.engine.blockDuration * 32)
+        XCTAssertEqual(idleRMS, baseRMS, accuracy: baseRMS * 0.05, "3 号一直按推子出声")
+
+        // 2. 转场 1 → 2：3 号不进 from / to，电平不动
+        let s = Tick(120)
+        await rig.sm.schedule(.fade(durationTicks: 30), at: s)
+        await rig.run(seconds: 3)
+        let tS = rig.clock.time(of: s), D = rig.clock.duration(ofTicks: 30)
+        var t = tS
+        while t < tS + D {
+            let e = t + rig.engine.blockDuration
+            XCTAssertEqual(c3.rms(from: t, to: e), baseRMS, accuracy: baseRMS * 0.05,
+                           "转场中 3 号电平应不动（\((t - tS).milliseconds) ms）")
+            t = e
+        }
+        XCTAssertEqual(gain(3), 1, "转场结束后仍是 1")
+        XCTAssertEqual(gain(2), 1, "转场完成，2 号成了 PGM")
+        XCTAssertEqual(gain(1), 0)
+        // 转场之后一直到结束都不动
+        XCTAssertEqual(c3.rms(from: tS + D, to: tS + D + rig.engine.blockDuration * 16), baseRMS, accuracy: baseRMS * 0.05)
+
+        // 3. 全局 AFV 关：全部 1（每路那一位不起作用）。此时已跑到约 3.5 s ≈ 210 拍，所以排在 300 拍并多跑 2 s
+        await rig.sm.schedule(.setAFV(on: false), at: Tick(300))
+        await rig.run(seconds: 2)
+        for n in 1...3 { XCTAssertEqual(gain(n), 1, "全局 AFV 关 → \(n) 号恒 1") }
+
+        // 4. 全局 AFV 再开：3 号还是 1，别的按 PGM / PVW 门控（此时 PGM = 2）
+        await rig.sm.schedule(.setAFV(on: true), at: Tick(420))
+        await rig.run(seconds: 2)
+        XCTAssertEqual(gain(3), 1)
+        XCTAssertEqual(gain(2), 1)
+        XCTAssertEqual(gain(1), 0)
+        await rig.shutdown()
+    }
+
+    /// 运行中翻某路的 afv 位（走 setInputSettings）：立刻重算该路的门控增益。
+    func testA_afvPerInputToggleAtRuntime() async throws {
+        let rig = try await EngineRig(state: States.fourInputs(afv: true))
+        try rig.addSource(number: 1, generator: sine(1000))
+        try rig.addSource(number: 3, generator: sine(2000))
+        func gain(_ n: Int) -> Float { rig.engine.status.inputs.first { $0.number == n }?.afvGain ?? -1 }
+        await rig.run(seconds: 0.5)
+        XCTAssertEqual(gain(3), 0, "3 号不在 PGM / PVW 上、参与门控 → 0")
+        // 关掉 3 号的 afv → 立刻变 1
+        var settings = InputSettings()
+        settings.audio.afv = false
+        await rig.sm.schedule(.setInputSettings(input: 3, settings: settings), at: Tick(60))
+        await rig.run(seconds: 1.5)
+        XCTAssertEqual(gain(3), 1, "afv 关掉后门控增益立刻回 1")
+        // 再打开 → 回 0
+        await rig.sm.schedule(.setInputSettings(input: 3, settings: InputSettings()), at: Tick(120))
+        await rig.run(seconds: 1.5)
+        XCTAssertEqual(gain(3), 0)
+        await rig.shutdown()
+    }
+
     // MARK: Fade 30 拍
 
     func testAFV_fade30_levelsFollowEqualPowerCurveWithin0_5dB_onsetOnTheTransitionTick() async throws {

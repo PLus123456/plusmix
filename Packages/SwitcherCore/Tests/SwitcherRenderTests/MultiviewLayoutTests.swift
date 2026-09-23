@@ -224,13 +224,164 @@ final class MultiviewLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(Double(onLabel.r + onLabel.g + onLabel.b), expected + 40, "PGM 格左下角应有 55% 黑的标签条，得 \(onLabel)，内容 \(content)")
     }
 
+    // MARK: P3（提案 010 落地：正式字段 `OutputSettings.multiview`）
+
+    /// 正式字段与过渡键给同一个布局时，格子表逐字相同、渲染出来逐像素相同；正式字段优先。
+    func testP3_officialMultiviewFieldMatchesLegacyExtraKey() throws {
+        let inputs = [1, 2, 3, 4, 5, 6, 7, 8]
+        // 预设 + 装饰开关
+        for name in MultiviewLayout.presetNames {
+            let legacy = MultiviewLayout.placements(layout: .string(name), inputs: inputs, width: 1920, height: 1080)
+            let official = MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: name), inputs: inputs, width: 1920, height: 1080)
+            XCTAssertEqual(official, legacy, "预设 \(name)")
+        }
+        // 认不出的预设名两边都退回默认
+        XCTAssertEqual(MultiviewLayout.placements(settings: MultiviewLayoutSettings(preset: "nonsense"), inputs: inputs, width: 1920, height: 1080),
+                       MultiviewLayout.placements(layout: nil, inputs: inputs, width: 1920, height: 1080))
+
+        // 自定义格子：用 W3-B 的过渡键布局 + 由它搬过来的正式字段
+        let legacyLayout = ReferenceStates.customLayout
+        let officialLayout = MultiviewLayoutSettings(legacyValue: legacyLayout)
+        XCTAssertEqual(MultiviewLayout.placements(settings: officialLayout, inputs: inputs, width: 1920, height: 1080),
+                       MultiviewLayout.placements(layout: legacyLayout, inputs: inputs, width: 1920, height: 1080))
+
+        // 真渲染：逐像素相同
+        let legacyState = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), legacyLayout)
+        var officialState = ReferenceStates.fixed8()
+        officialState.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
+                                             settings: OutputSettings(source: .multiview, multiview: officialLayout))]
+        XCTAssertEqual(Bitmap(try render(officialState).multiview).bgra, Bitmap(try render(legacyState).multiview).bgra)
+
+        // 正式字段优先：两边都给、值不同 → 按正式字段
+        var both = legacyState
+        both.outputs[0].settings.multiview = MultiviewLayoutSettings(preset: "3x3")
+        var only3x3 = ReferenceStates.fixed8()
+        only3x3.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
+                                       settings: OutputSettings(source: .multiview, multiview: MultiviewLayoutSettings(preset: "3x3")))]
+        XCTAssertEqual(Bitmap(try render(both).multiview).bgra, Bitmap(try render(only3x3).multiview).bgra)
+
+        // 自定义格子里的 multiview 源被忽略（格子不能套自己）
+        let selfRef = MultiviewLayoutSettings(custom: [MultiviewCell(source: .multiview, rect: .full),
+                                                      MultiviewCell(source: .program, rect: .bottomRightQuarter)])
+        let p = MultiviewLayout.placements(settings: selfRef, inputs: inputs, width: 1920, height: 1080)
+        XCTAssertEqual(p.map(\.source), [.program], "multiview 格被忽略，只剩 program 格")
+        // 编号 < 1 的输入格、空 rect 的格子也忽略；全忽略就退回默认布局
+        let bogus = MultiviewLayoutSettings(custom: [MultiviewCell(source: .input(number: 0), rect: .full),
+                                                    MultiviewCell(source: .program, rect: NormalizedRect(x: 0, y: 0, width: 0, height: 0))])
+        XCTAssertEqual(MultiviewLayout.placements(settings: bogus, inputs: [1], width: 1920, height: 1080).map(\.source),
+                       [.preview, .program, .input(number: 1)])
+        // 超过 64 格截断
+        let many = MultiviewLayoutSettings(custom: (0..<80).map { i in
+            MultiviewCell(source: .input(number: i % 8 + 1),
+                          rect: NormalizedRect(x: Double(i % 10) * 0.1, y: Double(i / 10) * 0.1, width: 0.1, height: 0.1))
+        })
+        XCTAssertEqual(MultiviewLayout.placements(settings: many, inputs: inputs, width: 1920, height: 1080).count, 64)
+    }
+
+    /// `RenderedFrame.preview / multiview` 的填充条件（用户 2026-09-22 定）：状态里有 enabled 且 source 是它的输出就填。
+    func testP3_renderedFramePreviewAndMultiviewFollowOutputs() {
+        var s = ReferenceStates.fixed8()
+        s.outputs = []
+        XCTAssertFalse(CompositorPasses.wants(.preview, in: s))
+        XCTAssertFalse(CompositorPasses.wants(.multiview, in: s))
+        // enabled 的 multiview 输出 → 填多画面
+        s.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true, settings: OutputSettings(source: .multiview))]
+        XCTAssertTrue(CompositorPasses.wants(.multiview, in: s))
+        XCTAssertFalse(CompositorPasses.wants(.preview, in: s))
+        // 关掉就不填
+        s.outputs[0].enabled = false
+        XCTAssertFalse(CompositorPasses.wants(.multiview, in: s))
+        // source = preview 的 NDI / 外部显示输出 → 填 PVW
+        s.outputs = [OutputState(number: 2, kind: .ndi, name: "PVW 发送", enabled: true, settings: OutputSettings(source: .preview))]
+        XCTAssertTrue(CompositorPasses.wants(.preview, in: s))
+        // kind 不限：外部显示送多画面也算
+        s.outputs = [OutputState(number: 3, kind: .externalDisplay, name: "大屏", enabled: true, settings: OutputSettings(source: .multiview))]
+        XCTAssertTrue(CompositorPasses.wants(.multiview, in: s))
+        // source = program / input 不算
+        s.outputs = [OutputState(number: 4, kind: .record, name: "录制", enabled: true, settings: OutputSettings(source: .program)),
+                     OutputState(number: 5, kind: .ndi, name: "Aux", enabled: true, settings: OutputSettings(source: .input(number: 3)))]
+        XCTAssertFalse(CompositorPasses.wants(.preview, in: s))
+        XCTAssertFalse(CompositorPasses.wants(.multiview, in: s))
+    }
+
+    /// 提案 010 / W3-B §4 第 5 条的裁定，走**实时渲染器**验一遍：选项 previewOutput / multiviewOutput 都**默认关**时，
+    /// `RenderedFrame.preview` / `.multiview` 是否非 nil 只由"状态里有没有 enabled 且 source 是它的输出"决定。
+    /// （`CompositorPasses.wants` 的纯函数用例在上面；这一条是端到端的，headless 的多画面真渲染就靠它。）
+    func testP3_renderedFrameAutoFilledFromStateWithDefaultOptions() throws {
+        let renderer = try MetalRenderer()      // 默认选项：两个强制开关都是 false
+        XCTAssertFalse(renderer.options.previewOutput)
+        XCTAssertFalse(renderer.options.multiviewOutput)
+        try renderer.prepare(format: .hd1080p60, maxInputs: 9)
+        defer { renderer.shutdown() }
+        let sink = CollectingSink()
+        sink.holdDepth = 1
+        renderer.sink = sink
+        let buffers = TestImages.phase2ReferenceBuffers()
+        let table = RenderInputTable(capacity: 9)
+        for (n, pb) in buffers {
+            table[inputNumber: n] = Frame(pixelBuffer: pb, pts: .zero, duration: .zero, color: .sRGBFull, inputNumber: n, sequence: 0, ingressTime: .zero)
+        }
+
+        var tick: Int64 = 0
+        /// 用这个状态连画几拍，返回最后一拍的产物。
+        func render(_ state: MixerState, sequence: UInt64) throws -> RenderedFrame {
+            let snap = MixerSnapshot(state: state, sequence: sequence, tick: Tick(tick))
+            for _ in 0..<8 {
+                _ = renderer.render(tick: Tick(tick), at: HostClock.now(), snapshot: snap, inputs: table)
+                tick += 1
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+            return try XCTUnwrap(sink.lastHeld)
+        }
+
+        // 1. 输出表为空：两个都不填
+        var s = ReferenceStates.fixed8()
+        s.outputs = []
+        let none = try render(s, sequence: 1)
+        XCTAssertNil(none.preview, "没有 enabled 的 preview 输出就不该填")
+        XCTAssertNil(none.multiview, "没有 enabled 的 multiview 输出就不该填")
+
+        // 2. 有 enabled 的多画面输出（= scenarios/g4-show.json 的样子）：只填多画面
+        s.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true, settings: OutputSettings(source: .multiview))]
+        let mv = try render(s, sequence: 2)
+        XCTAssertNotNil(mv.multiview, "状态里有 enabled 的多画面输出 → RenderedFrame.multiview 应非 nil")
+        XCTAssertNil(mv.preview)
+        XCTAssertEqual(mv.multiview?.pixelFormat, .nv12)
+        XCTAssertEqual(mv.multiview?.pts, mv.tickTime)
+        XCTAssertEqual(mv.multiview?.inputNumber, 0)
+
+        // 3. 关掉它：又不填了
+        s.outputs[0].enabled = false
+        XCTAssertNil(try render(s, sequence: 3).multiview, "enabled 关掉就不填")
+
+        // 4. source = preview 的 NDI 输出：填 PVW（kind 不限）
+        s.outputs = [OutputState(number: 2, kind: .ndi, name: "PVW 发送", enabled: true, settings: OutputSettings(source: .preview))]
+        let pv = try render(s, sequence: 4)
+        XCTAssertNotNil(pv.preview, "状态里有 enabled 且 source = preview 的输出 → RenderedFrame.preview 应非 nil")
+        XCTAssertNil(pv.multiview)
+        XCTAssertEqual(pv.preview?.pixelFormat, .nv12)
+
+        // 5. source = program / input 的输出不算
+        s.outputs = [OutputState(number: 3, kind: .record, name: "录制", enabled: true, settings: OutputSettings(source: .program)),
+                     OutputState(number: 4, kind: .ndi, name: "Aux", enabled: true, settings: OutputSettings(source: .input(number: 3)))]
+        let neither = try render(s, sequence: 5)
+        XCTAssertNil(neither.preview)
+        XCTAssertNil(neither.multiview)
+    }
+
     /// 多画面几何 API 用同一份解析逻辑（MultiviewLayoutTable），渲染线程的解析零分配：解析 20 次不分配。
     func testMultiview_layoutTableParseDoesNotAllocate() throws {
         try XCTSkipUnless(MallocProbe.isAvailable, "找不到 malloc_logger 符号")
         let table = MultiviewLayoutTable()
+        var official = ReferenceStates.fixed8()
+        official.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true,
+                                        settings: OutputSettings(source: .multiview,
+                                                                 multiview: MultiviewLayoutSettings(legacyValue: ReferenceStates.customLayout)))]
         let states = [ReferenceStates.fixed8(),
                       ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"),
                       ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout),
+                      official,                                                        // 正式字段这条路径也零分配（提案 010）
                       ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2")]
         for s in states { table.parse(state: s, width: 1920, height: 1080) }   // 预热
         MallocProbe.start()

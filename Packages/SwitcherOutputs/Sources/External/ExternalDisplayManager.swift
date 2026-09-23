@@ -70,6 +70,23 @@ public final class ExternalDisplayManager {
         for w in windows.values { w.screensDidChange() }
     }
 
+    /// 每个外部显示窗口在 Stats 里的一项（提案 013，铁律 4）。frames = `MetalDisplayView.presentedFrames`（已呈现）；
+    /// dropped = 没赶上显示刷新的次数（`SkipCounters.rateLimited` 之外的 noDrawable：拿不到 drawable 那一次就是掉了一帧；
+    /// 其余"跳过"是没有新帧或没必要画，不算丢）。state：showing → "presenting"、
+    /// waitingForDisplay / fallbackToMain → "noDisplay"（显示器不在：黑着等或退回主屏）。
+    public var statsEntries: [Stats.DisplayEntry] {
+        windows.map { (number, w) in
+            let name: String
+            switch w.status {
+            case .showing: name = "presenting"
+            case .waitingForDisplay, .fallbackToMain: name = "noDisplay"
+            }
+            return Stats.DisplayEntry(output: number, kind: "externalDisplay", frames: w.displayView.presentedFrames,
+                                      dropped: w.displayView.skipCounters.noDrawable, state: name)
+        }
+        .sorted { $0.output < $1.output }
+    }
+
     /// 某个窗口的状态文案（状态行 / 菜单用）。
     public static func describe(_ status: ExternalDisplayWindow.Status) -> String {
         switch status {

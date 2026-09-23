@@ -87,7 +87,7 @@ final class SwitcherSession {
         let maxNumber = initial.inputs.map(\.number).max() ?? 1
         let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
         self.engine = engine
-        audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice)
+        audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio)
         let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
         self.inputs = inputs
         outputs = OutputRuntime(engine: engine, audio: audio, inputs: inputs, format: format, showName: show.name)
@@ -169,6 +169,7 @@ final class SwitcherSession {
     // MARK: 快照分发（≤ 60 Hz）
 
     private func pollSnapshot() {
+        statsHub?.update(displays: aux.statsEntries)   // 提案 013：显示类输出的读数进同一行 Stats（每次轮询都刷，不等快照变）
         guard let snapshot = stateMachine.publisher.latest, snapshot !== lastSnapshot else { return }
         lastSnapshot = snapshot
         let newState = snapshot.state

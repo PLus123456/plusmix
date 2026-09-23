@@ -82,8 +82,8 @@ public struct AudioEngineStatus: Sendable {
     public var buses: [BusStatus]
     public var afv: Bool
     public var monitorMode: MonitorMode
-    /// 耳机取延迟线前 / 后（W1-D2）。
-    public var monitorPoint: MonitorPoint
+    /// 耳机取延迟线前 / 后（W1-D2）。混音器侧的那个 `MonitorPoint`（契约里的同名类型见提案 007）。
+    public var monitorPoint: SwitcherAudio.MonitorPoint
     /// 进行中的转场（from, to, 起点）。
     public var activeTransition: String?
     /// FTB 当前黑比例（音频侧算的）。

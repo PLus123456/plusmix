@@ -46,7 +46,8 @@ public struct AudioEngineConfiguration: Sendable {
     /// 耳机总线默认不经对齐延迟线（`monitorPoint`），监听延迟 = 环年龄 + 设备。
     public var alignmentFrames: Int = 2048
     /// 耳机总线取每路输入延迟线前（默认：不带对齐延迟 / 延迟补偿，低延迟监听，A5）还是延迟线后（与节目同刻）的信号。W1-D2。
-    public var monitorPoint: MonitorPoint = .preDelayLine
+    /// 节目文件里的那一份是契约的 `SwitcherContracts.MonitorPoint`（提案 007），组装方用下面的转换填进来。
+    public var monitorPoint: SwitcherAudio.MonitorPoint = .preDelayLine
     /// Cut 的短淡（块数，≥ 1；1 块 = 5.33 ms @256）：避免爆音。
     public var cutFadeBlocks: Int = 1
     /// FTB 同步淡出 Master（线性，与画面同一斜坡）。
@@ -101,5 +102,15 @@ public struct AudioInputHints: Sendable {
         if let p = producerBlockFrames { t = max(t, p + blockFrames) }
         if let j = deliveryJitterFrames { t = max(t, j + blockFrames) }
         return t
+    }
+}
+
+extension SwitcherAudio.MonitorPoint {
+    /// 契约的监听点（`AudioState.monitorPoint`，提案 007）→ 混音器的监听点。两个同名类型分处两个模块，组装方用它转换。
+    public init(_ point: SwitcherContracts.MonitorPoint) {
+        switch point {
+        case .preDelayLine: self = .preDelayLine
+        case .postDelayLine: self = .postDelayLine
+        }
     }
 }

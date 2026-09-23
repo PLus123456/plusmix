@@ -7,7 +7,8 @@ enum Samples {
         var s1 = InputSettings()
         s1.crop = CropInsets(left: 0.1, top: 0.05, right: 0.1, bottom: 0.05)
         s1.transform = Transform2D(scale: 0.5, offsetX: 0.25, offsetY: -0.25, rotationDegrees: 90, flipHorizontal: true, flipVertical: false)
-        s1.audio = InputAudioSettings(routing: BusRouting(master: true, busA: true, busB: false, headphones: true), gainDb: -6, muted: false, solo: true, pan: -0.5, delayMs: 120)
+        s1.audio = InputAudioSettings(routing: BusRouting(master: true, busA: true, busB: false, headphones: true), gainDb: -6, muted: false, solo: true,
+                                      pan: -0.5, delayMs: 120, afv: false)   // 每路 AFV 开关（P3）：非默认值
         s1.effects = [EffectSlot(id: "parametricEQ", enabled: true, params: ["band1Hz": 1000, "band1Gain": -3])]
         s1.keyer = KeyerSettings(enabled: true, keyColor: RGB8(red: 0, green: 255, blue: 0), tolerance: 0.25, softness: 0.1, spillSuppression: 0.4)
         return [
@@ -15,8 +16,8 @@ enum Samples {
             InputConfig(number: 2, name: "屏幕", source: .screen(target: .display(id: 1), frameRate: .fps30, captureAudio: true), settings: InputSettings()),
             InputConfig(number: 3, name: "片头", source: .file(path: "/Movies/intro.mov", endAction: .holdLastFrame, rate: 1), settings: InputSettings()),
             InputConfig(number: 4, name: "台标", source: .image(path: "/Pictures/logo.png"), settings: InputSettings()),
-            InputConfig(number: 5, name: "SDI", source: .decklink(deviceID: "DeckLink Mini Recorder#0"), settings: InputSettings()),
-            InputConfig(number: 6, name: "远端", source: .ndi(sourceName: "STUDIO (Cam A)"), settings: InputSettings()),
+            InputConfig(number: 5, name: "SDI", source: .decklink(deviceID: "peid:1234567890", connection: .hdmi), settings: InputSettings()),
+            InputConfig(number: 6, name: "远端", source: .ndi(sourceName: "STUDIO (Cam A)", bandwidth: .lowest, jitterBufferFrames: 2), settings: InputSettings()),
             InputConfig(number: 7, name: "话筒", source: .audio(deviceUID: "AppleUSBAudioEngine:1"), settings: InputSettings()),
             InputConfig(number: 8, name: "合成", source: .synthetic(settings: SyntheticSourceSettings(frameRate: .fps5994, width: 1280, height: 720, background: .noise(level: 192, amplitude: 24, seed: 7), patternID: 3, jitterMs: 2, dropEveryN: 20, clockDriftPpm: -100, audio: true, audioDriftPpm: 50)), settings: InputSettings()),
         ]
@@ -36,8 +37,14 @@ enum Samples {
                                                  audio: AudioEncodeSettings(codec: .aac, bitrateBps: 160_000),
                                                  record: nil,
                                                  stream: StreamSettings(url: "rtmp://127.0.0.1/live", streamKey: "abc", reconnectMaxSeconds: 30), extra: [:])),
-            OutputState(number: 3, kind: .multiview, name: "多画面", enabled: true, settings: OutputSettings(source: .multiview)),
-            OutputState(number: 4, kind: .externalDisplay, name: "外接屏", enabled: true, settings: OutputSettings(source: .input(number: 2))),
+            OutputState(number: 3, kind: .multiview, name: "多画面", enabled: true,
+                        settings: OutputSettings(source: .multiview,
+                                                 multiview: MultiviewLayoutSettings(preset: "3x3",
+                                                                                    custom: [MultiviewCell(source: .program, rect: .bottomRightQuarter),
+                                                                                             MultiviewCell(source: .input(number: 2), rect: NormalizedRect(x: 0, y: 0, width: 0.5, height: 0.5))],
+                                                                                    safeArea: true, meters: true))),
+            OutputState(number: 4, kind: .externalDisplay, name: "外接屏", enabled: true,
+                        settings: OutputSettings(source: .input(number: 2), display: DisplayOutputSettings(displayID: 7, fallbackToMain: false))),
         ]
     }
 
@@ -45,6 +52,8 @@ enum Samples {
         var a = AudioState()
         a.afv = true
         a.monitorMode = .pfl
+        a.alignmentFrames = 1024          // 提案 007：非默认值
+        a.monitorPoint = .postDelayLine
         a.buses[Bus.master.rawValue].gainDb = -3
         a.buses[Bus.busA.rawValue].muted = true
         a.buses[Bus.headphones.rawValue].effects = [EffectSlot(id: "peakLimiter", enabled: true, params: [:])]
@@ -60,7 +69,9 @@ enum Samples {
                                        wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12))
         s.ftb = FadeToBlack(on: true, durationTicks: 15, level: 0.4, startTick: Tick(990))
         s.overlays[0] = OverlayState(input: 4, on: true, rect: NormalizedRect(x: 0.05, y: 0.8, width: 0.9, height: 0.15), animProgress: 1,
-                                     animation: OverlayAnimation(kind: .slide, durationTicks: 20), startTick: nil)
+                                     animation: OverlayAnimation(kind: .slide, durationTicks: 20, slideFrom: .right), startTick: nil,
+                                     border: OverlayBorder(width: 0.012, color: RGB8(red: 255, green: 200, blue: 0)),
+                                     anchor: .bottomLeft, previewOn: true)   // 提案 010 的三个新字段
         s.overlays[2] = OverlayState(input: 2, on: false, rect: .bottomRightQuarter, animProgress: 0.3,
                                      animation: OverlayAnimation(kind: .fade, durationTicks: 10), startTick: Tick(1001))
         s.audio = audio()
@@ -82,7 +93,10 @@ enum Samples {
               encoder: [Stats.EncoderEntry(skipped: 0, bitrate: 6_000_000, frames: 215_990, dropped: 0, diskFreeMb: 40_960.5, reconnects: 0, state: "recording"),
                         Stats.EncoderEntry(skipped: 3, bitrate: 2_500_000, frames: 215_000, dropped: 12, diskFreeMb: 0, reconnects: 2, state: "publishing")],
               audio: Stats.AudioCounters(dropouts: 0, underruns: 1, discontinuities: 2, meters: meters()),
-              rssMb: 512.25, cpuPct: 12.5, gpuPct: 30)
+              rssMb: 512.25, cpuPct: 12.5, gpuPct: 30,
+              display: [Stats.DisplayEntry(output: 4, kind: "externalDisplay", frames: 36_000, dropped: 0, state: "presenting"),
+                        Stats.DisplayEntry(output: 5, kind: "virtualCamera", frames: 35_900, dropped: 4, state: "publishing"),
+                        Stats.DisplayEntry(output: 0, kind: "monitor", frames: 21_500, dropped: 1, state: "presenting")])
     }
 
     /// 四条总线（顺序 = Bus.allCases）+ 两路输入的表读数；A / B 总线静音（下限 −120）。
@@ -123,19 +137,28 @@ enum Samples {
             .overlay(channel: 2, on: true, input: 4),
             .overlay(channel: 3, on: false, input: nil),
             .setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .zoom, durationTicks: 12)),
+            .setOverlay(channel: 4, rect: .full, animation: OverlayAnimation(kind: .slide, durationTicks: 8, slideFrom: .left)),
+            .setOverlayDecoration(channel: 2, border: OverlayBorder(width: 0.008, color: RGB8(red: 0, green: 128, blue: 255)), anchor: .topRight, previewOn: true),
+            .setOverlayDecoration(channel: 3, border: nil, anchor: .center, previewOn: false),
             .audioGain(input: 1, dB: -6.5),
             .mute(input: 1, on: true),
             .busGain(bus: .busA, dB: 2),
             .busMute(bus: .headphones, on: false),
             .setAFV(on: true),
+            .setMonitorMode(mode: .pfl),
+            .setBusEffects(bus: .busB, effects: [EffectSlot(id: "dynamicsProcessor", enabled: false, params: ["thresholdDb": -12, "expansionRatio": 2])]),
             .startRecord(output: 1),
             .stopRecord(output: 1),
             .startStream(output: 2),
             .stopStream(output: 2),
+            .setOutputEnabled(output: 3, on: true),
+            .renameOutput(output: 3, name: "大屏"),
             .setInputSettings(input: 1, settings: inputs()[0].settings),
             .renameInput(input: 1, name: "讲台"),
             .addInput(config: inputs()[7]),
             .removeInput(input: 8),
+            .setInputSource(input: 6, source: .ndi(sourceName: "STUDIO (Cam B)", bandwidth: .audioOnly, jitterBufferFrames: 0)),
+            .setInputSource(input: 5, source: .decklink(deviceID: "peid:42", connection: .opticalSDI)),
             .addOutput(config: outputs()[1]),
             .removeOutput(output: 2),
             .setOutputSettings(output: 1, settings: outputs()[0].settings),
@@ -155,24 +178,30 @@ enum Samples {
         case .ftb: "ftb"
         case .overlay: "overlay"
         case .setOverlay: "setOverlay"
+        case .setOverlayDecoration: "setOverlayDecoration"
         case .audioGain: "audioGain"
         case .mute: "mute"
         case .busGain: "busGain"
         case .busMute: "busMute"
         case .setAFV: "setAFV"
+        case .setMonitorMode: "setMonitorMode"
+        case .setBusEffects: "setBusEffects"
         case .startRecord: "startRecord"
         case .stopRecord: "stopRecord"
         case .startStream: "startStream"
         case .stopStream: "stopStream"
+        case .setOutputEnabled: "setOutputEnabled"
+        case .renameOutput: "renameOutput"
         case .setInputSettings: "setInputSettings"
         case .renameInput: "renameInput"
         case .addInput: "addInput"
         case .removeInput: "removeInput"
+        case .setInputSource: "setInputSource"
         case .addOutput: "addOutput"
         case .removeOutput: "removeOutput"
         case .setOutputSettings: "setOutputSettings"
         case .loadShow: "loadShow"
         }
     }
-    static let commandCaseCount = 27
+    static let commandCaseCount = 33
 }

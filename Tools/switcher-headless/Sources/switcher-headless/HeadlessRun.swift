@@ -174,7 +174,7 @@ final class HeadlessSession: @unchecked Sendable {
         }
         var resolvedNDINames: [Int: String] = [:]
         for cfg in initialState.inputs {
-            if case .ndi(let sourceName) = cfg.source {
+            if case .ndi(let sourceName, _, _) = cfg.source {
                 guard NDIInput.isSDKAvailable else { throw CLIError("输入 \(cfg.number)「\(cfg.name)」是 NDI，但 \(SwitcherNDIInfo.unavailableMessage)") }
                 resolvedNDINames[cfg.number] = try NDILoop.resolveSourceName(sourceName)
             }
@@ -220,15 +220,17 @@ final class HeadlessSession: @unchecked Sendable {
                 let input = try ImageInput(number: cfg.number, name: cfg.name, path: resolved, timing: timing, videoSlot: slot)
                 engine.registerInput(number: cfg.number, slot: slot)
                 otherInputs.append(input)
-            case .ndi(let sourceName):
+            case .ndi(let sourceName, let bandwidth, let jitter):
                 let resolved = resolvedNDINames[cfg.number] ?? sourceName
+                // 提案 008：带宽与抖动缓冲从 case 取；--ndi-jitter-frames 与默认（1）不同 = 命令行显式给了，以它为准
                 var ndiOptions = NDIInput.Options()
-                ndiOptions.jitterBufferFrames = options.ndiJitterFrames
+                ndiOptions.bandwidth = NDIInput.Bandwidth(bandwidth)
+                ndiOptions.jitterBufferFrames = options.ndiJitterFrames == 1 ? jitter : options.ndiJitterFrames
                 let input = NDIInput(number: cfg.number, name: cfg.name, sourceName: resolved, timing: timing, videoSlot: slot,
                                      audioRing: nil, options: ndiOptions)
                 engine.registerInput(number: cfg.number, slot: slot)
                 otherInputs.append(input)
-                print("NDI 输入 \(cfg.number)：源「\(resolved)」，抖动缓冲 \(options.ndiJitterFrames) 帧")
+                print("NDI 输入 \(cfg.number)：源「\(resolved)」，带宽 \(ndiOptions.bandwidth.rawValue)，抖动缓冲 \(ndiOptions.jitterBufferFrames) 帧")
             default:
                 throw CLIError("headless 只接合成源 / 图片 / NDI：输入 \(cfg.number)「\(cfg.name)」是 \(cfg.kind)")
             }
@@ -238,6 +240,9 @@ final class HeadlessSession: @unchecked Sendable {
         //    每路带音频的输入把环注册进去，每路参数（增益 / 路由 / 静音…）由它从状态机快照 diff 出来，不用在这里 apply。
         var audioConfig = AudioEngineConfiguration()
         audioConfig.output = try AudioOutputChoice.output(options.audioDevice)
+        // 对齐延迟与监听点从节目文件读（提案 007）；命令行没有对应的覆盖参数（只有 --audio-device 选设备）
+        audioConfig.alignmentFrames = max(0, show.audio.alignmentFrames)
+        audioConfig.monitorPoint = SwitcherAudio.MonitorPoint(show.audio.monitorPoint)
         // SW_AUDIO_SILENT=1：真设备也不出声（Master 不映射到设备通道，仍照常处理、照常送录制器）——长跑 / 真设备 A2 用
         if ProcessInfo.processInfo.environment["SW_AUDIO_SILENT"] == "1" { audioConfig.outputChannelMap = BusChannelMap(master: nil) }
         let audioEngine = try AudioEngine(stateMachine: stateMachine, configuration: audioConfig)

@@ -1,7 +1,7 @@
 # 012 界面二期缺的几条命令：监听点、总线效果链、非录制输出的开关 / 改名、换输入来源；效果参数键名口径
 
 提出会话 / 分支：W3-E / w3-app2（2026-09-19，做设置面板与调音台时发现）
-状态：**已批**（用户 2026-09-22，按 G4 报告 §8 第 2 条：A、B 五个 case 与 C 口径都批。由契约会话 P3（docs/plan/prompts/61）落地 Command / reducer / validator / catalog / docs/api.md 与 App 三处调用（约 10 行）；"输入设置窗来源一节可编辑"归 W3-E2 / prompt 63。"顺带的疑问"1（每路 AFV 参与开关）用户没拍板，不在 P3 范围；2 由 008 覆盖。）
+状态：**已落地**（p3-contracts，2026-09-23，提交 cb85fbe…c73aab2）：A 的四个 case 与 B 的 `setInputSource` 都加了（Command 27 → 33，连同提案 010 A4 的 setOverlayDecoration），reducer / `CommandValidator` / `CommandCatalog` 与 `docs/api.md` 同步；C 的效果参数键表进 CONTRACTS.md §2.4。App 三处调用改完（`MixerModel.setMonitorMode` / `setBusEffects`、`OutputSettingsModel` 的开关与改名），W3-C 的运行表本来就按 `enabled` 起停，改开关后不再走删除 + 重加。"输入设置窗来源一节可编辑"归 W3-E2 / prompt 63。**"顺带的疑问" 1（每路 AFV 参与开关）用户 2026-09-22 第二轮批了**，一并落地：`InputAudioSettings.afv: Bool = true`，`AudioProgramGate.gains` 与 `AudioEngine` 的交叉淡变 / T-bar 门控都读它，走 `setInputSettings`、不加新命令。2 由 008 覆盖。
 
 ## 改什么
 
