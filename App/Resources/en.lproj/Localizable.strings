@@ -438,7 +438,11 @@
 "outputSettings.codec" = "Codec";
 "outputSettings.external.add" = "Open external display";
 "outputSettings.external.close" = "Close";
+"outputSettings.external.enabled" = "Enabled (off = hide the window, keep the settings)";
+"outputSettings.external.fallbackHelp" = "Off (default): when the display is unplugged, wait for it and leave the main display alone. On: go full screen on the main display (covers the control UI)";
+"outputSettings.external.fallbackToMain" = "Fall back to the main display when missing";
 "outputSettings.external.hint" = "A full-screen window on the chosen display; source can be PGM / PVW / multiview / any input (Aux).";
+"outputSettings.external.missingScreen" = "Display %u (not connected)";
 "outputSettings.external.name" = "External display — %@";
 "outputSettings.external.open" = "Open";
 "outputSettings.external.screen" = "Display";

@@ -1,7 +1,8 @@
 // 输出设置窗（W3-E 交付第 3 条）：录制（格式、码率、关键帧间隔、目录、停止后转 MP4）、ISO 路选择、推流目的地列表
-// （RTMP / RTMPS / SRT、地址、密钥、每路编码参数）、外部输出、NDI 发送、虚拟摄像头开关与安装状态。
-// 全部落在 MixerState.outputs（addOutput / removeOutput / setOutputSettings）；ISO = 一路 source = .input(n) 的录制输出
-// （契约："ISO = 同一拍发多条 startRecord"；W3-C 做同拍起步）。契约没有"改名 / 改 enabled"的命令，改这两项 = 删掉再加回同编号（提案 012）。
+// （RTMP / RTMPS / SRT、地址、密钥、每路编码参数）、外部输出、NDI 发送、虚拟摄像头开关与安装状态、多画面布局（W3-E2）。
+// 全部落在 MixerState.outputs（addOutput / removeOutput / setOutputSettings；非录制 / 推流输出的开关与改名走提案 012 的
+// setOutputEnabled / renameOutput）；ISO = 一路 source = .input(n) 的录制输出（契约："ISO = 同一拍发多条 startRecord"；W3-C 做同拍起步）。
+// 外部显示的显示器与"退回主屏"只写正式字段 OutputSettings.display（提案 013 / 015），显示类输出的状态读 Stats.display[]。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -79,7 +80,7 @@ final class OutputSettingsModel: ObservableObject {
     func nextOutputNumber() -> Int { (state.outputs.map(\.number).max() ?? 0) + 1 }
 
     /// 改开关（提案 012 的 setOutputEnabled）：本地先改，再发命令。record / stream 走 startRecord / startStream，被 reducer 拒。
-    private func setEnabled(_ number: Int, _ on: Bool) {
+    func setOutputEnabled(_ number: Int, on: Bool) {
         guard let i = state.outputs.firstIndex(where: { $0.number == number }), state.outputs[i].enabled != on else { return }
         state.outputs[i].enabled = on
         send?(.setOutputEnabled(output: number, on: on))
@@ -207,15 +208,17 @@ final class OutputSettingsModel: ObservableObject {
     func addExternalDisplay(screenNumber: UInt32, source: OutputSource) -> Int {
         let n = nextOutputNumber()
         let screenName = NSScreen.screen(number: screenNumber)?.localizedName ?? "\(screenNumber)"
+        // fallbackToMain 用默认（提案 015 起默认 false = 显示器不在就收起窗口等它回来）；要退回主屏在页上打开
         add(OutputState(number: n, kind: .externalDisplay, name: L("outputSettings.external.name", screenName), enabled: true,
-                        // fallbackToMain 显式写 false：保持 G4 的行为（显示器不在就收起窗口等它回来）。
-                        // 契约的默认是 true，面板上的开关归 W3-E2。
-                        settings: OutputSettings(source: source, display: DisplayOutputSettings(displayID: screenNumber, fallbackToMain: false))))
+                        settings: OutputSettings(source: source, display: DisplayOutputSettings(displayID: screenNumber))))
         return n
     }
 
+    /// 改显示器 / 来源：只写正式字段 `OutputSettings.display`（提案 013）。没经过 Show.load 的内存状态（API 直接 addOutput 的老写法）
+    /// 可能还带过渡键 extra["displayID"] / ["fallbackToMain"]：先按 Show.load 同一套规则搬进正式字段、清掉旧键，再改。
     func setExternalDisplay(_ number: Int, screenNumber: UInt32?, source: OutputSource?) {
         updateOutput(number) { s in
+            s = s.migratingLegacyKeys()
             if let screenNumber {
                 var d = s.display ?? DisplayOutputSettings()
                 d.displayID = screenNumber
@@ -223,6 +226,23 @@ final class OutputSettingsModel: ObservableObject {
             }
             if let source { s.source = source }
         }
+    }
+
+    /// 显示器不在时退回主屏（true）还是黑着等它回来（false，默认）。
+    func setExternalFallback(_ number: Int, on: Bool) {
+        updateOutput(number) { s in
+            s = s.migratingLegacyKeys()
+            var d = s.display ?? DisplayOutputSettings()
+            d.fallbackToMain = on
+            s.display = d
+        }
+    }
+
+    /// 显示器下拉的选项：接着的每块屏 + 当前设的那块（拔掉了也列出来，免得选中项凭空消失）。
+    func screenChoices(including current: UInt32?) -> [(id: UInt32, title: String)] {
+        var out = NSScreen.screens.compactMap { s in s.displayNumber.map { (id: $0, title: s.displayTitle) } }
+        if let current, !out.contains(where: { $0.id == current }) { out.append((current, L("outputSettings.external.missingScreen", current))) }
+        return out
     }
 
     // MARK: NDI 发送
@@ -253,7 +273,7 @@ final class OutputSettingsModel: ObservableObject {
     func setVirtualCamera(enabled: Bool, source: OutputSource) {
         if let o = virtualCameraOutput {
             if o.settings.source != source { updateOutput(o.number) { $0.source = source } }
-            setEnabled(o.number, enabled)
+            setOutputEnabled(o.number, on: enabled)
         } else {
             add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: source)))
         }
@@ -526,8 +546,13 @@ struct OutputSettingsView: View {
         Group {
             ForEach(model.externalOutputs) { output in
                 Section(L("outputSettings.external.section", output.number, output.name)) {
-                    screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }))
+                    Toggle(L("outputSettings.external.enabled"), isOn: Binding(get: { output.enabled }, set: { model.setOutputEnabled(output.number, on: $0) }))
+                    screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }),
+                                 current: OutputExtras.displayNumber(of: output))
                     sourcePicker(Binding(get: { output.settings.source }, set: { model.setExternalDisplay(output.number, screenNumber: nil, source: $0) }))
+                    Toggle(L("outputSettings.external.fallbackToMain"), isOn: Binding(get: { output.settings.display?.fallbackToMain ?? false },
+                                                                                       set: { model.setExternalFallback(output.number, on: $0) }))
+                        .help(L("outputSettings.external.fallbackHelp"))
                     LabeledContent(L("outputSettings.external.status"), value: model.displayStatus(output: output.number, kind: "externalDisplay") ?? "—")
                     Button(L("outputSettings.external.close")) { model.removeOutput(output.number) }
                 }
@@ -541,9 +566,9 @@ struct OutputSettingsView: View {
         }
     }
 
-    private func screenPicker(_ b: Binding<UInt32>) -> some View {
+    private func screenPicker(_ b: Binding<UInt32>, current: UInt32? = nil) -> some View {
         Picker(L("outputSettings.external.screen"), selection: b) {
-            ForEach(NSScreen.screens, id: \.displayNumber) { s in Text(s.displayTitle).tag(s.displayNumber ?? 0) }
+            ForEach(model.screenChoices(including: current), id: \.id) { c in Text(c.title).tag(c.id) }
         }
     }
 

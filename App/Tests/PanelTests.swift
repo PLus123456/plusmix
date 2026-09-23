@@ -323,6 +323,42 @@ final class PanelTests: XCTestCase {
         XCTAssertFalse(p.model.updateStatus.isEmpty, "更新一节要有说明文案（W4-B 接 Sparkle）")
     }
 
+    /// 外部显示页（W3-E2 交付第 6 条 / 提案 013、015）：保存后快照 outputs[n].settings.display?.displayID 变了、extra 里没有 displayID 键
+    /// （没经过 Show.load 的内存状态可能还带过渡键：页上一改就只写正式字段、清掉旧键）；fallbackToMain 默认 false 不再显式写；启用开关走 setOutputEnabled。
+    func testPanels_externalDisplayPageWritesFormalDisplayFields() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 1)
+        let page = AppTest.controller.panels.showOutputSettings(tab: .external).model
+        guard let screen = NSScreen.main?.displayNumber else { throw XCTSkip("没有主屏") }
+        // 1. 新加一路：正式字段、默认不退回主屏（提案 015 起默认就是 false）
+        let added = page.addExternalDisplay(screenNumber: screen, source: .preview)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(added)?.settings.display == DisplayOutputSettings(displayID: screen) }, "\(String(describing: session.state.output(added)?.settings))")
+        XCTAssertEqual(session.state.output(added)?.settings.extra, [:])
+        // 2. 带过渡键的内存状态（API 直接 addOutput 的老写法）：读时过渡键作后备，页上改显示器 → 只写正式字段、旧键清掉
+        let legacyNumber = page.nextOutputNumber()
+        session.send(.addOutput(config: OutputState(number: legacyNumber, kind: .externalDisplay, name: "legacy", enabled: false,
+                                                     settings: OutputSettings(source: .program, extra: ["displayID": .number(Double(screen)), "fallbackToMain": .bool(false)]))))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(legacyNumber) != nil })
+        XCTAssertEqual(OutputExtras.displayNumber(of: try XCTUnwrap(session.state.output(legacyNumber))), screen, "过渡键作后备")
+        let missing: UInt32 = 0x0BAD_F00D   // 不存在的显示器：窗口（若启用）只会等它接上，不会盖住任何一块屏
+        page.setExternalDisplay(legacyNumber, screenNumber: missing, source: nil)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(legacyNumber)?.settings.display?.displayID == missing },
+                      "\(String(describing: session.state.output(legacyNumber)?.settings))")
+        XCTAssertNil(session.state.output(legacyNumber)?.settings.extra["displayID"], "extra 里不应再有 displayID 键")
+        XCTAssertNil(session.state.output(legacyNumber)?.settings.extra["fallbackToMain"])
+        page.setExternalFallback(legacyNumber, on: true)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(legacyNumber)?.settings.display == DisplayOutputSettings(displayID: missing, fallbackToMain: true) })
+        // 3. 启用开关：setOutputEnabled（提案 012），同一个输出翻 enabled，不删了重加
+        page.setOutputEnabled(added, on: false)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(added)?.enabled == false && session.aux.external.windows[added] == nil }, "关掉后窗口应收起")
+        XCTAssertEqual(session.state.output(added)?.settings.display?.displayID, screen, "设置留着")
+        page.removeOutput(added)
+        page.removeOutput(legacyNumber)
+        XCTAssertTrue(AppTest.waitUntil(3) { !session.state.outputs.contains { $0.kind == .externalDisplay } })
+        XCTAssertEqual(session.control.bus.counters.rejected, 0)
+        AppTest.controller.panels.closeAll()
+    }
+
     /// 外部显示：输出设置面板加一路 = 快照多一个 externalDisplay 输出 → W3-C 的 AuxOutputRuntime 跟着开窗口；用户关窗口 = 移除该输出。
     /// （W3-E 原来的窗口菜单 / 窗口实现在 G4 合并时换成 W3-C 的：菜单 = MainWindowController.externalOutputMenu，窗口 = ExternalDisplayManager。）
     func testPanels_externalDisplayMenuAndWindowLifecycle() throws {

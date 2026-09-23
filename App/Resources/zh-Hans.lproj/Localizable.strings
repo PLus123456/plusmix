@@ -438,7 +438,11 @@
 "outputSettings.codec" = "编码器";
 "outputSettings.external.add" = "打开外部显示";
 "outputSettings.external.close" = "关闭这路";
+"outputSettings.external.enabled" = "启用（关掉 = 收起窗口，设置留着）";
+"outputSettings.external.fallbackHelp" = "关（默认）：显示器拔掉时黑着等它回来，不动主屏；开：退到主屏全屏（会盖住操作界面）";
+"outputSettings.external.fallbackToMain" = "显示器不在时退回主屏";
 "outputSettings.external.hint" = "全屏窗口在所选显示器上；来源可选 PGM / PVW / 多画面 / 任一输入（Aux）。";
+"outputSettings.external.missingScreen" = "显示器 %u（没接）";
 "outputSettings.external.name" = "外部显示 — %@";
 "outputSettings.external.open" = "打开";
 "outputSettings.external.screen" = "显示器";
