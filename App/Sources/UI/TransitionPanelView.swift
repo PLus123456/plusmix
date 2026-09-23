@@ -168,6 +168,9 @@ final class TransitionPanelView: NSView {
         durationChanged()
     }
 
+    /// 参数弹出面板的内容视图（开着时；测试看）。
+    var paramsPopoverContentView: NSView? { paramsPopover?.isShown == true ? paramsPopover?.contentViewController?.view : nil }
+
     /// 参数…：Wipe 方向 / 软边、Stinger 输入 / 换底拍的弹出面板。
     @objc private func paramsPressed() {
         if let paramsPopover, paramsPopover.isShown {

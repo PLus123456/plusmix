@@ -82,7 +82,7 @@ final class SwitcherSession {
         format = initial.format
         state = initial
         self.settings = settings
-        renderer = try MetalRenderer()
+        renderer = try MetalRenderer(options: settings.rendererOptions)   // PVW 预览全部叠加（偏好设置）在这里定死，换 session 生效
         stateMachine = StateMachine(initialState: initial)
         let maxNumber = initial.inputs.map(\.number).max() ?? 1
         let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))

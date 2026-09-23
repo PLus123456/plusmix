@@ -55,6 +55,8 @@ final class AccessibilityTests: XCTestCase {
         check("MIDI 映射", panels.showMIDIMapping().window?.contentView)
         wc.presentOverlayPanel(relativeTo: wc.bottomBar.overlayButton)
         check("叠加面板", wc.overlayPanelController?.view)
+        wc.transitionPanel.paramsButton.performClick(nil)   // W3-E2：转场参数弹出面板
+        check("转场参数", wc.transitionPanel.paramsPopoverContentView)
         panels.closeAll()
 
         // 纯 SwiftUI 的窗口在 AppKit 层可能一个控件都没有（MIDI 映射），只要求总数 > 0（主窗口 + 调音台的竖推子）且主窗口 > 0

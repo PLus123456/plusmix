@@ -176,6 +176,28 @@ final class PanelTests: XCTestCase {
                 let o = session.state.overlays[0]
                 return o.input == 2 && o.rect == .bottomRightQuarter && o.animation == OverlayAnimation(kind: .fade, durationTicks: 15)
             }, describe: { "\(session.state.overlays[0])" }))
+        // W3-E2 / 提案 010：每通道 PVW 预览、边框、锚点、滑入方向（前三项走 setOverlayDecoration，滑入方向走 setOverlay）
+        cases.append(Case(name: "叠加面板：通道 1 PVW 预览", change: {
+                let m = try XCTUnwrap(wc.overlayPanelController?.model, "叠加面板应还开着")
+                m.setPreviewOn(channel: 1, on: true)
+            }, verify: { session.state.overlays[0].previewOn && !session.state.overlays[1].previewOn && session.state.overlays[0].input == 2 },
+               describe: { "\(session.state.overlays[0])" }))
+        cases.append(Case(name: "叠加面板：通道 1 边框（宽 0.01、红）", change: {
+                let m = try XCTUnwrap(wc.overlayPanelController?.model)
+                m.setBorderEnabled(channel: 1, on: true)
+                m.setBorderWidth(channel: 1, 0.01)
+                m.setBorderColor(channel: 1, RGB8(red: 255, green: 0, blue: 0))
+            }, verify: { session.state.overlays[0].border == OverlayBorder(width: 0.01, color: RGB8(red: 255, green: 0, blue: 0)) && session.state.overlays[0].previewOn },
+               describe: { "\(String(describing: session.state.overlays[0].border))" }))
+        cases.append(Case(name: "叠加面板：通道 2 锚点右下 + 从左滑入", change: {
+                let m = try XCTUnwrap(wc.overlayPanelController?.model)
+                m.setAnchor(channel: 2, .bottomRight)
+                m.setAnimation(channel: 2, kind: .slide, durationTicks: 20)
+                m.setSlideFrom(channel: 2, .left)
+            }, verify: {
+                let o = session.state.overlays[1]
+                return o.anchor == .bottomRight && o.animation == OverlayAnimation(kind: .slide, durationTicks: 20, slideFrom: .left)
+            }, describe: { "\(session.state.overlays[1])" }))
 
         cases.append(Case(name: "快捷键编辑器：k → Cut", change: {
                 let h = panels.showHotkeyEditor()
@@ -253,6 +275,32 @@ final class PanelTests: XCTestCase {
         let p2 = controller.panels.showPreferences()
         p2.model.selectFormatPreset(.hd720p60)
         XCTAssertFalse(p2.model.applyProgramFormat(), "格式没变不换 session")
+    }
+
+    /// 偏好设置里的"PVW 预览全部叠加"总开关（W3-E2 交付第 3 条）→ MetalRendererOptions.overlaysInPreview：渲染器的选项在 init 定死，
+    /// 所以存进 UserDefaults、换 session 才生效；与每通道的 OverlayState.previewOn 取或（渲染器那边）。
+    func testPanels_preferencesOverlaysInPreviewTakesEffectOnNextSession() throws {
+        let session = try AppTest.freshSession()
+        let controller = AppTest.controller
+        XCTAssertFalse(session.renderer.options.overlaysInPreview, "默认关（v8-preview-pvw.png 的口径）")
+        let p = controller.panels.showPreferences()
+        XCTAssertFalse(p.model.overlaysInPreview)
+        p.model.overlaysInPreview = true
+        p.model.apply()
+        XCTAssertTrue(controller.defaults.bool(forKey: AppSettings.Keys.overlaysInPreview))
+        XCTAssertTrue(controller.settings.overlaysInPreview)
+        XCTAssertFalse(session.renderer.options.overlaysInPreview, "跑着的 session 不变（渲染器选项在 init 定死）")
+        let done = AppTest.expectationBox()
+        Task { await controller.restartSession(); done.value = true }
+        XCTAssertTrue(AppTest.waitUntil(20) { done.value && controller.session?.isRunning == true && controller.session !== session })
+        XCTAssertEqual(controller.session?.renderer.options.overlaysInPreview, true, "换 session 后生效")
+        // 还原（别的测试按默认关断言 PVW）
+        let p2 = controller.panels.showPreferences()
+        p2.model.overlaysInPreview = false
+        p2.model.apply()
+        XCTAssertFalse(controller.defaults.bool(forKey: AppSettings.Keys.overlaysInPreview))
+        _ = try AppTest.freshSession()
+        XCTAssertEqual(controller.session?.renderer.options.overlaysInPreview, false)
     }
 
     /// 偏好设置：法律提示文案、音频输出设备列表、语言选择写 AppleLanguages。

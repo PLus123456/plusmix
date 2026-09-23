@@ -1,4 +1,4 @@
-// 偏好设置（W3-E 交付第 7 条）：节目分辨率 / 帧率（在 Show 里，改了要换 session）、API 端口 / token、音频输出设备、
+// 偏好设置（W3-E 交付第 7 条）：节目分辨率 / 帧率（在 Show 里，改了要换 session）、API 端口 / token、音频输出设备、PVW 预览全部叠加（W3-E2）、
 // 第三方 API 兼容层（VMixCompat）开关（带法律提示）、语言、更新（W4-B 接 Sparkle，这里只留位置）。
 // API / 音频 / 兼容层用 W2-B2 的同一组 UserDefaults 键（AppSettings.Keys），下次起 session 生效；"应用并重启引擎"立刻生效。
 import AppKit
@@ -34,6 +34,8 @@ final class PreferencesModel: ObservableObject {
     @Published var audioDevice: AppSettings.AudioDevice
     @Published var compatLayerEnabled: Bool
     @Published var compatLayerPort: Int
+    /// PVW 预览全部叠加（渲染器总开关，换 session 生效）。
+    @Published var overlaysInPreview: Bool
     @Published var language: String
     @Published private(set) var status = ""
     let audioDeviceChoices: [AudioDeviceChoice]
@@ -59,6 +61,7 @@ final class PreferencesModel: ObservableObject {
         audioDevice = s.audioDevice
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
+        overlaysInPreview = s.overlaysInPreview
         let languages = controller.defaults.stringArray(forKey: "AppleLanguages")
         language = languages?.first.flatMap { code in L10n.supportedLanguages.contains(code) ? code : nil } ?? Self.systemLanguage
         var choices = [AudioDeviceChoice(id: "default", title: L("prefs.audio.systemDefault"), device: .systemDefault),
@@ -96,6 +99,7 @@ final class PreferencesModel: ObservableObject {
         s.audioDevice = audioDevice
         s.compatLayerEnabled = compatLayerEnabled
         s.compatLayerPort = max(1, min(65535, compatLayerPort))
+        s.overlaysInPreview = overlaysInPreview
         controller.updateSettings(s)
         if language == Self.systemLanguage {
             controller.defaults.removeObject(forKey: "AppleLanguages")
@@ -153,6 +157,10 @@ struct PreferencesView: View {
                     ForEach(model.audioDeviceChoices) { Text($0.title).tag($0.id) }
                 }
                 Text(L("prefs.audio.hint")).font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L("prefs.preview.title")) {
+                Toggle(L("prefs.preview.overlaysAll"), isOn: $model.overlaysInPreview)
+                Text(L("prefs.preview.hint")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("prefs.compat.title")) {
                 Toggle(L("prefs.compat.enabled"), isOn: $model.compatLayerEnabled)
