@@ -1,6 +1,9 @@
 // 输入设置窗（W3-E 交付第 2 条）：裁切 / 变换、延迟补偿（0–500 ms）、音频路由（四总线）、增益 / 静音 / 独听 / 声像、抠像参数、
-// 效果链、来源（DeckLink / NDI 特有项）。模型只发 setInputSettings / renameInput，快照回来再刷新表单。
+// 效果链、来源。模型只发 setInputSettings / renameInput / setInputSource，快照回来再刷新表单。
+// W3-E2：来源一节可编辑（提案 012 的 setInputSource：编号 / 名字 / 设置 / PGM / PVW / 叠加引用全保留，运行表按新来源重建这一路），
+// 表单复用 Add Input 的 InputSourceFormView；摘要显示 DeckLink 接口、NDI 带宽 / 抖动缓冲（提案 008）与声道映射（提案 014）。
 import AppKit
+import Combine
 import SwiftUI
 import SwitcherContracts
 
@@ -51,7 +54,15 @@ final class InputSettingsModel: ObservableObject {
     /// 快照回来：我们发的到了（相等或被 clamped 后 300 ms 内没再发）就接受。
     func apply(state: MixerState) {
         guard let c = state.input(number) else { return }
+        let oldSource = config.source
         config = c
+        // 来源被别处换了（API / 另一个窗口）且表单没被动过：表单跟着换；动过的留着（用户还没点应用）
+        if c.source != oldSource, let form = sourceForm, (try? form.model.makeSource()) == oldSource {
+            var m = AddInputModel(source: c.source)
+            m.number = number
+            m.name = c.name
+            form.model = m
+        }
         if name != c.name, pending == nil { name = c.name }
         if let p = pending {
             if c.settings == p || Date().timeIntervalSince(pendingSince) > 0.3 {
@@ -89,11 +100,68 @@ final class InputSettingsModel: ObservableObject {
         })
     }
 
+    // MARK: 来源（提案 012：setInputSource）
+
+    /// 来源一节的表单（第一次打开那一节时建：要列设备、挂音频设备插拔订阅）。
+    private(set) var sourceForm: AddInputFormModel?
+    private var sourceFormChange: AnyCancellable?
+    @Published private(set) var sourceError = ""
+
+    func sourceFormModel() -> AddInputFormModel {
+        if let f = sourceForm { return f }
+        let f = AddInputFormModel(editing: config)
+        sourceFormChange = f.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }   // "应用"按钮的可用状态跟着表单变
+        sourceForm = f
+        return f
+    }
+
+    /// 表单出来的来源与当前的不同（表单不完整也算不同：点应用会报缺什么）。
+    var sourceChanged: Bool {
+        guard let form = sourceForm else { return false }
+        return (try? form.model.makeSource()) != config.source
+    }
+
+    /// 换来源：setInputSource（编号 / 名字 / 设置 / PGM / PVW / 叠加引用都保留；运行表按"编号 + 来源"变了重建这一路）。
+    func applySource() {
+        guard let form = sourceForm else { return }
+        do {
+            let source = try form.model.makeSource()
+            sourceError = ""
+            guard source != config.source else { return }
+            send?(.setInputSource(input: number, source: source))
+        } catch {
+            sourceError = "\(error)"
+        }
+    }
+
+    /// 表单改回当前来源。
+    func revertSource() {
+        guard let form = sourceForm else { return }
+        var m = AddInputModel(source: config.source)
+        m.number = number
+        m.name = config.name
+        form.model = m
+        sourceError = ""
+    }
+
+    /// 窗口关掉：摘掉表单的设备插拔订阅。
+    func close() {
+        sourceForm?.close()
+    }
+
+    /// 声道映射（提案 014）的摘要后缀："（第 5、6 路）"；空（前两路）没有后缀。
+    static func channelsSuffix(_ channels: [Int]) -> String {
+        channels.isEmpty ? "" : L("inputSettings.source.channels", ChannelMapChoice.summary(channels))
+    }
+
     /// 来源摘要。
     var sourceSummary: String {
         switch config.source {
         case .camera(let id): return L("inputSettings.source.camera", id)
-        case .decklink(let id, _, _): return L("inputSettings.source.decklink", id)   // 接口 / 带宽等 008 的新参数进摘要归 W3-E2
+        case .decklink(let id, let connection, let channels):
+            let card = id.isEmpty ? L("addInput.decklink.firstCard") : id
+            let port = connection.map { L("decklink.connection.\($0.rawValue)") } ?? L("addInput.decklink.connection.keep")
+            return L("inputSettings.source.decklink", card, port) + Self.channelsSuffix(channels)
         case .screen(let target, let rate, let audio):
             let t: String
             switch target {
@@ -104,8 +172,9 @@ final class InputSettingsModel: ObservableObject {
             return L("inputSettings.source.screen", t, rate.map { "\($0)" } ?? L("addInput.screen.frameRateProgram"), audio ? L("common.on") : L("common.off"))
         case .file(let path, let end, let rate): return L("inputSettings.source.file", path, L("addInput.file.endAction.\(end.rawValue)"), rate)
         case .image(let path): return L("inputSettings.source.image", path)
-        case .ndi(let name, _, _): return L("inputSettings.source.ndi", name)
-        case .audio(let uid, _): return L("inputSettings.source.audio", uid)   // 声道映射（提案 014）进摘要归 W3-E2
+        case .ndi(let name, let bandwidth, let jitter): return L("inputSettings.source.ndi", name, L("ndi.bandwidth.\(bandwidth.rawValue)"), jitter)
+        case .audio(let uid, let channels):
+            return L("inputSettings.source.audio", uid.isEmpty ? L("addInput.audio.systemDefault") : uid) + Self.channelsSuffix(channels)
         case .synthetic(let s): return L("inputSettings.source.synthetic", "\(s.frameRate)", s.width, s.height)
         }
     }
@@ -205,25 +274,21 @@ struct InputSettingsView: View {
 
     @ViewBuilder
     private var source: some View {
+        let form = model.sourceFormModel()
         Section(L("inputSettings.source.title")) {
-            Text(model.sourceSummary)
-            Text(L("inputSettings.source.changeHint")).font(.caption).foregroundStyle(.secondary)
+            LabeledContent(L("inputSettings.source.current"), value: model.sourceSummary)
+            Picker(L("inputSettings.source.kind"), selection: Binding(get: { form.model.kind }, set: { form.model.kind = $0 })) {
+                ForEach(AddInputModel.Kind.allCases) { Text($0.title).tag($0) }
+            }
         }
-        switch model.config.source {
-        case .decklink:
-            Section(L("inputSettings.decklink.title")) {
-                Picker(L("inputSettings.decklink.connection"), selection: .constant(0)) { Text(L("inputSettings.decklink.connection.auto")).tag(0) }.disabled(true)
-                Picker(L("inputSettings.decklink.videoFormat"), selection: .constant(0)) { Text(L("inputSettings.decklink.videoFormat.auto")).tag(0) }.disabled(true)
-                Text(L("inputSettings.decklink.pending")).font(.caption).foregroundStyle(.secondary)
+        InputSourceFormView(form: form)
+        Section {
+            HStack {
+                Button(L("inputSettings.source.apply")) { model.applySource() }.disabled(!model.sourceChanged)
+                Button(L("inputSettings.source.revert")) { model.revertSource() }.disabled(!model.sourceChanged)
             }
-        case .ndi:
-            Section(L("inputSettings.ndi.title")) {
-                Picker(L("inputSettings.ndi.bandwidth"), selection: .constant(0)) { Text(L("inputSettings.ndi.bandwidth.highest")).tag(0) }.disabled(true)
-                Toggle(L("inputSettings.ndi.tally"), isOn: .constant(true)).disabled(true)
-                Text(L("inputSettings.ndi.pending")).font(.caption).foregroundStyle(.secondary)
-            }
-        default:
-            EmptyView()
+            if !model.sourceError.isEmpty { Text(model.sourceError).foregroundStyle(.red) }
+            Text(L("inputSettings.source.changeHint")).font(.caption).foregroundStyle(.secondary)
         }
     }
 }
@@ -241,5 +306,10 @@ final class InputSettingsWindowController: PanelWindowController {
     func apply(state: MixerState) {
         model.apply(state: state)
         window?.title = L("inputSettings.windowTitle", model.number, model.config.name)
+    }
+
+    override func windowWillClose(_ notification: Notification) {
+        model.close()
+        super.windowWillClose(notification)
     }
 }

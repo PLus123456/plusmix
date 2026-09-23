@@ -215,7 +215,11 @@ final class MixerPanelView: NSView {
     private func refreshMeters() {
         guard let audio else { meters.clear(); return }
         meters.apply(status: audio.status)
+        onMeters?(meters.inputPeakDb)
     }
+
+    /// 每次刷表之后（50 ms）：把每路读数转给别处用（纯音频输入的缩略图格子画电平表），同一份数。
+    var onMeters: (([Int: [Double]]) -> Void)?
 
     var displayedGain: String { MixerModel.gainText(model.busState(.master).gainDb) }
     var displayedPeak: String { model.masterPeakText }

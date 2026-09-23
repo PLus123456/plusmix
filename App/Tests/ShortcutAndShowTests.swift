@@ -3,6 +3,7 @@ import AppKit
 import XCTest
 import SwitcherContracts
 import SwitcherControl
+import SwitcherInputs
 @testable import Switcher
 
 @MainActor
@@ -188,19 +189,27 @@ final class ShortcutAndShowTests: XCTestCase {
         m.kind = .image
         m.imagePath = "/tmp/b.png"
         XCTAssertEqual(try m.makeConfig().source, .image(path: "/tmp/b.png"))
-        // W3-E 补的三种：DeckLink / NDI / 纯音频设备
+        // W3-E 补的三种：DeckLink / NDI / 纯音频设备（W3-E2：提案 008 的接口 / 带宽 / 抖动缓冲、014 的声道映射）
         m.kind = .decklink
-        XCTAssertThrowsError(try m.makeConfig())
+        XCTAssertEqual(try m.makeConfig().source, .decklink(deviceID: ""), "空串 = 第一台有输入的卡（契约 InputSource.decklink 的口径）")
         m.decklinkDeviceID = "decklink-0"
         XCTAssertEqual(try m.makeConfig().source, .decklink(deviceID: "decklink-0"))
+        m.decklinkConnection = .sdi
+        m.decklinkChannels = [4, 5]
+        XCTAssertEqual(try m.makeConfig().source, .decklink(deviceID: "decklink-0", connection: .sdi, channels: [4, 5]))
         m.kind = .ndi
         XCTAssertThrowsError(try m.makeConfig())
         m.ndiSourceName = "MACHINE (Cam)"
         XCTAssertEqual(try m.makeConfig().source, .ndi(sourceName: "MACHINE (Cam)"))
+        m.ndiBandwidth = .lowest
+        m.ndiJitterBufferFrames = 7
+        XCTAssertEqual(try m.makeConfig().source, .ndi(sourceName: "MACHINE (Cam)", bandwidth: .lowest, jitterBufferFrames: 2), "抖动缓冲钳到 0–2 帧")
         m.kind = .audio
-        XCTAssertThrowsError(try m.makeConfig())
+        XCTAssertEqual(try m.makeConfig().source, .audio(deviceUID: ""), "空串 uid = 跟随系统默认输入（W2-A2 口径）")
         m.audioDeviceUID = "AppleUSBAudioEngine:1"
         XCTAssertEqual(try m.makeConfig().source, .audio(deviceUID: "AppleUSBAudioEngine:1"))
+        m.audioChannels = [4]
+        XCTAssertEqual(try m.makeConfig().source, .audio(deviceUID: "AppleUSBAudioEngine:1", channels: [4]))
         // 屏幕：窗口 / 应用 + 帧率 + 系统音频
         m.kind = .screen
         m.screenKind = .window
@@ -239,10 +248,74 @@ final class ShortcutAndShowTests: XCTestCase {
         XCTAssertFalse(AddInputModel.cameras().contains { $0.name.isEmpty }, "摄像头列表（可以为空）")
         XCTAssertGreaterThanOrEqual(AddInputModel.displays().count, 1)
     }
+
+    /// 输入设置窗"来源"一节复用 Add Input 的表单（W3-E2 交付第 6 条 / 提案 012）：从现有来源填回表单，再出来的来源逐字段相同。
+    func testAddInput_modelRoundTripsExistingSources() throws {
+        let sources: [InputSource] = [
+            .camera(uniqueID: "cam-1"),
+            .decklink(deviceID: "peid:42", connection: .hdmi, channels: [2, 3]),
+            .decklink(deviceID: ""),
+            .screen(target: .window(id: 77), frameRate: .fps30, captureAudio: true),
+            .screen(target: .application(bundleID: "com.apple.Keynote"), frameRate: nil, captureAudio: false),
+            .file(path: "/tmp/a.mov", endAction: .holdLastFrame, rate: 0.5),
+            .image(path: "/tmp/b.png"),
+            .ndi(sourceName: "HOST (Cam)", bandwidth: .audioOnly, jitterBufferFrames: 0),
+            .audio(deviceUID: "BuiltInMicrophoneDevice", channels: [4, 5]),
+            .audio(deviceUID: ""),
+            .synthetic(settings: SyntheticSourceSettings(frameRate: .fps30, width: 1280, height: 720, background: .noise(level: 96, amplitude: 12, seed: 3),
+                                                         patternID: 4, jitterMs: 1, dropEveryN: 0, clockDriftPpm: 10, audio: true, audioDriftPpm: 5)),
+        ]
+        for source in sources {
+            var m = AddInputModel(source: source)
+            m.number = 3
+            m.name = "x"
+            XCTAssertEqual(try m.makeConfig().source, source, "\(source)")
+            XCTAssertEqual(m.kind.inputKind, source.kind)
+        }
+    }
+
+    /// 声道映射（提案 014）的表单口径：前两路 / 选两路（左、右）/ 单声道一路；摘要"第 5、6 路"。
+    func testAddInput_channelMapChoices() {
+        XCTAssertEqual(ChannelMapChoice(channels: []).mode, .firstTwo)
+        XCTAssertEqual(ChannelMapChoice(channels: [4, 5]).mode, .pair)
+        XCTAssertEqual(ChannelMapChoice(channels: [4]).mode, .mono)
+        var c = ChannelMapChoice(channels: [])
+        c.mode = .pair
+        XCTAssertEqual(c.channels, [0, 1], "切到选两路：默认第 1、2 路")
+        c.left = 4
+        c.right = 5
+        XCTAssertEqual(c.channels, [4, 5])
+        c.mode = .mono
+        XCTAssertEqual(c.channels, [4], "单声道取左边那一路")
+        c.mode = .firstTwo
+        XCTAssertEqual(c.channels, [])
+        XCTAssertEqual(ChannelMapChoice.summary([4, 5]), "第 5、6 路")
+        XCTAssertEqual(ChannelMapChoice.summary([4]), "第 5 路（单声道）")
+        XCTAssertEqual(ChannelMapChoice.summary([]), "")
+        L10n.languageOverride = "en"
+        defer { L10n.languageOverride = "zh-Hans" }
+        XCTAssertEqual(ChannelMapChoice.summary([4, 5]), "channels 5, 6")
+    }
 }
 
 @MainActor
 final class AddInputSheetTests: XCTestCase {
+    /// 设备列表（W3-E2 交付第 7 条 / 提案 008）：纯音频页第一项"系统默认输入"（空串 uid，默认选它），用 SwitcherInputs.AudioInputDevices 列、
+    /// 插拔时刷新（observeChanges，关表单时 stop）；DeckLink 页第一项"第一台有输入的卡"（空串）；接口下拉按卡支持的列，不知道时列全部。
+    func testAddInput_formDeviceListsHaveDefaultEntries() throws {
+        let form = AddInputFormModel(state: MixerState(), maxInputs: 16)
+        XCTAssertEqual(form.audioDevices.first?.id, "")
+        XCTAssertEqual(form.audioDevices.first?.title, "系统默认输入")
+        XCTAssertEqual(form.model.audioDeviceUID, "", "默认选系统默认输入")
+        XCTAssertTrue(form.isObservingAudioDevices, "插拔要刷新列表")
+        XCTAssertEqual(form.audioDevices.count - 1, AudioInputDevices.list().filter { $0.inputChannels > 0 }.count)
+        XCTAssertEqual(form.decklinkDevices.first?.id, "")
+        XCTAssertEqual(form.decklinkConnections(for: "不存在的卡"), DeckLinkConnection.allCases, "卡不在：接口全列")
+        XCTAssertEqual(form.decklinkChannelCount, 16, "内嵌音频 1–16 路")
+        form.close()
+        XCTAssertFalse(form.isObservingAudioDevices, "关表单时 stop 订阅")
+    }
+
     /// Sheet 真的能弹出、切类型、取消；截图留档（AppKit 内容）。
     func testAddInput_sheetPresentsSwitchesKindsAndCancels() throws {
         let session = try AppTest.freshSession()

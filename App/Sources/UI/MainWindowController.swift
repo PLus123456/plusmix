@@ -125,6 +125,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         bottomBar.onISOSettings = { [weak self] in self?.panels?.showOutputSettings(tab: .iso) }   // ISO 只留输出设置里那一页（W3-E2）
         inputStrip.onOpenSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
         mixerPanel.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
+        mixerPanel.onMeters = { [weak self] levels in self?.inputStrip.applyAudioLevels(levels) }   // 纯音频输入格子的电平表
     }
 
     // MARK: 绑定

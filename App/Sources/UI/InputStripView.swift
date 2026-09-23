@@ -138,6 +138,11 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     }
     private var thumbnailLayoutKey: ThumbnailLayoutKey?
 
+    /// 纯音频输入格子上的电平表（调音台 50 ms 的表定时器转过来，同一份 AudioEngineStatus 读数）。
+    func applyAudioLevels(_ peakDb: [Int: [Double]]) {
+        for (number, cell) in cells where cell.isAudioOnly { cell.applyAudioLevel(peakDb[number]) }
+    }
+
     /// 显示来源（新 session 时换）；新建的格子也从这里拿。
     var displaySource: (any DisplayFrameSource)? {
         didSet { for c in cells.values { c.display.source = displaySource } }

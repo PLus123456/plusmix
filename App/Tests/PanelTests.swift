@@ -44,6 +44,19 @@ final class PanelTests: XCTestCase {
                 return false
             }, describe: { "\(session.state.inputs.map(\.number))" }))
 
+        // W3-E2 / 提案 008：Add Input 的 NDI 页选带宽模式 / 抖动缓冲（源不在也照样加：noSignal 等它出现）
+        cases.append(Case(name: "添加输入 sheet：NDI 带宽最低 + 抖动缓冲 2 帧 → 4 号", change: {
+                wc.presentAddInput()
+                let sheet = try XCTUnwrap(wc.window?.attachedSheet?.windowController as? AddInputSheetController, "应弹出 sheet")
+                sheet.form.model.kind = .ndi
+                sheet.form.model.number = 4
+                sheet.form.model.ndiSourceName = "不存在的机器 (Nope)"
+                sheet.form.model.ndiBandwidth = .lowest
+                sheet.form.model.ndiJitterBufferFrames = 2
+                sheet.confirmForTesting()
+            }, verify: { session.state.input(4)?.source == .ndi(sourceName: "不存在的机器 (Nope)", bandwidth: .lowest, jitterBufferFrames: 2) },
+               describe: { "\(String(describing: session.state.input(4)))" }))
+
         cases.append(Case(name: "输入设置：延迟补偿 120 ms", change: {
                 let w = try XCTUnwrap(panels.showInputSettings(input: 1))
                 w.model.update { $0.audio.delayMs = 120 }
@@ -147,7 +160,7 @@ final class PanelTests: XCTestCase {
         cases.append(Case(name: "调音台：AFV 开", change: { wc.mixerPanel.model.setAFV(on: true) },
                  verify: { session.state.audio.afv }, describe: { "\(session.state.audio.afv)" }))
         cases.append(Case(name: "调音台：监听 PFL（setMonitorMode，提案 012）", change: { wc.mixerPanel.model.setMonitorMode(.pfl) },
-                 verify: { session.state.audio.monitorMode == .pfl && session.state.inputs.count == 3 },
+                 verify: { session.state.audio.monitorMode == .pfl && session.state.inputs.count == 4 },
                  describe: { "\(session.state.audio.monitorMode) 输入 \(session.state.inputs.count)" }))
         cases.append(Case(name: "调音台：Master 效果链（限幅）", change: {
                 wc.mixerPanel.model.setBusEffects(.master, [AudioEffectParams.peakLimiter(attackSeconds: 0.01, decaySeconds: 0.02, preGainDb: 1)])
@@ -244,7 +257,7 @@ final class PanelTests: XCTestCase {
                 XCTAssertTrue(p.model.applyShowAudio(), "变了应换 session")
             }, verify: {
                 guard let s = controller.session, s !== session, s.isRunning else { return false }
-                return s.state.audio.alignmentFrames == 4096 && s.state.audio.monitorPoint == .postDelayLine && s.state.inputs.count == 3
+                return s.state.audio.alignmentFrames == 4096 && s.state.audio.monitorPoint == .postDelayLine && s.state.inputs.count == 4
                     && s.audio.engine.configuration.alignmentFrames == 4096 && s.audio.engine.configuration.monitorPoint == .postDelayLine
             }, describe: { "\(String(describing: controller.session?.state.audio)) 引擎 \(String(describing: controller.session?.audio.engine.configuration.alignmentFrames))" },
                timeout: 20))

@@ -17,6 +17,12 @@ final class InputCellView: NSView {
     private let statusLabel = Theme.label("", size: 10, color: .white)
     let overlayButtons: [NSButton]
     let muteButton: NSButton
+    /// 纯音频输入的占位（W3-E2 / W2-A2 口径：没有画面，画话筒 + 名字 + 电平表，不显示成"无信号"的黑块）。
+    private let audioPlaceholder = NSStackView()
+    private let audioIcon = NSImageView()
+    private let audioName = Theme.label("", size: 11, weight: .semibold, color: .white)
+    /// 电平表（推子后峰值，-60 … 0 dBFS；读调音台同一份 AudioEngineStatus）。
+    let audioMeter = NSLevelIndicator()
     private var config: InputConfig
     private var tally = Tally.off
     /// 缩略图刷新率上限（prompt：≤ 24 fps）。
@@ -50,6 +56,22 @@ final class InputCellView: NSView {
         }
         muteButton.target = self
         muteButton.action = #selector(mutePressed)
+        audioIcon.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: L("cell.audioOnly"))
+        audioIcon.contentTintColor = Theme.dimText
+        audioIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .regular)
+        audioMeter.levelIndicatorStyle = .continuousCapacity
+        audioMeter.minValue = 0
+        audioMeter.maxValue = 1
+        audioMeter.warningValue = 0.9
+        audioMeter.criticalValue = 0.97
+        audioMeter.setAccessibilityLabel(L("mixer.meter"))
+        audioMeter.widthAnchor.constraint(equalToConstant: Theme.thumbnailWidth - 40).isActive = true
+        for v in [audioIcon, audioName, audioMeter] as [NSView] { audioPlaceholder.addArrangedSubview(v) }
+        audioPlaceholder.orientation = .vertical
+        audioPlaceholder.spacing = 6
+        audioPlaceholder.alignment = .centerX
+        audioPlaceholder.translatesAutoresizingMaskIntoConstraints = false
+        audioPlaceholder.isHidden = true
 
         let buttonRow = NSStackView(views: overlayButtons + [muteButton])
         buttonRow.orientation = .horizontal
@@ -59,6 +81,7 @@ final class InputCellView: NSView {
         titleBar.addSubview(numberLabel)
         titleBar.addSubview(nameLabel)
         addSubview(display)
+        addSubview(audioPlaceholder)
         addSubview(statusLabel)
         addSubview(buttonRow)
         NSLayoutConstraint.activate([
@@ -76,6 +99,8 @@ final class InputCellView: NSView {
             display.leadingAnchor.constraint(equalTo: leadingAnchor),
             display.trailingAnchor.constraint(equalTo: trailingAnchor),
             display.heightAnchor.constraint(equalToConstant: Theme.thumbnailHeight),
+            audioPlaceholder.centerXAnchor.constraint(equalTo: display.centerXAnchor),
+            audioPlaceholder.centerYAnchor.constraint(equalTo: display.centerYAnchor, constant: -8),
             statusLabel.centerXAnchor.constraint(equalTo: display.centerXAnchor),
             statusLabel.centerYAnchor.constraint(equalTo: display.centerYAnchor),
             statusLabel.widthAnchor.constraint(lessThanOrEqualTo: display.widthAnchor, constant: -8),
@@ -103,6 +128,7 @@ final class InputCellView: NSView {
         }
         Theme.setHighlighted(muteButton, config.settings.audio.muted, color: Theme.recording)
         self.runtime = runtime
+        audioName.stringValue = config.name
         updateStatus()
         toolTip = L("cell.tooltip", config.number, config.name, L("addInput.kind.\(config.kind.rawValue)"))
     }
@@ -111,7 +137,6 @@ final class InputCellView: NSView {
     func setThumbnail(rect: NormalizedRect?) {
         isOutsideMultiviewLayout = rect == nil
         display.sourceRect = rect ?? .full
-        display.isHidden = rect == nil
         updateStatus()
     }
 
@@ -119,13 +144,27 @@ final class InputCellView: NSView {
     private(set) var isOutsideMultiviewLayout = false
     private var runtime: InputState?
 
-    /// 格子中间那行字：运行状态（无信号 / 错误文案）优先，其次"不在多画面布局里"。
+    /// 纯音频输入（没有画面）：格子画占位，不画多画面格子。
+    var isAudioOnly: Bool { config.kind == .audio }
+
+    /// 电平（推子后峰值 dBFS，[L, R]；nil = 没有读数）→ 占位里的表（-60 … 0 dBFS 线性映射到 0 … 1）。只对纯音频输入有意义。
+    func applyAudioLevel(_ peakDb: [Double]?) {
+        guard isAudioOnly else { return }
+        let level = peakDb?.max().map { min(max(1 + $0 / 60, 0), 1) } ?? 0
+        if abs(audioMeter.doubleValue - level) > 0.001 { audioMeter.doubleValue = level }
+    }
+
+    /// 格子中间那行字：运行状态（无信号 / 错误文案）优先，其次"不在多画面布局里"。纯音频输入没有画面不算无信号：
+    /// 设备不在（noSignal）写"等音频设备"，权限被拒等（error）照样显示文案。
     private func updateStatus() {
+        let audioOnly = isAudioOnly
+        display.isHidden = audioOnly || isOutsideMultiviewLayout
+        audioPlaceholder.isHidden = !audioOnly
         let text: String?
         switch runtime {
-        case .noSignal?: text = L("input.noSignal")
+        case .noSignal?: text = audioOnly ? L("input.audioWaiting") : L("input.noSignal")
         case .error(let message)?: text = message
-        case .live?, nil: text = isOutsideMultiviewLayout ? L("cell.notInMultiview") : nil
+        case .live?, nil: text = (!audioOnly && isOutsideMultiviewLayout) ? L("cell.notInMultiview") : nil
         }
         statusLabel.stringValue = text ?? ""
         statusLabel.isHidden = text == nil

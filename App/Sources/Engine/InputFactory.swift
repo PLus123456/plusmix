@@ -1,7 +1,7 @@
 // 输入工厂（W2-B2 接缝 1）：把一路 InputConfig 变成活的 Input 对象。
 // 摄像头 / 屏幕 / 文件 / 图片用 W2-A 的四种输入（`init(config:timing:videoSlot:audioRing:)`），合成源用 TestKit 的 SyntheticVideoInput；
 // 帧槽与音频环由组装方（InputRuntime）建（CONTRACTS.md §2.3 注入规则），带音频的路把 `CAudioRing` 交给输入、再注册进 AudioEngine。
-// DeckLink / NDI / 纯音频设备的实现在 W3-A，这里建成占位（格子上有文案）。
+// DeckLink / NDI 是 W3-A 的（G4 接线），纯音频设备是 W2-A2 的 AudioDeviceInput（W3-E2 接线）；八种都有运行实现，建不出来的才画占位（格子上有文案）。
 import Foundation
 import SwitcherContracts
 import SwitcherEngine
@@ -27,17 +27,7 @@ protocol InputFactory {
     func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput
 }
 
-enum InputFactoryError: Error, CustomStringConvertible {
-    /// 这种输入还没有实现（DeckLink / NDI 在 W3-A）。
-    case unsupported(InputKind)
-    var description: String {
-        switch self {
-        case .unsupported(let kind): L("input.unsupported", L("addInput.kind.\(kind.rawValue)"))
-        }
-    }
-}
-
-/// 默认工厂：五种能跑的输入。
+/// 默认工厂：八种输入。
 struct DefaultInputFactory: InputFactory {
     /// 合成源视频比拍点提前半个节目帧（headless 的 --input-lead-ms 默认值，理由见 HeadlessRun.swift 第 1 步）；音频（click）不提前。
     static func syntheticLead(_ timing: ProgramTiming) -> HostDuration {
@@ -80,12 +70,18 @@ struct DefaultInputFactory: InputFactory {
             let input = try DeckLinkInput(config: config, timing: timing, videoSlot: slot, audioRing: ring)
             return MadeInput(input: input, audioRing: ring, audioBlockFrames: 1024)
         case .ndi:
-            // W3-A（G4 接线）：源不在就等它出现（noSignal + 文案）；抖动缓冲用默认 1 帧（提案 008 批了以后从节目文件读）
+            // W3-A（G4 接线）：源不在就等它出现（noSignal + 文案）；带宽模式 / 抖动缓冲从 case 取（提案 008，NDIInput.init(config:) 读）
             let ring = CAudioRing(channelCount: 2)
             let input = try NDIInput(config: config, timing: timing, videoSlot: slot, audioRing: ring)
             return MadeInput(input: input, audioRing: ring, audioBlockFrames: 1024)
         case .audio:
-            throw InputFactoryError.unsupported(config.kind)
+            // W2-A2：Core Audio IOProc 取样（回调零分配），泵线程写环；设备不在 = noSignal + 文案，麦克风权限被拒 = error。
+            // 声道映射从 case 取（提案 014）。没有画面：videoSlot 是 nil（不强制解包），帧槽照旧由 InputRuntime 建、没人往里推，
+            // 引擎挑不到帧、画黑——能被选进 PGM / PVW / 叠加，音频照常按每路 AFV 走（W2-A2 报告 §4 第 2 条，用户 2026-09-23 定）。
+            // 生产者块 1024：设备 IO 块本机是 512，走采样率转换时每块约多 9%，拿不准就给 1024（同摄像头 / DeckLink）。
+            let ring = CAudioRing(channelCount: 2)
+            let input = try AudioDeviceInput(config: config, audioRing: ring)
+            return MadeInput(input: input, audioRing: ring, audioBlockFrames: 1024)
         }
     }
 }

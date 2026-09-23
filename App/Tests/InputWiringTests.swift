@@ -118,6 +118,87 @@ final class InputWiringTests: XCTestCase {
         XCTAssertTrue((50...70).contains(pushed), "图片应每拍 push 一次（≈ 60/s），实际 \(pushed)")
     }
 
+    /// 纯音频设备输入（W2-A2 的 AudioDeviceInput；W3-E2 交付第 7 条）：工厂不再给占位；环注册进音频引擎（生产者块 1024）；帧槽照旧建
+    /// （videoSlot 是 nil，引擎挑不到帧、画黑，是定下来的口径）；缩略图格子画占位（名字 + 电平表 + 话筒），不显示成"无信号"；
+    /// 麦克风权限被拒时是 W2-A2 那句文案。能被选进 PGM（画面按没帧画黑场）。
+    func testInputs_audioDeviceInputWiredAsAudioOnly() throws {
+        guard AudioInputDevices.list().contains(where: { $0.inputChannels > 0 }) else { throw XCTSkip("BLOCKED-硬件：没有带输入声道的音频设备") }
+        let session = try AppTest.freshSession()
+        let wc = AppTest.controller.windowController
+        session.send(.addInput(config: InputConfig(number: 1, name: "话筒", source: .audio(deviceUID: ""))))   // 空串 = 系统默认输入
+        XCTAssertTrue(AppTest.waitUntil(3) { session.inputs.entries[1] != nil })
+        let entry = try XCTUnwrap(session.inputs.entries[1])
+        XCTAssertTrue(entry.input is AudioDeviceInput, "工厂应建 AudioDeviceInput 而不是占位：\(type(of: entry.input))")
+        XCTAssertNil(entry.input.videoSlot, "纯音频输入没有画面")
+        XCTAssertEqual(entry.made.audioBlockFrames, 1024)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.audio.registeredInputs.contains(1) }, "音频环应注册进音频引擎：\(session.audio.registeredInputs)")
+        AppTest.waitUntil(5) {
+            if case .error? = session.inputs.runtimeState(of: 1) { return true }
+            return session.inputs.runtimeState(of: 1) == .live
+        }
+        let state = session.inputs.runtimeState(of: 1)
+        print("纯音频输入：状态 \(String(describing: state))，设备 \(String(describing: (entry.input as? AudioDeviceInput)?.deviceName))")
+        let cell = try XCTUnwrap(wc.inputStrip.cells[1])
+        if case .error(let message)? = state {
+            // 权限文案是 W2-A2 的 CapturePermission.message（被拒 = 报告 §2 那句；从 Claude 的 Bash 起的测试宿主弹不出 TCC 提示，是"尚未授权"那句）
+            XCTAssertTrue(message.hasPrefix("麦克风权限"), "权限问题的文案来自 W2-A2（CapturePermission.message）：\(message)")
+            XCTAssertTrue(AppTest.waitUntil(2) { cell.displayedStatus == message }, "格子上照样显示权限文案：\(cell.displayedStatus)")
+            print("纯音频输入：BLOCKED-权限（麦克风 TCC），live 的路径要从 Terminal.app 跑 make test-app 才测得到")
+        }
+        XCTAssertTrue(AppTest.waitUntil(2) { cell.isAudioOnly }, "纯音频输入的格子应画占位")
+        XCTAssertTrue(cell.display.isHidden, "没有画面：不画多画面格子")
+        XCTAssertNotEqual(cell.displayedStatus, L("input.noSignal"), "不显示成\"无信号\"")
+        session.send(.setProgram(input: 1))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.program == 1 }, "能被选进 PGM")
+        XCTAssertEqual(session.control.bus.counters.rejected, 0)
+        session.send(.removeInput(input: 1))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.inputs.entries[1] == nil && !session.audio.registeredInputs.contains(1) })
+    }
+
+    /// 输入设置窗"来源"一节可编辑（W3-E2 交付第 6 条 / 提案 012）：合成源换成文件路径 → setInputSource；编号 / 名字 / 叠加引用 / PGM / PVW 保留，
+    /// InputRuntime.reconcile 按"编号 + 来源变了"重建了那一路（运行对象换成 FileInput 并 live）；摘要跟着变。
+    func testInputSettings_sourceEditSetsInputSource_keepsReferences_rebuildsRuntime() throws {
+        let fixture = try AppTest.repoRoot().appendingPathComponent("Tests/Fixtures/pattern.mov")
+        guard FileManager.default.fileExists(atPath: fixture.path) else { throw XCTSkip("没有 Tests/Fixtures/pattern.mov") }
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        session.send(.renameInput(input: 1, name: "机位一"))
+        session.send(.overlay(channel: 1, on: true, input: 1))
+        session.send(.setProgram(input: 1))
+        session.send(.setPreview(input: 2))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.name == "机位一" && session.state.overlays[0].input == 1 && session.state.program == 1 && session.state.preview == 2 })
+        let before = try XCTUnwrap(session.inputs.entries[1]?.input)
+        let window = try XCTUnwrap(AppTest.controller.panels.showInputSettings(input: 1))
+        window.model.section = .source
+        let form = window.model.sourceFormModel()
+        XCTAssertEqual(form.model.kind, .synthetic, "表单从现有来源填回")
+        XCTAssertFalse(window.model.sourceChanged)
+        form.model.kind = .file
+        form.model.filePath = fixture.path
+        form.model.fileEndAction = .loop
+        XCTAssertTrue(window.model.sourceChanged)
+        window.model.applySource()
+        let wanted = InputSource.file(path: fixture.path, endAction: .loop, rate: 1)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.source == wanted }, "\(String(describing: session.state.input(1)?.source))")
+        XCTAssertEqual(session.state.inputs.map(\.number), [1, 2], "编号不变")
+        XCTAssertEqual(session.state.input(1)?.name, "机位一", "名字保留")
+        XCTAssertEqual(session.state.overlays[0].input, 1, "叠加引用保留")
+        XCTAssertTrue(session.state.overlays[0].on)
+        XCTAssertEqual(session.state.program, 1)
+        XCTAssertEqual(session.state.preview, 2)
+        XCTAssertTrue(session.control.bus.recentEntries().contains { if case .setInputSource(1, wanted) = $0.command { return true } else { return false } },
+                      "走 setInputSource，不是 removeInput + addInput")
+        XCTAssertFalse(session.control.bus.recentEntries().contains { if case .removeInput = $0.command { return true } else { return false } })
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.entries[1]?.input is FileInput && session.inputs.entries[1]?.input !== before },
+                      "运行表应按新来源重建这一路：\(String(describing: session.inputs.entries[1]?.input))")
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
+        XCTAssertTrue(window.model.sourceSummary.contains("pattern.mov"), window.model.sourceSummary)
+        XCTAssertFalse(window.model.sourceChanged, "应用后表单与快照一致")
+        XCTAssertEqual(session.control.bus.counters.rejected, 0)
+        AppTest.controller.panels.closeAll()
+        XCTAssertFalse(form.isObservingAudioDevices, "窗口关掉摘掉设备订阅")
+    }
+
     /// 纯色 PNG（sRGB）。
     static func writeSolidPNG(to url: URL, width: Int, height: Int, red: UInt8, green: UInt8, blue: UInt8) throws {
         let cs = CGColorSpace(name: CGColorSpace.sRGB)!
