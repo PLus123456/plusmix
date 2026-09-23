@@ -181,8 +181,7 @@ extension OutputSettings {
                 fallback = b
                 found = true
             }
-            // 过渡键的默认是"不退回"（`ExternalDisplaySpec` 的 false），正式字段的默认是"退回"；
-            // 只有出现过旧键的才搬，搬的时候按旧键的原值走，不改语义。
+            // 过渡键的默认与正式字段的默认都是"不退回"（提案 015 起一致，都是 false）；只有出现过旧键的才搬，搬的时候按旧键的原值走，不改语义。
             if found { s.display = DisplayOutputSettings(displayID: displayID, fallbackToMain: fallback) }
         }
         s.extra.removeValue(forKey: DisplayOutputSettings.legacyDisplayIDKey)

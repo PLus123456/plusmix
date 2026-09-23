@@ -513,20 +513,20 @@ public struct MultiviewLayoutSettings: Hashable, Codable, Sendable {
 public struct DisplayOutputSettings: Hashable, Codable, Sendable {
     /// CGDirectDisplayID；nil = 主显示器。显示器 ID 重启后可能变，App 侧另存型号 / 序列号做匹配是界面的事。
     public var displayID: UInt32?
-    /// 显示器不在时退回主显示器（默认）还是黑着等它回来。
+    /// 显示器不在时：false（默认，提案 015）= 黑着等它回来、不动主显示器；true = 退回主显示器全屏（会盖住操作界面，只在明确要的时候开）。
     public var fallbackToMain: Bool
-    public init(displayID: UInt32? = nil, fallbackToMain: Bool = true) {
+    public init(displayID: UInt32? = nil, fallbackToMain: Bool = false) {
         self.displayID = displayID
         self.fallbackToMain = fallbackToMain
     }
 
     enum CodingKeys: String, CodingKey { case displayID, fallbackToMain }
 
-    /// fallbackToMain 缺键 = true（提案 013）。
+    /// fallbackToMain 缺键 = false（提案 013 定 true，015 改成 false：与 `ExternalDisplaySpec` 从 G4 起的运行时默认一致，用户 2026-09-23 批）。
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         displayID = try c.decodeIfPresent(UInt32.self, forKey: .displayID)
-        fallbackToMain = try c.decodeIfPresent(Bool.self, forKey: .fallbackToMain) ?? true
+        fallbackToMain = try c.decodeIfPresent(Bool.self, forKey: .fallbackToMain) ?? false
     }
 
     /// JSON 键名。

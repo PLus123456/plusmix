@@ -155,7 +155,7 @@ DeckLink 开的内嵌音频路数 = max(`Options.audioChannels`, 映射用得上
 | `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`} | 状态机 | 输出实现、UI | — |
 | `OutputSettings` | {source, video?, audio?, record?, stream?, multiview?（010）, display?（013）, extra 占位} | Show / 命令 | 编码、录制、推流、多画面、外部显示 | — |
 | `MultiviewLayoutSettings` / `MultiviewCell` | {preset, custom[], safeArea, meters} / {source, rect}（提案 010；`OutputSource.multiview` 作格子源无效，渲染器忽略） | Show / setOutputSettings | 渲染（多画面） | 解析只在快照 sequence 变化时做 |
-| `DisplayOutputSettings` | {displayID?（CGDirectDisplayID；nil = 主显示器）, fallbackToMain}（提案 013） | Show / setOutputSettings | 外部显示运行表 | — |
+| `DisplayOutputSettings` | {displayID?（CGDirectDisplayID；nil = 主显示器）, fallbackToMain（默认 false = 显示器不在时黑着等、不动主屏；提案 013 定 true，015 改 false 与运行时一致）} | Show / setOutputSettings | 外部显示运行表 | — |
 | `Tally` | {program, preview}，由快照推导 | 契约代码 | UI、API、多画面、外部 tally | — |
 
 progress 的意义：新画面（= preview 输入）盖在旧画面上的比例。auto 转场第 s 拍应用命令，第 s + k 拍 progress = k / durationTicks，到 1 时状态机对调 program/preview 并回空闲（W1-B）。运行时统计（帧数、丢帧、码率）**不在** OutputState 里，在 Stats（铁律 4）。

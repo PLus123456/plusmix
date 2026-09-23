@@ -162,13 +162,14 @@ final class ContractsP3Tests: XCTestCase {
 
     func testP3_013_displayEntryAndDisplaySettings() throws {
         XCTAssertEqual(DisplayOutputSettings.jsonKeys, ["displayID", "fallbackToMain"])
-        XCTAssertTrue(DisplayOutputSettings().fallbackToMain)
+        XCTAssertFalse(DisplayOutputSettings().fallbackToMain, "提案 015：默认不退回主显示器（与 ExternalDisplaySpec 一致）")
         XCTAssertNil(DisplayOutputSettings().displayID)
         let d = DisplayOutputSettings(displayID: 7, fallbackToMain: false)
         XCTAssertEqual(String(decoding: try sortedEncoder.encode(d), as: UTF8.self), #"{"displayID":7,"fallbackToMain":false}"#)
         XCTAssertEqual(try JSONDecoder().decode(DisplayOutputSettings.self, from: try sortedEncoder.encode(d)), d)
-        // fallbackToMain 缺键 = true
-        XCTAssertTrue(try JSONDecoder().decode(DisplayOutputSettings.self, from: Data(#"{"displayID":3}"#.utf8)).fallbackToMain)
+        // fallbackToMain 缺键 = false（提案 015）；显式 true 照解
+        XCTAssertFalse(try JSONDecoder().decode(DisplayOutputSettings.self, from: Data(#"{"displayID":3}"#.utf8)).fallbackToMain)
+        XCTAssertTrue(try JSONDecoder().decode(DisplayOutputSettings.self, from: Data(#"{"displayID":3,"fallbackToMain":true}"#.utf8)).fallbackToMain)
 
         let e = Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 36_000, dropped: 0, state: "presenting")
         XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(e), as: UTF8.self),

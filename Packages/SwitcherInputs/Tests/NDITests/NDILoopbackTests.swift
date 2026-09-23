@@ -14,6 +14,10 @@ import SwitcherInputsHarness
 /// `testNDI_loopback_externalSource_manual`（设 SWITCHER_NDI_LOOP_SOURCE 指到它）。
 final class NDILoopbackTests: XCTestCase {
     private static let nameCounter = Atomic<Int>(0)
+    /// 两条计时断言的调度余量（用户 2026-09-23 批；reports/issues/W2A2-w3-inputs2-ndi-audio-interval-flaky-under-load.md）：阈值本来贴着理论值
+    /// （音频块最大间隔 = 一块 + 抖动 24.667 ms；停送后 noSignal = 3 个帧间隔 + 一次 capture 超时 71.667 ms），整包 swift test 里并发的实时 / 高优先级线程多，
+    /// NDI 收发线程或看门狗被调度晚 0.25–0.7 ms 就过线，单跑稳过。这 2 ms 只盖调度抖动，不改被测行为的口径。
+    private static let schedulingMarginMs = 2.0
     private func uniqueName(_ base: String) -> String {
         let n = Self.nameCounter.add(1, ordering: .relaxed).newValue
         return "\(base) \(ProcessInfo.processInfo.processIdentifier)-\(n)"
@@ -211,7 +215,7 @@ final class NDILoopbackTests: XCTestCase {
         let sinceLastFrame = (noSignalAt - lastIngress).milliseconds
         let interval = timing.frameDuration.milliseconds
         print("停止送帧：最后一帧 → noSignal \(String(format: "%.1f", sinceLastFrame)) ms（3 个帧间隔 = \(String(format: "%.1f", 3 * interval)) ms，加轮询粒度 ≤ 1 帧）；文案：\(input.lastError ?? "-")")
-        XCTAssertLessThanOrEqual(sinceLastFrame, 3 * interval + interval + 5, "noSignal 应在 3 个帧间隔内（+ 一次 capture 超时的粒度）")
+        XCTAssertLessThanOrEqual(sinceLastFrame, 3 * interval + interval + 5 + Self.schedulingMarginMs, "noSignal 应在 3 个帧间隔内（+ 一次 capture 超时的粒度 + 调度余量）")
         XCTAssertNotNil(input.lastError)
         // 2. 恢复送帧：自动回 live
         sender!.start(width: 1280, height: 720, clock: timing.clock, frameRate: format.frameRate, firstTick: timing.nextTick(atOrAfter: HostClock.now() + HostDuration(milliseconds: 50)))
@@ -323,7 +327,7 @@ final class NDILoopbackTests: XCTestCase {
         let gaps = zip(times, times.dropFirst()).map { ($1 - $0).milliseconds }
         let meanGap = gaps.reduce(0, +) / Double(gaps.count)
         XCTAssertEqual(meanGap, 16.667, accuracy: 0.3)
-        XCTAssertLessThanOrEqual(gaps.max() ?? 0, 16.667 + 8, "最大间隔不超过一块 + 抖动")
+        XCTAssertLessThanOrEqual(gaps.max() ?? 0, 16.667 + 8 + Self.schedulingMarginMs, "最大间隔不超过一块 + 抖动（+ 调度余量）")
         // 内容：1 kHz 正弦 −20 dBFS，两声道相同；click（+1.0）每秒一个
         let all = blocks.flatMap(\.channel0)
         let peak = all.map(abs).max() ?? 0

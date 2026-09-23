@@ -35,8 +35,8 @@ JSON：`"display":[{"output":3,"kind":"externalDisplay","frames":36000,"dropped"
 public struct DisplayOutputSettings: Hashable, Codable, Sendable {
     /// CGDirectDisplayID；nil = 主显示器。显示器 ID 重启后可能变，App 侧另存型号 / 序列号做匹配是界面的事。
     public var displayID: UInt32? = nil
-    /// 显示器不在时退回主显示器（true，默认）还是黑着等它回来（false）。
-    public var fallbackToMain: Bool = true
+    /// 显示器不在时退回主显示器（true）还是黑着等它回来（false）。默认值原定 true，2026-09-23 由提案 015 改成 false（与 W3-C 运行时一致）。
+    public var fallbackToMain: Bool = false
 }
 ```
 过渡键 `extra["displayID"]`（数字）/ `extra["fallbackToMain"]`（布尔；`ExternalDisplaySpec.displayIDKey / fallbackKey`）保留一个版本作后备：正式字段为 nil 时读过渡键；解码旧 Show 时搬进正式字段、清掉旧键（与 010 的 `extra["layout"]` 同一做法）。

@@ -1,7 +1,7 @@
 # 015 `DisplayOutputSettings.fallbackToMain` 的默认值改成 false（与 W3-C 的运行时一致）
 
 提出会话 / 分支：G4 续做合入 / g4（2026-09-23；来源 reports/p3-contracts.md §4 第 2 条）
-状态：**待批**（一行默认值 + 键名快照 + CONTRACTS.md；建议由下一个契约会话或用户授权的检查点按胶水额度落地）
+状态：**已落地**（用户 2026-09-23 批："015 批了 … 你顺手做了"；G4 续做合入会话按授权落地：`MixerState.swift` 默认与缺键都改 false、`ContractsP3Tests.testP3_013_displayEntryAndDisplaySettings` 的两处断言改过来并补一条"显式 true 照解"、`Show.swift` 搬迁注释、docs/CONTRACTS.md §2.5 一句；`ExternalDisplaySpec` 与 App 不用改，App 显式写的 false 现在与默认相同，可由 W3-E2 顺手去掉）
 
 ## 改什么
 
