@@ -197,8 +197,9 @@ enum LoadStates {
         }
         guard !legacy else { return s }
         if keyer { for i in 4..<8 { s.inputs[i].settings.keyer = ReferenceStates.keyer() } }
-        s.inputs[4].settings.effects = [ReferenceStates.borderEffect()]
-        s.inputs[5].settings.effects = [ReferenceStates.borderEffect(width: 0.01, color: (255, 200, 0))]
+        // 叠加 1 / 2（输入 5 / 6）带边框：W3-B 时写在输入 5 / 6 的效果格里，W3-B2 起走正式字段（负载不变，同样两圈边框）
+        s.overlays[0].border = OverlayBorder()
+        s.overlays[1].border = OverlayBorder(width: 0.01, color: RGB8(red: 255, green: 200, blue: 0))
         return customLayout ? ReferenceStates.withMultiviewLayout(s, ReferenceStates.customLayout) : s
     }
 }

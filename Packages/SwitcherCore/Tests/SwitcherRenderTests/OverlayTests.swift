@@ -58,8 +58,9 @@ final class OverlayTests: XCTestCase {
         }
     }
 
-    /// 画中画边框：效果格 "border"（提案 010 过渡做法）→ rect 外扩一圈白；没有效果格就没有边框。
-    func testV8_pipBorderDrawnFromEffectSlot() throws {
+    /// 画中画边框：正式字段 `OverlayState.border`（提案 010）→ rect 外扩一圈；没有就没有边框。
+    /// （W3-B 时这条用例叫 testV8_pipBorderDrawnFromEffectSlot，读的是效果格 "border"；W3-B2 删了过渡读取，改验正式字段，断言一条没少。）
+    func testV8_pipBorderDrawnFromOfficialField() throws {
         let s = ReferenceStates.pipBorder()
         let bm = try render(s)
         // rect (0.05, 0.05, 0.3, 0.3) → x 96–672、y 54–378；边框 0.006 × 1080 = 6.48 px
@@ -70,19 +71,19 @@ final class OverlayTests: XCTestCase {
         let outside = bm.pixel(84, 216)
         XCTAssertFalse(outside.r > 240 && outside.g > 240 && outside.b > 240, "边框外 12 px 应是底，得 \(outside)")
         var noBorder = s
-        noBorder.inputs[3].settings.effects = []
+        noBorder.overlays[2].border = nil
         let q = try render(noBorder).pixel(93, 216)
-        XCTAssertFalse(q.r > 240 && q.g > 240 && q.b > 240, "没有效果格不该有边框，得 \(q)")
+        XCTAssertFalse(q.r > 240 && q.g > 240 && q.b > 240, "border 为 nil 不该有边框，得 \(q)")
         // 彩色边框 + 自定义宽度
         var red = s
-        red.inputs[3].settings.effects = [ReferenceStates.borderEffect(width: 0.02, color: (255, 0, 0))]
+        red.overlays[2].border = OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0))
         let rr = try render(red).pixel(80, 216)   // 0.02 × 1080 = 21.6 px
         XCTAssertTrue(rr.r > 240 && rr.g < 20 && rr.b < 20, "红边 0.02，得 \(rr)")
-        // 解析：宽度钳到 0–0.1，颜色缺省白
-        let d = OverlayDecoration.border(for: red.inputs[3])
-        XCTAssertEqual(d?.width, 0.02)
-        XCTAssertEqual(OverlayDecoration.border(for: InputConfig(number: 1, name: "", source: .image(path: ""), settings: InputSettings(effects: [EffectSlot(id: "border", params: ["width": 5])])))?.width, 0.1)
-        XCTAssertNil(OverlayDecoration.border(for: InputConfig(number: 1, name: "", source: .image(path: ""), settings: InputSettings(effects: [EffectSlot(id: "border", enabled: false)]))))
+        // 解析：宽度钳到 0–0.1，颜色换成预乘（alpha 1），缺省白
+        XCTAssertEqual(OverlayDecoration.resolve(red.overlays[2].border!).width, 0.02)
+        XCTAssertEqual(OverlayDecoration.resolve(red.overlays[2].border!).color, SIMD4<Float>(1, 0, 0, 1))
+        XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder(width: 5)).width, 0.1)
+        XCTAssertEqual(OverlayDecoration.resolve(OverlayBorder()).color, SIMD4<Float>(1, 1, 1, 1))
     }
 
     /// 进出动画的几何（纯函数）：cut / fade / slide / zoom 对 animProgress 的解释。
@@ -187,7 +188,9 @@ final class OverlayTests: XCTestCase {
 
     /// 正式字段 `OverlayState.border` 与过渡做法 `effects["border"]` 给同一个边框时逐像素相同；正式字段优先。
     func testP3_borderOfficialFieldMatchesEffectSlotPixelForPixel() throws {
-        let legacy = ReferenceStates.pipBorder()                       // 输入 4 的效果格，白边 0.006
+        var legacy = ReferenceStates.pipBorder()
+        legacy.overlays[2].border = nil
+        legacy.inputs[3].settings.effects = [ReferenceStates.borderEffect()]   // 输入 4 的效果格，白边 0.006
         var official = legacy
         official.inputs[3].settings.effects = []
         official.overlays[2].border = OverlayBorder()                  // 同样的默认白边 0.006

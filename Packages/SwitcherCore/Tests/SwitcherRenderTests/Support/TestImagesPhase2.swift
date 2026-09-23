@@ -160,7 +160,8 @@ extension ReferenceStates {
         return s
     }
 
-    /// 画中画边框：效果格 "border"（提案 010 过渡做法）。
+    /// 画中画边框的旧写法：效果格 "border"（提案 010 的过渡做法）。W3-B2 起渲染器不再读它（只读 `OverlayState.border`），
+    /// 只留给"旧键被忽略"的用例造数据。
     static func borderEffect(width: Double = 0.006, color: (Int, Int, Int) = (255, 255, 255)) -> EffectSlot {
         EffectSlot(id: "border", enabled: true, params: ["width": .number(width), "color": .array([.number(Double(color.0)), .number(Double(color.1)), .number(Double(color.2))])])
     }
@@ -174,11 +175,13 @@ extension ReferenceStates {
     }
 
     /// 带边框的画中画：Overlay 3 = 输入 4 在左上 (0.05, 0.05, 0.3, 0.3)，白边 0.006。
+    /// 边框走正式字段 `OverlayState.border`（提案 010）。`v8-pip-border-pgm.png` 是 W3-B 用效果格画的，
+    /// P3 证明过两条路径逐像素相同，所以换写法之后参考图不变。
     static func pipBorder() -> MixerState {
         var s = fixed8()
         s.overlays[0] = OverlayState()
         s.overlays[2] = OverlayState(input: 4, on: true, rect: NormalizedRect(x: 0.05, y: 0.05, width: 0.3, height: 0.3), animProgress: 1)
-        s.inputs[3].settings.effects = [borderEffect()]
+        s.overlays[2].border = OverlayBorder()
         return s
     }
 
@@ -233,16 +236,43 @@ extension ReferenceStates {
         return s
     }
 
-    /// 多画面布局：把 layout JSON 放进 kind = multiview 的输出的 extra["layout"]（提案 010 过渡做法）。
-    static func withMultiviewLayout(_ state: MixerState, _ layout: JSONValue) -> MixerState {
+    /// 多画面布局：放进 kind = multiview 的输出的正式字段 `settings.multiview`（提案 010）。
+    /// W3-B 时这里写的是过渡键 `extra["layout"]`；W3-B2 删了渲染器的过渡读取，参考图的状态改走正式字段（像素不变，见 README）。
+    static func withMultiviewLayout(_ state: MixerState, _ layout: MultiviewLayoutSettings) -> MixerState {
         var s = state
         s.outputs = [OutputState(number: 9, kind: .multiview, name: "多画面", enabled: true,
-                                 settings: OutputSettings(source: .multiview, extra: ["layout": layout]))]
+                                 settings: OutputSettings(source: .multiview, multiview: layout))]
         return s
     }
 
-    /// 自定义布局：PGM 占左上 70%，右列 PVW + 输入 3 / 4，底行输入 1 / 2 / 5；安全框和电平表占位都开。
-    static let customLayout: JSONValue = [
+    /// 预设名的简写。
+    static func withMultiviewPreset(_ state: MixerState, _ preset: String) -> MixerState {
+        withMultiviewLayout(state, MultiviewLayoutSettings(preset: preset))
+    }
+
+    /// 旧写法：把 layout JSON 放进过渡键 `extra["layout"]`、不给正式字段。W3-B2 起渲染器忽略它（只留给"旧键被忽略"的用例）。
+    static func withLegacyExtraLayout(_ state: MixerState, _ layout: JSONValue) -> MixerState {
+        var s = state
+        s.outputs = [OutputState(number: 9, kind: .multiview, name: "多画面", enabled: true,
+                                 settings: OutputSettings(source: .multiview, extra: [MultiviewLayoutSettings.legacyExtraKey: layout]))]
+        return s
+    }
+
+    /// 自定义布局：PGM 占左上 70%，右列 PVW + 输入 3 / 4，底行输入 1 / 2 / 5；安全框和电平表都开。
+    /// 数值与 W3-B 的过渡键写法 `customLayoutLegacyJSON` 逐位相同（`testP3_multiviewReadsOnlyOfficialField…` 钉住），
+    /// 所以 `v8-multiview-custom.png` 不用重生成。
+    static let customLayout = MultiviewLayoutSettings(custom: [
+        MultiviewCell(source: .program, rect: NormalizedRect(x: 0.0, y: 0.0, width: 0.7, height: 0.7)),
+        MultiviewCell(source: .preview, rect: NormalizedRect(x: 0.7, y: 0.0, width: 0.3, height: 0.2333)),
+        MultiviewCell(source: .input(number: 3), rect: NormalizedRect(x: 0.7, y: 0.2333, width: 0.3, height: 0.2333)),
+        MultiviewCell(source: .input(number: 4), rect: NormalizedRect(x: 0.7, y: 0.4667, width: 0.3, height: 0.2333)),
+        MultiviewCell(source: .input(number: 1), rect: NormalizedRect(x: 0.0, y: 0.7, width: 0.3333, height: 0.3)),
+        MultiviewCell(source: .input(number: 2), rect: NormalizedRect(x: 0.3333, y: 0.7, width: 0.3333, height: 0.3)),
+        MultiviewCell(source: .input(number: 5), rect: NormalizedRect(x: 0.6667, y: 0.7, width: 0.3333, height: 0.3)),
+    ], safeArea: true, meters: true)
+
+    /// 同一个自定义布局的过渡键写法（W3-B 原样）。
+    static let customLayoutLegacyJSON: JSONValue = [
         "cells": [
             ["source": "program", "rect": ["x": 0.0, "y": 0.0, "width": 0.7, "height": 0.7]],
             ["source": "preview", "rect": ["x": 0.7, "y": 0.0, "width": 0.3, "height": 0.2333]],

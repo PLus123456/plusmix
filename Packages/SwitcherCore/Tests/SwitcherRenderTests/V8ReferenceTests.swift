@@ -41,8 +41,8 @@ final class V8ReferenceTests: XCTestCase {
         RefCase(name: "v8-overlay-slide50-pgm", state: ReferenceStates.overlaySlide50(), target: .program),
         RefCase(name: "v8-overlay-zoom50-pgm", state: ReferenceStates.overlayZoom50(), target: .program),
         RefCase(name: "v8-preview-overlays-pvw", state: ReferenceStates.fixed8(), target: .preview, overlaysInPreview: true),
-        RefCase(name: "v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview),
-        RefCase(name: "v8-multiview-3x3", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"), target: .multiview),
+        RefCase(name: "v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview),
+        RefCase(name: "v8-multiview-3x3", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3"), target: .multiview),
         RefCase(name: "v8-multiview-custom", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout), target: .multiview),
     ]
 
@@ -132,8 +132,8 @@ final class V8ReferenceTests: XCTestCase {
     }
     func testV8_previewWithOverlaysMatchesReference() throws { try compare("v8-preview-overlays-pvw", state: ReferenceStates.fixed8(), target: .preview, overlaysInPreview: true) }
     func testV8_multiviewLayoutsMatchReference() throws {
-        try compare("v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview)
-        try compare("v8-multiview-3x3", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), "3x3"), target: .multiview)
+        try compare("v8-multiview-pgmpvw2x2", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "pgmPvw+2x2"), target: .multiview)
+        try compare("v8-multiview-3x3", state: ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3"), target: .multiview)
         try compare("v8-multiview-custom", state: ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout), target: .multiview)
     }
 
