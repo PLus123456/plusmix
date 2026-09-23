@@ -598,6 +598,13 @@
 "prefs.preview.hint" = "打开后 PVW 画每一路显示中的叠加（与叠加面板里每通道的\"PVW 预览\"取或）；渲染器选项，下次起引擎生效（\"应用并重起引擎\"立刻生效）。";
 "prefs.preview.overlaysAll" = "PVW 预览全部叠加";
 "prefs.preview.title" = "PVW 预览";
+"prefs.showAudio.alignment" = "对齐延迟 %d 帧（%.1f ms）";
+"prefs.showAudio.apply" = "应用（重建音频引擎）";
+"prefs.showAudio.hint" = "对齐延迟 = 节目音频相对采集晚多少（默认 2048 帧 = 42.7 ms，与视频内部延迟同量级）：低延迟监听调小、大块生产者调大。两项都存在节目文件里；运行中改要重建延迟线，所以\"应用\"会换一次引擎，录制 / 推流会停。";
+"prefs.showAudio.monitorPoint" = "耳机监听点";
+"prefs.showAudio.monitorPoint.postDelayLine" = "延迟线后（与节目画面对齐）";
+"prefs.showAudio.monitorPoint.preDelayLine" = "延迟线前（低延迟监听，默认）";
+"prefs.showAudio.title" = "节目音频：对齐与监听（存在节目文件里）";
 "prefs.status.restarting" = "正在重起引擎…";
 "prefs.status.saved" = "已保存";
 "prefs.update.check" = "检查更新…";

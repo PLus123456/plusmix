@@ -151,6 +151,17 @@ final class AppController {
         await replaceSession(show: show)
     }
 
+    /// 改节目音频的对齐延迟 / 监听点（提案 007，存在 Show.audio 里）：运行期改要重建延迟线，AudioRuntime 建引擎时才读，所以换一个 session
+    /// （同 changeProgramFormat：输入 / 输出原样带过去，录制 / 推流的目标状态清掉）。
+    func changeShowAudio(alignmentFrames: Int, monitorPoint: MonitorPoint) async {
+        guard let session else { return }
+        var show = ShowDocuments.stoppingOutputs(session.makeShow())
+        show.audio.alignmentFrames = max(0, alignmentFrames)
+        show.audio.monitorPoint = monitorPoint
+        show.layout = currentLayout()
+        await replaceSession(show: show)
+    }
+
     /// 用当前节目重起引擎（偏好设置里 API / 音频设备 / 兼容层改了要立刻生效）。
     func restartSession() async {
         guard let session else { return }

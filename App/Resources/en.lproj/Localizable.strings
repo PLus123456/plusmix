@@ -598,6 +598,13 @@
 "prefs.preview.hint" = "When on, PVW draws every visible overlay (OR-ed with each channel's \"Preview in PVW\" in the overlay panel). It is a renderer option: takes effect the next time the engine starts (\"Apply and Restart Engine\" applies it now).";
 "prefs.preview.overlaysAll" = "Preview all overlays in PVW";
 "prefs.preview.title" = "Preview (PVW)";
+"prefs.showAudio.alignment" = "Alignment delay %d frames (%.1f ms)";
+"prefs.showAudio.apply" = "Apply (rebuild audio engine)";
+"prefs.showAudio.hint" = "Alignment delay = how much later the program audio is than capture (default 2048 frames = 42.7 ms, about the video pipeline's latency): lower it for low-latency monitoring, raise it for producers with large blocks. Both are saved in the show; changing them needs a new delay line, so Apply restarts the engine and stops recording / streaming.";
+"prefs.showAudio.monitorPoint" = "Headphone monitor point";
+"prefs.showAudio.monitorPoint.postDelayLine" = "After the delay line (aligned with the picture)";
+"prefs.showAudio.monitorPoint.preDelayLine" = "Before the delay line (low latency, default)";
+"prefs.showAudio.title" = "Show audio: alignment and monitoring (saved in the show)";
 "prefs.status.restarting" = "Restarting engine…";
 "prefs.status.saved" = "Saved";
 "prefs.update.check" = "Check for Updates…";

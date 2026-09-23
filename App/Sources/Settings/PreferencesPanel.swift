@@ -36,6 +36,9 @@ final class PreferencesModel: ObservableObject {
     @Published var compatLayerPort: Int
     /// PVW 预览全部叠加（渲染器总开关，换 session 生效）。
     @Published var overlaysInPreview: Bool
+    /// 节目音频的对齐延迟（48 kHz 帧）与监听点（提案 007）：存在节目文件里，不是全局偏好；改了要重建音频引擎（换 session）。
+    @Published var alignmentFrames: Int
+    @Published var monitorPoint: SwitcherContracts.MonitorPoint
     @Published var language: String
     @Published private(set) var status = ""
     let audioDeviceChoices: [AudioDeviceChoice]
@@ -62,6 +65,9 @@ final class PreferencesModel: ObservableObject {
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
         overlaysInPreview = s.overlaysInPreview
+        let audio = controller.session?.state.audio ?? AudioState()
+        alignmentFrames = audio.alignmentFrames
+        monitorPoint = audio.monitorPoint
         let languages = controller.defaults.stringArray(forKey: "AppleLanguages")
         language = languages?.first.flatMap { code in L10n.supportedLanguages.contains(code) ? code : nil } ?? Self.systemLanguage
         var choices = [AudioDeviceChoice(id: "default", title: L("prefs.audio.systemDefault"), device: .systemDefault),
@@ -119,6 +125,22 @@ final class PreferencesModel: ObservableObject {
         return true
     }
 
+    /// 对齐延迟的范围（帧，48 kHz）：0 … 0.5 s。
+    static let alignmentRange = 0...24_000
+    static let alignmentStep = 256
+
+    /// 对齐延迟 / 监听点变了就换 session 重建音频引擎（录制 / 推流会停）；没变返回 false。
+    @discardableResult
+    func applyShowAudio() -> Bool {
+        guard let session = controller.session else { return false }
+        let frames = min(max(alignmentFrames, Self.alignmentRange.lowerBound), Self.alignmentRange.upperBound)
+        guard frames != session.state.audio.alignmentFrames || monitorPoint != session.state.audio.monitorPoint else { return false }
+        let point = monitorPoint
+        status = L("prefs.status.restarting")
+        Task { await controller.changeShowAudio(alignmentFrames: frames, monitorPoint: point) }
+        return true
+    }
+
     /// 应用设置并立刻重起引擎（API / 音频设备 / 兼容层的改动才生效）。
     func applyAndRestart() {
         apply()
@@ -157,6 +179,16 @@ struct PreferencesView: View {
                     ForEach(model.audioDeviceChoices) { Text($0.title).tag($0.id) }
                 }
                 Text(L("prefs.audio.hint")).font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L("prefs.showAudio.title")) {
+                Stepper(value: $model.alignmentFrames, in: PreferencesModel.alignmentRange, step: PreferencesModel.alignmentStep) {
+                    Text(L("prefs.showAudio.alignment", model.alignmentFrames, Double(model.alignmentFrames) / 48))
+                }
+                Picker(L("prefs.showAudio.monitorPoint"), selection: $model.monitorPoint) {
+                    ForEach(SwitcherContracts.MonitorPoint.allCases, id: \.self) { Text(L("prefs.showAudio.monitorPoint.\($0.rawValue)")).tag($0) }
+                }
+                Button(L("prefs.showAudio.apply")) { model.applyShowAudio() }
+                Text(L("prefs.showAudio.hint")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("prefs.preview.title")) {
                 Toggle(L("prefs.preview.overlaysAll"), isOn: $model.overlaysInPreview)

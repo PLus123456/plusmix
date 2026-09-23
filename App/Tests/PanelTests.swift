@@ -17,6 +17,8 @@ final class PanelTests: XCTestCase {
         let verify: () -> Bool
         /// 失败时打印的现状。
         let describe: () -> String
+        /// 等字段变的时限（换 session 的那几条要长一点）。
+        var timeout: Double = 3
     }
 
     func testPanels_openChangeOneItemSnapshotFieldChanges() throws {
@@ -232,6 +234,21 @@ final class PanelTests: XCTestCase {
                  verify: { controller.windowController.isMultiviewWindowVisible && controller.windowController.multiviewWindow?.displayView.target == .multiview },
                  describe: { "\(String(describing: controller.windowController.multiviewWindow))" }))
 
+        // W3-E2 / 提案 007：对齐延迟与监听点存在 Show.audio 里，改了要重建音频引擎 = 换 session（放最后：后面的用例不再用旧 session）
+        cases.append(Case(name: "偏好设置：对齐延迟 4096 帧 + 监听点延迟线后（换 session 重建音频引擎）", change: {
+                let p = panels.showPreferences()
+                XCTAssertEqual(p.model.alignmentFrames, AudioState.defaultAlignmentFrames)
+                XCTAssertEqual(p.model.monitorPoint, .preDelayLine)
+                p.model.alignmentFrames = 4096
+                p.model.monitorPoint = .postDelayLine
+                XCTAssertTrue(p.model.applyShowAudio(), "变了应换 session")
+            }, verify: {
+                guard let s = controller.session, s !== session, s.isRunning else { return false }
+                return s.state.audio.alignmentFrames == 4096 && s.state.audio.monitorPoint == .postDelayLine && s.state.inputs.count == 3
+                    && s.audio.engine.configuration.alignmentFrames == 4096 && s.audio.engine.configuration.monitorPoint == .postDelayLine
+            }, describe: { "\(String(describing: controller.session?.state.audio)) 引擎 \(String(describing: controller.session?.audio.engine.configuration.alignmentFrames))" },
+               timeout: 20))
+
         for c in cases {
             do {
                 try c.change()
@@ -239,7 +256,7 @@ final class PanelTests: XCTestCase {
                 XCTFail("\(c.name)：\(error)")
                 continue
             }
-            let ok = AppTest.waitUntil(3, c.verify)
+            let ok = AppTest.waitUntil(c.timeout, c.verify)
             XCTAssertTrue(ok, "\(c.name)：字段没变，现状 \(c.describe())")
             AppTest.pump(seconds: 0.05)
         }
@@ -251,6 +268,7 @@ final class PanelTests: XCTestCase {
         for r in m.model.rows { m.model.removeRow(r.id) }
         XCTAssertTrue(m.model.save())
         // 面板都开着的时候关掉（换 session 也走同一条路）
+        panels.showMultiview()
         panels.closeAll()
         XCTAssertFalse(controller.windowController.isMultiviewWindowVisible, "closeAll 应关掉多画面窗口")
     }
