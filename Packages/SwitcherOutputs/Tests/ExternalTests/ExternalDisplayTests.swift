@@ -38,6 +38,9 @@ final class FakeDisplaySource: @unchecked Sendable {
             }
         }
         t.name = "fake.render"
+        // 与真渲染线程一样是高优先级（引擎的渲染线程是 time-constraint 线程）：默认优先级在别的会话跑测试时会被拖后、再连着补渲几拍，
+        // 两帧落进同一次显示刷新就被覆盖——那是夹具不像真的，不是显示侧掉帧
+        t.qualityOfService = .userInteractive
         thread = t
         t.start()
     }

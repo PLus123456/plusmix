@@ -5,8 +5,9 @@
 所以"挪到外接屏"这一项这次能自动测了（L2 秒表法仍是人工）。
 worktree `.claude/worktrees/w3-outputs-aux-stats-dd95ab`，桌面端给的分支 `claude/w3-outputs-aux-stats-dd95ab` 没动，另从同一提交开了 **`w3-outputs-3`** 并在上面提交；
 从 main **4b7a3df**（P3 / W1-A3 / W2-A2 合入、提案 015 落地之后）开。提交：`git log main..w3-outputs-3`（代码 3 个、问题单 2 个、报告 3 个）。
-改动只在 `Packages/SwitcherOutputs/{Sources,Tests}/{External,ExternalTests,VirtualCamera,VirtualCameraTests}/`、本报告与 `reports/issues/`；
-契约、渲染器、App、CameraExtension、Package.swift 都没碰。`make lint BRANCH=w3-outputs-3` 全绿（禁词 / 版本号 / 依赖方向 / 归属 / RT 符号）。
+改动在 `Packages/SwitcherOutputs/{Sources,Tests}/{External,ExternalTests,VirtualCamera,VirtualCameraTests}/`、本报告与 `reports/issues/`、`docs/contract-changes/018`；
+另有**提案 018（用户 2026-09-23 批并指定本会话落地）**多出来的 9 个文件：契约 `Stats.swift` + 契约测试四处、`docs/CONTRACTS.md`、TestKit 的 `StatsSummary.swift` 与其测试、
+`docs/OWNERSHIP.md`（W3-C2 行记了授权与这些文件）。渲染器、App、CameraExtension、Package.swift、测试标准都没碰。`make lint BRANCH=w3-outputs-3` 全绿（禁词 / 版本号 / 依赖方向 / 归属 / RT 符号）。
 
 ## 1. 做了什么
 
@@ -27,12 +28,16 @@ worktree `.claude/worktrees/w3-outputs-aux-stats-dd95ab`，桌面端给的分支
 | 1 Aux 全分辨率 | `External/AuxShaders.swift`（着色器源码 + 管线缓存）、`AuxInputPresenter.swift`（取帧 / 包纹理 / 编码 / 占位 / 记账，窗口与离屏测试共用）、`AuxInputView.swift`（CAMetalLayer + `NSView.displayLink`）、`ExternalDisplayWindow` / `ExternalDisplayManager` 接线 | source = 输入 n 的窗口里 `displayView`（MetalDisplayView）收起、`auxView` 出来。每次显示刷新：**帧槽的契约读入口 `latest(atOrBefore: 此刻)`** 从组装方给的帧槽取该路最新帧（`AuxFrameTap`：App 里 = `InputRuntime.openBranch` → `InputFrameTee` 的一个分支，窗口是它唯一的读者；不走引擎的 `latest(forTick:)`，不碰主槽、不动到达余量），CVMetalTextureCache 零拷贝包成纹理，着色器按渲染器同一套系数换算（BT.709 / 601 / 2020、limited / full、4:2:0 色度左对齐、线性采样、1:1 与放大走 float、缩小按 Placement 的 taps 做盒式滤波），按比例铺满 drawable。NV12 / BGRA 之外顺手支持 UYVY（DeckLink 的 8 位 4:2:2，同一套换算）。**抠像 / 裁切 / 变换不生效 = 原始画面**（写在 `ExternalDisplaySpec` / 窗口 / presenter 的注释里；界面文案归 App，见 §3）。**纹理缓存按输入编号预建**（attach 时建，不等第一帧），**换输入时重建**（同一路改名不重建）。**无信号画占位**：帧槽里从没有帧、组装方给的运行状态是 noSignal / error、或（没给运行状态时）帧断了超过 3 个帧间隔（与输入 NoSignalWatchdog 同一个 N，下限 50 ms）→ 黑底 + 中间"无信号"（error 时是输入报的文案）+ 左下"编号  名字"（多画面格子名字条的格式）；文字在后台队列用 CoreText 栅格化，好了补画一次，画过就不重画。**主线程不做像素工作**：每次刷新只取帧、包纹理、编码一次绘制（release 中位 9.8 µs、p99 19.4 µs，见 §2 末），像素换算在 GPU。渲染线程完全不参与（没加 `RenderedFrame` 字段、没加每路全分辨率目标）。组装方怎么接：issue W3C2-app-aux-wiring（约 10 行胶水） |
 | 2 `Stats.display[]` 复核 | `External/DisplayFrameLedger.swift`、`ExternalDisplayManager.statsEntries`、`ExternalDisplayWindow.presentedFrames / droppedFrames`；`VirtualCamera/VirtualCameraSink.swift`（`VirtualCameraSink` 协议、`ScheduledOutputTracker`、`CMIOSequenceNumber`）、`CMIOSinkStreamClient`、`VirtualCameraOutput` | **外部显示的 dropped**：P3 只算"拿不到 drawable"。改成 prompt 的口径"引擎给了新帧但两次刷新间被覆盖的次数"：PGM / PVW / 多画面由 `DisplayFrameLedger` 夹在渲染器与 MetalDisplayView 之间转发 `latestDisplayFrame`，按渲染器完成帧版本号在两次呈现之间跳过的个数记（MetalDisplayView 与渲染器都不用改）；Aux 由 presenter 按帧槽分支两次刷新之间的 `FrameSlotStats.dropped` 增量 + 取了没画出去又被新帧顶掉的记。**窗口收起 / 被遮住 / 换源 / 占位期间不记**（那是没在呈现，不是没赶上）。frames = 窗口累计呈现（两种视图相加、换源不清零、占位不算）。state 的 presenting / noDisplay 复核无误保持。**虚拟摄像头**：dropped 按契约注释改成"被扩展丢弃"——连着的时候本端队列满 + 排不进 sink（扩展没及时取）+ **扩展收了没输出的（从扩展来：每帧挂 CMIO 序号，扩展输出后 `notifyScheduledOutputChanged`，本进程在 sink stream 上注册 'sonp' 回调，序号跳号 = 扩展丢的）**；扩展没装时丢的不再进 Stats（仍在 `countersSnapshot.droppedNoDevice`）。state：找不到设备 / 刚掉线 = waitingExtension，设备在但起不来 = **failed**；连上后连续一秒排不进 sink 就关掉重找（以前会一直停在 publishing）。扩展侧那一行 BLOCKED-签名 + 不归本会话，issue W3C2-camera-extension-scheduled-output 写了怎么加、怎么验 |
 | 3 主屏层级选项 | `ExternalDisplayWindow.MainScreenLayering`、`ExternalDisplayManager.mainScreenLayering` | 包内选项（不进 `OutputSettings.display`）。`.front` = 默认，行为不变（普通层级、orderFront）；`.behindInterface` = 窗口落在主屏（带菜单栏那块）时层级 normal − 1，主界面和别的窗口永远在它上面、点它也不翻上来；外接屏不受影响。App 的偏好开关归界面（issue） |
+| 2（续）提案 018 | `SwitcherContracts/Stats.swift`、`Contracts018Tests`（新）与 `CodableTests` / `ContractsP3Tests` / `Samples`、`docs/CONTRACTS.md`；TestKit `StatsSummary.DisplaySummary`；`VirtualCameraOutput.statsEntry`、`DisplayFrameLedger`、`AuxInputPresenter` / `AuxInputView`、`ExternalDisplayWindow.undeliveredFrames` | 用户"dropped 走提案吧"→ 写提案 018 → 用户选"批，本分支落地"。`Stats.DisplayEntry` 加 **`undelivered`**（JSON 键 `undelivered`，缺键 0、写出总写；`init` 默认 0，老调用点照编）= 不在呈现 / 发布时没送出去的帧；`dropped` 的注释收紧成"在呈现 / 发布时没送出去的"，两者不重叠。填数：虚拟摄像头 = `droppedNoDevice`（没连上时丢的）；外部显示 PGM / PVW / 多画面 = 记账源在窗口收起 / 被遮住时记下最后画出的版本，暂停中按渲染器当前版本边停边估（少估两帧，保证不回退），恢复后第一帧按版本号结算；Aux = 暂停（或占位）期间帧槽分支挤掉的帧，按帧槽计数边停边记；换源那段两边都不记。TestKit `DisplaySummary.undelivered` 同 frames 的算法，老摘要缺键 0 |
 | 4 删过渡键后备读取 | `ExternalDisplaySpec.init(settings:)` | 只读 `OutputSettings.display`，没有就是 `DisplayOutputSettings()` 的默认（主屏、`fallbackToMain = false`，提案 015 已落地，两边默认一致）；`extra["displayID" / "fallbackToMain"]` 一律忽略。写出照旧只写正式字段、顺手清旧键。`displayIDKey / fallbackKey` 常量留着——App 的 `OutputExtras.displayNumber(of:)` 还在用它们作后备（P3 报告 §4 第 1 条：W4 / G5 一起删）。P3 的 `testP3_013_specRoundTripsThroughOfficialDisplayField` 后半改成"旧键被忽略" |
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
-跑法：`swift test --package-path Packages/SwitcherOutputs --filter 'ExternalTests|VirtualCameraTests'`（debug，最后一次 16:09–16:10，机器上没有别的会话在跑测试：
-ExternalTests 14 个 1 跳 0 失败 47.8 s、VirtualCameraTests 9 个 0 失败 1.7 s）。开窗的用例会在两块屏上开全屏窗口几秒。
+跑法：`swift test --package-path Packages/SwitcherOutputs --filter 'ExternalTests|VirtualCameraTests'`（debug，落地 018 之后最后一次 17:20–17:21，
+机器上没有别的会话在跑测试 / 构建、1 分钟负载 < 4：ExternalTests 14 个 1 跳 0 失败 47.1 s、VirtualCameraTests 9 个 0 失败 1.7 s）。开窗的用例会在两块屏上开全屏窗口几秒。
+**负载下的一次（17:08，W3-E2 / W3-B2 同时在跑整包测试，负载 8.6）**：统计用例的 PGM 窗口 10 s 记了 dropped 29（57.1 fps），Aux 窗口 0——夹具的假渲染线程是默认优先级，
+被拖后再连着补渲，两帧落进同一次刷新就被覆盖，记数本身是对的；夹具的线程改成 `.userInteractive`（与引擎的 time-constraint 渲染线程一致），断言没动，
+等机器空下来重跑就是上面的数（"无负载"是这条用例的前提）。
 
 | 测试 ID | 测试函数 | 数值 | 阈值 | 通过 |
 |---|---|---|---|---|
@@ -40,18 +45,20 @@ ExternalTests 14 个 1 跳 0 失败 47.8 s、VirtualCameraTests 9 个 0 失败 1
 | （附加）UYVY | `testAux_uyvyInputMatchesRenderer` | 对渲染器 0 差 | 同上 | ✅ |
 | 无信号占位（prompt 点名） | `AuxInputTests.testAux_noSignalDrawsPlaceholder` | 帧槽空 → 占位（先黑底，文字后台好了补画一次，之后不重画）：中间亮像素 2580、左下名字条 775、其余 0；"无信号" / "2  机位二"；来帧 → 画帧（字节相等）；帧断 40 ms 仍是最后一帧、60 ms（> 3 × 16.7）回到占位（与第一次逐字节相同）；运行状态 noSignal → 不画帧；error → 占位中间换成错误文案；文案可换（No signal）；没有帧槽 → 占位 | 画占位、与多画面格子同一套文案 | ✅ |
 | （附加）纹理缓存 | `testAux_textureCacheRebuiltOnInputSwitch` | attach 即建（按输入编号），同一路改名不重建，换输入重建，detach 释放 | 预建 / 换输入重建 | ✅ |
-| 显示类 Stats（prompt 点名） | `DisplayStatsTests.testStats_displayEntriesCountPresentedFrames` | 内置屏 120 Hz，节目 60 fps：**PGM 窗口 10 s 呈现 600 帧（60.0 fps）dropped 0**，**Aux 窗口 10 s 606 帧（60.0 fps）dropped 0**；每 100 ms 采样 frames / dropped 单调、每秒都在涨、state 全是 presenting；目标显示器 ID 改成不存在（模拟拔掉）→ **noDisplay**、frames 停、dropped 仍 0；改回来 → presenting、继续呈现、**拔插空档不记丢帧** | 10 s 内 frames 单调递增、dropped 0（无负载）、presenting；拔显示器 → noDisplay | ✅ |
-| （附加）dropped 口径本身 | `testStats_droppedCountsFramesOverwrittenBetweenRefreshes` | 源比刷新快（240 fps → 120 Hz）：PGM 2 s 新版本 483、呈现 241、dropped 241；Aux 推 480、呈现 240、dropped 240——**呈现 + 丢 = 新帧**（差 ≤ 2，是首尾在路上的） | 被覆盖的都记上、不多记 | ✅ |
+| 显示类 Stats（prompt 点名） | `DisplayStatsTests.testStats_displayEntriesCountPresentedFrames` | 内置屏 120 Hz，节目 60 fps：**PGM 窗口 10 s 呈现 606 帧（60.0 fps）dropped 0**，**Aux 窗口 10 s 606 帧（60.0 fps）dropped 0**，这 10 s 里 undelivered 不动；每 100 ms 采样 frames / dropped 单调、每秒都在涨、state 全是 presenting；目标显示器 ID 改成不存在（模拟拔掉）→ **noDisplay**、frames 停、dropped 仍 0、**undelivered 边停边涨**；改回来 → presenting、继续呈现、**拔插空档不记丢帧**，拔掉的 2.01 s 全进 undelivered：PGM **121**、Aux **121**（约 60 帧 / s，提案 018） | 10 s 内 frames 单调递增、dropped 0（无负载）、presenting；拔显示器 → noDisplay | ✅ |
+| （附加）dropped 口径本身 | `testStats_droppedCountsFramesOverwrittenBetweenRefreshes` | 源比刷新快（240 fps → 120 Hz）：PGM 2 s 新版本 481、呈现 238、dropped 242；Aux 推 483、呈现 242、dropped 242——**呈现 + 丢 = 新帧**（差 ≤ 2，是首尾在路上的）；一直在呈现，undelivered 不动 | 被覆盖的都记上、不多记 | ✅ |
 | 主屏层级 | `testWindow_mainScreenLayeringOption_keepsInterfaceOnTop` | 默认 `.front`：层级 normal、（宿主是前台时）盖在替身界面上面；`.behindInterface`：层级 normal − 1，界面在上、自己成 key 也不翻上来、仍全屏可见；外接屏上的窗口仍 normal；切回 `.front` 恢复 | 默认行为不变 / 选项不盖住主界面 | ✅（默认的前后次序只在宿主是前台 App 时核，见 §5 第 3 条） |
-| 外接屏（硬件这次在） | `testExternal_realSecondDisplay_pgmAndAuxPresentWithoutDrops` | LG 144 Hz：PGM **59.9 fps dropped 0**、Aux **59.9 fps dropped 0**，窗口 = 那块屏的 frame，Aux 的 drawable = **2560×1440**（整块屏的像素，不是格子） | 按那块屏刷新、全分辨率、不掉帧 | ✅ |
+| 外接屏（硬件这次在） | `testExternal_realSecondDisplay_pgmAndAuxPresentWithoutDrops` | LG 144 Hz：PGM **60.0 fps dropped 0**、Aux **59.9 fps dropped 0**，窗口 = 那块屏的 frame，Aux 的 drawable = **2560×1440**（整块屏的像素，不是格子） | 按那块屏刷新、全分辨率、不掉帧 | ✅ |
 | 过渡键 | `ExternalDisplayTests.testP3_013_specRoundTripsThroughOfficialDisplayField` | 正式字段往返；**旧键被忽略**（只有 extra 时 = 主屏 / 不退回）；有正式字段只看正式字段；写出清旧键；缺省 fallbackToMain = `DisplayOutputSettings()` 的默认（false，015） | — | ✅ |
 | W3-C 的老用例 | `ExternalDisplayTests` 其余 4 个 | 窗口盖满屏、59.7 fps blit、换源、Esc；插拔等待 / 退主屏；管理器增删多窗口（Aux 窗口开 / 还分支）；显示器列表 | — | ✅ |
 | 外接屏 L2 秒表法 | `testL2_externalDisplayStopwatch_manual` | — | UVC ≤ 150 ms（扣设备 ≤ 3 帧） | **BLOCKED-硬件（人工）**：屏有了，缺的是摄像头 + 手机毫秒秒表 + 1/1000 s 快门拍照读数；步骤见 issue W3C2-checklist-external-display-manual §1（给检查点抄进 docs/checklists 的下一版） |
-| 虚拟摄像头 Stats | `VirtualCameraTests.testP3_013_virtualCameraStatsEntry`（改了口径） | 没设备：10 帧全进 `droppedNoDevice`，Stats 的 dropped = 0、frames 0、state waitingExtension；dropped = 队列满 + sink + 扩展三项 | 契约注释："被扩展丢弃的帧数" | ✅ |
-| 虚拟摄像头连上之后（以前 0 覆盖） | `testVirtualCamera_fakeSinkPublishing_framesDroppedAndStates` | 假 sink：publishing、frames = 30、序号 0…29 连续挂在样本上；sink 满 5 帧 → dropped 5、序号不跳；扩展回报（输出 28、跳号 2）→ dropped 7、framesOutput 28；连续 8 帧排不进 → 关掉重找、waitingExtension、之后丢的不进 dropped；起流失败 → failed；恢复 → publishing、新连接序号从 0 | — | ✅ |
+| 虚拟摄像头 Stats | `VirtualCameraTests.testP3_013_virtualCameraStatsEntry`（改了口径） | 没设备：10 帧全进 `droppedNoDevice`，Stats 的 dropped = 0、**undelivered = 10**（= droppedNoDevice，提案 018）、frames 0、state waitingExtension；dropped = 队列满 + sink + 扩展三项 | 契约注释："被扩展丢弃的帧数"；018：没连上时丢的进 undelivered | ✅ |
+| 虚拟摄像头连上之后（以前 0 覆盖） | `testVirtualCamera_fakeSinkPublishing_framesDroppedAndStates` | 假 sink：publishing、frames = 30、undelivered 0、序号 0…29 连续挂在样本上；sink 满 5 帧 → dropped 5、序号不跳；扩展回报（输出 28、跳号 2）→ dropped 7、framesOutput 28；连续 8 帧排不进 → 关掉重找、waitingExtension、之后丢的不进 dropped、进 undelivered（+10 以上，= droppedNoDevice）；起流失败 → failed；恢复 → publishing、新连接序号从 0 | — | ✅ |
 | 扩展丢帧记账 | `testVirtualCamera_scheduledOutputNotificationsCountExtensionDrops` | 走注册给 CMIO 的同一个 C 回调：序号 0,1,2,5,6 → 输出 5 丢 2；重复 / 倒退不算丢；新连接不和旧连接比；第一条通知之前的序号算丢；refCon 为空不崩 | — | ✅ |
 | CMIO 序号 | `testVirtualCamera_sequenceNumberRoundTripsOnSampleBuffer` | 默认 invalid；设 41 / 42 读回一致；本机用的是 C 函数（不是附件键后备） | — | ✅ |
 | 虚拟摄像头老用例 | 其余 5 个 | 没设备 60 帧全丢、重试 6 次、consume p99 0.008 ms；未签名宿主激活报 BLOCKED-签名 | — | ✅ |
+| 提案 018 契约 | `SwitcherContractsTests.Contracts018Tests`（2 个，新）+ `CodableTests` / `ContractsP3Tests` 的键名快照跟改 | 键名与位置（dropped 之后）、往返、013 老条目缺键 = 0、老调用点默认 0、写出总写全；整行 Stats 往返带着 undelivered。SwitcherContractsTests 全部 75 个 0 失败（1 跳过是原有的） | — | ✅ |
+| 提案 018 摘要 | `SwitcherTestKitTests.StatsTests.test018_statsSummary_displayUndelivered` | `DisplaySummary.undelivered` = 末行 − 首行（虚拟摄像头 70、外部显示 62）；018 之前的摘要缺键按 0 解。StatsTests 11 个 0 失败（本地 TestKit 钉回 swift-collections 1.6.0 才跑得起来，§5 第 2 条） | — | ✅ |
 | 虚拟摄像头真扩展的 publishing / 扩展回报 | — | — | — | **BLOCKED-签名**（Team ID + /Applications）；扩展侧还差 `notifyScheduledOutputChanged` 一行（issue 里有代码和验证步骤） |
 
 **主线程开销（交付 1 "主线程不做像素工作"的数字）**：离屏循环 600 次（1080p NV12 → 3456×2234 目标，= 内置屏全屏 drawable），每次 取帧 + 包纹理 + 编码 + 提交：
@@ -76,15 +83,17 @@ release **中位 9.8 µs、p99 19.4 µs、最大 49.5 µs**（debug 11.4 / 20.8 
 ## 4. 对契约的疑问
 
 1. **`FrameSlot.latest(atOrBefore:)` 的线程注释**写的是"只能由渲染线程调"。G4 的裁定让 Aux 在显示刷新（主线程）上用这个入口读 InputFrameTee 的**分支槽**——那个槽的唯一读者就是这个窗口，SPSC 仍然成立，ISO 的 tap 也是同样用法。建议下一个契约会话把注释改成"单消费者：引擎的渲染线程，或分支槽的唯一读者（ISO / Aux）"（只改注释，不动签名）。
-2. **虚拟摄像头 dropped 的口径改了**：P3 把"扩展没装时丢的"也算进 dropped，本会话按 `DisplayEntry` 的注释（"被扩展丢弃的帧数"）改成只算连上之后的三项，没装时的丢帧靠 state = waitingExtension 表达、数字留在 `countersSnapshot.droppedNoDevice`。契约没改（口径本来就是这么写的）。**用户 2026-09-23 定"dropped 走提案"→ 提案 018（待批）**：`Stats.DisplayEntry` 加 `undelivered`
-（不在呈现 / 发布时没送出去的帧：虚拟摄像头没连上时丢的、外部显示收起 / 被遮住时没画的），`dropped` 的注释收紧成"在呈现 / 发布时没送出去的"，两者不重叠；
-建议照 014 / 015 的先例批了就由本分支落地（契约几行 + 填数），App 文案留给合并检查点。
+2. **虚拟摄像头 dropped 的口径 → 提案 018（已批并由本分支落地）**：P3 把"扩展没装时丢的"也算进 dropped，本会话先按 `DisplayEntry` 的注释（"被扩展丢弃的帧数"）改成只算连上之后的三项；
+   用户定"dropped 走提案"→ 提案 018 → 批并指定本分支落地：`Stats.DisplayEntry` 加 `undelivered`（不在呈现 / 发布时没送出去的帧），`dropped` 只算在呈现 / 发布时的，两者不重叠。
+   **还差一处等用户**：测试标准 §7 的 display[] 字段表（`display[{output, kind, frames, dropped, state}]`）没加 `undelivered`——测试标准只有用户能改或授权；契约里的 `Stats` 注释与 CONTRACTS.md 已经写上。
 3. **Aux 窗口的输入无信号时 state 仍是 presenting**（窗口在呈现，画的是占位；frames 不涨）。`DisplayEntry.states` 里没有"源无信号"，输入的健康在 `per_input` 里有。觉得需要细分再提。
 
 ## 5. 下一个会话需要知道的坑
 
 1. **App 不接三根线，Aux 就是"无信号"**（§3 第 1 条）。`AuxFrameTap` 的两个闭包是 `@MainActor`；关分支要把 `any FrameSlot` 转回 `LockFreeFrameSlot` 再 `InputRuntime.releaseBranch`。每个 Aux 窗口占该路 InputFrameTee 的一个分支（每路 4 个，与 ISO 共用），开不到就画占位、下次快照变了再试。
-2. **新 worktree 的 App 起不来（dyld `_swift_initBorrow`）**：`make gen` 生成的 Xcode 工作区会把 swift-collections 解到上游刚发的 1.7.0，它用的运行时符号 macOS 26.6.2 没有；入库的 Package.resolved 与其他 worktree 都是 1.6.0。绕法与正式修法见 issue W3C2-g5-swift-collections-1.7-dyld-crash（拷一份 1.6.0 的工作区 Package.resolved、清 `.build/DerivedData/SourcePackages` 再 resolve）。包级 `swift test` 不受影响。
+2. **新 worktree 的 App 起不来（dyld `_swift_initBorrow`）**：`make gen` 生成的 Xcode 工作区会把 swift-collections 解到上游刚发的 1.7.0，它用的运行时符号 macOS 26.6.2 没有；入库的 Package.resolved 与其他 worktree 都是 1.6.0。绕法与正式修法见 issue W3C2-g5-swift-collections-1.7-dyld-crash（拷一份 1.6.0 的工作区 Package.resolved、清 `.build/DerivedData/SourcePackages` 再 resolve）。
+   **包级 `swift test` 也中招，只要那个包没有入库的 Package.resolved**：SwitcherTestKit（落地 018 时跑它的测试撞上，同一个 dyld 错）、大概率还有 Tools/frameprobe；
+   SwitcherControl / switcher-headless 有入库的钉法、SwitcherCore / SwitcherOutputs 不依赖 swift-collections，不受影响。绕法同一张 issue。
 3. **macOS 14 起的协作式激活让"窗口前后次序"类用例看运气**：测试宿主不是前台 App 时，新窗口 orderFront 排到哪由系统定，被别的 App 盖住的窗口 MetalDisplayView / AuxInputView 会按规矩暂停。本分支的层级用例因此只在宿主真是前台时核默认次序；App 的 `testMultiview_windowTogglesPresentsAndSavesFrame` 今天在本机就是这样红的。跑这类用例前把别的 App 的窗口从主屏挪开或让测试宿主成前台。
 4. **Aux 着色器的数学模式要跟渲染器走**：现在是 `.fast`（渲染器实际用的 default.metallib）。渲染器哪天改了换算或数学模式，`testAux_inputWindowDrawsFullResolutionFrame` 的色度噪声那张会红，把 `AuxShaders.swift` 跟着改。
 5. **占位文字是后台栅格化的**：离屏测试要先 `nextDraw` 一次（触发栅格化、先画黑底），转事件循环等 `placeholderReady`，再画一次才带字；窗口里下一次刷新自然补上。
