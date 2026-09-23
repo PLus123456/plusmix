@@ -51,4 +51,5 @@ App 的 Info.plist 要有 `NSMicrophoneUsageDescription`（摄像头自带麦克
 1–6 条都做了：工厂 `.audio` 分支（块 1024、videoSlot 不解包、帧槽照旧建）、Add Input 纯音频页换成 `AudioInputDevices.list()`（第一项"系统默认输入"、
 插拔刷新、关表单 stop）、声道选择（设备声道 > 2 时；DeckLink 1–16 路）、输入设置窗摘要"第 5、6 路"、缩略图格子占位（话筒 + 名字 + 电平表，不显示"无信号"）、
 权限文案照原样显示（Info.plist 早有 NSMicrophoneUsageDescription）。用例 `InputWiringTests.testInputs_audioDeviceInputWiredAsAudioOnly`；
-live 路径从 Claude 的 Bash 起的测试宿主拿不到麦克风 TCC（状态是"麦克风权限尚未授权"那句 error），BLOCKED-权限，从 Terminal.app 跑 `make test-app` 解锁。
+单跑那次测试宿主还没有麦克风授权（状态是"麦克风权限尚未授权"那句 error，格子照样显示它）；之后授权了，全量那次 **live（MacBook Pro麦克风）**。
+多路接口上的声道选择（第 5、6 路）只在模型 / 表单层测了：本机只有 1 声道的内置麦克风，真设备那几条仍是清单 §9 的人工项。
