@@ -161,6 +161,7 @@ prompt：docs/plan/prompts/61-P3-契约落地二.md。落地提案 **007 / 008 /
 | `testP3_zoomAnchor` | center（默认）/ topLeft / bottomRight 的缩放中心；progress = 1 时九个锚点都回原 rect | ✅ |
 | `testP3_officialMultiviewFieldMatchesLegacyExtraKey` | 五个预设 + 自定义格子两条路径**格子表逐字相同**、渲染**逐像素相同**；正式字段优先；`.multiview` 格忽略；编号 < 1 / 空 rect 忽略；超 64 格截断 | ✅ |
 | `testP3_renderedFramePreviewAndMultiviewFollowOutputs` | `CompositorPasses.wants` 的六种组合（enabled / source / kind） | ✅ |
+| `testP3_renderedFrameAutoFilledFromStateWithDefaultOptions` | **端到端**：默认选项（两个强制开关都关）的实时 `MetalRenderer` 连画五种状态，`RenderedFrame.preview / multiview` 该有才有（NV12、pts = 拍点）。P3 之前默认选项下多画面环不建，这条会在"应非 nil"那一步红 | ✅ |
 | `testMultiview_layoutTableParseDoesNotAllocate` | 把正式字段那条路径也加进去，20 次解析 **SwitcherRender 自身 0 次分配** | ✅ |
 | `V8ReferenceTests` 全部 | 参考图不变（本会话没改任何默认渲染行为） | ✅ 72 个渲染用例全绿 |
 | `DeckLinkSourceParametersTests`（5 个，不要硬件） | 从 case 取 Options、老文件 connection nil、Options 覆盖 case、位集互转、kind 不符抛错 | ✅ |
@@ -169,6 +170,8 @@ prompt：docs/plan/prompts/61-P3-契约落地二.md。落地提案 **007 / 008 /
 | `ExternalDisplayTests.testManager_reconcile…`（扩了 statsEntries 段） | 每窗口一项、按编号升序、state 在 013 列表内、frames 随呈现递增且与 `presentedFrames` 同源、关窗后为空 | ✅ |
 | `testP3_013_virtualCameraStatsEntry` | idle / waitingExtension / stopped 三种状态、dropped 与 `countersSnapshot` 同源、frames = framesSent | ✅（publishing / frames 递增要签名的扩展，见 §3） |
 | `CommandCatalogTests.testCatalog_generatedMarkdownMatchesCommittedDocsApiMd` | `docs/api.md` 与生成器同步（33 条） | ✅ |
+| `StatsTests.testP3_statsSummary_displaysGroupedByOutputAndKind`（TestKit） | `StatsSummary.displays` 按 (output, kind) 分组：中途出现的虚拟摄像头、中途消失的监视器各按自己的首末行算；往返；P3 之前的基线没有这个键解成 nil；没有 display 项的文件是空数组 | ✅ |
+| `ShowRoundTripTests.testShow_legacyExtraKeysMigrateOnLoad`（App） | 过渡键写法的节目文件经 `Show.load` 搬进正式字段、旧键清掉，App 的 `OutputExtras.displayNumber` 照样读得到 | ✅（App 全量里跑） |
 
 ### 2.4 `make test`
 
