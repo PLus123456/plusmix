@@ -182,9 +182,28 @@ prompt：docs/plan/prompts/61-P3-契约落地二.md。落地提案 **007 / 008 /
 | `SyntheticSourceTests.testW1A_syntheticVideo_60fps10s_continuousMonotonic_pushed600` | 600 帧每帧一条，解出的 `hostTimeMs` 与 `pts.nanoseconds / 1e6` **差正好 2^28** | 601 条，同样红 | 测试漏了 `& TestPattern.dataMask`（图案数据字是 28 位，同包 `NoiseBackgroundTests` 写对了）。机器连续唤醒超过 2^28 ms ≈ 3.1 天就整片红（本机唤醒 3.16 天）。**按胶水额度改了那一行**（断言语义没变，补上本来就成立的前提），问题单 `reports/issues/P3-w1-testkit-hosttimems-28bit-mask.md` 退回 W1-A3 |
 | `SyntheticSourceTests.testW1A_syntheticVideo_jitterIsUniformWithinBound` | `abs(mean) < 0.8` 实测 0.85–0.86 | **3 次 3 次红** | 这是**阈值**，P3 不自己动（铁律 9）。问了用户，**2026-09-23 批了放宽到 1.2 ms**，已改并注明；问题单 `reports/issues/P3-w1-testkit-jitter-mean-bound.md` 里另记了"先跑一遍 jitterMs = 0 当零点、判 `abs(mean − 基准)`"这个与机器快慢无关的做法，留给 W1-A3 |
 
-### 2.5 gate4
+### 2.5 gate4（10 分钟 G4 场景；用户 2026-09-23 定的跑法：`scripts/gate4.sh --label p3* --baseline baselines/g4-m5max.json`，不写基线，跑完还原 `reports/G4.md`、删掉 `reports/G4-run-p3*.md`）
 
-待填（见文末"运行记录"）。
+`make gate4-run` 会用 `--write-baseline` 覆盖 `baselines/g4-m5max.json` 并重写 `reports/G4.md`，P3 不该动这两样，所以按上面的办法跑。
+**这台机器上当时还有别的会话在干活**（09:58 看到 W2-A2 的 worktree `w2-inputs-audio-device-2ef9a9` 在跑 `make test`；p3b 期间 load 4.4–5.0、WindowServer 29–45%、"Claude" 进程 7–16%）。
+
+| 运行 | 时间 | 19 项 | 没过的 | 说明 |
+|---|---|---|---|---|
+| p3 | 09:21–09:31（提交 d59f993） | 16 / 19 | V2 9 帧、V4 109 帧（引擎侧精确核算）、V5 −9 | V2 两次跳拍（拍 34271 +4、35291 +5），那两秒 render_ms 3.84 / 5.13 ms、CPU 28–30%、GPU 20–22%（都**低于**全程均值）；V3 max 0.099 ms（时钟没晚醒）。与 G4 run1–3 的记录同一个样子（G4：跳拍秒 render_ms 3.7–5.4 ms、V3 ≤ 0.05 ms，查明是"进程被系统 / 桌面活动拖住"）。V4 / V5 全由这 9 拍派生 |
+| p3b | 09:32–09:42（提交 ca1baa5） | **18 / 19** | V4 13 帧（引擎侧精确核算；§4 必须档的平均帧率口径 0.0306% ≤ 0.05% ✅；frameprobe 在播段 0 ✅） | V2 **0**、V5 **0**。V4 的 13 帧里 11 帧是**输入 5** 的 drop（外加 8 次 reused，设计内约 3.6 / 0）。输入 5 是 **+100 ppm** 的合成源，相位每 166 s 扫过一次拍点边界，**一到就晚就变成 drop + dup**。晚到来自**所有输入**都有的生产者晚醒：p3b 每路"迟到" 6–13 次、唤醒延迟最大 0.06–3.37 ms；**G4 run4（main）每路迟到 0、唤醒最大 ≤ 0.15 ms**。输入 1 / 2 / 7 / 8 与叠加、多画面都无关也一样晚到——这是生产者线程的 CPU 调度，P3 没碰；其它输入的相位离边界远（60 fps 整）或方向相反（59.94 / −100 ppm 只会 dup），晚到只是等一等。main 上 G4 的四次运行里输入 5 的 drop 也一直比别的输入多（3 / 6 / 6 / 20） |
+
+**第 7 条要求记录的 V1 变化**（节目里有 enabled 的多画面输出，所以 headless 从 P3 起每拍多做一次多画面 NV12 转换）：
+
+| | render_ms avg | p99 | max | 进程 CPU | GPU |
+|---|---|---|---|---|---|
+| G4 run4（main，代表运行） | 2.149 | 2.652 | 2.717 | 50.7% | 30.5% |
+| P3 p3 | 2.077 | 2.559 | 5.126（跳拍那秒） | 53.9% | 27.2% |
+| P3 p3b | 1.942 | 2.590 | 3.573 | 63.0% | 28.4% |
+
+**V1 没有可见的退步**：两次都比 G4 的代表运行低，落在 G4 自己四次运行的散布里（avg 1.936–2.149）。原因是多画面纹理本来每拍就在画（`options.multiview` 默认开），P3 只是多了一个 1080p → NV12 的 compute dispatch，塞在已经开着的那个 compute encoder 里。多画面真的在转——`testP3_renderedFrameAutoFilledFromStateWithDefaultOptions` 用默认选项的实时渲染器验过。
+进程 CPU 在 p3 与 p3b 之间差 9 个点，代码只差一个报告提交，所以是环境（性能核被别的会话占着、线程落到能效核上，同样的活要更多 CPU 秒；与上面的晚醒是同一件事）。P3 每拍在 CPU 上多出来的只有两个短循环（`CompositorPasses.wants`、PVW 叠加遍历的早退）和一次纹理表查找。
+
+S2（内存增长）两次 88.2 / 72.3 MB/h，G4 run4 是 79.9 MB/h，**G4 也是红的**（10 分钟不足 1 h，整段拟合仅供参考），不在 19 项里；S3 的 CPU 在 p3b 是 63.0%（线 60%），原因同上。
 
 ---
 
@@ -222,11 +241,18 @@ prompt：docs/plan/prompts/61-P3-契约落地二.md。落地提案 **007 / 008 /
 4. **自定义多画面格子的像素算式必须"先转 Float 再乘"**（`Float(x) * w`，不是 `Float(x * Double(w))`）：两条解析路径的浮点舍入要逐位一致，否则 `testP3_officialMultiviewFieldMatchesLegacyExtraKey` 会在第 4 个格子上差 3e-8。
 5. **`check-ownership` 是逐提交结算的**：同一个文件先加后删会**两次都算进胶水额度**。本会话一开始把 `MetalRenderer.wants` 写在 `MetalRenderer.swift` 里（胶水 68/50 超额），挪到 `CompositorPasses.swift` 之后如果直接再提交一次，额度会变成 107 行而不是 43 行——只能 `git reset --soft` 重做提交，让每个文件只被动一次。**改胶水文件前先想清楚放哪**。
 6. **`make lint` 要显式给分支名**：worktree 的分支是 `claude/p3-contracts-phase-2-86a7c4`，OWNERSHIP 里是 `p3-contracts`，所以要 `git branch -f p3-contracts HEAD` 再 `make lint BRANCH=p3-contracts`。
-7. **`swift build` 会在没有 `Package.resolved` 的包里生成一个**（SwitcherOutputs / SwitcherTestKit 有外部依赖）。仓库只跟踪 SwitcherControl 与 switcher-headless 两份，所以跑完测试工作树里会多出两个未跟踪文件；本会话把它们删掉了，别误提交。
+7. **`swift build` 会在没有 `Package.resolved` 的包里生成一个**（SwitcherOutputs / SwitcherTestKit / frameprobe）。仓库只跟踪 SwitcherControl 与 switcher-headless 两份，所以跑完测试工作树里会多出三个未跟踪文件；本会话把它们删掉了，别误提交。
 8. **需要 rebase 的分支**：此时可能已经开着的 **w1-testkit-3（W1-A3，prompt 62）** 与 **w2-inputs-2（W2-A2，prompt 64）**——两者都从 G4 合入后的 main 开，与 P3 没有文件重叠，但都 `import SwitcherContracts`：
    - w1-testkit-3 动 `Packages/SwitcherTestKit/` 与 `Tools/frameprobe/`，P3 动了 `SwitcherTestKit/Sources/.../Stats/StatsSummary.swift`（加 `displays`），rebase 时可能在这一个文件上冲突；
    - w2-inputs-2 动 `SwitcherInputs/`，P3 动了 `DeckLinkInput.swift` / `NDIInput.swift` / `DeckLinkDevices.swift`；纯音频设备输入不碰这三个，但新写的 `AudioDeviceInput` 如果 `switch config.source` 要补 `decklink` / `ndi` 的新关联值。
    **w3-app-3（W3-E2，prompt 63）与 w3-outputs-3（W3-C2，prompt 65）按计划从 P3 合入后的 main 开**，不用 rebase。
+   本会话结束时看到 W2-A2 已经开着（worktree `w2-inputs-audio-device-2ef9a9`，在跑 `make test`）。
+9. **同一台机器上别的会话在跑重活时，gate4 与计时类用例的数字不可信**。本会话两次 gate4 的红（p3 的跳拍、p3b 输入 5 的 drop）、TestKit 抖动用例的偏置，都是生产者线程晚醒 / 落到能效核的样子。**开跑之前先看一眼**：
+   `for p in $(pgrep -f "make test|gate[0-9]|swift-test|switcher-headless run"); do lsof -a -p $p -d cwd -Fn | sed -n 's/^n//p'; done`——
+   有别的 worktree 的就等它跑完。两个会话同时 `make test` 会互相拖慢，计时类用例在两边都可能红（本会话看到 W2-A2 的 `make test` 先起，就把自己的停了）。
+10. **`TestPattern` 的数据字只有 28 位**：`hostTimeMs` 与 `frameNumber` 都被 `dataMask` 掩过。拿解出来的毫秒字段与 host time 比，要一起 `& TestPattern.dataMask`，
+    否则机器**连续唤醒**（不含睡眠）超过 2^28 ms ≈ 3.1 天就红，重启又好——很难复现。frameprobe 的 `genTimeMs` 跨帧相减也要按 28 位环形算（问题单里写了）。
+11. **后台跑 `make … | grep …` 时，任务通知里的 exit code 是管道最后一段的**，不是 make 的——本会话第一次 `make test-packages` 通知"exit code 0"，日志末尾其实是 `make: *** [test-packages] Error 1`。看结果要翻日志，别看通知。
 
 ---
 
