@@ -215,3 +215,63 @@ P3 / W1-A3 各自把 `docs/spec/导播台测试标准.md` `docs/OWNERSHIP.md` �
 1. **NDI 回环两条计时断言的余量——已定（用户 2026-09-23 "NDI 那两条加余量，你顺手做了"）**：`NDILoopbackTests` 加 `schedulingMarginMs = 2.0` 并写明理由（阈值贴着理论值 24.667 / 71.667 ms，整包负载下调度晚 0.25–0.7 ms 就过线，单跑稳过；余量只盖调度抖动，不改被测行为的口径），两条断言各 + 2 ms。
 2. **提案 015——已批并落地（同上）**：`DisplayOutputSettings.fallbackToMain` 默认与缺键都改成 false，与 `ExternalDisplaySpec` 从 G4 起的运行时一致；P3 的两处断言改过来、补一条"显式 true 照解"；CONTRACTS.md §2.5 一句；App 显式写的 false 现在等于默认，W3-E2 可顺手去掉。
 3. W2-A2 问题单 4-1…4-5 的硬件 / 手动项（清单 §9）——仍是人工。
+
+## 11. 第二批续做合入（2026-09-23，G4 会话续；用户："那三个都完事，你检查一下"）
+
+三个分支都从 main 4b7a3df 开，`git merge-tree` 试算三路依次合并无冲突，按 W3-E2 → W3-C2 → W3-B2 `--no-ff` 合进 g4：
+
+| 顺序 | 分支 | 顶 | 提交 | 报告 | 合并 | 检查结论 |
+|---|---|---|---|---|---|---|
+| 1 | w3-app-3（W3-E2，prompt 63） | 6d26ab0 | 21 | reports/w3-app-3.md | 64b043b | 63 的七条全做（39 处文案、转场参数控件、每通道 PVW / 边框 / 锚点、多画面布局页、007 / 008 / 012 / 013 / 014 接进界面、纯音频输入、MIDI 锚、ISO 单入口）；**提案 016 setTransitionParams 用户批并由它落地（Command 34 个）**；Outputs / TestKit / frameprobe 的 Package.resolved 钉版本入库（用户批）；App 71 个用例 70 过 1 跳、包测试 / lint 全绿；App/ 之外的文件逐个列进其 OWNERSHIP 行 |
+| 2 | w3-outputs-3（W3-C2，prompt 65） | da10561 | 12 | reports/w3-outputs-3.md | 9524142 | Aux 全分辨率（本包自己画，BGRA / NV12 / UYVY 对渲染器 0 差）、dropped 口径 = 两次刷新间被覆盖、虚拟摄像头记账 + CMIO 序号、主屏层级选项、删过渡键读取；**提案 018 undelivered 用户批并由它落地**；ExternalTests 14 / VirtualCameraTests 9 全过；外接屏这次在，PGM / Aux 60 fps dropped 0 |
+| 3 | w3-compositor-3（W3-B2，prompt 66） | 2ac7038 | 10 | reports/w3-compositor-3.md | f5b8afe | 纯音频格、setMeters 真实电平表（三块交接、渲染线程零分配）、名字标签 64 槽下一帧生效、删 010 过渡读取（用例改成"旧键被忽略"）、PVW / 多画面环按需建（省 50 MB）；91 个渲染用例全过、24 张参考图 PSNR ∞；提案 017（RMS）**待批** |
+
+归属：三个分支的越界文件都是用户批的（016 / 018 / Package.resolved），各自写进了自己的 OWNERSHIP 行；W3-B2 25 个文件全在行内。
+
+### 11.1 合并后检查点做的胶水（App/ 与 Tools / scripts / docs）
+
+| 事 | 来源 | 落点 |
+|---|---|---|
+| Aux 三根线（帧槽分支开 / 还、输入状态、无信号文案）；`ExternalOutputAppTests` 第 3 步改按新行为（Aux 画输入 2 的全分辨率帧，不再是多画面第 2 格） | issue W3C2-app-aux-wiring §1 / §2 | App SwitcherSession.swift、App/Tests/ExternalOutputAppTests.swift |
+| 虚拟摄像头 waitingExtension 那句的帧数改读 `undelivered`（018） | issue W3C2-app-aux-wiring §4 | App OutputStatusText.swift |
+| 多画面真实电平表的喂数：App 在 StatsHub 消费者里 1 Hz `renderer.setMeters`，headless 在 StatsPublisher 消费者里同样一行；50 ms 的喂法归 W3-E3 | issue W3B2-w3-app-3-multiview-meters-thumbnails §1 | App SwitcherSession.swift、Tools/switcher-headless/HeadlessRun.swift |
+| 测试标准 §7 的 display[] 字段表加 `undelivered`（018，口径权限） | W3-C2 报告 §4 第 2 条 | docs/spec/导播台测试标准.md |
+| `make gen` 从入库模板 `scripts/xcode-workspace-Package.resolved` 拷工作区 Package.resolved（swift-collections 钉 1.6.0；新 worktree 不再 dyld 崩） | issues W3C2-g5-swift-collections-1.7-dyld-crash、W3E2-w1-testkit-frameprobe-unpinned-deps-swift-runtime | Makefile、scripts/ |
+| 清单 §1 / §2 / §4 三处过时文字更正；§10 外接屏 / 多画面人工项 | W3-E2 报告 §3 第 5 条、issue W3C2-checklist-external-display-manual | docs/checklists/G4.md |
+| 新 prompt 67 P4（017 若批 + 注释 / 口径 + reducer 两条小规则）、68 W3-E3（NDI 发送接线、Aux 文案 / 层级开关、显示窗口丢帧记账、电平表统一）、69 W3-C3（包内中文、扩展侧回报、ISO 估算）+ OWNERSHIP 三行；prompt 71 加依赖钉版本一条 | 三份报告的 §3 / §4 与问题单 | docs/plan/prompts/、docs/OWNERSHIP.md |
+
+### 11.2 测试（合并后 + 胶水后，2026-09-23 17:5x–19:0x；机器合盖、只剩 LG 外接屏且显示器在睡 / 锁屏——见下）
+
+| 步骤 | 结果 |
+|---|---|
+| `make build` 全量 | 第一遍 App 编不过：W3-E2 的 `InputStripView` / `MultiviewLayoutTests` 用了 W3-B2 删掉的 `MultiviewLayout.layoutValue(in:)` / `placements(layout:)`（两个分支各自绿、合起来红的语义冲突）。按 W3-B2 的裁定改成只读正式字段、过渡键用例改成"被忽略"（App 胶水 10 行），再编全绿 |
+| 六个包 `swift test` | **677 个用例 0 失败、21 跳过**（`make test` 在 SwitcherOutputs 停了一次，剩下的包分开补跑）：SwitcherCore 91 / 91 / 78（跳 1）、SwitcherInputs 55（跳 6）/ 25（跳 2）/ 25（跳 3）、SwitcherAudio 62（跳 2）/ 41（跳 3）、SwitcherOutputs 9 / 25 / 28 / 8（跳 2）/ 7 / 14（跳 2，见下）、SwitcherControl 25（跳 1）/ 3 / 28、SwitcherTestKit 70 |
+| SwitcherOutputs `StreamingTests.MediaMTXTests` 4 条第一遍红 | RTMP / SRT / E7 / E8 都在"帧号连续 / 解不出 = 0"上红：**W1-A3 自证解码的"节奏"一票**把实时喂送（`PatternFeeder` 烧的是生成时刻 `now`，带毫秒级抖动）的 37 / 599 帧按残差 3.2–3.8 ms > 3 ms 判成解不出、算成丢帧；同一文件关掉自证 599 帧 0 丢 0 重。12:10 那次全量之所以绿，是当时 `Tools/frameprobe/.build/release/frameprobe` 还是 W1-A3 之前编的。检查点把推流测试的 frameprobe 调用改成传输口径 `--no-self-check`（Outputs 包胶水 5 行，注释写明），重跑 4 条全过（RTMP 599 帧 0 丢 0 重 0 解不出、E7 81.7 s、E8 全部重连）；问题单 `reports/issues/G4b-w1-testkit-selfcheck-rhythm-vs-realtime-feeder.md` 退 W1-A |
+| SwitcherOutputs `ExternalTests` 14 条里 4 条红（37 处断言） | 全是"0 帧 / 0 fps / display link 回调 0 次"。**环境**：机器合盖（`AppleClamshellState = Yes`）、只剩 LG 外接屏且显示器在睡 / 会话锁着——一个 20 行 AppKit 探针在当前 Space 开全屏窗口 1.5 s 内 display link 0 次回调，`caffeinate -u` 唤醒后的一瞬间 216 次、几秒后又 0；W3-C2 17:20 在同一份代码上 14 条全过。这 4 条与 App 的出帧类用例要等桌面可见时再跑（命令见 §11.4） |
+| 两个工具冒烟 | 通过 |
+| headless 60 s 录制 + frameprobe（为排查推流那 4 条做的对照） | 3600 帧、自证判掉 0、丢 0 重 0——W3-B2 的输出环 / 预包纹理改动没有弄坏 PGM 帧 |
+| App `xcodebuild test`（gate 之后 20:18 带 caffeinate 跑了一次全量） | 出帧类 7 条红全是 0 帧（`DisplayDecouplingAppTests` 拖窗、`ExternalOutputAppTests` 外部窗口 / 多画面窗口、`ThumbnailRateTests` ×2）——与 ExternalTests 同一环境原因（锁屏 / 显示器不可见，W3-E2 报告 §5 第 1 条）；**一条真红并已修**：W3-E2 新加的 `testL10n_packageStatusesLookedUpInApp` 里虚拟摄像头 waitingExtension 的样例还按 `dropped: 7` 期望"已丢 7 帧"，018 之后这句读 `undelivered`（W3-C2 问题单 §4 点名的交叉）——样例改成 `undelivered: 7`，LocalizationTests 5 / 5 绿。其余用例（W3-E2 自己分支上 71 个 70 过 1 跳）本次只改了两条断言（Aux 第 3 步、过渡键缩略图）和 `InputStripView` 10 行 |
+
+### 11.3 gate4（合并后的 10 分钟运行：g4c / g4d / g4e；渲染器多了名字标签 / 电平表 / 按需建环，契约多了 016 / 018；headless 每秒喂电平表）
+
+机器状态：合盖、只剩外接屏、会话锁着、用户不在——macOS 在这种"空闲 + 接电"下跑后台任务（load.log 里 `assistantd` 35%、`VTDecoderXPCService` 36% 各持续数分钟），与 G4 run1–3 / P3 p3b 记过的"进程被系统活动拖住"是同一类环境。
+
+| 运行 | 时间 | 自动项 | 没过的 | 归因 |
+|---|---|---|---|---|
+| g4c | 19:0x–19:24（跑 10 min + 报告 20 min） | 17 / 19 | V4 精确核算设计外 25 帧（frameprobe 在播段 0）；A4 click 极差 999.979 ms | V4：各路生产者线程晚醒（"唤醒 max 17 ms"、每路迟到 3–5 次），输入 5（+100 ppm）drop 8 ≈ 设计内 3.6 + 4——环境；**A4：frameprobe 多文件对齐的平局缺陷**（闪光正落 x.500 s，iso3 的 click 晚 20 µs 就配到前一个 click；iso3 里 491.001 s 的 click 明明在），问题单 G4b-w1-testkit-a4-click-pairing-tie-at-half-second |
+| g4d | 19:27–19:51 | 17 / 19 | V2 1 帧（拍 20050，那秒 render 3.08 ms / GPU 21% / CPU 53%，都低于均值 → 渲染线程晚醒）；V4 设计外 8 帧 | 同一类环境（输入 6 唤醒 max 18.5 ms）；A4 这次 0.188 ms（平局同向） |
+| **g4e** | **19:5x–20:16** | **19 / 19 ✅（代表运行）** | — | 用 `caffeinate -u -i -d -s` 包住整条 gate（声明用户活跃 + 禁止空闲 / 显示器 / 系统睡眠）：各路生产者**迟到 0、唤醒 max 0.05–0.11 ms**（g4c / g4d 是 9–18 ms），V2 0、V4 两个口径 0、V5 +0、A4 0.208 ms；`assistantd` 仍在跑（33%），所以拖住线程的不是它的 CPU，是用户"空闲"时的电源 / 定时器策略。V1 avg 2.038 / p99 2.511 ms（三次里最好），S3 CPU 55.1% / GPU 28.7% |
+
+**结论**：合并后的代表运行是 g4e（19 / 19）；g4c / g4d 的红是用户不在时的环境（生产者线程唤醒晚 10–18 ms）和一处工具平局缺陷，不是本批代码的问题。**gate4.sh 从此自动用 `caffeinate -u -i -d -s -w <headless pid>` 护住运行段**（§11.1 表外的一条小胶水），无人值守时也能拿到干净数据。
+
+**没有退步的证据**（三次都稳定，且都好于或等于 g4b）：V1 avg 2.068–2.120 / p99 2.558 ms（g4b 2.094 / 2.859）、V3 p99 ≤ 0.044 ms、V4 frameprobe 在播段 0、V5 |Δ| ≤ 1、V6 90 次 Cut 全干净、V7 Fade ≤ 0.55 帧 / Wipe ≤ 0.05 / Zoom ≤ 0.01、A1–A3 0、E1–E3 / E5 全过、C1–C4 全过、S3 CPU 50–55% / GPU 23–26%。
+W3-B2 的渲染器改动（标签线程、电平表三块交接、按需建环）没有让 V1 / V2 / V3 变差；headless 每秒 `setMeters` 也没有。**基线不动**。
+
+### 11.4 等用户的
+
+0. **桌面可见（解锁、当前 Space 不是全屏 App）时补跑两组出帧类测试**（本次锁屏跑不了，gate 之后又试了一次仍是 0 帧）：`swift test --package-path Packages/SwitcherOutputs --filter ExternalTests`（约 1 分钟，会在屏上开全屏窗口几秒）和 `make test-app`（约 3 分钟）。预期 ExternalTests 14 个 2 跳 0 失败、App 只剩已知的 UISmokeTests 偶发；红了就是本次合并的问题，回报我。
+1. **提案 017**（Stats.audio.meters 加 rms_db；批了由 P4 / prompt 67 落地，混音器 C 热路径要多算一项）。
+2. **电平表颜色分段统一**：W3-B2 定的 −18 黄 / −6 红（广播常见）vs 调音台 MeterBar（−6 红两段）vs 纯音频缩略图 NSLevelIndicator（−6 / −1.8）。建议采用 W3-B2 那套并补进设计方案 §7（设计方案不归检查点），W3-E3 照改。
+3. **UISmokeTests"每秒最多 60 次快照分发"偶发 61**（W3-E2 §5 第 13 条）：(a) 冒烟开头清零、只量本条；(b) 按 Timer 触发序号数。建议 (a)，W3-E3 做。
+4. `removeInput` 清 stinger 引用、API 进来的旧键先搬迁——两条 reducer 小规则建议做，已写进 P4（prompt 67 第 3 条），不同意就划掉。
+5. **两张退 W1-A 的工具口径单**（不等拍板，知会）：`G4b-w1-testkit-selfcheck-rhythm-vs-realtime-feeder`（自证的节奏一票把实时喂送的图案帧判掉——推流测试改用 `--no-self-check` 传输口径）；`G4b-w1-testkit-a4-click-pairing-tie-at-half-second`（A4 多文件对齐在闪光落 x.500 s 时平局打法不一致 → 999.98 ms 假红，g4c 撞上）。W1-A 下一次续做一起收。

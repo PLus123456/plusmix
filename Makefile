@@ -39,6 +39,12 @@ help:
 # ---------- gen ----------
 gen:
 	$(XCODEGEN) generate --quiet
+	@# 新 worktree 第一次解析会把 swift-collections 解到 1.7.0（要 Swift 6.4 运行时，macOS 26.6.2 的 libswiftCore 没有 _swift_initBorrow，App 一起就崩，
+	@# reports/issues/W3C2-g5-swift-collections-1.7-dyld-crash.md）。工作区的 Package.resolved 是生成物，这里从入库的模板拷一份钉住（与各包入库的 Package.resolved 同一套版本）；
+	@# 升依赖是 W4-B 的事：改模板 + 各包的 Package.resolved 一起改，并在 macOS 15 / 26 各起一次 App 与 frameprobe。SWITCHER_KEEP_RESOLVED=1 跳过拷贝。
+	@if [ -z "$$SWITCHER_KEEP_RESOLVED" ] && [ -f scripts/xcode-workspace-Package.resolved ]; then \
+	  mkdir -p $(XCODEPROJ)/project.xcworkspace/xcshareddata/swiftpm && \
+	  cp scripts/xcode-workspace-Package.resolved $(XCODEPROJ)/project.xcworkspace/xcshareddata/swiftpm/Package.resolved; fi
 
 $(XCODEPROJ)/project.pbxproj: project.yml
 	$(MAKE) gen

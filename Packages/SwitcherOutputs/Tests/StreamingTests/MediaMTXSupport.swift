@@ -110,7 +110,11 @@ enum Frameprobe {
     }
 
     static func stats(_ url: URL, fps: Int = 60) throws -> Stats {
-        let obj = try Proc.json(try StreamTestPaths.frameprobe().path, ["stats", url.path, "--fps", "\(fps)"])
+        // 传输口径：只有一路、没有转场，要的是"收到的帧号连续、不重不丢"。W1-A3 起 frameprobe 默认开自证解码，其中"节奏"一票
+        // 要求烧进画面的 (帧号, 时间戳) 落在该路自己的直线上、残差 ≤ 3 ms——那是按引擎节拍的合成源定的；这里的 PatternFeeder 实时喂送，
+        // 时间戳带毫秒级调度抖动，RTMP 10 s 里有 37 帧残差 3.2–3.8 ms 被判成解不出、算成丢帧（G4 第二批合入时查明，同一文件关掉自证 599 帧 0 丢 0 重）。
+        // 自证是为转场合成帧准备的，这里用不上，按老口径读；问题单 reports/issues/G4b-w1-testkit-selfcheck-rhythm-vs-realtime-feeder.md。
+        let obj = try Proc.json(try StreamTestPaths.frameprobe().path, ["stats", url.path, "--fps", "\(fps)", "--no-self-check"])
         guard let st = obj["stats"] as? [String: Any] else { throw TestFailure("frameprobe stats 没有 stats 节：\(obj)") }
         let inputs = st["inputs"] as? [[String: Any]] ?? []
         let dropped = inputs.reduce(0) { $0 + ($1["droppedFrames"] as? Int ?? 0) }

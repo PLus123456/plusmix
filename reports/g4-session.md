@@ -95,3 +95,8 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
 用户："P3（prompt 61）、W1-A3（62）、W2-A2（64）都完事了，你检查一下，之后再合一下，好像又要加东西，你也看看"。
 检查 → 合并（P3 → W1-A3 → W2-A2，只有 OWNERSHIP 相邻两行一处冲突）→ 检查点胶水（gate4.sh 接自证与 Wipe / Zoom、g4 节目 5 / 6 号换 ID、headless 与探针接纯音频设备）→ 全量测试 + 一次 gate4 → 新 prompt 66 / 提案 015 / 清单 §9 → g4 快进到 main。
 明细与数字在 reports/G4-notes.md §10（reports/G4.md 同步）。
+
+## 8. 第二批续做合入（2026-09-23，本会话续）
+
+用户："那三个都完事，你检查一下"。W3-E2（w3-app-3）/ W3-C2（w3-outputs-3）/ W3-B2（w3-compositor-3）检查 → 三路 `--no-ff` 合入（无冲突）→ 检查点胶水（Aux 三根线、setMeters 1 Hz、虚拟摄像头文案、外部输出测试第 3 步、测试标准 §7 undelivered、make gen 钉工作区锁文件、清单）→ 全量测试 + gate4 g4c → 新 prompt 67 / 68 / 69 → g4 快进到 main。
+明细与数字在 reports/G4-notes.md §11（reports/G4.md 同步）。

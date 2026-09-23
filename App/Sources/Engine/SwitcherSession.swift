@@ -14,6 +14,7 @@
 import AppKit
 import SwitcherContracts
 import SwitcherEngine
+import SwitcherExternal   // AuxFrameTap（W3-C2 的 Aux 接线）
 import SwitcherRender
 import SwitcherInputs
 import SwitcherControl
@@ -94,6 +95,13 @@ final class SwitcherSession {
         outputs.fallbackDirectory = settings.recordFallbackDirectory
         outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
         aux = AuxOutputRuntime(engine: engine, source: renderer, format: format)
+        // W3-C2：Aux = 本包自己画输入帧。每个 Aux 窗口给那一路开一个 InputFrameTee 分支（与 ISO 共用每路 4 个的额度），窗口换输入 / 关掉时还回去；
+        // 占位与多画面缩略格子同一个来源、同一句文案（reports/issues/W3C2-app-aux-wiring.md，G4 续做合入时接的胶水）
+        aux.external.auxFrames = AuxFrameTap(
+            open: { [weak inputs] n in inputs?.openBranch(input: n) },
+            close: { [weak inputs] n, slot in if let s = slot as? LockFreeFrameSlot { inputs?.releaseBranch(s, input: n) } })
+        aux.external.inputStateProvider = { [weak inputs] n in inputs?.runtimeState(of: n) }
+        aux.external.noSignalText = L("input.noSignal")
         control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable,
                                  compat: settings.compatConfiguration)
         lastSnapshot = stateMachine.publisher.latest
@@ -131,6 +139,7 @@ final class SwitcherSession {
         let hub = StatsHub(engine: engine, consumers: [
             { [weak self] stats in DispatchQueue.main.async { MainActor.assumeIsolated { self?.publish(stats: stats) } } },
             { [feed = control.feed] stats in feed.publish(stats: stats) },
+            { [renderer] stats in renderer.setMeters(stats.audio.meters) },   // W3-B2：多画面真实电平表，1 Hz 够用；50 ms 的喂法归 W3-E3
         ])
         try hub.start()
         statsHub = hub

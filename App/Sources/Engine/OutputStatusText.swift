@@ -49,7 +49,7 @@ enum OutputStatusText {
         guard let e = entry else { return L("aux.virtualCamera.starting") }
         switch e.state {
         case "idle": return L("aux.virtualCamera.idle")
-        case "waitingExtension": return L("aux.virtualCamera.waitingExtension", Int(clamping: e.dropped))
+        case "waitingExtension": return L("aux.virtualCamera.waitingExtension", Int(clamping: e.undelivered))   // 提案 018：没连上时丢的是 undelivered，dropped 只算连上之后的
         case "publishing": return L("aux.virtualCamera.publishing", Int(clamping: e.frames))
         case "stopped": return L("aux.virtualCamera.stopped")
         default: return display(e)

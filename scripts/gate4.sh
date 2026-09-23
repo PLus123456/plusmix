@@ -143,7 +143,11 @@ if [ "$do_run" = 1 ]; then
   "$headless" run --show "$show" --script "$script" --duration "$duration" --stats "$stats" --record "$movie" --iso-audio "$iso_audio" \
       --audio-device null ${api_args[@]+"${api_args[@]}"} > "$run_log" 2>&1 &
   headless_pid=$!
-  trap 'kill $headless_pid $sampler_pid 2>/dev/null' EXIT
+  # 用户不在（合盖 / 锁屏 / 空闲）时 macOS 的电源与定时器策略会让生产者线程晚醒 10–18 ms（G4 第二批合入的 g4c / g4d：V4 设计外 8–25 帧、V2 1 帧），
+  # 声明"用户活跃 + 不许空闲 / 显示器 / 系统睡眠"后同一场景迟到 0、唤醒 ≤ 0.11 ms（g4e 19 / 19）。-w 跟着 headless 的进程活，它退出就退出。
+  caffeinate -u -i -d -s -w "$headless_pid" >/dev/null 2>&1 &
+  caffeinate_pid=$!
+  trap 'kill $headless_pid $sampler_pid $caffeinate_pid 2>/dev/null' EXIT
   client_status=0
   if [ "$do_api" = 1 ]; then
     step "客户端：C1 50 次 cut（t0 + $c1_start s 起，相位 $c1_phase s：转场 0.4 s 已结束、离 5 s 切换点 ≥ 0.4 s），C4 2 × 100/s × 60 s，C2 / C3 全程记录"
@@ -153,7 +157,7 @@ if [ "$do_run" = 1 ]; then
     client_status=${PIPESTATUS[0]}
   fi
   wait "$headless_pid"; rc=$?
-  kill "$sampler_pid" 2>/dev/null; wait "$sampler_pid" 2>/dev/null
+  kill "$sampler_pid" "$caffeinate_pid" 2>/dev/null; wait "$sampler_pid" "$caffeinate_pid" 2>/dev/null
   trap - EXIT
   echo "load_after=$(uptime | sed 's/.*load averages: //')" >> "$env_file"
   tail -n 30 "$run_log"

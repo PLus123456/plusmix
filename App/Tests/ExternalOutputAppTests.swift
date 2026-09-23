@@ -52,15 +52,17 @@ final class ExternalOutputAppTests: XCTestCase {
         XCTAssertGreaterThan(Double(presented) / elapsed, 40, "外部窗口应接近节目帧率")
         XCTAssertLessThanOrEqual(Double(presented) / elapsed, 62)
 
-        // 3. Aux：输入 2 → 多画面里第 2 格；换源走 setOutputSettings
+        // 3. Aux：输入 2 → AuxInputView 画输入 2 的全分辨率帧（W3-C2，G4 裁定：Aux 不再用多画面格子）；换源走 setOutputSettings
         var aux = ExternalDisplaySpec(settings: output.settings)
         aux.source = .input(number: 2)
         var settings = output.settings
         aux.apply(to: &settings)
         session.send(.setOutputSettings(output: output.number, settings: settings))
-        XCTAssertTrue(AppTest.waitUntil(3) { external.displayView.target == .multiview && external.displayView.sourceRect != .full })
-        XCTAssertEqual(external.displayView.sourceRect, MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080))
+        XCTAssertTrue(AppTest.waitUntil(3) { external.auxView.presenter.input == 2 && !external.auxView.isHidden })
+        XCTAssertTrue(external.displayView.isHidden, "Aux 不再用多画面纹理")
         XCTAssertFalse(external.auxUnresolved)
+        XCTAssertTrue(AppTest.waitUntil(3) { external.auxView.presentedFrames > 10 }, "分支接上了，输入 2 的帧在画")
+        XCTAssertEqual(external.auxView.presenter.signal, .live)
         AppTest.pump(seconds: 0.5)
 
         // 4. 节目文件里带着它；删输出 → 窗口关

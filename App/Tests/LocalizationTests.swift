@@ -63,7 +63,8 @@ final class LocalizationTests: XCTestCase {
             XCTAssertFalse(t.isEmpty)
             XCTAssertFalse(t.hasPrefix("aux.") || t.hasPrefix("disk."), "缺键：\(t)")
         }
-        XCTAssertEqual(OutputStatusText.virtualCamera(enabled: true, entry: Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 0, dropped: 7, state: "waitingExtension")),
+        // 提案 018（W3-C2）：扩展没连上时丢的帧是 undelivered，dropped 只算连上之后被扩展丢的；waitingExtension 那句读 undelivered
+        XCTAssertEqual(OutputStatusText.virtualCamera(enabled: true, entry: Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 0, dropped: 0, undelivered: 7, state: "waitingExtension")),
                        "找不到虚拟摄像头设备（扩展未安装 / 未激活）；已丢 7 帧")
         XCTAssertEqual(OutputStatusText.externalWindow(.showing(displayID: 2)), "显示中（显示器 2）")
         L10n.languageOverride = "en"

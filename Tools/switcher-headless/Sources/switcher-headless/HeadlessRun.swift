@@ -319,6 +319,9 @@ final class HeadlessSession: @unchecked Sendable {
                 engine.gpuPercentProvider = { g.deviceUtilizationPercent() }
             }
             let publisher = StatsPublisher(engine: engine, interval: 1)
+            // W3-B2：多画面的真实电平表由组装方喂数（铁律 4，数只来自 Stats.audio.meters）；1 Hz 够用，3 s 没喂渲染器自动退回占位
+            let meterSink = renderer
+            publisher.addConsumer { meterSink.setMeters($0.audio.meters) }
             if let url = options.statsURL {
                 let w = try StatsWriter(url: url, append: false)
                 publisher.addConsumer { w.submit($0) }

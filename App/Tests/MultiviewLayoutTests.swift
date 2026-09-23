@@ -110,19 +110,22 @@ final class MultiviewSettingsTests: XCTestCase {
         AppTest.controller.panels.closeAll()
     }
 
-    /// 没经过 Show.load 的内存状态（API 直接 addOutput 一个带过渡键 extra["layout"] 的多画面输出）：渲染器还认过渡键（P3 留一个版本的后备），
-    /// 缩略图同一个顺序——正式字段优先，没有才读过渡键——否则两边切的格子对不上。
-    func testThumbnails_followLegacyLayoutKeyLikeRenderer() throws {
+    /// 没经过 Show.load 的内存状态（API 直接 addOutput 一个带过渡键 extra["layout"] 的多画面输出）：W3-B2 起渲染器只读正式字段、过渡键一律忽略，
+    /// 缩略图与它同一个来源——带旧键的输出对布局没有影响，两边都按默认布局切格子（P3 报告 §4 第 1 条：后备保留一个版本后删除；G4 第二批合入时改的用例）。
+    func testThumbnails_ignoreLegacyLayoutKeyLikeRenderer() throws {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 2)
         let wc = AppTest.controller.windowController
+        let defaultRect = MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080)
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == defaultRect })
         let number = (session.state.outputs.map(\.number).max() ?? 0) + 1
         session.send(.addOutput(config: OutputState(number: number, kind: .multiview, name: "legacy", enabled: false,
                                                     settings: OutputSettings(source: .multiview, extra: ["layout": .string("3x3")]))))
-        let expected = MultiviewLayout.placements(layout: .string("3x3"), inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) }?.inner
-        XCTAssertNotNil(expected)
-        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == expected }, "\(String(describing: wc.inputStrip.cells[2]?.display.sourceRect))")
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(number) != nil })
+        AppTest.pump(seconds: 0.5)
+        XCTAssertEqual(wc.inputStrip.cells[2]?.display.sourceRect, defaultRect, "过渡键被忽略：缩略图仍按默认布局切，与渲染器一致")
+        XCTAssertEqual(MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) }?.inner, defaultRect)
         session.send(.removeOutput(output: number))
-        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080) })
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(number) == nil && wc.inputStrip.cells[2]?.display.sourceRect == defaultRect })
     }
 }
