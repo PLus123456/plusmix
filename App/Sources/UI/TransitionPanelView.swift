@@ -87,8 +87,13 @@ final class TransitionPanelView: NSView {
         let overlayLabel = Theme.label("Overlay", size: 10, color: Theme.dimText)
         overlayLabel.alignment = .center
 
+        // "T-bar：Wipe  [参数…]" 一行放在 T-bar 上面（转场列高度紧，最小窗口高度下不多占一行）
+        tbarTypeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let tbarRow = NSStackView(views: [tbarTypeLabel, paramsButton])
+        tbarRow.orientation = .horizontal
+        tbarRow.spacing = 4
         let stack = NSStackView(views: [cutButton, fadeButton, wipeButton, zoomButton, stingerButton, ftbButton,
-                                        durationControl, paramsButton, overlayLabel, overlayRow, tbarTypeLabel, tbar, clock])
+                                        durationControl, overlayLabel, overlayRow, tbarRow, tbar, clock])
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = 6

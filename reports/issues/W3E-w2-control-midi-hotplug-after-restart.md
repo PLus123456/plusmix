@@ -23,3 +23,11 @@ App 里每个 session 一个 `MIDIController`（`ControlRuntime`），换节目 
 ## W3-E 的绕法
 
 测试里先建虚拟源再起 session（`ControlEditorTests.testMIDIMapping_learnFromVirtualSourceAndSave`）。用户侧的影响：换过节目之后插的 MIDI 设备要重开 App 才能用。
+
+## App 侧绕法（W3-E2 / w3-app-3，2026-09-23；W2-C 还没修）
+
+- 探针证实了上面的推断：第一个客户端的线程退出后，新客户端收到 `msgObjectAdded` 0 次；先在主线程建一个客户端，新客户端收到 1 次、回调在 main。
+- App 启动时（`AppController.init`，第一个 session 之前）在主线程建一个不干活的锚客户端（`App/Sources/Engine/MIDINotificationAnchor.swift`），
+  全进程的通知都走主 run loop；`MIDIController.handleNotification` 只动带锁的源表和 MIDI API，在主线程上被调没问题。
+- 守门用例 `ControlEditorTests.testMIDI_hotplugAfterShowReplaced_newSourceConnects`（换两次节目后建虚拟源，5 s 内连上、销毁后消失）；去掉锚时红。
+- W2-C 按"建议"第一条修了（客户端进程内共用 / 在常驻 run loop 上建）之后，App 的锚可以删，用例留着。

@@ -28,3 +28,10 @@ G4 合并冲突块里保留下来的 W3-C 菜单文案：
 2. `SystemExtensionInstaller.describe` / `ExternalDisplayManager.describe`（SwitcherOutputs 包里）返回的是中文文案，进了状态行；包不该管语言，
    建议它们返回枚举 / 英文标识，App 侧查表。这条动到 W3-C 的包，写在这里等 W3-C 认领或由续做会话按胶水额度处理。
 3. 跑 `make test-app`：LocalizationTests 四条全绿。
+
+## 处理结果（W3-E2 / w3-app-3，2026-09-23）
+
+- 第 1 条：39 处全改 `L(键)`，两种语言各一份（`menu.output.virtualCamera.*`、`externalMenu.*`、`notice.*`、`aux.*`）；LocalizationTests 五条全绿（多了一条 `testL10n_packageStatusesLookedUpInApp`）。
+- 第 2 条：包没改。App 按枚举查表（`App/Sources/Engine/OutputStatusText.swift`；`DiskEstimate.describe` 的替代在 `ISORoutes.remainingText`），事件只带枚举；
+  包里剩下拼好的中文（`.failed` 原因、外部显示窗口标题）另开问题单 `W3E2-w3-outputs-3-package-status-text-language.md` 给 W3-C2。
+- 第 3 条：见 reports/w3-app-3.md §2。

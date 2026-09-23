@@ -120,11 +120,15 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     /// 缩略图 = 多画面纹理里这一路的格子：按当前布局算（提案 010 的 OutputSettings.multiview；没有 = 默认布局，4×2 → 6×3 随路数变）。
     /// 布局或路数变了才重算（快照每拍都可能变，布局很少变）。布局里没有的路（自定义格子没放它）缩略图画不出来，格子上说明。
     private func relayoutThumbnails() {
-        let key = ThumbnailLayoutKey(layout: MultiviewLayout.layoutSettings(in: lastState), inputs: lastState.inputs.map(\.number),
-                                     width: textureSize.width, height: textureSize.height)
+        // 与渲染器同一个顺序：正式字段优先，没有才读过渡键 extra["layout"]（没经过 Show.load 的内存状态，P3 保留一个版本的后备）
+        let settings = MultiviewLayout.layoutSettings(in: lastState)
+        let key = ThumbnailLayoutKey(layout: settings, legacy: settings == nil ? MultiviewLayout.layoutValue(in: lastState) : nil,
+                                     inputs: lastState.inputs.map(\.number), width: textureSize.width, height: textureSize.height)
         guard key != thumbnailLayoutKey else { return }
         thumbnailLayoutKey = key
-        let placements = MultiviewLayout.placements(settings: key.layout, inputs: key.inputs, width: key.width, height: key.height)
+        let placements = key.layout == nil && key.legacy != nil
+            ? MultiviewLayout.placements(layout: key.legacy, inputs: key.inputs, width: key.width, height: key.height)
+            : MultiviewLayout.placements(settings: key.layout, inputs: key.inputs, width: key.width, height: key.height)
         for number in key.inputs {
             cells[number]?.setThumbnail(rect: placements.first { $0.source == .input(number: number) }?.inner)
         }
@@ -132,6 +136,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
 
     private struct ThumbnailLayoutKey: Equatable {
         let layout: MultiviewLayoutSettings?
+        let legacy: JSONValue?
         let inputs: [Int]
         let width: Int
         let height: Int

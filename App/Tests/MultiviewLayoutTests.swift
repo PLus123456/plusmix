@@ -109,4 +109,20 @@ final class MultiviewSettingsTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(mv.number)?.settings.multiview?.custom.isEmpty == true && wc.inputStrip.cells[2]?.isOutsideMultiviewLayout == false })
         AppTest.controller.panels.closeAll()
     }
+
+    /// 没经过 Show.load 的内存状态（API 直接 addOutput 一个带过渡键 extra["layout"] 的多画面输出）：渲染器还认过渡键（P3 留一个版本的后备），
+    /// 缩略图同一个顺序——正式字段优先，没有才读过渡键——否则两边切的格子对不上。
+    func testThumbnails_followLegacyLayoutKeyLikeRenderer() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let wc = AppTest.controller.windowController
+        let number = (session.state.outputs.map(\.number).max() ?? 0) + 1
+        session.send(.addOutput(config: OutputState(number: number, kind: .multiview, name: "legacy", enabled: false,
+                                                    settings: OutputSettings(source: .multiview, extra: ["layout": .string("3x3")]))))
+        let expected = MultiviewLayout.placements(layout: .string("3x3"), inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) }?.inner
+        XCTAssertNotNil(expected)
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == expected }, "\(String(describing: wc.inputStrip.cells[2]?.display.sourceRect))")
+        session.send(.removeOutput(output: number))
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080) })
+    }
 }
