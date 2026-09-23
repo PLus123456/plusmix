@@ -290,7 +290,7 @@ S3 的 CPU 在 p3b 是 63.0%（线 60%），原因同上，p3c 回到 31.4%。
 
 | 什么 | 命令 | 时间 | 结果 | 产物 |
 |---|---|---|---|---|
-| 归属 / 依赖 / 禁词 | `git branch -f p3-contracts HEAD && make lint BRANCH=p3-contracts` | 收尾时 | **全绿**（exit 0）：禁词、版本号 0.1.0 一致、Package.swift 约束、依赖方向（8 个包）、归属（74 个改动文件都在允许范围内；胶水 App/ 50/50、SwitcherTestKit 49/50、SwitcherCore 45/50、SwitcherInputs 20/50、SwitcherAudio 4/50、SwitcherControl 2/50——前两个已经顶格）、check-rt-symbols（混音 C 热路径无 malloc / 锁 / 日志 / 系统调用符号） | — |
+| 归属 / 依赖 / 禁词 | `git branch -f p3-contracts HEAD && make lint BRANCH=p3-contracts` | 收尾时 | **全绿**（exit 0）：禁词、版本号 0.1.0 一致、Package.swift 约束、依赖方向（8 个包）、归属（76 个改动文件都在允许范围内，含测试标准与 OWNERSHIP 两个；胶水 App/ 50/50、SwitcherTestKit 49/50、SwitcherCore 45/50、SwitcherInputs 20/50、SwitcherAudio 4/50、SwitcherControl 2/50——前两个已经顶格）、check-rt-symbols（混音 C 热路径无 malloc / 锁 / 日志 / 系统调用符号） | — |
 | 全仓库测试（最终一次，提交 c9c49ac 起跑） | `make test`（等别的会话的测试停下 60 s 以上才开） | 10:47– | 六个包 614 个用例全绿；两个工具冒烟绿；App 只有 `testL10n_noHardcodedChineseInUISources` 一条红（39 处，与 G4 逐条相同，归 prompt 63）；`MAKE_EXIT=2` 就是这一条 | `/private/tmp/claude-501/maketest-final.log` |
 | gate4 代表运行 | `scripts/gate4.sh --minutes 10 --label p3c --baseline baselines/g4-m5max.json` | 10:07–10:17 | **19 / 19** | `.build/gate4/p3c/`（stats.jsonl、out.mov + 4 路 ISO、frameprobe / ffprobe / apitest JSON、load.log、headless.log） |
 | gate4 前两次 | 同上 `--label p3` / `p3b` | 09:21–09:31 / 09:32–09:42 | 16 / 19、18 / 19（环境，见 §2.5） | `.build/gate4/p3/`、`.build/gate4/p3b/` |
