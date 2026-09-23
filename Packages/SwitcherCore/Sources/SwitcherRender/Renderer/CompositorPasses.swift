@@ -396,7 +396,8 @@ enum CompositorPasses {
                 if layout.safeArea { drawSafeArea(inner, width: width, height: height, context: context, encoder: encoder) }
                 // PGM 格 = Master 总线，PVW 格 = 当前 PVW 那路输入。没有读数就不画（这两格 W3-B 起就没有占位条，参考图不变）
                 if layout.meters, let meters, let levels = isProgram ? meters.programLevels : meters.levels(forInput: state.preview) {
-                    drawMeter(inner, levels: levels, width: width, height: height, context: context, encoder: encoder)
+                    drawMeter(inner, levels: levels, rms: isProgram ? meters.programRms : meters.rms(forInput: state.preview),
+                              width: width, height: height, context: context, encoder: encoder)
                 }
                 if let labels = context.labels {
                     drawCellLabel(labels, slice: isProgram ? labels.programSlice : labels.previewSlice, inner: inner, cellHeight: rect.height,
@@ -416,7 +417,7 @@ enum CompositorPasses {
                 }
                 // 电平表：纯音频格总是画（它是这一格唯一的内容），其它输入格看 meters 开关；这一路没有读数就是占位
                 if cell.audioOnly || layout.meters {
-                    drawMeter(inner, levels: meters?.levels(forInput: number), width: width, height: height, context: context, encoder: encoder)
+                    drawMeter(inner, levels: meters?.levels(forInput: number), rms: meters?.rms(forInput: number), width: width, height: height, context: context, encoder: encoder)
                 }
                 if let labels = context.labels, let slice = labels.slice(forInput: number) {
                     drawCellLabel(labels, slice: slice, inner: inner, cellHeight: rect.height, frameHeight: h,
@@ -470,14 +471,15 @@ enum CompositorPasses {
         return PixelRect(x: inner.x + inner.width - sw - pad, y: inner.y + pad, width: sw, height: max(0, inner.height - 2 * pad))
     }
 
-    /// 电平表：暗条 → 两个声道的峰值条与峰值保持线（有读数时）→ 四道刻度（表高 1/5…4/5 = −48 / −36 / −24 / −12 dBFS）。
+    /// 电平表：暗条 → 两个声道的条与峰值保持线（有读数时）→ 四道刻度（表高 1/5…4/5 = −48 / −36 / −24 / −12 dBFS）。
     /// levels = (峰值 L, 峰值 R, 保持 L, 保持 R) dBFS；nil = 没有读数，只画暗条和刻度（与 W3-B 的占位逐像素相同）。
+    /// rms = (RMS L, RMS R) dBFS（提案 017）：有 → RMS 实心条 + 峰值细线 + 保持线；nil（017 之前的数据）→ 峰值实心条 + 保持线（W3-B2 的画法）。
     /// 数只来自 Stats.audio.meters（铁律 4），经 setMeters → MultiviewMeterFeed 递进来，这里只画。
     @inline(__always)
-    static func drawMeter(_ inner: PixelRect, levels: SIMD4<Float>?, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+    static func drawMeter(_ inner: PixelRect, levels: SIMD4<Float>?, rms: SIMD2<Float>? = nil, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
         let strip = meterStrip(inner)
         drawSolid(meterBackground, dest: strip, width: width, height: height, context: context, encoder: encoder)
-        if let levels { drawMeterLevels(strip, levels: levels, width: width, height: height, context: context, encoder: encoder) }
+        if let levels { drawMeterLevels(strip, levels: levels, rms: rms, width: width, height: height, context: context, encoder: encoder) }
         var k = 1
         while k <= 4 {
             let y = strip.y + strip.height * Float(k) / 5
@@ -486,10 +488,11 @@ enum CompositorPasses {
         }
     }
 
-    /// 峰值条（−60…0 dBFS 线性，分段上色）与峰值保持线。条区 = 暗条收进 1 px；左右声道各占一半，中间 1 px 缝（条区不到 5 px 宽时不留缝）。
-    /// 保持线高 = 画面高 / 540（1080p 下 2 px），上沿在保持电平处，颜色按它所在的分段；保持电平与峰值相同时它落在条顶里、看不出来。
+    /// 条（−60…0 dBFS 线性，分段上色）与峰值保持线。条区 = 暗条收进 1 px；左右声道各占一半，中间 1 px 缝（条区不到 5 px 宽时不留缝）。
+    /// 没有 RMS：实心条画到峰值。有 RMS（017）：实心条画到 RMS，峰值另画一道细线（高同保持线）、上沿在峰值处、颜色按峰值所在分段。
+    /// 保持线高 = 画面高 / 540（1080p 下 2 px），上沿在保持电平处，颜色按它所在的分段；保持电平与峰值相同时它落在条顶（或峰值线）里、看不出来。
     @inline(__always)
-    static func drawMeterLevels(_ strip: PixelRect, levels: SIMD4<Float>, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
+    static func drawMeterLevels(_ strip: PixelRect, levels: SIMD4<Float>, rms: SIMD2<Float>? = nil, width: Int, height: Int, context: Context, encoder: any MTLRenderCommandEncoder) {
         let area = PixelRect(x: strip.x + 1, y: strip.y + 1, width: max(0, strip.width - 2), height: max(0, strip.height - 2))
         guard area.width > 0, area.height > 0 else { return }
         let gap: Float = area.width >= 5 ? 1 : 0
@@ -500,12 +503,18 @@ enum CompositorPasses {
             let x = ch == 0 ? area.x : area.x + bw + gap
             let peak = MeterScale.fraction(levels[ch])
             let hold = MeterScale.fraction(levels[2 + ch])
-            drawMeterSegment(area, x: x, barWidth: bw, from: 0, to: min(peak, MeterScale.yellowFrom), color: meterGreen,
+            let bar = rms.map { MeterScale.fraction($0[ch]) } ?? peak
+            drawMeterSegment(area, x: x, barWidth: bw, from: 0, to: min(bar, MeterScale.yellowFrom), color: meterGreen,
                              width: width, height: height, context: context, encoder: encoder)
-            drawMeterSegment(area, x: x, barWidth: bw, from: MeterScale.yellowFrom, to: min(peak, MeterScale.redFrom), color: meterYellow,
+            drawMeterSegment(area, x: x, barWidth: bw, from: MeterScale.yellowFrom, to: min(bar, MeterScale.redFrom), color: meterYellow,
                              width: width, height: height, context: context, encoder: encoder)
-            drawMeterSegment(area, x: x, barWidth: bw, from: MeterScale.redFrom, to: peak, color: meterRed,
+            drawMeterSegment(area, x: x, barWidth: bw, from: MeterScale.redFrom, to: bar, color: meterRed,
                              width: width, height: height, context: context, encoder: encoder)
+            if rms != nil, peak > 0 {   // 017：峰值细线（与保持线同高），上沿在峰值处
+                let y = min(area.y + area.height * (1 - peak), area.y + area.height - holdHeight)
+                drawSolid(meterColor(forFraction: peak), dest: PixelRect(x: x, y: y, width: bw, height: holdHeight),
+                          width: width, height: height, context: context, encoder: encoder)
+            }
             if hold > 0 {
                 let y = min(area.y + area.height * (1 - hold), area.y + area.height - holdHeight)
                 drawSolid(meterColor(forFraction: hold), dest: PixelRect(x: x, y: y, width: bw, height: holdHeight),

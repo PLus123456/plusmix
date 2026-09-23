@@ -171,4 +171,35 @@ final class MeterTests: XCTestCase {
         rig.run(blocks: 2)
         XCTAssertEqual(Double(rig.mixer.meters[.master].peakMax[0]), 0.1 * pow(10, -6.0 / 20), accuracy: 1e-3, "复位后重新保持")
     }
+
+    /// 提案 017：RMS = 推子后均方的 300 ms 一阶平均再开方。1 kHz 正弦、幅度 0.1、增益 −6 dB、声像全左：
+    /// 稳态 RMS 比峰值低 3.01 dB；右声道无信号 = 下限 −120；输入表与 Master 同一口径；静音后均方按 300 ms 时间常数衰减。
+    func test017_rmsIsPeakMinus3dBForSine_settlesWith300msTimeConstant() {
+        final class Switch: @unchecked Sendable { var silent = false }
+        let sw = Switch()
+        let rig = OfflineRig()
+        rig.addSource(slot: 0, resampling: .bypass, generator: { _, start, n, buf in
+            for i in 0..<n { buf[i] = sw.silent ? 0 : 0.1 * Float(sin(2 * Double.pi * 1000 * Double(start + Int64(i)) / 48_000)) }
+        })
+        rig.mixer.setPan(slot: 0, -1)
+        rig.mixer.setGain(slot: 0, dB: -6)
+        rig.run(blocks: 60)           // 增益 / 声像平滑到位
+        rig.mixer.resetMeters()       // 清掉声像还没到位时右声道漏进来的那点能量（RMS 是一阶平均，3 s 后还剩 e^-10，不到下限）
+        let expectedPeakDb = 20 * log10(0.1 * pow(10, -6.0 / 20))
+        let expectedRmsDb = expectedPeakDb - 20 * log10(2.0.squareRoot())
+        let blockSeconds = Double(rig.driver.blockFrames) / 48_000
+        rig.run(blocks: Int((3.0 / blockSeconds).rounded()))   // 3 s ≫ 300 ms，稳态
+        let m = rig.mixer.meters
+        XCTAssertEqual(m[.master].rmsDb[0], expectedRmsDb, accuracy: 0.1, "Master 左：RMS = 峰值 − 3.01 dB")
+        XCTAssertEqual(m[.master].peakDb[0], expectedPeakDb, accuracy: 0.1)
+        XCTAssertEqual(m.inputs[0].rmsDb[0], expectedRmsDb, accuracy: 0.1, "输入表推子后同一口径")
+        XCTAssertEqual(m[.master].rmsDb[1], -120, accuracy: 1e-6, "右声道无信号 → 下限")
+        XCTAssertEqual(m.inputs[0].rmsDb[1], -120, accuracy: 1e-6)
+        // 时间常数：静音后均方每 300 ms 掉到 1/e（RMS −4.34 dB）。块步长是 exp 的一阶逼近（256 帧块：alpha 0.0178），0.3 s 后允差 ±0.5 dB
+        sw.silent = true
+        let before = m[.master].rmsDb[0]
+        rig.run(blocks: Int((0.3 / blockSeconds).rounded()))
+        let after = rig.mixer.meters[.master].rmsDb[0]
+        XCTAssertEqual(before - after, 4.34, accuracy: 0.5, "300 ms 后 RMS 应掉 4.34 dB：\(before) → \(after)")
+    }
 }

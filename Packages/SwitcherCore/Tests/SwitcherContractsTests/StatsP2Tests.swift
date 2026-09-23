@@ -60,13 +60,13 @@ final class StatsP2Tests: XCTestCase {
     func testP2_stats_metersJsonShape() throws {
         let m = Stats.AudioCounters.BusMeter(bus: Bus.master.name, peakDb: [-6, -6.5], truePeakDb: [-5.8, -6.3], lufsM: -18, lufsS: -19, lufsI: -20, lra: 4)
         XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(m), as: UTF8.self),
-                       #"{"bus":"master","lra":4,"lufs_i":-20,"lufs_m":-18,"lufs_s":-19,"peak_db":[-6,-6.5],"true_peak_db":[-5.8,-6.3]}"#)
-        XCTAssertEqual(Stats.AudioCounters.BusMeter.jsonKeys, ["bus", "peak_db", "true_peak_db", "lufs_m", "lufs_s", "lufs_i", "lra"])
-        XCTAssertEqual(Stats.AudioCounters.InputMeter.jsonKeys, ["peak_db"])
+                       #"{"bus":"master","lra":4,"lufs_i":-20,"lufs_m":-18,"lufs_s":-19,"peak_db":[-6,-6.5],"rms_db":[],"true_peak_db":[-5.8,-6.3]}"#)
+        XCTAssertEqual(Stats.AudioCounters.BusMeter.jsonKeys, ["bus", "peak_db", "rms_db", "true_peak_db", "lufs_m", "lufs_s", "lufs_i", "lra"])   // 017 加 rms_db
+        XCTAssertEqual(Stats.AudioCounters.InputMeter.jsonKeys, ["peak_db", "rms_db"])
         XCTAssertEqual(Stats.AudioCounters.Meters.jsonKeys, ["buses", "inputs"])
-        XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(Stats.AudioCounters.InputMeter(peakDb: [-12, -120])), as: UTF8.self), #"{"peak_db":[-12,-120]}"#)
+        XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(Stats.AudioCounters.InputMeter(peakDb: [-12, -120])), as: UTF8.self), #"{"peak_db":[-12,-120],"rms_db":[]}"#)
         let meters = Stats.AudioCounters.Meters(buses: [], inputs: [7: .init(peakDb: [-1, -2])])
-        XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(meters), as: UTF8.self), #"{"buses":[],"inputs":{"7":{"peak_db":[-1,-2]}}}"#)
+        XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(meters), as: UTF8.self), #"{"buses":[],"inputs":{"7":{"peak_db":[-1,-2],"rms_db":[]}}}"#)
         XCTAssertEqual(try JSONDecoder().decode(Stats.AudioCounters.Meters.self, from: try Stats.lineEncoder.encode(meters)), meters)
         // Bus.name：与 BusRouting 的 JSON 键一致，可逆
         XCTAssertEqual(Bus.allCases.map(\.name), ["master", "busA", "busB", "headphones"])

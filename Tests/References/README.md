@@ -72,6 +72,7 @@ W3-B2 删了渲染器对提案 010 过渡键（`extra["layout"]`、效果格 `bo
 |---|---|---|
 | `v8-multiview-audio-only-3x3.png` | 3×3 预设（meters 关），`fixed8()` 的输入 6 换成纯音频设备 `.audio(deviceUID: "BuiltInMicrophoneDevice")`、名字"话筒 Mic"（输入表里照样给它 stinger 图的帧） | 第三行中间一格是深灰底（38），右侧一条带四道刻度的暗条（没有读数 = 占位），左下"6  话筒 Mic"；不画 stinger 图。其余输入格没有电平表（meters 关） |
 | `v8-multiview-meters.png` | 同 `v8-multiview-custom` 的状态 + 两次 `setMeters`：t0 时输入 4 = −21 / −27，t0 + 0.5 s 时输入 1 = −3 / −5、3 = −14 / −16、4 = −33 / −40，Master = −9 / −10 | 输入 1 两根条顶进红区；输入 3 顶在黄区；输入 4 绿条，上方 0.65 / 0.55 处各一道 2 px 绿线（峰值保持，1 s 内不回落）；输入 2、5 没有读数 = 占位暗条；PGM 格右侧一条 40 px 宽的表（Master，顶在黄区）；PVW 格（输入 2，没有读数）不画表。没给表时与 `v8-multiview-custom` 逐像素相同 |
+| `v8-multiview-meters-rms.png` | 新（G4 续做合入 2026-09-24，提案 017；`SWITCHER_GEN_REFERENCES=1` 只跑 `testV8_multiviewMetersWithRMS` 生成，人工看过） | 同一组读数再带 RMS（= 峰值 − 9 dB）。实心条只到 RMS（输入 1 到 0.8 黄区顶、输入 3 到 0.583 绿、输入 4 到 0.3），峰值变成 2 px 细线（输入 1 在 0.95 / 0.917 红，输入 4 在 0.45 绿），保持线照旧（输入 4 的 0.65 / 0.55）；PGM 格 Master 同一画法。没有 rms_db 的老数据仍画 `v8-multiview-meters.png` 那样的实心峰值条（用例 `testV8_multiviewMetersWithRMS` 两张都比）。 |
 
 电平表的刻度与颜色（设计方案 §7 没有给颜色表，本会话定的，报告 §4 等用户拍板）：−60…0 dBFS 线性，< −18 绿、−18…−6 黄、≥ −6 红；
 四道刻度在表高 1/5…4/5（−48 / −36 / −24 / −12 dBFS），与 W3-B 的占位同一位置。

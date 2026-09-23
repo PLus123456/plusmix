@@ -390,18 +390,22 @@ struct BusEffectsSheet: View {
     }
 }
 
-/// 竖表：0 … −60 dBFS，nil = −∞。
+/// 竖表：0 … −60 dBFS，nil = −∞。分段颜色按设计方案 §7（2026-09-24 定，三处表同一套）：< −18 dBFS 绿、−18…−6 黄、≥ −6 红。
 struct MeterBar: View {
     let peakDb: [Double]?
+    /// 表高比例：−18 dBFS = 0.7，−6 dBFS = 0.9（−60…0 线性）。
+    static let yellowFrom = 0.7, redFrom = 0.9
 
     var body: some View {
         GeometryReader { geo in
             let level = peakDb?.max().flatMap { $0 > MixerModel.silenceDb ? $0 : nil }
             let fraction = level.map { min(max(1 + $0 / 60, 0), 1) } ?? 0
+            let h = geo.size.height
             ZStack(alignment: .bottom) {
                 Rectangle().fill(Color(nsColor: Theme.divider))
-                Rectangle().fill(fraction > 0.9 ? Color(nsColor: Theme.recording) : Color(nsColor: Theme.tallyPreview))
-                    .frame(height: geo.size.height * fraction)
+                Rectangle().fill(Color(nsColor: Theme.tallyPreview)).frame(height: h * min(fraction, Self.yellowFrom))
+                Rectangle().fill(Color(nsColor: .systemYellow)).frame(height: h * max(0, min(fraction, Self.redFrom) - Self.yellowFrom)).offset(y: -h * Self.yellowFrom)
+                Rectangle().fill(Color(nsColor: Theme.recording)).frame(height: h * max(0, fraction - Self.redFrom)).offset(y: -h * Self.redFrom)
                 ForEach([0.0, -6, -12, -24, -40], id: \.self) { db in
                     Rectangle().fill(db == 0 ? Color(nsColor: Theme.recording) : Color(nsColor: Theme.dimText)).frame(height: 1)
                         .offset(y: -geo.size.height * (1 + db / 60) + 1)

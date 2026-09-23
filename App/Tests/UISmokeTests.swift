@@ -10,6 +10,7 @@ final class UISmokeTests: XCTestCase {
     func testUI_smoke_launchAddTwoSyntheticsKey2SpaceThenReturnSwapsAfter30Ticks() throws {
         let session = try AppTest.freshSession()
         let wc = AppTest.controller.windowController
+        wc.resetSnapshotRateStats()   // (a)：只量本条用例的快照分发峰值（之前跨用例累计，偶发 61 / 60）
         XCTAssertNotNil(wc.window, "主窗口应已建好")
         XCTAssertEqual(session.state.inputs.count, 0, "新节目应没有输入")
 

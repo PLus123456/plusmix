@@ -118,6 +118,7 @@ typedef struct sw_input_stats {
 /// 一条总线的表读数（RT 写，快照读；线性峰值，LUFS / LU 响度）。
 typedef struct sw_bus_meter {
     float  peak[SW_MIX_BUS_CHANNELS];       ///< 本块采样峰值（线性）
+    float  mean_square[SW_MIX_BUS_CHANNELS];///< 推子后均方（线性功率，300 ms 一阶平均；提案 017 的 rms_db = 10·log10 在 Swift 侧算）
     float  true_peak[SW_MIX_BUS_CHANNELS];  ///< 本块真峰值（线性，4× 过采样，libebur128）
     float  peak_max[SW_MIX_BUS_CHANNELS];   ///< 自复位以来的最大采样峰值
     float  true_peak_max[SW_MIX_BUS_CHANNELS]; ///< 自复位以来的最大真峰值
@@ -130,6 +131,7 @@ typedef struct sw_bus_meter {
 /// 一路输入的表读数。
 typedef struct sw_input_meter {
     float peak[SW_MIX_BUS_CHANNELS];     ///< 推子后（含 AFV 增益）采样峰值
+    float mean_square[SW_MIX_BUS_CHANNELS]; ///< 推子后均方（线性功率，300 ms 一阶平均，提案 017）
     float peak_max[SW_MIX_BUS_CHANNELS];
 } sw_input_meter;
 

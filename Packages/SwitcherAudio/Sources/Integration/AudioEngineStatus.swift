@@ -34,6 +34,8 @@ public struct AudioEngineStatus: Sendable {
         public var afvGain: Float
         /// 推子后峰值（dBFS，L / R）。
         public var peakDb: [Double]
+        /// 推子后 RMS（dBFS，L / R；300 ms 一阶平均，提案 017）。
+        public var rmsDb: [Double]
         /// 正在摘除（淡出中）。
         public var removing: Bool
     }
@@ -41,6 +43,8 @@ public struct AudioEngineStatus: Sendable {
     public struct BusStatus: Hashable, Sendable {
         public var bus: Bus
         public var peakDb: [Double]
+        /// RMS dBFS（提案 017）。
+        public var rmsDb: [Double]
         public var truePeakDb: [Double]
         public var peakHoldDb: [Double]
         public var momentaryLUFS: Double

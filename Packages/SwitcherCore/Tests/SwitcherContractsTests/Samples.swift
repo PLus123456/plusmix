@@ -105,12 +105,12 @@ enum Samples {
         let silent = [-120.0, -120.0]
         return Stats.AudioCounters.Meters(
             buses: [
-                BM(bus: Bus.master.name, peakDb: [-6.5, -7], truePeakDb: [-6.2, -6.8], lufsM: -18.3, lufsS: -19.1, lufsI: -20, lra: 4.5),
+                BM(bus: Bus.master.name, peakDb: [-6.5, -7], rmsDb: [-12, -12.6], truePeakDb: [-6.2, -6.8], lufsM: -18.3, lufsS: -19.1, lufsI: -20, lra: 4.5),   // 017：rms_db
                 BM(bus: Bus.busA.name, peakDb: silent, truePeakDb: silent, lufsM: -120, lufsS: -120, lufsI: -120, lra: 0),
                 BM(bus: Bus.busB.name, peakDb: silent, truePeakDb: silent, lufsM: -120, lufsS: -120, lufsI: -120, lra: 0),
                 BM(bus: Bus.headphones.name, peakDb: [-9, -9], truePeakDb: [-8.9, -8.9], lufsM: -21, lufsS: -21.5, lufsI: -22, lra: 3),
             ],
-            inputs: [1: Stats.AudioCounters.InputMeter(peakDb: [-12, -12.5]), 3: Stats.AudioCounters.InputMeter(peakDb: silent)])
+            inputs: [1: Stats.AudioCounters.InputMeter(peakDb: [-12, -12.5], rmsDb: [-18, -18.5]), 3: Stats.AudioCounters.InputMeter(peakDb: silent)])
     }
 
     static func scenario() -> Scenario {

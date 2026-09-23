@@ -275,3 +275,24 @@ W3-B2 的渲染器改动（标签线程、电平表三块交接、按需建环�
 3. **UISmokeTests"每秒最多 60 次快照分发"偶发 61**（W3-E2 §5 第 13 条）：(a) 冒烟开头清零、只量本条；(b) 按 Timer 触发序号数。建议 (a)，W3-E3 做。
 4. `removeInput` 清 stinger 引用、API 进来的旧键先搬迁——两条 reducer 小规则建议做，已写进 P4（prompt 67 第 3 条），不同意就划掉。
 5. **两张退 W1-A 的工具口径单**（不等拍板，知会）：`G4b-w1-testkit-selfcheck-rhythm-vs-realtime-feeder`（自证的节奏一票把实时喂送的图案帧判掉——推流测试改用 `--no-self-check` 传输口径）；`G4b-w1-testkit-a4-click-pairing-tie-at-half-second`（A4 多文件对齐在闪光落 x.500 s 时平局打法不一致 → 999.98 ms 假红，g4c 撞上）。W1-A 下一次续做一起收。
+
+## 12. 第三轮（2026-09-24）：提案 017 落地、电平表三处统一、UISmoke 计数改法（用户："017 批了，电平表按你说的，UISmoke 用 (a)，都顺手做了"）
+
+| 事 | 落点 | 说明 |
+|---|---|---|
+| **017 RMS** 契约 | `SwitcherContracts/Stats.swift`：`BusMeter` / `InputMeter` 加 `rmsDb`（`rms_db`，显式 `init(from:)`、缺键 = 空数组、写出总写全）、`jsonKeys` 加一项；`Contracts017Tests`（新）+ StatsP2Tests / CodableTests / Samples 的字面量跟改 | 老 stats.jsonl 缺键解成 []，读表的照只有峰值画 |
+| 017 C 热路径 | `sw_audio_rt.h` 两个表结构加 `mean_square`；`sw_mix_internal.h` 输入槽 / 总线加 `rms_sq` 状态；`sw_mix.c` 输入推子循环与总线增益循环各多两次乘加（平方和），块尾一步一阶平均 `alpha = frames / (0.3 s · sr)`（不进 libm，不用 expf / sqrtf；`check-rt-symbols` 审计清单不变），快照拷进 `mean_square`；`SW_CMD_RESET_METERS` 也清它 | 开方与 dB 换算在 Swift 侧（`AudioMixer.BusMeter/InputMeter.rmsDb`），回调里只有乘加 |
+| 017 集成层 / 渲染器 | `AudioEngine.statsMeters` 填 `rmsDb`，`AudioEngineStatus.InputStatus/BusStatus` 加 `rmsDb`；渲染器 `MultiviewMeterTable` 多存 (RMS L, R)（NaN = 没有），`drawMeterLevels` 有 RMS 时画"RMS 实心条 + 峰值 2 px 细线 + 保持线"、没有时与 W3-B2 相同；新参考图 `Tests/References/v8-multiview-meters-rms.png`（`v8-multiview-meters.png` 不重生成，两张都比） | headless / App 的 `setMeters` 喂的是整份 Stats.audio.meters，自然带上 rms_db |
+| **电平表三处统一**（设计方案 §7 新增一条口径） | 调音台 `MeterBar` 改三段色（< −18 绿、−18…−6 黄、≥ −6 红）；纯音频缩略图 `NSLevelIndicator` 的 warning / critical 改 0.7 / 0.9（= −18 / −6）；多画面本来就是这套 | 用户授权改设计方案（不归检查点的文件，OWNERSHIP G4 行记了） |
+| **UISmoke 61 / 60 → (a)** | `MainWindowController.resetSnapshotRateStats()`；`UISmokeTests` 开头清零，只量本条用例 | 阈值 60 没动 |
+| 文档 | CONTRACTS.md §2.7、测试标准 §7 字段表加 rms_db、提案 017 状态、prompt 67（017 不用做了）/ 68（电平表与 UISmoke 已做）、Tests/References/README | |
+
+### 12.1 测试
+
+| 步骤 | 结果 |
+|---|---|
+| SwitcherContractsTests | 79 个用例 0 失败（1 跳过原有）；含 Contracts017Tests |
+| SwitcherAudio MeterTests + IntegrationTests 的表用例 | MeterTests 15 / 0（新 `test017_rmsIsPeakMinus3dBForSine_settlesWith300msTimeConstant`：正弦 RMS = 峰值 − 3.01 dB ± 0.1、右声道 −120、静音后 300 ms 掉 4.34 ± 0.5 dB）；`testP2_audioCounters_carryMetersAndDiscontinuities` / `testMonitor_busAndInputParametersFromState` 过 |
+| SwitcherRenderTests | 93 个：92 过、1 失败 = `DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`（blit 0 次：显示器仍不可见，与 §11.2 同一环境原因）；新 `testV8_multiviewMetersWithRMS`（参考图 PSNR ∞ + 结构断言）、`testMultiview_meterFeedCarriesRMS` 过，24 + 1 张参考图全部 PSNR ∞，零分配用例照过 |
+| App（UISmokeTests / MixerPanelTests / LocalizationTests / MultiviewLayoutTests / InputWiringTests 五个类，`caffeinate` 下） | 15 过 1 失败：唯一红的是 `InputWiringTests.testInputs_builtInCameraLiveWithin5sAndPictureShows`（"缩略图格子应在画"——合盖、内置摄像头与窗口都不可见，环境，与 §11.2 同类）；UISmoke 两条过，清零后本条的快照分发峰值 39 / s；`testMixer_perInputAFVToggle…` / `testMixer_stripsMetersAndCommands` 过（MeterBar 改三段色没影响读数断言） |
+| lint | 禁词 / 版本 / Package.swift 约束、依赖方向、实时符号审计（清单不变）、归属（App 胶水 24 / 50）全绿 |

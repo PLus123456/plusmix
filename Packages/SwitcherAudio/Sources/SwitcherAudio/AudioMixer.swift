@@ -171,19 +171,28 @@ public struct BusMeter: Hashable, Sendable {
     public var truePeakDb: [Double] { truePeak.map { 20 * log10(Double(max($0, 1e-12))) } }
     /// dBFS。
     public var peakDb: [Double] { peak.map { 20 * log10(Double(max($0, 1e-12))) } }
+    /// 推子后均方（线性功率，300 ms 一阶平均；提案 017）。
+    public var meanSquare: [Float]
+    /// RMS dBFS（10·log10 均方；静音给 −120，与 Stats 的下限一致）。
+    public var rmsDb: [Double] { meanSquare.map { max(-120, 10 * log10(Double(max($0, 1e-24)))) } }
     init(_ c: sw_bus_meter) {
         peak = [c.peak.0, c.peak.1]; truePeak = [c.true_peak.0, c.true_peak.1]
+        meanSquare = [c.mean_square.0, c.mean_square.1]
         peakMax = [c.peak_max.0, c.peak_max.1]; truePeakMax = [c.true_peak_max.0, c.true_peak_max.1]
         momentaryLUFS = c.momentary_lufs; shortTermLUFS = c.short_term_lufs
         integratedLUFS = c.integrated_lufs; loudnessRangeLU = c.loudness_range_lu
     }
 }
 
-/// 一路输入的表读数（推子后采样峰值）。
+/// 一路输入的表读数（推子后采样峰值 + 均方，提案 017）。
 public struct InputMeter: Hashable, Sendable {
     public var peak: [Float]
     public var peakMax: [Float]
-    init(_ c: sw_input_meter) { peak = [c.peak.0, c.peak.1]; peakMax = [c.peak_max.0, c.peak_max.1] }
+    /// 推子后均方（线性功率，300 ms 一阶平均）。
+    public var meanSquare: [Float]
+    /// RMS dBFS（静音给 −120）。
+    public var rmsDb: [Double] { meanSquare.map { max(-120, 10 * log10(Double(max($0, 1e-24)))) } }
+    init(_ c: sw_input_meter) { peak = [c.peak.0, c.peak.1]; peakMax = [c.peak_max.0, c.peak_max.1]; meanSquare = [c.mean_square.0, c.mean_square.1] }
 }
 
 /// 表读数快照（UI 读这个）。

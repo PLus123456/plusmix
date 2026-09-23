@@ -9,8 +9,8 @@
 // 纯双缓冲做不到"两边都不等"：写端要复用读端刚放下的那块，就得先确认读端读完了。第三块就是省掉这一步的交接位。
 //
 // 数的口径（峰值保持、过期）都在写端和这里定，画法（刻度、颜色分段）在 CompositorPasses.drawMeter。
-// 契约里没有 RMS（`Stats.AudioCounters.InputMeter` 只有 peak_db，总线也只有峰值 / 真峰值 / 响度），这里只画峰值 + 峰值保持；
-// 要加 RMS 见 docs/contract-changes/017（本会话写的提案，等批；W3-E2 先占了 016）。
+// RMS（提案 017，2026-09-24 落地）：`rms_db` 有值时表里带 (RMS L, RMS R)，画法变成 RMS 实心条 + 峰值细线 + 保持线；
+// 空数组（017 之前的 stats）= 没有 RMS，表里存 NaN，画法与 W3-B2 相同（峰值实心条 + 保持线）。
 import Foundation
 import Synchronization
 import SwitcherContracts
@@ -45,21 +45,28 @@ final class MultiviewMeterTable: @unchecked Sendable {
     fileprivate(set) var count = 0
     fileprivate var hasProgram = false
     fileprivate var program = SIMD4<Float>(repeating: -120)
+    /// 节目的 (RMS L, RMS R)；NaN = 这份数没有 RMS。
+    fileprivate var programRmsValue = SIMD2<Float>(.nan, .nan)
     /// 输入编号（按编号升序）。
     private let numbers: UnsafeMutablePointer<Int32>
     /// (峰值 L, 峰值 R, 保持 L, 保持 R)。
     private let levels: UnsafeMutablePointer<SIMD4<Float>>
+    /// (RMS L, RMS R)，与 levels 同下标；NaN = 没有 RMS（提案 017 之前的数据）。
+    private let rms: UnsafeMutablePointer<SIMD2<Float>>
 
     init() {
         numbers = .allocate(capacity: MultiviewMeterTable.capacity)
         numbers.initialize(repeating: 0, count: MultiviewMeterTable.capacity)
         levels = .allocate(capacity: MultiviewMeterTable.capacity)
         levels.initialize(repeating: SIMD4(repeating: -120), count: MultiviewMeterTable.capacity)
+        rms = .allocate(capacity: MultiviewMeterTable.capacity)
+        rms.initialize(repeating: SIMD2(.nan, .nan), count: MultiviewMeterTable.capacity)
     }
 
     deinit {
         numbers.deallocate()
         levels.deallocate()
+        rms.deallocate()
     }
 
     fileprivate func clear() {
@@ -68,10 +75,11 @@ final class MultiviewMeterTable: @unchecked Sendable {
         hasProgram = false
     }
 
-    fileprivate func append(number: Int, levels l: SIMD4<Float>) {
+    fileprivate func append(number: Int, levels l: SIMD4<Float>, rms r: SIMD2<Float>?) {
         guard count < MultiviewMeterTable.capacity else { return }
         numbers[count] = Int32(truncatingIfNeeded: number)
         levels[count] = l
+        rms[count] = r ?? SIMD2(.nan, .nan)
         count += 1
     }
 
@@ -88,9 +96,25 @@ final class MultiviewMeterTable: @unchecked Sendable {
         return nil
     }
 
+    /// 输入 n 的 RMS（提案 017）；表里没有这一路、或这份数没有 RMS 都为 nil。
+    @inline(__always)
+    func rms(forInput n: Int) -> SIMD2<Float>? {
+        guard n > 0 else { return nil }
+        let key = Int32(truncatingIfNeeded: n)
+        var i = 0
+        while i < count {
+            if numbers[i] == key { let r = rms[i]; return r.x.isNaN ? nil : r }
+            i += 1
+        }
+        return nil
+    }
+
     /// 节目（Master 总线）的读数，PGM 格用；这次没有 master 总线为 nil。
     @inline(__always)
     var programLevels: SIMD4<Float>? { hasProgram ? program : nil }
+    /// 节目的 RMS；没有 master 总线或这份数没有 RMS 为 nil。
+    @inline(__always)
+    var programRms: SIMD2<Float>? { hasProgram && !programRmsValue.x.isNaN ? programRmsValue : nil }
 }
 
 /// 写端 → 渲染线程的电平表通道（三块定长缓冲）。实时渲染器、离线渲染器各一份。
@@ -125,18 +149,20 @@ final class MultiviewMeterFeed: @unchecked Sendable {
         defer { writeLock.unlock() }
         let t = tables[back]
         t.clear()
+        t.programRmsValue = SIMD2(.nan, .nan)
         t.fedAt = time
         if let meters {
             var seen = Set<Int>()
             for n in meters.inputs.keys.sorted() where n > 0 && t.count < MultiviewMeterTable.capacity {
                 guard let peak = MultiviewMeterFeed.pair(meters.inputs[n]?.peakDb ?? []) else { continue }
                 let hold = updateHold(key: n, peak: peak, at: time)
-                t.append(number: n, levels: SIMD4(peak.x, peak.y, hold.x, hold.y))
+                t.append(number: n, levels: SIMD4(peak.x, peak.y, hold.x, hold.y), rms: MultiviewMeterFeed.pair(meters.inputs[n]?.rmsDb ?? []))
                 seen.insert(n)
             }
             if let master = meters.buses.first(where: { $0.bus == Bus.master.name }), let peak = MultiviewMeterFeed.pair(master.peakDb) {
                 let hold = updateHold(key: 0, peak: peak, at: time)
                 t.program = SIMD4(peak.x, peak.y, hold.x, hold.y)
+                t.programRmsValue = MultiviewMeterFeed.pair(master.rmsDb) ?? SIMD2(.nan, .nan)
                 t.hasProgram = true
                 seen.insert(0)
             }

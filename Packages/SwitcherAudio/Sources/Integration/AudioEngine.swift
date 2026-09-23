@@ -583,10 +583,11 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private func statsMeters(_ m: MixerMeters) -> Stats.AudioCounters.Meters {
         typealias M = Stats.AudioCounters.Meters
         func dB(_ v: [Float]) -> [Double] { v.map { M.decibels(fromLinear: Double($0)) } }
+        func rms(_ ms: [Float]) -> [Double] { ms.map { M.decibels(fromLinear: Double($0).squareRoot()) } }   // 017：均方 → dBFS（开方在这里，不在回调里）
         let buses = Bus.allCases.compactMap { b -> Stats.AudioCounters.BusMeter? in
             guard b.rawValue < m.buses.count else { return nil }
             let r = m.buses[b.rawValue]
-            return .init(bus: b.name, peakDb: dB(r.peak), truePeakDb: dB(r.truePeak), lufsM: M.loudness(r.momentaryLUFS),
+            return .init(bus: b.name, peakDb: dB(r.peak), rmsDb: rms(r.meanSquare), truePeakDb: dB(r.truePeak), lufsM: M.loudness(r.momentaryLUFS),
                          lufsS: M.loudness(r.shortTermLUFS), lufsI: M.loudness(r.integratedLUFS), lra: M.loudness(r.loudnessRangeLU))
         }
         lock.lock()
@@ -594,7 +595,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         lock.unlock()
         var inputs: [Int: Stats.AudioCounters.InputMeter] = [:]
         for (number, slot) in pairs where slot >= 0 && slot < m.inputs.count {
-            inputs[number] = .init(peakDb: dB(m.inputs[slot].peak))
+            inputs[number] = .init(peakDb: dB(m.inputs[slot].peak), rmsDb: rms(m.inputs[slot].meanSquare))
         }
         return M(buses: buses, inputs: inputs)
     }
@@ -623,12 +624,12 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
                                                  alignmentDelayFrames: rec.alignmentDelayFrames, residualFrames: rec.residualFrames,
                                                  userDelayMs: rec.settings.delayMs, ratio: st?.ratio ?? 1,
                                                  underrunBlocks: st?.underrunBlocks ?? 0, reprimes: st?.reprimes ?? 0, afvGain: rec.afvGain,
-                                                 peakDb: (m?.peak ?? [0, 0]).map(dB), removing: rec.removing != nil)
+                                                 peakDb: (m?.peak ?? [0, 0]).map(dB), rmsDb: m?.rmsDb ?? [-120, -120], removing: rec.removing != nil)
         }
         let busStatus: [AudioEngineStatus.BusStatus] = Bus.allCases.map { b in
             let m = meters[b]
             let s = busStates.first { $0.bus == b } ?? BusState(bus: b)
-            return AudioEngineStatus.BusStatus(bus: b, peakDb: m.peak.map(dB), truePeakDb: m.truePeak.map(dB), peakHoldDb: m.peakMax.map(dB),
+            return AudioEngineStatus.BusStatus(bus: b, peakDb: m.peak.map(dB), rmsDb: m.rmsDb, truePeakDb: m.truePeak.map(dB), peakHoldDb: m.peakMax.map(dB),
                                                momentaryLUFS: m.momentaryLUFS, shortTermLUFS: m.shortTermLUFS, integratedLUFS: m.integratedLUFS,
                                                loudnessRangeLU: m.loudnessRangeLU, gainDb: s.gainDb, muted: s.muted)
         }

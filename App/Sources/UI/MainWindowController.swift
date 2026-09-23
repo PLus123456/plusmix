@@ -48,6 +48,15 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     /// 最近一秒内快照回调的最大次数（测试用）。
     private(set) var maxSnapshotsPerSecond = 0
 
+    /// 测试用：清零快照分发的计数，让一条用例只量自己（UISmokeTests 的"每秒最多 60 次"，用户 2026-09-24 选的做法 (a)；
+    /// 计数原来跨用例累计、以事件为锚的 1 s 窗口偶发数到 61，W3-E2 报告 §5 第 13 条）。
+    func resetSnapshotRateStats() {
+        snapshotsReceived = 0
+        snapshotWindowStart = Date()
+        snapshotsInWindow = 0
+        maxSnapshotsPerSecond = 0
+    }
+
     init() {
         let window = MainWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                                 styleMask: [.titled, .closable, .miniaturizable, .resizable],

@@ -215,6 +215,76 @@ final class MultiviewMetersTests: XCTestCase {
         XCTAssertEqual(feed.acquire(now: nil)?.levels(forInput: 7), SIMD4<Float>(-50, -50, -50, -50))
     }
 
+    /// 提案 017：同一组读数再带 RMS（= 峰值 − 9 dB）→ 新参考图 v8-multiview-meters-rms：实心条只到 RMS，峰值变成细线，保持线照旧；
+    /// 没有 RMS 的老数据（上一条用例）画法不变、v8-multiview-meters 不重生成。
+    func testV8_multiviewMetersWithRMS() throws {
+        let s = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout)
+        func withRms(_ m: Stats.AudioCounters.Meters?) -> Stats.AudioCounters.Meters? {
+            guard var m else { return nil }
+            m.inputs = m.inputs.mapValues { Stats.AudioCounters.InputMeter(peakDb: $0.peakDb, rmsDb: $0.peakDb.map { $0 - 9 }) }
+            m.buses = m.buses.map { var b = $0; b.rmsDb = b.peakDb.map { $0 - 9 }; return b }
+            return m
+        }
+        let calls = ReferenceStates.referenceMeterCalls.map { V8ReferenceTests.MeterFeedCall(meters: withRms($0.meters), at: $0.at) }
+        try V8ReferenceTests.compare("v8-multiview-meters-rms", state: s, target: .multiview, meters: calls)
+
+        let fed = try renderMultiview(s, meters: calls)
+        let peakOnly = try renderMultiview(s, meters: ReferenceStates.referenceMeterCalls)
+        let placeholder = try renderMultiview(s)
+        XCTAssertFalse(fed.bgra == peakOnly.bgra, "带 RMS 的画法与只有峰值的不同")
+        let cs = cells(s)
+        func strip(ofInput n: Int) throws -> PixelRect {
+            CompositorPasses.meterStrip(try XCTUnwrap(cs.first { $0.spec.kind == .input && Int($0.spec.input) == n }, "没有输入 \(n) 的格子").inner)
+        }
+        func at(_ bm: Bitmap, _ strip: PixelRect, _ ch: Int, _ f: Float) -> RGBA {
+            let p = Self.meterPoint(strip, channel: ch, fraction: f)
+            return bm.pixel(p.x, p.y)
+        }
+        func unchanged(_ strip: PixelRect, _ ch: Int, _ f: Float) -> Bool { at(fed, strip, ch, f) == at(placeholder, strip, ch, f) }
+        /// 细线只有 2 px：在期望位置上下 3 行里找颜色
+        func lineNear(_ strip: PixelRect, _ ch: Int, _ f: Float, _ test: (RGBA) -> Bool) -> Bool {
+            let p = Self.meterPoint(strip, channel: ch, fraction: f)
+            return (-3...3).contains { test(fed.pixel(p.x, p.y + $0)) }
+        }
+        // 输入 1：峰值 −3 / −5（0.95 / 0.917），RMS −12 / −14（0.8 / 0.767）：实心条到 0.8（0.75 处黄），0.85 处是暗条，0.95 附近一道红线
+        let s1 = try strip(ofInput: 1)
+        XCTAssertTrue(Self.isGreen(at(fed, s1, 0, 0.5)))
+        XCTAssertTrue(Self.isYellow(at(fed, s1, 0, 0.75)), "RMS 条 0.8 高，0.75 处应是黄，得 \(at(fed, s1, 0, 0.75))")
+        XCTAssertTrue(unchanged(s1, 0, 0.85), "RMS 条顶 0.8 与峰值线 0.95 之间应是暗条，得 \(at(fed, s1, 0, 0.85))")
+        XCTAssertTrue(lineNear(s1, 0, 0.95, Self.isRed), "峰值 −3 dBFS 处应有一道红线")
+        XCTAssertTrue(unchanged(s1, 0, 0.985), "峰值线之上是暗条")
+        XCTAssertTrue(unchanged(s1, 1, 0.85))
+        XCTAssertTrue(lineNear(s1, 1, 0.917, Self.isRed), "R 峰值 −5 dBFS 处应有一道红线")
+        // 输入 4：峰值 −33 / −40（0.45 / 0.333），RMS −42 / −49（0.3 / 0.183），保持 −21 / −27（0.65 / 0.55）：绿条到 0.3，0.45 附近绿线，0.65 附近绿线，两线之间暗条
+        let s4 = try strip(ofInput: 4)
+        XCTAssertTrue(Self.isGreen(at(fed, s4, 0, 0.2)))
+        XCTAssertTrue(unchanged(s4, 0, 0.38), "RMS 条顶 0.3 与峰值线 0.45 之间应是暗条")
+        XCTAssertTrue(lineNear(s4, 0, 0.45, Self.isGreen), "峰值 −33 dBFS 处应有一道绿线")
+        XCTAssertTrue(unchanged(s4, 0, 0.55), "峰值线与保持线之间应是暗条")
+        XCTAssertTrue(lineNear(s4, 0, 0.65, Self.isGreen), "保持线 −21 dBFS 照旧")
+        // 只有峰值的老数据：画法与 W3-B2 相同（上一条用例的参考图没动）
+        try assertEqualsReference("v8-multiview-meters", peakOnly)
+    }
+
+    /// 017：表里带 RMS，没有 RMS 的数据为 nil；PGM 格读 master 的 RMS
+    func testMultiview_meterFeedCarriesRMS() throws {
+        let feed = MultiviewMeterFeed()
+        let t0 = HostTime(ticks: 5_000_000)
+        var m = Stats.AudioCounters.Meters()
+        m.inputs = [3: .init(peakDb: [-10, -20], rmsDb: [-19, -29]), 5: .init(peakDb: [-30])]
+        m.buses = [.init(bus: Bus.master.name, peakDb: [-6, -7], rmsDb: [-15, -16], truePeakDb: [-5, -6], lufsM: -18, lufsS: -18, lufsI: -18, lra: 1)]
+        feed.write(m, at: t0)
+        let t = try XCTUnwrap(feed.acquire(now: nil))
+        XCTAssertEqual(t.rms(forInput: 3), SIMD2<Float>(-19, -29))
+        XCTAssertEqual(t.levels(forInput: 3), SIMD4<Float>(-10, -20, -10, -20))
+        XCTAssertNil(t.rms(forInput: 5), "没给 rms_db 的路 → nil（画法回到只有峰值）")
+        XCTAssertNotNil(t.levels(forInput: 5))
+        XCTAssertEqual(t.programRms, SIMD2<Float>(-15, -16))
+        m.buses[0].rmsDb = []
+        feed.write(m, at: t0 + HostDuration(milliseconds: 100))
+        XCTAssertNil(feed.acquire(now: nil)?.programRms, "master 没有 rms_db → PGM 格只有峰值")
+    }
+
     /// 给定 meters 表（三路不同电平 + Master）→ 参考图 PSNR ∞；没给表 / 清掉表 → 与 W3-B 的占位图 v8-multiview-custom 逐像素相同。
     func testV8_multiviewMetersFromStats() throws {
         let s = ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout)

@@ -62,8 +62,8 @@ final class InputCellView: NSView {
         audioMeter.levelIndicatorStyle = .continuousCapacity
         audioMeter.minValue = 0
         audioMeter.maxValue = 1
-        audioMeter.warningValue = 0.9
-        audioMeter.criticalValue = 0.97
+        audioMeter.warningValue = 0.7     // −18 dBFS：与调音台 MeterBar / 多画面电平表同一套分段（设计方案 §7，2026-09-24 定）
+        audioMeter.criticalValue = 0.9    // −6 dBFS
         audioMeter.setAccessibilityLabel(L("mixer.meter"))
         audioMeter.widthAnchor.constraint(equalToConstant: Theme.thumbnailWidth - 40).isActive = true
         for v in [audioIcon, audioName, audioMeter] as [NSView] { audioPlaceholder.addArrangedSubview(v) }

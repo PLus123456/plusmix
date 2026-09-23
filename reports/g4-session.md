@@ -100,3 +100,7 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
 
 用户："那三个都完事，你检查一下"。W3-E2（w3-app-3）/ W3-C2（w3-outputs-3）/ W3-B2（w3-compositor-3）检查 → 三路 `--no-ff` 合入（无冲突）→ 检查点胶水（Aux 三根线、setMeters 1 Hz、虚拟摄像头文案、外部输出测试第 3 步、测试标准 §7 undelivered、make gen 钉工作区锁文件、清单）→ 全量测试 + gate4 g4c → 新 prompt 67 / 68 / 69 → g4 快进到 main。
 明细与数字在 reports/G4-notes.md §11（reports/G4.md 同步）。
+
+## 9. 第三轮（2026-09-24，本会话续）
+
+用户："017 批了，电平表按你说的，UISmoke 用 (a)，都顺手做了"。提案 017（RMS）从契约到 C 热路径、集成层、渲染器与参考图一次落地；三处电平表统一成设计方案 §7 新写的口径；UISmoke 的快照分发计数改成只量本条。明细与数字在 reports/G4-notes.md §12。

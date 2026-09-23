@@ -35,6 +35,8 @@
 #include "sw_rt_pragma.h"
 
 #define SW_PAN_SMOOTH_PER_BLOCK 0.3f   ///< 声像每块向目标走 30%
+/// RMS 表的积分时间常数（IEC 60268-17 VU：300 ms，提案 017）。每块按 alpha = frames / (τ·sr) 一阶逼近，块比 τ 短得多时与 exp 的差 < 1%；不进 libm。
+#define SW_RMS_TIME_CONSTANT_S 0.3f
 #define SW_STALL_BLOCKS_LIMIT  190u    ///< write_index 连续 ~1 s（190 × 5.3 ms）没动 → 视为源停了，回到未就绪
 #define SW_PI_F 3.14159265358979323846f
 #define SW_PRIME_WAIT_EXTRA_BLOCKS 16u ///< 目标年龄模式：等相位 / 等目标时刻走进当前数据的上限 = 目标年龄的块数 + 这么多块
@@ -183,6 +185,11 @@ OSStatus sw_effect_input_proc(void *refCon, AudioUnitRenderActionFlags *flags, c
 // ---------------------------------------------------------------------------
 
 static inline float sw_clampf(float v, float lo, float hi) SW_NONBLOCKING { return v < lo ? lo : (v > hi ? hi : v); }
+/// 提案 017：RMS 一阶平均本块的步长 alpha = frames / (τ·sr)，钳到 [0, 1]。不用 expf：不进 libm，RT 符号审计不变。
+static inline float sw_rms_alpha(const sw_mix_ctx *ctx, uint32_t frames) SW_NONBLOCKING {
+    const float a = (float)frames / (SW_RMS_TIME_CONSTANT_S * (float)ctx->sample_rate);
+    return a > 1.0f ? 1.0f : a;
+}
 
 static void sw_rate_reset(sw_rate_state *r) SW_NONBLOCKING {
     r->level_filt = 0; r->integ = 0; r->ratio = 1.0; r->have_level = 0; r->win_valid = 0;
@@ -303,7 +310,8 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
             for (uint32_t ch = 0; ch < SW_MIX_BUS_CHANNELS; ch++) { bus->m.peak_max[ch] = 0; bus->m.true_peak_max[ch] = 0; }
             // 积分响度的复位需要 ebur128 重建（分配），留给 Host：这里只清峰值保持
         }
-        for (uint32_t i = 0; i < ctx->input_capacity; i++) { ctx->inputs[i].peak_max[0] = 0; ctx->inputs[i].peak_max[1] = 0; }
+        for (uint32_t i = 0; i < ctx->input_capacity; i++) { ctx->inputs[i].peak_max[0] = 0; ctx->inputs[i].peak_max[1] = 0; ctx->inputs[i].rms_sq[0] = 0; ctx->inputs[i].rms_sq[1] = 0; }
+        for (uint32_t b = 0; b < SW_MIX_BUS_COUNT; b++) { ctx->buses[b].rms_sq[0] = 0; ctx->buses[b].rms_sq[1] = 0; }   // 017：RMS 的一阶平均也从头算
         break;
     case SW_CMD_RESET_STATS:
         ctx->stats.dropouts = 0; ctx->stats.underruns = 0; ctx->stats.tap_drops = 0; ctx->stats.max_block_ticks = 0;
@@ -657,6 +665,7 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     float *pl = slot->post[0], *pr = slot->post[1];
     float g = g0, afv = afv0;
     float pk0 = 0, pk1 = 0;
+    float sq0 = 0, sq1 = 0;   // 提案 017：本块平方和（RMS）
     for (uint32_t i = 0; i < frames; i++) {
         g += (gt - g) * k;
         if (xfade_gain) afv = xfade_gain[i]; else afv += (afv_t - afv) * k;
@@ -668,6 +677,7 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
         const float al = fabsf(l), ar = fabsf(r);
         if (al > pk0) pk0 = al;
         if (ar > pk1) pk1 = ar;
+        sq0 += l * l; sq1 += r * r;
     }
     // 一阶平滑到目标 1e-6（−120 dB）以内就吸到目标：float32 在 1.0 附近一个 ulp 是 1.19e-7，增量早已加不进去
     if (fabsf(g - gt) < 1e-6f) g = gt;
@@ -679,6 +689,12 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     slot->peak_block[0] = pk0; slot->peak_block[1] = pk1;
     if (pk0 > slot->peak_max[0]) slot->peak_max[0] = pk0;
     if (pk1 > slot->peak_max[1]) slot->peak_max[1] = pk1;
+    {   // 提案 017：均方的一阶平均（300 ms），每块一步
+        const float alpha = sw_rms_alpha(ctx, frames);
+        const float inv_n = frames > 0 ? 1.0f / (float)frames : 0.0f;
+        slot->rms_sq[0] += (sq0 * inv_n - slot->rms_sq[0]) * alpha;
+        slot->rms_sq[1] += (sq1 * inv_n - slot->rms_sq[1]) * alpha;
+    }
 
     // 6. 送节目总线
     const uint32_t rt = slot->routing;
@@ -819,12 +835,14 @@ static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, 
     float g = bus->gain;
     float *l = cur[0], *r = cur[1];
     float pk0 = 0, pk1 = 0;
+    float sq0 = 0, sq1 = 0;   // 提案 017
     for (uint32_t i = 0; i < frames; i++) {
         g += (gt - g) * k;
         l[i] *= g; r[i] *= g;
         const float al = fabsf(l[i]), ar = fabsf(r[i]);
         if (al > pk0) pk0 = al;
         if (ar > pk1) pk1 = ar;
+        sq0 += l[i] * l[i]; sq1 += r[i] * r[i];
     }
     if (fabsf(g - gt) < 1e-6f) g = gt;
     bus->gain = g;
@@ -834,6 +852,13 @@ static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, 
     m->peak[0] = pk0; m->peak[1] = pk1;
     if (pk0 > m->peak_max[0]) m->peak_max[0] = pk0;
     if (pk1 > m->peak_max[1]) m->peak_max[1] = pk1;
+    {   // 提案 017：总线均方的一阶平均，直接写进 m（快照整块拷 m）
+        const float alpha = sw_rms_alpha(ctx, frames);
+        const float inv_n = frames > 0 ? 1.0f / (float)frames : 0.0f;
+        bus->rms_sq[0] += (sq0 * inv_n - bus->rms_sq[0]) * alpha;
+        bus->rms_sq[1] += (sq1 * inv_n - bus->rms_sq[1]) * alpha;
+        m->mean_square[0] = bus->rms_sq[0]; m->mean_square[1] = bus->rms_sq[1];
+    }
     if (bus->meter) {
         float *il = bus->interleaved;
         for (uint32_t i = 0; i < frames; i++) { il[2 * i] = l[i]; il[2 * i + 1] = r[i]; }
@@ -933,6 +958,8 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
         ctx->meters.input[i].peak[1] = ctx->inputs[i].peak_block[1];
         ctx->meters.input[i].peak_max[0] = ctx->inputs[i].peak_max[0];
         ctx->meters.input[i].peak_max[1] = ctx->inputs[i].peak_max[1];
+        ctx->meters.input[i].mean_square[0] = ctx->inputs[i].rms_sq[0];
+        ctx->meters.input[i].mean_square[1] = ctx->inputs[i].rms_sq[1];
     }
     __atomic_thread_fence(__ATOMIC_RELEASE);
     __atomic_store_n(&ctx->meter_seq, ctx->meter_seq + 1u, __ATOMIC_RELEASE);   // 偶数：可读

@@ -1,7 +1,7 @@
 # 017 `Stats.audio.meters` 加 RMS（`rms_db`）
 
 提出会话 / 分支：W3-B2 / w3-compositor-3（worktree 分支 `claude/w3-compositor-audio-meters-labels-e0dba1`，2026-09-23）
-状态：**待批**
+状态：**已落地**（用户 2026-09-24 批："017 批了 … 都顺手做了"；G4 续做合入会话按授权落地：契约 `BusMeter` / `InputMeter` 加 `rmsDb`（缺键 = 空数组），C 热路径每块每声道平方和 → 300 ms 一阶平均的均方（不在回调里开方，Swift 侧 10·log10），`AudioMixer.meters` / `AudioEngine.audioCounters` / `AudioEngineStatus` 带出，渲染器有 RMS 时画"RMS 实心条 + 峰值细线 + 保持线"、没有时照旧，新参考图 `v8-multiview-meters-rms.png`；CONTRACTS.md §2.7、测试标准 §7 同步）
 
 ## 改什么
 

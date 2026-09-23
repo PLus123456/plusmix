@@ -81,6 +81,7 @@ typedef struct sw_input_slot {
     sw_input_stats st;            ///< 快照读
     float peak_max[SW_MIX_BUS_CHANNELS];
     float peak_block[SW_MIX_BUS_CHANNELS];
+    float rms_sq[SW_MIX_BUS_CHANNELS];      ///< 推子后均方的一阶平均（提案 017），每块更新
     float *resampled[SW_MIX_BUS_CHANNELS]; ///< 重采样输出（max_block）
     float *delayed[SW_MIX_BUS_CHANNELS];   ///< 延迟线输出
     float *post[SW_MIX_BUS_CHANNELS];      ///< 推子后（增益 / 静音 / AFV / 声像）立体声
@@ -111,6 +112,7 @@ typedef struct sw_bus_state {
     uint32_t frames_since_meter_update;
     uint64_t sample_time;                 ///< AU 渲染时间戳（帧）
     sw_bus_meter m;
+    float rms_sq[SW_MIX_BUS_CHANNELS];       ///< 总线均方的一阶平均（提案 017）
 } sw_bus_state;
 
 /// 一次 AFV 交叉淡变。

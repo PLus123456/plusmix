@@ -242,6 +242,9 @@ public struct Stats: Hashable, Codable, Sendable {
             public var bus: String
             /// JSON 键 peak_db：本块采样峰值 dBFS，[L, R]。
             public var peakDb: [Double]
+            /// JSON 键 rms_db（提案 017）：推子后（与 peak_db 同一取样点）的均方根电平 dBFS，[L, R]；300 ms 一阶指数平均（IEC 60268-17 的 VU 积分时间），
+            /// 每个混音块更新一次，采样那一刻的值；空数组 = 这份数没有 RMS（017 之前的文件），读表的照只有峰值画。
+            public var rmsDb: [Double]
             /// JSON 键 true_peak_db：真峰值 dBTP，[L, R]。
             public var truePeakDb: [Double]
             /// JSON 键 lufs_m：瞬时响度（400 ms）。
@@ -252,9 +255,10 @@ public struct Stats: Hashable, Codable, Sendable {
             public var lufsI: Double
             /// JSON 键 lra：响度范围（LU）。
             public var lra: Double
-            public init(bus: String, peakDb: [Double], truePeakDb: [Double], lufsM: Double, lufsS: Double, lufsI: Double, lra: Double) {
+            public init(bus: String, peakDb: [Double], rmsDb: [Double] = [], truePeakDb: [Double], lufsM: Double, lufsS: Double, lufsI: Double, lra: Double) {
                 self.bus = bus
                 self.peakDb = peakDb
+                self.rmsDb = rmsDb
                 self.truePeakDb = truePeakDb
                 self.lufsM = lufsM
                 self.lufsS = lufsS
@@ -264,24 +268,45 @@ public struct Stats: Hashable, Codable, Sendable {
             enum CodingKeys: String, CodingKey {
                 case bus
                 case peakDb = "peak_db"
+                case rmsDb = "rms_db"
                 case truePeakDb = "true_peak_db"
                 case lufsM = "lufs_m"
                 case lufsS = "lufs_s"
                 case lufsI = "lufs_i"
                 case lra
             }
+            /// rms_db 缺键 = 空数组（017 之前的 stats.jsonl）；其余键照常。
+            public init(from decoder: any Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                bus = try c.decode(String.self, forKey: .bus)
+                peakDb = try c.decode([Double].self, forKey: .peakDb)
+                rmsDb = try c.decodeIfPresent([Double].self, forKey: .rmsDb) ?? []
+                truePeakDb = try c.decode([Double].self, forKey: .truePeakDb)
+                lufsM = try c.decode(Double.self, forKey: .lufsM)
+                lufsS = try c.decode(Double.self, forKey: .lufsS)
+                lufsI = try c.decode(Double.self, forKey: .lufsI)
+                lra = try c.decode(Double.self, forKey: .lra)
+            }
             /// JSON 键名。
-            public static let jsonKeys = ["bus", "peak_db", "true_peak_db", "lufs_m", "lufs_s", "lufs_i", "lra"]
+            public static let jsonKeys = ["bus", "peak_db", "rms_db", "true_peak_db", "lufs_m", "lufs_s", "lufs_i", "lra"]
         }
 
         /// 一路输入的表读数（推子后）。
         public struct InputMeter: Hashable, Codable, Sendable {
             /// JSON 键 peak_db：采样峰值 dBFS，[L, R]。
             public var peakDb: [Double]
-            public init(peakDb: [Double]) { self.peakDb = peakDb }
-            enum CodingKeys: String, CodingKey { case peakDb = "peak_db" }
+            /// JSON 键 rms_db（提案 017）：均方根电平 dBFS，[L, R]，口径同 BusMeter.rmsDb；空数组 = 没有 RMS。
+            public var rmsDb: [Double]
+            public init(peakDb: [Double], rmsDb: [Double] = []) { self.peakDb = peakDb; self.rmsDb = rmsDb }
+            enum CodingKeys: String, CodingKey { case peakDb = "peak_db", rmsDb = "rms_db" }
+            /// rms_db 缺键 = 空数组。
+            public init(from decoder: any Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                peakDb = try c.decode([Double].self, forKey: .peakDb)
+                rmsDb = try c.decodeIfPresent([Double].self, forKey: .rmsDb) ?? []
+            }
             /// JSON 键名。
-            public static let jsonKeys = ["peak_db"]
+            public static let jsonKeys = ["peak_db", "rms_db"]
         }
     }
 
