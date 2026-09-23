@@ -4,7 +4,8 @@ import Foundation
 
 /// CoreMediaIO 客户端 API 这一侧：找到我们的扩展设备、它的 sink stream（方向 0 = 数据从本进程流向设备；探针：普通摄像头的流方向是 1），
 /// 拿到 stream 的 CMSimpleQueue，把 CMSampleBuffer 排进去。全部是 C API 的薄包装；只在 VirtualCameraOutput 的线程上用。
-public final class CMIOSinkStreamClient: @unchecked Sendable {
+/// W3-C2：打开时在 sink stream 上注册"已输出"通知（'sonp'，`ScheduledOutputTracker`），扩展回报的输出 / 丢帧从这里读（`extensionReport`）。
+public final class CMIOSinkStreamClient: VirtualCameraSink, @unchecked Sendable {
     /// 错误。
     public enum Error: Swift.Error, Equatable, CustomStringConvertible {
         case deviceNotFound
@@ -26,6 +27,12 @@ public final class CMIOSinkStreamClient: @unchecked Sendable {
     public private(set) var streamID: CMIOStreamID = 0
     private var queue: CMSimpleQueue?
     public private(set) var isOpen = false
+    /// 扩展回报的记账（与本对象同寿命：注册给 CMIO 的 refCon 指向它，关流时先注销）。
+    private let tracker = ScheduledOutputTracker()
+    /// 这一次连接上"已输出"通知注册成功。
+    public private(set) var scheduledOutputRegistered = false
+    /// 任何一次连接注册成功过（之后才有回报可读）。
+    private var everRegistered = false
 
     public init(deviceUID: String = VirtualCameraConstants.deviceUID) {
         self.deviceUID = deviceUID
@@ -99,15 +106,34 @@ public final class CMIOSinkStreamClient: @unchecked Sendable {
         var q: Unmanaged<CMSimpleQueue>?
         let st = CMIOStreamCopyBufferQueue(sink, { _, _, _ in }, nil, &q)
         guard st == noErr, let q else { throw Error.queueUnavailable(st) }
+        let bufferQueue = q.takeRetainedValue()
+        tracker.beginConnection()
+        scheduledOutputRegistered = Self.setScheduledOutputNotification(stream: sink, tracker: tracker)
+        everRegistered = everRegistered || scheduledOutputRegistered
         let started = CMIODeviceStartStream(dev, sink)
         guard started == noErr else {
+            if scheduledOutputRegistered { _ = Self.setScheduledOutputNotification(stream: sink, tracker: nil) }
+            scheduledOutputRegistered = false
             throw Error.startFailed(started)
         }
         deviceID = dev
         streamID = sink
-        queue = q.takeRetainedValue()
+        queue = bufferQueue
         isOpen = true
     }
+
+    /// 在 sink stream 上注册 / 注销（tracker 为 nil）"已输出"通知。扩展没实现就不会有通知（注册本身多半仍成功）；设不上返回 false。
+    private static func setScheduledOutputNotification(stream: CMIOStreamID, tracker: ScheduledOutputTracker?) -> Bool {
+        var addr = address(kCMIOStreamPropertyScheduledOutputNotificationProc)
+        var payload = CMIOStreamScheduledOutputNotificationProcAndRefCon(
+            scheduledOutputNotificationProc: tracker == nil ? nil : ScheduledOutputTracker.notificationProc,
+            scheduledOutputNotificationRefCon: tracker.map { Unmanaged.passUnretained($0).toOpaque() })
+        let st = CMIOObjectSetPropertyData(stream, &addr, 0, nil, UInt32(MemoryLayout<CMIOStreamScheduledOutputNotificationProcAndRefCon>.size), &payload)
+        return st == noErr
+    }
+
+    /// 扩展回报的累计（跨连接累加）；从没注册上过为 nil。
+    public var extensionReport: SinkOutputReport? { everRegistered ? tracker.report : nil }
 
     /// 排一帧进去；队列满返回 false（调用方计数）。
     public func send(_ sampleBuffer: CMSampleBuffer) -> Bool {
@@ -127,6 +153,8 @@ public final class CMIOSinkStreamClient: @unchecked Sendable {
 
     public func close() {
         guard isOpen else { return }
+        if scheduledOutputRegistered { _ = Self.setScheduledOutputNotification(stream: streamID, tracker: nil) }
+        scheduledOutputRegistered = false
         CMIODeviceStopStream(deviceID, streamID)
         queue = nil
         isOpen = false

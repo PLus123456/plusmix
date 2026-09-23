@@ -7,9 +7,10 @@ import SwitcherContracts
 import SwitcherOutputs
 
 /// 虚拟摄像头输出 = PGM 帧的消费者（设计方案 §3.4、§8）：`consume` 在引擎派发线程只入有界队列（满了丢最旧）立即返回；
-/// 自己的线程把 NV12 IOSurface 包成 CMSampleBuffer（PTS = 拍点时刻，不拷像素）经 `CMIOSinkStreamClient` 排进扩展的 sink stream。
-/// 帧率跟节目（每个 PGM 帧送一次）。扩展没装 / 没激活时找不到设备：状态 `.searching`，每秒重试一次，期间的帧丢掉计数。
-/// 统计：本对象的 `counters`（不是编码器输出，Stats.encoder 没有它的项，见报告 §4）。
+/// 自己的线程把 NV12 IOSurface 包成 CMSampleBuffer（PTS = 拍点时刻，不拷像素，挂 CMIO 序号）经 sink（`CMIOSinkStreamClient`）
+/// 排进扩展的 sink stream。帧率跟节目（每个 PGM 帧送一次）。扩展没装 / 没激活时找不到设备：状态 `.searching`，每秒重试一次，
+/// 期间的帧丢掉计数；连上之后连续 `sinkLossThreshold` 帧排不进（扩展停了 / 被卸载）就关掉重找。
+/// 统计：`counters` 与 `Stats.display[]` 的一项（`statsEntry`，提案 013；W3-C2 复核了 dropped 与 state 的口径）。
 public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
     /// 状态。
     public enum State: Hashable, Sendable {
@@ -27,14 +28,22 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
         public var framesIn: UInt64 = 0
         /// 排进 sink stream 的帧。
         public var framesSent: UInt64 = 0
-        /// 队列满丢的（本对象的有界队列）。
+        /// 连着的时候本对象的有界队列满了挤掉的。
         public var droppedQueueFull: UInt64 = 0
-        /// 没有设备时丢的。
+        /// 没连上（扩展没装 / 没激活 / 连不上）时丢的——含那段时间队列满挤掉的。
         public var droppedNoDevice: UInt64 = 0
-        /// sink stream 队列满 / 排队失败丢的。
+        /// sink stream 队列满 / 排队失败丢的（扩展没及时取走）。
         public var droppedSink: UInt64 = 0
+        /// 扩展收了却没输出的（CMIO"已输出"通知的序号跳过数，`ScheduledOutputTracker`）。扩展不回报时恒 0。
+        public var droppedExtension: UInt64 = 0
+        /// 扩展回报已输出的帧。
+        public var framesOutput: UInt64 = 0
+        /// 扩展在回报（"已输出"通知注册上了）。
+        public var extensionReports = false
         /// 找设备的次数。
         public var connectAttempts: UInt64 = 0
+        /// 连上之后因为连续排不进而关掉重找的次数。
+        public var sinkLosses: UInt64 = 0
         /// 最近一次找设备失败的原因。
         public var lastError: String?
         public init() {}
@@ -43,7 +52,9 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
     public let consumerName: String
     /// 找不到设备时多久重试一次。
     public var retryInterval = HostDuration(seconds: 1)
-    private let client: CMIOSinkStreamClient
+    /// 连上之后连续这么多帧排不进 sink 就当扩展没了（停了 / 被卸载），关掉重找；默认 = 节目一秒的帧数。
+    public var sinkLossThreshold: Int
+    private let sink: any VirtualCameraSink
     private let frameDuration: CMTime
     private let queue: FrameQueue
     private let wakeup = DispatchSemaphore(value: 0)
@@ -57,31 +68,47 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
     private var formatDescription: CMVideoFormatDescription?
     private var formatKey: (OSType, Int, Int) = (0, 0, 0)
     private var lastAttempt: HostTime = .zero
+    /// 没连上时是在等扩展（找不到设备 / 还没找过 / 刚掉线）还是设备在但连不上；由 lock 保护。
+    private var waitingForExtension = true
+    // 以下只在本对象的线程上碰
+    private var nextSequence: UInt64 = 0
+    private var consecutiveSendFailures = 0
 
-    public init(format: ProgramFormat, deviceUID: String = VirtualCameraConstants.deviceUID, queueDepth: Int = 3, name: String = "virtual-camera") {
+    /// 默认的 sink = CoreMediaIO 客户端（按设备 UID 找扩展的设备）。
+    public convenience init(format: ProgramFormat, deviceUID: String = VirtualCameraConstants.deviceUID, queueDepth: Int = 3, name: String = "virtual-camera") {
+        self.init(format: format, sink: CMIOSinkStreamClient(deviceUID: deviceUID), queueDepth: queueDepth, name: name)
+    }
+
+    /// 指定 sink（测试给假的）。
+    public init(format: ProgramFormat, sink: any VirtualCameraSink, queueDepth: Int = 3, name: String = "virtual-camera") {
         consumerName = name
-        client = CMIOSinkStreamClient(deviceUID: deviceUID)
+        self.sink = sink
         frameDuration = format.frameDuration.cmTime
         queue = FrameQueue(capacity: queueDepth)
+        sinkLossThreshold = max(1, format.frameRate.nominalFramesPerSecond)
     }
 
     public var state: State { lock.withLock { stateValue } }
     public var countersSnapshot: Counters { lock.withLock { counters } }
 
-    /// 这个虚拟摄像头在 Stats 里的一项（提案 013，铁律 4：菜单 / API / 测试读同一个结构）。
-    /// frames = 排进 sink stream 的帧；dropped = 本对象队列满 + 没设备 + sink 队列满丢的三项之和；
-    /// state：idle → "idle"、searching → "waitingExtension"（扩展没装 / 没激活 / 刚拔）、connected → "publishing"、stopped → "stopped"。
+    /// 这个虚拟摄像头在 Stats 里的一项（提案 013，铁律 4：菜单 / API / 测试读同一个结构；W3-C2 复核）：
+    /// - frames = 排进 sink stream 的帧（= 扩展收到的）；
+    /// - dropped = "被扩展丢弃"（契约注释）= 连着的时候丢的：本对象队列满挤掉的 + 排不进 sink 的（扩展没及时取）+ 扩展收了没输出的
+    ///   （CMIO"已输出"通知的序号跳过数；扩展侧 BLOCKED-签名、还没回报时为 0）。**不含**没连上时丢的（那段是 waitingExtension，
+    ///   没在发布；数字在 `countersSnapshot.droppedNoDevice`，状态行用）；
+    /// - state：idle → "idle"；searching → 找不到设备（扩展没装 / 没激活 / 刚掉线）"waitingExtension"，设备在但连不上（sink 流没了、
+    ///   起流被拒）"failed"（仍在按间隔重试）；connected → "publishing"；stopped → "stopped"。
     public func statsEntry(output: Int) -> Stats.DisplayEntry {
-        let (c, st) = lock.withLock { (counters, stateValue) }
+        let (c, st, waiting) = lock.withLock { (counters, stateValue, waitingForExtension) }
         let name: String
         switch st {
         case .idle: name = "idle"
-        case .searching: name = "waitingExtension"
+        case .searching: name = waiting ? "waitingExtension" : "failed"
         case .connected: name = "publishing"
         case .stopped: name = "stopped"
         }
         return Stats.DisplayEntry(output: output, kind: "virtualCamera", frames: c.framesSent,
-                                  dropped: c.droppedQueueFull &+ c.droppedNoDevice &+ c.droppedSink, state: name)
+                                  dropped: c.droppedQueueFull &+ c.droppedSink &+ c.droppedExtension, state: name)
     }
 
     /// 起线程；找设备在线程上做（找不到不算错）。
@@ -127,7 +154,9 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
         let evicted = queue.push(frame)
         lock.withLock {
             counters.framesIn += 1
-            if evicted != nil { counters.droppedQueueFull += 1 }
+            if evicted != nil {
+                if stateValue == .connected { counters.droppedQueueFull += 1 } else { counters.droppedNoDevice += 1 }
+            }
         }
         wakeup.signal()
     }
@@ -139,22 +168,50 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
             wakeup.wait()
             if lock.withLock({ stopRequested }) { break }
             while let frame = queue.pop() {
-                if !client.isOpen { tryConnect() }
-                guard client.isOpen else {
+                if !sink.isOpen { tryConnect() }
+                guard sink.isOpen else {
                     lock.withLock { counters.droppedNoDevice += 1 }
                     continue
                 }
-                do {
-                    let sb = try makeSampleBuffer(frame.program, tickTime: frame.tickTime)
-                    let ok = client.send(sb)
-                    lock.withLock { if ok { counters.framesSent += 1 } else { counters.droppedSink += 1 } }
-                } catch {
-                    lock.withLock { counters.droppedSink += 1 }
-                }
+                send(frame)
             }
         }
         queue.removeAll()
-        client.close()
+        sink.close()
+    }
+
+    /// 送一帧：挂 CMIO 序号（每个连接从 0 连续，排不进的不占号）→ 排进 sink；同步扩展的回报；连续排不进就当扩展没了。
+    private func send(_ frame: RenderedFrame) {
+        var ok = false
+        if let sb = try? makeSampleBuffer(frame.program, tickTime: frame.tickTime) {
+            CMIOSequenceNumber.set(sb, nextSequence)
+            ok = sink.send(sb)
+        }
+        if ok {
+            nextSequence &+= 1
+            consecutiveSendFailures = 0
+        } else {
+            consecutiveSendFailures += 1
+        }
+        let report = sink.extensionReport
+        lock.withLock {
+            if ok { counters.framesSent += 1 } else { counters.droppedSink += 1 }
+            if let report {
+                counters.extensionReports = true
+                counters.framesOutput = report.output
+                counters.droppedExtension = report.dropped
+            }
+        }
+        if consecutiveSendFailures >= sinkLossThreshold {
+            sink.close()
+            consecutiveSendFailures = 0
+            lock.withLock {
+                stateValue = .searching
+                waitingForExtension = true
+                counters.sinkLosses += 1
+                counters.lastError = "连续 \(sinkLossThreshold) 帧排不进 sink（扩展停了或被卸载），重新找设备"
+            }
+        }
     }
 
     private func tryConnect() {
@@ -163,14 +220,19 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
         lastAttempt = now
         lock.withLock { counters.connectAttempts += 1 }
         do {
-            try client.open()
+            try sink.open()
+            nextSequence = 0
+            consecutiveSendFailures = 0
             lock.withLock {
                 stateValue = .connected
+                waitingForExtension = false
                 counters.lastError = nil
             }
         } catch {
+            let notFound = (error as? CMIOSinkStreamClient.Error) == .deviceNotFound
             lock.withLock {
                 stateValue = .searching
+                waitingForExtension = notFound
                 counters.lastError = "\(error)"
             }
         }
