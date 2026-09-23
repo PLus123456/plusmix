@@ -461,7 +461,7 @@ public protocol Input: AnyObject {
     var kind: InputKind { get }
     var state: InputState { get }
     /// 纯音频输入（`InputSource.audio`）为 nil。口径（W2-A2 报告 §4 第 2 条，用户 2026-09-23 定）：
-    /// - 组装方不给它登记帧槽（引擎的输入表里这一路没有槽，挑帧得 nil）；
+    /// - 引擎对这一路挑帧恒为 nil：组装方可以不登记帧槽，也可以登记一个没人往里推的空槽（App 的 InputRuntime 给每路都建槽，效果相同）；
     /// - 它照样能被选进 Program / Preview / 叠加：画面按"没帧"画黑场，音频照常按每路 AFV 走（切到它就出它的声）；
     /// - 多画面里它的格子画占位（名字 + 电平表），不是黑画面。
     var videoSlot: (any FrameSlot)? { get }

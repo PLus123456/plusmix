@@ -109,7 +109,7 @@
 DeckLink 开的内嵌音频路数 = max(`Options.audioChannels`, 映射用得上的最大下标 + 1)，按 SDK 认的 2 / 8 / 16 往上取。
 `audio` 的 `deviceUID` = Core Audio 的 `kAudioDevicePropertyDeviceUID`，空串 = 跟随系统默认输入。
 
-**纯音频输入（`InputSource.audio`，`Input.videoSlot` 为 nil；W2-A2 报告 §4 第 2 条，用户 2026-09-23 定）**：组装方不给它登记帧槽，引擎挑帧得 nil；
+**纯音频输入（`InputSource.audio`，`Input.videoSlot` 为 nil；W2-A2 报告 §4 第 2 条，用户 2026-09-23 定）**：引擎对这一路挑帧恒为 nil（组装方不登记帧槽，或登记一个没人推的空槽——App 现在就是后者）；
 它照样能被选进 Program / Preview / 叠加，画面按"没帧"画黑场，音频照常按每路 AFV 走（切到它就出它的声）；多画面里它的格子画占位（名字 + 电平表），
 不是黑画面。引擎与渲染器今天的行为已经满足前两条（没槽 → nil → 画黑）；多画面占位格与 App 接线待做（reports/issues/W2A2-*）。
 

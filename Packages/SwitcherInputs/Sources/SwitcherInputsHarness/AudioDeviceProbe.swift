@@ -7,7 +7,7 @@ import SwitcherInputs
 /// 组装方在这里：环由 `HarnessAudioRing` 建（契约 §2.3 的注入规则），`AudioDeviceInput` 只管往里写。
 ///
 /// 命令行入口在 `switcher-input-probe`（`Sources/switcher-input-probe/main.swift`，**不在本会话的可改目录里**，
-/// 接法见 reports/issues/W2A2-probe-audio-device-subcommand.md）；测试直接调这里的函数。
+/// 接法见 reports/issues/W2A2-w2-inputs-probe-audio-device-subcommand.md）；测试直接调这里的函数。
 public enum AudioDeviceProbe {
     /// 一次运行的结果。
     public struct Run: Sendable {
