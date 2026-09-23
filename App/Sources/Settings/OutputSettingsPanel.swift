@@ -5,6 +5,7 @@
 import AppKit
 import SwiftUI
 import SwitcherContracts
+import SwitcherVirtualCamera
 
 @MainActor
 final class OutputSettingsModel: ObservableObject {
@@ -16,30 +17,56 @@ final class OutputSettingsModel: ObservableObject {
 
     @Published var tab: Tab
     @Published private(set) var state: MixerState
+    /// 虚拟摄像头扩展的安装状态（W3-C 的 SystemExtensionInstaller，与输出菜单同一个对象）。
     @Published private(set) var virtualCameraStatus: String = ""
+    /// 最近一行 Stats 的 display[]（提案 013：外部显示 / 虚拟摄像头的状态与帧数都读它）。
+    @Published private(set) var displayStats: [Stats.DisplayEntry] = []
     var send: ((Command) -> Void)?
     /// 新建录制输出的默认目录。
     let defaultRecordDirectory: String
     /// 节目名（示例文件名用）。
     var showName: String
-    private let virtualCamera = VirtualCameraSupport()
+    /// 虚拟摄像头扩展的安装器：App 里只有 session 的那一个（AuxOutputRuntime.installer）；没有 session 为 nil。
+    private let installer: SystemExtensionInstaller?
+    private var extensionToken: ObserverToken?
     /// 测试宿主不去问系统扩展（没有扩展包，只会报错）。
     let queriesSystemExtensions: Bool
     /// ISO 页估算"还能录多久"时留出的磁盘余量（= 录制的下限，AppSettings.recordMinimumFreeMB）。
     let reserveBytes: UInt64
 
-    init(state: MixerState, tab: Tab, defaultRecordDirectory: String, showName: String, queriesSystemExtensions: Bool, reserveBytes: UInt64 = 0) {
+    init(state: MixerState, tab: Tab, defaultRecordDirectory: String, showName: String, queriesSystemExtensions: Bool, reserveBytes: UInt64 = 0,
+         aux: AuxOutputRuntime? = nil) {
         self.state = state
         self.tab = tab
         self.defaultRecordDirectory = defaultRecordDirectory
         self.showName = showName
         self.queriesSystemExtensions = queriesSystemExtensions
         self.reserveBytes = reserveBytes
-        virtualCameraStatus = virtualCamera.status.text
-        virtualCamera.onChange = { [weak self] s in self?.virtualCameraStatus = s.text }
+        installer = aux?.installer
+        virtualCameraStatus = OutputStatusText.extensionStatus(installer?.status ?? .unknown)
+        extensionToken = aux?.observeExtensionStatus { [weak self] s in self?.virtualCameraStatus = OutputStatusText.extensionStatus(s) }
     }
 
     func apply(state: MixerState) { self.state = state }
+
+    func apply(stats: Stats) {
+        if stats.display != displayStats { displayStats = stats.display }
+    }
+
+    /// 扩展的 bundle ID（安装器用的那个）。
+    var extensionIdentifier: String { installer?.extensionIdentifier ?? VirtualCameraConstants.extensionBundleIdentifier }
+
+    /// 某个显示类输出在 Stats.display[] 里的一行（没有为 nil）。
+    func displayStatus(output number: Int, kind: String) -> String? {
+        displayStats.first { $0.output == number && $0.kind == kind }.map(OutputStatusText.display)
+    }
+
+    /// 虚拟摄像头输出的一行（Stats.display[]）。
+    var virtualCameraOutputStatus: String {
+        let output = state.outputs.first { $0.kind == .virtualCamera && $0.enabled }
+        let entry = output.flatMap { o in displayStats.first { $0.kind == "virtualCamera" && $0.output == o.number } }
+        return OutputStatusText.virtualCamera(enabled: output != nil, entry: entry)
+    }
 
     static let videoCodecs: [VideoCodec] = [.h264, .hevc, .prores422, .prores422HQ, .prores4444]
     static let audioCodecs: [AudioCodec] = [.aac, .pcm]
@@ -233,15 +260,15 @@ final class OutputSettingsModel: ObservableObject {
 
     func refreshVirtualCameraStatus() {
         guard queriesSystemExtensions else { virtualCameraStatus = L("vcam.status.unavailableInTests"); return }
-        virtualCamera.refresh()
+        installer?.refresh()
     }
     func installVirtualCamera() {
         guard queriesSystemExtensions else { return }
-        virtualCamera.install()
+        installer?.activate()
     }
     func uninstallVirtualCamera() {
         guard queriesSystemExtensions else { return }
-        virtualCamera.uninstall()
+        installer?.deactivate()
     }
 
     /// 输出来源选项：PGM / PVW / 多画面 / 每路输入。
@@ -442,6 +469,7 @@ struct OutputSettingsView: View {
                 Section(L("outputSettings.external.section", output.number, output.name)) {
                     screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }))
                     sourcePicker(Binding(get: { output.settings.source }, set: { model.setExternalDisplay(output.number, screenNumber: nil, source: $0) }))
+                    LabeledContent(L("outputSettings.external.status"), value: model.displayStatus(output: output.number, kind: "externalDisplay") ?? "—")
                     Button(L("outputSettings.external.close")) { model.removeOutput(output.number) }
                 }
             }
@@ -499,13 +527,14 @@ struct OutputSettingsView: View {
                                                                    set: { model.setVirtualCamera(enabled: $0, source: model.virtualCameraOutput?.settings.source ?? .program) }))
             sourcePicker(Binding(get: { model.virtualCameraOutput?.settings.source ?? .program },
                                  set: { model.setVirtualCamera(enabled: model.virtualCameraOutput?.enabled ?? false, source: $0) }))
+            LabeledContent(L("outputSettings.vcam.outputStatus"), value: model.virtualCameraOutputStatus)
             LabeledContent(L("outputSettings.vcam.status"), value: model.virtualCameraStatus)
             HStack {
                 Button(L("outputSettings.vcam.check")) { model.refreshVirtualCameraStatus() }
                 Button(L("outputSettings.vcam.install")) { model.installVirtualCamera() }
                 Button(L("outputSettings.vcam.uninstall")) { model.uninstallVirtualCamera() }
             }
-            LabeledContent(L("outputSettings.vcam.bundleID"), value: VirtualCameraSupport.extensionBundleID)
+            LabeledContent(L("outputSettings.vcam.bundleID"), value: model.extensionIdentifier)
             Text(L("outputSettings.vcam.hint")).font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { if model.queriesSystemExtensions { model.refreshVirtualCameraStatus() } }

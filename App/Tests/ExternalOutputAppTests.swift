@@ -95,7 +95,19 @@ final class ExternalOutputAppTests: XCTestCase {
         XCTAssertEqual(sub2.items[1].state, .on)
         XCTAssertEqual(menu2.items.count, NSScreen.screens.count + 3, "多了分隔线 + 关闭 x + 关闭全部")
         XCTAssertEqual(ExternalDisplaySpec(settings: session.state.outputs.first { $0.kind == .externalDisplay }!.settings).displayID, ExternalDisplays.id(of: screen))
-        sub2.performActionForItem(at: 1)
+        // "关闭 n …（状态）"那一项的状态与帧数只读 Stats.display[]（提案 013）
+        let number = try XCTUnwrap(session.state.outputs.first { $0.kind == .externalDisplay }?.number)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.stats?.display.contains { $0.kind == "externalDisplay" && $0.output == number } ?? false },
+                      "Stats.display[] 应有这路外部显示：\(String(describing: session.stats?.display))")
+        let menu3 = try XCTUnwrap(wc.externalOutputMenu())   // 同一轮主线程里建菜单、再取同一行 Stats（中间不泵事件，session.stats 不会变）
+        let entry = try XCTUnwrap(session.stats?.display.first { $0.kind == "externalDisplay" && $0.output == number })
+        let closeItem = try XCTUnwrap(menu3.items.first { $0.action != nil && $0.title.hasPrefix("关闭 \(number) ") }, menu3.items.map(\.title).description)
+        XCTAssertTrue(closeItem.title.contains(OutputStatusText.display(entry)), "\(closeItem.title) / \(OutputStatusText.display(entry))")
+        XCTAssertTrue(closeItem.title.contains("显示中"), closeItem.title)
+        // 菜单项的 target 是最近一次建的 builder（MainWindowController 只留最后一个），所以用 menu3 的子菜单去点
+        let sub3 = try XCTUnwrap(menu3.items.first?.submenu)
+        XCTAssertEqual(sub3.items[1].state, .on)
+        sub3.performActionForItem(at: 1)
         XCTAssertTrue(AppTest.waitUntil(3) { !session.state.outputs.contains { $0.kind == .externalDisplay } })
     }
 

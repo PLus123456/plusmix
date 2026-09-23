@@ -1,6 +1,7 @@
 // 显示类输出的接线（W3-C）：外部显示窗口（SwitcherExternal.ExternalDisplayManager，按快照里 kind = .externalDisplay 的输出增删）和
 // 虚拟摄像头（SwitcherVirtualCamera.VirtualCameraOutput：快照里有 enabled 的 .virtualCamera 输出就挂到引擎上送 PGM 帧；
-// SystemExtensionInstaller 管扩展的安装 / 卸载，状态给菜单 / 状态行）。这两类不是编码器输出，Stats.encoder 里没有它们的项（报告 §4）。
+// SystemExtensionInstaller 管扩展的安装 / 卸载，状态给菜单 / 状态行 / 输出设置页——App 里只有这一个安装器）。
+// 这两类不是编码器输出，读数进 Stats.display[]（提案 013，`statsEntries`）；给人看的文案由 App 查表（OutputStatusText），事件只带枚举。
 import AppKit
 import SwitcherContracts
 import SwitcherEngine
@@ -11,17 +12,15 @@ import SwitcherVirtualCamera
 @MainActor
 final class AuxOutputRuntime {
     enum Event: Equatable {
-        case externalDisplay(output: Int, status: String)
+        case externalDisplay(output: Int, status: ExternalDisplayWindow.Status)
         case virtualCameraStarted
         case virtualCameraStopped
-        case extensionStatus(String)
+        case extensionStatus(SystemExtensionInstaller.Status)
     }
 
     let external: ExternalDisplayManager
     let installer: SystemExtensionInstaller
     private(set) var virtualCamera: VirtualCameraOutput?
-    /// 各外部输出的状态文案（菜单里显示）。
-    private(set) var externalStatuses: [Int: String] = [:]
     private let engine: Engine
     private let format: ProgramFormat
     var onEvent: ((Event) -> Void)?
@@ -32,25 +31,38 @@ final class AuxOutputRuntime {
     var uiDisplayEntries: (@MainActor () -> [Stats.DisplayEntry])?
     /// 当前虚拟摄像头输出的编号（reconcile 时记；没有就是 0）。
     private var virtualCameraOutput = 0
+    /// 扩展状态的观察者（输出设置 › 虚拟摄像头页）：installer 只有一个 onStatusChange，由这里扇出。
+    private var extensionObservers: [(key: UInt64, block: @MainActor (SystemExtensionInstaller.Status) -> Void)] = []
+    private var observerCounter: UInt64 = 0
 
     init(engine: Engine, source: any DisplayFrameSource, format: ProgramFormat) {
         self.engine = engine
         self.format = format
         external = ExternalDisplayManager(source: source)
         installer = SystemExtensionInstaller()
-        external.onStatusChange = { [weak self] number, status in
-            let text = ExternalDisplayManager.describe(status)
-            self?.externalStatuses[number] = text
-            self?.onEvent?(.externalDisplay(output: number, status: text))
-        }
+        external.onStatusChange = { [weak self] number, status in self?.onEvent?(.externalDisplay(output: number, status: status)) }
         external.onCloseRequested = { [weak self] number in self?.sendCommand?(.removeOutput(output: number)) }
-        installer.onStatusChange = { [weak self] status in self?.onEvent?(.extensionStatus(SystemExtensionInstaller.describe(status))) }
+        installer.onStatusChange = { [weak self] status in
+            guard let self else { return }
+            self.onEvent?(.extensionStatus(status))
+            for o in self.extensionObservers { o.block(status) }
+        }
+    }
+
+    /// 扩展状态变化时回调（立刻用当前状态回调一次）。释放凭据即取消。
+    func observeExtensionStatus(_ block: @escaping @MainActor (SystemExtensionInstaller.Status) -> Void) -> ObserverToken {
+        observerCounter &+= 1
+        let key = observerCounter
+        extensionObservers.append((key, block))
+        block(installer.status)
+        return ObserverToken { [weak self] in
+            Task { @MainActor in self?.extensionObservers.removeAll { $0.key == key } }
+        }
     }
 
     /// 跟快照：外部显示窗口表 + 虚拟摄像头开关。
     func reconcile(_ state: MixerState) {
         external.reconcile(outputs: state.outputs, inputs: state.inputs, format: state.format)
-        for n in externalStatuses.keys where external.windows[n] == nil { externalStatuses.removeValue(forKey: n) }
         virtualCameraOutput = state.outputs.first { $0.kind == .virtualCamera && $0.enabled }?.number ?? 0
         let wantCamera = virtualCameraOutput != 0
         if wantCamera, virtualCamera == nil {
@@ -84,17 +96,5 @@ final class AuxOutputRuntime {
         if let cam = virtualCamera { out.append(cam.statsEntry(output: virtualCameraOutput)) }
         out.append(contentsOf: uiDisplayEntries?() ?? [])
         return out
-    }
-
-    /// 虚拟摄像头一行状态（菜单 / 面板）。
-    var virtualCameraStatusText: String {
-        guard let cam = virtualCamera else { return "未启用" }
-        let c = cam.countersSnapshot
-        switch cam.state {
-        case .idle: return "未启动"
-        case .searching: return "找不到虚拟摄像头设备（扩展未安装 / 未激活）；已丢 \(c.droppedNoDevice) 帧"
-        case .connected: return "已连接，送出 \(c.framesSent) 帧"
-        case .stopped: return "已停止"
-        }
     }
 }

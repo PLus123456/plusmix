@@ -13,7 +13,7 @@ final class MultiviewWindowController: NSWindowController {
         let size = NSSize(width: 960, height: 540)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
-        window.title = "多画面"
+        window.title = L("multiview.windowTitle")
         window.contentAspectRatio = NSSize(width: 16, height: 9)
         window.isReleasedWhenClosed = false
         window.backgroundColor = .black

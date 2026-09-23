@@ -241,7 +241,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     /// 外部输出菜单（底栏按钮 / 菜单栏都用它）。
     func externalOutputMenu() -> NSMenu? {
         guard let session else { return nil }
-        let builder = ExternalOutputMenuBuilder(state: session.state, statuses: session.aux.externalStatuses)
+        let builder = ExternalOutputMenuBuilder(state: session.state, displayStats: session.stats?.display ?? [])
         builder.send = { [weak session] c in session?.send(c) }
         externalMenuBuilder = builder   // 菜单项的 target 是它，得活到菜单关掉
         return builder.makeMenu()
