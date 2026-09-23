@@ -25,13 +25,16 @@ final class OutputSettingsModel: ObservableObject {
     private let virtualCamera = VirtualCameraSupport()
     /// 测试宿主不去问系统扩展（没有扩展包，只会报错）。
     let queriesSystemExtensions: Bool
+    /// ISO 页估算"还能录多久"时留出的磁盘余量（= 录制的下限，AppSettings.recordMinimumFreeMB）。
+    let reserveBytes: UInt64
 
-    init(state: MixerState, tab: Tab, defaultRecordDirectory: String, showName: String, queriesSystemExtensions: Bool) {
+    init(state: MixerState, tab: Tab, defaultRecordDirectory: String, showName: String, queriesSystemExtensions: Bool, reserveBytes: UInt64 = 0) {
         self.state = state
         self.tab = tab
         self.defaultRecordDirectory = defaultRecordDirectory
         self.showName = showName
         self.queriesSystemExtensions = queriesSystemExtensions
+        self.reserveBytes = reserveBytes
         virtualCameraStatus = virtualCamera.status.text
         virtualCamera.onChange = { [weak self] s in self?.virtualCameraStatus = s.text }
     }
@@ -115,7 +118,7 @@ final class OutputSettingsModel: ObservableObject {
         return record.outputURL(showName: showName, outputName: r.name).lastPathComponent
     }
 
-    // MARK: ISO
+    // MARK: ISO（ISO 只有这一个入口：底栏"ISO…"打开的就是这一页，W3-E2 交付第 4 条）
 
     /// 已选 ISO 的输入编号。
     var isoInputs: Set<Int> {
@@ -125,17 +128,31 @@ final class OutputSettingsModel: ObservableObject {
         })
     }
 
+    /// 开 = 按 W3-C 的 ISORoutes 加一路（编码 / 目录抄 PGM 录制输出，文件名模板带 {output}）；关 = 删。录着的路锁住，不在这里删。
     func setISO(input: Int, on: Bool) {
-        let existing = state.outputs.first { $0.kind == .record && $0.settings.source == .input(number: input) }
+        let existing = ISORoutes.isoRecord(in: state, input: input)
         if on {
-            guard existing == nil else { return }
-            let base = recordOutput?.settings
-            let settings = OutputSettings(source: .input(number: input), video: base?.video ?? VideoEncodeSettings(), audio: base?.audio ?? AudioEncodeSettings(),
-                                          record: base?.record ?? RecordSettings(directory: defaultRecordDirectory))
-            add(OutputState(number: nextOutputNumber(), kind: .record, name: L("outputSettings.iso.name", input), enabled: false, settings: settings))
-        } else if let existing {
+            guard existing == nil, let config = state.input(input) else { return }
+            var output = ISORoutes.makeISOOutput(for: config, in: state, defaultDirectory: defaultRecordDirectory)
+            output.number = nextOutputNumber()
+            add(output)
+        } else if let existing, !existing.enabled {
             removeOutput(existing.number)
         }
+    }
+
+    /// 这路的 ISO 正在录（开关锁住）。
+    func isoLocked(input: Int) -> Bool { ISORoutes.isoRecord(in: state, input: input)?.enabled ?? false }
+
+    /// 开关旁的说明："→ ISO 3（录制中）"。
+    func isoRouteText(input: Int) -> String {
+        guard let iso = ISORoutes.isoRecord(in: state, input: input) else { return "" }
+        return iso.enabled ? L("outputSettings.iso.routeRecording", iso.name) : L("outputSettings.iso.route", iso.name)
+    }
+
+    /// 录制目录、剩余空间、按全部录制输出码率估的"还能录多久"。
+    var isoEstimateText: String {
+        ISORoutes.estimateText(state: state, defaultDirectory: defaultRecordDirectory, reserveBytes: reserveBytes)
     }
 
     // MARK: 推流
@@ -368,10 +385,15 @@ struct OutputSettingsView: View {
         Section(L("outputSettings.iso.title")) {
             Text(L("outputSettings.iso.hint")).font(.caption).foregroundStyle(.secondary)
             ForEach(model.state.inputs) { input in
-                Toggle(L("outputSettings.iso.input", input.number, input.name), isOn: Binding(get: { model.isoInputs.contains(input.number) },
-                                                                                                set: { model.setISO(input: input.number, on: $0) }))
+                HStack {
+                    Toggle(L("outputSettings.iso.input", input.number, input.name), isOn: Binding(get: { model.isoInputs.contains(input.number) },
+                                                                                                    set: { model.setISO(input: input.number, on: $0) }))
+                        .disabled(model.isoLocked(input: input.number))
+                    Text(model.isoRouteText(input: input.number)).font(.caption).foregroundStyle(.secondary)
+                }
             }
             if model.state.inputs.isEmpty { Text(L("outputSettings.iso.noInputs")).foregroundStyle(.secondary) }
+            Text(model.isoEstimateText).font(.caption).foregroundStyle(.secondary)
         }
     }
 

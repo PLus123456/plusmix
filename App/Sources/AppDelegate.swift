@@ -208,7 +208,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: 输出（W3-C）
 
-    @objc private func isoPanel() { controller.windowController.presentISOPanel(relativeTo: controller.windowController.bottomBar.isoButton) }
     @objc private func toggleMultiview() { controller.windowController.toggleMultiviewWindow() }
 
     /// 有 enabled 的虚拟摄像头输出就删掉（停），没有就加一个（起）。

@@ -103,8 +103,8 @@
 "bottom.overlay" = "Overlay…";
 "bottom.record" = "Record";
 "bottom.recordState" = "Record · %@";
-"bottom.recordStateTip" = "Record output is on; recorder state %@";
 "bottom.recordStateMany" = "Record · %@ (%d)";
+"bottom.recordStateTip" = "Record output is on; recorder state %@";
 "bottom.recording" = "● Recording";
 "bottom.recordingMany" = "● Recording (%d)";
 "bottom.statusLine" = "Status line";
@@ -143,6 +143,10 @@
 "common.on" = "On";
 "common.remove" = "Remove";
 "common.save" = "Save";
+"disk.remaining.hours" = "about %d h %d min";
+"disk.remaining.minutes" = "about %d min";
+"disk.remaining.underMinute" = "less than 1 minute";
+"disk.remaining.unlimited" = "not limited by disk space";
 "effects.dynamics.attackMs" = "Attack %.1f ms";
 "effects.dynamics.expansionRatio" = "Expansion ratio %.1f";
 "effects.dynamics.headroomDb" = "Headroom %.1f dB";
@@ -388,10 +392,13 @@
 "outputSettings.external.open" = "Open";
 "outputSettings.external.screen" = "Display";
 "outputSettings.external.section" = "Output %d · %@";
-"outputSettings.iso.hint" = "One record output per input (source = that input), sharing the PGM format, started on the same tick (W3-C); audio = post-fader, pre-AFV.";
+"outputSettings.iso.estimate" = "Directory %@\n%.1f GB free; %d outputs, %.1f Mbps in total → %@";
+"outputSettings.iso.hint" = "Each checked input records its own file (source = that input; encoding and directory copied from the PGM recording, file name pattern includes {output}). They start and stop on the same tick as PGM with the bottom bar's Record button; the audio track is post-fader, pre-AFV. A route that is recording cannot be removed here.";
 "outputSettings.iso.input" = "%d %@";
 "outputSettings.iso.name" = "ISO %d";
 "outputSettings.iso.noInputs" = "No inputs in this show yet";
+"outputSettings.iso.route" = "→ %@";
+"outputSettings.iso.routeRecording" = "→ %@ (recording)";
 "outputSettings.iso.title" = "ISO recording";
 "outputSettings.keyframeInterval" = "Keyframe interval %d frames";
 "outputSettings.ndi.add" = "Add NDI output";

@@ -77,7 +77,8 @@ final class PanelCoordinator: NSObject {
             return w
         }
         let model = OutputSettingsModel(state: session?.state ?? state, tab: tab, defaultRecordDirectory: controller.documents.recordDirectory,
-                                        showName: session?.name ?? "", queriesSystemExtensions: !controller.isTestHost)
+                                        showName: session?.name ?? "", queriesSystemExtensions: !controller.isTestHost,
+                                        reserveBytes: session?.outputs.minimumFreeBytes ?? 0)
         model.send = { [weak self] c in self?.session?.send(c) }
         let w = OutputSettingsWindowController(model: model)
         w.onClose = { [weak self] in self?.outputSettingsWindow = nil }

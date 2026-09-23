@@ -103,8 +103,8 @@
 "bottom.overlay" = "叠加…";
 "bottom.record" = "录制";
 "bottom.recordState" = "录制 · %@";
-"bottom.recordStateTip" = "录制输出已打开，录制器状态 %@";
 "bottom.recordStateMany" = "录制 · %@（%d 路）";
+"bottom.recordStateTip" = "录制输出已打开，录制器状态 %@";
 "bottom.recording" = "● 录制中";
 "bottom.recordingMany" = "● 录制中（%d 路）";
 "bottom.statusLine" = "状态行";
@@ -143,6 +143,10 @@
 "common.on" = "开";
 "common.remove" = "删除";
 "common.save" = "保存";
+"disk.remaining.hours" = "约 %d 小时 %d 分";
+"disk.remaining.minutes" = "约 %d 分钟";
+"disk.remaining.underMinute" = "不足 1 分钟";
+"disk.remaining.unlimited" = "不受磁盘限制";
 "effects.dynamics.attackMs" = "起音 %.1f ms";
 "effects.dynamics.expansionRatio" = "扩展比 %.1f";
 "effects.dynamics.headroomDb" = "Headroom %.1f dB";
@@ -388,10 +392,13 @@
 "outputSettings.external.open" = "打开";
 "outputSettings.external.screen" = "显示器";
 "outputSettings.external.section" = "输出 %d · %@";
-"outputSettings.iso.hint" = "每路一个录制输出（来源 = 该输入），与 PGM 共用录制格式，同一拍起步（W3-C）；音轨 = 推子后、AFV 前。";
+"outputSettings.iso.estimate" = "目录 %@\n剩余 %.1f GB；%d 路共 %.1f Mbps → %@";
+"outputSettings.iso.hint" = "勾选的输入各录一个文件（来源 = 该输入，编码 / 目录抄 PGM 录制输出，文件名模板带 {output}）；与 PGM 同一拍起停、共用起点，用底栏的「录制」一起起停；音轨 = 推子后、AFV 前。录着的路在这里删不掉。";
 "outputSettings.iso.input" = "%d %@";
 "outputSettings.iso.name" = "ISO %d";
 "outputSettings.iso.noInputs" = "节目里还没有输入";
+"outputSettings.iso.route" = "→ %@";
+"outputSettings.iso.routeRecording" = "→ %@（录制中）";
 "outputSettings.iso.title" = "ISO 分路录制";
 "outputSettings.keyframeInterval" = "关键帧间隔 %d 帧";
 "outputSettings.ndi.add" = "添加 NDI 发送";
