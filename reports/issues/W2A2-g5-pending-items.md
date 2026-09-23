@@ -47,7 +47,7 @@
 
 | # | 事 | 分级 | 详情 |
 |---|---|---|---|
-| 5-1 | NDI 回环的音频块间隔断言在整包负载下偶发超阈值（25.34 > 24.667 ms，单独跑稳过） | 建议（检查点跑 `make test` 可能撞上） | `W2A2-w3-inputs2-ndi-audio-interval-flaky-under-load.md` |
+| 5-1 | NDI 回环的两条计时断言在整包负载下偶发超阈值（25.34 > 24.667 ms；71.92 > 71.67 ms），单独跑都过 | 建议（**`make test` 遇错即停，撞上就整轮白跑**） | `W2A2-w3-inputs2-ndi-audio-interval-flaky-under-load.md` |
 
 ## 已经不用做的（本会话里定了 / 做了）
 
