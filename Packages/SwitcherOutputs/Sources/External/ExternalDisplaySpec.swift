@@ -1,11 +1,11 @@
 import SwitcherContracts
 
 /// 一个外部显示输出的设置：哪块显示器、送什么画面、显示器不在时怎么办。
-/// 存放在契约 `OutputSettings` 里：`source` 就是 `settings.source`；显示器 ID 和退回策略放 `settings.extra`（各输出会话的附加项占位）。
+/// 存放在契约 `OutputSettings` 里：`source` 就是 `settings.source`；显示器 ID 和退回策略是正式字段 `settings.display`（提案 013）。
 public struct ExternalDisplaySpec: Hashable, Sendable {
     /// CGDirectDisplayID；nil = 主显示器。
     public var displayID: UInt32?
-    /// 送什么：PGM / PVW / 多画面 / 某路输入（Aux）。
+    /// 送什么：PGM / PVW / 多画面 / 某路输入（Aux = 该路原始画面，抠像 / 裁切 / 变换不生效）。
     public var source: OutputSource
     /// 目标显示器不在（拔了 / 还没插）时退到主显示器；false = 收起窗口等它回来。
     public var fallbackToMain: Bool
@@ -16,24 +16,17 @@ public struct ExternalDisplaySpec: Hashable, Sendable {
         self.fallbackToMain = fallbackToMain
     }
 
-    /// `OutputSettings.extra` 里的过渡键（提案 013 落地后只作后备，保留一个版本）。
+    /// P3 之前放显示器 ID / 退回策略的 `OutputSettings.extra` 过渡键。本类型从 W3-C2 起**不再读**它们（旧节目文件由 `Show.load`
+    /// 一次性搬进正式字段，P3 报告 §4 第 1 条）；写出时仍顺手清掉。常量留着给还在做后备读取的 App `OutputExtras`（W4 / G5 一起删）。
     public static let displayIDKey = DisplayOutputSettings.legacyDisplayIDKey
     public static let fallbackKey = DisplayOutputSettings.legacyFallbackKey
 
-    /// 从输出设置读：正式字段 `settings.display`（提案 013）优先，没有才读过渡键。
+    /// 从输出设置读：只看正式字段 `settings.display`；没有就是它的默认（主显示器、不退回，提案 015）。
     public init(settings: OutputSettings) {
         source = settings.source
-        if let d = settings.display {
-            displayID = d.displayID
-            fallbackToMain = d.fallbackToMain
-            return
-        }
-        if case .number(let n)? = settings.extra[Self.displayIDKey], n >= 0, n <= Double(UInt32.max) {
-            displayID = UInt32(n)
-        } else {
-            displayID = nil
-        }
-        if case .bool(let b)? = settings.extra[Self.fallbackKey] { fallbackToMain = b } else { fallbackToMain = false }
+        let d = settings.display ?? DisplayOutputSettings()
+        displayID = d.displayID
+        fallbackToMain = d.fallbackToMain
     }
 
     /// 写回输出设置：只写正式字段，顺手清掉过渡键。

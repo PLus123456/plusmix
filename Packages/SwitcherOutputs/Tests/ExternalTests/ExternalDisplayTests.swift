@@ -1,5 +1,6 @@
-// 外部显示（W3-C 交付 1）：全屏窗口在指定显示器、源可选、插拔处理、多窗口。本机只有内置屏（BLOCKED-硬件），
-// 所以"指定显示器"= 主屏，"拔掉"用一个不存在的显示器 ID 模拟，插回 = 改回主屏 ID。纹理来源是一个假的 DisplayFrameSource（每 1/60 s 换版本）。
+// 外部显示（W3-C 交付 1）：全屏窗口在指定显示器、源可选、插拔处理、多窗口。"指定显示器"= 主屏，"拔掉"用一个不存在的显示器 ID 模拟，
+// 插回 = 改回主屏 ID（真外接屏上的用例在 DisplayStatsTests，本机接着一块时跑）。纹理来源是真的 MetalRenderer（每 1/60 s 换版本）。
+// W3-C2：Aux（source = 输入 n）不再取多画面格子，改由 AuxInputView 画该路帧槽分支里的全分辨率帧（AuxInputTests）。
 @preconcurrency import Metal
 import AppKit
 import Darwin
@@ -9,21 +10,23 @@ import SwitcherContracts
 import SwitcherRender
 @testable import SwitcherExternal
 
-/// 纹理来源：真的 MetalRenderer（DisplayFrame 的构造器不公开，伪造不了），后台线程按 60 Hz 节目时钟渲染一个没有输入的黑场状态。
+/// 纹理来源：真的 MetalRenderer（DisplayFrame 的构造器不公开，伪造不了），后台线程按节目时钟（默认 60 Hz）渲染一个没有输入的黑场状态。
 final class FakeDisplaySource: @unchecked Sendable {
     let renderer: MetalRenderer
+    let frameRate: FrameRate
     private final class Flag: Sendable { let value = Atomic<Bool>(false) }
     private let stopFlag = Flag()
     private var thread: Thread?
 
-    init() throws {
+    init(frameRate: FrameRate = .fps60) throws {
+        self.frameRate = frameRate
         renderer = try MetalRenderer()
         try renderer.prepare(format: .hd720p60, maxInputs: 3)
     }
 
     func start() {
-        let t = Thread { [renderer, stopFlag] in
-            let spec = TickClockSpec(t0: .now(), frameRate: .fps60)
+        let t = Thread { [renderer, stopFlag, frameRate] in
+            let spec = TickClockSpec(t0: .now(), frameRate: frameRate)
             let table = RenderInputTable(capacity: 3)
             let snapshot = MixerSnapshot(state: MixerState(format: .hd720p60), sequence: 0, tick: .zero)
             var tick = Tick.zero
@@ -65,7 +68,8 @@ final class ExternalDisplayTests: XCTestCase {
         if !NSApp.isRunning { NSApp.finishLaunching() }
     }
 
-    /// 提案 013：显示器 ID / 退回策略读写正式字段 `OutputSettings.display`；过渡键 extra 只作读的后备。
+    /// 提案 013：显示器 ID / 退回策略读写正式字段 `OutputSettings.display`。W3-C2 删了过渡键的后备读取（P3 报告 §4 第 1 条）：
+    /// 旧键 extra["displayID"] / ["fallbackToMain"] 一律忽略（`Show.load` 已把旧节目文件里的它们搬进正式字段）；写出照旧顺手清掉。
     func testP3_013_specRoundTripsThroughOfficialDisplayField() {
         var settings = OutputSettings(source: .program)
         let spec = ExternalDisplaySpec(displayID: 69734400, source: .input(number: 3), fallbackToMain: true)
@@ -84,17 +88,23 @@ final class ExternalDisplayTests: XCTestCase {
         ExternalDisplaySpec(displayID: nil, source: .multiview).apply(to: &plain)
         XCTAssertEqual(plain.display, DisplayOutputSettings(displayID: nil, fallbackToMain: false))
         XCTAssertEqual(ExternalDisplaySpec(settings: plain), ExternalDisplaySpec(displayID: nil, source: .multiview))
-        // 什么都没有（老 Show、也没有过渡键）：主屏 + 不退回（与 P3 之前一样）
+        // 什么都没有（没有正式字段）：主屏 + 不退回——= DisplayOutputSettings 的默认（提案 015：fallbackToMain 默认 false）
         XCTAssertEqual(ExternalDisplaySpec(settings: OutputSettings(source: .program)),
                        ExternalDisplaySpec(displayID: nil, source: .program, fallbackToMain: false))
-        // 过渡键作后备：正式字段为 nil 时仍读得出（一个版本）
+        XCTAssertEqual(ExternalDisplaySpec(settings: OutputSettings(source: .program)).fallbackToMain, DisplayOutputSettings().fallbackToMain)
+        // 旧键被忽略：正式字段为 nil 时不再读 extra（没经过 Show.load 的内存状态也一样）
         var legacy = OutputSettings(source: .preview)
         legacy.extra[ExternalDisplaySpec.displayIDKey] = .number(12345)
         legacy.extra[ExternalDisplaySpec.fallbackKey] = .bool(true)
-        XCTAssertEqual(ExternalDisplaySpec(settings: legacy), ExternalDisplaySpec(displayID: 12345, source: .preview, fallbackToMain: true))
-        // 正式字段优先于过渡键
-        legacy.display = DisplayOutputSettings(displayID: 999, fallbackToMain: false)
-        XCTAssertEqual(ExternalDisplaySpec(settings: legacy), ExternalDisplaySpec(displayID: 999, source: .preview, fallbackToMain: false))
+        XCTAssertEqual(ExternalDisplaySpec(settings: legacy), ExternalDisplaySpec(displayID: nil, source: .preview, fallbackToMain: false),
+                       "过渡键不再作后备")
+        // 有正式字段就只看正式字段，旧键在不在都一样
+        legacy.display = DisplayOutputSettings(displayID: 999, fallbackToMain: true)
+        XCTAssertEqual(ExternalDisplaySpec(settings: legacy), ExternalDisplaySpec(displayID: 999, source: .preview, fallbackToMain: true))
+        // 写回：只写正式字段，旧键顺手清掉
+        ExternalDisplaySpec(settings: legacy).apply(to: &legacy)
+        XCTAssertNil(legacy.extra[ExternalDisplaySpec.displayIDKey])
+        XCTAssertNil(legacy.extra[ExternalDisplaySpec.fallbackKey])
         XCTAssertEqual(ExternalDisplaySpec.describe(.input(number: 2), inputs: [InputConfig(number: 2, name: "机位二", source: .image(path: "/x.png"))]), "输入 2 机位二")
     }
 
@@ -135,23 +145,32 @@ final class ExternalDisplayTests: XCTestCase {
         print(String(format: "外部显示窗口：%.1f s blit %d 次（%.1f fps），display link 回调 %d 次，屏幕 %d Hz", elapsed, presented, Double(presented) / elapsed, w.displayView.linkCallbacks, screen.maximumFramesPerSecond))
         XCTAssertGreaterThan(Double(presented) / elapsed, 40, "应接近节目帧率（渲染器 60 Hz）")
         XCTAssertLessThanOrEqual(Double(presented) / elapsed, 62, "每个新版本最多 blit 一次")
-        // 换源：PVW → 多画面 → 输入 2（Aux = 多画面里第 2 格）
+        // 换源：PVW → 多画面 → 输入 2（Aux：AuxInputView 画该路帧槽分支的全分辨率帧，显示视图收起）
         w.update(spec: ExternalDisplaySpec(displayID: id, source: .preview))
         XCTAssertEqual(w.displayView.target, .preview)
         w.update(spec: ExternalDisplaySpec(displayID: id, source: .multiview))
         XCTAssertEqual(w.displayView.target, .multiview)
         XCTAssertEqual(w.displayView.sourceRect, .full)
+        XCTAssertTrue(w.auxView.isHidden)
         let inputs = [InputConfig(number: 1, name: "a", source: .image(path: "/a.png")), InputConfig(number: 2, name: "b", source: .image(path: "/b.png"))]
+        var opened: [Int] = [], closed: [Int] = []
+        let slot2 = TestFrameSlot()
+        w.auxFrames = AuxFrameTap(open: { n in opened.append(n); return n == 2 ? slot2 : nil }, close: { n, _ in closed.append(n) })
         w.apply(inputs: inputs, textureWidth: 1920, textureHeight: 1080)
         w.update(spec: ExternalDisplaySpec(displayID: id, source: .input(number: 2)))
-        XCTAssertEqual(w.displayView.target, .multiview)
-        XCTAssertEqual(w.displayView.sourceRect, MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080))
+        XCTAssertTrue(w.displayView.isHidden, "Aux 不再用多画面纹理")
+        XCTAssertFalse(w.auxView.isHidden)
+        XCTAssertEqual(w.auxView.presenter.input, 2)
+        XCTAssertEqual(opened, [2], "开窗口时给这路开一个帧槽分支")
         XCTAssertFalse(w.auxUnresolved)
         w.apply(inputs: [inputs[0]], textureWidth: 1920, textureHeight: 1080)   // 输入 2 被删
-        XCTAssertTrue(w.auxUnresolved, "找不到那路输入就画黑")
+        XCTAssertTrue(w.auxUnresolved, "找不到那路输入：画占位")
+        XCTAssertEqual(closed, [2], "那路没了就把分支还回去")
         XCTAssertTrue(w.displayView.isHidden)
+        XCTAssertFalse(w.auxView.isHidden)
         w.update(spec: ExternalDisplaySpec(displayID: id, source: .program))
         XCTAssertFalse(w.displayView.isHidden)
+        XCTAssertTrue(w.auxView.isHidden)
         pump(seconds: 0.3)
         // Esc → onCloseRequested
         var closeRequested = false
@@ -194,7 +213,7 @@ final class ExternalDisplayTests: XCTestCase {
         XCTAssertEqual(statuses, [.showing(displayID: id), .fallbackToMain(displayID: bogus), .waitingForDisplay(displayID: bogus)])
     }
 
-    /// 管理器：按输出表增删窗口（多窗口），设置变了更新，Aux 输入映射到多画面格子，显示器变化通知到每个窗口。
+    /// 管理器：按输出表增删窗口（多窗口），设置变了更新，Aux 输入交给 AuxInputView（帧槽分支按需开 / 还），显示器变化通知到每个窗口。
     func testManager_reconcileCreatesUpdatesClosesWindows_multipleWindows() throws {
         guard let screen = NSScreen.main else { throw XCTSkip("没有显示器") }
         launchApp()
@@ -203,6 +222,9 @@ final class ExternalDisplayTests: XCTestCase {
         defer { source.stop() }
         let manager = ExternalDisplayManager(source: source.source)
         defer { manager.closeAll() }
+        let slot = TestFrameSlot()
+        var opened: [Int] = [], closed: [Int] = []
+        manager.auxFrames = AuxFrameTap(open: { n in opened.append(n); return slot }, close: { n, _ in closed.append(n) })
         let id = ExternalDisplays.id(of: screen)
         var statusLog: [(Int, ExternalDisplayWindow.Status)] = []
         manager.onStatusChange = { statusLog.append(($0, $1)) }
@@ -219,11 +241,12 @@ final class ExternalDisplayTests: XCTestCase {
         manager.reconcile(outputs: outputs, inputs: inputs, format: .hd1080p60)
         XCTAssertEqual(Set(manager.windows.keys), [2, 3], "enabled 的外部显示输出各一个窗口；录制 / 关着的不算")
         XCTAssertEqual(manager.windows[2]?.displayView.target, .program)
-        XCTAssertEqual(manager.windows[3]?.displayView.target, .multiview)
-        XCTAssertEqual(manager.windows[3]?.displayView.sourceRect, MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080))
+        XCTAssertEqual(manager.windows[3]?.auxView.presenter.input, 2, "Aux：本包自己画输入 2 的帧")
+        XCTAssertEqual(manager.windows[3]?.displayView.isHidden, true)
+        XCTAssertEqual(opened, [2])
         XCTAssertEqual(statusLog.map(\.0).sorted(), [2, 3])
         pump(seconds: 0.5)
-        XCTAssertGreaterThan(manager.windows[2]!.displayView.presentedFrames + manager.windows[3]!.displayView.presentedFrames, 0)
+        XCTAssertGreaterThan(manager.windows[2]!.displayView.presentedFrames, 0)
         // 改 3 号的源、开 4 号、删 2 号
         outputs[2] = output(3, ExternalDisplaySpec(displayID: id, source: .multiview))
         outputs[3] = output(4, ExternalDisplaySpec(displayID: 0xDEAD_BEEF, source: .preview), enabled: true)
@@ -233,6 +256,8 @@ final class ExternalDisplayTests: XCTestCase {
         XCTAssertEqual(Set(manager.windows.keys), [3, 4])
         XCTAssertEqual(old2?.isShowing, false, "删掉的输出窗口应关掉")
         XCTAssertEqual(manager.windows[3]?.displayView.sourceRect, .full)
+        XCTAssertEqual(manager.windows[3]?.displayView.target, .multiview)
+        XCTAssertEqual(closed, [2], "3 号从 Aux 换成多画面：分支还回去")
         XCTAssertEqual(manager.windows[4]?.status, .waitingForDisplay(displayID: 0xDEAD_BEEF))
         XCTAssertEqual(manager.windows[4]?.isShowing, false)
         // 显示器变化通知：每个窗口重新找屏（没变化不动）
@@ -251,7 +276,8 @@ final class ExternalDisplayTests: XCTestCase {
         pump(seconds: 0.5)
         let after = try XCTUnwrap(manager.statsEntries.first { $0.output == 3 }).frames
         XCTAssertGreaterThan(after, before, "在显示的窗口 frames 应随呈现递增")
-        XCTAssertEqual(after, manager.windows[3]!.displayView.presentedFrames, "与 MetalDisplayView.presentedFrames 同源（铁律 4）")
+        XCTAssertEqual(after, manager.windows[3]!.presentedFrames, "与窗口的呈现计数同源（铁律 4）")
+        XCTAssertEqual(after, manager.windows[3]!.displayView.presentedFrames + manager.windows[3]!.auxView.presentedFrames)
 
         manager.closeAll()
         XCTAssertTrue(manager.windows.isEmpty)
@@ -261,8 +287,8 @@ final class ExternalDisplayTests: XCTestCase {
     /// L2 端到端（秒表法）：镜头前的手机毫秒秒表 → 外部显示上的 PGM，1/1000 s 快门同时拍下两者读差，5 次取中位数，另测摄像头直连显示器作扣除。
     func testL2_externalDisplayStopwatch_manual() throws {
         if NSScreen.screens.count < 2 {
-            throw XCTSkip("BLOCKED-硬件：本机只有内置屏，没有外接显示器；解锁条件 = 接一块 HDMI 显示器 + 摄像头 + 手机秒表，按 reports/w3-outputs2.md §2 的 L2 步骤人工测 5 次")
+            throw XCTSkip("BLOCKED-硬件：本机只有内置屏，没有外接显示器；解锁条件 = 接一块外接显示器 + 摄像头 + 手机毫秒秒表，按 reports/w3-outputs-3.md §2 的 L2 步骤人工测 5 次")
         }
-        throw XCTSkip("L2 秒表法是人工测量（测试标准 §3 L2），结果写 reports/w3-outputs2.md")
+        throw XCTSkip("BLOCKED-硬件（人工）：L2 秒表法要摄像头 + 手机秒表 + 高速快门拍照（测试标准 §3 L2），步骤在 reports/w3-outputs-3.md §2，下一版写进 docs/checklists")
     }
 }
