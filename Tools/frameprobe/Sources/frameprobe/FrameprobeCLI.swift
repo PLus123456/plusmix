@@ -5,9 +5,12 @@
 //   frameprobe stats    <file|dir> [--fps 60] [--input-fps 0=30,1=60] [--max-events N]        V4 / V5
 //   frameprobe switches <file|dir> [--start-tick N] [--gray-tolerance 6]                       V6
 //   frameprobe fade     <file|dir> [--gray-a 64 --gray-b 192] [--duration D] [--fade-at S] [--fade-tolerance 2]   V7
+//   frameprobe wipe     <file|dir> --at S --duration D [--wipe-direction leftToRight]                            V7
+//   frameprobe zoom     <file|dir> --at S --duration D                                                           V7
 //   frameprobe av       <file> [<file2> ...] [--fps 60] [--start-tick N] [--aac-priming auto|0|N] [--discontinuities]   A2 / A3（多文件 = A4）、A1 第三项
 //   frameprobe synth    --out x.mov [--seconds 20] [--width 1920 --height 1080] [--fps 60|59.94|30] [--bitrate 2000000]
-//                       [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D] [--raw-dir DIR --raw-frames N]
+//                       [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D]
+//                       [--wipe T:D:dir[:softness]] [--zoom T:D] [--raw-dir DIR --raw-frames N]
 // 通用：--size WxH（目录输入）、--markdown、--out PATH（把 JSON 写到文件）、--version
 import Foundation
 import SwitcherContracts
@@ -17,17 +20,20 @@ import SwitcherTestKit
 struct FrameprobeCLI {
     static let usage = """
     frameprobe \(SwitcherVersion.current)
-    用法：frameprobe <frames|stats|switches|fade|av|synth> [选项] <文件或目录…>
+    用法：frameprobe <frames|stats|switches|fade|wipe|zoom|av|synth> [选项] <文件或目录…>
       frames    每帧 {index, frameNumber, inputID, genTimeMs, flash, gray}      [--limit N]
       stats     每输入重复 / 丢弃序列与比例（V4）、总帧数 vs 时长 × 帧率（V5）   [--fps N] [--input-fps id=fps,…] [--max-events N]
       switches  输入 ID 变化的帧、Cut 前后有无混合帧（V6）                       [--start-tick N] [--gray-tolerance N]
       fade      Fade 逐帧混合比例与线性曲线的最大偏差帧数（V7）                   [--gray-a N --gray-b N] [--duration D] [--fade-at S] [--fade-tolerance N]
+      wipe      Wipe 逐帧擦边位置（软边取 50% 点）与线性曲线的偏差帧数（V7）       --at S --duration D [--wipe-direction leftToRight|rightToLeft|topToBottom|bottomToTop|diagonal]
+      zoom      Zoom 逐帧新画面宽度（中心行带）与线性曲线的偏差帧数（V7）          --at S --duration D
       av        闪光帧 ↔ 最近 click 的时间差（A2、A3；按整秒拍配对判，全部配对另报）；多个文件比较同一事件（A4）
                 [--start-tick N] 文件第一帧的节目拍  [--aac-priming auto|0|N] 音轨 priming：auto = 有编辑列表信 AVFoundation、没有按 ffmpeg 口径加回；0 = 不加回；N = 加回 N 样本
                 [--discontinuities] 顺带做波形不连续检测（A1 第三项：跳变 > 0.5 满幅、click ±1 ms 排除） [--click-margin-ms 1]
-      synth     生成合成源样例 .mov（VideoToolbox H.264）或原始 NV12 帧目录       --out x.mov [--seconds 20] [--width W --height H] [--fps 60] [--bitrate B] [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D] [--raw-dir DIR --raw-frames N]
+      synth     生成合成源样例 .mov（VideoToolbox H.264）或原始 NV12 帧目录       --out x.mov [--seconds 20] [--width W --height H] [--fps 60] [--bitrate B] [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D] [--wipe T:D:dir[:softness]] [--zoom T:D] [--raw-dir DIR --raw-frames N]
     通用：--size WxH（原始 NV12 目录的尺寸，默认 1920x1080）  --markdown（人读表）  --out PATH（JSON 写到文件）  --version
           --blank-ticks a-b,c-d,…（这些拍的帧当作解不出：转场中间帧没有单一输入身份，G4 的 gate4.sh 从场景文件算出来；tick = --start-tick + 序号）
+          --no-self-check（关掉自证解码，回到只按契约解码的老口径）  --id-tolerance 12  --rhythm-tolerance-ms 3  --self-check-gray-tolerance 5
     """
 
     static func main() async {
@@ -43,7 +49,7 @@ struct FrameprobeCLI {
         do {
             var parsed = try Parsed(Array(args.dropFirst()))
             switch command {
-            case "frames", "stats", "switches", "fade", "av":
+            case "frames", "stats", "switches", "fade", "wipe", "zoom", "av":
                 try await analyze(command, &parsed)
             case "synth":
                 try await synth(&parsed)
@@ -66,7 +72,7 @@ struct FrameprobeCLI {
         var options: [String: String] = [:]
         var flags: Set<String> = []
         var positional: [String] = []
-        static let flagNames: Set<String> = ["markdown", "software", "no-events", "help", "discontinuities"]
+        static let flagNames: Set<String> = ["markdown", "software", "no-events", "help", "discontinuities", "no-self-check"]
 
         init(_ args: [String]) throws {
             var i = 0
@@ -116,7 +122,17 @@ struct FrameprobeCLI {
         if let v = try p.double("gray-tolerance") { o.grayTolerance = v }
         if let v = try p.double("fade-tolerance") { o.fadeTolerance = v }
         o.fadeDuration = try p.int("duration")
+        o.transitionDuration = try p.int("duration")
         if let v = try p.int("fade-at") { o.fadeAt = Int64(v) }
+        if let v = try p.int("at") { o.transitionAt = Int64(v) }
+        if let v = p.options["wipe-direction"] {
+            guard let d = WipeDirection(rawValue: v) else { throw CLIError("--wipe-direction 只认 leftToRight / rightToLeft / topToBottom / bottomToTop / diagonal，给的是 \(v)") }
+            o.wipeDirection = d
+        }
+        o.selfCheck.enabled = !p.flags.contains("no-self-check")
+        if let v = try p.double("id-tolerance") { o.selfCheck.idDistance = v }
+        if let v = try p.double("rhythm-tolerance-ms") { o.selfCheck.rhythmToleranceMs = v }
+        if let v = try p.double("self-check-gray-tolerance") { o.selfCheck.grayTolerance = v }
         if let v = try p.int("max-events") { o.maxEvents = v }
         o.limit = try p.int("limit")
         if let v = p.options["aac-priming"] {
@@ -171,6 +187,12 @@ struct FrameprobeCLI {
         case "fade":
             let r = try await FrameProbe.fade(urls[0], options: options)
             try emit(r, markdown: FrameProbe.markdown(r), p)
+        case "wipe", "zoom":
+            guard options.transitionAt != nil, let d = options.transitionDuration, d >= 2 else {
+                throw CLIError("\(command) 要 --at S（发命令的拍）和 --duration D（≥ 2 拍）")
+            }
+            let r = command == "wipe" ? try await FrameProbe.wipe(urls[0], options: options) : try await FrameProbe.zoom(urls[0], options: options)
+            try emit(r, markdown: FrameProbe.markdown(r), p)
         case "av":
             if urls.count == 1 {
                 let r = try await FrameProbe.av(urls[0], options: options)
@@ -217,6 +239,20 @@ struct FrameprobeCLI {
             let parts = s.split(separator: ":")
             guard parts.count == 2, let t = Int(parts[0]), let d = Int(parts[1]) else { throw CLIError("--fade 形如 700:30") }
             spec.events = spec.events.filter { if case .fade = $0 { false } else { true } } + [.fade(tick: t, durationTicks: d)]
+        }
+        if let s = p.options["wipe"] {
+            // T:D:方向[:软边]
+            let parts = s.split(separator: ":")
+            guard parts.count >= 3, let t = Int(parts[0]), let d = Int(parts[1]), let dir = WipeDirection(rawValue: String(parts[2])) else {
+                throw CLIError("--wipe 形如 700:24:leftToRight 或 700:24:topToBottom:0.1")
+            }
+            let softness = parts.count > 3 ? Double(parts[3]) ?? 0 : 0
+            spec.events = spec.events.filter { if case .wipe = $0 { false } else { true } } + [.wipe(tick: t, durationTicks: d, direction: dir, softness: softness)]
+        }
+        if let s = p.options["zoom"] {
+            let parts = s.split(separator: ":")
+            guard parts.count == 2, let t = Int(parts[0]), let d = Int(parts[1]) else { throw CLIError("--zoom 形如 700:24") }
+            spec.events = spec.events.filter { if case .zoom = $0 { false } else { true } } + [.zoom(tick: t, durationTicks: d)]
         }
         if let raw = p.options["raw-dir"] {
             let n = try p.int("raw-frames") ?? 60

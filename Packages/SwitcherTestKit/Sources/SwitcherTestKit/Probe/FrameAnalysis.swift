@@ -205,6 +205,16 @@ public enum FrameAnalysis {
     }
 
     /// 输入 ID 变化的帧、Cut 前后有无混合帧（判据：帧灰度不等于任一输入的标称灰度）。
+    ///
+    /// 几种转场在这里各是什么样（W1-A3）：
+    /// - **Cut**：`betweenFrames == 0`，`cleanCut` 要为真（V6 硬性）。
+    /// - **Fade / Wipe / Zoom**：中间帧解不出输入身份（自证解码判掉，见 `SelfCheck`），所以是一条 `betweenFrames > 0` 的 transition。
+    ///   Wipe 走到解码区整幅都是新画面之后（leftToRight 上是 progress ≥ 0.625）就认出新输入了，`betweenFrames` 会比转场时长短，这是对的。
+    /// - **静态 PNG 的 Stinger**：叠层只盖画面的一部分，底下的输入照常解得出，所以它在这里就是**第 cutAtTick 拍的一次 Cut**
+    ///   （实测 g4：第 9900 拍发 Stinger、cutAtTick = 12 → 第 9912 拍一条 cut，cleanCut 为真）。
+    ///   判据是叠层在**解码区**（帧号行、时间戳行、ID 块、中心采样区、ID 邻域条，见 `PatternProbe.decodeRects`）上必须是透明的——
+    ///   G4Factory 的 PNG 就是按这个画的（只占下 20% 与左右两侧）。叠层要是盖住了解码区，那几帧会被自证判成解不出，
+    ///   这里就变成一条 `betweenFrames > 0` 的 transition，而不是 Cut。动画 stinger（文件输入）落地后再看。
     /// - Parameter startTick: 输出第 0 帧对应的节目拍（默认 0）；tick = startTick + index。
     public static func switches(frames: [ProbeFrame], startTick: Int64 = 0, grayTolerance: Double = 6) -> SwitchesReport {
         let nominal = nominalGrays(frames)

@@ -40,6 +40,15 @@ public enum FrameProbe {
         /// 帧号行与 ID 块在不同拍翻转、颜色是混合值，按输入身份统计的 V4 / V6 / C3 对它们没有定义（G4 checkpoint，`frameprobe --blank-ticks`）。
         /// 总帧数（V5）不受影响；引擎侧的 stats.jsonl 计数全程照算。
         public var blankTicks: [ClosedRange<Int64>] = []
+        /// 解码自证（W1-A3）：帧号行、时间戳行、ID 块、底色、节奏互相印证，认出转场合成帧。默认开；
+        /// `--no-self-check` 关掉就是老口径（只按契约解码），`--blank-ticks` 两种口径下都还在。
+        public var selfCheck = SelfCheck.Options()
+        /// 要量的那次转场的命令拍（`wipe` / `zoom` 子命令）。
+        public var transitionAt: Int64?
+        /// 要量的那次转场的时长（拍）。
+        public var transitionDuration: Int?
+        /// Wipe 的方向（`wipe` 子命令）。
+        public var wipeDirection: WipeDirection = .leftToRight
         public init() {}
     }
 
@@ -56,6 +65,10 @@ public enum FrameProbe {
         public var samples: [Float]
         /// 节目帧率（选项或标称）。
         public var fps: Double
+        /// 灰度剖面（只有转场窗口里的帧有）。
+        public var profiles: [Int: ScanProfile] = [:]
+        /// 自证解码的结果。
+        public var selfCheck = SelfCheck.Report(enabled: false, frames: 0, rejected: 0, byReason: [:], fits: [], examples: [], truncated: false)
     }
 
     /// 读文件（.mov / .mp4）或原始 NV12 目录；`withAudio` 才读音轨找 click。
@@ -64,11 +77,18 @@ public enum FrameProbe {
         var isDir: ObjCBool = false
         FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
         if isDir.boolValue {
-            let r = try MediaReader.readRawNV12Directory(url: url, width: options.rawWidth, height: options.rawHeight, fps: options.fps ?? options.rawFps)
-            return Loaded(source: url.path, info: r.info, frames: blank(r.frames, options: options, fps: options.fps ?? options.rawFps), audio: nil, clicks: [], samples: [], fps: options.fps ?? options.rawFps)
+            let fps = options.fps ?? options.rawFps
+            let r = try MediaReader.readRawNV12Directory(url: url, width: options.rawWidth, height: options.rawHeight, fps: fps,
+                                                         profileAt: profilePredicate(options: options, fps: fps))
+            let (frames, report) = check(r, options: options, fps: fps)
+            return Loaded(source: url.path, info: r.info, frames: frames, audio: nil, clicks: [], samples: [], fps: fps,
+                          profiles: r.profiles, selfCheck: report)
         }
-        let v = try await MediaReader.readVideo(url: url)
-        let frames = blank(v.frames, options: options, fps: options.fps ?? (v.info.nominalFps > 0 ? v.info.nominalFps : 60))
+        // 剖面窗口按拍号圈，拍号要用真帧率换算：没给 --fps 就先只读一次容器的标称帧率（59.94 的文件按 60 算，第 7800 拍会偏 8 拍）
+        var probeFps = options.fps ?? 0
+        if probeFps <= 0 && options.transitionAt != nil { probeFps = (try? await MediaReader.nominalFps(url: url)) ?? 60 }
+        let v = try await MediaReader.readVideo(url: url, profileAt: profilePredicate(options: options, fps: probeFps))
+        let (frames, selfCheck) = check(v, options: options, fps: options.fps ?? (v.info.nominalFps > 0 ? v.info.nominalFps : 60))
         var audio: ProbeAudioInfo?
         var clicks: [ClickEvent] = []
         var samples: [Float] = []
@@ -83,7 +103,30 @@ public enum FrameProbe {
             samples = a.samples
         }
         let fps = options.fps ?? (v.info.nominalFps > 0 ? v.info.nominalFps : 60)
-        return Loaded(source: url.path, info: v.info, frames: frames, audio: audio, clicks: clicks, samples: samples, fps: fps)
+        return Loaded(source: url.path, info: v.info, frames: frames, audio: audio, clicks: clicks, samples: samples, fps: fps,
+                      profiles: v.profiles, selfCheck: selfCheck)
+    }
+
+    /// 自证 + `--blank-ticks`。两者判掉的帧都置成解不出，报告里分开记。
+    static func check(_ v: MediaReader.VideoResult, options: Options, fps: Double) -> ([ProbeFrame], SelfCheck.Report) {
+        let checked = SelfCheck.apply(frames: v.frames, readings: v.readings, options: options.selfCheck,
+                                      startTick: options.startTick, maxEvents: options.maxEvents)
+        let frames = blank(checked.frames, options: options, fps: fps)
+        var report = checked.report
+        let blanked = zip(checked.frames, frames).filter { $0.inputID != nil && $1.inputID == nil }.count
+        if blanked > 0 {
+            report.byReason[SelfCheck.Reason.blank.rawValue, default: 0] += blanked
+            report.rejected += blanked
+        }
+        return (frames, report)
+    }
+
+    /// 哪些帧要算灰度剖面：转场窗口 [s, s + D] 的每一拍（`wipe` / `zoom` 子命令）。
+    static func profilePredicate(options: Options, fps: Double) -> (@Sendable (Double) -> Bool)? {
+        guard let at = options.transitionAt, let d = options.transitionDuration, d >= 2, fps > 0 else { return nil }
+        let startTick = options.startTick
+        let window = at...(at + Int64(d))
+        return { pts in window.contains(startTick + Int64((pts * fps).rounded())) }
     }
 
     /// `options.blankTicks` 里的帧置成解不出（见 Options.blankTicks）。拍号按 pts 算（tick = startTick + round(pts × fps)），
@@ -134,11 +177,15 @@ public enum FrameProbe {
         public var frameCount: Int
         public var frames: [ProbeFrame]
         public var truncated: Bool
+        /// 自证解码判掉了哪些帧（W1-A3）。
+        public var selfCheck: SelfCheck.Report?
     }
     public struct StatsOutput: Codable, Sendable {
         public var source: String
         public var info: ProbeVideoInfo
         public var stats: FrameAnalysis.StatsReport
+        /// 自证解码判掉了哪些帧（W1-A3）。
+        public var selfCheck: SelfCheck.Report?
     }
     public struct SwitchesOutput: Codable, Sendable {
         public var source: String
@@ -147,6 +194,11 @@ public enum FrameProbe {
     public struct FadeOutput: Codable, Sendable {
         public var source: String
         public var fade: FrameAnalysis.FadeReport
+    }
+    /// `wipe` / `zoom` 子命令的输出。
+    public struct CurveOutput: Codable, Sendable {
+        public var source: String
+        public var curve: FrameAnalysis.TransitionCurve
     }
     public struct AVOutput: Codable, Sendable {
         public var source: String
@@ -175,12 +227,32 @@ public enum FrameProbe {
     public static func frames(_ url: URL, options: Options = Options()) async throws -> FramesReport {
         let l = try await load(url, options: options, withAudio: false)
         let limited = options.limit.map { Array(l.frames.prefix($0)) } ?? l.frames
-        return FramesReport(source: l.source, info: l.info, frameCount: l.frames.count, frames: limited, truncated: limited.count < l.frames.count)
+        return FramesReport(source: l.source, info: l.info, frameCount: l.frames.count, frames: limited,
+                            truncated: limited.count < l.frames.count, selfCheck: l.selfCheck.enabled ? l.selfCheck : nil)
     }
 
     public static func stats(_ url: URL, options: Options = Options()) async throws -> StatsOutput {
         let l = try await load(url, options: options, withAudio: false)
-        return StatsOutput(source: l.source, info: l.info, stats: FrameAnalysis.stats(frames: l.frames, programFps: l.fps, inputFps: options.inputFps, maxEvents: options.maxEvents))
+        return StatsOutput(source: l.source, info: l.info,
+                           stats: FrameAnalysis.stats(frames: l.frames, programFps: l.fps, inputFps: options.inputFps, maxEvents: options.maxEvents),
+                           selfCheck: l.selfCheck.enabled ? l.selfCheck : nil)
+    }
+
+    /// Wipe 的进度曲线（V7）。要 `transitionAt` / `transitionDuration` / `wipeDirection`。
+    public static func wipe(_ url: URL, options: Options = Options()) async throws -> CurveOutput {
+        let l = try await load(url, options: options, withAudio: false)
+        let curve = FrameAnalysis.wipeCurve(frames: l.frames, profiles: l.profiles, direction: options.wipeDirection,
+                                            at: options.transitionAt ?? 0, durationTicks: options.transitionDuration ?? 0,
+                                            startTick: options.startTick, fps: l.fps)
+        return CurveOutput(source: l.source, curve: curve)
+    }
+
+    /// Zoom 的进度曲线（V7）。要 `transitionAt` / `transitionDuration`。
+    public static func zoom(_ url: URL, options: Options = Options()) async throws -> CurveOutput {
+        let l = try await load(url, options: options, withAudio: false)
+        let curve = FrameAnalysis.zoomCurve(frames: l.frames, profiles: l.profiles, at: options.transitionAt ?? 0,
+                                            durationTicks: options.transitionDuration ?? 0, startTick: options.startTick, fps: l.fps)
+        return CurveOutput(source: l.source, curve: curve)
     }
 
     public static func switches(_ url: URL, options: Options = Options()) async throws -> SwitchesOutput {
@@ -247,6 +319,7 @@ public enum FrameProbe {
         s += "| 项 | 值 |\n|---|---|\n"
         s += "| 总帧数（V5） | \(t.totalFrames)，时长 \(f(t.durationSeconds, 3)) s × \(f(t.programFps, 3)) fps = 期望 \(t.expectedFrames)，差 \(t.frameCountDelta >= 0 ? "+" : "")\(t.frameCountDelta) |\n"
         s += "| 帧号读不出 | \(t.undecodableFrames) |\n| 输入 ID 读不出（混合 / 黑场） | \(t.unidentifiedFrames) |\n\n"
+        if let c = r.selfCheck { s += markdown(c) + "\n" }
         s += "| 输入 | 帧 | 不同帧号 | 重复帧 | 重复比例 | 设计内 | 设计外 | 丢弃帧 | 丢弃比例 | 设计内 | 设计外 | 倒退 | V4 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
         for i in t.inputs {
             s += "| \(i.inputID)\(i.inputFps.map { "（\(f($0, 2)) fps）" } ?? "") | \(i.frames) | \(i.uniqueFrames) | \(i.duplicateFrames) | \(pct(i.duplicateRatio)) | \(i.designDuplicateRatio.map(pct) ?? "—") | \(i.excessDuplicateRatio.map(pct) ?? "—") | \(i.droppedFrames) | \(pct(i.dropRatio)) | \(i.designDropRatio.map(pct) ?? "—") | \(i.excessDropRatio.map(pct) ?? "—") | \(i.backwardJumps) | \(mark(i.passV4)) |\n"
@@ -256,6 +329,36 @@ public enum FrameProbe {
             s += "输入 \(i.inputID) 的重复段（前 \(i.duplicateRuns.count) 条）：" + i.duplicateRuns.prefix(20).map { "#\($0.index)×\($0.length)" }.joined(separator: "；") + "\n"
         }
         if t.truncated { s += "\n（序列被 maxEvents 截断）\n" }
+        return s
+    }
+
+    /// 自证解码的小结。
+    public static func markdown(_ c: SelfCheck.Report) -> String {
+        guard c.enabled else { return "自证解码：关（`--no-self-check`）\n" }
+        var s = "自证解码（W1-A3）：\(c.frames) 帧里判掉 \(c.rejected)（"
+        s += SelfCheck.Reason.allCases.compactMap { r in c.byReason[r.rawValue].map { "\(r.rawValue) \($0)" } }.joined(separator: "、")
+        s += "）\n\n| 输入 | 帧 | 每帧 ms | 最大残差 ms | 标称灰度 | 按节奏判掉 | 时间轴离群（只报） | 最大时间轴偏离 ms |\n"
+        s += "|---|---|---|---|---|---|---|---|\n"
+        for f in c.fits {
+            s += "| \(f.inputID) | \(f.frames) | \(self.f(f.msPerFrame, 4)) | \(self.f(f.maxResidualMs, 2)) | \(self.f(f.nominalGray, 1)) | \(f.rejected) | \(f.timelineOutliers) | \(self.f(f.maxTimelineDeviationMs, 1)) |\n"
+        }
+        if !c.examples.isEmpty {
+            s += "\n判掉的帧（前 \(min(12, c.examples.count)) 条\(c.truncated ? "，已截断" : "")）：" +
+                c.examples.prefix(12).map { "拍 \($0.tick) \($0.reason.rawValue)（\(self.f($0.value, 1))）" }.joined(separator: "；") + "\n"
+        }
+        return s
+    }
+
+    /// `wipe` / `zoom` 的曲线表（与 `fade` 同形）。
+    public static func markdown(_ r: CurveOutput) -> String {
+        let t = r.curve
+        var s = "**\(r.source)** \(t.kind)\(t.direction.map { " \($0)" } ?? "")：第 \(t.startTick) 拍起 \(t.durationTicks) 拍，"
+        s += "最大偏差 \(f(t.maxDeviationFrames, 3)) 帧（进度误差 \(pct(t.maxProgressError))），单调 \(t.monotonic ? "是" : "否")，V7 \(mark(t.passV7))\n\n"
+        if let n = t.note { s += "\(n)\n\n" }
+        s += "| 帧 | 拍 | 进度 | 期望 | 偏差（帧） | 取样点 |\n|---|---|---|---|---|---|\n"
+        for x in t.samples {
+            s += "| \(x.index) | \(x.tick) | \(f(x.progress, 4)) | \(f(x.expectedProgress, 4)) | \(f(x.deviationFrames, 3)) | \(x.usable) |\n"
+        }
         return s
     }
 

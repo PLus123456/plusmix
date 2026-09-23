@@ -9,6 +9,10 @@ public enum MediaReader {
     public struct VideoResult: Sendable {
         public var info: ProbeVideoInfo
         public var frames: [ProbeFrame]
+        /// 每帧的图案读数（自证解码要的证据，见 `SelfCheck`）；与 `frames` 一一对应。
+        public var readings: [PatternProbe.Reading] = []
+        /// 灰度剖面，键是帧序号；只有 `profileAt` 说要的那几帧有（Wipe / Zoom 的进度量法要，见 `ScanProfile`）。
+        public var profiles: [Int: ScanProfile] = [:]
     }
     public struct AudioResult: Sendable {
         /// `startSeconds` 是 AVFoundation 解码输出第一个样本的 PTS（编排层按容器 / priming 修正后再改）。
@@ -37,7 +41,9 @@ public enum MediaReader {
     // MARK: 视频
 
     /// 用 AVAssetReader 解成 BGRA，逐帧解码图案并采样中心灰度。
-    public static func readVideo(url: URL, progress: (@Sendable (Int) -> Void)? = nil) async throws -> VideoResult {
+    /// - Parameter profileAt: 给定 pts（秒）返回 true 的帧另外算一遍灰度剖面（`ScanProfile`）；默认一帧都不算。
+    public static func readVideo(url: URL, profileAt: (@Sendable (Double) -> Bool)? = nil,
+                                 progress: (@Sendable (Int) -> Void)? = nil) async throws -> VideoResult {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ReaderError.noVideoTrack }
         let (size, nominal, timeRange) = try await track.load(.naturalSize, .nominalFrameRate, .timeRange)
@@ -47,43 +53,57 @@ public enum MediaReader {
         reader.add(output)
         guard reader.startReading() else { throw ReaderError.readerFailed(reader.error?.localizedDescription ?? "startReading") }
         var frames: [ProbeFrame] = []
+        var readings: [PatternProbe.Reading] = []
+        var profiles: [Int: ScanProfile] = [:]
         var index = 0
         while let sb = output.copyNextSampleBuffer() {
             guard let pb = CMSampleBufferGetImageBuffer(sb) else { continue }
             let pts = CMSampleBufferGetPresentationTimeStamp(sb).seconds
-            if let d = TestPattern.decode(pixelBuffer: pb) {
-                frames.append(ProbeFrame(index: index, ptsSeconds: pts, decoded: d, gray: grayLevel(of: pb)))
-            } else {
-                frames.append(ProbeFrame(index: index, ptsSeconds: pts, frameNumber: nil, inputID: nil, genTimeMs: nil, flash: false, gray: 0))
-            }
+            let reading = PatternProbe.read(pixelBuffer: pb) ?? .unreadable
+            frames.append(ProbeFrame(index: index, ptsSeconds: pts, reading: reading))
+            readings.append(reading)
+            if profileAt?(pts) == true, let p = ScanProfile.measure(pixelBuffer: pb) { profiles[index] = p }
             index += 1
             if index % 100 == 0 { progress?(index) }
         }
         if reader.status == .failed { throw ReaderError.readerFailed(reader.error?.localizedDescription ?? "unknown") }
         let info = ProbeVideoInfo(width: Int(size.width), height: Int(size.height), nominalFps: Double(nominal),
                                   durationSeconds: timeRange.duration.seconds, pixelFormat: "bgra")
-        return VideoResult(info: info, frames: frames)
+        return VideoResult(info: info, frames: frames, readings: readings, profiles: profiles)
+    }
+
+    /// 只读容器标称帧率（不解帧）：算"哪几帧要做灰度剖面"时要先知道拍号怎么换算。
+    public static func nominalFps(url: URL) async throws -> Double {
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ReaderError.noVideoTrack }
+        return Double(try await track.load(.nominalFrameRate))
     }
 
     /// 原始 NV12 帧目录：`*.nv12` 按文件名排序，每个 width × height × 3/2 字节（Y 平面接 CbCr 平面，无 padding）。
-    public static func readRawNV12Directory(url: URL, width: Int, height: Int, fps: Double) throws -> VideoResult {
+    public static func readRawNV12Directory(url: URL, width: Int, height: Int, fps: Double,
+                                            profileAt: (@Sendable (Double) -> Bool)? = nil) throws -> VideoResult {
         let names = try FileManager.default.contentsOfDirectory(atPath: url.path).filter { $0.hasSuffix(".nv12") }.sorted()
         let expected = width * height * 3 / 2
         var frames: [ProbeFrame] = []
+        var readings: [PatternProbe.Reading] = []
+        var profiles: [Int: ScanProfile] = [:]
         for (i, name) in names.enumerated() {
             let data = try Data(contentsOf: url.appendingPathComponent(name))
             guard data.count == expected else { throw ReaderError.badRawFrame("\(name) 是 \(data.count) 字节，\(width)×\(height) NV12 应为 \(expected)") }
+            let pts = Double(i) / fps
             var copy = data
-            let (decoded, gray) = copy.withUnsafeMutableBytes { raw -> (TestPattern.Decoded, Double) in
+            let (reading, profile) = copy.withUnsafeMutableBytes { raw -> (PatternProbe.Reading, ScanProfile?) in
                 let base = raw.baseAddress!
                 let planes = TestPattern.PixelPlanes.nv12(luma: base, lumaBytesPerRow: width, chroma: base + width * height, chromaBytesPerRow: width)
-                let d = TestPattern.decode(planes, width: width, height: height)
-                return (d, grayLevel(nv12Luma: base, bytesPerRow: width, width: width, height: height))
+                return (PatternProbe.read(planes, width: width, height: height),
+                        profileAt?(pts) == true ? ScanProfile.measure(planes, width: width, height: height) : nil)
             }
-            frames.append(ProbeFrame(index: i, ptsSeconds: Double(i) / fps, decoded: decoded, gray: gray))
+            frames.append(ProbeFrame(index: i, ptsSeconds: pts, reading: reading))
+            readings.append(reading)
+            if let profile { profiles[i] = profile }
         }
         let info = ProbeVideoInfo(width: width, height: height, nominalFps: fps, durationSeconds: Double(frames.count) / fps, pixelFormat: "nv12")
-        return VideoResult(info: info, frames: frames)
+        return VideoResult(info: info, frames: frames, readings: readings, profiles: profiles)
     }
 
     // MARK: 音频
