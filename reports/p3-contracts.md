@@ -135,7 +135,7 @@ prompt：docs/plan/prompts/61-P3-契约落地二.md。落地提案 **007 / 008 /
 | `testP3_012_commandCaseCountAndJsonShapes` | 33 个 case 各有样例；六条新命令的 JSON 形态快照；`setOverlay` 的老形态逐字不变 | ✅ |
 | `testP3_oldShowFilesStillLoadWithSameSemantics` | `scenarios/g3-show.json` 与改写前的 `g4-show.json`（存进 `Tests/SwitcherContractsTests/Fixtures/g4-show-before-p3.json`）都能解；后者的 `extra["layout"]` 搬进正式字段后 **10 个格子逐个相同**，且与改写后的 `g4-show.json` 的 `multiview` 字段**完全相等**；inputs / overlays / audio 也都相同 | ✅ |
 | `testP3_migratingLegacyKeysIsIdempotentAndPrefersOfficialFields` | 三条搬迁 + 幂等 + 正式字段优先 + 没有叠加用到该输入时效果格留着 | ✅ |
-| `testP3_oldStatsLinesStillParse` | 老 stats.jsonl 每行仍能 `parse(line:)` 且 `display == []` | ✅ **17 份文件、12 067 行全部可解**（`App/Tests/Artifacts/` 里留档的 1 份 + G2/G3/G4 跑过的 16 份，从别的 worktree 的 `.build/gate*/` 拷进本工作树的 `.build/gate*/`，不入库） |
+| `testP3_oldStatsLinesStillParse` | 老 stats.jsonl 每行仍能 `parse(line:)` 且 `display == []` | ✅ **最终一次：20 份文件、13 867 行全部可解**（`App/Tests/Artifacts/` 里留档的 1 份 + G2 / G3 / G4 跑过的 16 份，从别的 worktree 的 `.build/gate*/` 拷进本工作树的 `.build/gate*/`，不入库；另 3 份是 P3 自己三次 gate4 的新格式文件，headless 的 `display` 就是 `[]`） |
 
 原有用例里改了字面量的三处：`testP1_stats_jsonKeysSnapshot`（顶层键加 `display`、整行字面量重生成）、`testP2_stats_missingKeysDecodeToDefaults_andEncodeWritesAll`（老行解出 `display == []`、写出带 `"display":[]`）、`Samples`（每个新字段都填非默认值，六条新命令各加样例，`commandCaseCount` 27 → 33）。
 
@@ -177,7 +177,7 @@ prompt：docs/plan/prompts/61-P3-契约落地二.md。落地提案 **007 / 008 /
 
 | 步骤 | 结果 |
 |---|---|
-| `make test-packages`（六个包） | 待最终重跑一次填数（见下：第一次跑时 SwitcherTestKit 有两条与 P3 无关的红，修 / 放宽之后单独跑到 63 用例全绿；前五个包在第一次跑里就已经全过——Makefile 是 `|| exit 1`，跑到第六个包就说明前五个没失败） |
+| `make test-packages`（六个包） | **全绿，614 个用例**（最终一次，提交 c9c49ac 起跑，TestKit 跑到时已含 3e0cb66 的逐字对齐）：SwitcherCore 237（Render 79 / Engine 90 / Contracts 68）、SwitcherInputs 75、SwitcherAudio 103、SwitcherOutputs 80、SwitcherControl 56、SwitcherTestKit 63。跳过的都是原有的 BLOCKED-硬件 / 手动项，外加 P2 的 `testP2_stats_oldGateFilesParse`（它找 `.build/gate*/<子目录>/stats.jsonl`，本工作树拷的是平铺文件；同一件事由 P3 的 `testP3_oldStatsLinesStillParse` 验了，见 §2.1） |
 | `make test-tools`（两个工具冒烟） | **绿**（exit 0；switcher-headless 0.1.0、frameprobe 都编得出、跑得起、打印自己的版本号） |
 | `make test-app`（`xcodebuild test`） | **一条红，与 P3 无关**：`LocalizationTests.testL10n_noHardcodedChineseInUISources`，列出 **39 处**写死的中文文案，与 `reports/G4.md` §6.5 记的 **39 处逐条相同**（AppDelegate 9 / OutputRuntime 6 / SwitcherSession 6 / ExternalOutputMenu 6 / ISOPanel 6 / AuxOutputRuntime 5 / MultiviewWindowController 1）。**P3 一处没加**（新写的字符串全是 ASCII：`"monitor"` / `"presenting"` 之类），P3 动过的 `AuxOutputRuntime.swift` / `SwitcherSession.swift` 两个文件条数也与 G4 时相同。归 **W3-E2 / prompt 63**（`reports/issues/G4-w3-app2-localize-w3c-app-strings.md`），G4 也是带着这一条放行的 |
 
@@ -289,4 +289,17 @@ display[]  显示类输出（外部显示窗口、虚拟摄像头、多画面窗
 
 ## 7. 运行记录
 
-待填。
+机器：Apple M5 Max / macOS 26.6.2（25G83）/ Xcode 27（SDK macOS 27.0）；开机 7 天、唤醒约 3.2 天（这个数字决定了 §2.4 那条 hostTimeMs 红）。
+同一台机器上当天还有别的会话在跑（W2-A2 的 worktree `w2-inputs-audio-device-2ef9a9`），计时类的数据都注明了是否与它重叠。
+
+| 什么 | 命令 | 时间 | 结果 | 产物 |
+|---|---|---|---|---|
+| 归属 / 依赖 / 禁词 | `git branch -f p3-contracts HEAD && make lint BRANCH=p3-contracts` | 收尾时 | **全绿**（exit 0）：禁词、版本号 0.1.0 一致、Package.swift 约束、依赖方向（8 个包）、归属（74 个改动文件都在允许范围内；胶水 App/ 50/50、SwitcherTestKit 49/50、SwitcherCore 45/50、SwitcherInputs 20/50、SwitcherAudio 4/50、SwitcherControl 2/50——前两个已经顶格）、check-rt-symbols（混音 C 热路径无 malloc / 锁 / 日志 / 系统调用符号） | — |
+| 全仓库测试（最终一次，提交 c9c49ac 起跑） | `make test`（等别的会话的测试停下 60 s 以上才开） | 10:47– | 六个包 614 个用例全绿；两个工具冒烟绿；App 只有 `testL10n_noHardcodedChineseInUISources` 一条红（39 处，与 G4 逐条相同，归 prompt 63）；`MAKE_EXIT=2` 就是这一条 | `/private/tmp/claude-501/maketest-final.log` |
+| gate4 代表运行 | `scripts/gate4.sh --minutes 10 --label p3c --baseline baselines/g4-m5max.json` | 10:07–10:17 | **19 / 19** | `.build/gate4/p3c/`（stats.jsonl、out.mov + 4 路 ISO、frameprobe / ffprobe / apitest JSON、load.log、headless.log） |
+| gate4 前两次 | 同上 `--label p3` / `p3b` | 09:21–09:31 / 09:32–09:42 | 16 / 19、18 / 19（环境，见 §2.5） | `.build/gate4/p3/`、`.build/gate4/p3b/` |
+| 老 stats.jsonl 可解 | `swift test --filter testP3_oldStatsLinesStillParse`（从别的 worktree 把 G2 / G3 / G4 的 stats.jsonl 拷进本工作树 `.build/gate*/`，不入库） | 最终 make test 里 | 20 份、13 867 行全部可解（含 P3 自己三次 gate4 的新格式文件） | — |
+| TestKit 两条红在 main 上复现 | `git worktree add --detach <scratch>/main-check main` → 同一用例各跑 3 次 → `git worktree remove` | 02:1x | hostTimeMs 601 条红；抖动均值 3/3 红 | — |
+| 三路合并试算 | `git merge-tree --write-tree HEAD w2-inputs-2`，再对结果 `merge-tree … w1-testkit-3` | 收尾时 | 全部无冲突 | 只写了临时 commit 对象，没动任何 ref / 工作树 |
+
+`baselines/g4-m5max.json` 从没写过（三次都没给 `--write-baseline`）；`reports/G4.md` 每次跑完都 `git checkout` 还原、`reports/G4-run-p3*.md` 删掉，本分支对它们净改动为零。
