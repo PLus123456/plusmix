@@ -1,13 +1,16 @@
-// 中列：转场按钮（Cut / Fade / Wipe / Zoom / Stinger / FTB）、时长预设、Overlay 1–4 开关、T-bar、时钟。
-// Wipe / Zoom / Stinger 在 W3-B 合入后（G4）接通：点 = setTransition(type, 当前时长) + autoTransition，参数（Wipe 方向 / 软边、Stinger 输入 / 换底拍）
-// 来自节目文件（控件归 W3-E2，prompt 55）；FTB 是开关；Overlay 开关只改 on，不改通道用的输入
-// （给通道选输入在缩略图格子的小按钮和底栏的叠加面板）。所有动作只发 Command，显示只读快照。
+// 中列：转场按钮（Cut / Fade / Wipe / Zoom / Stinger / FTB）、时长预设、参数…（Wipe 方向 / 软边、Stinger 输入 / 换底拍）、Overlay 1–4 开关、T-bar、时钟。
+// Wipe / Zoom / Stinger 在 W3-B 合入后（G4）接通：点 = setTransition(type, 当前时长) + autoTransition；类型留在状态里，T-bar 按它推（下面的"T-bar：…"标签）。
+// 时长预设改的是唯一的 durationTicks，五种转场都用它（Cut 没有中间态）。参数经 TransitionParamsModel 整体替换（没有专门的命令，见那里的说明）。
+// FTB 是开关；Overlay 开关只改 on，不改通道用的输入（给通道选输入在缩略图格子的小按钮和底栏的叠加面板）。所有动作只发 Command，显示只读快照。
 import AppKit
+import SwiftUI
 import SwitcherContracts
 
 @MainActor
 final class TransitionPanelView: NSView {
-    var send: ((Command) -> Void)?
+    var send: ((Command) -> Void)? {
+        didSet { params.send = send }
+    }
 
     let cutButton: NSButton
     let fadeButton: NSButton
@@ -16,6 +19,12 @@ final class TransitionPanelView: NSView {
     let stingerButton: NSButton
     let ftbButton: NSButton
     let durationControl: NSSegmentedControl
+    let paramsButton: NSButton
+    /// T-bar 推的是哪种转场（= 状态里的 transition.type）。
+    let tbarTypeLabel = Theme.label("", size: 10, color: Theme.dimText)
+    /// Wipe / Stinger 参数（弹出面板的模型）。
+    let params = TransitionParamsModel()
+    private var paramsPopover: NSPopover?
     let overlayButtons: [NSButton]
     let tbar = TBarView(frame: .zero)
     let clock = ClockView(frame: .zero)
@@ -34,6 +43,7 @@ final class TransitionPanelView: NSView {
         ftbButton = Theme.toggleButton("FTB", target: nil, action: nil)
         durationControl = NSSegmentedControl(labels: Self.durationPresets.map { $0 == 0.5 ? "0.5s" : "\(Int($0))s" },
                                              trackingMode: .selectOne, target: nil, action: nil)
+        paramsButton = Theme.button(L("transition.params"), target: nil, action: nil)
         overlayButtons = (1...MixerState.overlayCount).map { Theme.toggleButton("\($0)", target: nil, action: nil) }
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
@@ -51,6 +61,10 @@ final class TransitionPanelView: NSView {
         durationControl.controlSize = .small
         durationControl.setAccessibilityLabel(L("transition.durationLabel"))
         durationControl.cell?.setAccessibilityLabel(L("transition.durationLabel"))
+        paramsButton.target = self; paramsButton.action = #selector(paramsPressed)
+        paramsButton.controlSize = .small
+        paramsButton.toolTip = L("transition.params.title")
+        tbarTypeLabel.alignment = .center
         for (i, b) in overlayButtons.enumerated() {
             b.tag = i + 1
             b.target = self
@@ -74,7 +88,7 @@ final class TransitionPanelView: NSView {
         overlayLabel.alignment = .center
 
         let stack = NSStackView(views: [cutButton, fadeButton, wipeButton, zoomButton, stingerButton, ftbButton,
-                                        durationControl, overlayLabel, overlayRow, tbar, clock])
+                                        durationControl, paramsButton, overlayLabel, overlayRow, tbarTypeLabel, tbar, clock])
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = 6
@@ -117,7 +131,12 @@ final class TransitionPanelView: NSView {
             b.toolTip = o.input.map { L("transition.overlayInput", i + 1, $0) } ?? L("transition.overlayNoInput", i + 1, i + 1)
         }
         tbar.apply(state: state)
+        tbarTypeLabel.stringValue = L("transition.tbarType", L("transition.type.\(state.transition.type.rawValue)"))
+        params.apply(state: state)
     }
+
+    /// T-bar 标签的文字（测试看）。
+    var tbarTypeText: String { tbarTypeLabel.stringValue }
 
     /// 预设秒数换成拍数（按标称帧率取整：59.94 → 60）。
     func ticks(forSeconds seconds: Double) -> Int {
@@ -141,6 +160,27 @@ final class TransitionPanelView: NSView {
         let i = durationControl.selectedSegment
         guard i >= 0, i < Self.durationPresets.count else { return }
         send?(.setTransition(type: state.transition.type, durationTicks: ticks(forSeconds: Self.durationPresets[i])))
+    }
+
+    /// 测试入口：选第 i 个时长预设（= 点那一段）。
+    func selectDurationPresetForTesting(_ i: Int) {
+        durationControl.selectedSegment = i
+        durationChanged()
+    }
+
+    /// 参数…：Wipe 方向 / 软边、Stinger 输入 / 换底拍的弹出面板。
+    @objc private func paramsPressed() {
+        if let paramsPopover, paramsPopover.isShown {
+            paramsPopover.close()
+            return
+        }
+        let popover = NSPopover()
+        let host = NSHostingController(rootView: TransitionParamsView(model: params))
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
+        popover.behavior = .transient
+        popover.show(relativeTo: paramsButton.bounds, of: paramsButton, preferredEdge: .maxX)
+        paramsPopover = popover
     }
 
     @objc private func overlayPressed(_ sender: NSButton) {

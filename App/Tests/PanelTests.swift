@@ -144,13 +144,27 @@ final class PanelTests: XCTestCase {
                  describe: { "\(session.state.audio.buses)" }))
         cases.append(Case(name: "调音台：AFV 开", change: { wc.mixerPanel.model.setAFV(on: true) },
                  verify: { session.state.audio.afv }, describe: { "\(session.state.audio.afv)" }))
-        cases.append(Case(name: "调音台：监听 PFL（经 loadShow 过渡，提案 012）", change: { wc.mixerPanel.model.setMonitorMode(.pfl) },
+        cases.append(Case(name: "调音台：监听 PFL（setMonitorMode，提案 012）", change: { wc.mixerPanel.model.setMonitorMode(.pfl) },
                  verify: { session.state.audio.monitorMode == .pfl && session.state.inputs.count == 3 },
                  describe: { "\(session.state.audio.monitorMode) 输入 \(session.state.inputs.count)" }))
         cases.append(Case(name: "调音台：Master 效果链（限幅）", change: {
                 wc.mixerPanel.model.setBusEffects(.master, [AudioEffectParams.peakLimiter(attackSeconds: 0.01, decaySeconds: 0.02, preGainDb: 1)])
             }, verify: { session.state.audio.buses[0].effects.first?.id == AudioEffectParams.peakLimiterID },
                describe: { "\(session.state.audio.buses[0].effects)" }))
+
+        // W3-E2：切换面板的参数…（没有 setTransitionParams，经 loadShow 整体替换；空闲时立刻发）
+        cases.append(Case(name: "切换面板：Wipe 参数（上 → 下、软边 0.2）", change: {
+                let m = wc.transitionPanel.params
+                m.setWipeDirection(.topToBottom)
+                m.setWipeSoftness(0.2)
+            }, verify: { session.state.transition.wipe == WipeParams(direction: .topToBottom, softness: 0.2) },
+               describe: { "\(session.state.transition.wipe)" }))
+        cases.append(Case(name: "切换面板：Stinger 参数（2 号、第 12 拍换底）", change: {
+                let m = wc.transitionPanel.params
+                m.setStingerInput(2)
+                m.setStingerCutTick(12)
+            }, verify: { session.state.transition.stinger == StingerParams(input: 2, cutAtTick: 12) && session.state.transition.wipe.direction == .topToBottom },
+               describe: { "\(session.state.transition)" }))
 
         cases.append(Case(name: "叠加面板：通道 1 → 输入 2、右下 1/4、淡入 15 拍", change: {
                 wc.presentOverlayPanel(relativeTo: wc.bottomBar.overlayButton)
