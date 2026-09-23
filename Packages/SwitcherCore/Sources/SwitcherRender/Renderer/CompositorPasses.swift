@@ -418,8 +418,8 @@ enum CompositorPasses {
                 if cell.audioOnly || layout.meters {
                     drawMeter(inner, levels: meters?.levels(forInput: number), width: width, height: height, context: context, encoder: encoder)
                 }
-                if let labels = context.labels, number > 0, number < labels.inputSlices {
-                    drawCellLabel(labels, slice: number, inner: inner, cellHeight: rect.height, frameHeight: h,
+                if let labels = context.labels, let slice = labels.slice(forInput: number) {
+                    drawCellLabel(labels, slice: slice, inner: inner, cellHeight: rect.height, frameHeight: h,
                                   width: width, height: height, context: context, encoder: encoder)
                 }
             }

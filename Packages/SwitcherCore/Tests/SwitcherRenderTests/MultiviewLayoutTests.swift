@@ -212,14 +212,17 @@ final class MultiviewLayoutTests: XCTestCase {
     }
 
     /// 名字：每路输入的标签 + PGM / PVW 格的标签（LabelSet 末尾两个切片）。
+    /// （W3-B2 起切片按槽分配、槽里记输入编号，见 MultiviewLabelTests；这里只看文字和渲染出来的标签条。）
     func testMultiview_labelsIncludeProgramAndPreview() throws {
         let s = ReferenceStates.fixed8()
-        let texts = LabelPainter.wantedTexts(for: s, slices: 9 + LabelSet.extraSlices)
-        XCTAssertEqual(texts.count, 11)
-        XCTAssertEqual(texts[1], "1  摄像机 1")
-        XCTAssertEqual(texts[8], "8  Cam 8")
-        XCTAssertEqual(texts[LabelSet.programSlice(totalSlices: 11)], "PGM")
-        XCTAssertEqual(texts[LabelSet.previewSlice(totalSlices: 11)], "PVW")
+        let table = MultiviewLayoutTable()
+        table.parse(state: s, width: 1920, height: 1080)
+        let c = LabelPainter.contents(for: s, layout: table, inputSlots: 9, keeping: nil)
+        XCTAssertEqual(c.texts.count, 9 + LabelSet.extraSlices)
+        XCTAssertEqual(c.texts[0], "1  摄像机 1")
+        XCTAssertEqual(c.texts[7], "8  Cam 8")
+        XCTAssertEqual(c.texts[9], "PGM")
+        XCTAssertEqual(c.texts[10], "PVW")
         // 渲染：默认布局 PGM 格左下角有标签条（55% 黑底 + 白字）。取条内、文字左边留白处的一个像素：应比同一位置没有标签条时暗。
         let r = try render(s)
         let mv = Bitmap(r.multiview)

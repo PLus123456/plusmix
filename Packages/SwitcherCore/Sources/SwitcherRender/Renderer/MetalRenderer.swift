@@ -130,8 +130,8 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         // 填不填由每拍的状态定（提案 010），所以环总是建好：prepare 时还没有状态，渲染线程又不许分配
         let pvwRing = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize)
         let mvRing = options.multiview ? try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize) : nil
-        let lbl = try LabelRenderer(device: device, inputSlices: max(1, maxInputs),
-                                    submittedFrames: { [weak self] in self?.submitted.load(ordering: .acquiring) ?? 0 },
+        // 标签：输入槽按输入表容量要，LabelSet 封顶 64（多画面最多 64 格）
+        let lbl = try LabelRenderer(device: device, inputSlots: max(1, maxInputs),
                                     completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
         stateLock.lock()
         resources = res
@@ -177,7 +177,8 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         let frameIndex = submitted.load(ordering: .relaxed)
         let slot = slots[Int(frameIndex % UInt64(slots.count))]
         labels.noteSnapshot(snapshot)
-        let labelSet = options.multiview ? labels.current : nil
+        // 标签线程画好了新的一套就在这一帧接手（改名的下一帧就是新名字，见 LabelRenderer）
+        let labelSet = options.multiview ? labels.acquire(frame: frameIndex) : nil
 
         guard let output = ring.next(), let unmanaged = CVPixelBufferGetIOSurface(output) else {
             skipped.wrappingAdd(1, ordering: .relaxed)
@@ -318,6 +319,17 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
 
     /// 渲染线程接手新电平表的次数（测试看）。
     var meterAdoptions: Int { meterFeed.adoptions.load(ordering: .relaxed) }
+
+    /// 标签线程交出新一套标签的次数、最近一次的时刻（测试 / 报告看改名的延迟）。
+    var labelPublishes: Int {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return labels?.publishedCount.load(ordering: .acquiring) ?? 0
+    }
+    var lastLabelPublishTime: HostTime? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard let ticks = labels?.lastPublishTicks.load(ordering: .relaxed), ticks > 0 else { return nil }
+        return HostTime(ticks: ticks)
+    }
 
     // MARK: - DisplayFrameSource
 

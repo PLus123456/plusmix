@@ -66,7 +66,7 @@ public final class OfflineRenderer {
             targets = try RenderTargets(device: device, width: width, height: height, label: "offline")
             slot = RenderSlot(index: 0, targets: targets, maxInputs: maxInputs)
             table = SurfaceTextureTable(device: device, capacity: maxInputs * 4 + 32)
-            labels = try LabelSet(device: device, inputSlices: maxInputs)
+            labels = try LabelSet(device: device, inputSlots: maxInputs)
             ring = try OutputBufferRing(width: width, height: height, count: 3)
             previewRing = try OutputBufferRing(width: width, height: height, count: 3)
             multiviewRing = try OutputBufferRing(width: width, height: height, count: 3)
@@ -174,9 +174,9 @@ public final class OfflineRenderer {
         for (number, frame) in frames where number > 0 && number < table.capacity {
             table[inputNumber: number] = frame
         }
-        // 标签同步画好（实时路径由后台线程画）；布局每次都解析（实时路径只在 sequence 变了时解析）
-        LabelPainter.update(s.labels, from: state, scratch: s.scratch)
+        // 布局每次都解析（实时路径只在 sequence 变了时解析）；标签按解析好的布局同步画好（实时路径由标签线程画）
         s.layout.parse(state: state, width: width, height: height)
+        LabelPainter.update(s.labels, from: state, layout: s.layout, scratch: s.scratch)
 
         func target(_ ring: OutputBufferRing) throws -> (CVPixelBuffer, CompositorPasses.NV12Target) {
             guard let output = ring.next(), let unmanaged = CVPixelBufferGetIOSurface(output) else {

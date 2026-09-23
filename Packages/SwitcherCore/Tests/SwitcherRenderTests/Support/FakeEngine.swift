@@ -25,6 +25,9 @@ final class CollectingSink: RenderSink, @unchecked Sendable {
     /// 模拟一个慢消费者：持有最近 N 帧（含输出缓冲）。
     var holdDepth = 0
     private(set) var held: [RenderedFrame] = []
+    /// 只留这几拍的帧（跑之前设好；按拍号取，不像 holdDepth 那样一直扣着最近几帧的输出缓冲）。
+    var keepTicks: Set<Int64> = []
+    private var keptFrames: [Int64: RenderedFrame] = [:]
 
     func renderer(_ renderer: any Renderer, didComplete frame: RenderedFrame) {
         lock.lock()
@@ -34,8 +37,12 @@ final class CollectingSink: RenderSink, @unchecked Sendable {
             held.append(frame)
             if held.count > holdDepth { held.removeFirst() }
         }
+        if keepTicks.contains(frame.tick.rawValue) { keptFrames[frame.tick.rawValue] = frame }
         lock.unlock()
     }
+
+    /// keepTicks 里某一拍的帧。
+    func kept(_ tick: Int64) -> RenderedFrame? { lock.lock(); defer { lock.unlock() }; return keptFrames[tick] }
 
     var renderMs: [Double] { lock.lock(); defer { lock.unlock() }; return samples.map(\.renderMs) }
     var count: Int { lock.lock(); defer { lock.unlock() }; return samples.count }
@@ -87,6 +94,11 @@ final class FakeEngine: @unchecked Sendable {
 
     func publish(_ state: MixerState, sequence: UInt64, tick: Tick) {
         snapshot.withLock { $0 = MixerSnapshot(state: state, sequence: sequence, tick: tick) }
+    }
+
+    /// 换一个事先建好的快照（在渲染线程的钩子里调也不分配：快照对象在别处建好，这里只换引用）。下一拍生效。
+    func publish(_ prebuilt: MixerSnapshot) {
+        snapshot.withLock { $0 = prebuilt }
     }
 
     /// 跑 duration 秒；startDelay 后的第一拍是第 0 拍。阻塞调用者直到跑完（在主线程上想同时泵 run loop 用 startAsync）。
