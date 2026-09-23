@@ -17,6 +17,10 @@ public enum CommandValidator {
             return d < 0 ? "转场时长不能为负：\(d)" : nil
         case .setTransition(_, let d):
             return d < 0 ? "转场时长不能为负：\(d)" : nil
+        case .setTransitionParams(_, let stinger):
+            // 转场进行中被拒是随拍变的条件，留给 reducer；这里只查引用
+            if let input = stinger.input, s.input(input) == nil { return "Stinger 用的输入 \(input) 不存在" }
+            return nil
         case .setPreview(let input), .setProgram(let input):
             return inputReference(input, in: s)
         case .overlay(let channel, _, let input):

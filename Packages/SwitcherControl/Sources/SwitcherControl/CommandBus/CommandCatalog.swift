@@ -1,13 +1,13 @@
 import Foundation
 import SwitcherContracts
 
-// 命令目录：Command 的 33 个 case 各一条说明和一个样例。docs/api.md 由它生成（switcher-apidoc），
+// 命令目录：Command 的 34 个 case 各一条说明和一个样例。docs/api.md 由它生成（switcher-apidoc），
 // HTTP API 的 GET /api/v1/commands 也返回它。`CommandKind(of:)` 是穷举 switch：契约加 case 这里编译就红，
 // 目录不会悄悄落后（CommandCatalogTests 再钉一遍：每个 kind 都有样例、样例的 JSON 顶层键就是 case 名）。
 
 /// Command 的 case 名（= JSON 顶层键）。
 public enum CommandKind: String, CaseIterable, Sendable, Codable {
-    case cut, fade, setTransition, autoTransition, setPreview, setProgram, tbar, ftb
+    case cut, fade, setTransition, setTransitionParams, autoTransition, setPreview, setProgram, tbar, ftb
     case overlay, setOverlay, setOverlayDecoration
     case audioGain, mute, busGain, busMute, setAFV, setMonitorMode, setBusEffects
     case startRecord, stopRecord, startStream, stopStream, setOutputEnabled, renameOutput
@@ -21,6 +21,7 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
         case .cut: self = .cut
         case .fade: self = .fade
         case .setTransition: self = .setTransition
+        case .setTransitionParams: self = .setTransitionParams
         case .autoTransition: self = .autoTransition
         case .setPreview: self = .setPreview
         case .setProgram: self = .setProgram
@@ -91,6 +92,10 @@ public enum CommandCatalog {
             CommandDoc(kind: .setTransition, group: "切换", summary: "选下一次转场的类型和时长，不开始；T-bar 用的也是它选的类型。",
                        parameters: [("type", "cut / fade / wipe / zoom / stinger"), ("durationTicks", "时长（拍）")],
                        example: .setTransition(type: .wipe, durationTicks: 20)),
+            CommandDoc(kind: .setTransitionParams, group: "切换", summary: "改 Wipe / Stinger 参数（两组整体替换），下一次转场起生效；转场进行中（含 T-bar 推到一半）被拒。",
+                       parameters: [("wipe", "{direction: leftToRight / rightToLeft / topToBottom / bottomToTop / diagonal, softness: 软边宽占画面的比例 0–1，超出钳住}"),
+                                    ("stinger", "{input: 作 stinger 的输入编号（带 alpha 的文件 / 图片），不写 = 未设置；cutAtTick: 第几拍换底，≥ 0，≥ 时长 = 完成时换}")],
+                       example: .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 4, cutAtTick: 12))),
             CommandDoc(kind: .autoTransition, group: "切换", summary: "按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。", parameters: [], example: .autoTransition),
             CommandDoc(kind: .setPreview, group: "切换", summary: "把 PVW 换成该输入。", parameters: [("input", "输入编号；0 = 黑场")], example: .setPreview(input: 2)),
             CommandDoc(kind: .setProgram, group: "切换", summary: "直接把 PGM 换成该输入（硬切），PVW 不变。", parameters: [("input", "输入编号；0 = 黑场")], example: .setProgram(input: 3)),

@@ -101,6 +101,8 @@ final class CommandBusTests: XCTestCase {
         let reducer = MixerReducer()
         let legal: [Command] = [
             .cut, .fade(durationTicks: 30), .setTransition(type: .wipe, durationTicks: 10), .autoTransition,
+            .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12)),
+            .setTransitionParams(wipe: WipeParams(), stinger: StingerParams()),
             .setPreview(input: 3), .setProgram(input: 0), .tbar(progress: 0.5), .ftb(on: true),
             .overlay(channel: 4, on: true, input: 2), .setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .fade, durationTicks: 10)),
             .audioGain(input: 1, dB: -6), .mute(input: 2, on: true), .busGain(bus: .master, dB: -3), .busMute(bus: .busA, on: true), .setAFV(on: true),
@@ -116,6 +118,8 @@ final class CommandBusTests: XCTestCase {
         let illegal: [Command] = [
             .setPreview(input: 9), .overlay(channel: 5, on: true, input: nil), .audioGain(input: 7, dB: 0), .startRecord(output: 2),
             .removeInput(input: 99), .removeOutput(output: 99), .fade(durationTicks: -1),
+            .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 9, cutAtTick: 0)),
+            .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 0, cutAtTick: 0)),
         ]
         for c in illegal {
             XCTAssertNotNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应拒绝")
