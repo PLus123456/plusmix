@@ -258,7 +258,10 @@ S3 的 CPU 在 p3b 是 63.0%（线 60%），原因同上，p3c 回到 31.4%。
    - **w2-inputs-2（W2-A2，prompt 64）已完成，叠在 P3 的 `ca1baa5` 上**（它落地了提案 014，改了 `docs/CONTRACTS.md` / `docs/OWNERSHIP.md`）。所以**检查点要先合 P3**。
    - **w1-testkit-3（W1-A3，prompt 62）已完成，从 367bbb9 开**。它与 P3 唯一重叠的是 `SyntheticSourceTests.swift` 的 hostTimeMs 那一行——**两边独立修了同一个 28 位掩码的 bug**；
      P3 已把自己那三行改成与它逐字相同，git 会当成同一处改动自动合掉。抖动阈值那一行（0.8 → 1.2）W1-A3 没碰。
-   - 用 `git merge-tree` 在本分支顶上试过：**P3 → + w2-inputs-2 → + w1-testkit-3 依次合，全部无冲突**（没动任何分支、没动工作树）。
+   - 用 `git merge-tree` 在本分支顶上试过（没动任何分支、没动工作树）：**P3 → + w2-inputs-2 无冲突；再 + w1-testkit-3 只在 `docs/OWNERSHIP.md` 上冲突**——
+     P3 行（第 45 行）和 W1-A3 行（第 46 行）是挨着的两行，两边都给**自己那行**加了 `docs/spec/导播台测试标准.md` `docs/OWNERSHIP.md`（都是用户批的改测试标准），
+     git 把相邻两行的改动判成冲突。**解法：两行都取各自分支的版本**。其余文件（含测试标准本身、`SyntheticSourceTests.swift`）都自动合掉。
+     P3 没去改 W1-A3 那一行来躲冲突——那是别的会话的归属行。
    - **w3-app-3（W3-E2，prompt 63）与 w3-outputs-3（W3-C2，prompt 65）按计划从 P3 合入后的 main 开**，不用 rebase。
 9. **同一台机器上别的会话在跑重活时，gate4 与计时类用例的数字不可信**。本会话两次 gate4 的红（p3 的跳拍、p3b 输入 5 的 drop）、TestKit 抖动用例的偏置，都是生产者线程晚醒 / 落到能效核的样子。**开跑之前先看一眼**：
    `for p in $(pgrep -f "make test|gate[0-9]|swift-test|switcher-headless run"); do lsof -a -p $p -d cwd -Fn | sed -n 's/^n//p'; done`——
@@ -270,20 +273,13 @@ S3 的 CPU 在 p3b 是 63.0%（线 60%），原因同上，p3c 回到 31.4%。
 
 ---
 
-## 6. 测试标准 §7 需要同步的字段行（由用户改）
+## 6. 测试标准 §7 的字段同步（已加，用户 2026-09-23 让 P3 直接加）
 
-`docs/spec/导播台测试标准.md` §7 的 stats.jsonl 字段表里加一行（提案 013）：
-
-```
-display[]  显示类输出（外部显示窗口、虚拟摄像头、多画面窗口、主界面监视器）各一项，无固定顺序，按 output + kind 认。
-           output = MixerState.outputs 里的编号（主界面监视器不是输出，用 0）；
-           kind = externalDisplay / virtualCamera / multiviewWindow / monitor；
-           frames = 已呈现 / 已送出帧数，累计；dropped = 没赶上显示刷新 / 被扩展丢弃的帧数，累计；
-           state = idle / presenting / noDisplay / waitingExtension / publishing / stopped / failed。
-           老文件缺这个键 = 空数组。
-```
-
-顶层键的顺序：`ts, tick, render_ms, missed_render, jitter_ms, per_input, encoder, display, audio, rss_mb, cpu_pct, gpu_pct`（`display` 插在 `encoder` 与 `audio` 之间）。
+`docs/spec/导播台测试标准.md` §7 那段 stats.jsonl 字段列表：
+- 在 `encoder[…]` 与 `audio{…}` 之间插入 `display[{output, kind, frames, dropped, state}]`（与 `Stats.jsonKeys` 的顺序一致：`ts, tick, render_ms, missed_render, jitter_ms, per_input, encoder, display, audio, rss_mb, cpu_pct, gpu_pct`）；
+- 括号里"提案 001 / 002 / 004 / 005 落地后的形态"改成"… / 013 …"，并补一句 `display[]` 的含义（哪几类输出、output / kind / frames / dropped / state 各是什么、老文件缺键 = 空数组、headless 写空数组）。
+- **只改了这一段**，没动任何阈值与口径；W1-A3 同一天改的是 §2.1，两处不挨着，合并时这个文件不冲突。
+- 归属：像 W1-A3 那样在 OWNERSHIP 的 P3 行加了 `docs/spec/导播台测试标准.md` `docs/OWNERSHIP.md` 两个 token 并写明是用户让加的（见 §5 第 8 条的合并提示）。
 
 ---
 
@@ -300,6 +296,6 @@ display[]  显示类输出（外部显示窗口、虚拟摄像头、多画面窗
 | gate4 前两次 | 同上 `--label p3` / `p3b` | 09:21–09:31 / 09:32–09:42 | 16 / 19、18 / 19（环境，见 §2.5） | `.build/gate4/p3/`、`.build/gate4/p3b/` |
 | 老 stats.jsonl 可解 | `swift test --filter testP3_oldStatsLinesStillParse`（从别的 worktree 把 G2 / G3 / G4 的 stats.jsonl 拷进本工作树 `.build/gate*/`，不入库） | 最终 make test 里 | 20 份、13 867 行全部可解（含 P3 自己三次 gate4 的新格式文件） | — |
 | TestKit 两条红在 main 上复现 | `git worktree add --detach <scratch>/main-check main` → 同一用例各跑 3 次 → `git worktree remove` | 02:1x | hostTimeMs 601 条红；抖动均值 3/3 红 | — |
-| 三路合并试算 | `git merge-tree --write-tree HEAD w2-inputs-2`，再对结果 `merge-tree … w1-testkit-3` | 收尾时 | 全部无冲突 | 只写了临时 commit 对象，没动任何 ref / 工作树 |
+| 三路合并试算 | `git merge-tree --write-tree HEAD w2-inputs-2`，再对结果 `merge-tree … w1-testkit-3` | 收尾时 | 加测试标准那一行之前全部无冲突；加了之后只剩 `docs/OWNERSHIP.md` 第 45 / 46 行（P3 行与 W1-A3 行）相邻冲突，两行都留 | 只写了临时 commit 对象，没动任何 ref / 工作树 |
 
 `baselines/g4-m5max.json` 从没写过（三次都没给 `--write-baseline`）；`reports/G4.md` 每次跑完都 `git checkout` 还原、`reports/G4-run-p3*.md` 删掉，本分支对它们净改动为零。
