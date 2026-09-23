@@ -50,6 +50,7 @@ W3-E2 的 `OutputStatusText.virtualCamera` 在 state = waitingExtension 时显�
 W3-C2 复核后 **dropped = "被扩展丢弃"（连上之后丢的）**，扩展没装时丢的帧不再进 Stats（仍在 `VirtualCameraOutput.countersSnapshot.droppedNoDevice`），
 所以合并后这句会一直是"已丢 0 帧"。两个分支的测试都不红（W3-E2 的 LocalizationTests 用的是自造的 entry、VirtualCameraAppTests 是拿同一行 Stats 对文案）。
 建议合并时把 waitingExtension 那句的帧数去掉（"找不到虚拟摄像头设备（扩展未安装 / 未激活）"），不要为了这句把没设备的帧加回 dropped。
+**若提案 018 已批并落地**（`Stats.DisplayEntry.undelivered`），这句改读 `e.undelivered` 就对了，不用删帧数。
 另外 W3-C2 起多了 state = "failed"（设备在但起不来），W3-E2 的 `default: display(e)` 已经能显示（"失败 · n 帧"），`aux.displayState.failed` 两种语言都有。
 
 ## 5. 顺手可以做的（不做也不红）

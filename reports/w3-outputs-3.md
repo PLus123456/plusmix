@@ -76,7 +76,9 @@ release **中位 9.8 µs、p99 19.4 µs、最大 49.5 µs**（debug 11.4 / 20.8 
 ## 4. 对契约的疑问
 
 1. **`FrameSlot.latest(atOrBefore:)` 的线程注释**写的是"只能由渲染线程调"。G4 的裁定让 Aux 在显示刷新（主线程）上用这个入口读 InputFrameTee 的**分支槽**——那个槽的唯一读者就是这个窗口，SPSC 仍然成立，ISO 的 tap 也是同样用法。建议下一个契约会话把注释改成"单消费者：引擎的渲染线程，或分支槽的唯一读者（ISO / Aux）"（只改注释，不动签名）。
-2. **虚拟摄像头 dropped 的口径改了**：P3 把"扩展没装时丢的"也算进 dropped，本会话按 `DisplayEntry` 的注释（"被扩展丢弃的帧数"）改成只算连上之后的三项，没装时的丢帧靠 state = waitingExtension 表达、数字留在 `countersSnapshot.droppedNoDevice`。契约没改（口径本来就是这么写的），请确认；若希望 Stats 里也看得到"没连上期间丢了多少"，要加字段（提案）。
+2. **虚拟摄像头 dropped 的口径改了**：P3 把"扩展没装时丢的"也算进 dropped，本会话按 `DisplayEntry` 的注释（"被扩展丢弃的帧数"）改成只算连上之后的三项，没装时的丢帧靠 state = waitingExtension 表达、数字留在 `countersSnapshot.droppedNoDevice`。契约没改（口径本来就是这么写的）。**用户 2026-09-23 定"dropped 走提案"→ 提案 018（待批）**：`Stats.DisplayEntry` 加 `undelivered`
+（不在呈现 / 发布时没送出去的帧：虚拟摄像头没连上时丢的、外部显示收起 / 被遮住时没画的），`dropped` 的注释收紧成"在呈现 / 发布时没送出去的"，两者不重叠；
+建议照 014 / 015 的先例批了就由本分支落地（契约几行 + 填数），App 文案留给合并检查点。
 3. **Aux 窗口的输入无信号时 state 仍是 presenting**（窗口在呈现，画的是占位；frames 不涨）。`DisplayEntry.states` 里没有"源无信号"，输入的健康在 `per_input` 里有。觉得需要细分再提。
 
 ## 5. 下一个会话需要知道的坑
