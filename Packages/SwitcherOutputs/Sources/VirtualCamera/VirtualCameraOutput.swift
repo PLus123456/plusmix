@@ -94,8 +94,8 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
     /// 这个虚拟摄像头在 Stats 里的一项（提案 013，铁律 4：菜单 / API / 测试读同一个结构；W3-C2 复核）：
     /// - frames = 排进 sink stream 的帧（= 扩展收到的）；
     /// - dropped = "被扩展丢弃"（契约注释）= 连着的时候丢的：本对象队列满挤掉的 + 排不进 sink 的（扩展没及时取）+ 扩展收了没输出的
-    ///   （CMIO"已输出"通知的序号跳过数；扩展侧 BLOCKED-签名、还没回报时为 0）。**不含**没连上时丢的（那段是 waitingExtension，
-    ///   没在发布；数字在 `countersSnapshot.droppedNoDevice`，状态行用）；
+    ///   （CMIO"已输出"通知的序号跳过数；扩展侧 BLOCKED-签名、还没回报时为 0）。**不含**没连上时丢的；
+    /// - undelivered（提案 018）= 没连上（扩展没装 / 没激活 / 连不上 / 刚掉线）期间收到就丢掉的帧 = `countersSnapshot.droppedNoDevice`；
     /// - state：idle → "idle"；searching → 找不到设备（扩展没装 / 没激活 / 刚掉线）"waitingExtension"，设备在但连不上（sink 流没了、
     ///   起流被拒）"failed"（仍在按间隔重试）；connected → "publishing"；stopped → "stopped"。
     public func statsEntry(output: Int) -> Stats.DisplayEntry {
@@ -108,7 +108,8 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
         case .stopped: name = "stopped"
         }
         return Stats.DisplayEntry(output: output, kind: "virtualCamera", frames: c.framesSent,
-                                  dropped: c.droppedQueueFull &+ c.droppedSink &+ c.droppedExtension, state: name)
+                                  dropped: c.droppedQueueFull &+ c.droppedSink &+ c.droppedExtension,
+                                  undelivered: c.droppedNoDevice, state: name)
     }
 
     /// 起线程；找设备在线程上做（找不到不算错）。

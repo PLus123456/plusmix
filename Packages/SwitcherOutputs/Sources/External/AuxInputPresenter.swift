@@ -28,7 +28,8 @@ public struct AuxFrameTap {
 ///
 /// 计数（提案 013，`Stats.display[]`）：`presentedFrames` = 画出去的输入帧（占位不算）；`droppedFrames` = 没赶上显示刷新的帧 =
 /// 两次刷新之间在帧槽里被挤掉 / 跳过的（FrameSlotStats.dropped 的增量）+ 取了却没画出去（拿不到 drawable）又被新帧顶掉的。
-/// 不在呈现的时段（窗口收起 / 被遮住 / 换输入 / 占位期间）不记：`invalidate()` 断开，下一次只取基线。
+/// `undeliveredFrames`（提案 018）= 不在呈现的时段（窗口收起 / 被遮住：`pauseDelivery()`；占位期间）里帧槽挤掉 / 跳过的帧，
+/// 暂停中按帧槽计数边停边记，恢复后第一次画帧时结算。换输入 / 换帧槽（`invalidate()`）那段两边都不记。
 @MainActor
 public final class AuxInputPresenter {
     /// 这次刷新画什么。
@@ -76,6 +77,8 @@ public final class AuxInputPresenter {
 
     public private(set) var presentedFrames: UInt64 = 0
     public private(set) var droppedFrames: UInt64 = 0
+    /// 提案 018：不在呈现时没送出去的帧（暂停中含到此刻为止帧槽里挤掉的）。
+    public var undeliveredFrames: UInt64 { committedUndelivered &+ pendingUndelivered }
     /// 画过几次占位（测试 / 诊断）。
     public private(set) var placeholderPresentations: UInt64 = 0
     /// 纹理缓存是给哪一路建的（按输入编号预建、换输入时重建）。
@@ -91,6 +94,9 @@ public final class AuxInputPresenter {
     private var lastSlotDropped: UInt64?
     /// 取了却没画出去的那一帧的序号。
     private var unpresentedSequence: UInt64?
+    private var committedUndelivered: UInt64 = 0
+    /// 正在记的暂停：暂停时帧槽的 dropped（之后挤掉的记 undelivered）；nil = 没在记。
+    private var pausedBaseline: UInt64?
     /// 已经画出去的占位（哪一份文字、带没带字）。
     private var placeholderShown: (key: PlaceholderKey, withText: Bool)?
     private var labels: PlaceholderTextures?
@@ -111,29 +117,51 @@ public final class AuxInputPresenter {
             rebuildTextureCache()
         }
         if (newSlot as AnyObject?) !== (slot as AnyObject?) {
+            invalidate()   // 先按旧帧槽结算暂停中的 undelivered，再换
             slot = newSlot
-            invalidate()
             signal = newSlot == nil ? .noSlot : .waitingForFrames
         }
     }
 
     /// 解绑（窗口换成 PGM / PVW / 多画面，或关掉）。
     public func detach() {
+        invalidate()
         input = nil
         slot = nil
         if let textureCache { CVMetalTextureCacheFlush(textureCache, 0) }
         textureCache = nil
         textureCacheInput = nil
         signal = .detached
-        invalidate()
     }
 
-    /// 断开连续呈现（窗口收起 / 被遮住 / 尺寸变了）：下一次重画当前内容，丢帧记账重新取基线。
+    /// 断开连续呈现（换输入 / 换帧槽）：下一次重画当前内容，丢帧记账重新取基线；正在记的暂停按到此刻为止结算。
     public func invalidate() {
-        lastDrawn = nil
+        committedUndelivered = undeliveredFrames
+        pausedBaseline = nil
         lastSlotDropped = nil
         unpresentedSequence = nil
+        setNeedsRedraw()
+    }
+
+    /// 窗口暂停呈现（被遮住 / 隐藏 / 收起）：之后帧槽里挤掉的帧记 undelivered（不记 dropped），直到恢复后第一次画帧。
+    /// 只在已经画过帧之后才开始记（刚开窗口、还没画过的那段不算）。
+    public func pauseDelivery() {
+        if pausedBaseline == nil, let last = lastSlotDropped { pausedBaseline = last }
+        lastSlotDropped = nil
+        unpresentedSequence = nil
+        setNeedsRedraw()
+    }
+
+    /// 只要下一次重画（尺寸 / 屏变了、恢复可见），记账不断。
+    public func setNeedsRedraw() {
+        lastDrawn = nil
         placeholderShown = nil
+    }
+
+    private var pendingUndelivered: UInt64 {
+        guard let base = pausedBaseline, let slot else { return 0 }
+        let now = slot.stats.dropped
+        return now > base ? now - base : 0
     }
 
     private func rebuildTextureCache() {
@@ -186,7 +214,12 @@ public final class AuxInputPresenter {
         }
         signal = .live
         placeholderShown = nil
-        if let last = lastSlotDropped, slotDropped >= last { droppedFrames &+= slotDropped - last }
+        if let last = lastSlotDropped {
+            if slotDropped >= last { droppedFrames &+= slotDropped - last }
+        } else if let base = pausedBaseline {
+            if slotDropped > base { committedUndelivered &+= slotDropped - base }   // 暂停那段（含恢复这一下跳过的旧帧）
+            pausedBaseline = nil
+        }
         lastSlotDropped = slotDropped
         if let last = lastDrawn, last.sequence == frame.sequence, last.pts == frame.pts.ticks { return .nothing }
         return .frame(frame)
@@ -288,9 +321,10 @@ public final class AuxInputPresenter {
         currentPlaceholderSize.map { PlaceholderKey(lines: placeholderLines, width: $0.width, height: $0.height) }
     }
 
-    /// 进入 / 停在占位：断开帧的记账；文字没好先画黑底，好了再补画一次；画过带字的就不再重画。
+    /// 进入 / 停在占位：不在呈现帧——这段帧槽里挤掉的记 undelivered（同暂停）；文字没好先画黑底，好了再补画一次；画过带字的就不再重画。
     private func placeholder(width: Int, height: Int) -> Draw {
         lastDrawn = nil
+        if pausedBaseline == nil, let last = lastSlotDropped { pausedBaseline = last }
         lastSlotDropped = nil
         unpresentedSequence = nil
         currentPlaceholderSize = (width, height)

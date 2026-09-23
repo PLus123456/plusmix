@@ -6,7 +6,8 @@ import SwitcherContracts
 
 /// Aux 窗口的内容视图：自己的 CAMetalLayer + `NSView.displayLink`（按所在显示器的刷新率回调，不用弃用的 CVDisplayLink），
 /// 每次回调让 `AuxInputPresenter` 从帧槽取该路最新帧、全幅画进 drawable。渲染线程完全不参与（G4 裁定：不给渲染线程加每路全分辨率目标）。
-/// 暂停规则与 MetalDisplayView 相同：被遮住 / 隐藏 / 窗口收起时暂停 display link，恢复时让 presenter 断开记账（那段时间不算丢帧）、补画一帧。
+/// 暂停规则与 MetalDisplayView 相同：被遮住 / 隐藏 / 窗口收起时暂停 display link，那段时间帧槽里挤掉的帧记 undelivered（提案 018，不算 dropped），
+/// 恢复时补画一帧。
 @MainActor
 public final class AuxInputView: NSView {
     public let presenter: AuxInputPresenter
@@ -21,6 +22,7 @@ public final class AuxInputView: NSView {
 
     public var presentedFrames: UInt64 { presenter.presentedFrames }
     public var droppedFrames: UInt64 { presenter.droppedFrames }
+    public var undeliveredFrames: UInt64 { presenter.undeliveredFrames }
 
     private let metalLayer = CAMetalLayer()
     private let queue: any MTLCommandQueue
@@ -112,16 +114,16 @@ public final class AuxInputView: NSView {
     private func screenDidChange() {
         if let window { metalLayer.contentsScale = window.backingScaleFactor }
         updateDrawableSize()
-        presenter.invalidate()
+        presenter.setNeedsRedraw()
     }
 
-    /// 遮挡 / 隐藏 → 暂停；可见 → 恢复。两个方向都断开记账：暂停期间的帧不是"没赶上刷新"，恢复后先补画当前内容。
+    /// 遮挡 / 隐藏 → 暂停（这段帧槽里挤掉的帧记 undelivered，不记 dropped）；可见 → 恢复并补画当前内容。
     private func updatePause() {
         guard let link else { return }
         let visible = (window?.occlusionState.contains(.visible) ?? false) && !isHiddenOrHasHiddenAncestor
         if link.isPaused == visible {
             link.isPaused = !visible
-            presenter.invalidate()
+            if visible { presenter.setNeedsRedraw() } else { presenter.pauseDelivery() }
         }
     }
 
@@ -130,7 +132,7 @@ public final class AuxInputView: NSView {
         let size = CGSize(width: max(1, (bounds.width * scale).rounded()), height: max(1, (bounds.height * scale).rounded()))
         if metalLayer.drawableSize != size {
             metalLayer.drawableSize = size
-            presenter.invalidate()   // 尺寸变了：重画（占位的字也按新尺寸重排）
+            presenter.setNeedsRedraw()   // 尺寸变了：重画（占位的字也按新尺寸重排），记账不断
         }
     }
 

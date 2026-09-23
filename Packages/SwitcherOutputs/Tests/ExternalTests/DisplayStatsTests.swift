@@ -71,11 +71,13 @@ final class DisplayStatsTests: XCTestCase {
             }
             XCTAssertGreaterThan(Double(end.frames - start.frames) / elapsed, 50, "\(what)：应接近节目帧率 60")
             XCTAssertEqual(end.dropped, 0, "\(what)：无负载时不该掉帧")
+            XCTAssertEqual(end.undelivered, start.undelivered, "\(what)：一直在呈现，没有没送出去的（提案 018）")
             XCTAssertTrue(samples.allSatisfy { $0.state == "presenting" }, "\(what)：\(Set(samples.map(\.state)))")
             XCTAssertEqual(end.kind, "externalDisplay")
 
             // 拔显示器（目标 ID 不存在）→ noDisplay；窗口收起期间不呈现、不记丢帧
             let unplugged = ExternalDisplaySpec(displayID: 0xDEAD_BEEF, source: what)
+            let unplugAt = Date()
             manager.reconcile(outputs: [output(number, unplugged)], inputs: Self.inputs, format: .hd1080p60)
             pumpEvents(seconds: 1)
             let gone = try XCTUnwrap(entry(manager, number))
@@ -84,12 +86,19 @@ final class DisplayStatsTests: XCTestCase {
             let stillGone = try XCTUnwrap(entry(manager, number))
             XCTAssertEqual(stillGone.frames, gone.frames, "收起的窗口不呈现")
             XCTAssertEqual(stillGone.dropped, 0, "显示器不在期间的帧不是'没赶上刷新'")
-            // 插回来：照常呈现，拔掉那段的版本 / 帧差不算丢
+            XCTAssertGreaterThan(stillGone.undelivered, gone.undelivered + 30, "\(what)：拔掉期间 undelivered 边停边涨（提案 018）")
+            // 插回来：照常呈现，拔掉那段的版本 / 帧差不算丢，全进 undelivered
             manager.reconcile(outputs: [output(number, spec)], inputs: Self.inputs, format: .hd1080p60)
+            let gap = Date().timeIntervalSince(unplugAt)
             XCTAssertTrue(pumpEvents(until: 3) { (self.entry(manager, number)?.frames ?? 0) > gone.frames + 30 }, "\(what)：插回来应继续呈现")
             let back = try XCTUnwrap(entry(manager, number))
             XCTAssertEqual(back.state, "presenting")
             XCTAssertEqual(back.dropped, 0, "\(what)：拔插之间的空档不该记成丢帧")
+            XCTAssertGreaterThanOrEqual(back.undelivered, stillGone.undelivered, "累计值不减")
+            print(String(format: "%@：拔掉 %.2f s，undelivered %llu（约 %.0f 帧 / s）", "\(what)", gap, back.undelivered - start.undelivered,
+                         Double(back.undelivered - start.undelivered) / gap))
+            XCTAssertGreaterThan(Double(back.undelivered - start.undelivered), gap * 60 * 0.75, "\(what)：拔掉那段节目出的帧大都记上")
+            XCTAssertLessThan(Double(back.undelivered - start.undelivered), (gap + 0.5) * 60 + 5, "\(what)：不多记")
             manager.closeAll()
         }
         XCTAssertTrue(manager.statsEntries.isEmpty)
@@ -122,6 +131,7 @@ final class DisplayStatsTests: XCTestCase {
         let produced = Int(v1 - v0), shown = Int(a1.frames - a0.frames), lost = Int(a1.dropped - a0.dropped)
         print("PGM 240 fps → \(screen.maximumFramesPerSecond) Hz：2 s 新版本 \(produced)，呈现 \(shown)，dropped \(lost)")
         XCTAssertGreaterThan(lost, produced / 4, "比刷新快的源必然有被覆盖的版本")
+        XCTAssertEqual(a1.undelivered, a0.undelivered, "一直在呈现：被覆盖的是 dropped，不是 undelivered")
         XCTAssertLessThanOrEqual(abs(shown + lost - produced), 4, "呈现 + 丢 = 新版本（差的是首尾还在路上的）")
         manager.closeAll()
 

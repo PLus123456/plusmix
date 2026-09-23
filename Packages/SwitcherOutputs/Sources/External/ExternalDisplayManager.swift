@@ -99,6 +99,7 @@ public final class ExternalDisplayManager {
     /// - frames = 这个窗口累计呈现的帧（PGM / PVW / 多画面的 blit + Aux 画出去的输入帧；换源不清零，占位不算）；
     /// - dropped = 没赶上显示刷新的帧 = 引擎给了新帧、两次刷新之间就被覆盖的：PGM / PVW / 多画面按渲染器版本号跳过的个数
     ///   （DisplayFrameLedger），Aux 按该路帧槽分支两次刷新之间挤掉 / 跳过的帧（AuxInputPresenter）；窗口收起 / 被遮住 / 换源期间不记；
+    /// - undelivered（提案 018）= 窗口收起（目标显示器不在）/ 被遮住期间当前源出了、窗口没画的帧（与 dropped 不重叠；换源那段两边都不记）；
     /// - state：showing → "presenting"；waitingForDisplay（黑着等）/ fallbackToMain（暂用主屏）→ "noDisplay"（目标显示器不在）。
     public var statsEntries: [Stats.DisplayEntry] {
         windows.map { (number, w) in
@@ -107,7 +108,8 @@ public final class ExternalDisplayManager {
             case .showing: name = "presenting"
             case .waitingForDisplay, .fallbackToMain: name = "noDisplay"
             }
-            return Stats.DisplayEntry(output: number, kind: "externalDisplay", frames: w.presentedFrames, dropped: w.droppedFrames, state: name)
+            return Stats.DisplayEntry(output: number, kind: "externalDisplay", frames: w.presentedFrames, dropped: w.droppedFrames,
+                                      undelivered: w.undeliveredFrames, state: name)
         }
         .sorted { $0.output < $1.output }
     }

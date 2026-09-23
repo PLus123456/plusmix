@@ -74,10 +74,13 @@ public final class ExternalDisplayWindow: NSWindowController {
     public var presentedFrames: UInt64 { displayView.presentedFrames &+ auxView.presentedFrames }
     /// 累计"没赶上显示刷新的帧"（提案 013 的 dropped）：记账源 + Aux，换源 / 换渲染器不清零。
     public var droppedFrames: UInt64 { retiredLedgerDropped &+ (ledger?.droppedFrames ?? 0) &+ auxView.droppedFrames }
+    /// 累计"不在呈现时没送出去的帧"（提案 018 的 undelivered）：窗口收起（目标显示器不在）/ 被遮住期间当前源出的帧；换源那段不算。
+    public var undeliveredFrames: UInt64 { retiredLedgerUndelivered &+ (ledger?.undeliveredFrames ?? 0) &+ auxView.undeliveredFrames }
 
     private var inputs: [InputConfig] = []
     private var ledger: DisplayFrameLedger?
     private var retiredLedgerDropped: UInt64 = 0
+    private var retiredLedgerUndelivered: UInt64 = 0
     /// Aux 现在拿着的帧槽分支（哪一路、那路当时的来源、怎么还）。
     private var auxSlot: (input: Int, source: InputSource, slot: any FrameSlot, close: @MainActor (Int, any FrameSlot) -> Void)?
     nonisolated(unsafe) private var occlusionObserver: (any NSObjectProtocol)?
@@ -128,9 +131,9 @@ public final class ExternalDisplayWindow: NSWindowController {
             self?.onCloseRequested?()
             return true
         }
-        // 遮挡变化（收起 / 放回 / 被盖住）：记账源断开（MetalDisplayView 自己会暂停 / 恢复 display link）
+        // 遮挡变化（收起 / 放回 / 被盖住）：记账源断开，这段记 undelivered（MetalDisplayView 自己会暂停 / 恢复 display link；Aux 视图自己记）
         occlusionObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.ledger?.breakRun() }
+            MainActor.assumeIsolated { self?.visibilityBreak() }
         }
         applySource()
         place(reorder: false)
@@ -174,9 +177,15 @@ public final class ExternalDisplayWindow: NSWindowController {
 
     // MARK: 内部
 
+    /// 窗口收起 / 放回 / 遮挡变化：显示视图在用时这段记 undelivered；Aux 时显示视图本来就收着，只断开不记（不是这个源）。
+    private func visibilityBreak() {
+        ledger?.breakRun(countingUndelivered: !displayView.isHidden)
+    }
+
     /// 记账源包住渲染器，交给显示视图（显示视图对来源是弱引用，记账源由窗口持有）。换渲染器时旧账并进 retired，累计值不回退。
     private func rebuildLedger() {
         retiredLedgerDropped &+= ledger?.droppedFrames ?? 0
+        retiredLedgerUndelivered &+= ledger?.undeliveredFrames ?? 0
         if let source {
             let l = DisplayFrameLedger(upstream: source, view: displayView)
             ledger = l
@@ -193,6 +202,7 @@ public final class ExternalDisplayWindow: NSWindowController {
         case .preview: showDisplayView(.preview)
         case .multiview: showDisplayView(.multiview)
         case .input(let number):
+            if !displayView.isHidden { ledger?.breakRun() }   // 换源：显示视图收起的这段不是它的源，不记
             displayView.isHidden = true
             auxView.isHidden = false
             if let config = inputs.first(where: { $0.number == number }) {
@@ -214,7 +224,7 @@ public final class ExternalDisplayWindow: NSWindowController {
         displayView.sourceRect = .full
         if displayView.isHidden {
             displayView.isHidden = false
-            ledger?.breakRun()
+            ledger?.breakRun()   // 从 Aux 换回来：收着的那段不是这个源的，不记
         }
         auxUnresolved = false
     }
@@ -262,11 +272,11 @@ public final class ExternalDisplayWindow: NSWindowController {
             if window.frame != screen.frame || window.screen != screen { window.setFrame(screen.frame, display: true) }
             if !window.isVisible || reorder || levelChanged {
                 window.orderFront(nil)
-                ledger?.breakRun()
+                visibilityBreak()
             }
         } else if window.isVisible {
             window.orderOut(nil)
-            ledger?.breakRun()
+            visibilityBreak()
         }
         if newStatus != status {
             status = newStatus

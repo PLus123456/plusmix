@@ -121,6 +121,8 @@ final class VirtualCameraTests: XCTestCase {
         XCTAssertEqual(e.dropped, c.droppedQueueFull &+ c.droppedSink &+ c.droppedExtension, "dropped = 连上之后丢的三项")
         XCTAssertEqual(c.droppedNoDevice, 10, "没设备的 10 帧都记在这里")
         XCTAssertEqual(e.dropped, 0, "扩展没装时丢的不是'被扩展丢弃'")
+        XCTAssertEqual(e.undelivered, 10, "提案 018：没连上时丢的进 undelivered")
+        XCTAssertEqual(e.undelivered, c.droppedNoDevice, "与 countersSnapshot 同源（铁律 4）")
         XCTAssertEqual(e.state, "waitingExtension")
         XCTAssertTrue(Stats.DisplayEntry.states.contains(e.state), e.state)
         // 停掉
@@ -155,6 +157,7 @@ final class VirtualCameraTests: XCTestCase {
         var e = output.statsEntry(output: 7)
         XCTAssertEqual(e.state, "publishing")
         XCTAssertEqual(e.dropped, 0)
+        XCTAssertEqual(e.undelivered, 0, "一上来就连上了：没有没送出去的")
         XCTAssertEqual(sink.sequences, Array(0..<30), "每帧挂 CMIO 序号（扩展按它回报'已输出'）")
         // 2. sink 队列满 5 帧（没到掉线门限）：dropped = 5，frames 不动；序号不跳（没排进去的帧不占号）
         sink.acceptSends = false
@@ -180,9 +183,12 @@ final class VirtualCameraTests: XCTestCase {
         XCTAssertTrue(waitUntil(2) { output.state == .searching })
         XCTAssertTrue(waitUntil(2) { output.statsEntry(output: 7).state == "waitingExtension" })
         let droppedAtLoss = output.statsEntry(output: 7).dropped
+        let undeliveredAtLoss = output.statsEntry(output: 7).undelivered
         feed(10)
         XCTAssertTrue(waitUntil(2) { output.countersSnapshot.droppedNoDevice >= 10 })
         XCTAssertEqual(output.statsEntry(output: 7).dropped, droppedAtLoss, "没连上时丢的不进 dropped")
+        XCTAssertGreaterThanOrEqual(output.statsEntry(output: 7).undelivered, undeliveredAtLoss + 10, "提案 018：进 undelivered")
+        XCTAssertEqual(output.statsEntry(output: 7).undelivered, output.countersSnapshot.droppedNoDevice)
         XCTAssertGreaterThanOrEqual(sink.closes, 1)
         // 5. 设备在、但流起不来（签名不符被扩展拒、sink 流没了……）→ failed
         sink.openError = CMIOSinkStreamClient.Error.startFailed(-1)
