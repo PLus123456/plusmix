@@ -147,7 +147,8 @@ final class DisplayStatsTests: XCTestCase {
                           styleMask: [.titled], backing: .buffered, defer: false)
         ui.isReleasedWhenClosed = false
         ui.title = "主界面替身"
-        // 本进程要是前台 App：macOS 14 起的协作式激活下，后台 App 的 orderFront 不保证排到自己别的窗口前面，量"默认在最前"就没意义了
+        // 尽量让本进程成前台 App：macOS 14 起是协作式激活，后台 App 的 orderFront 排到哪由系统定（实测两种都出现过），
+        // 所以"默认在最前"的前后次序只在真成了前台时核；层级（决定"垫在界面下面"的那个）不受激活影响，一律核
         NSApp.activate(ignoringOtherApps: true)
         ui.makeKeyAndOrderFront(nil)
         defer { ui.orderOut(nil) }
@@ -168,8 +169,13 @@ final class DisplayStatsTests: XCTestCase {
             }
         }
         print("层级：orderedWindows \(order())，CG \(cgOrder())，key \(NSApp.keyWindow === ui ? "ui" : (NSApp.keyWindow === w ? "out" : "\(String(describing: NSApp.keyWindow))"))，active \(NSApp.isActive)")
-        XCTAssertEqual(w.level, .normal)
-        XCTAssertEqual(order(), ["out", "ui"], "默认：盖满主屏、在最前")
+        XCTAssertEqual(w.level, .normal, "默认：普通层级（W3-C 起的行为不变）")
+        XCTAssertTrue(w.isVisible)
+        if NSApp.isActive {
+            XCTAssertEqual(order(), ["out", "ui"], "默认：盖满主屏、在最前")
+        } else {
+            print("层级：测试宿主不是前台 App（协作式激活没给），默认的前后次序由系统定，这里只核层级")
+        }
 
         manager.mainScreenLayering = .behindInterface
         pumpEvents(seconds: 0.2)
@@ -192,8 +198,8 @@ final class DisplayStatsTests: XCTestCase {
         }
         manager.mainScreenLayering = .front
         pumpEvents(seconds: 0.2)
-        XCTAssertEqual(w.level, .normal)
-        XCTAssertEqual(order().first, "out", "切回默认：又在最前")
+        XCTAssertEqual(w.level, .normal, "切回默认：普通层级")
+        if NSApp.isActive { XCTAssertEqual(order().first, "out", "切回默认：又在最前") }
     }
 
     /// 真外接屏（本机现在接着一块时跑；没有就 BLOCKED-硬件）：PGM 与 Aux 窗口挪到外接屏上全屏，按那块屏的刷新率呈现、
