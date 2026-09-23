@@ -34,7 +34,7 @@ final class RealtimeRendererTests: XCTestCase {
         let gpuStartMean = gpuStartLag.reduce(0, +) / Double(gpuStartLag.count)
         print(String(format: "V1 render_ms（多画面 %@）：帧数 %d，平均 %.3f ms，p50 %.3f，p99 %.3f，最大 %.3f；唤醒延迟平均 %.3f ms；拍点→提交平均 %.3f ms；提交→GPU 开始平均 %.3f ms；GPU 执行平均 %.3f ms；skipped %d",
                      options.multiview ? "开" : "关", ms.count, mean, p50, p99, maxV, engine.meanWakeLagMs, submitMean, gpuStartMean, gpuMean, Int(engine.skipped.load(ordering: .relaxed))))
-        print("V1：纹理表建纹理 \(created) 次（应 = 8 路 × 4 缓冲 × 2 平面 + 输出环 8 × 2 = 80），输出环退回池子 \(fallbacks) 次（应为 0）")
+        print("V1：纹理表建纹理 \(created) 次（应 = 8 路 × 4 缓冲 × 2 平面 = 64；输出环的纹理 W3-B2 起在建环时包好，不进纹理表），输出环退回池子 \(fallbacks) 次（应为 0）")
         XCTAssertLessThanOrEqual(mean, 6, "V1 平均 render_ms 超过必须档 6 ms")
         XCTAssertLessThanOrEqual(p99, 12, "V1 p99 render_ms 超过必须档 12 ms")
         XCTAssertEqual(engine.skipped.load(ordering: .relaxed), 0, "标准负载下不该跳拍")

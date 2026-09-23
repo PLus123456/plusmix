@@ -16,6 +16,9 @@ final class CollectingSink: RenderSink, @unchecked Sendable {
         let submitTime: HostTime
         let gpuStart: HostTime
         let gpuEnd: HostTime
+        /// 这一帧有没有 PVW / 多画面的 NV12（只记有没有，不扣缓冲）。
+        var hasPreview = false
+        var hasMultiview = false
         var renderMs: Double { (gpuEnd - tickTime).milliseconds }
     }
     private let lock = NSLock()
@@ -31,7 +34,8 @@ final class CollectingSink: RenderSink, @unchecked Sendable {
 
     func renderer(_ renderer: any Renderer, didComplete frame: RenderedFrame) {
         lock.lock()
-        samples.append(Sample(tick: frame.tick, tickTime: frame.tickTime, submitTime: frame.submitTime, gpuStart: frame.gpuStart, gpuEnd: frame.gpuEnd))
+        samples.append(Sample(tick: frame.tick, tickTime: frame.tickTime, submitTime: frame.submitTime, gpuStart: frame.gpuStart, gpuEnd: frame.gpuEnd,
+                              hasPreview: frame.preview != nil, hasMultiview: frame.multiview != nil))
         dispatchTimes.append(HostClock.now())
         if holdDepth > 0 {
             held.append(frame)
