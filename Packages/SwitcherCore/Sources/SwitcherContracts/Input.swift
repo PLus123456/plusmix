@@ -85,6 +85,14 @@ public enum NDIBandwidth: String, Codable, Sendable, CaseIterable {
 }
 
 /// 一路输入"接的是什么"。`kind` 由它决定，不另外存。
+///
+/// **声道映射**（`audio` / `decklink` 的 `channels`，提案 014）：取源的哪几路写进这一路的音频环，值是源的声道下标（从 0 起）。
+/// 环的声道数由组装方定（App / headless 现在都是 2），目标声道 d 取 `channels[d]`：
+/// - 空数组 = 取前几路（目标 d 取源第 d 路；源是单声道就复制到所有声道，源声道比环少时缺的复制最后一路）；
+/// - 比环的声道数短时，缺的复制最后一项（单声道话筒插在第 5 路：`[4]` 就是两个声道都取第 5 路）；多出来的项忽略；
+/// - 越界的下标钳到源的声道范围里（`[0, 源声道数 − 1]`）。
+/// 它是**采集侧**的参数：决定输入往环里写什么，改它等于重建这一路输入（和换设备同一类操作），所以放在这里，
+/// 不放混音侧的 `InputAudioSettings`（提案 014"为什么不放 InputAudioSettings"）。
 public enum InputSource: Hashable, Codable, Sendable {
     /// AVCaptureDevice.uniqueID。UVC 采集卡也走这里。
     case camera(uniqueID: String)
@@ -96,7 +104,8 @@ public enum InputSource: Hashable, Codable, Sendable {
     /// - 空串 = 第一台有输入的卡。
     ///
     /// `connection` nil = 不改卡上的当前设置（Desktop Video Setup 里选的那个）。
-    case decklink(deviceID: String, connection: DeckLinkConnection? = nil)
+    /// `channels` = SDI / HDMI 内嵌音频取哪几路（提案 014，口径见上面"声道映射"；内嵌音频最多 16 路）。
+    case decklink(deviceID: String, connection: DeckLinkConnection? = nil, channels: [Int] = [])
     /// 屏幕 / 窗口 / 应用；frameRate nil = 跟节目帧率。
     case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
     /// 视频文件；rate = 播放速率（1 = 正常）。
@@ -105,8 +114,9 @@ public enum InputSource: Hashable, Codable, Sendable {
     /// NDI 源名（"机器名 (源名)"）+ 带宽模式 + 抖动缓冲深度（帧，0–2；提案 008）。
     /// 抖动缓冲直接决定这路的延迟，也决定 `Frame.pts` 的口径（见 `Frame.pts`）。
     case ndi(sourceName: String, bandwidth: NDIBandwidth = .highest, jitterBufferFrames: Int = 1)
-    /// Core Audio 设备 UID（纯音频输入）。
-    case audio(deviceUID: String)
+    /// Core Audio 设备 UID（纯音频输入，`kAudioDevicePropertyDeviceUID`；空串 = 跟随系统默认输入）+ 取设备的哪几路
+    /// （提案 014，口径见上面"声道映射"）。这种输入没有画面，`Input.videoSlot` 为 nil（能不能切进 Program 见那里的注释）。
+    case audio(deviceUID: String, channels: [Int] = [])
     case synthetic(settings: SyntheticSourceSettings)
 
     /// 对应的输入类型。
@@ -128,52 +138,55 @@ public enum InputSource: Hashable, Codable, Sendable {
     /// 抖动缓冲深度的默认值（帧）。
     public static let defaultNDIJitterBufferFrames = 1
 
-    enum CodingKeys: String, CodingKey {
-        case camera, decklink, screen, file, image, ndi, audio, synthetic
-    }
-    enum DeckLinkKeys: String, CodingKey { case deviceID, connection }
-    enum NDIKeys: String, CodingKey { case sourceName, bandwidth, jitterBufferFrames }
+    // MARK: Codable（提案 008 / 014）
 
-    /// 显式解码（提案 008）：只有 decklink / ndi 两个 case 自己解，好让老文件里缺 connection / bandwidth /
-    /// jitterBufferFrames 的对象按默认值解（合成的 Codable 对缺键会报错）。其余 case 原样交给合成的解码，
-    /// JSON 形态一个字节不变（`SwitcherContractsTests` 的键名快照钉住）。
+    /// JSON 形态的镜像。带默认值的参数在这里都是 Optional：合成的 Codable 对 Optional 用 decodeIfPresent / encodeIfPresent，
+    /// 所以老文件缺键能按默认值解、默认值可以不写键。
+    /// - 解码：缺 `connection` → nil，缺 `bandwidth` → highest，缺 `jitterBufferFrames` → 1，缺 `channels` → []。
+    /// - 编码：`connection` nil 不写键；`channels` 为空不写键（014 之前能表达的值编出来与之前逐字节相同）；
+    ///   ndi 的 `bandwidth` / `jitterBufferFrames` 照旧总是写（提案 008 落地时的形态）。
+    ///   键名快照在 `ContractsP3Tests.testP3_008_*` 与 `Contracts014Tests` 里钉住。
+    private enum Form: Codable {
+        case camera(uniqueID: String)
+        case decklink(deviceID: String, connection: DeckLinkConnection?, channels: [Int]?)
+        case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
+        case file(path: String, endAction: FileEndAction, rate: Double)
+        case image(path: String)
+        case ndi(sourceName: String, bandwidth: NDIBandwidth?, jitterBufferFrames: Int?)
+        case audio(deviceUID: String, channels: [Int]?)
+        case synthetic(settings: SyntheticSourceSettings)
+    }
+
     public init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        if c.contains(.decklink) {
-            let d = try c.nestedContainer(keyedBy: DeckLinkKeys.self, forKey: .decklink)
-            self = .decklink(deviceID: try d.decode(String.self, forKey: .deviceID),
-                             connection: try d.decodeIfPresent(DeckLinkConnection.self, forKey: .connection))
-            return
+        switch try Form(from: decoder) {
+        case .camera(let id): self = .camera(uniqueID: id)
+        case .decklink(let id, let connection, let channels):
+            self = .decklink(deviceID: id, connection: connection, channels: channels ?? [])
+        case .screen(let target, let rate, let audio): self = .screen(target: target, frameRate: rate, captureAudio: audio)
+        case .file(let path, let end, let rate): self = .file(path: path, endAction: end, rate: rate)
+        case .image(let path): self = .image(path: path)
+        case .ndi(let name, let bandwidth, let jitter):
+            self = .ndi(sourceName: name, bandwidth: bandwidth ?? .highest,
+                        jitterBufferFrames: jitter ?? InputSource.defaultNDIJitterBufferFrames)
+        case .audio(let uid, let channels): self = .audio(deviceUID: uid, channels: channels ?? [])
+        case .synthetic(let settings): self = .synthetic(settings: settings)
         }
-        if c.contains(.ndi) {
-            let d = try c.nestedContainer(keyedBy: NDIKeys.self, forKey: .ndi)
-            self = .ndi(sourceName: try d.decode(String.self, forKey: .sourceName),
-                        bandwidth: try d.decodeIfPresent(NDIBandwidth.self, forKey: .bandwidth) ?? .highest,
-                        jitterBufferFrames: try d.decodeIfPresent(Int.self, forKey: .jitterBufferFrames)
-                            ?? InputSource.defaultNDIJitterBufferFrames)
-            return
-        }
-        self = try InputSource.synthesizedDecoding(decoder)
     }
 
-    /// 合成的解码（除 decklink / ndi 外的 case）。`Synthesized` 的 JSON 形态与 `InputSource` 逐字相同。
-    private static func synthesizedDecoding(_ decoder: any Decoder) throws -> InputSource {
-        enum Synthesized: Hashable, Codable, Sendable {
-            case camera(uniqueID: String)
-            case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
-            case file(path: String, endAction: FileEndAction, rate: Double)
-            case image(path: String)
-            case audio(deviceUID: String)
-            case synthetic(settings: SyntheticSourceSettings)
+    public func encode(to encoder: any Encoder) throws {
+        let form: Form
+        switch self {
+        case .camera(let id): form = .camera(uniqueID: id)
+        case .decklink(let id, let connection, let channels):
+            form = .decklink(deviceID: id, connection: connection, channels: channels.isEmpty ? nil : channels)
+        case .screen(let target, let rate, let audio): form = .screen(target: target, frameRate: rate, captureAudio: audio)
+        case .file(let path, let end, let rate): form = .file(path: path, endAction: end, rate: rate)
+        case .image(let path): form = .image(path: path)
+        case .ndi(let name, let bandwidth, let jitter): form = .ndi(sourceName: name, bandwidth: bandwidth, jitterBufferFrames: jitter)
+        case .audio(let uid, let channels): form = .audio(deviceUID: uid, channels: channels.isEmpty ? nil : channels)
+        case .synthetic(let settings): form = .synthetic(settings: settings)
         }
-        switch try Synthesized(from: decoder) {
-        case .camera(let id): return .camera(uniqueID: id)
-        case .screen(let t, let r, let a): return .screen(target: t, frameRate: r, captureAudio: a)
-        case .file(let p, let e, let r): return .file(path: p, endAction: e, rate: r)
-        case .image(let p): return .image(path: p)
-        case .audio(let uid): return .audio(deviceUID: uid)
-        case .synthetic(let st): return .synthetic(settings: st)
-        }
+        try form.encode(to: encoder)
     }
 }
 
@@ -447,7 +460,10 @@ public protocol Input: AnyObject {
     var name: String { get }
     var kind: InputKind { get }
     var state: InputState { get }
-    /// 纯音频输入为 nil。
+    /// 纯音频输入（`InputSource.audio`）为 nil。口径（W2-A2 报告 §4 第 2 条，用户 2026-09-23 定）：
+    /// - 组装方不给它登记帧槽（引擎的输入表里这一路没有槽，挑帧得 nil）；
+    /// - 它照样能被选进 Program / Preview / 叠加：画面按"没帧"画黑场，音频照常按每路 AFV 走（切到它就出它的声）；
+    /// - 多画面里它的格子画占位（名字 + 电平表），不是黑画面。
     var videoSlot: (any FrameSlot)? { get }
     /// 没有音频的输入（图片等）为 nil。
     var audioRing: (any AudioRing)? { get }

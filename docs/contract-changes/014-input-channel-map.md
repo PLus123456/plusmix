@@ -1,7 +1,7 @@
 # 014 输入声道映射（`InputSource` 里给纯音频 / DeckLink 加"取哪几路"）
 
 提出：W2-A2（分支 `w2-inputs-2`，2026-09-23）。前一次提出同一件事：W3-A 报告 §4 第 5 条（DeckLink 内嵌音频声道数）。
-状态：**待用户批**（铁律 1：没批之前 SwitcherContracts 一个字都不改）。
+状态：**已落地**（用户 2026-09-23 批，并指定 W2-A2 自己落地；分支 `w2-inputs-2`，叠在 P3 的 `ca1baa5` 之上）。
 
 ## 改什么
 
@@ -48,3 +48,20 @@ case decklink(deviceID: String, connection: DeckLinkConnection = .auto, channels
 
 两边都只能留在包内 `Options`：默认取前两路，节目文件记不住，Add Input 表单里那一项做不了（或者做了也存不住）。
 功能上不阻塞——单声道 / 双声道设备（绝大多数话筒、USB 声卡的主输出）走默认就对。
+
+## 落地记录（2026-09-23，W2-A2）
+
+| 文件 | 改动 |
+|---|---|
+| `SwitcherContracts/Input.swift` | `audio(deviceUID:channels:)`、`decklink(deviceID:connection:channels:)`，`channels: [Int] = []`；`InputSource` 顶上加"声道映射"一节的口径注释；`audio` 注释补"空串 = 跟随系统默认输入"；`Input.videoSlot` 注释写进纯音频输入的口径（W2-A2 报告 §4 第 2 条，用户同日定） |
+| 同上（Codable） | P3 的"decklink / ndi 自己解、其余交给内部 Synthesized 枚举"改成**一个 JSON 形态镜像枚举 `Form`，解码 / 编码都走它**：带默认值的参数在镜像里是 Optional（合成 Codable 对 Optional 用 decodeIfPresent / encodeIfPresent），编码时空 `channels` 写成 nil。结果：014 之前能表达的值编出来逐字节不变（P3 的 `testP3_008_*` 键名快照原样通过），带映射的才多一个 `channels` 键 |
+| `SwitcherContractsTests/Contracts014Tests.swift` | 5 条：老文件缺键 → `[]`；空映射不写键；带映射的形态与往返（含 `null` / `[]`）；其余 case 形态逐个再钉一遍；节目文件存取 |
+| `docs/CONTRACTS.md` | 标题、变更记录、§2.4 表与两段口径（声道映射、纯音频输入）、§3 速查一条 |
+| `SwitcherInputs/Common/InputChannelMap.swift`（新） | 映射口径的唯一实现：`requestedChannel` / `sourceChannel` / `clamp` / `requiredSourceChannels` |
+| `SwitcherInputs/Audio/AudioDeviceInput.swift`、`AudioCaptureFIFO.swift` | `init(config:)` 从 case 取；`Options.channelMap` 非 nil = 显式覆盖（与 008 的 `connection` 同一口径）；交接区的声道表按 `InputChannelMap` 算 |
+| `SwitcherInputs/DeckLink/DeckLinkInput.swift` | `Options.channelMap`（同上）；`init(config:)` 从 case 取；内嵌音频开的路数 = max(`audioChannels`, 映射要的) 按 2 / 8 / 16 往上取（`embeddedAudioChannels`）；回调里查 init 时算好的表，不碰 Swift 数组 |
+| `App/Sources/Settings/InputSettingsPanel.swift` | 两处 `switch` 的模式跟着多一个关联值（编译跟改，2 行）；摘要里显示映射归 W3-E2 |
+| 测试 | `InputChannelMapTests`（口径 4 条 + AudioDeviceInput 从 case 取 1 条）、`AudioCaptureFIFOTests` 加短映射 / 越界 / 跨 buffer 1 条、`DeckLinkChannelMapTests`（从 case 取、路数取整、对着 Fake 的 8 路内嵌音频 → 环 3 条） |
+
+**与提案原文的一处出入**：原文"影响谁"里写"`InputSource` 的 JSON 快照多两个键"。落地时改成**空映射不写键**：老文件和不用映射的新文件逐字节不变，
+快照和 docs/api.md 都不用动；用了映射的才多 `channels` 这一个键。语义没变（缺键 = 空 = 取前几路）。

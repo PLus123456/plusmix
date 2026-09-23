@@ -1,4 +1,4 @@
-# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013）
+# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014）
 
 代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
@@ -11,7 +11,9 @@
 → 提案 011（W3-D 按授权直接落地：兼容层的 lint 例外）→ **P3（2026-09-23，分支 p3-contracts）：提案 007（AudioState 的 alignmentFrames / monitorPoint + 三条口径）、
 008（InputSource 的 DeckLink 接口 / NDI 带宽与抖动缓冲）、009（KeyerSettings 口径，只改文档）、010（叠加边框 / 锚点 / PVW 预览 / 滑入方向 + 多画面布局正式字段 + `setOverlayDecoration`）、
 012（五条界面命令 + EffectSlot 参数键口径）、013（Stats.display[] + OutputSettings.display），另加每路 AFV 开关 `InputAudioSettings.afv`
-与 W3 各报告等拍板的口径（用户 2026-09-22 批）**。提案文件留在 docs/contract-changes/ 当决策记录。
+与 W3 各报告等拍板的口径（用户 2026-09-22 批）**
+→ **提案 014（用户 2026-09-23 批并指定 W2-A2 落地，分支 w2-inputs-2，叠在 P3 之上）：`InputSource.audio` / `.decklink` 的 `channels`（声道映射），
+外加纯音频输入（`videoSlot` 为 nil）进 Program / 多画面的口径（W2-A2 报告 §4 第 2 条，同日定）**。提案文件留在 docs/contract-changes/ 当决策记录。
 
 ---
 
@@ -84,13 +86,13 @@
 |---|---|---|---|---|
 | `InputKind` | {camera, decklink, screen, file, image, ndi, audio, synthetic} | 由 `InputSource` 推出 | UI、引擎 | — |
 | `InputState` | {live, noSignal, error(message:)}；未 start / 已 stop = noSignal | 输入线程 | UI、引擎 | 实现保证原子 |
-| `InputSource` | 每种 kind 的来源参数（设备 ID、路径、屏幕目标、NDI 源名 / 带宽 / 抖动缓冲、DeckLink 设备 ID / 接口、合成源设置） | Show / addInput / setInputSource | 输入实现 | 普通 |
+| `InputSource` | 每种 kind 的来源参数（设备 ID、路径、屏幕目标、NDI 源名 / 带宽 / 抖动缓冲、DeckLink 设备 ID / 接口 / 声道映射、纯音频设备 UID / 声道映射、合成源设置） | Show / addInput / setInputSource | 输入实现 | 普通 |
 | `DeckLinkConnection` / `NDIBandwidth` | {sdi, hdmi, opticalSDI, component, composite, sVideo} / {highest, lowest, audioOnly}（提案 008） | 同上 | DeckLinkInput / NDIInput 填 `Options` | — |
 | `SyntheticSourceSettings` | 合成源：帧率、尺寸、底色、patternID、抖动、丢帧、时钟漂移、音频及其漂移 | Show / 脚本 | TestKit（W1-A） | 普通 |
 | `InputSettings` | {crop, transform, audio: `InputAudioSettings`, effects 占位, keyer 占位}；`clamped()` 钳范围 | 状态机（setInputSettings） | 渲染（crop/transform/keyer）、混音（audio） | 从快照读 |
 | `InputAudioSettings` | {routing: `BusRouting`, gainDb, muted, solo, pan, delayMs 0–500, afv}（提案 012 顺带项，用户 2026-09-22 批） | 同上 | 混音（W2-E 转成 C 参数） | 从快照读 |
 | `InputConfig` | {number, name, source, settings}；`MixerState.inputs` 和 `Show.inputs` 的元素 | 状态机 | 所有人 | 值类型 |
-| `Input` 协议 | 运行对象：number / name / kind / state / videoSlot / audioRing / start / stop | 输入实现 | 引擎、UI | start/stop 普通线程 |
+| `Input` 协议 | 运行对象：number / name / kind / state / videoSlot / audioRing / start / stop；纯音频输入 videoSlot = nil（口径见下） | 输入实现 | 引擎、UI | start/stop 普通线程 |
 
 每路输入的音频参数只存一份，在 `inputs[i].settings.audio`（prompt 里的 "audio.perInput"）；`AudioState` 里只有总线、AFV 总开关、监听、对齐延迟。
 
@@ -98,6 +100,18 @@
 - `decklink(deviceID:connection:)`：deviceID = `peid:<BMDDeckLinkPersistentID 十进制>`（卡有该属性时）/ `model:<型号>#<同型号内序号>`（老卡）/ 空串 = 第一台有输入的卡；connection nil = 不改卡上的当前设置。
 - `ndi(sourceName:bandwidth:jitterBufferFrames:)`：源名是 `"机器名 (源名)"`；抖动缓冲 0–2 帧，它同时定义这一路的 `Frame.pts`（见 §3）。
 两个 case 写出时缺省值不写（connection nil 不写键），老文件缺键按默认解（highest / 1 / nil）；其余 case 的 JSON 形态一个字节没变。
+
+**声道映射 `channels`（提案 014，用户 2026-09-23 批）**：`audio(deviceUID:channels:)`、`decklink(deviceID:connection:channels:)`，默认 `[]`。
+值是源的声道下标（从 0 起），环的第 d 路取 `channels[d]`：空 = 取前几路（单声道复制到所有声道、源比环少时复制最后一路）；
+比环的声道数短时缺的复制最后一项（`[4]` = 单声道话筒插在第 5 路，两个声道都取它）；多出来的项忽略；越界钳到源的声道范围。
+它是采集侧参数（改它 = 重建这一路输入），所以在 `InputSource` 不在 `InputAudioSettings`。空映射写出时不写键（老文件读进来再写出去形态不变），
+老文件缺键按 `[]` 解；`Contracts014Tests` 钉住。实现口径的唯一一份在 `SwitcherInputs.InputChannelMap`（纯音频设备与 DeckLink 共用）；
+DeckLink 开的内嵌音频路数 = max(`Options.audioChannels`, 映射用得上的最大下标 + 1)，按 SDK 认的 2 / 8 / 16 往上取。
+`audio` 的 `deviceUID` = Core Audio 的 `kAudioDevicePropertyDeviceUID`，空串 = 跟随系统默认输入。
+
+**纯音频输入（`InputSource.audio`，`Input.videoSlot` 为 nil；W2-A2 报告 §4 第 2 条，用户 2026-09-23 定）**：组装方不给它登记帧槽，引擎挑帧得 nil；
+它照样能被选进 Program / Preview / 叠加，画面按"没帧"画黑场，音频照常按每路 AFV 走（切到它就出它的声）；多画面里它的格子画占位（名字 + 电平表），
+不是黑画面。引擎与渲染器今天的行为已经满足前两条（没槽 → nil → 画黑）；多画面占位格与 App 接线待做（reports/issues/W2A2-*）。
 
 **`InputState` 的 noSignal / error 分界（W3-A 口径，用户 2026-09-22 定）= 会不会自己好**：驱动没装 / 设备不在 / NDI 源还没出现 / 显示器拔了 → `noSignal` + `lastError` 文案（装上、插回、源上线就自己恢复）；SDK 没编进来 / 起流失败 / 权限被拒 → `error(message:)`（不会自己好）。
 
@@ -220,6 +234,7 @@ P3 加的字段（提案 013）：
 - **编号**：输入 / 输出编号从 1 起，0 = 无；overlay channel 1–4；`Bus.rawValue` = `AudioState.buses` 下标。
 - **范围**：tbar/progress 0–1；pan −1…1；gainDb −96…+24；delayMs 0–500；crop 各边 0–1 且对边之和 ≤ 1（`InputSettings.clamped()`）。
 - **无信号**：`InputState.noSignal`，帧槽保留最后一帧；渲染不阻塞。noSignal 与 error 的分界见 §2.4（会不会自己好）。
+- **纯音频输入**：没有帧槽，能切进 Program（画黑、音频按 AFV 走），多画面画占位格 + 电平表（§2.4，用户 2026-09-23 定）；声道映射口径见 §2.4 提案 014。
 - **PVW / 多画面出不出 NV12**（用户 2026-09-22 定）：状态里有 enabled 的输出、其 `settings.source` 是 `.preview` / `.multiview` 时 `RenderedFrame.preview` / `.multiview` 自动填；
   `MetalRendererOptions.previewOutput` / `multiviewOutput` 保留为强制开的覆盖（取或）。
 - **PVW 画不画叠加**：每通道的 `OverlayState.previewOn`，与渲染器的"全部预览"总开关 `MetalRendererOptions.overlaysInPreview` 取或。
