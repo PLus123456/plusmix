@@ -2,7 +2,7 @@ import Foundation
 
 /// stats.jsonl 的一行（测试标准 §7；P2 按已批提案 001 / 002 / 004 / 005 扩了 per_input、encoder、audio 三节）。字段名逐字：
 /// ts、tick、render_ms、missed_render、jitter_ms、per_input{fps, dup, drop, latency_ms, latency_max_ms}、
-/// encoder[{skipped, bitrate, frames, dropped, disk_free_mb, reconnects, state}]、display[{output, kind, frames, dropped, state}]、
+/// encoder[{skipped, bitrate, frames, dropped, disk_free_mb, reconnects, state}]、display[{output, kind, frames, dropped, undelivered, state}]、
 /// audio{dropouts, underruns, discontinuities, meters}、rss_mb、cpu_pct、gpu_pct。
 /// UI 状态行、API、测试三方读同一个结构，不许各自另算（铁律 4）。
 ///
@@ -17,7 +17,8 @@ import Foundation
 /// - `encoder[i]`：与 MixerState.outputs 里带编码器的输出同序。skipped = E1 编码滞后跳帧累计；bitrate = 窗口内平均输出码率（bit/s）；
 ///   frames / dropped / disk_free_mb / reconnects / state = 提案 001 / 002（见 `EncoderEntry`）。
 /// - `display[i]`：提案 013，显示类输出（外部显示窗口、虚拟摄像头、多画面窗口、主界面监视器）各一项，无固定顺序，按 `output` / `kind` 认。
-///   frames = 已呈现 / 已送出帧数累计；dropped = 没赶上刷新 / 被扩展丢弃的帧数累计；state 见 `DisplayEntry.states`。
+///   frames = 已呈现 / 已送出帧数累计；dropped = 在呈现 / 发布时没赶上刷新 / 被扩展丢弃的帧数累计；
+///   undelivered = 不在呈现 / 发布时没送出去的帧数累计（提案 018，与 dropped 不重叠）；state 见 `DisplayEntry.states`。
 /// - `audio`：A1，dropouts = 输出回调超时累计，underruns = 缓冲欠载累计，discontinuities = 波形不连续累计；meters = 表读数（提案 004，见 `AudioCounters`）。
 /// - `rss_mb`：进程 RSS（MB）；`cpu_pct`：进程 CPU（100 = 一个核）；`gpu_pct`：GPU 占用。
 /// 累计值单调不减，任意两行相减就是窗口内的增量。
@@ -143,30 +144,39 @@ public struct Stats: Hashable, Codable, Sendable {
         public var kind: String
         /// 已呈现（显示）/ 已送出（虚拟摄像头扩展收到）的帧数，累计。
         public var frames: UInt64
-        /// 没赶上显示刷新 / 被扩展丢弃的帧数，累计。
+        /// 在呈现 / 发布的时候没送出去的帧数，累计：显示类 = 引擎给了新帧、两次显示刷新之间就被覆盖的；
+        /// 虚拟摄像头 = 连上之后本端队列满 + 排不进 sink（扩展没及时取）+ 扩展收了没输出的。不在呈现 / 发布时的进 `undelivered`。
         public var dropped: UInt64
+        /// 输出拿到（或该拿到）、但因为当时不在呈现 / 发布而没送出去的帧数，累计（提案 018）。与 `dropped` 不重叠。
+        /// - virtualCamera：扩展没装 / 没激活 / 没连上期间收到就丢掉的 PGM 帧（含那段时间本端队列满挤掉的）；
+        /// - externalDisplay：窗口收起（目标显示器不在）或被遮住期间，当前这个源出了、窗口没画的帧（换源不算：换之前的源不是这个输出的）；
+        /// - multiviewWindow / monitor：同 externalDisplay 的口径（组装方用记账源记；不记就是 0）。
+        /// 显示类在一段时间里 frames + dropped + undelivered ≈ 这段时间里当前源出的新帧（差的是首尾还在路上的一两帧）。
+        public var undelivered: UInt64
         /// "idle" / "presenting" / "noDisplay"（显示器不在：退回主屏或黑着等）/ "waitingExtension"（扩展未激活）/
         /// "publishing" / "stopped" / "failed"。
         public var state: String
-        public init(output: Int, kind: String, frames: UInt64 = 0, dropped: UInt64 = 0, state: String = "idle") {
+        public init(output: Int, kind: String, frames: UInt64 = 0, dropped: UInt64 = 0, undelivered: UInt64 = 0, state: String = "idle") {
             self.output = output
             self.kind = kind
             self.frames = frames
             self.dropped = dropped
+            self.undelivered = undelivered
             self.state = state
         }
-        enum CodingKeys: String, CodingKey { case output, kind, frames, dropped, state }
-        /// 缺键给 0 / "idle"。
+        enum CodingKeys: String, CodingKey { case output, kind, frames, dropped, undelivered, state }
+        /// 缺键给 0 / "idle"（013 的老条目没有 undelivered）。
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             output = try c.decode(Int.self, forKey: .output)
             kind = try c.decode(String.self, forKey: .kind)
             frames = try c.decodeIfPresent(UInt64.self, forKey: .frames) ?? 0
             dropped = try c.decodeIfPresent(UInt64.self, forKey: .dropped) ?? 0
+            undelivered = try c.decodeIfPresent(UInt64.self, forKey: .undelivered) ?? 0
             state = try c.decodeIfPresent(String.self, forKey: .state) ?? "idle"
         }
         /// JSON 键名。
-        public static let jsonKeys = ["output", "kind", "frames", "dropped", "state"]
+        public static let jsonKeys = ["output", "kind", "frames", "dropped", "undelivered", "state"]
         /// kind 的合法值。
         public static let kinds = ["externalDisplay", "virtualCamera", "multiviewWindow", "monitor"]
         /// state 的合法值。

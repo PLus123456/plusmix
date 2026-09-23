@@ -81,7 +81,7 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         public var states: [String: Int]
     }
 
-    /// 一个显示类输出的汇总（提案 013）：frames / dropped 取末行 − 首行；state 取末行与全程出现的状态（行数）。
+    /// 一个显示类输出的汇总（提案 013）：frames / dropped / undelivered（提案 018）取末行 − 首行；state 取末行与全程出现的状态（行数）。
     public struct DisplaySummary: Hashable, Codable, Sendable {
         /// 输出编号（0 = 主界面监视器）。
         public var output: Int
@@ -89,6 +89,8 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         public var kind: String
         public var frames: UInt64
         public var dropped: UInt64
+        /// 提案 018：不在呈现 / 发布时没送出去的帧。018 之前写的摘要没有这个键，解出来 0。
+        public var undelivered: UInt64
         public var lastState: String
         public var states: [String: Int]
     }
@@ -238,6 +240,7 @@ public struct StatsSummary: Hashable, Codable, Sendable {
                 return DisplaySummary(output: key.output, kind: key.kind,
                                       frames: (entries.last?.frames ?? 0) &- (entries.first?.frames ?? 0),
                                       dropped: (entries.last?.dropped ?? 0) &- (entries.first?.dropped ?? 0),
+                                      undelivered: (entries.last?.undelivered ?? 0) &- (entries.first?.undelivered ?? 0),
                                       lastState: entries.last?.state ?? "idle", states: states)
             }
 
@@ -364,5 +367,19 @@ public struct StatsSummary: Hashable, Codable, Sendable {
             s += "| \(v.id) \(v.name) | \(v.value)\(note) | \(v.must) | \(v.target) | \(mark) | \(delta) |\n"
         }
         return s
+    }
+}
+
+extension StatsSummary.DisplaySummary {
+    /// 提案 018 之前写的摘要（基线 / 报告里的 JSON）没有 undelivered：按 0 解，其余照旧。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        output = try c.decode(Int.self, forKey: .output)
+        kind = try c.decode(String.self, forKey: .kind)
+        frames = try c.decode(UInt64.self, forKey: .frames)
+        dropped = try c.decode(UInt64.self, forKey: .dropped)
+        undelivered = try c.decodeIfPresent(UInt64.self, forKey: .undelivered) ?? 0
+        lastState = try c.decode(String.self, forKey: .lastState)
+        states = try c.decode([String: Int].self, forKey: .states)
     }
 }

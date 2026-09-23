@@ -173,7 +173,7 @@ final class ContractsP3Tests: XCTestCase {
 
         let e = Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 36_000, dropped: 0, state: "presenting")
         XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(e), as: UTF8.self),
-                       #"{"dropped":0,"frames":36000,"kind":"externalDisplay","output":3,"state":"presenting"}"#)
+                       #"{"dropped":0,"frames":36000,"kind":"externalDisplay","output":3,"state":"presenting","undelivered":0}"#)   // 018 起多一个键
         XCTAssertEqual(try JSONDecoder().decode(Stats.DisplayEntry.self, from: Data(#"{"kind":"monitor","output":0}"#.utf8)),
                        Stats.DisplayEntry(output: 0, kind: "monitor"))
         XCTAssertEqual(Stats.DisplayEntry.kinds, ["externalDisplay", "virtualCamera", "multiviewWindow", "monitor"])

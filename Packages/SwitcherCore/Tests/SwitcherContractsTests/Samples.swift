@@ -95,7 +95,7 @@ enum Samples {
               audio: Stats.AudioCounters(dropouts: 0, underruns: 1, discontinuities: 2, meters: meters()),
               rssMb: 512.25, cpuPct: 12.5, gpuPct: 30,
               display: [Stats.DisplayEntry(output: 4, kind: "externalDisplay", frames: 36_000, dropped: 0, state: "presenting"),
-                        Stats.DisplayEntry(output: 5, kind: "virtualCamera", frames: 35_900, dropped: 4, state: "publishing"),
+                        Stats.DisplayEntry(output: 5, kind: "virtualCamera", frames: 35_900, dropped: 4, undelivered: 1_200, state: "publishing"),
                         Stats.DisplayEntry(output: 0, kind: "monitor", frames: 21_500, dropped: 1, state: "presenting")])
     }
 
