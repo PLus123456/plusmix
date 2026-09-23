@@ -44,7 +44,15 @@ XCTAssertEqual(external.auxView.presenter.signal, .live)
 - **主屏上不盖住主界面**（W3-C 报告 §3 第 5 条）：包里已有 `ExternalDisplayManager.mainScreenLayering`（`.front` 默认 = 现状，`.behindInterface` = 层级 normal − 1，
   只影响带菜单栏的那块屏）。偏好设置加一个开关写它即可（UserDefaults 键 App 自己定；不进 `OutputSettings.display`，prompt 65 要求是包内选项）。
 
-## 4. 顺手可以做的（不做也不红）
+## 4. 与 W3-E2（w3-app-3）合并时要对一下的一处文案
+
+W3-E2 的 `OutputStatusText.virtualCamera` 在 state = waitingExtension 时显示"找不到虚拟摄像头设备（扩展未安装 / 未激活）；已丢 %ld 帧"，帧数取 `Stats.display[]` 的 dropped。
+W3-C2 复核后 **dropped = "被扩展丢弃"（连上之后丢的）**，扩展没装时丢的帧不再进 Stats（仍在 `VirtualCameraOutput.countersSnapshot.droppedNoDevice`），
+所以合并后这句会一直是"已丢 0 帧"。两个分支的测试都不红（W3-E2 的 LocalizationTests 用的是自造的 entry、VirtualCameraAppTests 是拿同一行 Stats 对文案）。
+建议合并时把 waitingExtension 那句的帧数去掉（"找不到虚拟摄像头设备（扩展未安装 / 未激活）"），不要为了这句把没设备的帧加回 dropped。
+另外 W3-C2 起多了 state = "failed"（设备在但起不来），W3-E2 的 `default: display(e)` 已经能显示（"失败 · n 帧"），`aux.displayState.failed` 两种语言都有。
+
+## 5. 顺手可以做的（不做也不红）
 
 - **监视器 / 多画面窗口的 dropped 也按"被覆盖的版本"算**：现在 `MainWindowController.displayStatsEntries` 填的是 `skipCounters.noDrawable`（P3 的近似）。
   包里的 `DisplayFrameLedger`（公开）就是外部显示窗口用的记账源，夹在渲染器和任何 `MetalDisplayView` 之间都行：

@@ -90,3 +90,6 @@ release **中位 9.8 µs、p99 19.4 µs、最大 49.5 µs**（debug 11.4 / 20.8 
 7. **两块屏时 `NSScreen.main` 会跟着 key window 跑到外接屏**：本分支的 dropped 口径用例在全量里跑时"主屏"一度是 144 Hz 的 LG。要绑定内置屏用 `NSScreen.screens.first`。
 8. `ExternalDisplayWindow` 新增的公开面：`auxView`、`presentedFrames` / `droppedFrames`（Stats 用它们，别再直接读 `displayView.presentedFrames`）、`auxFrames`、`inputStateProvider`、`noSignalText`、`mainScreenLayering`；`Status` 的三个 case 没变（App 里的 switch 不受影响）。`VirtualCameraOutput.State` 的四个 case 也没变，"failed" 是从最近一次打开失败的原因推的。
 9. `swift build` 会在 `Packages/SwitcherOutputs/` 生成未跟踪的 `Package.resolved`，别提交（本会话每次都删了）。
+10. **与 W3-E2（w3-app-3，本会话收尾时已完成、未合并）的一处语义交叉**：W3-E2 的 `OutputStatusText.virtualCamera` 在 waitingExtension 时写"已丢 n 帧"、n 取 Stats 的 dropped；
+    本分支改了口径（扩展没装时丢的不进 dropped），合并后这句恒为 0。两边测试都不红，改文案即可（issue W3C2-app-aux-wiring §4）。
+    W3-E2 也改了 `AuxOutputRuntime` / `SwitcherSession` / `ExternalOutputAppTests`，Aux 接线的片段照样适用，放在它改过的 `SwitcherSession` 里建好 `aux` 之后。
