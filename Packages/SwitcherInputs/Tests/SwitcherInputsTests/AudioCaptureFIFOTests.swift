@@ -117,6 +117,41 @@ final class AudioCaptureFIFOTests: XCTestCase {
         XCTAssertEqual(blocks.first?.planes[0], (0..<frames).map { Float($0) + 0.5 })
     }
 
+    // MARK: 声道映射（提案 014）：短映射复制最后一项、越界钳住
+
+    func testIOProc_shortChannelMapRepeatsLastEntry_outOfRangeIsClamped() {
+        let frames = 4
+        let device = FakeDeviceBuffer(bufferChannelCounts: [8], frames: frames, bytesPerSample: 4)
+        let samples = device.data(0).assumingMemoryBound(to: Float.self)
+        for i in 0..<frames { for c in 0..<8 { samples[i * 8 + c] = Float(c) } }
+        // [4] = 单声道话筒插在第 5 路：两个声道都取它
+        let mono = AudioCaptureBuffer(channels: 2, deviceChannels: 8, channelMap: [4], bufferChannelCounts: [8],
+                                      sampleFormat: .float32, sampleRate: 48000, slotFrames: 64, slotCount: 4)
+        fire(mono, device, hostTime: 1)
+        let monoBlock = drain(mono).first
+        XCTAssertEqual(monoBlock?.planes[0], [Float](repeating: 4, count: frames))
+        XCTAssertEqual(monoBlock?.planes[1], [Float](repeating: 4, count: frames))
+        // 越界的下标钳到设备范围里：[20, -1] → [7, 0]
+        let clamped = AudioCaptureBuffer(channels: 2, deviceChannels: 8, channelMap: [20, -1], bufferChannelCounts: [8],
+                                         sampleFormat: .float32, sampleRate: 48000, slotFrames: 64, slotCount: 4)
+        fire(clamped, device, hostTime: 1)
+        let clampedBlock = drain(clamped).first
+        XCTAssertEqual(clampedBlock?.planes[0], [Float](repeating: 7, count: frames))
+        XCTAssertEqual(clampedBlock?.planes[1], [Float](repeating: 0, count: frames))
+        // 设备是非交错的两个 buffer（每个 4 路）：第 5 路在第二个 buffer 的第 1 路
+        let split = FakeDeviceBuffer(bufferChannelCounts: [4, 4], frames: frames, bytesPerSample: 4)
+        for b in 0..<2 {
+            let p = split.data(b).assumingMemoryBound(to: Float.self)
+            for i in 0..<frames { for c in 0..<4 { p[i * 4 + c] = Float(b * 4 + c) } }
+        }
+        let fromSecondBuffer = AudioCaptureBuffer(channels: 2, deviceChannels: 8, channelMap: [5, 2], bufferChannelCounts: [4, 4],
+                                                  sampleFormat: .float32, sampleRate: 48000, slotFrames: 64, slotCount: 4)
+        fire(fromSecondBuffer, split, hostTime: 1)
+        let splitBlock = drain(fromSecondBuffer).first
+        XCTAssertEqual(splitBlock?.planes[0], [Float](repeating: 5, count: frames))
+        XCTAssertEqual(splitBlock?.planes[1], [Float](repeating: 2, count: frames))
+    }
+
     // MARK: int16 / int32 归一化
 
     func testIOProc_int16AndInt32AreNormalized() {

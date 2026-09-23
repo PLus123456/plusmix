@@ -33,8 +33,9 @@ public final class AudioDeviceInput: Input, HotplugMonitorable, @unchecked Senda
         public var forceSampleRate48k = true
         /// 上一条没成时，在泵线程上用 AudioConverter 转成 48 kHz；关掉的话直接 noSignal + "设备不支持 48 kHz"。
         public var convertSampleRate = true
-        /// 目标声道取设备的哪几路（设备声道下标，长度应 = 环的声道数）。nil = 取前几路；
-        /// 设备是单声道就复制到所有声道，设备声道比环少就复制最后一路（与 `LPCM` 同一口径）。
+        /// 声道映射（设备声道下标；口径见 `InputChannelMap` / 契约 `InputSource` 的"声道映射"）。
+        /// nil = 从 `InputSource.audio(deviceUID:channels:)` 取（提案 014 已落地；case 里也是空 = 取前几路）；
+        /// 非 nil = 调用方显式给了，覆盖 case 里的值（与 DeckLink 的 `connection` 同一口径，提案 008）。
         public var channelMap: [Int]?
         /// 交接区槽数（2 的幂）。16 槽 × 一块 ≈ 170 ms，够泵线程被调度晚的余量。
         public var slotCount = 16
@@ -182,10 +183,12 @@ public final class AudioDeviceInput: Input, HotplugMonitorable, @unchecked Senda
 
     deinit { trace?.deallocate() }
 
-    /// 从 `InputSource.audio(deviceUID:)` 构造。
+    /// 从 `InputSource.audio(deviceUID:channels:)` 构造。声道映射从 case 取；`options.channelMap` 非 nil 时以它为准。
     public convenience init(config: InputConfig, audioRing: any AudioRing, options: Options = Options()) throws {
-        guard case .audio(let uid) = config.source else { throw AudioDeviceInputError.notAnAudioSource(config.source.kind) }
-        self.init(number: config.number, name: config.name, deviceUID: uid, audioRing: audioRing, options: options)
+        guard case .audio(let uid, let channels) = config.source else { throw AudioDeviceInputError.notAnAudioSource(config.source.kind) }
+        var o = options
+        if o.channelMap == nil { o.channelMap = channels }
+        self.init(number: config.number, name: config.name, deviceUID: uid, audioRing: audioRing, options: o)
     }
 
     public enum AudioDeviceInputError: Error, CustomStringConvertible {
@@ -332,7 +335,7 @@ public final class AudioDeviceInput: Input, HotplugMonitorable, @unchecked Senda
         // ---- 交接区 ----
         let deviceChannels = info.inputChannels
         let slotFrames = Self.slotFrames(for: info, options: options)
-        let map = options.channelMap ?? Array(0..<ring.channelCount)
+        let map = options.channelMap ?? []
         let buffer = AudioCaptureBuffer(channels: ring.channelCount, deviceChannels: deviceChannels, channelMap: map,
                                         bufferChannelCounts: AudioInputDevices.inputBufferChannelCounts(device),
                                         sampleFormat: sampleFormat, sampleRate: rate,

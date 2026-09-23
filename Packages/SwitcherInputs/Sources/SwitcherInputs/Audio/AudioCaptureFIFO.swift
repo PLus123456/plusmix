@@ -124,7 +124,7 @@ final class AudioCaptureBuffer: @unchecked Sendable {
     let slotCount: Int
 
     /// - Parameters:
-    ///   - channelMap: 目标声道 d 取设备的哪一路（长度 = channels，值是设备声道下标）。
+    ///   - channelMap: 声道映射（设备声道下标；空 = 取前几路），口径见 `InputChannelMap` / 契约 `InputSource` 的"声道映射"。
     ///   - bufferChannelCounts: 设备输入 AudioBufferList 里每个 buffer 的声道数（交错设备是 [N]，非交错是 [1, 1, …]）。
     init(channels: Int, deviceChannels: Int, channelMap: [Int], bufferChannelCounts: [Int],
          sampleFormat: AudioCaptureFIFO.SampleFormat, sampleRate: Double, slotFrames: Int, slotCount: Int) {
@@ -140,8 +140,7 @@ final class AudioCaptureBuffer: @unchecked Sendable {
         let srcChannel = UnsafeMutablePointer<Int32>.allocate(capacity: channels)
         // 设备声道号 → (第几个 buffer, buffer 内第几路)
         for d in 0..<channels {
-            let wanted = d < channelMap.count ? channelMap[d] : max(deviceChannels - 1, 0)
-            var remaining = min(max(wanted, 0), max(deviceChannels - 1, 0))
+            var remaining = InputChannelMap.sourceChannel(forDestination: d, map: channelMap, sourceChannels: deviceChannels)
             var bufferIndex = -1
             var inBuffer = 0
             for (i, n) in bufferChannelCounts.enumerated() {
