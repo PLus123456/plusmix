@@ -82,6 +82,41 @@ final class MixerPanelTests: XCTestCase {
         XCTAssertEqual(a.dropouts, 0)
     }
 
+    /// 每路 AFV（用户 2026-09-22 批，P3 落地 InputAudioSettings.afv；W3-E2 交付第 6 条）：条子上"跟随视频"开关（默认开）走 setInputSettings；
+    /// 关掉某路后 PGM 切走，AudioEngineStatus 里该路 afvGain 仍为 1（看数，不听声）；跟随视频的路不在 PGM 就是 0。全局 AFV 开关不变。
+    /// 条子上的门控显示读同一份 afvGain（dB）：afv = false 的路恒为 0 dB。
+    func testMixer_perInputAFVToggle_gateStaysUnityAfterProgramCutsAway() throws {
+        let session = try AppTest.freshSession()
+        for n in 1...3 { session.send(.addInput(config: AppTest.syntheticConfig(number: n, audio: true))) }
+        session.send(.setProgram(input: 1))
+        session.send(.setPreview(input: 2))
+        XCTAssertTrue(AppTest.waitUntil(8) { (1...3).allSatisfy { session.inputs.runtimeState(of: $0) == .live } && session.audio.registeredInputs == [1, 2, 3] },
+                      "三路带音频的合成源应 live 并注册：\(session.audio.registeredInputs)")
+        let panel = AppTest.controller.windowController.mixerPanel
+        XCTAssertTrue(AppTest.waitUntil(2) { panel.model.state.inputs.count == 3 })
+        XCTAssertTrue(session.state.inputs.allSatisfy { $0.settings.audio.afv }, "默认跟随视频")
+        panel.model.setAFV(on: true)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.audio.status.afv }, "全局 AFV 开")
+
+        panel.model.setInputAFV(1, on: false)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.input(1)?.settings.audio.afv == false }, "条子开关 → setInputSettings")
+        XCTAssertTrue(session.state.audio.afv, "全局开关不变")
+        session.send(.cut)   // PGM 1 → 2
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.program == 2 })
+        func gain(_ n: Int) -> Float? { session.audio.status.inputs.first { $0.number == n && !$0.removing }?.afvGain }
+        XCTAssertTrue(AppTest.waitUntil(4) { gain(3) == 0 && gain(2) == 1 }, "跟随视频的 3 号不在 PGM 应被门控到 0、PGM 上的 2 号为 1：\(String(describing: gain(3))) / \(String(describing: gain(2)))")
+        XCTAssertEqual(gain(1), 1, "1 号不跟随视频：PGM 切走后门控仍为 1")
+        XCTAssertTrue(AppTest.waitUntil(2) { panel.meters.afvGain[1] == 1 && panel.meters.afvGain[3] == 0 }, "条子读同一份 AudioEngineStatus：\(panel.meters.afvGain)")
+        XCTAssertEqual(MixerModel.afvGateText(globalAFV: true, gain: panel.meters.afvGain[1]), "AFV 0 dB")
+        XCTAssertEqual(MixerModel.afvGateText(globalAFV: true, gain: panel.meters.afvGain[3]), "AFV −∞ dB")
+        XCTAssertEqual(MixerModel.afvGateText(globalAFV: false, gain: 1), "AFV 关")
+
+        // 再打开：1 号不在 PGM → 门控回到 0
+        panel.model.setInputAFV(1, on: true)
+        XCTAssertTrue(AppTest.waitUntil(4) { gain(1) == 0 }, "1 号重新跟随视频、不在 PGM → 0：\(String(describing: gain(1)))")
+        XCTAssertEqual(session.control.bus.counters.rejected, 0)
+    }
+
     /// 效果参数的键名与 SwitcherAudio.BusEffectChain 的 setter 一一对应（W1-D 接线时照这个读）。
     func testMixer_effectParamsSchema() {
         let eq = AudioEffectParams.parametricEQ(centerHz: 1000, q: 1.5, gainDb: -3)

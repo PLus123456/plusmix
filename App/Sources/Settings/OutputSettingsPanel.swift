@@ -1,42 +1,74 @@
 // 输出设置窗（W3-E 交付第 3 条）：录制（格式、码率、关键帧间隔、目录、停止后转 MP4）、ISO 路选择、推流目的地列表
-// （RTMP / RTMPS / SRT、地址、密钥、每路编码参数）、外部输出、NDI 发送、虚拟摄像头开关与安装状态。
-// 全部落在 MixerState.outputs（addOutput / removeOutput / setOutputSettings）；ISO = 一路 source = .input(n) 的录制输出
-// （契约："ISO = 同一拍发多条 startRecord"；W3-C 做同拍起步）。契约没有"改名 / 改 enabled"的命令，改这两项 = 删掉再加回同编号（提案 012）。
+// （RTMP / RTMPS / SRT、地址、密钥、每路编码参数）、外部输出、NDI 发送、虚拟摄像头开关与安装状态、多画面布局（W3-E2）。
+// 全部落在 MixerState.outputs（addOutput / removeOutput / setOutputSettings；非录制 / 推流输出的开关与改名走提案 012 的
+// setOutputEnabled / renameOutput）；ISO = 一路 source = .input(n) 的录制输出（契约："ISO = 同一拍发多条 startRecord"；W3-C 做同拍起步）。
+// 外部显示的显示器与"退回主屏"只写正式字段 OutputSettings.display（提案 013 / 015），显示类输出的状态读 Stats.display[]。
 import AppKit
 import SwiftUI
 import SwitcherContracts
+import SwitcherRender
+import SwitcherVirtualCamera
 
 @MainActor
 final class OutputSettingsModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case record, iso, stream, external, ndi, virtualCamera
+        case record, iso, stream, external, ndi, virtualCamera, multiview
         var id: String { rawValue }
         var title: String { L("outputSettings.tab.\(rawValue)") }
     }
 
     @Published var tab: Tab
     @Published private(set) var state: MixerState
+    /// 虚拟摄像头扩展的安装状态（W3-C 的 SystemExtensionInstaller，与输出菜单同一个对象）。
     @Published private(set) var virtualCameraStatus: String = ""
+    /// 最近一行 Stats 的 display[]（提案 013：外部显示 / 虚拟摄像头的状态与帧数都读它）。
+    @Published private(set) var displayStats: [Stats.DisplayEntry] = []
     var send: ((Command) -> Void)?
     /// 新建录制输出的默认目录。
     let defaultRecordDirectory: String
     /// 节目名（示例文件名用）。
     var showName: String
-    private let virtualCamera = VirtualCameraSupport()
+    /// 虚拟摄像头扩展的安装器：App 里只有 session 的那一个（AuxOutputRuntime.installer）；没有 session 为 nil。
+    private let installer: SystemExtensionInstaller?
+    private var extensionToken: ObserverToken?
     /// 测试宿主不去问系统扩展（没有扩展包，只会报错）。
     let queriesSystemExtensions: Bool
+    /// ISO 页估算"还能录多久"时留出的磁盘余量（= 录制的下限，AppSettings.recordMinimumFreeMB）。
+    let reserveBytes: UInt64
 
-    init(state: MixerState, tab: Tab, defaultRecordDirectory: String, showName: String, queriesSystemExtensions: Bool) {
+    init(state: MixerState, tab: Tab, defaultRecordDirectory: String, showName: String, queriesSystemExtensions: Bool, reserveBytes: UInt64 = 0,
+         aux: AuxOutputRuntime? = nil) {
         self.state = state
         self.tab = tab
         self.defaultRecordDirectory = defaultRecordDirectory
         self.showName = showName
         self.queriesSystemExtensions = queriesSystemExtensions
-        virtualCameraStatus = virtualCamera.status.text
-        virtualCamera.onChange = { [weak self] s in self?.virtualCameraStatus = s.text }
+        self.reserveBytes = reserveBytes
+        installer = aux?.installer
+        virtualCameraStatus = OutputStatusText.extensionStatus(installer?.status ?? .unknown)
+        extensionToken = aux?.observeExtensionStatus { [weak self] s in self?.virtualCameraStatus = OutputStatusText.extensionStatus(s) }
     }
 
     func apply(state: MixerState) { self.state = state }
+
+    func apply(stats: Stats) {
+        if stats.display != displayStats { displayStats = stats.display }
+    }
+
+    /// 扩展的 bundle ID（安装器用的那个）。
+    var extensionIdentifier: String { installer?.extensionIdentifier ?? VirtualCameraConstants.extensionBundleIdentifier }
+
+    /// 某个显示类输出在 Stats.display[] 里的一行（没有为 nil）。
+    func displayStatus(output number: Int, kind: String) -> String? {
+        displayStats.first { $0.output == number && $0.kind == kind }.map(OutputStatusText.display)
+    }
+
+    /// 虚拟摄像头输出的一行（Stats.display[]）。
+    var virtualCameraOutputStatus: String {
+        let output = state.outputs.first { $0.kind == .virtualCamera && $0.enabled }
+        let entry = output.flatMap { o in displayStats.first { $0.kind == "virtualCamera" && $0.output == o.number } }
+        return OutputStatusText.virtualCamera(enabled: output != nil, entry: entry)
+    }
 
     static let videoCodecs: [VideoCodec] = [.h264, .hevc, .prores422, .prores422HQ, .prores4444]
     static let audioCodecs: [AudioCodec] = [.aac, .pcm]
@@ -48,7 +80,7 @@ final class OutputSettingsModel: ObservableObject {
     func nextOutputNumber() -> Int { (state.outputs.map(\.number).max() ?? 0) + 1 }
 
     /// 改开关（提案 012 的 setOutputEnabled）：本地先改，再发命令。record / stream 走 startRecord / startStream，被 reducer 拒。
-    private func setEnabled(_ number: Int, _ on: Bool) {
+    func setOutputEnabled(_ number: Int, on: Bool) {
         guard let i = state.outputs.firstIndex(where: { $0.number == number }), state.outputs[i].enabled != on else { return }
         state.outputs[i].enabled = on
         send?(.setOutputEnabled(output: number, on: on))
@@ -115,7 +147,7 @@ final class OutputSettingsModel: ObservableObject {
         return record.outputURL(showName: showName, outputName: r.name).lastPathComponent
     }
 
-    // MARK: ISO
+    // MARK: ISO（ISO 只有这一个入口：底栏"ISO…"打开的就是这一页，W3-E2 交付第 4 条）
 
     /// 已选 ISO 的输入编号。
     var isoInputs: Set<Int> {
@@ -125,17 +157,31 @@ final class OutputSettingsModel: ObservableObject {
         })
     }
 
+    /// 开 = 按 W3-C 的 ISORoutes 加一路（编码 / 目录抄 PGM 录制输出，文件名模板带 {output}）；关 = 删。录着的路锁住，不在这里删。
     func setISO(input: Int, on: Bool) {
-        let existing = state.outputs.first { $0.kind == .record && $0.settings.source == .input(number: input) }
+        let existing = ISORoutes.isoRecord(in: state, input: input)
         if on {
-            guard existing == nil else { return }
-            let base = recordOutput?.settings
-            let settings = OutputSettings(source: .input(number: input), video: base?.video ?? VideoEncodeSettings(), audio: base?.audio ?? AudioEncodeSettings(),
-                                          record: base?.record ?? RecordSettings(directory: defaultRecordDirectory))
-            add(OutputState(number: nextOutputNumber(), kind: .record, name: L("outputSettings.iso.name", input), enabled: false, settings: settings))
-        } else if let existing {
+            guard existing == nil, let config = state.input(input) else { return }
+            var output = ISORoutes.makeISOOutput(for: config, in: state, defaultDirectory: defaultRecordDirectory)
+            output.number = nextOutputNumber()
+            add(output)
+        } else if let existing, !existing.enabled {
             removeOutput(existing.number)
         }
+    }
+
+    /// 这路的 ISO 正在录（开关锁住）。
+    func isoLocked(input: Int) -> Bool { ISORoutes.isoRecord(in: state, input: input)?.enabled ?? false }
+
+    /// 开关旁的说明："→ ISO 3（录制中）"。
+    func isoRouteText(input: Int) -> String {
+        guard let iso = ISORoutes.isoRecord(in: state, input: input) else { return "" }
+        return iso.enabled ? L("outputSettings.iso.routeRecording", iso.name) : L("outputSettings.iso.route", iso.name)
+    }
+
+    /// 录制目录、剩余空间、按全部录制输出码率估的"还能录多久"。
+    var isoEstimateText: String {
+        ISORoutes.estimateText(state: state, defaultDirectory: defaultRecordDirectory, reserveBytes: reserveBytes)
     }
 
     // MARK: 推流
@@ -162,15 +208,17 @@ final class OutputSettingsModel: ObservableObject {
     func addExternalDisplay(screenNumber: UInt32, source: OutputSource) -> Int {
         let n = nextOutputNumber()
         let screenName = NSScreen.screen(number: screenNumber)?.localizedName ?? "\(screenNumber)"
+        // fallbackToMain 用默认（提案 015 起默认 false = 显示器不在就收起窗口等它回来）；要退回主屏在页上打开
         add(OutputState(number: n, kind: .externalDisplay, name: L("outputSettings.external.name", screenName), enabled: true,
-                        // fallbackToMain 显式写 false：保持 G4 的行为（显示器不在就收起窗口等它回来）。
-                        // 契约的默认是 true，面板上的开关归 W3-E2。
-                        settings: OutputSettings(source: source, display: DisplayOutputSettings(displayID: screenNumber, fallbackToMain: false))))
+                        settings: OutputSettings(source: source, display: DisplayOutputSettings(displayID: screenNumber))))
         return n
     }
 
+    /// 改显示器 / 来源：只写正式字段 `OutputSettings.display`（提案 013）。没经过 Show.load 的内存状态（API 直接 addOutput 的老写法）
+    /// 可能还带过渡键 extra["displayID"] / ["fallbackToMain"]：先按 Show.load 同一套规则搬进正式字段、清掉旧键，再改。
     func setExternalDisplay(_ number: Int, screenNumber: UInt32?, source: OutputSource?) {
         updateOutput(number) { s in
+            s = s.migratingLegacyKeys()
             if let screenNumber {
                 var d = s.display ?? DisplayOutputSettings()
                 d.displayID = screenNumber
@@ -178,6 +226,23 @@ final class OutputSettingsModel: ObservableObject {
             }
             if let source { s.source = source }
         }
+    }
+
+    /// 显示器不在时退回主屏（true）还是黑着等它回来（false，默认）。
+    func setExternalFallback(_ number: Int, on: Bool) {
+        updateOutput(number) { s in
+            s = s.migratingLegacyKeys()
+            var d = s.display ?? DisplayOutputSettings()
+            d.fallbackToMain = on
+            s.display = d
+        }
+    }
+
+    /// 显示器下拉的选项：接着的每块屏 + 当前设的那块（拔掉了也列出来，免得选中项凭空消失）。
+    func screenChoices(including current: UInt32?) -> [(id: UInt32, title: String)] {
+        var out = NSScreen.screens.compactMap { s in s.displayNumber.map { (id: $0, title: s.displayTitle) } }
+        if let current, !out.contains(where: { $0.id == current }) { out.append((current, L("outputSettings.external.missingScreen", current))) }
+        return out
     }
 
     // MARK: NDI 发送
@@ -208,7 +273,7 @@ final class OutputSettingsModel: ObservableObject {
     func setVirtualCamera(enabled: Bool, source: OutputSource) {
         if let o = virtualCameraOutput {
             if o.settings.source != source { updateOutput(o.number) { $0.source = source } }
-            setEnabled(o.number, enabled)
+            setOutputEnabled(o.number, on: enabled)
         } else {
             add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: source)))
         }
@@ -216,19 +281,54 @@ final class OutputSettingsModel: ObservableObject {
 
     func refreshVirtualCameraStatus() {
         guard queriesSystemExtensions else { virtualCameraStatus = L("vcam.status.unavailableInTests"); return }
-        virtualCamera.refresh()
+        installer?.refresh()
     }
     func installVirtualCamera() {
         guard queriesSystemExtensions else { return }
-        virtualCamera.install()
+        installer?.activate()
     }
     func uninstallVirtualCamera() {
         guard queriesSystemExtensions else { return }
-        virtualCamera.uninstall()
+        installer?.deactivate()
     }
 
     /// 输出来源选项：PGM / PVW / 多画面 / 每路输入。
     var sourceChoices: [OutputSource] { [.program, .preview, .multiview] + state.inputs.map { .input(number: $0.number) } }
+
+    // MARK: 多画面布局（提案 010：OutputSettings.multiview）
+
+    /// 承载布局的输出：渲染器取第一个 kind = multiview 的输出的布局（不看 enabled）。
+    var multiviewOutput: OutputState? { state.outputs.first { $0.kind == .multiview } }
+
+    /// 当前布局（没有多画面输出 = 默认布局）。
+    var multiviewLayout: MultiviewLayoutSettings { multiviewOutput?.settings.multiview ?? MultiviewLayoutSettings() }
+
+    /// 改布局：有多画面输出就改它的 settings.multiview（setOutputSettings），没有就加一个只承载布局的——source = multiview、enabled = false
+    /// （enabled 且 source = multiview 会让渲染器每拍多转一次 NV12 给下游，App 里没有这个下游；布局本身不看 enabled）。
+    func updateMultiview(_ body: (inout MultiviewLayoutSettings) -> Void) {
+        var layout = multiviewLayout
+        body(&layout)
+        if let o = multiviewOutput {
+            updateOutput(o.number) { $0.multiview = layout }
+        } else {
+            add(OutputState(number: nextOutputNumber(), kind: .multiview, name: L("outputSettings.multiview.name"), enabled: false,
+                            settings: OutputSettings(source: .multiview, multiview: layout)))
+        }
+    }
+
+    func setMultiviewPreset(_ preset: String) { updateMultiview { $0.preset = preset } }
+    func setMultiviewSafeArea(_ on: Bool) { updateMultiview { $0.safeArea = on } }
+    func setMultiviewMeters(_ on: Bool) { updateMultiview { $0.meters = on } }
+    /// 清掉自定义格子（回到预设）。格子本身不在这里编辑（prompt 63：只读展示，不做编辑器）。
+    func clearMultiviewCustomCells() { updateMultiview { $0.custom = [] } }
+
+    /// 自定义格子的只读列表：来源 + 位置。
+    var customCellRows: [(source: String, rect: String)] {
+        multiviewLayout.custom.map { c in
+            let r = c.rect
+            return (c.source.title(in: state), String(format: "x %.3f  y %.3f  w %.3f  h %.3f", r.x, r.y, r.width, r.height))
+        }
+    }
 }
 
 struct OutputSettingsView: View {
@@ -263,6 +363,29 @@ struct OutputSettingsView: View {
         case .external: externalTab
         case .ndi: ndiTab
         case .virtualCamera: virtualCameraTab
+        case .multiview: multiviewTab
+        }
+    }
+
+    // MARK: 多画面布局
+
+    private var multiviewTab: some View {
+        let layout = model.multiviewLayout
+        return Section(L("outputSettings.multiview.title")) {
+            Picker(L("outputSettings.multiview.preset"), selection: Binding(get: { layout.preset }, set: { model.setMultiviewPreset($0) })) {
+                ForEach(MultiviewLayout.presetNames, id: \.self) { Text(L("outputSettings.multiview.preset.\($0)")).tag($0) }
+            }
+            .disabled(!layout.custom.isEmpty)
+            Toggle(L("outputSettings.multiview.safeArea"), isOn: Binding(get: { layout.safeArea }, set: { model.setMultiviewSafeArea($0) }))
+            Toggle(L("outputSettings.multiview.meters"), isOn: Binding(get: { layout.meters }, set: { model.setMultiviewMeters($0) }))
+            if !layout.custom.isEmpty {
+                Text(L("outputSettings.multiview.customActive", layout.custom.count)).font(.caption).foregroundStyle(.secondary)
+                ForEach(Array(model.customCellRows.enumerated()), id: \.offset) { _, row in
+                    LabeledContent(row.source, value: row.rect)
+                }
+                Button(L("outputSettings.multiview.clearCustom")) { model.clearMultiviewCustomCells() }
+            }
+            Text(L("outputSettings.multiview.hint")).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -368,10 +491,15 @@ struct OutputSettingsView: View {
         Section(L("outputSettings.iso.title")) {
             Text(L("outputSettings.iso.hint")).font(.caption).foregroundStyle(.secondary)
             ForEach(model.state.inputs) { input in
-                Toggle(L("outputSettings.iso.input", input.number, input.name), isOn: Binding(get: { model.isoInputs.contains(input.number) },
-                                                                                                set: { model.setISO(input: input.number, on: $0) }))
+                HStack {
+                    Toggle(L("outputSettings.iso.input", input.number, input.name), isOn: Binding(get: { model.isoInputs.contains(input.number) },
+                                                                                                    set: { model.setISO(input: input.number, on: $0) }))
+                        .disabled(model.isoLocked(input: input.number))
+                    Text(model.isoRouteText(input: input.number)).font(.caption).foregroundStyle(.secondary)
+                }
             }
             if model.state.inputs.isEmpty { Text(L("outputSettings.iso.noInputs")).foregroundStyle(.secondary) }
+            Text(model.isoEstimateText).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -418,8 +546,14 @@ struct OutputSettingsView: View {
         Group {
             ForEach(model.externalOutputs) { output in
                 Section(L("outputSettings.external.section", output.number, output.name)) {
-                    screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }))
+                    Toggle(L("outputSettings.external.enabled"), isOn: Binding(get: { output.enabled }, set: { model.setOutputEnabled(output.number, on: $0) }))
+                    screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }),
+                                 current: OutputExtras.displayNumber(of: output))
                     sourcePicker(Binding(get: { output.settings.source }, set: { model.setExternalDisplay(output.number, screenNumber: nil, source: $0) }))
+                    Toggle(L("outputSettings.external.fallbackToMain"), isOn: Binding(get: { output.settings.display?.fallbackToMain ?? false },
+                                                                                       set: { model.setExternalFallback(output.number, on: $0) }))
+                        .help(L("outputSettings.external.fallbackHelp"))
+                    LabeledContent(L("outputSettings.external.status"), value: model.displayStatus(output: output.number, kind: "externalDisplay") ?? "—")
                     Button(L("outputSettings.external.close")) { model.removeOutput(output.number) }
                 }
             }
@@ -432,9 +566,9 @@ struct OutputSettingsView: View {
         }
     }
 
-    private func screenPicker(_ b: Binding<UInt32>) -> some View {
+    private func screenPicker(_ b: Binding<UInt32>, current: UInt32? = nil) -> some View {
         Picker(L("outputSettings.external.screen"), selection: b) {
-            ForEach(NSScreen.screens, id: \.displayNumber) { s in Text(s.displayTitle).tag(s.displayNumber ?? 0) }
+            ForEach(model.screenChoices(including: current), id: \.id) { c in Text(c.title).tag(c.id) }
         }
     }
 
@@ -477,13 +611,14 @@ struct OutputSettingsView: View {
                                                                    set: { model.setVirtualCamera(enabled: $0, source: model.virtualCameraOutput?.settings.source ?? .program) }))
             sourcePicker(Binding(get: { model.virtualCameraOutput?.settings.source ?? .program },
                                  set: { model.setVirtualCamera(enabled: model.virtualCameraOutput?.enabled ?? false, source: $0) }))
+            LabeledContent(L("outputSettings.vcam.outputStatus"), value: model.virtualCameraOutputStatus)
             LabeledContent(L("outputSettings.vcam.status"), value: model.virtualCameraStatus)
             HStack {
                 Button(L("outputSettings.vcam.check")) { model.refreshVirtualCameraStatus() }
                 Button(L("outputSettings.vcam.install")) { model.installVirtualCamera() }
                 Button(L("outputSettings.vcam.uninstall")) { model.uninstallVirtualCamera() }
             }
-            LabeledContent(L("outputSettings.vcam.bundleID"), value: VirtualCameraSupport.extensionBundleID)
+            LabeledContent(L("outputSettings.vcam.bundleID"), value: model.extensionIdentifier)
             Text(L("outputSettings.vcam.hint")).font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { if model.queriesSystemExtensions { model.refreshVirtualCameraStatus() } }

@@ -63,3 +63,66 @@ final class MultiviewLayoutTests: XCTestCase {
         abs(a.0 - b.0) <= tolerance && abs(a.1 - b.1) <= tolerance && abs(a.2 - b.2) <= tolerance
     }
 }
+
+/// W3-E2 / 提案 010：输出设置 › 多画面页读写 `OutputSettings.multiview`（预设 + safeArea / meters；自定义格子只读展示）；
+/// 缩略图按当前布局切多画面纹理（换预设后跟着换位置），布局里没有的输入显示占位文案。
+@MainActor
+final class MultiviewSettingsTests: XCTestCase {
+    func testMultiviewSettings_presetFlagsCustomReadOnly_thumbnailsFollowLayout() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let wc = AppTest.controller.windowController
+        let page = AppTest.controller.panels.showOutputSettings(tab: .multiview).model
+        XCTAssertNil(page.multiviewOutput, "空节目没有多画面输出")
+        XCTAssertEqual(page.multiviewLayout, MultiviewLayoutSettings(), "没有就显示默认布局")
+        XCTAssertEqual(wc.inputStrip.cells[1]?.display.sourceRect, MultiviewLayout.inputCell(index: 0, inputCount: 2, width: 1920, height: 1080))
+
+        page.setMultiviewPreset("3x3")
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .multiview }?.settings.multiview?.preset == "3x3" }, "\(session.state.outputs)")
+        let mv = try XCTUnwrap(session.state.outputs.first { $0.kind == .multiview })
+        XCTAssertEqual(mv.settings.source, .multiview)
+        XCTAssertFalse(mv.enabled, "只承载布局：enabled + source = multiview 会让渲染器每拍多转一次 NV12，App 里没有下游")
+        page.setMultiviewSafeArea(true)
+        page.setMultiviewMeters(true)
+        let wanted = MultiviewLayoutSettings(preset: "3x3", safeArea: true, meters: true)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(mv.number)?.settings.multiview == wanted }, "\(String(describing: session.state.output(mv.number)?.settings.multiview))")
+        XCTAssertTrue(session.state.output(mv.number)?.settings.extra.isEmpty ?? false, "只写正式字段，不写 extra[\"layout\"]")
+
+        // 缩略图跟着布局
+        let placements = MultiviewLayout.placements(settings: wanted, inputs: [1, 2], width: 1920, height: 1080)
+        let rect1 = try XCTUnwrap(placements.first { $0.source == .input(number: 1) }?.inner)
+        XCTAssertNotEqual(rect1, MultiviewLayout.inputCell(index: 0, inputCount: 2, width: 1920, height: 1080), "3×3 与默认布局的格子不同（否则测不出东西）")
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[1]?.display.sourceRect == rect1 }, "缩略图应按 3×3 切：\(String(describing: wc.inputStrip.cells[1]?.display.sourceRect))")
+
+        // 自定义格子（节目文件 / API 给的）：页上只读列出，预设不起作用；布局里没有 2 号 → 2 号缩略图显示占位文案
+        var settings = try XCTUnwrap(session.state.output(mv.number)?.settings)
+        settings.multiview?.custom = [MultiviewCell(source: .program, rect: NormalizedRect(x: 0, y: 0, width: 0.5, height: 0.5)),
+                                      MultiviewCell(source: .input(number: 1), rect: NormalizedRect(x: 0.5, y: 0, width: 0.5, height: 0.5))]
+        session.send(.setOutputSettings(output: mv.number, settings: settings))
+        XCTAssertTrue(AppTest.waitUntil(2) { page.multiviewLayout.custom.count == 2 })
+        XCTAssertEqual(page.customCellRows.count, 2)
+        XCTAssertTrue(page.customCellRows[0].source.contains("PGM"), page.customCellRows[0].source)
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.isOutsideMultiviewLayout == true }, "2 号不在自定义布局里")
+        XCTAssertEqual(wc.inputStrip.cells[2]?.displayedStatus, "不在多画面布局里")
+        XCTAssertEqual(wc.inputStrip.cells[1]?.isOutsideMultiviewLayout, false)
+        page.clearMultiviewCustomCells()
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(mv.number)?.settings.multiview?.custom.isEmpty == true && wc.inputStrip.cells[2]?.isOutsideMultiviewLayout == false })
+        AppTest.controller.panels.closeAll()
+    }
+
+    /// 没经过 Show.load 的内存状态（API 直接 addOutput 一个带过渡键 extra["layout"] 的多画面输出）：渲染器还认过渡键（P3 留一个版本的后备），
+    /// 缩略图同一个顺序——正式字段优先，没有才读过渡键——否则两边切的格子对不上。
+    func testThumbnails_followLegacyLayoutKeyLikeRenderer() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let wc = AppTest.controller.windowController
+        let number = (session.state.outputs.map(\.number).max() ?? 0) + 1
+        session.send(.addOutput(config: OutputState(number: number, kind: .multiview, name: "legacy", enabled: false,
+                                                    settings: OutputSettings(source: .multiview, extra: ["layout": .string("3x3")]))))
+        let expected = MultiviewLayout.placements(layout: .string("3x3"), inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) }?.inner
+        XCTAssertNotNil(expected)
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == expected }, "\(String(describing: wc.inputStrip.cells[2]?.display.sourceRect))")
+        session.send(.removeOutput(output: number))
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080) })
+    }
+}

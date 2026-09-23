@@ -117,12 +117,35 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         applySearch()
     }
 
-    /// 输入数量变了格子网格会变（4×2 → 6×3），全部重算。
+    /// 缩略图 = 多画面纹理里这一路的格子：按当前布局算（提案 010 的 OutputSettings.multiview；没有 = 默认布局，4×2 → 6×3 随路数变）。
+    /// 布局或路数变了才重算（快照每拍都可能变，布局很少变）。布局里没有的路（自定义格子没放它）缩略图画不出来，格子上说明。
     private func relayoutThumbnails() {
-        let count = lastState.inputs.count
-        for (i, config) in lastState.inputs.enumerated() {
-            cells[config.number]?.setThumbnail(index: i, inputCount: count, textureWidth: textureSize.width, textureHeight: textureSize.height)
+        // 与渲染器同一个顺序：正式字段优先，没有才读过渡键 extra["layout"]（没经过 Show.load 的内存状态，P3 保留一个版本的后备）
+        let settings = MultiviewLayout.layoutSettings(in: lastState)
+        let key = ThumbnailLayoutKey(layout: settings, legacy: settings == nil ? MultiviewLayout.layoutValue(in: lastState) : nil,
+                                     inputs: lastState.inputs.map(\.number), width: textureSize.width, height: textureSize.height)
+        guard key != thumbnailLayoutKey else { return }
+        thumbnailLayoutKey = key
+        let placements = key.layout == nil && key.legacy != nil
+            ? MultiviewLayout.placements(layout: key.legacy, inputs: key.inputs, width: key.width, height: key.height)
+            : MultiviewLayout.placements(settings: key.layout, inputs: key.inputs, width: key.width, height: key.height)
+        for number in key.inputs {
+            cells[number]?.setThumbnail(rect: placements.first { $0.source == .input(number: number) }?.inner)
         }
+    }
+
+    private struct ThumbnailLayoutKey: Equatable {
+        let layout: MultiviewLayoutSettings?
+        let legacy: JSONValue?
+        let inputs: [Int]
+        let width: Int
+        let height: Int
+    }
+    private var thumbnailLayoutKey: ThumbnailLayoutKey?
+
+    /// 纯音频输入格子上的电平表（调音台 50 ms 的表定时器转过来，同一份 AudioEngineStatus 读数）。
+    func applyAudioLevels(_ peakDb: [Int: [Double]]) {
+        for (number, cell) in cells where cell.isAudioOnly { cell.applyAudioLevel(peakDb[number]) }
     }
 
     /// 显示来源（新 session 时换）；新建的格子也从这里拿。

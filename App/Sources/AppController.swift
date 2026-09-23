@@ -37,6 +37,8 @@ final class AppController {
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost
+        // 第一个 session 的 MIDIController 起来之前：让 CoreMIDI 的热插拔通知走主 run loop（换节目后新插的设备也能连上，W3-E2）
+        MIDINotificationAnchor.install()
         defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
         if isTestHost {
             L10n.languageOverride = "zh-Hans"
@@ -145,6 +147,17 @@ final class AppController {
         guard let session else { return }
         var show = ShowDocuments.stoppingOutputs(session.makeShow())
         show.mixer.format = format
+        show.layout = currentLayout()
+        await replaceSession(show: show)
+    }
+
+    /// 改节目音频的对齐延迟 / 监听点（提案 007，存在 Show.audio 里）：运行期改要重建延迟线，AudioRuntime 建引擎时才读，所以换一个 session
+    /// （同 changeProgramFormat：输入 / 输出原样带过去，录制 / 推流的目标状态清掉）。
+    func changeShowAudio(alignmentFrames: Int, monitorPoint: MonitorPoint) async {
+        guard let session else { return }
+        var show = ShowDocuments.stoppingOutputs(session.makeShow())
+        show.audio.alignmentFrames = max(0, alignmentFrames)
+        show.audio.monitorPoint = monitorPoint
         show.layout = currentLayout()
         await replaceSession(show: show)
     }

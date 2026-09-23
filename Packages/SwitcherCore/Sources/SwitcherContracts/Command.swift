@@ -1,8 +1,8 @@
 // 命令（设计方案 §9.1）：UI、快捷键、MIDI、API 都只发命令，不直接改状态。
 
 /// 一条命令的内容。覆盖 §9.1 列出的全部，另加几条后续会话必然要用的（转场选择、总线、输出与叠加的设置）。
-/// 32 个 case（P3 按提案 010 / 012 加了 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、
-/// renameOutput、setInputSource；对照见 CONTRACTS.md §8）。
+/// 34 个 case（P3 按提案 010 / 012 加了 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、
+/// renameOutput、setInputSource，W3-E2 按提案 016 加了 setTransitionParams；对照见 CONTRACTS.md §8）。
 /// JSON 形态由 Swift 合成的 Codable 决定：`{"fade":{"durationTicks":30}}`、无参数的是 `{"cut":{}}`；
 /// 快照钉在 SwitcherContractsTests 里，是 HTTP API 的 wire format。
 public enum Command: Hashable, Codable, Sendable {
@@ -13,6 +13,10 @@ public enum Command: Hashable, Codable, Sendable {
     case fade(durationTicks: Int)
     /// 选下一次转场的类型和时长，不开始。T-bar 用的也是它选的类型。
     case setTransition(type: TransitionType, durationTicks: Int)
+    /// 改 Wipe / Stinger 参数（`TransitionState.wipe` / `.stinger` 两组整体替换；提案 016），下一次转场起生效。
+    /// 转场进行中被拒（与 setTransition 同一口径：进行中的那一次按开始时的参数走）；stinger.input 非 nil 时须是存在的输入；
+    /// softness 钳到 0–1，cutAtTick 钳到 ≥ 0（≥ durationTicks = 完成时换，不钳上限）。
+    case setTransitionParams(wipe: WipeParams, stinger: StingerParams)
     /// 按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。
     case autoTransition
     case setPreview(input: Int)

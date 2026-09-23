@@ -222,7 +222,7 @@ final class OutputRuntime {
             var hasAudio = audio != nil
             if let n = output.settings.source.inputNumber {
                 guard let b = inputs?.openBranch(input: n) else {
-                    fail(output: output.number, "ISO 输入 \(n) 不存在或分支用完（每路最多 \(InputFrameTee.maxBranches) 个 ISO / Aux）")
+                    fail(output: output.number, L("notice.isoBranchUnavailable", n, InputFrameTee.maxBranches))
                     continue
                 }
                 branch = b
@@ -266,7 +266,7 @@ final class OutputRuntime {
             if let message = errors.lock.withLock({ errors.byNumber[number] }) {
                 if let branch, let n = output.settings.source.inputNumber { inputs?.releaseBranch(branch, input: n) }
                 finishedRecorders[number] = rec   // Stats 里报 failed
-                fail(output: number, "录制 \(number) 起不来：\(message)")
+                fail(output: number, L("notice.recordingFailed", number, message))
                 continue
             }
             attach(output: output, recorder: rec, branch: branch, start: start)
@@ -353,7 +353,7 @@ final class OutputRuntime {
         case .lowSpace(let free):
             onEvent?(.recordingDiskLow(output: number, freeMB: Double(free) / 1_048_576))
         case .belowMinimum(let free):
-            let reason = "录制 \(number)：磁盘剩余 \(Int(free / 1_048_576)) MB，低于下限 \(Int(minimumFreeBytes / 1_048_576)) MB"
+            let reason = L("notice.recordingBelowMinimum", number, Int(free / 1_048_576), Int(minimumFreeBytes / 1_048_576))
             if canFallback(entry) {
                 switchToFallback(entry, reason: reason)
             } else {
@@ -361,12 +361,12 @@ final class OutputRuntime {
             }
         case .failed(let cause, let message, _):
             guard cause == .disk else {
-                fail(output: number, "录制 \(number) 失败：\(message)")
+                fail(output: number, L("notice.recordingError", number, message))
                 if let clock { entry.stopping = true; entry.recorder.stop(atTick: clock.tick(at: .now())) { [weak self] r in
                     DispatchQueue.main.async { MainActor.assumeIsolated { self?.finishRecording(number, entry: entry, result: r) } } } }
                 return
             }
-            let reason = "录制 \(number)：磁盘满（\(message.prefix(80))）"
+            let reason = L("notice.recordingDiskFull", number, String(message.prefix(80)))
             if canFallback(entry) {
                 switchToFallback(entry, reason: reason)
             } else {
@@ -409,7 +409,7 @@ final class OutputRuntime {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try rec.start(at: start)
         } catch {
-            stopForDisk(entry, reason: reason + "；备用目录也起不来：\(error)")
+            stopForDisk(entry, reason: L("notice.recordingFallbackFailed", reason, "\(error)"))
             return
         }
         // 旧的停在同一边界；封口回调只做清理（运行表里已经是新的了）

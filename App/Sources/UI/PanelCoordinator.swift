@@ -16,6 +16,7 @@ final class PanelCoordinator: NSObject {
     private(set) var hotkeyWindow: HotkeyEditorWindowController?
     private(set) var midiWindow: MIDIMappingWindowController?
     private var stateToken: ObserverToken?
+    private var statsToken: ObserverToken?
     private var session: SwitcherSession?
     private var state = MixerState()
 
@@ -28,6 +29,8 @@ final class PanelCoordinator: NSObject {
     func bind(session: SwitcherSession?) {
         stateToken?.invalidate()
         stateToken = nil
+        statsToken?.invalidate()
+        statsToken = nil
         for (_, w) in inputSettingsWindows { w.close() }
         inputSettingsWindows.removeAll()
         outputSettingsWindow?.close()
@@ -41,6 +44,8 @@ final class PanelCoordinator: NSObject {
         self.session = session
         guard let session else { state = MixerState(); return }
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
+        // 输出设置页的显示类输出状态读 Stats.display[]（提案 013），1 Hz
+        statsToken = session.observeStats { [weak self] stats in self?.outputSettingsWindow?.model.apply(stats: stats) }
     }
 
     private func apply(state: MixerState) {
@@ -77,7 +82,9 @@ final class PanelCoordinator: NSObject {
             return w
         }
         let model = OutputSettingsModel(state: session?.state ?? state, tab: tab, defaultRecordDirectory: controller.documents.recordDirectory,
-                                        showName: session?.name ?? "", queriesSystemExtensions: !controller.isTestHost)
+                                        showName: session?.name ?? "", queriesSystemExtensions: !controller.isTestHost,
+                                        reserveBytes: session?.outputs.minimumFreeBytes ?? 0, aux: session?.aux)
+        if let stats = session?.stats { model.apply(stats: stats) }
         model.send = { [weak self] c in self?.session?.send(c) }
         let w = OutputSettingsWindowController(model: model)
         w.onClose = { [weak self] in self?.outputSettingsWindow = nil }

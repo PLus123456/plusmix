@@ -123,7 +123,7 @@ final class UISmokeTests: XCTestCase {
         XCTAssertFalse(wc.bottomBar.streamButton.isEnabled, "空节目没有推流输出")
         XCTAssertTrue(wc.bottomBar.externalButton.isEnabled, "外部输出（W3-C 接上了）")
         XCTAssertTrue(wc.bottomBar.multiviewButton.isEnabled, "多画面窗口（W3-C 接上了）")
-        XCTAssertTrue(wc.bottomBar.isoButton.isEnabled, "ISO 面板（W3-C）")
+        XCTAssertTrue(wc.bottomBar.isoButton.isEnabled, "ISO 入口（打开输出设置的 ISO 页，W3-E2）")
 
         // 13. 调音台收起 / 展开
         XCTAssertTrue(wc.isMixerPanelVisible)

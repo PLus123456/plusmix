@@ -180,11 +180,11 @@ final class ContractsP3Tests: XCTestCase {
         XCTAssertTrue(Stats.DisplayEntry.states.contains(e.state))
     }
 
-    // MARK: 命令键名快照（27 → 33）
+    // MARK: 命令键名快照（27 → 33；提案 016 再加 setTransitionParams → 34，形态见 Contracts016Tests）
 
     func testP3_012_commandCaseCountAndJsonShapes() throws {
-        XCTAssertEqual(Samples.commandCaseCount, 33)
-        XCTAssertEqual(Set(Samples.commands().map(Samples.caseName(of:))).count, 33)
+        XCTAssertEqual(Samples.commandCaseCount, 34)
+        XCTAssertEqual(Set(Samples.commands().map(Samples.caseName(of:))).count, 34)
         func json(_ c: Command) throws -> String { String(decoding: try sortedEncoder.encode(c), as: UTF8.self) }
         XCTAssertEqual(try json(.setMonitorMode(mode: .pfl)), #"{"setMonitorMode":{"mode":"pfl"}}"#)
         XCTAssertEqual(try json(.setBusEffects(bus: .busA, effects: [])), #"{"setBusEffects":{"bus":1,"effects":[]}}"#)

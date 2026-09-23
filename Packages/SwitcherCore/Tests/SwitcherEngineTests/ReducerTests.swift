@@ -309,6 +309,20 @@ final class ReducerTests: XCTestCase {
                 .setInputSource(input: 3, source: .ndi(sourceName: "MAC (Cam)", bandwidth: .lowest, jitterBufferFrames: 2))) {
                 $0.inputs[2].source = .ndi(sourceName: "MAC (Cam)", bandwidth: .lowest, jitterBufferFrames: 2) },
             Row("setInputSource 不存在", .setInputSource(input: 9, source: .image(path: "/a.png"))) { _ in },
+
+            // 提案 016：改 Wipe / Stinger 参数
+            Row("setTransitionParams", .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12))) {
+                $0.transition.wipe = WipeParams(direction: .topToBottom, softness: 0.2); $0.transition.stinger = StingerParams(input: 3, cutAtTick: 12) },
+            Row("setTransitionParams 软边钳到 ≤ 1、换底拍钳到 ≥ 0",
+                .setTransitionParams(wipe: WipeParams(direction: .diagonal, softness: 1.5), stinger: StingerParams(input: nil, cutAtTick: -4))) {
+                $0.transition.wipe = WipeParams(direction: .diagonal, softness: 1); $0.transition.stinger = StingerParams(input: nil, cutAtTick: 0) },
+            Row("setTransitionParams 软边钳到 ≥ 0", .setTransitionParams(wipe: WipeParams(direction: .rightToLeft, softness: -0.3), stinger: StingerParams())) {
+                $0.transition.wipe = WipeParams(direction: .rightToLeft, softness: 0) },
+            Row("setTransitionParams stinger 输入不存在拒绝",
+                .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 9, cutAtTick: 12))) { _ in },
+            Row("setTransitionParams stinger 输入 0 拒绝（0 是黑场，不是输入）", .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 0, cutAtTick: 0))) { _ in },
+            Row("setTransitionParams T-bar 推到一半拒绝", before: { $0.transition.progress = 0.4; $0.transition.source = .tbar },
+                .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams())) { _ in },
         ]
         var covered = Set<String>()
         for row in rows {
@@ -320,7 +334,7 @@ final class ReducerTests: XCTestCase {
             XCTAssertEqual(actual, expected, row.name)
             covered.insert(Self.caseName(row.command))
         }
-        XCTAssertEqual(covered.count, Self.allCaseNames.count, "33 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
+        XCTAssertEqual(covered.count, Self.allCaseNames.count, "34 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
     }
 
     func testW1B_reduce_isPureAndDoesNotMutateInput() {
@@ -367,6 +381,35 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(reducer.reduce(s, .setOverlayDecoration(channel: 1, border: nil, anchor: .center, previewOn: false), at: Tick(1)), s)
     }
 
+    /// 提案 016：转场进行中（auto 或 T-bar 推到一半）被拒——进行中的那一次按开始时的参数走；结束后再发就生效，别的字段一个不动；
+    /// 相同值原样返回（回执 applied = false）；cutAtTick ≥ durationTicks 不钳（= 完成时换）。
+    func test016_setTransitionParams_rejectedWhileActive_appliesAfterwards() {
+        let wanted = Command.setTransitionParams(wipe: WipeParams(direction: .rightToLeft, softness: 0.25), stinger: StingerParams(input: 4, cutAtTick: 20))
+        let auto = reducer.reduce(Self.baseState(), .setTransition(type: .wipe, durationTicks: 30), at: Tick(9))
+        let started = reducer.reduce(auto, .autoTransition, at: Tick(10))
+        let midAuto = reducer.advance(started, to: Tick(20))
+        XCTAssertTrue(midAuto.transition.isActive)
+        XCTAssertEqual(reducer.reduce(midAuto, wanted, at: Tick(20)), midAuto, "auto 转场中被拒")
+        let midBar = reducer.reduce(Self.baseState(), .tbar(progress: 0.4), at: Tick(5))
+        XCTAssertEqual(reducer.reduce(midBar, wanted, at: Tick(6)), midBar, "T-bar 推到一半被拒")
+
+        let done = reducer.advance(started, to: Tick(40))
+        XCTAssertFalse(done.transition.isActive)
+        XCTAssertEqual(done.program, 2, "转场按原参数走完")
+        let after = reducer.reduce(done, wanted, at: Tick(41))
+        XCTAssertEqual(after.transition.wipe, WipeParams(direction: .rightToLeft, softness: 0.25))
+        XCTAssertEqual(after.transition.stinger, StingerParams(input: 4, cutAtTick: 20))
+        var rest = after
+        rest.transition.wipe = done.transition.wipe
+        rest.transition.stinger = done.transition.stinger
+        XCTAssertEqual(rest, done, "只动 wipe / stinger 两组")
+        XCTAssertEqual(reducer.reduce(after, wanted, at: Tick(42)), after, "相同值原样返回")
+
+        let late = reducer.reduce(done, .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: nil, cutAtTick: 500)), at: Tick(43))
+        XCTAssertEqual(late.transition.stinger.cutAtTick, 500, "≥ durationTicks 不钳")
+        XCTAssertNil(late.transition.stinger.input)
+    }
+
     func testW1B_loadShow_invalidStateIsRejected() {
         var bad = Self.baseState()
         bad.inputs.append(bad.inputs[0]) // 重复编号
@@ -374,7 +417,7 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(reducer.reduce(Self.baseState(), .loadShow(show: show), at: Tick(1)), Self.baseState())
     }
 
-    static let allCaseNames = ["cut", "fade", "setTransition", "autoTransition", "setPreview", "setProgram", "tbar", "ftb", "overlay", "setOverlay",
+    static let allCaseNames = ["cut", "fade", "setTransition", "setTransitionParams", "autoTransition", "setPreview", "setProgram", "tbar", "ftb", "overlay", "setOverlay",
                                "setOverlayDecoration",
                                "audioGain", "mute", "busGain", "busMute", "setAFV", "setMonitorMode", "setBusEffects",
                                "startRecord", "stopRecord", "startStream", "stopStream", "setOutputEnabled", "renameOutput",
@@ -386,6 +429,7 @@ final class ReducerTests: XCTestCase {
         case .cut: "cut"
         case .fade: "fade"
         case .setTransition: "setTransition"
+        case .setTransitionParams: "setTransitionParams"
         case .autoTransition: "autoTransition"
         case .setPreview: "setPreview"
         case .setProgram: "setProgram"

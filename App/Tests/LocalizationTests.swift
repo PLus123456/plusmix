@@ -2,6 +2,9 @@
 // 三个检查：两种语言的键集合相同且没有空值；源码里用到的每个键都在表里；App/Sources 里没有写死的中文文案（日志 / 断言除外）。
 import Foundation
 import XCTest
+import SwitcherContracts
+import SwitcherExternal
+import SwitcherVirtualCamera
 @testable import Switcher
 
 @MainActor
@@ -39,6 +42,39 @@ final class LocalizationTests: XCTestCase {
         let root = try AppTest.repoRoot().appendingPathComponent("App/Sources")
         let violations = try AppTest.chineseLiteralViolations(in: root)
         XCTAssertEqual(violations, [], "App/Sources 里写死的中文文案（应改成 L(\"键\")）：\n" + violations.joined(separator: "\n"))
+    }
+
+    /// 包里返回中文的状态文案（SystemExtensionInstaller / ExternalDisplayManager / ExternalDisplaySpec / DiskEstimate 的 describe）在 App 侧查表：
+    /// 每个枚举值 / Stats.display 的每个 state 都有两种语言的文案，英文里没有中文（W3-E2 交付第 1 条，G4 问题单第 2 条）。
+    func testL10n_packageStatusesLookedUpInApp() {
+        let installer: [SystemExtensionInstaller.Status] = [.unknown, .notInstalled, .requesting, .needsUserApproval, .installed(version: "1.0"),
+                                                            .installed(version: ""), .uninstalled, .needsReboot, .failed("包给的诊断")]
+        let windows: [ExternalDisplayWindow.Status] = [.showing(displayID: 2), .waitingForDisplay(displayID: 3), .fallbackToMain(displayID: 4)]
+        func texts() -> [String] {
+            installer.map(OutputStatusText.extensionStatus) + windows.map(OutputStatusText.externalWindow)
+                + Stats.DisplayEntry.states.map(OutputStatusText.displayState)
+                + Stats.DisplayEntry.states.map { OutputStatusText.display(Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 1234, dropped: 5, state: $0)) }
+                + Stats.DisplayEntry.states.map { OutputStatusText.virtualCamera(enabled: true, entry: Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 9, dropped: 7, state: $0)) }
+                + [OutputStatusText.virtualCamera(enabled: false, entry: nil), OutputStatusText.virtualCamera(enabled: true, entry: nil)]
+                + [Double.infinity, 30, 600, 7_500].map(ISORoutes.remainingText)
+        }
+        let zh = texts()
+        for t in zh {
+            XCTAssertFalse(t.isEmpty)
+            XCTAssertFalse(t.hasPrefix("aux.") || t.hasPrefix("disk."), "缺键：\(t)")
+        }
+        XCTAssertEqual(OutputStatusText.virtualCamera(enabled: true, entry: Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 0, dropped: 7, state: "waitingExtension")),
+                       "找不到虚拟摄像头设备（扩展未安装 / 未激活）；已丢 7 帧")
+        XCTAssertEqual(OutputStatusText.externalWindow(.showing(displayID: 2)), "显示中（显示器 2）")
+        L10n.languageOverride = "en"
+        defer { L10n.languageOverride = "zh-Hans" }
+        let en = texts()
+        let cjk = try! NSRegularExpression(pattern: #"[一-鿿　-〿！-～]"#)
+        for t in en where !t.contains("包给的诊断") {   // .failed 带的原因是包给的诊断文字，原样附在后面
+            XCTAssertNil(cjk.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)), "英文文案里有中文：\(t)")
+        }
+        XCTAssertEqual(OutputStatusText.externalWindow(.showing(displayID: 2)), "Showing (display 2)")
+        XCTAssertNotEqual(Set(zh), Set(en))
     }
 
     func testL10n_lookupUsesOverrideAndFallsBackToKey() {

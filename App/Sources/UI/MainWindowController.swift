@@ -32,7 +32,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private var statsToken: ObserverToken?
     private var noticeToken: ObserverToken?
     private var overlayPopover: NSPopover?
-    private var isoPopover: NSPopover?
     private var externalMenuBuilder: ExternalOutputMenuBuilder?
     private(set) var multiviewWindow: MultiviewWindowController?
     /// 新 ISO 路的默认录制目录（AppController 按测试宿主 / 正常设）。
@@ -123,9 +122,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         bottomBar.onOverlayPanel = { [weak self] anchor in self?.presentOverlayPanel(relativeTo: anchor) }
         bottomBar.onExternalMenu = { [weak self] anchor in self?.presentExternalMenu(relativeTo: anchor) }
         bottomBar.onMultiview = { [weak self] in self?.toggleMultiviewWindow() }
-        bottomBar.onISOPanel = { [weak self] anchor in self?.presentISOPanel(relativeTo: anchor) }
+        bottomBar.onISOSettings = { [weak self] in self?.panels?.showOutputSettings(tab: .iso) }   // ISO 只留输出设置里那一页（W3-E2）
         inputStrip.onOpenSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
         mixerPanel.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
+        mixerPanel.onMeters = { [weak self] levels in self?.inputStrip.applyAudioLevels(levels) }   // 纯音频输入格子的电平表
     }
 
     // MARK: 绑定
@@ -194,7 +194,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         inputStrip.apply(state: state)
         mixerPanel.apply(state: state)
         bottomBar.apply(state: state)
-        (isoPopover?.contentViewController as? ISOPanelController)?.apply(state: state)
         overlayPanelController?.apply(state: state)
     }
 
@@ -240,27 +239,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         overlayPanelController = controller
     }
 
-    /// ISO 选路面板（底栏 ISO… 弹出）。
-    func presentISOPanel(relativeTo anchor: NSView) {
-        guard let session else { return }
-        if let isoPopover, isoPopover.isShown {
-            isoPopover.close()
-            return
-        }
-        let controller = ISOPanelController(state: session.state, defaultDirectory: defaultRecordDirectory,
-                                            reserveBytes: session.outputs.minimumFreeBytes)
-        controller.send = { [weak session] c in session?.send(c) }
-        let popover = NSPopover()
-        popover.contentViewController = controller
-        popover.behavior = .transient
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
-        isoPopover = popover
-    }
-
     /// 外部输出菜单（底栏按钮 / 菜单栏都用它）。
     func externalOutputMenu() -> NSMenu? {
         guard let session else { return nil }
-        let builder = ExternalOutputMenuBuilder(state: session.state, statuses: session.aux.externalStatuses)
+        let builder = ExternalOutputMenuBuilder(state: session.state, displayStats: session.stats?.display ?? [])
         builder.send = { [weak session] c in session?.send(c) }
         externalMenuBuilder = builder   // 菜单项的 target 是它，得活到菜单关掉
         return builder.makeMenu()

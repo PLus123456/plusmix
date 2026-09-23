@@ -2,7 +2,7 @@
 // 录制 / 推流按钮只发 startRecord / stopRecord / startStream / stopStream；文案 = 快照里输出的 enabled（目标）× Stats.encoder[i].state（实际）：
 //   录制：目标关 → "录制"；目标开、实际 recording → "● 录制中"；目标开、实际还没到（idle / stopping / failed）→ "录制 · <state>"。
 //   推流：目标关 → "推流"；publishing → "● 推流中"；connecting / backoff → "推流 · 重连中（第 n 次）"（n = Stats.encoder[i].reconnects）。
-// W3-C：外部输出按钮弹显示器 × 源的菜单（ExternalOutputMenuBuilder），多画面按钮开独立窗口，ISO… 按钮弹选路面板；录制按钮对全部录制输出
+// W3-C：外部输出按钮弹显示器 × 源的菜单（ExternalOutputMenuBuilder），多画面按钮开独立窗口，ISO… 按钮打开输出设置的 ISO 页（W3-E2：ISO 只留一个入口）；录制按钮对全部录制输出
 // （PGM + ISO 路）一起发 startRecord / stopRecord（同一拍起停），推流按钮起停全部目的地。文案走 L10n（W3-E）。
 import AppKit
 import SwitcherContracts
@@ -14,7 +14,7 @@ final class BottomBarView: NSView {
     var onOverlayPanel: ((NSView) -> Void)?
     var onExternalMenu: ((NSView) -> Void)?
     var onMultiview: (() -> Void)?
-    var onISOPanel: ((NSView) -> Void)?
+    var onISOSettings: (() -> Void)?
 
     let addInputButton: NSButton
     let recordButton: NSButton
@@ -226,5 +226,5 @@ final class BottomBarView: NSView {
     @objc private func overlayPressed() { onOverlayPanel?(overlayButton) }
     @objc private func externalPressed() { onExternalMenu?(externalButton) }
     @objc private func multiviewPressed() { onMultiview?() }
-    @objc private func isoPressed() { onISOPanel?(isoButton) }
+    @objc private func isoPressed() { onISOSettings?() }
 }

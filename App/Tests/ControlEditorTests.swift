@@ -76,9 +76,28 @@ final class ControlEditorTests: XCTestCase {
         }
     }
 
+    /// W3E-w2-control-midi-hotplug-after-restart 的 App 侧绕法（W3-E2 交付第 5 条，W2-C 还没修）：换过节目之后（旧的 MIDIController 停了、
+    /// 线程退出，新的在自己线程上建客户端）再插的源也要连上。CoreMIDI 把全进程的通知派到第一次 MIDIClientCreate 时的 run loop 上，
+    /// App 启动时先在主线程建一个锚客户端（MIDINotificationAnchor），之后每个控制器的热插拔通知都走主 run loop。
+    func testMIDI_hotplugAfterShowReplaced_newSourceConnects() throws {
+        XCTAssertTrue(MIDINotificationAnchor.isInstalled, "App 启动时应已在主线程建好 MIDI 锚客户端")
+        let first = try AppTest.freshSession()
+        let second = try AppTest.freshSession()   // 再换一次节目：first 的 MIDI 线程已退出
+        XCTAssertTrue(first !== second)
+        let midi = second.control.midi
+        guard midi.isRunning else { throw XCTSkip("BLOCKED-MIDI：MIDI 控制器没起来（\(second.control.midiError ?? "?")）") }
+        let name = "Switcher 热插拔 \(UUID().uuidString.prefix(6))"
+        let source = try VirtualMIDISource(name: name)   // session 起来之后才出现的源 = 热插拔
+        defer { source.dispose() }
+        XCTAssertTrue(AppTest.waitUntil(5) { midi.sources.contains { $0.name == name && $0.connected } },
+                      "换过节目后新出现的源应在 5 s 内连上：\(midi.sources.map(\.name))")
+        source.dispose()
+        XCTAssertTrue(AppTest.waitUntil(5) { !midi.sources.contains { $0.name == name } }, "拔掉（源消失）也应收到")
+    }
+
     func testMIDIMapping_learnFromVirtualSourceAndSave() throws {
-        // 虚拟源要在 session 起来之前建：CoreMIDI 的热插拔通知只送到进程里第一次 MIDIClientCreate 时的 run loop，第一个 session 的
-        // MIDI 线程停了之后再建的源收不到通知（W2-C 的坑，reports/issues/W3E-w2-control-midi-hotplug-after-restart.md）；起 session 时会枚举现有源
+        // 虚拟源在 session 起来之前建（起 session 时枚举现有源）。换节目后新插的源走热插拔，见上一条用例（MIDINotificationAnchor 之前那条路收不到通知，
+        // W2-C 的坑，reports/issues/W3E-w2-control-midi-hotplug-after-restart.md）
         let name = "Switcher 测试源 \(UUID().uuidString.prefix(6))"
         let source = try VirtualMIDISource(name: name)
         defer { source.dispose() }

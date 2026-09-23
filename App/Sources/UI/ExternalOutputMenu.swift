@@ -1,6 +1,8 @@
 // 外部输出菜单（底栏"外部输出"按钮 / 菜单栏"输出 → 外部输出"，W3-C 交付 1）：每块显示器一个子菜单，里面是源（PGM / PVW / 多画面 / 各输入）；
 // 选中 = 节目里加一个 kind = .externalDisplay 的输出（addOutput，enabled）；已有的打勾，再选一次 = 删（removeOutput）。
 // 全部走命令：外部窗口跟着快照开关（AuxOutputRuntime），节目文件里也就带着它们。
+// 文案走 L10n（W3-E2）；源的名字用 App 的 OutputSource.title（包里的 ExternalDisplaySpec.describe 是中文）；
+// "关闭 n …（状态）"里的状态与帧数只读 Stats.display[]（提案 013）。
 import AppKit
 import SwitcherContracts
 import SwitcherExternal
@@ -10,12 +12,13 @@ final class ExternalOutputMenuBuilder: NSObject {
     var send: ((Command) -> Void)?
     private var state: MixerState
     private let displays: [DisplayInfo]
-    private var statuses: [Int: String]
+    /// 最近一行 Stats 的 display[]（没有 Stats 时空）。
+    private let displayStats: [Stats.DisplayEntry]
 
-    init(state: MixerState, displays: [DisplayInfo] = ExternalDisplays.all(), statuses: [Int: String] = [:]) {
+    init(state: MixerState, displays: [DisplayInfo] = ExternalDisplays.all(), displayStats: [Stats.DisplayEntry] = []) {
         self.state = state
         self.displays = displays
-        self.statuses = statuses
+        self.displayStats = displayStats
     }
 
     /// 现有的外部显示输出里，显示器 + 源都匹配的那个。
@@ -31,7 +34,7 @@ final class ExternalOutputMenuBuilder: NSObject {
     static func makeOutput(in state: MixerState, displayID: UInt32?, displayName: String, source: OutputSource) -> OutputState {
         let number = (state.outputs.map(\.number).max() ?? 0) + 1
         let spec = ExternalDisplaySpec(displayID: displayID, source: source, fallbackToMain: false)
-        return OutputState(number: number, kind: .externalDisplay, name: "\(displayName) · \(ExternalDisplaySpec.describe(source, inputs: state.inputs))",
+        return OutputState(number: number, kind: .externalDisplay, name: L("externalMenu.outputName", displayName, source.title(in: state)),
                            enabled: true, settings: spec.outputSettings)
     }
 
@@ -41,20 +44,22 @@ final class ExternalOutputMenuBuilder: NSObject {
     }
 
     func makeMenu() -> NSMenu {
-        let menu = NSMenu(title: "外部输出")
+        let menu = NSMenu(title: L("bottom.external"))
         if displays.isEmpty {
-            menu.addItem(withTitle: "（没有显示器）", action: nil, keyEquivalent: "").isEnabled = false
+            menu.addItem(withTitle: L("externalMenu.noDisplays"), action: nil, keyEquivalent: "").isEnabled = false
         }
         for display in displays {
             let sub = NSMenu(title: display.name)
             for source in Self.sources(in: state) {
-                let item = NSMenuItem(title: ExternalDisplaySpec.describe(source, inputs: state.inputs), action: #selector(sourcePicked(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: source.title(in: state), action: #selector(sourcePicked(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = Pick(displayID: display.id, displayName: display.name, source: source)
                 item.state = Self.existingOutput(in: state, displayID: display.id, source: source) == nil ? .off : .on
                 sub.addItem(item)
             }
-            let head = NSMenuItem(title: "\(display.name)（\(Int(display.frame.width))×\(Int(display.frame.height)) \(display.maximumFramesPerSecond) Hz\(display.isMain ? "，主屏" : "")）", action: nil, keyEquivalent: "")
+            let size = (Int(display.frame.width), Int(display.frame.height), display.maximumFramesPerSecond)
+            let head = NSMenuItem(title: display.isMain ? L("externalMenu.displayMain", display.name, size.0, size.1, size.2)
+                                                        : L("externalMenu.display", display.name, size.0, size.1, size.2), action: nil, keyEquivalent: "")
             head.submenu = sub
             menu.addItem(head)
         }
@@ -62,12 +67,14 @@ final class ExternalOutputMenuBuilder: NSObject {
         if !existing.isEmpty {
             menu.addItem(.separator())
             for o in existing {
-                let item = NSMenuItem(title: "关闭 \(o.number) \(o.name)\(statuses[o.number].map { "（\($0)）" } ?? "")", action: #selector(closeOutput(_:)), keyEquivalent: "")
+                let status = displayStats.first { $0.kind == "externalDisplay" && $0.output == o.number }.map(OutputStatusText.display)
+                let title = status.map { L("externalMenu.closeWithStatus", o.number, o.name, $0) } ?? L("externalMenu.close", o.number, o.name)
+                let item = NSMenuItem(title: title, action: #selector(closeOutput(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = o.number as NSNumber
                 menu.addItem(item)
             }
-            let all = NSMenuItem(title: "关闭全部外部输出", action: #selector(closeAll), keyEquivalent: "")
+            let all = NSMenuItem(title: L("externalMenu.closeAll"), action: #selector(closeAll), keyEquivalent: "")
             all.target = self
             menu.addItem(all)
         }

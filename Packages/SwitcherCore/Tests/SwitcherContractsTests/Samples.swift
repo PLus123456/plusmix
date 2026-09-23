@@ -129,6 +129,8 @@ enum Samples {
             .cut,
             .fade(durationTicks: 30),
             .setTransition(type: .stinger, durationTicks: 40),
+            .setTransitionParams(wipe: WipeParams(direction: .bottomToTop, softness: 0.05), stinger: StingerParams(input: 3, cutAtTick: 18)),
+            .setTransitionParams(wipe: WipeParams(), stinger: StingerParams()),   // 提案 016：stinger 没设输入
             .autoTransition,
             .setPreview(input: 2),
             .setProgram(input: 3),
@@ -171,6 +173,7 @@ enum Samples {
         case .cut: "cut"
         case .fade: "fade"
         case .setTransition: "setTransition"
+        case .setTransitionParams: "setTransitionParams"
         case .autoTransition: "autoTransition"
         case .setPreview: "setPreview"
         case .setProgram: "setProgram"
@@ -203,5 +206,5 @@ enum Samples {
         case .loadShow: "loadShow"
         }
     }
-    static let commandCaseCount = 33
+    static let commandCaseCount = 34
 }

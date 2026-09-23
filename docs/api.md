@@ -133,6 +133,30 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 }
 ```
 
+#### `setTransitionParams`
+
+改 Wipe / Stinger 参数（两组整体替换），下一次转场起生效；转场进行中（含 T-bar 推到一半）被拒。
+
+| 参数 | 含义 |
+|---|---|
+| `wipe` | {direction: leftToRight / rightToLeft / topToBottom / bottomToTop / diagonal, softness: 软边宽占画面的比例 0–1，超出钳住} |
+| `stinger` | {input: 作 stinger 的输入编号（带 alpha 的文件 / 图片），不写 = 未设置；cutAtTick: 第几拍换底，≥ 0，≥ 时长 = 完成时换} |
+
+```json
+{
+  "setTransitionParams" : {
+    "stinger" : {
+      "cutAtTick" : 12,
+      "input" : 4
+    },
+    "wipe" : {
+      "direction" : "topToBottom",
+      "softness" : 0.2
+    }
+  }
+}
+```
+
 #### `autoTransition`
 
 按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。

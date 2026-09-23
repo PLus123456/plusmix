@@ -8,9 +8,11 @@
 //   --record-fallback <目录>  录制目标盘满 / 低于下限时自动切到这个目录继续录（W3-C，S7 目标档）；不设 = 只停录制并提示
 //   --record-min-free-mb <N> 录制目录剩余空间低于 N MB 就停该路录制（默认 200）
 // 同名 UserDefaults 键：audioOutputDevice / apiEnabled / apiListen / apiToken / recordFallbackDirectory / recordMinimumFreeMB；
-// W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）。命令行参数优先于 UserDefaults。
+// W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）；
+// W3-E2 加 overlaysInPreview（PVW 预览全部叠加 = MetalRendererOptions.overlaysInPreview，渲染器选项在 init 定死，换 session 生效）。命令行参数优先于 UserDefaults。
 import Foundation
 import SwitcherControl
+import SwitcherRender
 import VMixCompat
 
 struct AppSettings: Equatable, Sendable {
@@ -47,6 +49,7 @@ struct AppSettings: Equatable, Sendable {
         static let recordMinimumFreeMB = "recordMinimumFreeMB"
         static let compatLayerEnabled = "compatLayerEnabled"
         static let compatLayerPort = "compatLayerPort"
+        static let overlaysInPreview = "overlaysInPreview"
     }
 
     var audioDevice: AudioDevice = .systemDefault
@@ -63,6 +66,15 @@ struct AppSettings: Equatable, Sendable {
     var recordFallbackDirectory: String?
     /// 录制目录剩余空间下限（MB），低于就停该路。
     var recordMinimumFreeMB = 200
+    /// PVW 预览全部叠加（渲染器总开关，与每通道 OverlayState.previewOn 取或；默认关）。
+    var overlaysInPreview = false
+
+    /// 起 session 用的渲染器选项。
+    var rendererOptions: MetalRendererOptions {
+        var o = MetalRendererOptions()
+        o.overlaysInPreview = overlaysInPreview
+        return o
+    }
 
     static let defaultCompatLayerPort = 8099
 
@@ -97,6 +109,7 @@ struct AppSettings: Equatable, Sendable {
         if defaults.object(forKey: Keys.compatLayerPort) != nil, defaults.integer(forKey: Keys.compatLayerPort) > 0 {
             s.compatLayerPort = defaults.integer(forKey: Keys.compatLayerPort)
         }
+        if defaults.object(forKey: Keys.overlaysInPreview) != nil { s.overlaysInPreview = defaults.bool(forKey: Keys.overlaysInPreview) }
 
         func value(after flag: String) -> String? {
             guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
@@ -125,5 +138,6 @@ struct AppSettings: Equatable, Sendable {
         if let apiToken, !apiToken.isEmpty { defaults.set(apiToken, forKey: Keys.apiToken) } else { defaults.removeObject(forKey: Keys.apiToken) }
         defaults.set(compatLayerEnabled, forKey: Keys.compatLayerEnabled)
         defaults.set(compatLayerPort, forKey: Keys.compatLayerPort)
+        defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview)
     }
 }

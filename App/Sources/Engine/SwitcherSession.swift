@@ -82,7 +82,7 @@ final class SwitcherSession {
         format = initial.format
         state = initial
         self.settings = settings
-        renderer = try MetalRenderer()
+        renderer = try MetalRenderer(options: settings.rendererOptions)   // PVW 预览全部叠加（偏好设置）在这里定死，换 session 生效
         stateMachine = StateMachine(initialState: initial)
         let maxNumber = initial.inputs.map(\.number).max() ?? 1
         let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
@@ -239,8 +239,8 @@ final class SwitcherSession {
         case .recordingStarted(let n, let url): notify(L("notice.recordingStarted", n, url.lastPathComponent))
         case .recordingStopped(let n, let url, let frames, let seconds): notify(L("notice.recordingStopped", n, url.lastPathComponent, Int(frames), seconds))
         case .recordingFailed(_, let message): notify(message)
-        case .recordingDiskLow(let n, let mb): notify("录制 \(n)：磁盘剩余 \(Int(mb)) MB")
-        case .recordingSwitchedToFallback(let n, let url): notify("录制 \(n)：磁盘满，已切到备用目录：\(url.lastPathComponent)")
+        case .recordingDiskLow(let n, let mb): notify(L("notice.recordingDiskLow", n, Int(mb)))
+        case .recordingSwitchedToFallback(let n, let url): notify(L("notice.recordingFallback", n, url.lastPathComponent))
         case .streamStarted(let n): notify(L("notice.streamStarted", n))
         case .streamStopped(let n): notify(L("notice.streamStopped", n))
         case .streamFailed(_, let message): notify(message)
@@ -249,11 +249,18 @@ final class SwitcherSession {
 
     private func handle(auxEvent event: AuxOutputRuntime.Event) {
         switch event {
-        case .externalDisplay(let n, let status): notify("外部输出 \(n)：\(status)")
-        case .virtualCameraStarted: notify("虚拟摄像头输出已启用")
-        case .virtualCameraStopped: notify("虚拟摄像头输出已停")
-        case .extensionStatus(let s): notify("虚拟摄像头扩展：\(s)")
+        case .externalDisplay(let n, let status): notify(L("notice.externalDisplay", n, OutputStatusText.externalWindow(status)))
+        case .virtualCameraStarted: notify(L("notice.virtualCameraStarted"))
+        case .virtualCameraStopped: notify(L("notice.virtualCameraStopped"))
+        case .extensionStatus(let s): notify(L("notice.virtualCameraExtension", OutputStatusText.extensionStatus(s)))
         }
+    }
+
+    /// 虚拟摄像头输出的一行状态（菜单的状态行 / 输出设置页）：读 Stats.display[] 里它那一项（提案 013，铁律 4）。
+    var virtualCameraStatusText: String {
+        let output = state.outputs.first { $0.kind == .virtualCamera && $0.enabled }
+        let entry = output.flatMap { o in stats?.display.first { $0.kind == "virtualCamera" && $0.output == o.number } }
+        return OutputStatusText.virtualCamera(enabled: output != nil, entry: entry)
     }
 
     // MARK: 节目时钟
