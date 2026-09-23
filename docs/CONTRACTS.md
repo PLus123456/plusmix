@@ -145,7 +145,7 @@ DeckLink 开的内嵌音频路数 = max(`Options.audioChannels`, 映射用得上
 |---|---|---|---|---|
 | `MixerState` | 不可变快照：format, inputs, program, preview, transition, ftb, overlays[4], audio, outputs；`validate()`、`tally(ofInput:)`、`tallies` | 状态机（reduce / advance） | 渲染（每拍一次）、音频、UI、API、录制 | 值类型；经 `MixerSnapshot` 发布 |
 | `MixerSnapshot` | final class {state, sequence, tick, publishedAt}，不可变；状态机用原子指针交换发布；`publishedAt` = 发布时刻 host time（提案 003 §B，C2 从它算） | 状态机 | 渲染、音频、控制 | 读方只 retain，不进 actor |
-| `TransitionState` | {type, durationTicks, progress 0–1, source auto/tbar, startTick, wipe, stinger}；空闲时 type/duration 就是"下一次转场"的选择 | 状态机 | 渲染 | — |
+| `TransitionState` | {type, durationTicks, progress 0–1, source auto/tbar, startTick, wipe, stinger}；空闲时 type/duration 就是"下一次转场"的选择；wipe / stinger 由 `setTransitionParams` 改（提案 016，转场进行中被拒） | 状态机 | 渲染 | — |
 | `FadeToBlack` | {on 目标, durationTicks, level 当前黑比例, startTick} | 状态机 | 渲染、音频（可选淡出 Master） | — |
 | `OverlayState` | {input?, on 目标, rect, animProgress 0–1, animation, startTick, border?, anchor, previewOn}（提案 010）；`isVisible` | 状态机 | 渲染 | — |
 | `OverlayAnimation` | {kind, durationTicks, slideFrom?}（提案 010：slideFrom nil = 离 rect 最近的边） | 状态机 | 渲染 | — |
@@ -172,7 +172,7 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `Command` | 枚举，33 个 case（对照见 §8；P3 按提案 010 / 012 从 27 加到 33）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}` | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
+| `Command` | 枚举，34 个 case（对照见 §8；P3 按提案 010 / 012 从 27 加到 33，W3-E2 按提案 016 加 setTransitionParams）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}` | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
 | `IssuedCommand` | {sequence, issuedAt, command}：命令总线（W2-C）加信封；`issuedAt` = 命令进总线的时刻（服务端 host time，不是客户端发出时刻；提案 003 §C） | 命令总线 | 状态机（按 sequence 严格顺序） | 普通 |
 | `CommandReceipt` | {sequence, appliedTick, applied}；`applied` = 状态真的变了（false = reducer 按规则忽略了它，提案 003 §A；结构性非法的在总线入口就被拒，到不了回执） | 状态机 | 总线、API | 普通 |
 | `MixerReducing` 协议 | `reduce(state, command, at tick)`、`advance(state, to tick)`，纯函数，实现在 W1-B | W1-B | 状态机、Control 的测试 | 纯函数 |
@@ -323,6 +323,7 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 | cut | `.cut` | PGM/PVW 原子对调 |
 | fade(duration) | `.fade(durationTicks:)` | = setTransition(.fade, d) + autoTransition |
 | — | `.setTransition(type:durationTicks:)`、`.autoTransition` | 加的：Wipe/Zoom/Stinger 和 T-bar 需要"选类型"与"开始"分开 |
+| — | `.setTransitionParams(wipe:stinger:)` | 加的（提案 016）：Wipe 方向 / 软边、Stinger 输入 / 换底拍两组整体替换；转场进行中被拒，softness 钳 0–1、cutAtTick 钳 ≥ 0；之前只能 loadShow 整体替换（会盖掉别人的改动、打断进行中的动画） |
 | setPreview(input) | `.setPreview(input:)` | |
 | setProgram(input) | `.setProgram(input:)` | 硬切 PGM，PVW 不变 |
 | tbar(progress) | `.tbar(progress:)` | 到 1 提交 |
@@ -354,8 +355,9 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 2. **MixerState 多了 `format` 和 `inputs`**：addInput / removeInput / setInputSettings 要能在 reduce 里落地，渲染每拍要读裁切变换。相应地 `Show.mixer` 只是切换部分（`MixerSettings`），避免 inputs/audio/outputs 在 Show 里存两份。
 3. **每路输入音频参数存在 `InputSettings.audio`**，`AudioState` 没有 perInput（只存一份）。
 4. **`ftb` 是结构不是 Bool**：`FadeToBlack{on, durationTicks, level}`，因为 §5 第 4 步是"乘一个黑色比例"，需要进度。
-5. **命令比 §9.1 多 14 个**（setTransition、autoTransition、setOverlay、busGain、busMute、setAFV、renameInput、addOutput/removeOutput/setOutputSettings，
-   以及 P3 按提案 010 / 012 加的 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、renameOutput、setInputSource）：都是 W2/W3 prompt 里已经写明要做的事。
+5. **命令比 §9.1 多 17 个**（按 §8 的对照表数，34 − 17；P1 写的 14 是 27 减 §9.1 那一行的 13 个示例，P3 加了 6 个没跟着改。setTransition、autoTransition、setOverlay、busGain、busMute、setAFV、renameInput、addOutput/removeOutput/setOutputSettings，
+   P3 按提案 010 / 012 加的 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、renameOutput、setInputSource，
+   以及 W3-E2 按提案 016 加的 setTransitionParams）：都是 W2/W3 prompt 里已经写明要做的事。
 6. **`InputState.error(message:)` 带标签**、`ColorInfo` 多了 `matrix`：JSON 可读性 / 601 摄像头。
 7. **`RGB8`、`ShowLayout` 的命名**：`RGBColor` 与 ApplicationServices（QuickDraw）的同名类型冲突，`Layout` 与 SwiftUI 冲突，改名避开。
 8. **C 结构不用 `_Alignas(64)`**：Swift 不导入过度对齐的结构；用显式 padding，分配方负责 64 字节对齐。

@@ -87,6 +87,13 @@ public struct MixerReducer: MixerReducing {
             guard !s.transition.isActive, d >= 0 else { return state }
             s.transition.type = type
             s.transition.durationTicks = d
+        case .setTransitionParams(var wipe, var stinger):
+            guard !s.transition.isActive else { return state }
+            if let input = stinger.input, !Self.inputExists(input, in: s) { return state }
+            wipe.softness = min(max(wipe.softness, 0), 1)
+            stinger.cutAtTick = max(stinger.cutAtTick, 0)
+            s.transition.wipe = wipe
+            s.transition.stinger = stinger
         case .autoTransition:
             guard !s.transition.isActive else { return state }
             Self.startAuto(&s, at: tick)
