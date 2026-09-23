@@ -4,7 +4,7 @@
 **本机现在接着两块屏**：内置 Liquid Retina XDR（1728×1117 pt @2x，120 Hz，主屏 id 1）+ LG ULTRAGEAR（2560×1440 @1x，144 Hz，id 5）——W3-C 时只有内置屏，
 所以"挪到外接屏"这一项这次能自动测了（L2 秒表法仍是人工）。
 worktree `.claude/worktrees/w3-outputs-aux-stats-dd95ab`，桌面端给的分支 `claude/w3-outputs-aux-stats-dd95ab` 没动，另从同一提交开了 **`w3-outputs-3`** 并在上面提交；
-从 main **4b7a3df**（P3 / W1-A3 / W2-A2 合入、提案 015 落地之后）开。提交：`git log main..w3-outputs-3`（6 个，顶 = 本报告）。
+从 main **4b7a3df**（P3 / W1-A3 / W2-A2 合入、提案 015 落地之后）开。提交：`git log main..w3-outputs-3`（代码 3 个、问题单 2 个、报告 3 个）。
 改动只在 `Packages/SwitcherOutputs/{Sources,Tests}/{External,ExternalTests,VirtualCamera,VirtualCameraTests}/`、本报告与 `reports/issues/`；
 契约、渲染器、App、CameraExtension、Package.swift 都没碰。`make lint BRANCH=w3-outputs-3` 全绿（禁词 / 版本号 / 依赖方向 / 归属 / RT 符号）。
 
