@@ -138,6 +138,35 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(StatsSummary(lines: [line(0, []), line(1, [])]).displays, [])
     }
 
+    /// 提案 018：`DisplaySummary.undelivered` 与 frames / dropped 同一算法（末行 − 首行）；018 之前写的摘要没有这个键，按 0 解。
+    func test018_statsSummary_displayUndelivered() throws {
+        func line(_ i: Int, _ display: [Stats.DisplayEntry]) -> Stats {
+            Stats(ts: 1000 + Double(i), tick: Tick(Int64(i) * 60), renderMs: 1, missedRender: 0, jitterMs: 0,
+                  perInput: [:], encoder: [], audio: Stats.AudioCounters(dropouts: 0, underruns: 0),
+                  rssMb: 1, cpuPct: 1, gpuPct: 0, display: display)
+        }
+        let s = StatsSummary(lines: [
+            line(0, [Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 0, dropped: 0, undelivered: 60, state: "waitingExtension"),
+                     Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 10, dropped: 0, undelivered: 0, state: "presenting")]),
+            line(1, [Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 0, dropped: 0, undelivered: 120, state: "waitingExtension"),
+                     Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 10, dropped: 0, undelivered: 45, state: "noDisplay")]),
+            line(2, [Stats.DisplayEntry(output: 4, kind: "virtualCamera", frames: 60, dropped: 1, undelivered: 130, state: "publishing"),
+                     Stats.DisplayEntry(output: 3, kind: "externalDisplay", frames: 55, dropped: 0, undelivered: 62, state: "presenting")]),
+        ])
+        let d = try XCTUnwrap(s.displays)
+        let cam = try XCTUnwrap(d.first { $0.kind == "virtualCamera" })
+        XCTAssertEqual([cam.frames, cam.dropped, cam.undelivered], [60, 1, 70], "末行 − 首行")
+        let ext = try XCTUnwrap(d.first { $0.kind == "externalDisplay" })
+        XCTAssertEqual([ext.frames, ext.dropped, ext.undelivered], [45, 0, 62])
+        XCTAssertEqual(try JSONDecoder().decode(StatsSummary.self, from: try JSONEncoder().encode(s)), s)
+        // 018 之前的摘要（displays 里没有 undelivered）照样能解，按 0
+        var old = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(s)) as! [String: Any]
+        old["displays"] = (old["displays"] as! [[String: Any]]).map { var e = $0; e["undelivered"] = nil; return e }
+        let back = try JSONDecoder().decode(StatsSummary.self, from: try JSONSerialization.data(withJSONObject: old))
+        XCTAssertEqual(back.displays?.map(\.undelivered), [0, 0])
+        XCTAssertEqual(back.displays?.map(\.frames), [45, 60])
+    }
+
     /// 手写 5 行 jsonl，avg / p99 / max 与手算一致。
     func testW1A_statsSummary_handWrittenJsonlMatchesHandCalculation() throws {
         let text = """

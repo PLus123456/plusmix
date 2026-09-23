@@ -1,4 +1,4 @@
-# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014）
+# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，W3-C2 落地提案 018）
 
 代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
@@ -13,7 +13,9 @@
 012（五条界面命令 + EffectSlot 参数键口径）、013（Stats.display[] + OutputSettings.display），另加每路 AFV 开关 `InputAudioSettings.afv`
 与 W3 各报告等拍板的口径（用户 2026-09-22 批）**
 → **提案 014（用户 2026-09-23 批并指定 W2-A2 落地，分支 w2-inputs-2，叠在 P3 之上）：`InputSource.audio` / `.decklink` 的 `channels`（声道映射），
-外加纯音频输入（`videoSlot` 为 nil）进 Program / 多画面的口径（W2-A2 报告 §4 第 2 条，同日定）**。提案文件留在 docs/contract-changes/ 当决策记录。
+外加纯音频输入（`videoSlot` 为 nil）进 Program / 多画面的口径（W2-A2 报告 §4 第 2 条，同日定）**
+→ **提案 018（用户 2026-09-23 批并指定 W3-C2 落地，分支 w3-outputs-3）：`Stats.DisplayEntry.undelivered`（不在呈现 / 发布时没送出去的帧），
+`dropped` 的口径收紧成"在呈现 / 发布时没送出去的"，两者不重叠**。提案文件留在 docs/contract-changes/ 当决策记录。
 
 ---
 
@@ -181,7 +183,7 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop,latency_ms,latency_max_ms}, encoder[{skipped,bitrate,frames,dropped,disk_free_mb,reconnects,state}], display[{output,kind,frames,dropped,state}]（P3 提案 013）, audio{dropouts,underruns,discontinuities,meters{buses[{bus,peak_db,true_peak_db,lufs_m,lufs_s,lufs_i,lra}],inputs{n:{peak_db}}}}, rss_mb, cpu_pct, gpu_pct（P2 按提案 001 / 002 / 004 / 005 扩，2026-09-18） | 引擎每秒汇总一次（W1-B）：encoder[] 由各输出的 `statsEntry` 填（`Recorder` / `StreamOutput` / `NDISender`），audio 由 `AudioEngine.audioCounters` 填（W2-E 集成层），per_input 的 L1 由引擎填（W1-B2）；写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
+| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop,latency_ms,latency_max_ms}, encoder[{skipped,bitrate,frames,dropped,disk_free_mb,reconnects,state}], display[{output,kind,frames,dropped,undelivered,state}]（P3 提案 013，undelivered 是 018）, audio{dropouts,underruns,discontinuities,meters{buses[{bus,peak_db,true_peak_db,lufs_m,lufs_s,lufs_i,lra}],inputs{n:{peak_db}}}}, rss_mb, cpu_pct, gpu_pct（P2 按提案 001 / 002 / 004 / 005 扩，2026-09-18） | 引擎每秒汇总一次（W1-B）：encoder[] 由各输出的 `statsEntry` 填（`Recorder` / `StreamOutput` / `NDISender`），audio 由 `AudioEngine.audioCounters` 填（W2-E 集成层），per_input 的 L1 由引擎填（W1-B2）；写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
 
 口径：`render_ms` = 窗口内"拍点时刻 → GPU 完成"平均 ms（V1）；`jitter_ms` = 窗口内 |派发时刻 − 理想拍点| 最大值（V3）；计数类（missed_render, dup, drop, skipped, dropouts, underruns, frames, dropped, reconnects, discontinuities）全是自启动累计，相邻两行相减得窗口增量；`fps` = 窗口内该输入 push 帧数 / 秒；`bitrate` = 窗口平均 bit/s；`ts` = Unix 秒。`Stats.jsonLine()` / `parse(line:)` 是唯一的编解码入口。
 
@@ -198,6 +200,13 @@ P3 加的字段（提案 013）：
   填数方：`ExternalDisplayManager.statsEntries`、`VirtualCameraOutput.statsEntry(output:)`、App 的 `MetalDisplayView.presentedFrames`（monitor / multiviewWindow）；
   汇总的是 App `StatsHub` → `Engine.displayStatsProvider`；headless 没有显示类输出，写空数组。
   老文件缺 `display` 键 = 空数组。`StatsSummary.displays` 是它的汇总（P3 之前的基线文件里没有这个键，解出来是 nil）。
+
+W3-C2 加的字段（提案 018）：
+- `display[i].undelivered`：输出拿到（或该拿到）、但因为当时不在呈现 / 发布而没送出去的帧数累计——虚拟摄像头 = 扩展没装 / 没连上期间收到就丢掉的，
+  外部显示 = 窗口收起（目标显示器不在）/ 被遮住期间当前源出了、窗口没画的（换源那段不算）。与 `dropped` 不重叠：`dropped` 只算在呈现 / 发布时没送出去的
+  （显示类 = 两次刷新之间被覆盖；虚拟摄像头 = 连上之后本端队列满 + 排不进 sink + 扩展收了没输出）。显示类一段时间里 frames + dropped + undelivered ≈ 当前源出的新帧。
+  填数方：`VirtualCameraOutput.statsEntry`（= `countersSnapshot.droppedNoDevice`）、`ExternalDisplayManager.statsEntries`（`DisplayFrameLedger` / `AuxInputPresenter`）；
+  App 的 monitor / multiviewWindow 两项不填就是 0。缺键 = 0（013 的老条目照解），写出总是写全；`StatsSummary.DisplaySummary.undelivered` 同算法（末行 − 首行）。
 
 ### 2.8 文件与脚本（Show.swift、Scenario.swift）
 
