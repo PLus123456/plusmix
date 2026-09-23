@@ -253,6 +253,7 @@ S2（内存增长）两次 88.2 / 72.3 MB/h，G4 run4 是 79.9 MB/h，**G4 也�
 10. **`TestPattern` 的数据字只有 28 位**：`hostTimeMs` 与 `frameNumber` 都被 `dataMask` 掩过。拿解出来的毫秒字段与 host time 比，要一起 `& TestPattern.dataMask`，
     否则机器**连续唤醒**（不含睡眠）超过 2^28 ms ≈ 3.1 天就红，重启又好——很难复现。frameprobe 的 `genTimeMs` 跨帧相减也要按 28 位环形算（问题单里写了）。
 11. **后台跑 `make … | grep …` 时，任务通知里的 exit code 是管道最后一段的**，不是 make 的——本会话第一次 `make test-packages` 通知"exit code 0"，日志末尾其实是 `make: *** [test-packages] Error 1`。看结果要翻日志，别看通知。
+    另外 **`until ! pgrep -qf "make test"; do …` 这种等待循环会匹配到它自己所在的 shell**（那个 shell 的命令行里就有 "make test"），永远等不完；要写成 `pgrep -qf "[m]ake test"`。
 
 ---
 
