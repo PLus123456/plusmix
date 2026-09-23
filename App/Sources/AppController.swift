@@ -37,6 +37,8 @@ final class AppController {
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost
+        // 第一个 session 的 MIDIController 起来之前：让 CoreMIDI 的热插拔通知走主 run loop（换节目后新插的设备也能连上，W3-E2）
+        MIDINotificationAnchor.install()
         defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
         if isTestHost {
             L10n.languageOverride = "zh-Hans"
