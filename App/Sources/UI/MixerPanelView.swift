@@ -1,9 +1,9 @@
-// 右侧可收起的调音台（W3-E 交付第 4 条）：每路条子（表、推子、静音、独听、声像、总线送出、AFV 门控状态）、四总线（表、推子、静音、效果链）、
-// AFV 开关、监听选择（PFL / AFL）。SwiftUI 表单放 NSHostingView；动作只发 Command，显示只读快照。
+// 右侧可收起的调音台（W3-E 交付第 4 条）：每路条子（表、推子、静音、独听、声像、总线送出、跟随视频开关 + AFV 门控）、四总线（表、推子、静音、效果链）、
+// AFV 总开关、监听选择（PFL / AFL）。SwiftUI 表单放 NSHostingView；动作只发 Command，显示只读快照。
 // 表的数字只有一个来源（AudioMixer.meters，铁律 4）：读数文字 + A1 计数从 1 Hz 的 Stats.audio.meters 来（提案 004）；
 // 条子按 AudioEngineStatus（控制循环每 50 ms 刷新的同一份读数）每 50 ms 刷，UI 高刷新率的表允许另读这一份（Stats.swift 的说明）。
-// 契约没有"改监听点 / 总线效果链"的命令（AudioState 只有 busGain / busMute / setAFV），这两项过渡期经 loadShow 整体替换当前状态
-// （转场中会被打断），正式命令见 docs/contract-changes/012。
+// 监听方式 / 总线效果链走提案 012 的 setMonitorMode / setBusEffects（P3 落地）；每路"跟随视频"= InputAudioSettings.afv（用户 2026-09-22 批），
+// 走 setInputSettings，门控显示读 AudioEngineStatus.afvGain（afv = false 的路引擎恒给 1 = 0 dB）。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -81,6 +81,18 @@ final class MixerModel: ObservableObject {
 
     static func gainText(_ dB: Double) -> String {
         dB <= faderRange.lowerBound ? "−∞ dB" : String(format: "%+.1f dB", dB)
+    }
+
+    /// 条子上的 AFV 门控：全局 AFV 关 = "AFV 关"；否则把 AudioEngineStatus 的门控增益换成 dB（1 = 0 dB、0 = −∞）。
+    /// 不跟随视频（afv = false）的路引擎恒给 1，所以恒显示 0 dB——读的是同一份数，不在这里另算。
+    static func afvGateText(globalAFV: Bool, gain: Float?) -> String {
+        guard globalAFV else { return L("mixer.afvOff") }
+        guard let g = gain else { return "—" }
+        let db: String
+        if g >= 0.9999 { db = "0 dB" }
+        else if g <= 0.0001 { db = "−∞ dB" }
+        else { db = String(format: "%.1f dB", 20 * log10(Double(g))) }
+        return L("mixer.afvGate", db)
     }
 
     // MARK: 每路
@@ -303,6 +315,9 @@ struct MixerInputStrip: View {
                 }
             }
             .toggleStyle(.button).controlSize(.mini)
+            Toggle(L("mixer.followVideo"), isOn: Binding(get: { audio.afv }, set: { model.setInputAFV(input.number, on: $0) }))
+                .toggleStyle(.button).controlSize(.mini)
+                .help(L("mixer.followVideoHelp"))
             afvIndicator
             Button(L("mixer.inputSettings")) { model.onOpenInputSettings?(input.number) }.controlSize(.mini)
         }
@@ -312,12 +327,8 @@ struct MixerInputStrip: View {
     }
 
     private var afvIndicator: some View {
-        let g = meters.afvGain[input.number]
-        let text: String
-        if !model.state.audio.afv { text = L("mixer.afvOff") }
-        else if let g { text = L("mixer.afvGain", Int((g * 100).rounded())) }
-        else { text = "—" }
-        return Text(text).font(.system(size: 9)).foregroundStyle(.secondary).help(L("mixer.afvIndicatorHelp"))
+        Text(MixerModel.afvGateText(globalAFV: model.state.audio.afv, gain: meters.afvGain[input.number]))
+            .font(.system(size: 9)).foregroundStyle(.secondary).help(L("mixer.afvIndicatorHelp"))
     }
 }
 
