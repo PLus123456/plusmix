@@ -38,7 +38,12 @@ XCTAssertLessThan(abs(mean), 0.8)
 （与隔壁 hostTimeMs 那条不同，那条是漏掉了一个本来就成立的掩码，见
 `reports/issues/P3-w1-testkit-hosttimems-28bit-mask.md`）。P3 只记录，不动。
 
-## 给 W1-A3 / 用户的两个方向（请拍板）
+## 已处理（用户 2026-09-23 拍板）
+
+**选了方向 2：阈值 0.8 → 1.2 ms**，P3 在 `SyntheticSourceTests.swift` 改掉并写了注释。
+下面方向 1（扣掉偏置再判）仍然是更稳的做法——换台慢机器 1.2 还会再红——留给 W1-A3 决定要不要做。
+
+## 给 W1-A3 / 用户的两个方向（原提法）
 
 1. **把偏置扣掉再判**：先跑一遍同配置但 `jitterMs: 0` 的基准，拿它的 mean 当零点，判
    `abs(mean − baselineMean) < 0.8`。这样量的才是"抖动是否零均值"，与机器快慢无关——**P3 倾向这个**。
