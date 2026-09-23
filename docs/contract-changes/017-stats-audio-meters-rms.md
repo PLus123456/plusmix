@@ -1,4 +1,4 @@
-# 016 `Stats.audio.meters` 加 RMS（`rms_db`）
+# 017 `Stats.audio.meters` 加 RMS（`rms_db`）
 
 提出会话 / 分支：W3-B2 / w3-compositor-3（worktree 分支 `claude/w3-compositor-audio-meters-labels-e0dba1`，2026-09-23）
 状态：**待批**

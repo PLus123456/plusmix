@@ -17,7 +17,7 @@ public func setMeters(_ meters: Stats.AudioCounters.Meters?, at time: HostTime =
 - **频率**：每次 Stats 发布（1 Hz）就能用；想让表活一点，App 可以按调音台同一份 `AudioEngineStatus`（50 ms）拼一份同形态的
   `Stats.AudioCounters.Meters`（`inputs[n].peakDb`、`buses` 里 bus = "master" 的 `peakDb`）再喂。峰值保持 1 s 按 `time` 算。
 - **过期**：超过 3 s 没喂新数，多画面当没有读数（输入格退回占位暗条、PGM / PVW 格不画表）；音频引擎停了请显式 `setMeters(nil)`。
-- **读哪一项**：输入格 = `inputs[n].peak_db`；PGM 格 = master 总线；PVW 格 = 当前 PVW 那路输入的 `inputs[n]`。只用峰值（契约没有 RMS，提案 016 待批）。
+- **读哪一项**：输入格 = `inputs[n].peak_db`；PGM 格 = master 总线；PVW 格 = 当前 PVW 那路输入的 `inputs[n]`。只用峰值（契约没有 RMS，提案 017 待批）。
 - headless：`HeadlessRun` 每秒拿到 `Stats` 之后加一行 `renderer.setMeters(stats.audio.meters)` 即可（多画面环 / NDI 多画面输出才看得到）。
 
 ## 2. 输入条缩略图按"默认布局"的几何切多画面纹理，多画面输出换了布局就切错

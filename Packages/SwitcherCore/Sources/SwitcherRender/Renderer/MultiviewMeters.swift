@@ -10,7 +10,7 @@
 //
 // 数的口径（峰值保持、过期）都在写端和这里定，画法（刻度、颜色分段）在 CompositorPasses.drawMeter。
 // 契约里没有 RMS（`Stats.AudioCounters.InputMeter` 只有 peak_db，总线也只有峰值 / 真峰值 / 响度），这里只画峰值 + 峰值保持；
-// 要加 RMS 见 docs/contract-changes/016（本会话写的提案，等批）。
+// 要加 RMS 见 docs/contract-changes/017（本会话写的提案，等批；W3-E2 先占了 016）。
 import Foundation
 import Synchronization
 import SwitcherContracts
