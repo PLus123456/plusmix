@@ -156,7 +156,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
             return
         }
         inputStrip.setTextureSize(width: session.format.width, height: session.format.height)
-        transitionPanel.params.showName = session.name
         window?.title = "Switcher \(SwitcherVersion.current) — \(session.name)"
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
         statsToken = session.observeStats { [weak self] stats in self?.apply(stats: stats) }

@@ -1,6 +1,6 @@
 // 中列：转场按钮（Cut / Fade / Wipe / Zoom / Stinger / FTB）、时长预设、参数…（Wipe 方向 / 软边、Stinger 输入 / 换底拍）、Overlay 1–4 开关、T-bar、时钟。
 // Wipe / Zoom / Stinger 在 W3-B 合入后（G4）接通：点 = setTransition(type, 当前时长) + autoTransition；类型留在状态里，T-bar 按它推（下面的"T-bar：…"标签）。
-// 时长预设改的是唯一的 durationTicks，五种转场都用它（Cut 没有中间态）。参数经 TransitionParamsModel 整体替换（没有专门的命令，见那里的说明）。
+// 时长预设改的是唯一的 durationTicks，五种转场都用它（Cut 没有中间态）。参数经 TransitionParamsModel 发 setTransitionParams（提案 016，见那里的说明）。
 // FTB 是开关；Overlay 开关只改 on，不改通道用的输入（给通道选输入在缩略图格子的小按钮和底栏的叠加面板）。所有动作只发 Command，显示只读快照。
 import AppKit
 import SwiftUI

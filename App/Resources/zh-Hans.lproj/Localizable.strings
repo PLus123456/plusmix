@@ -667,8 +667,8 @@
 "transition.overlayInput" = "Overlay %d：输入 %d";
 "transition.overlayNoInput" = "Overlay %d：还没指定输入（在缩略图格子上点 %d）";
 "transition.params" = "参数…";
-"transition.params.hint" = "Wipe / Stinger 参数没有单独的命令，经 loadShow 整体替换当前节目状态生效；转场、叠加进出动画、FTB 渐变进行中改的会等它们结束再发（整体替换会把进行中的动画直接打到终点）。";
-"transition.params.pending" = "等当前动画结束后生效";
+"transition.params.hint" = "改的参数从下一次转场起生效；转场进行中（含 T-bar 推到一半）改的，等这次转场结束再发，进行中的这一次仍按开始时的参数走。";
+"transition.params.pending" = "等当前转场结束后生效";
 "transition.params.title" = "转场参数（Wipe / Stinger）";
 "transition.stinger.cutAtTick" = "第 %d 拍换底（时长 %d 拍）";
 "transition.stinger.hint" = "选一路带 alpha 的图片 / 文件输入叠在最上层；换底拍 0 与 1 等价，≥ 时长 = 转场完成时才换。";

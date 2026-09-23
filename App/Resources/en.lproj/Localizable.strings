@@ -667,8 +667,8 @@
 "transition.overlayInput" = "Overlay %d: input %d";
 "transition.overlayNoInput" = "Overlay %d: no input yet (click %d on a thumbnail)";
 "transition.params" = "Params…";
-"transition.params.hint" = "Wipe / Stinger parameters have no command of their own; they take effect by replacing the whole show state (loadShow). Changes made while a transition, an overlay animation or an FTB fade is running are sent when it finishes (a replacement would cut the running animation short).";
-"transition.params.pending" = "Applies when the current animation finishes";
+"transition.params.hint" = "Changes apply from the next transition. Changes made while a transition is running (including a half-pulled T-bar) are sent when it finishes; the running transition keeps the parameters it started with.";
+"transition.params.pending" = "Applies when the current transition finishes";
 "transition.params.title" = "Transition parameters (Wipe / Stinger)";
 "transition.stinger.cutAtTick" = "Cut at tick %d (of %d)";
 "transition.stinger.hint" = "Pick an image / file input with alpha to lay on top; cut ticks 0 and 1 are the same, ≥ duration = cut when the transition completes.";

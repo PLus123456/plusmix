@@ -167,7 +167,7 @@ final class PanelTests: XCTestCase {
             }, verify: { session.state.audio.buses[0].effects.first?.id == AudioEffectParams.peakLimiterID },
                describe: { "\(session.state.audio.buses[0].effects)" }))
 
-        // W3-E2：切换面板的参数…（没有 setTransitionParams，经 loadShow 整体替换；空闲时立刻发）
+        // W3-E2：切换面板的参数…（setTransitionParams，提案 016；不在转场中就立刻发）
         cases.append(Case(name: "切换面板：Wipe 参数（上 → 下、软边 0.2）", change: {
                 let m = wc.transitionPanel.params
                 m.setWipeDirection(.topToBottom)

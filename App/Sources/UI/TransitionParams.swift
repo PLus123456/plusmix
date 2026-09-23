@@ -1,9 +1,7 @@
 // 转场参数（W3-E2 交付第 2 条）：Wipe 方向（五向）/ 软边（0–0.3）、Stinger 输入 / 换底拍，落 `TransitionState.wipe` / `.stinger`。
-// 契约没有改这两组参数的命令（只有 setTransition(type:durationTicks:)），所以按 prompt 先用 loadShow 整体替换：拿最新快照、只换这两项、发 loadShow。
-// 整体替换的代价写清楚（reports/w3-app-3.md §3、提案 016）：
-// - loadShow 会 resetTransientState：转场 / 叠加进出动画 / FTB 渐变进行中发，会把它们直接打到终点（转场是作废、不对调）。
-//   所以动画进行中只在面板上先显示新值（pending），等全部空闲再发。
-// - 替换用的是 App 手里的快照：从快照到命令进状态机之间（≤ 1/60 s + 命令队列）别的来源（API / MIDI / 快捷键）改的东西会被盖回去。
+// 发 setTransitionParams（提案 016，用户 2026-09-23 批）：只整体替换这两组，别的字段不碰，叠加进出动画 / FTB 渐变进行中照发、不打断它们
+// （之前没有这条命令，走 loadShow 整体替换：会盖掉别的来源的改动，还得等所有动画空闲）。
+// reducer 在转场进行中（含 T-bar 推到一半）拒绝，所以转场中改的先在面板上显示（pending），等转场结束再发。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -14,8 +12,6 @@ final class TransitionParamsModel: ObservableObject {
     /// 还没进快照的参数（面板上先显示它）。
     @Published private(set) var pending: (wipe: WipeParams, stinger: StingerParams)?
     var send: ((Command) -> Void)?
-    /// loadShow 用的节目名（状态机不看它，只是让命令日志好认）。
-    var showName = ""
     /// 已经发出去、等快照回来的时刻（等太久就放弃，面板回到快照的值）。
     private var sentAt: Date?
 
@@ -34,7 +30,11 @@ final class TransitionParamsModel: ObservableObject {
             pending = nil
             sentAt = nil
         } else if let t = sentAt {
-            if Date().timeIntervalSince(t) > 1 { pending = nil; sentAt = nil }   // 被拒 / 被忽略：放弃，显示快照的值
+            if state.transition.isActive {
+                sentAt = nil   // 发出后别的来源先起了转场：reducer 会拒，转场结束再发
+            } else if Date().timeIntervalSince(t) > 1 {
+                pending = nil; sentAt = nil   // 被拒（stinger 用的输入刚被删）/ 被忽略：放弃，显示快照的值
+            }
         } else {
             flushIfIdle()
         }
@@ -55,18 +55,10 @@ final class TransitionParamsModel: ObservableObject {
         flushIfIdle()
     }
 
-    /// 转场、叠加进出动画、FTB 渐变都空闲（loadShow 的 resetTransientState 打断不到任何东西）。
-    static func isIdle(_ s: MixerState) -> Bool {
-        !s.transition.isActive && s.ftb.startTick == nil && s.overlays.allSatisfy { $0.startTick == nil }
-    }
-
     private func flushIfIdle() {
-        guard let p = pending, sentAt == nil, Self.isIdle(state) else { return }
-        var s = state
-        s.transition.wipe = p.wipe
-        s.transition.stinger = p.stinger
+        guard let p = pending, sentAt == nil, !state.transition.isActive else { return }
         sentAt = Date()
-        send?(.loadShow(show: Show(name: showName, state: s)))
+        send?(.setTransitionParams(wipe: p.wipe, stinger: p.stinger))
     }
 }
 

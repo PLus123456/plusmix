@@ -79,12 +79,13 @@ final class TransitionPanelTests: XCTestCase {
         XCTAssertEqual(panel.durationControl.selectedSegment, index, "面板显示当前时长对应的预设")
     }
 
-    /// Wipe 方向 / 软边、Stinger 输入 / 换底拍：没有 setTransitionParams 命令，经 loadShow 整体替换落进快照；
-    /// 输入 / PGM / PVW 不变、输入不重建；转场进行中改的参数等转场结束再发（loadShow 会 resetTransientState，发了就打断转场）。
-    func testTransitionParams_replaceViaLoadShow_deferredWhileTransitionActive() throws {
+    /// Wipe 方向 / 软边、Stinger 输入 / 换底拍经 setTransitionParams（提案 016）落进快照，不再 loadShow 整体替换：
+    /// 输入 / PGM / PVW 不变、输入不重建；叠加进出动画进行中照发、不打断它；只有转场进行中（reducer 会拒）才先在面板上显示、等转场结束再发。
+    func testTransitionParams_setTransitionParams_deferredOnlyWhileTransitionActive() throws {
         let session = try prepare(durationTicks: 30)
         let panel = AppTest.controller.windowController.transitionPanel
         let m = panel.params
+        let since = session.control.bus.recentEntries().last?.sequence ?? 0
         let input1 = try XCTUnwrap(session.inputs.entries[1]?.input)
         m.setWipeDirection(.topToBottom)
         m.setWipeSoftness(0.9)
@@ -98,10 +99,28 @@ final class TransitionPanelTests: XCTestCase {
         XCTAssertEqual(session.state.program, 1)
         XCTAssertEqual(session.state.preview, 2)
         XCTAssertEqual(session.state.inputs.count, 2)
-        XCTAssertTrue(session.inputs.entries[1]?.input === input1, "整体替换不应重建输入")
+        XCTAssertTrue(session.inputs.entries[1]?.input === input1, "不应重建输入")
         XCTAssertFalse(m.isPending)
 
-        // 转场进行中：面板上立刻显示新值，但等转场结束才发（转场照常完成对调，没被打断）
+        // 面板手里的快照过时（快照到命令入队之间别的来源改了东西）：只发这两组参数，不会把别人的改动盖回去
+        let stale = session.state
+        session.send(.busGain(bus: .master, dB: -6))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.buses[Bus.master.rawValue].gainDb == -6 })
+        m.apply(state: stale)
+        m.setWipeSoftness(0.1)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.wipe.softness == 0.1 }, "\(session.state.transition.wipe)")
+        XCTAssertEqual(session.state.audio.buses[Bus.master.rawValue].gainDb, -6, "别的来源的改动保留")
+
+        // 叠加进出动画进行中：照发、不打断动画（loadShow 的 resetTransientState 会把它直接打到终点）
+        session.send(.setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .fade, durationTicks: 240)))
+        session.send(.overlay(channel: 1, on: true, input: 2))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.overlays[0].startTick != nil })
+        m.setWipeSoftness(0.2)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.wipe.softness == 0.2 && !m.isPending }, "叠加动画（4 s）不挡参数：\(session.state.transition.wipe)")
+        XCTAssertNotNil(session.state.overlays[0].startTick, "叠加动画没被打断")
+        XCTAssertLessThan(session.state.overlays[0].animProgress, 1)
+
+        // 转场进行中：面板上立刻显示新值，等转场结束才发（reducer 在转场中会拒），转场照常完成对调
         session.send(.autoTransition)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.isActive })
         m.setWipeDirection(.diagonal)
@@ -112,9 +131,17 @@ final class TransitionPanelTests: XCTestCase {
         XCTAssertEqual(session.state.transition.wipe.direction, .topToBottom, "转场进行中还没发")
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.program == 2 && session.state.preview == 1 && !session.state.transition.isActive },
                       "转场应照常完成对调：\(session.state.program) / \(session.state.preview)")
-        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.wipe == WipeParams(direction: .diagonal, softness: 0.3) && !m.isPending },
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.wipe == WipeParams(direction: .diagonal, softness: 0.2) && !m.isPending },
                       "转场结束后参数生效：\(session.state.transition.wipe)")
-        XCTAssertEqual(session.state.program, 2, "发参数用的是最新快照，不会把对调改回去")
+        XCTAssertEqual(session.state.program, 2)
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
+
+        // 命令日志：全是 setTransitionParams、每条都生效（转场中没发过注定被拒的），没有 loadShow
+        let entries = session.control.bus.recentEntries().filter { $0.sequence > since && $0.source == .ui }
+        let params = entries.filter { if case .setTransitionParams = $0.command { return true } else { return false } }
+        XCTAssertGreaterThanOrEqual(params.count, 5, "\(entries.map(\.command))")
+        XCTAssertTrue(params.allSatisfy(\.applied), "\(params.map { ($0.command, $0.applied) })")
+        XCTAssertFalse(entries.contains { if case .loadShow = $0.command { return true } else { return false } }, "不再 loadShow 整体替换")
+        session.send(.overlay(channel: 1, on: false, input: nil))
     }
 }
