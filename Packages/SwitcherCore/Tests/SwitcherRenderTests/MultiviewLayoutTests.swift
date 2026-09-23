@@ -304,6 +304,72 @@ final class MultiviewLayoutTests: XCTestCase {
         XCTAssertFalse(CompositorPasses.wants(.multiview, in: s))
     }
 
+    /// 提案 010 / W3-B §4 第 5 条的裁定，走**实时渲染器**验一遍：选项 previewOutput / multiviewOutput 都**默认关**时，
+    /// `RenderedFrame.preview` / `.multiview` 是否非 nil 只由"状态里有没有 enabled 且 source 是它的输出"决定。
+    /// （`CompositorPasses.wants` 的纯函数用例在上面；这一条是端到端的，headless 的多画面真渲染就靠它。）
+    func testP3_renderedFrameAutoFilledFromStateWithDefaultOptions() throws {
+        let renderer = try MetalRenderer()      // 默认选项：两个强制开关都是 false
+        XCTAssertFalse(renderer.options.previewOutput)
+        XCTAssertFalse(renderer.options.multiviewOutput)
+        try renderer.prepare(format: .hd1080p60, maxInputs: 9)
+        defer { renderer.shutdown() }
+        let sink = CollectingSink()
+        sink.holdDepth = 1
+        renderer.sink = sink
+        let buffers = TestImages.phase2ReferenceBuffers()
+        let table = RenderInputTable(capacity: 9)
+        for (n, pb) in buffers {
+            table[inputNumber: n] = Frame(pixelBuffer: pb, pts: .zero, duration: .zero, color: .sRGBFull, inputNumber: n, sequence: 0, ingressTime: .zero)
+        }
+
+        var tick: Int64 = 0
+        /// 用这个状态连画几拍，返回最后一拍的产物。
+        func render(_ state: MixerState, sequence: UInt64) throws -> RenderedFrame {
+            let snap = MixerSnapshot(state: state, sequence: sequence, tick: Tick(tick))
+            for _ in 0..<8 {
+                _ = renderer.render(tick: Tick(tick), at: HostClock.now(), snapshot: snap, inputs: table)
+                tick += 1
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+            return try XCTUnwrap(sink.lastHeld)
+        }
+
+        // 1. 输出表为空：两个都不填
+        var s = ReferenceStates.fixed8()
+        s.outputs = []
+        let none = try render(s, sequence: 1)
+        XCTAssertNil(none.preview, "没有 enabled 的 preview 输出就不该填")
+        XCTAssertNil(none.multiview, "没有 enabled 的 multiview 输出就不该填")
+
+        // 2. 有 enabled 的多画面输出（= scenarios/g4-show.json 的样子）：只填多画面
+        s.outputs = [OutputState(number: 1, kind: .multiview, name: "多画面", enabled: true, settings: OutputSettings(source: .multiview))]
+        let mv = try render(s, sequence: 2)
+        XCTAssertNotNil(mv.multiview, "状态里有 enabled 的多画面输出 → RenderedFrame.multiview 应非 nil")
+        XCTAssertNil(mv.preview)
+        XCTAssertEqual(mv.multiview?.pixelFormat, .nv12)
+        XCTAssertEqual(mv.multiview?.pts, mv.tickTime)
+        XCTAssertEqual(mv.multiview?.inputNumber, 0)
+
+        // 3. 关掉它：又不填了
+        s.outputs[0].enabled = false
+        XCTAssertNil(try render(s, sequence: 3).multiview, "enabled 关掉就不填")
+
+        // 4. source = preview 的 NDI 输出：填 PVW（kind 不限）
+        s.outputs = [OutputState(number: 2, kind: .ndi, name: "PVW 发送", enabled: true, settings: OutputSettings(source: .preview))]
+        let pv = try render(s, sequence: 4)
+        XCTAssertNotNil(pv.preview, "状态里有 enabled 且 source = preview 的输出 → RenderedFrame.preview 应非 nil")
+        XCTAssertNil(pv.multiview)
+        XCTAssertEqual(pv.preview?.pixelFormat, .nv12)
+
+        // 5. source = program / input 的输出不算
+        s.outputs = [OutputState(number: 3, kind: .record, name: "录制", enabled: true, settings: OutputSettings(source: .program)),
+                     OutputState(number: 4, kind: .ndi, name: "Aux", enabled: true, settings: OutputSettings(source: .input(number: 3)))]
+        let neither = try render(s, sequence: 5)
+        XCTAssertNil(neither.preview)
+        XCTAssertNil(neither.multiview)
+    }
+
     /// 多画面几何 API 用同一份解析逻辑（MultiviewLayoutTable），渲染线程的解析零分配：解析 20 次不分配。
     func testMultiview_layoutTableParseDoesNotAllocate() throws {
         try XCTSkipUnless(MallocProbe.isAvailable, "找不到 malloc_logger 符号")
