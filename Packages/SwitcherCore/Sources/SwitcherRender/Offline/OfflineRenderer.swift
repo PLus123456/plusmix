@@ -42,6 +42,8 @@ public final class OfflineRenderer {
     private var session: Session?
     /// PVW 也画叠加（= MetalRendererOptions.overlaysInPreview）。
     public var overlaysInPreview = false
+    /// 多画面电平表的读数（= MetalRenderer.setMeters 那条通道，W3-B2）；离线渲染不判过期。
+    private let meterFeed = MultiviewMeterFeed()
 
     /// 一个尺寸对应的目标纹理和读回纹理。
     private final class Session {
@@ -92,6 +94,12 @@ public final class OfflineRenderer {
         q.label = "switcher.render.offline"
         queue = q
         resources = try RenderResources.shared(for: dev)
+    }
+
+    /// 多画面电平表的读数（同 `MetalRenderer.setMeters`：峰值保持按 `time` 算；nil = 清掉）。之后每次渲染都用最后喂的那份，
+    /// 离线渲染不看钟、不判过期。参考图 / 测试用固定的 `time`，结果确定。
+    public func setMeters(_ meters: Stats.AudioCounters.Meters?, at time: HostTime = HostClock.now()) {
+        meterFeed.write(meters, at: time)
     }
 
     /// prompt 里的签名：状态 + 输入图（按输入编号）+ 尺寸 → 一张图（默认 PGM）。
@@ -190,6 +198,7 @@ public final class OfflineRenderer {
         cb.label = "switcher.offline"
         var context = CompositorPasses.Context(resources: resources, table: s.table, labels: s.labels, layout: s.layout, frameIndex: 0)
         context.overlaysInPreview = overlaysInPreview
+        context.meters = meterFeed.acquire(now: nil)
         // ---- 与实时路径同一个函数 ----
         CompositorPasses.encodeFrame(state: state, inputs: table, slot: s.slot, context: context, commandBuffer: cb,
                                      outputs: CompositorPasses.FrameOutputs(program: programTarget, preview: previewTarget, multiview: multiviewTarget),

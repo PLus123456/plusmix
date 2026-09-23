@@ -397,6 +397,7 @@ final class MultiviewLayoutTests: XCTestCase {
                       ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "3x3"),
                       ReferenceStates.withMultiviewLayout(ReferenceStates.fixed8(), ReferenceStates.customLayout),
                       ReferenceStates.withLegacyExtraLayout(ReferenceStates.fixed8(), ReferenceStates.customLayoutLegacyJSON),
+                      ReferenceStates.audioOnly3x3(),                                  // 纯音频格的标记也在这次解析里算（W3-B2）
                       ReferenceStates.withMultiviewPreset(ReferenceStates.fixed8(), "pgmPvw+2x2")]
         for s in states { table.parse(state: s, width: 1920, height: 1080) }   // 预热
         MallocProbe.start()

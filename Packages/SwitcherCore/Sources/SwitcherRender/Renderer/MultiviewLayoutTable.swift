@@ -6,6 +6,7 @@
 // 过渡键 `settings.extra["layout"]` 的后备读取 P3 保留了一个版本，W3-B2 删掉（P3 报告 §4 第 1 条）：旧节目文件由 `Show.load`
 // 一次性搬进正式字段；没经过 load 的内存状态里的过渡键不再起作用（渲染成默认布局）。
 // 解析结果放进预分配的定长表：渲染线程只在快照 sequence 变了时解析一次，解析本身零分配（下标循环、枚举载荷只 retain）。
+// 同一次解析顺手标出哪些输入格是纯音频输入（`InputConfig.kind == .audio`，W3-B2 交付 1）：渲染线程每帧查格子上的标记。
 // App 的几何 API（MultiviewLayout.placements）走同一份 `Geometry`，用 Double 算；渲染表用 Float，与 W1-C 的像素算式逐字相同。
 import simd
 import SwitcherContracts
@@ -18,6 +19,9 @@ struct MultiviewCellSpec {
     var input: Int32 = 0
     /// 外框（含 tally 边框），像素。
     var rect = PixelRect(x: 0, y: 0, width: 0, height: 0)
+    /// kind = input 且这路是纯音频输入（`InputConfig.kind == .audio`，W3-B2）：画占位格（深灰底 + 名字 + 电平表），不画画面。
+    /// 只有 `parse(state:…)` 会标（它看得到输入表）；`placements` 给 App 的几何不关心它。
+    var audioOnly = false
 }
 
 /// 布局几何（对 Float / Double 各实例化一次）。
@@ -111,9 +115,17 @@ final class MultiviewLayoutTable {
     }
 
     /// 从状态解析（渲染线程；零分配）。只读正式字段 `settings.multiview`，过渡键 `extra["layout"]` 忽略。
+    /// 顺手标出纯音频输入的格子（W3-B2）：渲染线程只在快照 sequence 变了时调这里，每帧查格子上的标记，不遍历输入表。
     func parse(state: MixerState, width: Int, height: Int) {
         let inputs = state.inputs
         parse(settings: MultiviewLayoutTable.settings(in: state), inputCount: inputs.count, width: width, height: height) { inputs[$0].number }
+        var i = 0
+        while i < cellCount {
+            if cells[i].kind == .input, let config = CompositorPasses.inputConfig(Int(cells[i].input), in: state) {
+                cells[i].audioOnly = config.kind == .audio
+            }
+            i += 1
+        }
     }
 
     /// 核心：正式字段 + 输入编号 → 表（提案 010）。下标循环、只 retain，渲染线程可调。

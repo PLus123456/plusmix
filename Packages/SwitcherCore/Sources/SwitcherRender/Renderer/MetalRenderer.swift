@@ -82,6 +82,8 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     /// 多画面布局表：只有渲染线程碰；快照 sequence 变了才重新解析。
     private let layout = MultiviewLayoutTable()
     private var layoutSequence: UInt64 = .max
+    /// 多画面电平表的读数通道（W3-B2）：setMeters 写、渲染线程每帧读。跟渲染器同寿命（prepare 之前也能喂）。
+    private let meterFeed = MultiviewMeterFeed()
 
     /// 在途帧数（已提交未完成）。
     let inflight = Atomic<Int>(0)
@@ -218,6 +220,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         }
         var context = CompositorPasses.Context(resources: resources, table: table, labels: labelSet, layout: layout, frameIndex: frameIndex)
         context.overlaysInPreview = options.overlaysInPreview
+        if options.multiview { context.meters = meterFeed.acquire(now: tickTime) }
         CompositorPasses.encodeFrame(state: state, inputs: inputs, slot: slot, context: context, commandBuffer: cb,
                                      outputs: outputs, multiview: options.multiview)
 
@@ -301,6 +304,20 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         }
         finished.signal()
     }
+
+    // MARK: - 多画面电平表（W3-B2）
+
+    /// 把表读数递给多画面的电平表。组装方（App / headless）在**非实时线程**调：每秒 Stats 发布时喂 `stats.audio.meters`，
+    /// 想让表更活可以更密（例如 App 按 50 ms 的表读数拼一份同形态的 Meters）；不许在音频实时回调里调（这里分配、拿锁）。
+    /// - 输入格读 `meters.inputs[n]`，PGM 格读 master 总线，PVW 格读当前 PVW 那路输入；只用峰值（契约没有 RMS）。
+    /// - 峰值保持 1 s 按 `time`（喂数时刻）算；超过 3 s 没喂新数，渲染线程就当没有读数（输入格退回占位）。
+    /// - nil = 清掉（例如音频引擎停了）。多条线程同时调会按锁串行，渲染线程从不等它。
+    public func setMeters(_ meters: Stats.AudioCounters.Meters?, at time: HostTime = HostClock.now()) {
+        meterFeed.write(meters, at: time)
+    }
+
+    /// 渲染线程接手新电平表的次数（测试看）。
+    var meterAdoptions: Int { meterFeed.adoptions.load(ordering: .relaxed) }
 
     // MARK: - DisplayFrameSource
 
