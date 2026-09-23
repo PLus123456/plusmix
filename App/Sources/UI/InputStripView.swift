@@ -117,13 +117,26 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         applySearch()
     }
 
-    /// 输入数量变了格子网格会变（4×2 → 6×3），全部重算。
+    /// 缩略图 = 多画面纹理里这一路的格子：按当前布局算（提案 010 的 OutputSettings.multiview；没有 = 默认布局，4×2 → 6×3 随路数变）。
+    /// 布局或路数变了才重算（快照每拍都可能变，布局很少变）。布局里没有的路（自定义格子没放它）缩略图画不出来，格子上说明。
     private func relayoutThumbnails() {
-        let count = lastState.inputs.count
-        for (i, config) in lastState.inputs.enumerated() {
-            cells[config.number]?.setThumbnail(index: i, inputCount: count, textureWidth: textureSize.width, textureHeight: textureSize.height)
+        let key = ThumbnailLayoutKey(layout: MultiviewLayout.layoutSettings(in: lastState), inputs: lastState.inputs.map(\.number),
+                                     width: textureSize.width, height: textureSize.height)
+        guard key != thumbnailLayoutKey else { return }
+        thumbnailLayoutKey = key
+        let placements = MultiviewLayout.placements(settings: key.layout, inputs: key.inputs, width: key.width, height: key.height)
+        for number in key.inputs {
+            cells[number]?.setThumbnail(rect: placements.first { $0.source == .input(number: number) }?.inner)
         }
     }
+
+    private struct ThumbnailLayoutKey: Equatable {
+        let layout: MultiviewLayoutSettings?
+        let inputs: [Int]
+        let width: Int
+        let height: Int
+    }
+    private var thumbnailLayoutKey: ThumbnailLayoutKey?
 
     /// 显示来源（新 session 时换）；新建的格子也从这里拿。
     var displaySource: (any DisplayFrameSource)? {

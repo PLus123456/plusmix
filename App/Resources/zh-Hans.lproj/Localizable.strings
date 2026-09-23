@@ -152,6 +152,7 @@
 "cell.menu.remove" = "删除输入 %d";
 "cell.menu.rename" = "重命名…";
 "cell.menu.settings" = "设置…";
+"cell.notInMultiview" = "不在多画面布局里";
 "cell.rename.field" = "新名字";
 "cell.rename.title" = "重命名输入 %d";
 "cell.tooltip" = "%d %@（%@）\n点击 = 选 PVW，Shift 点击 = 直切 PGM";
@@ -323,6 +324,7 @@
 "menu.output" = "输出";
 "menu.output.external" = "外部输出…";
 "menu.output.iso" = "ISO 分路录制…";
+"menu.output.multiview" = "多画面布局…";
 "menu.output.ndi" = "NDI 发送…";
 "menu.output.record" = "录制设置…";
 "menu.output.stream" = "推流设置…";
@@ -451,6 +453,19 @@
 "outputSettings.iso.routeRecording" = "→ %@（录制中）";
 "outputSettings.iso.title" = "ISO 分路录制";
 "outputSettings.keyframeInterval" = "关键帧间隔 %d 帧";
+"outputSettings.multiview.clearCustom" = "清掉自定义格子（回到预设）";
+"outputSettings.multiview.customActive" = "自定义格子 %d 个（来自节目文件 / API，这里只读；非空时预设不起作用）：";
+"outputSettings.multiview.hint" = "布局对多画面窗口、缩略图条、外部输出的\"多画面\"来源都生效；存在节目文件里（第一个多画面输出的设置）。";
+"outputSettings.multiview.meters" = "输入格画电平表";
+"outputSettings.multiview.name" = "多画面布局";
+"outputSettings.multiview.preset" = "预设";
+"outputSettings.multiview.preset.3x3" = "3×3";
+"outputSettings.multiview.preset.4x4" = "4×4";
+"outputSettings.multiview.preset.pgmPvw+2x2" = "PVW / PGM + 2×2";
+"outputSettings.multiview.preset.pgmPvw+4x2" = "PVW / PGM + 4×2";
+"outputSettings.multiview.preset.pgmPvw+grid" = "PVW / PGM + 按路数自动（默认）";
+"outputSettings.multiview.safeArea" = "PGM / PVW 画安全框（EBU R95）";
+"outputSettings.multiview.title" = "多画面布局";
 "outputSettings.ndi.add" = "添加 NDI 发送";
 "outputSettings.ndi.addButton" = "添加";
 "outputSettings.ndi.conversion" = "转换";
@@ -486,6 +501,7 @@
 "outputSettings.stream.urlPrompt" = "rtmp:// rtmps:// srt://";
 "outputSettings.tab.external" = "外部显示";
 "outputSettings.tab.iso" = "ISO 分路";
+"outputSettings.tab.multiview" = "多画面布局";
 "outputSettings.tab.ndi" = "NDI 发送";
 "outputSettings.tab.record" = "录制";
 "outputSettings.tab.stream" = "推流";

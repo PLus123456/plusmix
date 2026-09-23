@@ -5,12 +5,13 @@
 import AppKit
 import SwiftUI
 import SwitcherContracts
+import SwitcherRender
 import SwitcherVirtualCamera
 
 @MainActor
 final class OutputSettingsModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case record, iso, stream, external, ndi, virtualCamera
+        case record, iso, stream, external, ndi, virtualCamera, multiview
         var id: String { rawValue }
         var title: String { L("outputSettings.tab.\(rawValue)") }
     }
@@ -273,6 +274,41 @@ final class OutputSettingsModel: ObservableObject {
 
     /// 输出来源选项：PGM / PVW / 多画面 / 每路输入。
     var sourceChoices: [OutputSource] { [.program, .preview, .multiview] + state.inputs.map { .input(number: $0.number) } }
+
+    // MARK: 多画面布局（提案 010：OutputSettings.multiview）
+
+    /// 承载布局的输出：渲染器取第一个 kind = multiview 的输出的布局（不看 enabled）。
+    var multiviewOutput: OutputState? { state.outputs.first { $0.kind == .multiview } }
+
+    /// 当前布局（没有多画面输出 = 默认布局）。
+    var multiviewLayout: MultiviewLayoutSettings { multiviewOutput?.settings.multiview ?? MultiviewLayoutSettings() }
+
+    /// 改布局：有多画面输出就改它的 settings.multiview（setOutputSettings），没有就加一个只承载布局的——source = multiview、enabled = false
+    /// （enabled 且 source = multiview 会让渲染器每拍多转一次 NV12 给下游，App 里没有这个下游；布局本身不看 enabled）。
+    func updateMultiview(_ body: (inout MultiviewLayoutSettings) -> Void) {
+        var layout = multiviewLayout
+        body(&layout)
+        if let o = multiviewOutput {
+            updateOutput(o.number) { $0.multiview = layout }
+        } else {
+            add(OutputState(number: nextOutputNumber(), kind: .multiview, name: L("outputSettings.multiview.name"), enabled: false,
+                            settings: OutputSettings(source: .multiview, multiview: layout)))
+        }
+    }
+
+    func setMultiviewPreset(_ preset: String) { updateMultiview { $0.preset = preset } }
+    func setMultiviewSafeArea(_ on: Bool) { updateMultiview { $0.safeArea = on } }
+    func setMultiviewMeters(_ on: Bool) { updateMultiview { $0.meters = on } }
+    /// 清掉自定义格子（回到预设）。格子本身不在这里编辑（prompt 63：只读展示，不做编辑器）。
+    func clearMultiviewCustomCells() { updateMultiview { $0.custom = [] } }
+
+    /// 自定义格子的只读列表：来源 + 位置。
+    var customCellRows: [(source: String, rect: String)] {
+        multiviewLayout.custom.map { c in
+            let r = c.rect
+            return (c.source.title(in: state), String(format: "x %.3f  y %.3f  w %.3f  h %.3f", r.x, r.y, r.width, r.height))
+        }
+    }
 }
 
 struct OutputSettingsView: View {
@@ -307,6 +343,29 @@ struct OutputSettingsView: View {
         case .external: externalTab
         case .ndi: ndiTab
         case .virtualCamera: virtualCameraTab
+        case .multiview: multiviewTab
+        }
+    }
+
+    // MARK: 多画面布局
+
+    private var multiviewTab: some View {
+        let layout = model.multiviewLayout
+        return Section(L("outputSettings.multiview.title")) {
+            Picker(L("outputSettings.multiview.preset"), selection: Binding(get: { layout.preset }, set: { model.setMultiviewPreset($0) })) {
+                ForEach(MultiviewLayout.presetNames, id: \.self) { Text(L("outputSettings.multiview.preset.\($0)")).tag($0) }
+            }
+            .disabled(!layout.custom.isEmpty)
+            Toggle(L("outputSettings.multiview.safeArea"), isOn: Binding(get: { layout.safeArea }, set: { model.setMultiviewSafeArea($0) }))
+            Toggle(L("outputSettings.multiview.meters"), isOn: Binding(get: { layout.meters }, set: { model.setMultiviewMeters($0) }))
+            if !layout.custom.isEmpty {
+                Text(L("outputSettings.multiview.customActive", layout.custom.count)).font(.caption).foregroundStyle(.secondary)
+                ForEach(Array(model.customCellRows.enumerated()), id: \.offset) { _, row in
+                    LabeledContent(row.source, value: row.rect)
+                }
+                Button(L("outputSettings.multiview.clearCustom")) { model.clearMultiviewCustomCells() }
+            }
+            Text(L("outputSettings.multiview.hint")).font(.caption).foregroundStyle(.secondary)
         }
     }
 

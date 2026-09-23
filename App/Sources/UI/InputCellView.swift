@@ -102,23 +102,37 @@ final class InputCellView: NSView {
             Theme.setHighlighted(b, overlays[i].on && overlays[i].input == config.number)
         }
         Theme.setHighlighted(muteButton, config.settings.audio.muted, color: Theme.recording)
-        switch runtime {
-        case .live?, nil:
-            statusLabel.isHidden = true
-        case .noSignal?:
-            statusLabel.stringValue = L("input.noSignal")
-            statusLabel.isHidden = false
-        case .error(let message)?:
-            statusLabel.stringValue = message
-            statusLabel.isHidden = false
-        }
+        self.runtime = runtime
+        updateStatus()
         toolTip = L("cell.tooltip", config.number, config.name, L("addInput.kind.\(config.kind.rawValue)"))
     }
 
-    /// 缩略图取多画面纹理里的哪一块（index = 在 MixerState.inputs 里的序号）。
-    func setThumbnail(index: Int, inputCount: Int, textureWidth: Int, textureHeight: Int) {
-        display.sourceRect = MultiviewLayout.inputCell(index: index, inputCount: inputCount, width: textureWidth, height: textureHeight) ?? .full
+    /// 缩略图取多画面纹理里的哪一块（InputStripView 按当前布局算好的内框）；nil = 布局里没有这一路（自定义格子没放它），不画、写一句说明。
+    func setThumbnail(rect: NormalizedRect?) {
+        isOutsideMultiviewLayout = rect == nil
+        display.sourceRect = rect ?? .full
+        display.isHidden = rect == nil
+        updateStatus()
     }
+
+    /// 布局里没有这一路（缩略图画不出来）。
+    private(set) var isOutsideMultiviewLayout = false
+    private var runtime: InputState?
+
+    /// 格子中间那行字：运行状态（无信号 / 错误文案）优先，其次"不在多画面布局里"。
+    private func updateStatus() {
+        let text: String?
+        switch runtime {
+        case .noSignal?: text = L("input.noSignal")
+        case .error(let message)?: text = message
+        case .live?, nil: text = isOutsideMultiviewLayout ? L("cell.notInMultiview") : nil
+        }
+        statusLabel.stringValue = text ?? ""
+        statusLabel.isHidden = text == nil
+    }
+
+    /// 格子上现在显示的状态文字（没有为空串；测试看）。
+    var displayedStatus: String { statusLabel.isHidden ? "" : statusLabel.stringValue }
 
     /// 搜索匹配：编号或名字包含关键字。
     func matches(search: String) -> Bool {

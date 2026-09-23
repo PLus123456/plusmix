@@ -152,6 +152,7 @@
 "cell.menu.remove" = "Remove Input %d";
 "cell.menu.rename" = "Rename…";
 "cell.menu.settings" = "Settings…";
+"cell.notInMultiview" = "Not in the multiview layout";
 "cell.rename.field" = "New name";
 "cell.rename.title" = "Rename Input %d";
 "cell.tooltip" = "%d %@ (%@)\nClick = preview, Shift-click = program";
@@ -323,6 +324,7 @@
 "menu.output" = "Output";
 "menu.output.external" = "External Output…";
 "menu.output.iso" = "ISO Recording…";
+"menu.output.multiview" = "Multiview Layout…";
 "menu.output.ndi" = "NDI Output…";
 "menu.output.record" = "Recording Settings…";
 "menu.output.stream" = "Streaming Settings…";
@@ -451,6 +453,19 @@
 "outputSettings.iso.routeRecording" = "→ %@ (recording)";
 "outputSettings.iso.title" = "ISO recording";
 "outputSettings.keyframeInterval" = "Keyframe interval %d frames";
+"outputSettings.multiview.clearCustom" = "Clear custom cells (use the preset)";
+"outputSettings.multiview.customActive" = "%d custom cells (from the show file / API, read-only here; the preset is ignored while they exist):";
+"outputSettings.multiview.hint" = "The layout applies to the multiview window, the input thumbnails and the \"Multiview\" source of external outputs; it is saved in the show (settings of the first multiview output).";
+"outputSettings.multiview.meters" = "Audio meters on input cells";
+"outputSettings.multiview.name" = "Multiview layout";
+"outputSettings.multiview.preset" = "Preset";
+"outputSettings.multiview.preset.3x3" = "3×3";
+"outputSettings.multiview.preset.4x4" = "4×4";
+"outputSettings.multiview.preset.pgmPvw+2x2" = "PVW / PGM + 2×2";
+"outputSettings.multiview.preset.pgmPvw+4x2" = "PVW / PGM + 4×2";
+"outputSettings.multiview.preset.pgmPvw+grid" = "PVW / PGM + automatic grid (default)";
+"outputSettings.multiview.safeArea" = "Safe area on PGM / PVW (EBU R95)";
+"outputSettings.multiview.title" = "Multiview layout";
 "outputSettings.ndi.add" = "Add NDI output";
 "outputSettings.ndi.addButton" = "Add";
 "outputSettings.ndi.conversion" = "Conversion";
@@ -486,6 +501,7 @@
 "outputSettings.stream.urlPrompt" = "rtmp:// rtmps:// srt://";
 "outputSettings.tab.external" = "External Display";
 "outputSettings.tab.iso" = "ISO";
+"outputSettings.tab.multiview" = "Multiview Layout";
 "outputSettings.tab.ndi" = "NDI Output";
 "outputSettings.tab.record" = "Recording";
 "outputSettings.tab.stream" = "Streaming";

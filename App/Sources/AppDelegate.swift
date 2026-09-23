@@ -110,7 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         output.delegate = self
         outputMenu = output
         for (title, tab) in [(L("menu.output.record"), OutputSettingsModel.Tab.record), (L("menu.output.iso"), .iso), (L("menu.output.stream"), .stream),
-                             (L("menu.output.external"), .external), (L("menu.output.ndi"), .ndi), (L("menu.output.virtualCamera"), .virtualCamera)] {
+                             (L("menu.output.external"), .external), (L("menu.output.ndi"), .ndi), (L("menu.output.virtualCamera"), .virtualCamera),
+                             (L("menu.output.multiview"), .multiview)] {
             let item = output.addItem(withTitle: title, action: #selector(outputSettings(_:)), keyEquivalent: "")
             item.representedObject = tab.rawValue
         }
