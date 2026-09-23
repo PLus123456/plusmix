@@ -298,7 +298,7 @@
 "inputSettings.general.number" = "Number";
 "inputSettings.general.title" = "General";
 "inputSettings.keyer.enabled" = "Enable keyer";
-"inputSettings.keyer.hint" = "YCbCr color distance + spill suppression + edge softness; rendering comes with W3-B.";
+"inputSettings.keyer.hint" = "YCbCr colour distance + spill suppression + edge softness (key radius = tolerance × 0.5); multiview thumbnails are keyed after filtering, so their edges are a little rougher than PGM.";
 "inputSettings.keyer.keyColor" = "Key color";
 "inputSettings.keyer.softness" = "Softness %.2f";
 "inputSettings.keyer.spill" = "Spill suppression %.2f";
@@ -514,7 +514,7 @@
 "outputSettings.ndi.conversion.cpu" = "CPU";
 "outputSettings.ndi.conversion.gpu" = "GPU";
 "outputSettings.ndi.groups" = "Groups";
-"outputSettings.ndi.hint" = "PGM always; inputs optional; app wiring comes with W3-C.";
+"outputSettings.ndi.hint" = "Saved in the show (headless --ndi-send can send it); NDI sending is not wired into the app yet, so its state stays idle.";
 "outputSettings.ndi.name" = "Source name";
 "outputSettings.ndi.remove" = "Remove";
 "outputSettings.ndi.section" = "NDI %d · %@";
@@ -618,7 +618,7 @@
 "prefs.audio.title" = "Audio output";
 "prefs.compat.enabled" = "Enable compatibility layer (off by default)";
 "prefs.compat.legal" = "Legal notice: this module imitates a third-party switcher’s HTTP / TCP control protocol only so existing control-panel configurations keep working; the protocol and names belong to their owners and this software is not affiliated with them. It is a separate module, off by default, and must be reviewed by counsel before release (design spec §0, §9.3).";
-"prefs.compat.pending" = "The module comes with W3-D; until it is linked into the app this switch only stores the setting.";
+"prefs.compat.pending" = "The switch and port take effect the next time the engine starts (\"Apply and Restart Engine\" applies them now).";
 "prefs.compat.port" = "TCP port";
 "prefs.compat.title" = "Third-party API compatibility layer (VMixCompat)";
 "prefs.format.apply" = "Apply Format (restarts engine)";

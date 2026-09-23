@@ -298,7 +298,7 @@
 "inputSettings.general.number" = "编号";
 "inputSettings.general.title" = "基本";
 "inputSettings.keyer.enabled" = "启用抠像";
-"inputSettings.keyer.hint" = "YCbCr 颜色距离 + 溢色抑制 + 边缘柔化；渲染由 W3-B 做。";
+"inputSettings.keyer.hint" = "YCbCr 颜色距离 + 溢色抑制 + 边缘柔化（容差 × 0.5 = 键色半径）；多画面缩略图是滤波后再抠，边缘会比 PGM 略糙。";
 "inputSettings.keyer.keyColor" = "键色";
 "inputSettings.keyer.softness" = "边缘柔化 %.2f";
 "inputSettings.keyer.spill" = "溢色抑制 %.2f";
@@ -514,7 +514,7 @@
 "outputSettings.ndi.conversion.cpu" = "CPU";
 "outputSettings.ndi.conversion.gpu" = "GPU";
 "outputSettings.ndi.groups" = "分组";
-"outputSettings.ndi.hint" = "PGM 必送，各输入可选；App 接线在 W3-C。";
+"outputSettings.ndi.hint" = "设置存在节目文件里（headless 的 --ndi-send 能发）；App 里的 NDI 发送还没接线，状态恒为 idle。";
 "outputSettings.ndi.name" = "源名";
 "outputSettings.ndi.remove" = "删除";
 "outputSettings.ndi.section" = "NDI %d · %@";
@@ -618,7 +618,7 @@
 "prefs.audio.title" = "音频输出";
 "prefs.compat.enabled" = "启用兼容层（默认关）";
 "prefs.compat.legal" = "法律提示：这个模块模仿第三方导播软件的 HTTP / TCP 控制协议，只为让现成的控制面板配置能用；协议与名称归各自所有者，本软件与其没有关联。它是独立模块、默认关闭，发布前需律师审阅（设计方案 §0、§9.3）。";
-"prefs.compat.pending" = "模块由 W3-D 提供；合入 App 前这个开关只保存设置。";
+"prefs.compat.pending" = "开关与端口下次起引擎生效（\"应用并重起引擎\"立刻生效）。";
 "prefs.compat.port" = "TCP 端口";
 "prefs.compat.title" = "第三方 API 兼容层（VMixCompat）";
 "prefs.format.apply" = "应用格式（重起引擎）";

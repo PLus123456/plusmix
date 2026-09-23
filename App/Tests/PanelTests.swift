@@ -308,6 +308,33 @@ final class PanelTests: XCTestCase {
         XCTAssertFalse(p2.model.applyProgramFormat(), "格式没变不换 session")
     }
 
+    /// W3-E2 交付第 6 条（提案 012）：确认 P3 只改了调用的几处已经发新命令——调音台的监听方式 / 总线效果链（setMonitorMode / setBusEffects），
+    /// 输出设置的开关 / 改名（setOutputEnabled / renameOutput）；不再 loadShow 整体替换、不再删了重加。看命令日志。
+    func testPanels_p3RewiredCallsUseNewCommands() throws {
+        let session = try AppTest.freshSession()
+        let wc = AppTest.controller.windowController
+        let since = session.control.bus.recentEntries().last?.sequence ?? 0
+        wc.mixerPanel.model.setMonitorMode(.pfl)
+        wc.mixerPanel.model.setBusEffects(.busA, [AudioEffectParams.peakLimiter(attackSeconds: 0.01, decaySeconds: 0.02, preGainDb: 1)])
+        let page = AppTest.controller.panels.showOutputSettings(tab: .virtualCamera).model
+        page.setVirtualCamera(enabled: true, source: .program)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.contains { $0.kind == .virtualCamera && $0.enabled } })
+        let number = try XCTUnwrap(session.state.outputs.first { $0.kind == .virtualCamera }?.number)
+        page.setVirtualCamera(enabled: false, source: .program)
+        page.rename(number, "虚拟摄像头 · 副")
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number)?.enabled == false && session.state.output(number)?.name == "虚拟摄像头 · 副"
+            && session.state.audio.monitorMode == .pfl && session.state.audio.buses[Bus.busA.rawValue].effects.count == 1 })
+        let commands = session.control.bus.recentEntries().filter { $0.sequence > since }.map(\.command)
+        XCTAssertTrue(commands.contains(.setMonitorMode(mode: .pfl)), "\(commands)")
+        XCTAssertTrue(commands.contains { if case .setBusEffects(.busA, _) = $0 { return true } else { return false } })
+        XCTAssertTrue(commands.contains(.setOutputEnabled(output: number, on: false)))
+        XCTAssertTrue(commands.contains(.renameOutput(output: number, name: "虚拟摄像头 · 副")))
+        XCTAssertFalse(commands.contains { if case .loadShow = $0 { return true } else { return false } }, "不再 loadShow 整体替换")
+        XCTAssertFalse(commands.contains { if case .removeOutput = $0 { return true } else { return false } }, "不再删了重加")
+        page.removeOutput(number)
+        AppTest.controller.panels.closeAll()
+    }
+
     /// 偏好设置里的"PVW 预览全部叠加"总开关（W3-E2 交付第 3 条）→ MetalRendererOptions.overlaysInPreview：渲染器的选项在 init 定死，
     /// 所以存进 UserDefaults、换 session 才生效；与每通道的 OverlayState.previewOn 取或（渲染器那边）。
     func testPanels_preferencesOverlaysInPreviewTakesEffectOnNextSession() throws {
