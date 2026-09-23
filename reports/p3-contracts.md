@@ -185,7 +185,7 @@ prompt：docs/plan/prompts/61-P3-契约落地二.md。落地提案 **007 / 008 /
 
 | 用例 | 现象 | 在 main 上 | P3 的处理 |
 |---|---|---|---|
-| `SyntheticSourceTests.testW1A_syntheticVideo_60fps10s_continuousMonotonic_pushed600` | 600 帧每帧一条，解出的 `hostTimeMs` 与 `pts.nanoseconds / 1e6` **差正好 2^28** | 601 条，同样红 | 测试漏了 `& TestPattern.dataMask`（图案数据字是 28 位，同包 `NoiseBackgroundTests` 写对了）。机器连续唤醒超过 2^28 ms ≈ 3.1 天就整片红（本机唤醒 3.16 天）。**按胶水额度改了那一行**（断言语义没变，补上本来就成立的前提），问题单 `reports/issues/P3-w1-testkit-hosttimems-28bit-mask.md` 退回 W1-A3 |
+| `SyntheticSourceTests.testW1A_syntheticVideo_60fps10s_continuousMonotonic_pushed600` | 600 帧每帧一条，解出的 `hostTimeMs` 与 `pts.nanoseconds / 1e6` **差正好 2^28** | 601 条，同样红 | 测试漏了 `& TestPattern.dataMask`（图案数据字是 28 位，同包 `NoiseBackgroundTests` 写对了）。机器连续唤醒超过 2^28 ms ≈ 3.1 天就整片红（本机唤醒 3.16 天）。**按胶水额度改了那一行**（断言语义没变，补上本来就成立的前提），问题单 `reports/issues/P3-w1-testkit-hosttimems-28bit-mask.md`。**W1-A3 同一天独立修了同一行**，P3 已改成与它逐字相同（见 §5 第 8 条），单子可以关 |
 | `SyntheticSourceTests.testW1A_syntheticVideo_jitterIsUniformWithinBound` | `abs(mean) < 0.8` 实测 0.85–0.86 | **3 次 3 次红** | 这是**阈值**，P3 不自己动（铁律 9）。问了用户，**2026-09-23 批了放宽到 1.2 ms**，已改并注明；问题单 `reports/issues/P3-w1-testkit-jitter-mean-bound.md` 里另记了"先跑一遍 jitterMs = 0 当零点、判 `abs(mean − 基准)`"这个与机器快慢无关的做法，留给 W1-A3 |
 
 ### 2.5 gate4（10 分钟 G4 场景；用户 2026-09-23 定的跑法：`scripts/gate4.sh --label p3* --baseline baselines/g4-m5max.json`，不写基线，跑完还原 `reports/G4.md`、删掉 `reports/G4-run-p3*.md`）
@@ -254,11 +254,12 @@ S3 的 CPU 在 p3b 是 63.0%（线 60%），原因同上，p3c 回到 31.4%。
 5. **`check-ownership` 是逐提交结算的**：同一个文件先加后删会**两次都算进胶水额度**。本会话一开始把 `MetalRenderer.wants` 写在 `MetalRenderer.swift` 里（胶水 68/50 超额），挪到 `CompositorPasses.swift` 之后如果直接再提交一次，额度会变成 107 行而不是 43 行——只能 `git reset --soft` 重做提交，让每个文件只被动一次。**改胶水文件前先想清楚放哪**。
 6. **`make lint` 要显式给分支名**：worktree 的分支是 `claude/p3-contracts-phase-2-86a7c4`，OWNERSHIP 里是 `p3-contracts`，所以要 `git branch -f p3-contracts HEAD` 再 `make lint BRANCH=p3-contracts`。
 7. **`swift build` 会在没有 `Package.resolved` 的包里生成一个**（SwitcherOutputs / SwitcherTestKit / frameprobe）。仓库只跟踪 SwitcherControl 与 switcher-headless 两份，所以跑完测试工作树里会多出三个未跟踪文件；本会话把它们删掉了，别误提交。
-8. **需要 rebase 的分支**：此时可能已经开着的 **w1-testkit-3（W1-A3，prompt 62）** 与 **w2-inputs-2（W2-A2，prompt 64）**——两者都从 G4 合入后的 main 开，与 P3 没有文件重叠，但都 `import SwitcherContracts`：
-   - w1-testkit-3 动 `Packages/SwitcherTestKit/` 与 `Tools/frameprobe/`，P3 动了 `SwitcherTestKit/Sources/.../Stats/StatsSummary.swift`（加 `displays`），rebase 时可能在这一个文件上冲突；
-   - w2-inputs-2 动 `SwitcherInputs/`，P3 动了 `DeckLinkInput.swift` / `NDIInput.swift` / `DeckLinkDevices.swift`；纯音频设备输入不碰这三个，但新写的 `AudioDeviceInput` 如果 `switch config.source` 要补 `decklink` / `ndi` 的新关联值。
-   **w3-app-3（W3-E2，prompt 63）与 w3-outputs-3（W3-C2，prompt 65）按计划从 P3 合入后的 main 开**，不用 rebase。
-   本会话结束时看到 W2-A2 已经开着（worktree `w2-inputs-audio-device-2ef9a9`，在跑 `make test`）。
+8. **与另外两个已完成分支的关系（P3 收尾时查的，只读）**：
+   - **w2-inputs-2（W2-A2，prompt 64）已完成，叠在 P3 的 `ca1baa5` 上**（它落地了提案 014，改了 `docs/CONTRACTS.md` / `docs/OWNERSHIP.md`）。所以**检查点要先合 P3**。
+   - **w1-testkit-3（W1-A3，prompt 62）已完成，从 367bbb9 开**。它与 P3 唯一重叠的是 `SyntheticSourceTests.swift` 的 hostTimeMs 那一行——**两边独立修了同一个 28 位掩码的 bug**；
+     P3 已把自己那三行改成与它逐字相同，git 会当成同一处改动自动合掉。抖动阈值那一行（0.8 → 1.2）W1-A3 没碰。
+   - 用 `git merge-tree` 在本分支顶上试过：**P3 → + w2-inputs-2 → + w1-testkit-3 依次合，全部无冲突**（没动任何分支、没动工作树）。
+   - **w3-app-3（W3-E2，prompt 63）与 w3-outputs-3（W3-C2，prompt 65）按计划从 P3 合入后的 main 开**，不用 rebase。
 9. **同一台机器上别的会话在跑重活时，gate4 与计时类用例的数字不可信**。本会话两次 gate4 的红（p3 的跳拍、p3b 输入 5 的 drop）、TestKit 抖动用例的偏置，都是生产者线程晚醒 / 落到能效核的样子。**开跑之前先看一眼**：
    `for p in $(pgrep -f "make test|gate[0-9]|swift-test|switcher-headless run"); do lsof -a -p $p -d cwd -Fn | sed -n 's/^n//p'; done`——
    有别的 worktree 的就等它跑完。两个会话同时 `make test` 会互相拖慢，计时类用例在两边都可能红（本会话看到 W2-A2 的 `make test` 先起，就把自己的停了）。

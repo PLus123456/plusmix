@@ -45,3 +45,12 @@ XCTAssertEqual(r.decoded.hostTimeMs, UInt32(truncatingIfNeeded: r.pts.nanosecond
 2. **frameprobe 的 `genTimeMs` 可能有同一个坑**：`Probe/ProbeTypes.swift:33` 把 `decoded.hostTimeMs` 原样当
    `genTimeMs` 用。如果哪个分析拿它做**跨帧相减**，一次长跑正好跨过 2^28 ms 的回绕点（唤醒 3.1 天、6.2 天……）
    就会算出一个 −2^28 的跳变。A/V 与 V4 的口径请顺手看一眼要不要按 28 位环形相减。
+
+## 后续（2026-09-23，P3 收尾时）
+
+- **W1-A3（w1-testkit-3）同一天独立踩到并修了同一行**，代码与 P3 的一样（`& TestPattern.dataMask`），只有注释不同。
+  P3 把自己那三行改成与 W1-A3 **逐字相同**（提交里写了），检查点合并时两边是同一处改动，git 自动合掉——
+  用 `git merge-tree` 试过：P3 → + w2-inputs-2 → + w1-testkit-3 依次合，全部无冲突。
+- 上面"留给 W1-A3 的两件事"第 2 条（frameprobe 的 `genTimeMs`）查过了：`FrameAnalysis` 只在 A4 多文件对齐里把它当**事件键**用
+  （容差内相等算同一事件），不拿它做跨帧相减，所以跨过 2^28 回绕点不会把同一事件拆开、也不会把两个事件并起来。**不用改**。
+- 因此这张单子**可以关**；留着当记录。
