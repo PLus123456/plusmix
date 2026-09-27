@@ -8,7 +8,9 @@ import SwitcherContracts
 @MainActor
 final class ReleaseTests: XCTestCase {
     /// R7：一键导出的诊断包里有日志、stats、去掉密钥的节目、系统信息、崩溃诊断目录；推流密钥和 API token 一个字都不出现。
-    func testR7_diagnosticBundleContainsRequiredFilesWithoutSecrets() async throws {
+    /// 注意：App 测试不能写成 async——async 测试体在主队列的 dispatch 块里跑，AppTest.pump 的嵌套 run loop 不会排空主队列（CF 的 libdispatchQSafe），
+    /// 引擎启动的 main actor 续体永远回不来（W4-B 撞到，reports/w4-release.md §5）。异步的 build 用 Task + 轮询盒子。
+    func testR7_diagnosticBundleContainsRequiredFilesWithoutSecrets() throws {
         let session = try AppTest.freshSession()
         let secretKey = "SECRET-STREAM-KEY-7f3a"
         let secretToken = "SECRET-API-TOKEN-91c2"
@@ -28,7 +30,16 @@ final class ReleaseTests: XCTestCase {
         var options = DiagnosticBundle.Options()
         options.includeCrashLogs = true
         options.systemLogWindowMinutes = 1      // log show 要跑一会儿，测试只取 1 分钟
-        let zip = try await DiagnosticBundle.build(controller: AppTest.controller, options: options, destination: dir.appendingPathComponent("diag.zip"))
+        final class Result { var zip: URL?; var error: (any Error)? }
+        let result = Result()
+        let controller = AppTest.controller
+        Task { @MainActor in
+            do { result.zip = try await DiagnosticBundle.build(controller: controller, options: options, destination: dir.appendingPathComponent("diag.zip")) }
+            catch { result.error = error }
+        }
+        XCTAssertTrue(AppTest.waitUntil(120) { result.zip != nil || result.error != nil }, "诊断包 120 s 内没出来")
+        if let error = result.error { throw error }
+        let zip = try XCTUnwrap(result.zip)
         XCTAssertTrue(FileManager.default.fileExists(atPath: zip.path), "没有产出 zip")
 
         let unpacked = dir.appendingPathComponent("unpacked", isDirectory: true)
@@ -42,7 +53,7 @@ final class ReleaseTests: XCTestCase {
         // 密钥一个字都不出现（递归读所有文本文件）
         let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]))
         var scanned = 0
-        for case let file as URL in enumerator {
+        for file in enumerator.allObjects.compactMap({ $0 as? URL }) {
             guard (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true, let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
             scanned += 1
             XCTAssertFalse(text.contains(secretKey), "\(file.lastPathComponent) 里泄露了推流密钥")
