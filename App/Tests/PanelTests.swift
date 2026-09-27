@@ -145,7 +145,7 @@ final class PanelTests: XCTestCase {
 
         cases.append(Case(name: "虚拟摄像头：开", change: {
                 let w = panels.showOutputSettings(tab: .virtualCamera)
-                w.model.setVirtualCamera(enabled: true, source: .program)
+                w.model.setVirtualCamera(enabled: true)
             }, verify: { session.state.outputs.first { $0.kind == .virtualCamera }?.enabled == true },
                describe: { "\(session.state.outputs)" }))
 
@@ -317,10 +317,10 @@ final class PanelTests: XCTestCase {
         wc.mixerPanel.model.setMonitorMode(.pfl)
         wc.mixerPanel.model.setBusEffects(.busA, [AudioEffectParams.peakLimiter(attackSeconds: 0.01, decaySeconds: 0.02, preGainDb: 1)])
         let page = AppTest.controller.panels.showOutputSettings(tab: .virtualCamera).model
-        page.setVirtualCamera(enabled: true, source: .program)
+        page.setVirtualCamera(enabled: true)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.contains { $0.kind == .virtualCamera && $0.enabled } })
         let number = try XCTUnwrap(session.state.outputs.first { $0.kind == .virtualCamera }?.number)
-        page.setVirtualCamera(enabled: false, source: .program)
+        page.setVirtualCamera(enabled: false)
         page.rename(number, "虚拟摄像头 · 副")
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number)?.enabled == false && session.state.output(number)?.name == "虚拟摄像头 · 副"
             && session.state.audio.monitorMode == .pfl && session.state.audio.buses[Bus.busA.rawValue].effects.count == 1 })

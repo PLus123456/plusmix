@@ -579,6 +579,7 @@
 "outputSettings.vcam.install" = "安装…";
 "outputSettings.vcam.name" = "虚拟摄像头";
 "outputSettings.vcam.outputStatus" = "输出状态";
+"outputSettings.vcam.sourceNote" = "固定送 PGM（节目画面），与录制 / 推流 / NDI 拿的是同一块节目帧；来源不可选。";
 "outputSettings.vcam.status" = "安装状态";
 "outputSettings.vcam.title" = "虚拟摄像头";
 "outputSettings.vcam.uninstall" = "卸载";

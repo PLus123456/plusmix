@@ -579,6 +579,7 @@
 "outputSettings.vcam.install" = "Install…";
 "outputSettings.vcam.name" = "Virtual Camera";
 "outputSettings.vcam.outputStatus" = "Output status";
+"outputSettings.vcam.sourceNote" = "Always sends PGM (the program picture), the same program frame recording / streaming / NDI get; the source cannot be chosen.";
 "outputSettings.vcam.status" = "Install status";
 "outputSettings.vcam.title" = "Virtual camera";
 "outputSettings.vcam.uninstall" = "Uninstall";

@@ -279,12 +279,14 @@ final class OutputSettingsModel: ObservableObject {
 
     var virtualCameraOutput: OutputState? { state.outputs.first { $0.kind == .virtualCamera } }
 
-    func setVirtualCamera(enabled: Bool, source: OutputSource) {
+    /// 开关（setOutputEnabled）；没有虚拟摄像头输出就加一个 source = PGM 的。来源不可选（W3-E4，issue W3E3-virtual-camera-source-picker-ignored 选 2）：
+    /// VirtualCameraOutput 只发 PGM 帧（设计方案 §2 / §3：PGM 那块 IOSurface 同时交给编码器 / NDI / 虚拟摄像头 / 录制器），
+    /// 已存节目里带别的 source 的虚拟摄像头输出照样当 PGM——这里不动它的 source、也不报错。
+    func setVirtualCamera(enabled: Bool) {
         if let o = virtualCameraOutput {
-            if o.settings.source != source { updateOutput(o.number) { $0.source = source } }
             setOutputEnabled(o.number, on: enabled)
         } else {
-            add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: source)))
+            add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: .program)))
         }
     }
 
@@ -624,10 +626,10 @@ struct OutputSettingsView: View {
 
     private var virtualCameraTab: some View {
         Section(L("outputSettings.vcam.title")) {
-            Toggle(L("outputSettings.vcam.enabled"), isOn: Binding(get: { model.virtualCameraOutput?.enabled ?? false },
-                                                                   set: { model.setVirtualCamera(enabled: $0, source: model.virtualCameraOutput?.settings.source ?? .program) }))
-            sourcePicker(Binding(get: { model.virtualCameraOutput?.settings.source ?? .program },
-                                 set: { model.setVirtualCamera(enabled: model.virtualCameraOutput?.enabled ?? false, source: $0) }))
+            Toggle(L("outputSettings.vcam.enabled"), isOn: Binding(get: { model.virtualCameraOutput?.enabled ?? false }, set: { model.setVirtualCamera(enabled: $0) }))
+            // 来源不可选：固定送 PGM（W3-E4；设计方案 §2 / §3 的数据流）
+            LabeledContent(L("outputSettings.source"), value: L("source.program"))
+            Text(L("outputSettings.vcam.sourceNote")).font(.caption).foregroundStyle(.secondary)
             LabeledContent(L("outputSettings.vcam.outputStatus"), value: model.virtualCameraOutputStatus)
             LabeledContent(L("outputSettings.vcam.status"), value: model.virtualCameraStatus)
             HStack {
