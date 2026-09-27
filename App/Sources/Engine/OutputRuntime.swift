@@ -786,7 +786,8 @@ final class EncoderStatsSource: @unchecked Sendable {
                 switch list[i].source {
                 case .recorder(let r):
                     let c = r.counters
-                    out.append(c.statsEntry(previous: list[i].previousRecorder, windowSeconds: window, state: r.state.statsName))
+                    // disk_free_mb：录制器自己读到 0（非启动卷，Recorder.freeBytes 的问题单）时由 DiskGuard 重新量（W3-C3）
+                    out.append(DiskGuard.statsEntry(for: r, counters: c, previous: list[i].previousRecorder, windowSeconds: window))
                     list[i].previousRecorder = c
                 case .stream(let s):
                     let c = s.counters

@@ -48,7 +48,11 @@ final class LocalizationTests: XCTestCase {
     /// 每个枚举值 / Stats.display 的每个 state 都有两种语言的文案，英文里没有中文（W3-E2 交付第 1 条，G4 问题单第 2 条）。
     func testL10n_packageStatusesLookedUpInApp() {
         let installer: [SystemExtensionInstaller.Status] = [.unknown, .notInstalled, .requesting, .needsUserApproval, .installed(version: "1.0"),
-                                                            .installed(version: ""), .uninstalled, .needsReboot, .failed("包给的诊断")]
+                                                            .installed(version: ""), .uninstalled, .needsReboot]
+            + SystemExtensionInstaller.Failure.Reason.allCases.flatMap { reason -> [SystemExtensionInstaller.Status] in
+                // W3-C3：失败 = 枚举原因（查表）+ 系统给的描述（原样附在后面）；不带描述的那条检查原因本身的英文
+                [.failed(.init(reason: reason, domain: "x", code: 1, detail: "包给的诊断")), .failed(.init(reason: reason, domain: "x", code: 1, detail: ""))]
+            }
         let windows: [ExternalDisplayWindow.Status] = [.showing(displayID: 2), .waitingForDisplay(displayID: 3), .fallbackToMain(displayID: 4)]
         func texts() -> [String] {
             installer.map(OutputStatusText.extensionStatus) + windows.map(OutputStatusText.externalWindow)

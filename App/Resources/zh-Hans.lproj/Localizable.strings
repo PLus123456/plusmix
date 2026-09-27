@@ -131,6 +131,12 @@
 "aux.displayState.stopped" = "已停止";
 "aux.displayState.waitingExtension" = "等扩展";
 "aux.extension.failed" = "失败：%@";
+"aux.extension.failure.canceled" = "请求被取消";
+"aux.extension.failure.detail" = "%@（%@）";
+"aux.extension.failure.extensionNotFound" = "App 里没有扩展，要带 Team ID 签名并嵌入 Contents/Library/SystemExtensions（BLOCKED-签名）";
+"aux.extension.failure.other" = "其他错误";
+"aux.extension.failure.requirementsNotMet" = "签名 / 权限 / 位置不满足，要带 Team ID 签名、从 /Applications 运行（BLOCKED-签名）";
+"aux.extension.failure.superseded" = "请求被更新的请求替代";
 "aux.extension.installed" = "已安装（%@）";
 "aux.extension.installedNoVersion" = "已安装";
 "aux.extension.needsReboot" = "重启后生效";
@@ -142,6 +148,7 @@
 "aux.external.fallbackToMain" = "显示器 %u 不在，暂用主显示器";
 "aux.external.showing" = "显示中（显示器 %u）";
 "aux.external.waitingForDisplay" = "等待显示器 %u 接上";
+"aux.external.windowTitle" = "Switcher 外部输出";
 "aux.rawPictureNote" = "Aux = 原始画面（抠像 / 裁切 / 变换不生效）";
 "aux.virtualCamera.disabled" = "未启用";
 "aux.virtualCamera.idle" = "未启动";

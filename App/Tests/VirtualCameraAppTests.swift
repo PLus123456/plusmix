@@ -61,8 +61,9 @@ final class VirtualCameraAppTests: XCTestCase {
         if case .needsUserApproval = installer.status {
             throw XCTSkip("系统要求用户批准：这台机器有可用的签名，人工在系统设置里允许后再验证 QuickTime / FaceTime")
         }
-        guard case .failed(let message) = installer.status else { return XCTFail() }
-        XCTAssertTrue(message.contains("BLOCKED-签名") || message.contains("签名") || message.contains("权限"), message)
+        guard case .failed(let failure) = installer.status else { return XCTFail() }
+        XCTAssertTrue(failure.isSigningBlocked, "\(failure)")   // W3-C3：包给枚举原因，文字 App 查表
+        XCTAssertTrue(OutputStatusText.extensionStatus(installer.status).contains("BLOCKED-签名"), OutputStatusText.extensionStatus(installer.status))
         XCTAssertTrue((session.lastNotice ?? "").contains("虚拟摄像头扩展"), session.lastNotice ?? "")
         // 输出设置 › 虚拟摄像头页用的是同一个安装器（W3-C 的 SystemExtensionInstaller，扩展 ID 来自 VirtualCameraConstants），
         // 不再另有一个猜 bundle ID 的查询器：状态文案跟着它走

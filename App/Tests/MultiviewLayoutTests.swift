@@ -120,9 +120,10 @@ final class MultiviewSettingsTests: XCTestCase {
         AppTest.controller.panels.closeAll()
     }
 
-    /// 没经过 Show.load 的内存状态（API 直接 addOutput 一个带过渡键 extra["layout"] 的多画面输出）：W3-B2 起渲染器只读正式字段、过渡键一律忽略，
-    /// 缩略图与它同一个来源——带旧键的输出对布局没有影响，两边都按默认布局切格子（P3 报告 §4 第 1 条：后备保留一个版本后删除；G4 第二批合入时改的用例）。
-    func testThumbnails_ignoreLegacyLayoutKeyLikeRenderer() throws {
+    /// API 直接 addOutput 一个带过渡键 extra["layout"] 的多画面输出（没经过 Show.load）：P4 起状态机先按 Show.load 同一套规则把它搬进正式字段
+    /// （`OutputSettings.multiview` = 预设 "3x3"），渲染器与缩略图读的都是正式字段——两边一起按 3x3 切格子，旧键不再被静默丢成默认布局
+    /// （W3-B2 报告 §4 第 4 条；G4 第二批合入时这条曾改成"过渡键被忽略"，P4 之后前提变了）。
+    func testThumbnails_legacyLayoutKeyFromAPIMigratedLikeRenderer() throws {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 2)
         let wc = AppTest.controller.windowController
@@ -135,9 +136,14 @@ final class MultiviewSettingsTests: XCTestCase {
         session.send(.addOutput(config: OutputState(number: number, kind: .multiview, name: "legacy", enabled: false,
                                                     settings: OutputSettings(source: .multiview, extra: ["layout": .string("3x3")]))))
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(number) != nil })
-        AppTest.pump(seconds: 0.5)
-        XCTAssertEqual(wc.inputStrip.cells[2]?.display.sourceRect, defaultRect, "过渡键被忽略：缩略图仍按默认布局切，与渲染器一致")
-        XCTAssertEqual(MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) }?.inner, defaultPlacement.inner)
+        let settings = try XCTUnwrap(session.state.output(number)?.settings)
+        XCTAssertEqual(settings.multiview, MultiviewLayoutSettings(preset: "3x3"), "过渡键搬进正式字段")
+        XCTAssertNil(settings.extra["layout"], "旧键搬完清掉")
+        let migratedPlacement = try XCTUnwrap(MultiviewLayout.placements(settings: settings.multiview, inputs: [1, 2], width: 1920, height: 1080)
+            .first { $0.source == .input(number: 2) })
+        let migratedRect = InputStripView.thumbnailRect(for: migratedPlacement, width: 1920, height: 1080)
+        XCTAssertNotEqual(migratedRect, defaultRect)
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == migratedRect }, "缩略图按搬进来的 3x3 切，与渲染器一致")
         session.send(.removeOutput(output: number))
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(number) == nil && wc.inputStrip.cells[2]?.display.sourceRect == defaultRect })
     }

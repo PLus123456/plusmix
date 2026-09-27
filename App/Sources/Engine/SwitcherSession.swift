@@ -108,6 +108,7 @@ final class SwitcherSession {
         aux.external.noSignalText = L("input.noSignal")
         // 外部输出开在主屏上时盖不盖住主界面（偏好设置，本机选项、不进节目文件；W3-E3）
         aux.external.mainScreenLayering = settings.externalMainScreenLayering
+        aux.external.windowTitle = L("aux.external.windowTitle")   // W3-C3：包里的默认标题是 ASCII
         control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable,
                                  compat: settings.compatConfiguration)
         meterFeed = AudioMeterFeed(status: { audio.status }, sink: { meters, at in renderer.setMeters(meters, at: at) })

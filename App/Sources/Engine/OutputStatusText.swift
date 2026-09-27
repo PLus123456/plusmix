@@ -1,6 +1,6 @@
 // 显示类输出与系统扩展的状态文案（W3-E2；G4 问题单 G4-w3-app2-localize-w3c-app-strings 第 2 条、提案 013）：
 // - SwitcherOutputs 里的 `SystemExtensionInstaller.describe` / `ExternalDisplayManager.describe` / `ExternalDisplaySpec.describe` 返回中文，
-//   包不该管语言：App 按枚举查表（`.failed(String)` 带的原因是包给的诊断文字，原样附在后面）。
+//   包不该管语言：App 按枚举查表（W3-C3 起包里的 describe 都删了；`.failed` 带的是枚举原因 + 系统给的描述，原因查表、描述附在后面）。
 // - 帧数与状态只读 `Stats.display[]`（铁律 4：菜单、状态行、设置页、API、测试读同一个结构），不再直接读
 //   `VirtualCameraOutput.countersSnapshot` / `MetalDisplayView.presentedFrames`。
 import SwitcherContracts
@@ -19,8 +19,14 @@ enum OutputStatusText {
         case .installed(let v): v.isEmpty ? L("aux.extension.installedNoVersion") : L("aux.extension.installed", v)
         case .uninstalled: L("aux.extension.uninstalled")
         case .needsReboot: L("aux.extension.needsReboot")
-        case .failed(let m): L("aux.extension.failed", m)
+        case .failed(let f): L("aux.extension.failed", failureReason(f))
         }
+    }
+
+    /// 扩展请求失败的原因（W3-C3：包只给枚举原因 + 系统给的描述）：原因查表，系统描述（系统本地化）附在后面。
+    static func failureReason(_ f: SystemExtensionInstaller.Failure) -> String {
+        let reason = L("aux.extension.failure.\(f.reason.rawValue)")
+        return f.detail.isEmpty ? reason : L("aux.extension.failure.detail", reason, f.detail)
     }
 
     /// 外部显示窗口的状态（状态变化时的提示用；持续的帧数看 `display(_:)`）。

@@ -11,7 +11,7 @@ import SwitcherContracts
 /// - Overlay 1–4 各挂 5–8 号（fade 15 / slide 20 / zoom 20 / cut），位置避开测试图案（左上）、闪光块（右上）和 frameprobe 的中心采样区（宽高各 1/4）。
 /// - 9 号是带 alpha 的静态 PNG（`stingerFileName`，make-show 时写在节目文件旁边；路径相对节目文件），做 Stinger 的叠层：
 ///   图形只占下 20% 与左右两侧（不碰顶部图案行、闪光块、中心采样区），Stinger 期间帧号 / ID 照常可解。
-/// - 多画面输出带自定义布局（提案 010 的正式字段 `OutputSettings.multiview`：PGM / PVW 上半 + 8 路 4×2，安全框 + 电平表占位；
+/// - 多画面输出带自定义布局（提案 010 的正式字段 `OutputSettings.multiview`：PGM / PVW 上半 + 8 路 4×2，安全框 + 真实电平表（W3-B2 起；headless 在 Stats 消费者里每秒 setMeters）；
 ///   P3 之前写的是过渡键 `extra["layout"]`，格子几何逐字相同）。
 /// - 转场：Wipe 从左到右、软边 0.1；Stinger 用 9 号、第 12 拍换底。
 /// - 场景：120 s 起每 5 s 一次转场，按 Cut → Fade → Wipe → Zoom → Stinger 轮流（非 Cut 都 24 拍 = 0.4 s，在 C1 客户端 x.7 s 的 cut 之前结束），

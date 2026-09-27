@@ -131,6 +131,12 @@
 "aux.displayState.stopped" = "stopped";
 "aux.displayState.waitingExtension" = "waiting for extension";
 "aux.extension.failed" = "failed: %@";
+"aux.extension.failure.canceled" = "request canceled";
+"aux.extension.failure.detail" = "%@ (%@)";
+"aux.extension.failure.extensionNotFound" = "the extension is not in the app; it must be signed with a Team ID and embedded in Contents/Library/SystemExtensions (BLOCKED: signing)";
+"aux.extension.failure.other" = "other error";
+"aux.extension.failure.requirementsNotMet" = "code signing, entitlement or location requirements not met; sign with a Team ID and run from /Applications (BLOCKED: signing)";
+"aux.extension.failure.superseded" = "request superseded by a newer one";
 "aux.extension.installed" = "installed (%@)";
 "aux.extension.installedNoVersion" = "installed";
 "aux.extension.needsReboot" = "takes effect after restart";
@@ -142,6 +148,7 @@
 "aux.external.fallbackToMain" = "Display %u is missing, using the main display";
 "aux.external.showing" = "Showing (display %u)";
 "aux.external.waitingForDisplay" = "Waiting for display %u";
+"aux.external.windowTitle" = "Switcher External Output";
 "aux.rawPictureNote" = "Aux = raw input picture (keying / crop / transform not applied)";
 "aux.virtualCamera.disabled" = "not enabled";
 "aux.virtualCamera.idle" = "not started";
