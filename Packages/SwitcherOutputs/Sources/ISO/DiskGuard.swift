@@ -4,7 +4,8 @@ import SwitcherContracts
 import SwitcherOutputs
 
 /// 磁盘保护（测试标准 S7）的判定与估算。停录制的是 Recorder 自己：写失败 / 剩余空间低于 `minimumFreeBytes` → 状态 `.failed`、
-/// 只影响本录制（W1-E）。这里只做三件事：把失败归因（是不是磁盘）、估算还能录多久、给切备用目录算路径。
+/// 只影响本录制（W1-E）。这里做：把失败归因（是不是磁盘）、量剩余空间（非启动卷也对）、估算还能录多久、给切备用目录算路径。
+/// 全部只出枚举 / 数字，给人看的文字归组装方（W3-C3）。
 public enum DiskGuard {
     /// 失败原因分类。
     public enum Cause: Hashable, Sendable {
@@ -17,19 +18,32 @@ public enum DiskGuard {
     /// 剩余空间低于它就把"写失败"归因为磁盘（AVAssetWriter 报的错未必带 ENOSPC 字样）。
     public static let lowWaterBytes: UInt64 = 64 * 1024 * 1024
 
-    /// 按失败文案 + 失败那一刻的剩余空间归因。
+    /// 失败文案里表示"磁盘满"的、与语言无关的记号（小写比）：AVError.diskFull（-11807）、ENOSPC（POSIX 28）、NSFileWriteOutOfSpaceError（640），
+    /// 外加系统英文描述里的说法。W3-C3 起不认中文字样：录制器的失败文案是 W1-E 给人看的、系统描述随用户语言变，拿它们归因靠不住；
+    /// 录制器自己按下限停的改按它的读数认（`classify(recorder:message:freeBytes:)`）。
+    static let diskFullMarkers = ["-11807", "code=28", "code=640", "enospc", "no space", "out of space", "disk full", "not enough space"]
+
+    /// 按失败文案里的磁盘错误码 + 失败那一刻的剩余空间归因。空间充足、又没有磁盘错误码的写失败归 other
+    /// （卷被拔掉时 `freeBytes(for:)` 量出来是 0，仍归磁盘）。
     public static func classify(message: String, freeBytes: UInt64) -> Cause {
         let m = message.lowercased()
-        let words = ["磁盘", "no space", "enospc", "out of space", "disk full", "写入失败", "not enough space", "code=640", "code=28", "-11807"]
-        if words.contains(where: { m.contains($0) }) { return .disk }
+        if diskFullMarkers.contains(where: { m.contains($0) }) { return .disk }
         if freeBytes < lowWaterBytes { return .disk }
         return .other
+    }
+
+    /// 带录制器的归因：录制器自己按下限停的（设了下限、它记下的剩余空间低于下限——Recorder 每次比下限之前都先记读数，
+    /// 起步时与之后每秒一次）直接归磁盘，不看文案；其余同 `classify(message:freeBytes:)`。
+    public static func classify(recorder: Recorder, message: String, freeBytes: UInt64) -> Cause {
+        let minimum = recorder.configuration.minimumFreeBytes
+        if minimum > 0, recorder.counters.diskFreeBytes < minimum { return .disk }
+        return classify(message: message, freeBytes: freeBytes)
     }
 
     /// 录制器现在的失败原因：没失败为 nil。
     public static func failureCause(of recorder: Recorder) -> Cause? {
         guard case .failed(let message) = recorder.state else { return nil }
-        return classify(message: message, freeBytes: freeBytes(for: recorder.configuration.url))
+        return classify(recorder: recorder, message: message, freeBytes: freeBytes(for: recorder.configuration.url))
     }
 
     /// 文件所在卷的剩余空间（字节）。`volumeAvailableCapacityForImportantUsage` 只对启动卷有意义：探针实测 macOS 26 上 HFS+ / APFS
@@ -46,9 +60,25 @@ public enum DiskGuard {
         }
         return 0
     }
+
+    /// 录制器所在卷的剩余空间：录制器自己的读数（`RecorderCounters.diskFreeBytes`，起步时与之后每秒一次）不是 0 就用它，是 0 就用
+    /// `freeBytes(for:)` 重新量。`Recorder.freeBytes` 只看 importantUsage 键，非启动卷（磁盘镜像 / 外置盘）上恒 0
+    /// （issue W3C-w1-outputs-recorder-freebytes-nonboot-volume，W1-E 还没修）；修好之后读数不再是 0，这里就不多量那一次（W3-C3）。
+    public static func diskFreeBytes(of recorder: Recorder, counters: RecorderCounters) -> UInt64 {
+        counters.diskFreeBytes > 0 ? counters.diskFreeBytes : freeBytes(for: recorder.configuration.url)
+    }
+
+    /// 在跑的录制器在 `Stats.encoder` 里的一项：同 `RecorderCounters.statsEntry`（skipped / bitrate / frames / dropped / state），
+    /// disk_free_mb 用 `diskFreeBytes(of:counters:)`——非启动卷上不再报 0。组装方（App 的 OutputRuntime）用它代替 `counters.statsEntry`。
+    public static func statsEntry(for recorder: Recorder, counters: RecorderCounters, previous: RecorderCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
+        var e = counters.statsEntry(previous: previous, windowSeconds: windowSeconds, state: recorder.state.statsName)
+        e.diskFreeMb = Double(diskFreeBytes(of: recorder, counters: counters)) / 1_048_576
+        return e
+    }
 }
 
-/// 磁盘余量预估：按编码设置算每秒字节数，除进剩余空间。
+/// 磁盘余量预估：按编码设置算每秒字节数，除进剩余空间。只出数（字节 / 秒、秒；没有码率 = +inf），
+/// "约 1 小时 23 分"之类的文案归组装方（App 的 ISORoutes.remainingText；W3-C3 删了包里的 describe）。
 public enum DiskEstimate {
     /// 一路（视频 + 音频）每秒写多少字节。PCM 按 48 kHz × 声道 × 24 bit（Recorder 写 LPCM 用 24 bit）。
     public static func bytesPerSecond(video: VideoEncodeSettings?, audio: AudioEncodeSettings?, audioChannels: Int = 2) -> Double {
@@ -68,15 +98,6 @@ public enum DiskEstimate {
         let usable = Double(freeBytes > reserveBytes ? freeBytes - reserveBytes : 0)
         guard bytesPerSecond > 0 else { return .infinity }
         return usable / bytesPerSecond
-    }
-
-    /// "约 1 小时 23 分" / "约 12 分" / "不足 1 分钟"。
-    public static func describe(seconds: Double) -> String {
-        guard seconds.isFinite else { return "不受磁盘限制" }
-        let minutes = Int(seconds / 60)
-        if minutes < 1 { return "不足 1 分钟" }
-        if minutes < 60 { return "约 \(minutes) 分钟" }
-        return "约 \(minutes / 60) 小时 \(minutes % 60) 分"
     }
 }
 
@@ -188,7 +209,8 @@ public final class RecordingDiskMonitor: @unchecked Sendable {
                 case .failed(let message):
                     if !e.reportedFailure {
                         e.reportedFailure = true
-                        events.append((key, .failed(cause: DiskGuard.classify(message: message, freeBytes: free), message: message, freeBytes: free)))
+                        let cause = DiskGuard.classify(recorder: e.recorder, message: message, freeBytes: free)
+                        events.append((key, .failed(cause: cause, message: message, freeBytes: free)))
                     }
                 case .recording:
                     if free < warnBelowBytes {
