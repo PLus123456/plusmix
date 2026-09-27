@@ -9,7 +9,13 @@
 #
 # 用法：scripts/perf/s4-thermal.sh [--minutes 60] [--force] [--out-dir .build/perf/s4] [--no-build] [--skip-run] [--report reports/W4-s4-<机器>.md]
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+# 从拷贝跑：跑的过程中有人改了这个脚本（git pull / 合并 / 编辑），正在跑的 bash 会按旧偏移读到错位的行（本会话 perf 连跑时就撞上了）。
+# 先把自己拷到临时目录再 exec 拷贝，仓库里的脚本随便改，这一趟不受影响。
+if [ -z "${SWITCHER_SCRIPT_COPY:-}" ]; then
+  root="$(cd "$(dirname "$0")/../.." && pwd)"
+  copy="$(mktemp "${TMPDIR:-/tmp}/s4-thermal.sh.XXXXXX")" && cp "$0" "$copy" && SWITCHER_SCRIPT_COPY="$copy" SWITCHER_REPO_ROOT="$root" exec bash "$copy" "$@"
+fi
+cd "$SWITCHER_REPO_ROOT"
 export PATH="/opt/homebrew/bin:$PATH"
 export PYTHONDONTWRITEBYTECODE=1
 

@@ -17,10 +17,16 @@
 #                            [--camera auto|none|<uniqueID>] [--no-file] [--no-ndi] [--streams 2] [--rtmp-port 19350] [--mtx-record]
 #                            [--powermetrics auto|on|off] [--pm-interval 10] [--ambient "约 24 °C"] [--allow-battery] [--write-baseline] [--report <md>]
 #   --skip-run：只用 out-dir 里的产物重新判定、重出报告（改了判定脚本后用）。--no-probe：不跑 frameprobe（A3 / 离线 A1 不判）。
-#   --powermetrics auto：sudo -n 可用才采；on：在终端里 sudo -v 问一次密码（之后 powermetrics 自己按样数退出）；off：不采。
+#   --powermetrics auto：sudo -n 可用就采；在终端里先问一句要不要（60 s 不答 = 不采）；非交互不采。on：直接在终端里 sudo -v 问密码；off：不采。
 #   --mtx-record：MediaMTX 把两路推流落盘（每路约 2.7 GB/h，默认不落，只按 API 记收到的字节）。
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+# 从拷贝跑：跑的过程中有人改了这个脚本（git pull / 合并 / 编辑），正在跑的 bash 会按旧偏移读到错位的行（本会话 perf 连跑时就撞上了）。
+# 先把自己拷到临时目录再 exec 拷贝，仓库里的脚本随便改，这一趟不受影响。
+if [ -z "${SWITCHER_SCRIPT_COPY:-}" ]; then
+  root="$(cd "$(dirname "$0")/../.." && pwd)"
+  copy="$(mktemp "${TMPDIR:-/tmp}/soak.sh.XXXXXX")" && cp "$0" "$copy" && SWITCHER_SCRIPT_COPY="$copy" SWITCHER_REPO_ROOT="$root" exec bash "$copy" "$@"
+fi
+cd "$SWITCHER_REPO_ROOT"
 export PATH="/opt/homebrew/bin:$PATH"
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -203,7 +209,12 @@ if [ "$do_run" = 1 ]; then
   pm_pid=""; pm_ok=0
   if [ "$pm_mode" != off ]; then
     if sudo -n true 2>/dev/null; then pm_ok=1
-    elif [ "$pm_mode" = on ] && [ -t 0 ]; then echo "powermetrics 要 root：输入本机密码（只这一次）"; sudo -v && pm_ok=1; fi
+    elif [ -t 0 ] && [ "$pm_mode" = on ]; then echo "powermetrics 要 root：输入本机密码（只这一次）"; sudo -v && pm_ok=1
+    elif [ -t 0 ]; then
+      # auto + 终端：问一句，60 s 没人答就跳过（人走开了也不会卡在密码提示上、整晚没开跑）
+      ans=""; read -r -t 60 -p "要采 powermetrics（GPU 频率 / thermal pressure，要 sudo 密码）吗？[y/N]（60 s 不答 = 不采）" ans || true; echo
+      if [ "$ans" = y ] || [ "$ans" = Y ]; then sudo -v && pm_ok=1; fi
+    fi
   fi
   if [ "$pm_ok" = 1 ]; then
     ( sudo -n /usr/bin/powermetrics -f plist -i $((pm_interval * 1000)) -n $((duration_s / pm_interval + 6)) --samplers cpu_power,gpu_power,thermal \

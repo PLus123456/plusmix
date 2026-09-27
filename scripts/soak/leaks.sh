@@ -6,7 +6,13 @@
 #   - 负载：soak 预设（8 路合成源 + 摄像头（授权了才接）+ 文件 + 录制 + 2 路推流 + NDI）；--light 只跑 G4 场景 + 录制（出问题时二分用）。
 # 用法：scripts/soak/leaks.sh [--minutes 30] [--out-dir .build/soak/leaks] [--light] [--no-build] [--skip-run] [--report reports/W4-leaks.md]
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+# 从拷贝跑：跑的过程中有人改了这个脚本（git pull / 合并 / 编辑），正在跑的 bash 会按旧偏移读到错位的行（本会话 perf 连跑时就撞上了）。
+# 先把自己拷到临时目录再 exec 拷贝，仓库里的脚本随便改，这一趟不受影响。
+if [ -z "${SWITCHER_SCRIPT_COPY:-}" ]; then
+  root="$(cd "$(dirname "$0")/../.." && pwd)"
+  copy="$(mktemp "${TMPDIR:-/tmp}/leaks.sh.XXXXXX")" && cp "$0" "$copy" && SWITCHER_SCRIPT_COPY="$copy" SWITCHER_REPO_ROOT="$root" exec bash "$copy" "$@"
+fi
+cd "$SWITCHER_REPO_ROOT"
 export PATH="/opt/homebrew/bin:$PATH"
 export PYTHONDONTWRITEBYTECODE=1
 

@@ -14,11 +14,18 @@
 # 用法：scripts/perf/perf-baseline.sh [--minutes 5] [--label perf] [--out-dir .build/perf/<label>] [--no-build] [--skip-run] [--no-e4]
 #                                     [--powermetrics auto|on|off] [--write-baseline] [--rules scripts/perf/regression.json] [--report <md>] [--baseline-dir baselines]
 #                                     [--ambient "约 24 °C"]（室温，写进报告头；本机读不到）
-#   --powermetrics auto：sudo 不要密码（sudo -n 可用：刚 sudo -v 过，或 sudoers 给了 /usr/bin/powermetrics NOPASSWD）才采；on：必要时在终端里 sudo -v 问密码；off：不采。
+#   --powermetrics auto：sudo -n 可用（刚 sudo -v 过，或 sudoers 给了 /usr/bin/powermetrics NOPASSWD）就采；在终端里先问一句要不要（60 s 不答 = 不采）；
+#                        非交互（CI）不采。on：直接在终端里 sudo -v 问密码；off：不采。
 #   --skip-run：只用 out-dir 里已有的产物重出报告（不跑、不算 VMAF 以外的东西）。
 # 跑的时候别跑 App 测试 / 大编译（prompt 70 第 7 条）：脚本开头会列出机器上在跑的编译 / 测试进程并写进报告。
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+# 从拷贝跑：跑的过程中有人改了这个脚本（git pull / 合并 / 编辑），正在跑的 bash 会按旧偏移读到错位的行（本会话 perf 连跑时就撞上了）。
+# 先把自己拷到临时目录再 exec 拷贝，仓库里的脚本随便改，这一趟不受影响。
+if [ -z "${SWITCHER_SCRIPT_COPY:-}" ]; then
+  root="$(cd "$(dirname "$0")/../.." && pwd)"
+  copy="$(mktemp "${TMPDIR:-/tmp}/perf-baseline.sh.XXXXXX")" && cp "$0" "$copy" && SWITCHER_SCRIPT_COPY="$copy" SWITCHER_REPO_ROOT="$root" exec bash "$copy" "$@"
+fi
+cd "$SWITCHER_REPO_ROOT"
 export PATH="/opt/homebrew/bin:$PATH"
 export PYTHONDONTWRITEBYTECODE=1
 
@@ -87,6 +94,10 @@ if [ "$do_run" = 1 ] && [ "$pm_mode" != off ]; then
   elif [ "$pm_mode" = on ] && [ -t 0 ]; then
     echo "powermetrics 要 root：输入本机密码（只这一次，脚本里的 sudo 都是 -n）"
     sudo -v && pm_ok=1
+  elif [ -t 0 ]; then
+    # auto + 终端：问一句，60 s 没人答就跳过
+    ans=""; read -r -t 60 -p "要采 powermetrics（GPU 对照，要 sudo 密码）吗？[y/N]（60 s 不答 = 不采）" ans || true; echo
+    if [ "$ans" = y ] || [ "$ans" = Y ]; then sudo -v && pm_ok=1; fi
   fi
   if [ "$pm_ok" = 0 ]; then
     yellow "powermetrics 不采（sudo 要密码；在自己的终端跑 make perf-baseline PERF_ARGS='--powermetrics on'，或 sudoers 给 /usr/bin/powermetrics NOPASSWD）；GPU 用 IOKit 口径"

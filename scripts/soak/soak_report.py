@@ -19,6 +19,7 @@ import perfjudge as pj  # noqa: E402
 import soakjudge as sj  # noqa: E402
 
 MAX_EXCERPTS = 40          # 异常段最多截这么多份（前 39 段 + 最后一段）；事件表全列
+MAX_LOG_SHOW = 10          # 系统日志（log show，每段十几秒）只取前 10 段，其余段照截 stats / 采样日志
 LOG_SHOW_LINES = 4000
 
 
@@ -194,7 +195,7 @@ def main():
         pm_part = [s for s in pm_all if r["start"] <= s.get("_ts", 0) <= r["end"]]
         if pm_part:
             json.dump(pj.powermetrics_summary(pm_part), open(os.path.join(d, "powermetrics-summary.json"), "w"), ensure_ascii=False, indent=1)
-        if not a.no_log_show:
+        if not a.no_log_show and n <= MAX_LOG_SHOW:
             fmt = "%Y-%m-%d %H:%M:%S"
             cmd = ["log", "show", "--style", "compact", "--start", datetime.datetime.fromtimestamp(r["start"]).strftime(fmt),
                    "--end", datetime.datetime.fromtimestamp(r["end"]).strftime(fmt),
