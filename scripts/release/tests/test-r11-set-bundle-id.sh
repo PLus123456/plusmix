@@ -5,6 +5,7 @@
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 s="$REPO_ROOT/scripts/release/set-bundle-id.sh"
+before=$(cd "$REPO_ROOT" && find project.yml CameraExtension Packages/SwitcherOutputs/Sources/VirtualCamera/Shared Tools/streamdeck-plugin docs/integrations -type f -not -path '*/node_modules/*' -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256)
 cur=$("$s" --check 2>&1)
 assert_contains "$cur" "com.example" "--check 报出当前 App 前缀 com.example"
 assert_contains "$cur" "com.plusmix" "--check 报出当前 Stream Deck 前缀 com.plusmix"
@@ -29,7 +30,8 @@ assert_contains "$(cat "$scratch/Packages/SwitcherOutputs/Sources/VirtualCamera/
 assert_file "$scratch/Tools/streamdeck-plugin/io.example-domain.switcher.sdPlugin/manifest.json" "Stream Deck 插件目录改名"
 assert_contains "$(cat "$scratch/Tools/streamdeck-plugin/io.example-domain.switcher.sdPlugin/manifest.json")" '"UUID": "io.example-domain.switcher.cut"' "动作 UUID 一起换"
 assert_true "副本上 --check 报新前缀" bash -c "'$s' --check --root '$scratch' | grep -q io.example-domain"
-# 仓库本体没动
-assert_true "仓库本体没被改动" git -C "$REPO_ROOT" diff --quiet -- project.yml CameraExtension Packages/SwitcherOutputs/Sources/VirtualCamera/Shared Tools/streamdeck-plugin
+# 仓库本体没动（校验和前后一致；工作树本来可能有未提交改动，不能用 git diff）
+after=$(cd "$REPO_ROOT" && find project.yml CameraExtension Packages/SwitcherOutputs/Sources/VirtualCamera/Shared Tools/streamdeck-plugin docs/integrations -type f -not -path '*/node_modules/*' -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256)
+assert_eq "$after" "$before" "仓库本体的校验和前后一致"
 rm -rf "$scratch"
 finish

@@ -35,6 +35,7 @@ help:
 	@echo "make test   所有包 swift test + 两个工具跑一次冒烟 + App 的 xcodebuild test"
 	@echo "make lint   scripts/lint-rules.sh + check-deps.sh + check-ownership.sh \$$BRANCH + scripts/{check,lint}-*.sh"
 	@echo "make clean  删掉所有 .build 和生成的工程"
+	@echo "make archive  发布归档：签名 → 校验 → DMG → 公证（W4-B，scripts/release/release.mk；archive-adhoc / release-test / appcast / pin-check 也在那里）"
 
 # ---------- gen ----------
 gen:
@@ -170,3 +171,7 @@ gate4-matrix:
 
 gate4-report:
 	scripts/gate4-report.sh --label 10min --baseline $(GATE4_PREVIOUS)
+
+# ---------- W4-B 发布工程 ----------
+# archive / archive-adhoc / release-verify / appcast / release-test / pin-check / pin-sync / runner-install：scripts/release/release.mk（归属 W4-B）
+-include scripts/release/release.mk

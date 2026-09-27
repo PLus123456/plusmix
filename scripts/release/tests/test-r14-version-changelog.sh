@@ -6,6 +6,7 @@ set -uo pipefail
 assert_file "$REPO_ROOT/docs/release/CHANGELOG-template.md" "CHANGELOG 模板"
 assert_file "$REPO_ROOT/docs/release/KNOWN_ISSUES-template.md" "KNOWN_ISSUES 模板"
 assert_file "$REPO_ROOT/docs/release/versioning.md" "版本号与变更日志规范"
+before=$(cd "$REPO_ROOT" && shasum -a 256 project.yml Packages/SwitcherCore/Sources/SwitcherContracts/Version.swift | shasum -a 256)
 scratch=$(mktemp -d "$RELEASE_TEST_OUT/r14.XXXX")
 mkdir -p "$scratch/Packages/SwitcherCore/Sources/SwitcherContracts"
 cp "$REPO_ROOT/project.yml" "$scratch/"
@@ -23,6 +24,7 @@ assert_not_contains "$sec" "## 未发布" "抽出的小节不含别的小节"
 assert_false "bump-version.sh 拒绝不合法的版本号" "$REPO_ROOT/scripts/release/bump-version.sh" v1 --root "$scratch"
 assert_false "bump-version.sh 拒绝倒退的版本号" "$REPO_ROOT/scripts/release/bump-version.sh" 0.1.0 --root "$scratch"
 rm -rf "$scratch"
-# 仓库本体的两处版本号一致（lint 也查；这里保证工具没碰它们）
-assert_true "仓库本体没动" git -C "$REPO_ROOT" diff --quiet -- project.yml Packages/SwitcherCore/Sources/SwitcherContracts/Version.swift
+# 工具没碰仓库本体（校验和前后一致）
+after=$(cd "$REPO_ROOT" && shasum -a 256 project.yml Packages/SwitcherCore/Sources/SwitcherContracts/Version.swift | shasum -a 256)
+assert_eq "$after" "$before" "仓库本体的校验和前后一致"
 finish

@@ -669,7 +669,7 @@
 "prefs.status.restarting" = "正在重起引擎…";
 "prefs.status.saved" = "已保存";
 "prefs.update.check" = "检查更新…";
-"prefs.update.pending" = "自动更新由 W4-B 接 Sparkle；这里先留位置。";
+"prefs.update.pending" = "更新由 Sparkle 提供：每天检查一次，有新版本时弹窗，下载后校验签名再安装。";
 "prefs.update.title" = "更新";
 "prefs.windowTitle" = "偏好设置";
 "screen.title" = "%@（%d×%d）";
@@ -714,3 +714,28 @@
 "transition.wipe.softness" = "软边 %.2f";
 "transition.wipe.title" = "Wipe";
 "vcam.status.unavailableInTests" = "测试宿主不查询系统扩展";
+
+/* W4-B：更新（Sparkle）与诊断包 */
+"menu.checkForUpdates" = "检查更新…";
+"menu.help" = "帮助";
+"menu.help.exportDiagnostics" = "导出诊断包…";
+"menu.help.showDiagnosticsFolder" = "打开诊断文件夹";
+"update.status.unconfigured" = "这份构建未配置自动更新（没有更新源与签名公钥；只有签名并公证的正式发布版才有）。";
+"update.status.never" = "还没检查过更新。";
+"update.status.lastCheck" = "上次检查：%@";
+"update.alert.unconfigured.title" = "这份构建没有自动更新";
+"update.alert.unconfigured.text" = "只有签名并公证的正式发布版带更新源。请到项目发布页手动下载新版本。";
+"prefs.update.automatic" = "自动检查更新";
+"prefs.update.unconfiguredHint" = "开发构建 / 未签名构建不带更新源；正式版每天检查一次，可以在这里关掉。";
+"prefs.update.exportDiagnostics" = "导出诊断包…";
+"prefs.update.diagnosticsHint" = "报问题时附上诊断包：设置、统计、去掉密钥的节目文件、系统信息，以及（经你同意后）崩溃诊断与系统日志。";
+"diagnostics.alert.title" = "导出诊断包";
+"diagnostics.alert.text" = "诊断包含：设置（不含 API token）、最近一秒的统计、去掉推流密钥的节目文件、快捷键 / MIDI 表、系统信息。\n是否一并包含崩溃诊断（MetricKit 记录与系统崩溃报告）和最近两小时的本程序日志？这些可能含有文件路径与设备名。导出后可以先自己打开检查再发出。";
+"diagnostics.alert.includeAll" = "包含崩溃诊断与日志";
+"diagnostics.alert.minimal" = "只导出设置与统计";
+"diagnostics.alert.cancel" = "取消";
+"diagnostics.save.name" = "Switcher-诊断-%@.zip";
+"diagnostics.done.title" = "诊断包已导出";
+"diagnostics.done.text" = "已写到 %@。报问题时把这个文件附上；发出前可以自己打开检查。";
+"diagnostics.failed.title" = "导出诊断包失败";
+"diagnostics.readme" = "Switcher 诊断包\n\n里面有什么：\n- system.txt        程序版本、签名、机型、macOS 版本、GPU、显示器、当前节目格式与输入 / 输出列表\n- settings.txt      偏好设置（API token 只写“已设置 / 未设置”）\n- stats-latest.jsonl 导出时最近一秒的统计，字段与 stats.jsonl 同一套\n- stats.jsonl       启动时带 --stats 时正在写的整份统计（没有就没这个文件）\n- show.switcher.json 当前节目文件，推流密钥与地址里的口令已换成 <redacted>\n- config/           快捷键表、MIDI 映射\n- crashes/          MetricKit 崩溃 / 卡死诊断与系统崩溃报告（只在你选“包含崩溃诊断与日志”时有内容）\n- log.txt           最近一段本程序与虚拟摄像头扩展的系统日志（同上）\n\n发出前可以自己打开看一遍。报问题时把整个 zip 附上。\n";

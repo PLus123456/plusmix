@@ -1,0 +1,94 @@
+# W4-B：每次提交跑 L0 + L1，每个 PR 再跑 L2（测试标准 §5）。跑在自托管的 Mac（Metal、采集设备、系统扩展都要真机；docs/release/ci.md 讲 runner 怎么装）。
+# runner 必须以 LaunchAgent 跑在登录会话里（App 的 xcodebuild test 要窗口服务器）；机器上要装 Xcode、xcodegen、ffmpeg、mediamtx、NDI SDK。
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['v*']          # tag 由 release.yml 处理
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NSUnbufferedIO: "YES"
+  # W4-A 第 7 条：无人值守时 macOS 会把实时线程的唤醒拖 10–18 ms，所有跑引擎的步骤都包 caffeinate
+  CAFFEINATE: caffeinate -u -i -d -s
+
+jobs:
+  l0-l1:
+    name: L0 + L1（lint、六包 swift test、两工具冒烟、App xcodebuild test）
+    runs-on: [self-hosted, macOS, ARM64, switcher]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # check-ownership 要 merge-base(main, 分支)
+
+      - name: 工具链与依赖钉版本
+        run: |
+          xcodebuild -version
+          swift --version | head -1
+          scripts/release/pin-deps.sh check
+
+      - name: lint（禁词 / 版本号 / 依赖方向 / 目录归属 / 会话自加的检查）
+        run: |
+          branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          if [ "$branch" != main ] && grep -qF "| \`$branch\` |" docs/OWNERSHIP.md; then
+            # 会话分支：与本地一样的 make lint（含目录归属）；Actions 的检出是 detached HEAD，给分支名一个本地引用，main 也要在本地
+            git rev-parse --verify -q "$branch" >/dev/null || git branch -f "$branch" HEAD
+            git rev-parse --verify -q main >/dev/null || git fetch -q origin main:main
+            make lint BRANCH="$branch"
+          else
+            # main / 临时分支 / PR 合并分支：docs/OWNERSHIP.md 没有行，跳过目录归属，其余照查
+            scripts/release/ci-ownership.sh --no-ownership
+          fi
+
+      - name: make gen
+        run: make gen
+
+      - name: make test（六包 + 两工具 + App）
+        run: $CAFFEINATE make test
+
+      - name: 收集结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l0-l1-${{ github.run_id }}
+          path: |
+            .build/DerivedData/Logs/Test/*.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+
+  l2:
+    name: L2（10 分钟集成场景：make gate4-run）
+    if: github.event_name == 'pull_request'
+    needs: l0-l1
+    runs-on: [self-hosted, macOS, ARM64, switcher]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: make gen
+        run: make gen
+
+      - name: gate4-run（V1–V7、A1–A4、E1–E3、E5、C1–C4，10 分钟）
+        run: $CAFFEINATE make gate4-run
+
+      - name: 收集结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l2-${{ github.run_id }}
+          path: |
+            .build/gate4/10min/**/*.jsonl
+            .build/gate4/10min/**/*.md
+            .build/gate4/10min/**/*.txt
+            reports/G4-run-10min.md
+          if-no-files-found: ignore
+          retention-days: 14

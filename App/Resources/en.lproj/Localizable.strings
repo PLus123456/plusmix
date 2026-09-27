@@ -669,7 +669,7 @@
 "prefs.status.restarting" = "Restarting engine…";
 "prefs.status.saved" = "Saved";
 "prefs.update.check" = "Check for Updates…";
-"prefs.update.pending" = "Automatic updates arrive with W4-B (Sparkle); placeholder for now.";
+"prefs.update.pending" = "Updates are delivered by Sparkle: checked once a day, announced in a dialog, signature-verified before installing.";
 "prefs.update.title" = "Updates";
 "prefs.windowTitle" = "Preferences";
 "screen.title" = "%@ (%d×%d)";
@@ -714,3 +714,28 @@
 "transition.wipe.softness" = "Softness %.2f";
 "transition.wipe.title" = "Wipe";
 "vcam.status.unavailableInTests" = "Not queried in the test host";
+
+/* W4-B: updates (Sparkle) and diagnostics */
+"menu.checkForUpdates" = "Check for Updates…";
+"menu.help" = "Help";
+"menu.help.exportDiagnostics" = "Export Diagnostics…";
+"menu.help.showDiagnosticsFolder" = "Show Diagnostics Folder";
+"update.status.unconfigured" = "This build has no automatic updates (no feed URL or signing key; only signed, notarized release builds do).";
+"update.status.never" = "Updates have not been checked yet.";
+"update.status.lastCheck" = "Last checked: %@";
+"update.alert.unconfigured.title" = "This build has no automatic updates";
+"update.alert.unconfigured.text" = "Only signed, notarized release builds carry an update feed. Download new versions from the project's releases page.";
+"prefs.update.automatic" = "Check for updates automatically";
+"prefs.update.unconfiguredHint" = "Development and unsigned builds carry no update feed; release builds check once a day, which can be turned off here.";
+"prefs.update.exportDiagnostics" = "Export Diagnostics…";
+"prefs.update.diagnosticsHint" = "Attach a diagnostics bundle when reporting a problem: settings, stats, the show file with keys removed, system information, and (with your consent) crash diagnostics and the system log.";
+"diagnostics.alert.title" = "Export Diagnostics";
+"diagnostics.alert.text" = "The bundle contains: settings (without the API token), the latest stats line, the show file with stream keys removed, hotkey / MIDI tables and system information.\nAlso include crash diagnostics (MetricKit records and system crash reports) and the last two hours of this app's log? Those may contain file paths and device names. You can inspect the bundle before sending it.";
+"diagnostics.alert.includeAll" = "Include crashes and log";
+"diagnostics.alert.minimal" = "Settings and stats only";
+"diagnostics.alert.cancel" = "Cancel";
+"diagnostics.save.name" = "Switcher-diagnostics-%@.zip";
+"diagnostics.done.title" = "Diagnostics exported";
+"diagnostics.done.text" = "Written to %@. Attach this file when reporting a problem; you can inspect it before sending.";
+"diagnostics.failed.title" = "Could not export diagnostics";
+"diagnostics.readme" = "Switcher diagnostics bundle\n\nContents:\n- system.txt         app version, signing, machine model, macOS version, GPU, displays, current program format and input / output list\n- settings.txt       preferences (the API token is only reported as set / not set)\n- stats-latest.jsonl the latest stats line at export time, same fields as stats.jsonl\n- stats.jsonl        the full stats log being written when the app was launched with --stats (absent otherwise)\n- show.switcher.json the current show file; stream keys and passphrases in URLs replaced with <redacted>\n- config/            hotkey table, MIDI map\n- crashes/           MetricKit crash / hang diagnostics and system crash reports (only when you chose to include crashes and log)\n- log.txt            recent system log of this app and the virtual camera extension (same)\n\nFeel free to inspect everything before sending. Attach the whole zip when reporting a problem.\n";

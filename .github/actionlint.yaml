@@ -1,0 +1,6 @@
+# actionlint 的配置：self-hosted runner 的标签（.github/workflows 里 runs-on 用到的），不然会报 unknown label。
+self-hosted-runner:
+  labels:
+    - switcher
+    - macOS
+    - ARM64

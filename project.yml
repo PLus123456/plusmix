@@ -43,6 +43,10 @@ packages:
     path: Packages/SwitcherControl
   SwitcherTestKit:
     path: Packages/SwitcherTestKit
+  # W4-B：自动更新（MIT）。二进制 xcframework，钉死版本；升级时 scripts/xcode-workspace-Package.resolved 的 sparkle 一项一起改（scripts/release/pin-deps.sh upgrade）。
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 
 targets:
   Switcher:
@@ -59,6 +63,15 @@ targets:
         INFOPLIST_FILE: App/Info.plist   # 手写，见文件内注释；不用 XcodeGen 生成（它会把版本写死成 1.0）
         GENERATE_INFOPLIST_FILE: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        # W4-B：Sparkle 的两个 Info.plist 键从构建设置注入（App/Info.plist 里写 $(SPARKLE_FEED_URL) / $(SPARKLE_PUBLIC_ED_KEY)）。
+        # 默认空 = 这份构建不带更新（UpdateController 不起 Sparkle，偏好设置里写"未配置"）；发布构建由 scripts/release/archive.sh 用
+        # xcodebuild 的命令行设置传真实值（SPARKLE_FEED_URL / SPARKLE_PUBLIC_ED_KEY 环境变量），私钥永远不进仓库（docs/release/sparkle.md）。
+        SPARKLE_FEED_URL: ""
+        SPARKLE_PUBLIC_ED_KEY: ""
+        # W4-B：公证要求硬化运行时。ad-hoc 签名时 Xcode 自己会关掉它（构建日志 note: Disabling hardened runtime with ad-hoc codesigning），
+        # 有 Team ID 时生效：摄像头 / 麦克风要 App/Switcher-signed.entitlements 里的 device.camera / device.audio-input 两条，
+        # 包内的 libndi.dylib / Sparkle.framework 要用同一 Team ID 重签（库校验），scripts/release/sign.sh 做。
+        ENABLE_HARDENED_RUNTIME: YES
         # W3-C：权限表按 DEVELOPMENT_TEAM 选——空（ad-hoc）用空表 App/Switcher.entitlements，有 Team ID 用 App/Switcher-signed.entitlements
         # （system-extension.install 是受限权限，ad-hoc 带着它 Xcode 拒绝构建）。写法：$(DEVELOPMENT_TEAM:default=adhoc) → "adhoc" 或 Team ID，
         # 再查 SWITCHER_ENTITLEMENTS_<它>，只定义了 adhoc 那个，其他（任何 Team ID）落到 default 的签名表。
@@ -95,6 +108,7 @@ targets:
       - package: SwitcherControl
         product: VMixCompat                  # G4：偏好设置里的第三方 API 兼容层开关（W3-D）
       - package: SwitcherTestKit
+      - package: Sparkle                     # W4-B：自动更新（UpdateController）；Xcode 把 Sparkle.framework 嵌进 Contents/Frameworks 并签名
       - target: SwitcherCameraExtension      # W3-C：嵌到 Contents/Library/SystemExtensions/
         embed: true
         codeSign: true
@@ -107,6 +121,7 @@ targets:
     sources:
       - path: CameraExtension/Sources
       - path: Packages/SwitcherOutputs/Sources/VirtualCamera/Shared
+      - path: CameraExtension/Resources      # W4-B：en / zh-Hans 的 InfoPlist.strings（系统设置里的扩展显示名，prompt 71 第 9 条）
     settings:
       base:
         PRODUCT_NAME: com.example.switcher.camera-extension
