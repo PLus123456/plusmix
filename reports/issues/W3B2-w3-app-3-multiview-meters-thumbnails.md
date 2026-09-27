@@ -31,3 +31,11 @@ public func setMeters(_ meters: Stats.AudioCounters.Meters?, at time: HostTime =
 - 纯音频输入：`w3-app-3` 把缩略图的显示视图藏起来、画 App 自己的占位（话筒 + 名字 + `NSLevelIndicator`），不切多画面格子——和渲染器的纯音频格（深灰底 + 名字 + 电平表，
   只出现在多画面窗口 / 多画面输出里）不会叠在一起，不用改。只是两处表的颜色分段不一样：App 的 `NSLevelIndicator` 警告 0.9（−6 dBFS）/ 危险 0.97（约 −1.8 dBFS），
   渲染器是 −18 起黄、−6 起红（本会话定的，设计方案 §7 没有颜色表）。统一成哪一套等用户拍板（W3-B2 报告 §4 第 2 条）。
+
+## 处理结果（W3-E3 / w3-app-4，2026-09-27，报告 `reports/w3-app-4.md`）
+
+- §1 电平表喂数：G4 检查点先接了 1 Hz（Stats 消费者里 `renderer.setMeters(stats.audio.meters)`），本会话换成 50 ms：session 的 `AudioMeterFeed` 每拍读一次 AudioEngineStatus，
+  同一份拼成 Meters（含 017 的 rmsDb）喂渲染器、再交给调音台 / 纯音频缩略图；1 Hz 那条撤了。`MeterFeedTests`（19 Hz、全在主线程；停喂 3.6 s 多画面表退回占位 = 没有别的喂数方）。
+- §2 名字出现两次：选"缩略图切掉内框底部的名字条"（标题条保留编号 + 名字 + tally 色）。几何与 `CompositorPasses.drawCellLabel` 同一个 Float 算式，再多切 2 px。
+  `ThumbnailCropTests`（离线渲染 7 种布局 / 分辨率 44 路，缩略图区域 0 个名字条像素，名字条那几行扫得到白字）。
+- §2 颜色分段：检查点 2026-09-24 已统一成设计方案 §7；本会话把调音台 MeterBar 改成"RMS 实心条 + 峰值细线"（017）。
