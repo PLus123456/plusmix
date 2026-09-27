@@ -3,6 +3,7 @@
 提出会话 / 分支：W3-E2 / `w3-app-3`（2026-09-23；prompt 63 交付第 2 条："现有命令只有 setTransition(type:durationTicks:)，这两组参数目前只能 loadShow 整体替换——
 先按替换做并写清楚；若嫌不妥，写提案加 setTransitionParams"。prompt 原文写的编号是 013，但 013 已是显示类输出那条，顺延到 016）
 状态：**已落地**（用户 2026-09-23 批："016 批了"；由提出会话 W3-E2 / `w3-app-3` 落地：`6193f56` 契约 + reducer、`e41eeb4` 校验器 / 命令目录 / docs/api.md、`91c9322` App 改发新命令。落地细节与正文的出入见文末"落地记录"）
+后续：**P4（2026-09-27，分支 p4-contracts）** 补上文末"没做"那条——removeInput 删掉 Stinger 用的那一路时把 `transition.stinger.input` 置 nil（与叠加引用同口径）；P4 之前存下的节目文件里的悬空编号由 `Show.migratingLegacyKeys()` 清掉；`MixerState.validate()` 不查引用（用户 2026-09-27 定）。`setTransitionParams` 的校验与 reducer 规则不变。
 
 ## 改什么
 
