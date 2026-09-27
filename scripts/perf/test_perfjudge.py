@@ -140,6 +140,43 @@ class PowermetricsTests(unittest.TestCase):
         self.assertEqual(len(pj.parse_powermetrics(blob)), 1)
 
 
+class S4Tests(unittest.TestCase):
+    def minute(self, i, pressure="Nominal", p_mhz=3500.0, gpu_mhz=1200.0):
+        return {"_ts": 1000.0 + 60 * i + 1, "thermal_pressure": pressure, "gpu": {"freq_hz": gpu_mhz, "idle_ratio": 0.7},
+                "processor": {"clusters": [{"name": "P-Cluster", "freq_hz": p_mhz * 1e6, "idle_ratio": 0.5}]}}
+
+    def stats(self, n_minutes, missed_at=()):
+        out, missed = [], 0
+        for s in range(0, n_minutes * 60 + 1):
+            if s in missed_at:
+                missed += 1
+            out.append(stats_line(1000.0 + s, 60 * s, missed=missed))
+        return out
+
+    def test_S4_noThrottleMeansConditionNotTriggered(self):
+        samples = [self.minute(i) for i in range(60)]
+        v = pj.s4_verdict(pj.s4_timeline(samples, self.stats(60)))
+        self.assertFalse(v["throttled"])
+        self.assertTrue(v["pass"])
+
+    def test_S4_pressureOnsetThenV2JudgedAfterOnset(self):
+        samples = [self.minute(i, pressure="Nominal" if i < 30 else "Heavy") for i in range(60)]
+        ok = pj.s4_verdict(pj.s4_timeline(samples, self.stats(60, missed_at=(100,))))       # 丢帧在降频之前（第 1 分钟）
+        self.assertTrue(ok["throttled"])
+        self.assertEqual(ok["onset_minute"], 30)
+        self.assertTrue(ok["pass"], "降频后 V2 为 0")
+        bad = pj.s4_verdict(pj.s4_timeline(samples, self.stats(60, missed_at=tuple(range(2000, 2010)))))   # 降频后 10 帧 / 30 分钟 = 0.0093% ≤ 0.02%
+        self.assertTrue(bad["pass"])
+        worse = pj.s4_verdict(pj.s4_timeline(samples, self.stats(60, missed_at=tuple(range(2000, 2030)))))  # 30 帧 / 108000 拍 = 0.028%
+        self.assertFalse(worse["pass"])
+
+    def test_S4_frequencyDropCountsAsThrottle(self):
+        samples = [self.minute(i, p_mhz=3500.0 if i < 40 else 2600.0) for i in range(60)]
+        v = pj.s4_verdict(pj.s4_timeline(samples, self.stats(60)))
+        self.assertTrue(v["throttled"])
+        self.assertEqual(v["onset_minute"], 40)
+
+
 class E4Tests(unittest.TestCase):
     def test_E4_alignmentFindsOffsetOfFirstSourceFrame(self):
         import math

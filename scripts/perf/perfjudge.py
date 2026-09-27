@@ -303,3 +303,94 @@ def os_major(version):
 
 def baseline_path(directory, machine, macos_version):
     return os.path.join(directory, f"perf-{machine}-macos{os_major(macos_version)}.json")
+
+
+# ---------------------------------------------------------------- S4（无风扇机型热降频；测试标准 §1 S4、§3 S4、§4 S4）
+
+PRESSURE_ORDER = ["Nominal", "Moderate", "Heavy", "Trapping", "Sleeping"]
+
+
+def _pressure_rank(p):
+    """None 最低；不认识的名字（系统版本换了叫法）当作比 Nominal 高一级。"""
+    if p is None:
+        return -1
+    return PRESSURE_ORDER.index(p) if p in PRESSURE_ORDER else 1
+
+
+def s4_timeline(samples, lines, minute_s=60):
+    """按分钟对齐 powermetrics 样本（带 _ts 墙钟）与 stats.jsonl：最坏的 thermal pressure、各簇 / GPU 频率均值、该分钟的 V2 增量与拍数。"""
+    if not lines:
+        return []
+    t0 = float(lines[0]["ts"])
+    n = int((float(lines[-1]["ts"]) - t0) // minute_s) + 1
+    rows = [{"minute": i, "pressure": None, "cluster_mhz": {}, "gpu_mhz": [], "missed": 0, "ticks": 0} for i in range(n)]
+    for s in samples:
+        i = int((float(s.get("_ts", 0)) - t0) // minute_s)
+        if not 0 <= i < n:
+            continue
+        r = rows[i]
+        p = s.get("thermal_pressure")
+        if p is not None and _pressure_rank(str(p)) > _pressure_rank(r["pressure"]):
+            r["pressure"] = str(p)
+        for c in (s.get("processor") or {}).get("clusters") or []:
+            if "freq_hz" in c:
+                r["cluster_mhz"].setdefault(str(c.get("name", "?")), []).append(_mhz(c["freq_hz"]))
+        g = s.get("gpu") or {}
+        if "freq_hz" in g:
+            r["gpu_mhz"].append(_mhz(g["freq_hz"]))
+    prev = lines[0]
+    j = 0
+    for i in range(n):
+        end_ts = t0 + (i + 1) * minute_s
+        while j + 1 < len(lines) and float(lines[j + 1]["ts"]) <= end_ts:
+            j += 1
+        cur = lines[j]
+        rows[i]["missed"] = int(cur["missed_render"]) - int(prev["missed_render"])
+        rows[i]["ticks"] = int(cur["tick"]) - int(prev["tick"])
+        prev = cur
+    for r in rows:
+        r["cluster_mhz"] = {k: sum(v) / len(v) for k, v in r["cluster_mhz"].items()}
+        r["gpu_mhz"] = (sum(r["gpu_mhz"]) / len(r["gpu_mhz"])) if r["gpu_mhz"] else None
+    return rows
+
+
+def s4_verdict(rows, freq_drop=0.15, reference_minutes=5):
+    """降频起点 = 第一个 thermal pressure 不是 Nominal 的分钟，或任一簇 / GPU 频率比前 5 分钟的中位数低 freq_drop 以上的分钟；
+    起点之后的 V2（missed 增量之和 / 拍数之和）≤ 0.02% 算"V2 仍达标"（§4 S4 必须档；引擎目前没有降级策略，只能按这一条判）。"""
+    def median(xs):
+        xs = sorted(xs)
+        return xs[len(xs) // 2] if xs else None
+    ref = rows[:reference_minutes]
+    ref_cluster = {}
+    for r in ref:
+        for k, v in r["cluster_mhz"].items():
+            ref_cluster.setdefault(k, []).append(v)
+    ref_cluster = {k: median(v) for k, v in ref_cluster.items()}
+    ref_gpu = median([r["gpu_mhz"] for r in ref if r["gpu_mhz"]])
+    onset, why = None, ""
+    for r in rows[reference_minutes:] if len(rows) > reference_minutes else []:
+        reasons = []
+        if r["pressure"] not in (None, "Nominal"):
+            reasons.append(f"thermal pressure {r['pressure']}")
+        for k, v in r["cluster_mhz"].items():
+            base = ref_cluster.get(k)
+            if base and v < (1 - freq_drop) * base:
+                reasons.append(f"{k} {v:.0f} MHz < {(1 - freq_drop) * 100:.0f}% × {base:.0f}")
+        if ref_gpu and r["gpu_mhz"] and r["gpu_mhz"] < (1 - freq_drop) * ref_gpu:
+            reasons.append(f"GPU {r['gpu_mhz']:.0f} MHz < {(1 - freq_drop) * 100:.0f}% × {ref_gpu:.0f}")
+        if reasons:
+            onset, why = r["minute"], "；".join(reasons)
+            break
+    total_missed = sum(r["missed"] for r in rows)
+    total_ticks = sum(r["ticks"] for r in rows)
+    if onset is None:
+        ratio = total_missed / total_ticks if total_ticks else 0.0
+        return {"throttled": False, "onset_minute": None, "why": "", "v2_after": total_missed, "ticks_after": total_ticks,
+                "v2_ratio_after": ratio, "pass": ratio <= MUST["v2_ratio"],
+                "note": "这段时间里没出现降频（thermal pressure 一直 Nominal、频率没掉）：S4 的条件没触发，按全程 V2 报"}
+    after = [r for r in rows if r["minute"] >= onset]
+    missed = sum(r["missed"] for r in after)
+    ticks = sum(r["ticks"] for r in after)
+    ratio = missed / ticks if ticks else 0.0
+    return {"throttled": True, "onset_minute": onset, "why": why, "v2_after": missed, "ticks_after": ticks, "v2_ratio_after": ratio,
+            "pass": ratio <= MUST["v2_ratio"], "note": ""}

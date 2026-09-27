@@ -146,7 +146,10 @@ def main():
     verdict = "✅ 无退步" if not regressions and not must_fail else "❌ " + "；".join(
         [f"退步：{r['name']}" for r in regressions] + [f"掉出必须档：{r[0]}" for r in must_fail])
     first = not base
-    w(f"**判定：{verdict}**" + ("（同系统还没有基线：这次是第一版，写入 " + show_path(bpath) + "，不判退步）" if first else "") + "\n")
+    busy_now = (env.get("busy_processes", "") + " " + env.get("busy_processes_after", "")).strip()
+    will_write = a.write_baseline or (first and a.minutes == 5 and bool(e4) and not busy_now)
+    first_txt = ("（同系统还没有基线：" + ("这次写成第一版 " + show_path(bpath) if will_write else "这次不是标准条件，不写基线") + "，不判退步）") if first else ""
+    w(f"**判定：{verdict}**" + first_txt + "\n")
     w(f"生成：{now}。数据：`{a.out_dir}/`（stats.jsonl、headless.log、load.log、powermetrics.plist、e4/）。脚本：scripts/perf/perf-baseline.sh → scripts/perf/perf_report.py。\n")
     w("## 1. 版本 / 机器 / 环境（§7 报告头、§2.8）\n")
     w("| 项 | 值 |\n|---|---|")
@@ -230,8 +233,11 @@ def main():
                "must_fail": [r[0] for r in must_fail], "regressions": regressions, "baseline": show_path(bpath), "first": first}
     json.dump(summary, open(os.path.join(a.out_dir, "perf-summary.json"), "w"), ensure_ascii=False, indent=1)
 
-    # 基线：同系统第一版自动写；已有时只有 --write-baseline 才覆盖
-    if first or a.write_baseline:
+    # 基线：同系统第一版自动写——只限固定场景（5 分钟 + E4）且机器上没有别的编译 / 测试进程；已有时只有 --write-baseline 才覆盖
+    auto_ok = first and a.minutes == 5 and bool(e4) and not busy
+    if first and not auto_ok and not a.write_baseline:
+        print(f"同系统还没有基线，但这次不是标准条件（{a.minutes:g} 分钟{'、没跑 E4' if not e4 else ''}{'、机器上有编译 / 测试进程' if busy else ''}），不自动写；要写加 --write-baseline")
+    if auto_ok or a.write_baseline:
         sb = load_json(os.path.join(a.out_dir, "summary-baseline.json")) or {}
         sb["checkpoint"] = "W4-A-L5"
         sb["machine"] = machine
