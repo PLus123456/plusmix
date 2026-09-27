@@ -70,8 +70,9 @@ public enum DiskGuard {
 
     /// 在跑的录制器在 `Stats.encoder` 里的一项：同 `RecorderCounters.statsEntry`（skipped / bitrate / frames / dropped / state），
     /// disk_free_mb 用 `diskFreeBytes(of:counters:)`——非启动卷上不再报 0。组装方（App 的 OutputRuntime）用它代替 `counters.statsEntry`。
-    public static func statsEntry(for recorder: Recorder, counters: RecorderCounters, previous: RecorderCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
-        var e = counters.statsEntry(previous: previous, windowSeconds: windowSeconds, state: recorder.state.statsName)
+    public static func statsEntry(for recorder: Recorder, counters: RecorderCounters, previous: RecorderCounters?, windowSeconds: Double,
+                                  output: Int = 0) -> Stats.EncoderEntry {
+        var e = counters.statsEntry(previous: previous, windowSeconds: windowSeconds, state: recorder.state.statsName, output: output)
         e.diskFreeMb = Double(diskFreeBytes(of: recorder, counters: counters)) / 1_048_576
         return e
     }

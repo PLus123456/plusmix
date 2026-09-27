@@ -1,4 +1,4 @@
-# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则）
+# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017 / 019，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则）
 
 代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
@@ -18,6 +18,7 @@
 `dropped` 的口径收紧成"在呈现 / 发布时没送出去的"，两者不重叠**
 → 提案 015（G4 续做合入会话按授权落地：`DisplayOutputSettings.fallbackToMain` 默认与缺键改 false）、016（W3-E2 落地：`Command.setTransitionParams`，34 个 case）
 → 提案 017（用户 2026-09-24 批，G4 续做合入会话落地：`Stats.audio.meters` 的 `rms_db`）
+→ 提案 019（用户 2026-09-27 批，G4 续做合入会话落地：`Stats.EncoderEntry` 的 `output` / `connections`、NDI state 的 failed、reducer 对 addInput / setInputSettings 剥 border 格）
 → **P4（2026-09-27，分支 p4-contracts）：过期注释 / 口径收口；reducer 两条小规则（removeInput 清 Stinger 引用，addOutput / setOutputSettings / loadShow 先搬过渡键）；
 搬迁清掉 `border` 效果格与悬空的 Stinger 引用；`validate()` 只查结构、不查引用（用户 2026-09-27 定）。没有加改任何公开类型与 JSON 键**。提案文件留在 docs/contract-changes/ 当决策记录。
 
@@ -196,13 +197,13 @@ P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的�
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop,latency_ms,latency_max_ms}, encoder[{skipped,bitrate,frames,dropped,disk_free_mb,reconnects,state}], display[{output,kind,frames,dropped,undelivered,state}]（P3 提案 013，undelivered 是 018）, audio{dropouts,underruns,discontinuities,meters{buses[{bus,peak_db,rms_db,true_peak_db,lufs_m,lufs_s,lufs_i,lra}],inputs{n:{peak_db,rms_db}}}}, rss_mb, cpu_pct, gpu_pct（P2 按提案 001 / 002 / 004 / 005 扩，2026-09-18；rms_db 是 017，2026-09-24） | 引擎每秒汇总一次（W1-B）：encoder[] 由各输出的 `statsEntry` 填（`Recorder` / `StreamOutput` / `NDISender`），audio 由 `AudioEngine.audioCounters` 填（W2-E 集成层），per_input 的 L1 由引擎填（W1-B2）；写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
+| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop,latency_ms,latency_max_ms}, encoder[{output,skipped,bitrate,frames,dropped,disk_free_mb,reconnects,connections,state}]（output / connections 是 019）, display[{output,kind,frames,dropped,undelivered,state}]（P3 提案 013，undelivered 是 018）, audio{dropouts,underruns,discontinuities,meters{buses[{bus,peak_db,rms_db,true_peak_db,lufs_m,lufs_s,lufs_i,lra}],inputs{n:{peak_db,rms_db}}}}, rss_mb, cpu_pct, gpu_pct（P2 按提案 001 / 002 / 004 / 005 扩，2026-09-18；rms_db 是 017，2026-09-24） | 引擎每秒汇总一次（W1-B）：encoder[] 由各输出的 `statsEntry` 填（`Recorder` / `StreamOutput` / `NDISender`），audio 由 `AudioEngine.audioCounters` 填（W2-E 集成层），per_input 的 L1 由引擎填（W1-B2）；写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
 
 口径：`render_ms` = 窗口内"拍点时刻 → GPU 完成"平均 ms（V1）；`jitter_ms` = 窗口内 |派发时刻 − 理想拍点| 最大值（V3）；计数类（missed_render, dup, drop, skipped, dropouts, underruns, frames, dropped, reconnects, discontinuities）全是自启动累计，相邻两行相减得窗口增量；`fps` = 窗口内该输入 push 帧数 / 秒；`bitrate` = 窗口平均 bit/s；`ts` = Unix 秒。`Stats.jsonLine()` / `parse(line:)` 是唯一的编解码入口。
 
 P2 加的字段（口径全文在 Stats.swift 的文档注释）：
 - `per_input[n].latency_ms` / `latency_max_ms`（提案 005）：窗口内 L1（帧交给第一个 FrameConsumer 的时刻 − 该帧 `Frame.ingressTime`）的平均 / 最大 ms，只算每拍第一次用到的帧，窗口内没样本写 0；引擎侧算法归 W1-B2（prompt 42），之前引擎写 0。
-- `encoder[i].frames`（001）：写进文件 / 交给传输层的帧数累计；`dropped`（001）：编码之后、落地之前丢的帧累计（录制 = writer 不接的 `videoFramesRejected`；推流 = E9 网络丢帧 `networkDropped`；NDI = 队列满丢的帧），与编码前的 E1 `skipped` 是两回事；`disk_free_mb`（001）：录制目录所在卷剩余 MB（2^20 字节，与 rss_mb 同口径），非录制输出 0；`reconnects`（002）：推流重连成功次数累计，录制 / NDI 0；`state`（002）：推流 idle / connecting / publishing / backoff / stopping / stopped / failed，NDI publishing / idle / unavailable（SDK 不在），录制 idle / recording / stopping / stopped / failed。
+- `encoder[i].frames`（001）：写进文件 / 交给传输层的帧数累计；`dropped`（001）：编码之后、落地之前丢的帧累计（录制 = writer 不接的 `videoFramesRejected`；推流 = E9 网络丢帧 `networkDropped`；NDI = 队列满丢的帧），与编码前的 E1 `skipped` 是两回事；`disk_free_mb`（001）：录制目录所在卷剩余 MB（2^20 字节，与 rss_mb 同口径），非录制输出 0；`reconnects`（002）：推流重连成功次数累计，录制 / NDI 0；`state`（002）：推流 idle / connecting / publishing / backoff / stopping / stopped / failed，NDI publishing / idle / unavailable（SDK 不在）/ failed（SDK 在但 initialize / send_create 失败，019），录制 idle / recording / stopping / stopped / failed；`output`（019）：这一项对应的输出在 MixerState.outputs 里的编号（与 display[].output 同口径，0 = 填数方没给 / 不在输出表里，如 headless 的 ISO 音轨），读的一方按它对号、不再靠数组顺序；`connections`（019）：NDI 当前接收方数，推流 / 录制 0。
 - `audio.discontinuities`（004）：A1 第三项，Master 消费者流上相邻样本跳变 > 0.5 满幅的次数累计（集成层泵线程的流式检测，合成信号的 click 按平台启发式排除；正式判定用离线口径）；`audio.meters`（004）：采样那一刻的表读数，`buses` 顺序 = `Bus.allCases`（`bus` = `Bus.name`：master / busA / busB / headphones），`inputs` 键 = 输入编号；峰值 / 真峰值 dBFS / dBTP、响度 LUFS、LRA LU，dB / LUFS 下限 −120（`Stats.AudioCounters.Meters.floorDb`，静音也钳到它，JSON 写不了 −inf），来源只有 `AudioMixer.meters`。
 - 兼容：老 stats.jsonl 缺这些键时解码给 0 / "idle" / 空（`decodeIfPresent`），写出总是写全；Show 文件不受影响（Stats 不在 Show 里）。
 
@@ -225,6 +226,12 @@ G4 续做落地的字段（提案 017，用户 2026-09-24 批）：
 - `audio.meters.buses[].rms_db` / `inputs{n}.rms_db`：推子后（与 peak_db 同一取样点）的均方根电平 dBFS，[L, R]，20·log10(rms)、下限 −120（`Meters.floorDb`）；
   300 ms 一阶指数平均（IEC 60268-17 的 VU 积分时间）、每个混音块更新、采样那一刻的值。C 热路径只累平方和与一阶平均（不开方、不进 libm），开方与 dB 换算在 Swift 侧（`AudioEngine.statsMeters`）。
   缺键 = 空数组 = 没有 RMS（017 之前的文件），读表的只画峰值；写出总是写全。多画面电平表有 RMS 时画"RMS 实心条 + 峰值细线 + 保持线"。
+
+G4 续做落地的字段（提案 019，用户 2026-09-27 批）：
+- `encoder[].output`：与 display[].output 同口径的输出编号，jsonKeys 里排最前；缺键 = 0。填数：包里各 `statsEntry` 多一个 `output:` 参数（默认 0），组装方（App OutputRuntime、headless）给编号——headless 的 PGM 录制器 = 节目里第一个 record 输出、NDI = 第一个 ndi 输出、ISO 音轨 0；App 的填法归 W3-E4。
+- `encoder[].connections`：NDI 当前接收方数（`NDISendCounters.connections`），推流 / 录制 0；缺键 = 0。
+- NDI 的 `state` 多一个 `failed`：SDK 在但 `NDIlib_initialize` / `NDIlib_send_create` 失败（`NDISendCounters.startFailed`，下一次 start 清）；`unavailable` 仍只表示 SDK 不在。
+- reducer（019 D）：addInput / setInputSettings 带进来的 `EffectSlot(id: "border")` 剥掉（`MixerReducer.strippingLegacyBorder`），与 Show.load 的搬迁同口径；校验器不改。
 
 ### 2.8 文件与脚本（Show.swift、Scenario.swift）
 

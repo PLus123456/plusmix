@@ -71,9 +71,11 @@ public struct RecorderCounters: Hashable, Sendable {
 
     /// Stats.encoder 的一项（提案 001 / 002，P2 落地）：skipped / bitrate 来自编码器计数（`EncoderCounters.statsEntry`）；
     /// frames = videoFrames（写进文件的）；dropped = videoFramesRejected（writer 不接的）；disk_free_mb = diskFreeBytes / 2^20（与 rss_mb 同口径）；
-    /// reconnects = 0；state 由录制器给（`Recorder.State.statsName`：idle / recording / stopping / stopped / failed）。
-    public func statsEntry(previous: RecorderCounters?, windowSeconds: Double, state: String) -> Stats.EncoderEntry {
+    /// reconnects = 0；state 由录制器给（`Recorder.State.statsName`：idle / recording / stopping / stopped / failed）；
+    /// output = 这路录制在 MixerState.outputs 里的编号（提案 019；组装方给，不给 = 0 = 不知道）。
+    public func statsEntry(previous: RecorderCounters?, windowSeconds: Double, state: String, output: Int = 0) -> Stats.EncoderEntry {
         var e = encoder.statsEntry(previous: previous?.encoder, windowSeconds: windowSeconds)
+        e.output = output
         e.frames = videoFrames
         e.dropped = videoFramesRejected
         e.diskFreeMb = Double(diskFreeBytes) / 1_048_576

@@ -197,16 +197,17 @@ public struct MixerReducer: MixerReducing {
             s.outputs[i].name = name
 
         // 输入表
+        // 输入表（进来的设置剥掉过渡做法的 "border" 效果格，019 D：Show.load / loadShow / addOutput / setOutputSettings 都搬迁清死数据，这两条是最后一个入口；没有叠加通道的上下文所以直接清）
         case .setInputSettings(let input, let settings):
             guard let i = Self.inputIndex(input, in: s) else { return state }
-            s.inputs[i].settings = settings.clamped()
+            s.inputs[i].settings = Self.strippingLegacyBorder(settings.clamped())
         case .renameInput(let input, let name):
             guard let i = Self.inputIndex(input, in: s) else { return state }
             s.inputs[i].name = name
         case .addInput(let config):
             guard config.number > MixerState.noInput, !Self.inputExists(config.number, in: s) else { return state }
             var c = config
-            c.settings = c.settings.clamped()
+            c.settings = Self.strippingLegacyBorder(c.settings.clamped())
             let at = s.inputs.firstIndex { $0.number > c.number } ?? s.inputs.count
             s.inputs.insert(c, at: at)
         case .removeInput(let input):
@@ -270,5 +271,15 @@ public struct MixerReducer: MixerReducing {
     private static func outputIndex(_ number: Int, kind: OutputKind, in s: MixerState) -> Int? {
         guard let i = s.outputs.firstIndex(where: { $0.number == number }), s.outputs[i].kind == kind else { return nil }
         return i
+    }
+}
+
+extension MixerReducer {
+    /// 019 D：效果链里 id = "border" 的格一律去掉（`OverlayBorder.legacyEffectID`，`Show.migratingLegacyKeys()` 同一口径），别的格原样、顺序不变。
+    static func strippingLegacyBorder(_ settings: InputSettings) -> InputSettings {
+        guard settings.effects.contains(where: { $0.id == OverlayBorder.legacyEffectID }) else { return settings }
+        var s = settings
+        s.effects.removeAll { $0.id == OverlayBorder.legacyEffectID }
+        return s
     }
 }

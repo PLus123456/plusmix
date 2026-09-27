@@ -1,7 +1,7 @@
 # 019 `Stats.EncoderEntry` 加输出编号 `output` 与接收方数 `connections`；NDI 的 state 多一个 `failed`；（附）reducer 对 addInput / setInputSettings 带来的 `border` 效果格
 
 提出会话 / 分支：G4 续做合入会话（g4，2026-09-27）。来源：reports/w3-app-4.md §4 第 2 / 3 条（W3-E3）、reports/p4-contracts.md §4 第 1 条（P4）。
-状态：**待批**（A / B / C / D 四条可以分开批；批了建议由 main 快进后的下一轮检查点顺手落地，或新开契约会话 P5——本轮 App 胶水额度已用 42 / 50，落不下 App 那几行）。
+状态：**已批并落地**（用户 2026-09-27："1–7 都按你建议的批"，四条全批；G4 续做合入会话同日落地：契约 `Stats.EncoderEntry.output` / `connections` + `Contracts019Tests`、CodableTests / StatsP2Tests / Samples 的字面量、`NDISendCounters.startFailed` 与三处 `statsEntry` 的 `output:` 参数、headless 填编号、reducer D + `ReducerTests.test019_…`、CONTRACTS.md §2.7、测试标准 §7；App 的读法与文案归 prompt 73 W3-E4；OWNERSHIP G4 行记了授权与 token）。
 
 ## 改什么
 

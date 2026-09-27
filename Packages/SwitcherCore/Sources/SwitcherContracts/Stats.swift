@@ -90,6 +90,9 @@ public struct Stats: Hashable, Codable, Sendable {
 
     /// encoder 的元素，与带编码器的输出同序。
     public struct EncoderEntry: Hashable, Codable, Sendable {
+        /// JSON 键 output（提案 019）：这一项对应的输出在 `MixerState.outputs` 里的编号，与 `DisplayEntry.output` 同口径；
+        /// 0 = 填数方没给 / 不知道（019 之前的文件、ISO 音轨这类不在输出表里的项）。读的一方按它对号，不再靠数组顺序。
+        public var output: Int
         /// E1 编码滞后跳帧累计。
         public var skipped: UInt64
         /// 窗口平均输出码率（bit/s）。
@@ -103,37 +106,43 @@ public struct Stats: Hashable, Codable, Sendable {
         public var diskFreeMb: Double
         /// JSON 键 reconnects（提案 002）：推流重连成功次数，累计；录制 / NDI 写 0。
         public var reconnects: UInt64
+        /// JSON 键 connections（提案 019）：NDI = 当前接收方数（NDIlib_send_get_no_connections，每秒查一次的值）；推流 / 录制写 0。
+        public var connections: UInt64
         /// JSON 键 state（提案 002）：输出的运行状态。推流：idle / connecting / publishing / backoff / stopping / stopped / failed；
-        /// NDI：publishing / idle / unavailable（SDK 不在）；录制：idle / recording / stopping / stopped / failed。
+        /// NDI：publishing / idle / unavailable（SDK 不在）/ failed（SDK 在但 initialize / send_create 失败，019）；录制：idle / recording / stopping / stopped / failed。
         public var state: String
-        public init(skipped: UInt64, bitrate: Double, frames: UInt64 = 0, dropped: UInt64 = 0, diskFreeMb: Double = 0,
-                    reconnects: UInt64 = 0, state: String = "idle") {
+        public init(output: Int = 0, skipped: UInt64, bitrate: Double, frames: UInt64 = 0, dropped: UInt64 = 0, diskFreeMb: Double = 0,
+                    reconnects: UInt64 = 0, connections: UInt64 = 0, state: String = "idle") {
+            self.output = output
             self.skipped = skipped
             self.bitrate = bitrate
             self.frames = frames
             self.dropped = dropped
             self.diskFreeMb = diskFreeMb
             self.reconnects = reconnects
+            self.connections = connections
             self.state = state
         }
         enum CodingKeys: String, CodingKey {
-            case skipped, bitrate, frames, dropped
+            case output, skipped, bitrate, frames, dropped
             case diskFreeMb = "disk_free_mb"
-            case reconnects, state
+            case reconnects, connections, state
         }
-        /// 老文件只有 skipped / bitrate：其余缺键给 0 / "idle"。
+        /// 老文件只有 skipped / bitrate：其余缺键给 0 / "idle"（output / connections 是 019 加的，缺键 = 0）。
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
+            output = try c.decodeIfPresent(Int.self, forKey: .output) ?? 0
             skipped = try c.decode(UInt64.self, forKey: .skipped)
             bitrate = try c.decode(Double.self, forKey: .bitrate)
             frames = try c.decodeIfPresent(UInt64.self, forKey: .frames) ?? 0
             dropped = try c.decodeIfPresent(UInt64.self, forKey: .dropped) ?? 0
             diskFreeMb = try c.decodeIfPresent(Double.self, forKey: .diskFreeMb) ?? 0
             reconnects = try c.decodeIfPresent(UInt64.self, forKey: .reconnects) ?? 0
+            connections = try c.decodeIfPresent(UInt64.self, forKey: .connections) ?? 0
             state = try c.decodeIfPresent(String.self, forKey: .state) ?? "idle"
         }
-        /// JSON 键名。
-        public static let jsonKeys = ["skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "state"]
+        /// JSON 键名（output 在最前，与 display[] 一样；019）。
+        public static let jsonKeys = ["output", "skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "connections", "state"]
     }
 
     /// display 的元素（提案 013）：显示类输出没有编码器，帧数 / 丢帧 / 状态进这里。

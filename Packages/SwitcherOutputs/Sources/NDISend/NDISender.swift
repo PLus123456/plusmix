@@ -48,19 +48,24 @@ public struct NDISendCounters: Hashable, Sendable {
     public var autoSwitches: UInt64 = 0
     /// 当前 NDI 接收方数量（NDIlib_send_get_no_connections，每秒查一次）。
     public var connections: Int = 0
-    /// SDK 不在 / 初始化失败：Stats 里标 unavailable。
+    /// SDK 不在 / 初始化失败：Stats 里标 unavailable（初始化失败时 `startFailed` 也为 true，Stats 里 failed 优先）。
     public var unavailable: Bool = false
+    /// SDK 在、但 NDIlib_initialize / NDIlib_send_create 失败（提案 019）：Stats 的 state = failed，与"SDK 不在"的 unavailable 分开；
+    /// 下一次 start() 清掉。
+    public var startFailed: Bool = false
 
     public init() {}
 
     /// Stats.encoder 的一项：NDI 没有码率控制，bitrate = 窗口内送出的 UYVY 字节 × 8 / 秒（原始码率，报告用）。
     /// 提案 001 + 002（P2 落地）：frames = framesSent、dropped = skipped（NDI 没有编码器，队列满丢的帧就是"落地之前丢的"）、
-    /// reconnects = 0、disk_free_mb = 0、state = unavailable ? "unavailable" : (running ? "publishing" : "idle")。
-    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, bytesPerFrame: Int, running: Bool = true) -> Stats.EncoderEntry {
+    /// reconnects = 0、disk_free_mb = 0、state = startFailed ? "failed" : unavailable ? "unavailable" : (running ? "publishing" : "idle")。
+    /// 提案 019：output = 这路在 MixerState.outputs 里的编号（组装方给，不给 = 0）；connections = 当前接收方数（SDK 没给 / 负数当 0）。
+    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, bytesPerFrame: Int, running: Bool = true, output: Int = 0) -> Stats.EncoderEntry {
         let frames = framesSent &- (previous?.framesSent ?? 0)
         let bitrate = windowSeconds > 0 ? Double(frames * UInt64(bytesPerFrame)) * 8 / windowSeconds : 0
-        return Stats.EncoderEntry(skipped: skipped, bitrate: bitrate, frames: framesSent, dropped: skipped, diskFreeMb: 0, reconnects: 0,
-                                  state: unavailable ? "unavailable" : (running ? "publishing" : "idle"))
+        return Stats.EncoderEntry(output: output, skipped: skipped, bitrate: bitrate, frames: framesSent, dropped: skipped, diskFreeMb: 0, reconnects: 0,
+                                  connections: UInt64(max(0, connections)),
+                                  state: startFailed ? "failed" : (unavailable ? "unavailable" : (running ? "publishing" : "idle")))
     }
 }
 
@@ -192,9 +197,9 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
     /// 每帧 UYVY 字节数（statsEntry 用）。
     public var uyvyBytesPerFrame: Int { bytesPerFrame }
 
-    /// Stats.encoder 的一项（state：SDK 不在 = unavailable；在跑 = publishing；没跑 = idle）。
-    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
-        counters.snapshot().statsEntry(previous: previous, windowSeconds: windowSeconds, bytesPerFrame: bytesPerFrame, running: isRunning)
+    /// Stats.encoder 的一项（state：SDK 在但起不来 = failed（019）；SDK 不在 = unavailable；在跑 = publishing；没跑 = idle）。
+    public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, output: Int = 0) -> Stats.EncoderEntry {
+        counters.snapshot().statsEntry(previous: previous, windowSeconds: windowSeconds, bytesPerFrame: bytesPerFrame, running: isRunning, output: output)
     }
 
     /// 起：初始化 NDI、建发送实例、建转换器、起线程。
@@ -204,10 +209,12 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         try stateLock.withLock {
             guard !running else { throw NDISendError.alreadyRunning }
             let haveSDK = Self.isAvailable
+            counters.startFailed.store(false, ordering: .relaxed)   // 019：上一次起失败的记号到这次 start 为止
             #if canImport(NDI)
             if !configuration.dryRun {
                 guard NDIlib_initialize() else {
                     counters.unavailable.store(true, ordering: .relaxed)
+                    counters.startFailed.store(true, ordering: .relaxed)   // 019：SDK 在但起不来 → Stats failed
                     throw NDISendError.initializeFailed
                 }
                 nameCString = strdup(configuration.name)
@@ -216,6 +223,7 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
                                                 clock_video: false, clock_audio: false)
                 guard let s = NDIlib_send_create(&desc) else {
                     counters.unavailable.store(true, ordering: .relaxed)
+                    counters.startFailed.store(true, ordering: .relaxed)   // 019
                     throw NDISendError.createFailed
                 }
                 sender = s
@@ -606,6 +614,7 @@ final class AtomicNDICounters: @unchecked Sendable {
     let usingGPU = Atomic<Bool>(false)
     let connections = Atomic<Int>(0)
     let unavailable = Atomic<Bool>(true)
+    let startFailed = Atomic<Bool>(false)
     let lastCPUProbeMs = Atomic<Double>(0)
     let lastGPUProbeMs = Atomic<Double>(0)
     let autoSwitches = Atomic<UInt64>(0)
@@ -642,6 +651,7 @@ final class AtomicNDICounters: @unchecked Sendable {
         c.autoSwitches = autoSwitches.load(ordering: .relaxed)
         c.connections = connections.load(ordering: .relaxed)
         c.unavailable = unavailable.load(ordering: .relaxed)
+        c.startFailed = startFailed.load(ordering: .relaxed)
         return c
     }
 }

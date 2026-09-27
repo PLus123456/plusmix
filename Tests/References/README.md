@@ -77,3 +77,10 @@ W3-B2 删了渲染器对提案 010 过渡键（`extra["layout"]`、效果格 `bo
 电平表的刻度与颜色（设计方案 §7 没有给颜色表，本会话定的，报告 §4 等用户拍板）：−60…0 dBFS 线性，< −18 绿、−18…−6 黄、≥ −6 红；
 四道刻度在表高 1/5…4/5（−48 / −36 / −24 / −12 dBFS），与 W3-B 的占位同一位置。
 
+## 四、2026-09-27 在 macOS 27.0 (26A428) 重生成的七张多画面图（用户裁定，issue P4-w3-compositor-multiview-cjk-labels-macos27）
+
+`v8-fixed-multiview`、`v8-multiview-3x3`、`v8-multiview-audio-only-3x3`、`v8-multiview-custom`、`v8-multiview-meters`、`v8-multiview-meters-rms`、`v8-multiview-pgmpvw2x2`：
+渲染逻辑没变，只有名字标签里的中文字形随系统回退字体变了（26.6.2 → 27.0 的图 PSNR 58.3–60.2 dB、差异全在"摄像机 / 画中画 / 绿幕"几个字上，拉丁字母一个像素没变）。
+**这七张从此是 macOS 27 的字形**：在 26.x 的机器上它们不再逐像素相同（`MultiviewMetersTests` 三处"逐像素相同"断言会红），PSNR ≥ 40 dB 的比对仍过；再升系统时若又红，先看差异图是不是只在中文标签上，是就再生成一次并在这里记一行。
+PGM / PVW 类 18 张不受影响（没有中文标签）。
+

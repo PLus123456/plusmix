@@ -111,3 +111,8 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
 App 胶水 42 / 50 行（W3-C3 的安装器失败原因查表 + P4 的两条用例前提），Makefile 的 make test 改成三组跑完再判，`Recorder.freeBytes` 按两张问题单的建议修了；
 六包 700 个用例只剩 macOS 27 中文字形那 2 条环境红，gate4 g4f 自动项通过。等拍板的七条、已做的增减在 reports/G4-notes.md §13.3 / §13.4；提案 019 待批；prompt 73（W3-E4）视裁定。
 
+## 11. 第四轮的裁定落地（2026-09-27 下午，本会话续）
+
+用户："1、2、3、4、5、6、7 都按你建议的批，73 开"。七条全按建议落：W3-E3 行加 project.yml；七张多画面参考图在 macOS 27 上重生成；提案 019 四条全落地（契约 + 三处填数 + headless + reducer，App 的读法归 W3-E4）；
+虚拟摄像头页去掉来源下拉进 prompt 73；S7 不放宽；prompt 73 定稿；`Recorder.freeBytes` 的修法保留。明细在 reports/G4-notes.md §13.6，测试与 gate 在 §13.6 末表。
+

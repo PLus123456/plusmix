@@ -190,8 +190,8 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
         return c
     }
     /// Stats.encoder[i] 的一项（提案 001 / 002）：见 `RecorderCounters.statsEntry`；state 按录制状态。只在 Stats 采样线程上调（每秒一次）。
-    public func statsEntry(previous: RecorderCounters?, windowSeconds: Double) -> Stats.EncoderEntry {
-        counters.statsEntry(previous: previous, windowSeconds: windowSeconds, state: state.statsName)
+    public func statsEntry(previous: RecorderCounters?, windowSeconds: Double, output: Int = 0) -> Stats.EncoderEntry {
+        counters.statsEntry(previous: previous, windowSeconds: windowSeconds, state: state.statsName, output: output)
     }
     /// 编码队列是否已满（喂料背压用）。
     public var isQueueFull: Bool { encoder.isQueueFull }

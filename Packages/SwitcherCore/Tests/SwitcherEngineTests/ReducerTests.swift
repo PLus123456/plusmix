@@ -437,6 +437,39 @@ final class ReducerTests: XCTestCase {
                        "删完之后照当前 stinger 改 Wipe 参数照常生效")
     }
 
+    /// 提案 019 D（用户 2026-09-27 批）：addInput / setInputSettings 带进来的 `EffectSlot(id: "border")` 剥掉——P4 之后这是效果链里 border 格的最后一个入口；
+    /// 别的效果格原样、顺序不变；没有 border 格的设置一个字节不动；校验器不改。
+    func test019_addInputAndSetInputSettings_stripLegacyBorderEffectSlots() throws {
+        let eq = EffectSlot(id: "parametricEQ", enabled: true, params: ["gain": .number(3)])
+        let border = EffectSlot(id: OverlayBorder.legacyEffectID, enabled: true, params: ["width": .number(0.02)])
+        let disabledBorder = EffectSlot(id: OverlayBorder.legacyEffectID, enabled: false)
+        let comp = EffectSlot(id: "compressor", enabled: false)
+        var withBorder = InputSettings()
+        withBorder.effects = [eq, border, comp, disabledBorder]
+        var clean = withBorder
+        clean.effects = [eq, comp]
+
+        // addInput
+        let base = Self.baseState()
+        let number = (base.inputs.map(\.number).max() ?? 0) + 1
+        let added = reducer.reduce(base, .addInput(config: InputConfig(number: number, name: "带边框格", source: try XCTUnwrap(base.inputs.first).source, settings: withBorder)), at: Tick(1))
+        let addedInput = try XCTUnwrap(added.inputs.first { $0.number == number })
+        XCTAssertEqual(addedInput.settings.effects, [eq, comp], "两个 border 格（启用的、停用的）都清掉，别的格原样、顺序不变")
+        XCTAssertEqual(addedInput.settings, clean.clamped(), "除了 border 格，其余与 clamped() 相同")
+        XCTAssertNoThrow(try added.validate())
+        // setInputSettings
+        let target = try XCTUnwrap(base.inputs.first).number
+        let set = reducer.reduce(base, .setInputSettings(input: target, settings: withBorder), at: Tick(2))
+        XCTAssertEqual(set.inputs.first { $0.number == target }?.settings.effects, [eq, comp])
+        XCTAssertEqual(set.inputs.first { $0.number == target }?.settings, clean.clamped())
+        // 没有 border 格：与原规则逐字段相等
+        let plain = reducer.reduce(base, .setInputSettings(input: target, settings: clean), at: Tick(3))
+        var expected = base
+        expected.inputs[0].settings = clean.clamped()
+        XCTAssertEqual(plain, expected)
+        XCTAssertEqual(MixerReducer.strippingLegacyBorder(clean), clean, "没有 border 格的设置一个字节不动")
+    }
+
     /// addOutput / setOutputSettings / loadShow 进来的设置先过一遍 `migratingLegacyKeys()`（W3-B2 报告 §4 第 4 条；loadShow 用户 2026-09-27 定一并做）：
     /// API 客户端直接带过渡键（extra["layout"] / ["displayID"] / ["fallbackToMain"]、效果格 "border"）的，与读节目文件得到同一份正式字段，不再静默变成默认布局 / 没有边框。
     func testP4_outputSettingsFromCommands_migrateLegacyKeys() {

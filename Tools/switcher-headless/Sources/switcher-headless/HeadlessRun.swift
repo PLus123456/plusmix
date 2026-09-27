@@ -69,9 +69,15 @@ final class EncoderStatsSource: @unchecked Sendable {
     private let ndi: NDISender?
     private let lastNDI = Mutex<(counters: NDISendCounters, at: HostTime)?>(nil)
 
-    init(recorders: [Recorder], ndi: NDISender? = nil) {
+    /// 019：每路录制器在节目输出表里的编号（PGM 录制器 = 节目里第一个 record 输出，ISO 音轨不是输出表里的项 = 0）；NDI 同理（第一个 ndi 输出）。
+    private let outputNumbers: [Int]
+    private let ndiOutput: Int
+
+    init(recorders: [Recorder], outputNumbers: [Int] = [], ndi: NDISender? = nil, ndiOutput: Int = 0) {
         self.recorders = recorders
+        self.outputNumbers = (0..<recorders.count).map { $0 < outputNumbers.count ? outputNumbers[$0] : 0 }
         self.ndi = ndi
+        self.ndiOutput = ndiOutput
         last.withLock { $0 = Array(repeating: nil, count: recorders.count) }
     }
 
@@ -85,7 +91,7 @@ final class EncoderStatsSource: @unchecked Sendable {
         }
         var entries = current.enumerated().map { i, c in
             let window = previous[i].map { max((now - $0.at).seconds, 1e-3) } ?? 1
-            return c.statsEntry(previous: previous[i]?.counters, windowSeconds: window, state: recorders[i].state.statsName)
+            return c.statsEntry(previous: previous[i]?.counters, windowSeconds: window, state: recorders[i].state.statsName, output: outputNumbers[i])
         }
         if let ndi {
             let snapshot = ndi.countersSnapshot
@@ -94,7 +100,7 @@ final class EncoderStatsSource: @unchecked Sendable {
                 box = (snapshot, now)
                 return p
             }
-            entries.append(ndi.statsEntry(previous: prev?.counters, windowSeconds: prev.map { max((now - $0.at).seconds, 1e-3) } ?? 1))
+            entries.append(ndi.statsEntry(previous: prev?.counters, windowSeconds: prev.map { max((now - $0.at).seconds, 1e-3) } ?? 1, output: ndiOutput))
         }
         return entries
     }
@@ -310,7 +316,11 @@ final class HeadlessSession: @unchecked Sendable {
         var statsPublisher: StatsPublisher?
         if options.statsURL != nil || apiServer != nil {
             if recorder != nil || ndiSender != nil {
-                let source = EncoderStatsSource(recorders: (recorder.map { [$0] } ?? []) + isoRecorders.map(\.0), ndi: ndiSender)
+                // 019：encoder[] 带输出编号——PGM 录制器对节目里第一个 record 输出，NDI 发送对第一个 ndi 输出（都是 --record / --ndi-send 起的，节目里没有就 0）；ISO 音轨 0
+                let recordNumber = show.outputs.first { $0.kind == .record }?.number ?? 0
+                let ndiNumber = show.outputs.first { $0.kind == .ndi }?.number ?? 0
+                let source = EncoderStatsSource(recorders: (recorder.map { [$0] } ?? []) + isoRecorders.map(\.0),
+                                                outputNumbers: recorder == nil ? [] : [recordNumber], ndi: ndiSender, ndiOutput: ndiNumber)
                 engine.encoderStatsProvider = { source.entries() }
             }
             engine.audioStatsProvider = { audioEngine.audioCounters }

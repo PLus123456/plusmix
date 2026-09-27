@@ -358,3 +358,18 @@ W3-B2 的渲染器改动（标签线程、电平表三块交接、按需建环�
 3. `DiskGuard.classify` 不认中文字样了：App 只对错误码 / 剩余空间归的"磁盘"切备用目录。
 4. `Recorder.freeBytes` 修好之后 `RecorderCounters.diskFreeBytes` 在镜像上不再是 0，W3-C3 兜底那条路径平时不走；两边的用例都改成不依赖 0。
 5. 检查点合入三路时 App 的相邻行冲突（strings 键、SwitcherSession 接线）是常态：`git apply --3way` 后两边都留，键按字母序。
+
+### 13.6 裁定落地（用户 2026-09-27："1、2、3、4、5、6、7 都按你建议的批，73 开"）
+
+| # | 裁定 | 落点 |
+|---|---|---|
+| 1 | W3-E3 行加 project.yml | docs/OWNERSHIP.md W3-E3 行 token + 备注；`check-ownership.sh w3-app-4` 绿 |
+| 2 | 七张多画面参考图在 macOS 27 上重生成 | `scripts/gen-references.sh`（六张）+ `SWITCHER_GEN_REFERENCES=1 … MultiviewMetersTests/testV8_multiviewMetersWithRMS`（meters-rms）；Tests/References/README.md 第四节；issue P4-w3-compositor-… 处理结果；prompt 80 前提改成"已重生成" |
+| 3 | 提案 019 A–D 全批、检查点落地 | 契约 `Stats.EncoderEntry.output` / `connections`（jsonKeys 9 个、output 在最前、缺键 0、写出写全）+ `Contracts019Tests`、CodableTests / StatsP2Tests 金线与 Samples；`RecorderCounters` / `Recorder` / `DiskGuard` / `StreamCounters` / `StreamOutput` / `NDISendCounters` / `NDISender` 的 `statsEntry` 加 `output:`（默认 0），`NDISendCounters.startFailed` → state failed、connections 填接收方数（`NDISendTests/Stats019Tests`）；headless `EncoderStatsSource` 填编号（PGM 录制器 = 节目第一个 record 输出、NDI = 第一个 ndi 输出、ISO 音轨 0）；reducer `strippingLegacyBorder`（addInput / setInputSettings）+ `ReducerTests.test019_…`；CONTRACTS.md 头 / 变更记录 / §2.7、测试标准 §7、提案状态；App 的填法与文案归 prompt 73（在此之前 App 写出的 encoder[].output = 0） |
+| 4 | 虚拟摄像头页去掉来源下拉、写明送 PGM | prompt 73 第 1 条；issue W3E3-virtual-camera-source-picker-ignored；清单 11-4；prompt 72 第 7 条 |
+| 5 | S7 missed_render 不放宽 | 阈值没动；prompt 70 / 80 写明空机器上跑、红了先单独重跑 |
+| 6 | prompt 73 开 | docs/plan/prompts/73-W3E4-App收尾三.md 定稿（分支 w3-app-5，从本轮合入后的 main 开）；OWNERSHIP W3-E4 行 |
+| 7 | `Recorder.freeBytes` 修 | 已在 faa20e9（§13.1） |
+
+<!-- G4-13.6-tests -->
+
