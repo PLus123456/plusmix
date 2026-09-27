@@ -197,7 +197,8 @@ final class SwitcherSession {
         let outputsChanged = newState.outputs != state.outputs
         state = newState
         if inputsChanged { inputs.reconcile(newState, timing: programTiming()) }
-        if outputsChanged { outputs.reconcile(newState) }
+        // 输入表变了也让输出运行表看一眼：源是输入 n 的 NDI 发送要跟着那一路换 tee（运行表其余部分幂等）
+        if outputsChanged || inputsChanged { outputs.reconcile(newState) }
         if outputsChanged || inputsChanged { aux.reconcile(newState) }
         for observer in stateObservers { observer.block(newState) }
     }
@@ -262,6 +263,9 @@ final class SwitcherSession {
         case .streamStarted(let n): notify(L("notice.streamStarted", n))
         case .streamStopped(let n): notify(L("notice.streamStopped", n))
         case .streamFailed(_, let message): notify(message)
+        case .ndiStarted(let n, let name): notify(L("notice.ndiStarted", n, name))
+        case .ndiStopped(let n): notify(L("notice.ndiStopped", n))
+        case .ndiFailed(_, let message): notify(message)
         }
     }
 

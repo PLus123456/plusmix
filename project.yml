@@ -84,6 +84,8 @@ targets:
       - package: SwitcherOutputs
         product: SwitcherStreaming           # W2-B2：App 接 W2-D 的 StreamOutput
       - package: SwitcherOutputs
+        product: SwitcherNDISend             # W3-E3：App 接 W2-D 的 NDISender（OutputRuntime 的 kind = ndi）
+      - package: SwitcherOutputs
         product: SwitcherExternal            # W3-C：外部显示窗口
       - package: SwitcherOutputs
         product: SwitcherISO                 # W3-C：ISO 分路 + 磁盘保护

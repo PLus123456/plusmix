@@ -23,6 +23,8 @@ final class OutputSettingsModel: ObservableObject {
     @Published private(set) var virtualCameraStatus: String = ""
     /// 最近一行 Stats 的 display[]（提案 013：外部显示 / 虚拟摄像头的状态与帧数都读它）。
     @Published private(set) var displayStats: [Stats.DisplayEntry] = []
+    /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；与 outputs 里带编码器的输出同序）。
+    @Published private(set) var encoderStats: [Stats.EncoderEntry] = []
     var send: ((Command) -> Void)?
     /// 新建录制输出的默认目录。
     let defaultRecordDirectory: String
@@ -53,6 +55,7 @@ final class OutputSettingsModel: ObservableObject {
 
     func apply(stats: Stats) {
         if stats.display != displayStats { displayStats = stats.display }
+        if stats.encoder != encoderStats { encoderStats = stats.encoder }
     }
 
     /// 扩展的 bundle ID（安装器用的那个）。
@@ -258,12 +261,20 @@ final class OutputSettingsModel: ObservableObject {
         return n
     }
 
+    /// 改分组 / 转换方式 / 来源（setOutputSettings）。运行表（OutputRuntime）按新设置重建 sender（分组 / 来源）或运行时切换（转换方式）；
+    /// 名字 = 输出名，走 rename（renameOutput）；开关走 setOutputEnabled。
     func setNDI(_ number: Int, groups: String? = nil, conversion: String? = nil, source: OutputSource? = nil) {
         updateOutput(number) { s in
             if let groups { s.extra[OutputExtras.ndiGroups] = groups.isEmpty ? nil : .string(groups) }
             if let conversion { s.extra[OutputExtras.ndiConversion] = .string(conversion) }
             if let source { s.source = source }
         }
+    }
+
+    /// 一路 NDI 发送的状态行：只读 Stats.encoder 里它那一项（铁律 4）。
+    func ndiStatus(output number: Int) -> String {
+        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number, outputs: state.outputs)
+        return OutputStatusText.ndi(enabled: state.output(number)?.enabled ?? false, entry: entry)
     }
 
     // MARK: 虚拟摄像头
@@ -598,14 +609,7 @@ struct OutputSettingsView: View {
     private var ndiTab: some View {
         Group {
             ForEach(model.ndiOutputs) { output in
-                Section(L("outputSettings.ndi.section", output.number, output.name)) {
-                    sourcePicker(Binding(get: { output.settings.source }, set: { model.setNDI(output.number, source: $0) }))
-                    TextField(L("outputSettings.ndi.groups"), text: Binding(get: { OutputExtras.string(output, OutputExtras.ndiGroups) ?? "" }, set: { model.setNDI(output.number, groups: $0) }))
-                    Picker(L("outputSettings.ndi.conversion"), selection: Binding(get: { OutputExtras.string(output, OutputExtras.ndiConversion) ?? "auto" }, set: { model.setNDI(output.number, conversion: $0) })) {
-                        ForEach(OutputExtras.ndiConversions, id: \.self) { Text(L("outputSettings.ndi.conversion.\($0)")).tag($0) }
-                    }
-                    Button(L("outputSettings.ndi.remove")) { model.removeOutput(output.number) }
-                }
+                NDIOutputSection(model: model, output: output)
             }
             Section(L("outputSettings.ndi.add")) {
                 TextField(L("outputSettings.ndi.name"), text: $newNDIName)
@@ -637,6 +641,45 @@ struct OutputSettingsView: View {
             Text(L("outputSettings.vcam.hint")).font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { if model.queriesSystemExtensions { model.refreshVirtualCameraStatus() } }
+    }
+}
+
+/// NDI 页的一路（W3-E3：名字 / 源 / 开关生效）。名字 = 输出名 = NDI 源名，改了要重建发送端（接收方重新选源），所以不跟着每个按键发：
+/// 回车或点"改名"才发 renameOutput；来源 / 分组 / 转换方式走 setOutputSettings，开关走 setOutputEnabled。状态行只读 Stats.encoder。
+struct NDIOutputSection: View {
+    @ObservedObject var model: OutputSettingsModel
+    let output: OutputState
+    @State private var draftName: String
+
+    init(model: OutputSettingsModel, output: OutputState) {
+        self.model = model
+        self.output = output
+        _draftName = State(initialValue: output.name)
+    }
+
+    var body: some View {
+        Section(L("outputSettings.ndi.section", output.number, output.name)) {
+            Toggle(L("outputSettings.ndi.enabled"), isOn: Binding(get: { output.enabled }, set: { model.setOutputEnabled(output.number, on: $0) }))
+            HStack {
+                TextField(L("outputSettings.ndi.name"), text: $draftName)
+                    .onSubmit { model.rename(output.number, draftName) }
+                Button(L("outputSettings.ndi.rename")) { model.rename(output.number, draftName) }
+                    .disabled(draftName.trimmingCharacters(in: .whitespaces).isEmpty || draftName == output.name)
+            }
+            Picker(L("outputSettings.source"), selection: Binding(get: { output.settings.source }, set: { model.setNDI(output.number, source: $0) })) {
+                ForEach(model.sourceChoices, id: \.self) { Text($0.title(in: model.state)).tag($0) }
+            }
+            if let note = model.sourceNote(for: output.settings.source) {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+            }
+            TextField(L("outputSettings.ndi.groups"), text: Binding(get: { OutputExtras.string(output, OutputExtras.ndiGroups) ?? "" }, set: { model.setNDI(output.number, groups: $0) }))
+            Picker(L("outputSettings.ndi.conversion"), selection: Binding(get: { OutputExtras.string(output, OutputExtras.ndiConversion) ?? "auto" }, set: { model.setNDI(output.number, conversion: $0) })) {
+                ForEach(OutputExtras.ndiConversions, id: \.self) { Text(L("outputSettings.ndi.conversion.\($0)")).tag($0) }
+            }
+            LabeledContent(L("outputSettings.ndi.status"), value: model.ndiStatus(output: output.number))
+            Button(L("outputSettings.ndi.remove")) { model.removeOutput(output.number) }
+        }
+        .onChange(of: output.name) { _, name in draftName = name }
     }
 }
 

@@ -43,6 +43,20 @@ enum OutputStatusText {
         return e.dropped > 0 ? base + L("aux.display.dropped", Int(clamping: e.dropped)) : base
     }
 
+    /// NDI 发送一行（输出设置 NDI 页）。enabled = 输出的目标开关；entry = Stats.encoder 里它那一项（state：publishing / idle / unavailable，提案 002）。
+    static func ndi(enabled: Bool, entry: Stats.EncoderEntry?) -> String {
+        guard enabled else { return L("ndi.status.disabled") }
+        guard let e = entry else { return L("ndi.status.starting") }
+        switch e.state {
+        case "publishing":
+            let base = L("ndi.status.publishing", Int(clamping: e.frames))
+            return e.dropped > 0 ? base + L("ndi.status.dropped", Int(clamping: e.dropped)) : base
+        case "unavailable": return L("ndi.status.unavailable")
+        case "idle": return L("ndi.status.starting")
+        default: return e.state
+        }
+    }
+
     /// 虚拟摄像头输出一行（菜单的状态行 / 设置页）。enabled = 节目里有 enabled 的虚拟摄像头输出；entry = Stats.display[] 里它那一项。
     static func virtualCamera(enabled: Bool, entry: Stats.DisplayEntry?) -> String {
         guard enabled else { return L("aux.virtualCamera.disabled") }

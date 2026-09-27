@@ -12,12 +12,20 @@
 //   有备用目录就在下一拍把那一路切到备用目录继续录（S7 目标档），否则只停那一路（发 stopRecord 让快照一致）并提示；推流 / 渲染不在这条链上。
 //   Recorder 自己的 minimumFreeBytes 设 0（它的 freeBytes 在非启动卷上是 0，见 reports/issues/W3C-w1-outputs-recorder-freebytes-nonboot-volume.md）。
 // - 推流：StreamOutput 自己有编码器 + 有界队列 + 重连；起 = start() + 挂消费者，停 = 摘消费者 + stopAsync()。
+// - NDI 发送（W3-E3）：kind = ndi 且 enabled 的输出 = 一个 NDISender（W2-D）。源名 = 输出名，分组 = extra["ndi.groups"]，转换方式 = extra["ndi.conversion"]。
+//   PGM / PVW / 多画面：sender 自己是 PGM 帧的消费者，从 RenderedFrame 挑（PVW / 多画面帧由渲染器按状态自动填：有 enabled 的输出要它才转，开头可能缺一两帧）；
+//   输入 n（Aux，原始画面）：该路帧槽开一个分支（与 ISO / Aux 窗口共用每路 4 个的额度），ISO 同款的 ISOFrameTap 每拍挑帧交给 NDIInputFeed → sender.send(frame:)
+//   （NDISender.consume 对 .input 不动）。音频：PGM / PVW / 多画面送 Master，输入 n 送该路推子后的 ISO 音轨（没有音频的路不带）。
+//   名字 / 分组 / 源定死在 sender 里，变了就停掉旧的、按新设置起新的（接收方要重新选源）；转换方式 setConversion 运行时改。
+//   start（NDIlib_initialize、send_create、Metal 转换器编译）/ stop（等发送线程退出、销毁实例）都放后台线程做，不卡主线程；
+//   起 / 停的过程中快照又变了，做完按最新快照再对一次。Stats.encoder 那一项由 sender 的 statsEntry 填（publishing / idle / unavailable）。
 import Foundation
 import Synchronization
 import SwitcherContracts
 import SwitcherEngine
 import SwitcherOutputs
 import SwitcherStreaming
+import SwitcherNDISend
 import SwitcherAudioIntegration
 import SwitcherControl
 import SwitcherISO
@@ -53,6 +61,9 @@ final class OutputRuntime {
         case streamStarted(output: Int)
         case streamStopped(output: Int)
         case streamFailed(output: Int, message: String)
+        case ndiStarted(output: Int, name: String)
+        case ndiStopped(output: Int)
+        case ndiFailed(output: Int, message: String)
     }
 
     /// 一路在跑的录制（主线程改，封口回调经主线程；标 @unchecked Sendable 只为能捕获进回调）。
@@ -90,6 +101,39 @@ final class OutputRuntime {
         }
     }
 
+    /// NDI sender 建好后改不了的那几样：变了就重建 sender。
+    struct NDIKey: Equatable, Sendable {
+        let name: String
+        let groups: String?
+        let source: OutputSource
+        init(_ output: OutputState) {
+            name = output.name
+            groups = OutputExtras.string(output, OutputExtras.ndiGroups).flatMap { $0.isEmpty ? nil : $0 }
+            source = output.settings.source
+        }
+    }
+
+    /// 一路 NDI 发送（主线程改；起 / 停在后台线程做完回主线程，标 @unchecked Sendable 只为能捕获进回调）。
+    final class NDIEntry: @unchecked Sendable {
+        enum Phase { case starting, running, stopping }
+        let number: Int
+        let key: NDIKey
+        let sender: NDISender
+        var phase = Phase.starting
+        /// 挂在引擎上的消费者：PGM / PVW / 多画面 = sender 本身；输入 n = inputTap。
+        var consumer: (any FrameConsumer)?
+        /// 源是输入 n 时：该路分支槽上按拍挑帧的 tap（下游 NDIInputFeed → sender），分支槽，接上时那一路的来源（换了来源要换到新 tee 上）。
+        var inputTap: ISOFrameTap?
+        var branch: LockFreeFrameSlot?
+        var inputSource: InputSource?
+        var audioToken: AudioConsumerToken?
+        init(number: Int, key: NDIKey, sender: NDISender) {
+            self.number = number
+            self.key = key
+            self.sender = sender
+        }
+    }
+
     private let engine: Engine
     private let audio: AudioRuntime?
     private let inputs: InputRuntime?
@@ -115,15 +159,22 @@ final class OutputRuntime {
 
     private(set) var recorders: [Int: RecordEntry] = [:]
     private(set) var streams: [Int: StreamEntry] = [:]
-    /// 已停的录制器 / 推流（Stats 里继续报 stopped / failed，直到该输出再次起来）。
+    /// 在起 / 在跑 / 在停的 NDI 发送（键 = 输出编号）。
+    private(set) var ndiSenders: [Int: NDIEntry] = [:]
+    /// 已停的录制器 / 推流 / NDI（Stats 里继续报 stopped / failed / idle，直到该输出再次起来）。
     private var finishedRecorders: [Int: Recorder] = [:]
     private var finishedStreams: [Int: StreamOutput] = [:]
+    private var finishedNDI: [Int: NDISender] = [:]
+    /// 起不来的 NDI 输出当时的设置：设置变了（改名 / 换源 / 换分组）就再试，没变不反复试。
+    private var ndiFailedKeys: [Int: NDIKey] = [:]
     /// 起不来的输出（enabled 仍为 true）：不反复重试，等它被关掉再清。
     private(set) var failed: [Int: String] = [:]
     private(set) var lastResults: [Int: RecordingResult] = [:]
     /// 每路最近一次的磁盘事件（测试 / 面板看）。
     private(set) var diskEvents: [Int: RecordingDiskMonitor.Event] = [:]
     private var lastOutputs: [OutputState] = []
+    /// 最近一次快照的输入表（源是输入 n 的 NDI 发送看那一路换没换来源）。
+    private var lastInputs: [InputConfig] = []
     private let stats = EncoderStatsSource()
     let diskMonitor = RecordingDiskMonitor(warnBelowBytes: 1024 * 1024 * 1024, interval: 1)
 
@@ -148,13 +199,19 @@ final class OutputRuntime {
     // MARK: 跟快照
 
     /// 让运行表跟上快照：enabled 且没在跑的起（同一批共用起始拍），不 enabled 且在跑的停（共用边界拍），消失的停。
+    /// 输入表变了也要调（源是输入 n 的 NDI 发送要跟着那一路换 tee）；其余情况下幂等。
     func reconcile(_ state: MixerState) {
         lastOutputs = state.outputs
+        lastInputs = state.inputs
         let wanted = Dictionary(uniqueKeysWithValues: state.outputs.map { ($0.number, $0) })
         var toStop: [Int] = []
         for (n, e) in recorders where wanted[n]?.kind != .record && !e.stopping { toStop.append(n) }
         for (n, e) in streams where wanted[n]?.kind != .stream && !e.stopping { stopStream(n) }
-        for (n, _) in failed where wanted[n]?.enabled != true { failed.removeValue(forKey: n) }
+        for (n, _) in ndiSenders where wanted[n]?.kind != .ndi { stopNDI(n) }
+        for (n, _) in failed where wanted[n]?.enabled != true {
+            failed.removeValue(forKey: n)
+            ndiFailedKeys.removeValue(forKey: n)
+        }
         var toStart: [OutputState] = []
         for output in state.outputs {
             switch output.kind {
@@ -164,6 +221,8 @@ final class OutputRuntime {
             case .stream:
                 if output.enabled, streams[output.number] == nil, failed[output.number] == nil { startStream(output) }
                 else if !output.enabled, let e = streams[output.number], !e.stopping { stopStream(output.number) }
+            case .ndi:
+                reconcileNDI(output)
             default:
                 break
             }
@@ -180,16 +239,19 @@ final class OutputRuntime {
         let running = recorders.keys.sorted().filter { !recorders[$0]!.stopping }
         if !running.isEmpty { stopRecordings(running) }
         for n in streams.keys.sorted() where !streams[n]!.stopping { stopStream(n) }
+        for n in ndiSenders.keys.sorted() { stopNDI(n) }   // 还在起的那几路：起完按（已清空的）快照再对一次，就停了
         let deadline = Date().addingTimeInterval(10)
-        while (!recorders.isEmpty || !streams.isEmpty) && Date() < deadline {
+        while (!recorders.isEmpty || !streams.isEmpty || !ndiSenders.isEmpty) && Date() < deadline {
             try? await Task.sleep(for: .milliseconds(20))
         }
-        if !recorders.isEmpty || !streams.isEmpty {
-            NSLog("输出没在 10 s 内停完：录制 \(recorders.keys.sorted())，推流 \(streams.keys.sorted())")
+        if !recorders.isEmpty || !streams.isEmpty || !ndiSenders.isEmpty {
+            NSLog("输出没在 10 s 内停完：录制 \(recorders.keys.sorted())，推流 \(streams.keys.sorted())，NDI \(ndiSenders.keys.sorted())")
             for (_, e) in recorders { engine.removeConsumer(e.consumer) }
             for (_, e) in streams { engine.removeConsumer(e.stream) }
+            for (_, e) in ndiSenders { detachNDI(e) }
             recorders.removeAll()
             streams.removeAll()
+            ndiSenders.removeAll()
         }
         startPlanner.reset()
         stopPlanner.reset()
@@ -490,7 +552,150 @@ final class OutputRuntime {
         }
     }
 
+    // MARK: NDI 发送（W3-E3）
+
+    /// 一路 NDI 输出跟上快照：enabled 且没有 sender 的起；关掉 / 名字 / 分组 / 源变了的停（停完按最新快照再起）；转换方式运行时改；
+    /// 源是输入 n、那一路换了来源（InputRuntime 重建了它的 tee）的把分支换到新 tee 上。起 / 停进行中的不动，做完会再对一次。
+    private func reconcileNDI(_ output: OutputState) {
+        let n = output.number
+        let key = NDIKey(output)
+        if let e = ndiSenders[n] {
+            guard e.phase == .running else { return }
+            if !output.enabled || e.key != key {
+                stopNDI(n)
+                return
+            }
+            let mode = NDISender.Configuration.Conversion(extra: output.settings.extra)
+            if e.sender.conversion != mode { e.sender.setConversion(mode) }
+            if case .input(let m) = key.source, e.inputSource != lastInputs.first(where: { $0.number == m })?.source {
+                detachNDI(e)
+                attachNDI(e)
+            }
+        } else if output.enabled {
+            if let k = ndiFailedKeys[n] {
+                guard k != key else { return }   // 设置没变：不反复试
+                ndiFailedKeys.removeValue(forKey: n)
+                failed.removeValue(forKey: n)
+            }
+            startNDI(output)
+        }
+    }
+
+    /// 起：建 sender，后台线程 start（NDIlib_initialize / send_create / 转换器），回主线程挂消费者与音频。
+    private func startNDI(_ output: OutputState) {
+        let n = output.number
+        let key = NDIKey(output)
+        let config = NDISender.Configuration(name: key.name, groups: key.groups, format: format, source: key.source,
+                                             conversion: NDISender.Configuration.Conversion(extra: output.settings.extra))
+        let entry = NDIEntry(number: n, key: key, sender: NDISender(configuration: config))
+        ndiSenders[n] = entry
+        finishedNDI.removeValue(forKey: n)
+        let sender = entry.sender
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result { try sender.start() }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.ndiStarted(entry, result: result) } }
+        }
+    }
+
+    private func ndiStarted(_ entry: NDIEntry, result: Result<Void, any Error>) {
+        let n = entry.number
+        guard ndiSenders[n] === entry else { return }
+        switch result {
+        case .failure(let error):
+            ndiSenders.removeValue(forKey: n)
+            finishedNDI[n] = entry.sender   // SDK 初始化 / 建实例失败时 sender 自己标 unavailable，Stats 里报它
+            let message = L("notice.ndiFailed", n, "\(error)")
+            NSLog("%@", message)
+            failed[n] = message
+            ndiFailedKeys[n] = entry.key
+            onEvent?(.ndiFailed(output: n, message: message))
+        case .success:
+            attachNDI(entry)
+            entry.phase = .running
+            if entry.sender.countersSnapshot.unavailable {
+                // 编译时没有 SDK：空实现照样"起"（帧收了就丢），Stats 里 unavailable；提示一句
+                onEvent?(.ndiFailed(output: n, message: L("notice.ndiUnavailable", n)))
+            } else {
+                onEvent?(.ndiStarted(output: n, name: entry.key.name))
+            }
+        }
+        rebuildStats()
+        // 起的过程中快照又变了（关掉 / 删了 / 改了名字或源）：按最新快照再对一次
+        if let latest = lastOutputs.first(where: { $0.number == n }), latest.kind == .ndi { reconcileNDI(latest) } else { stopNDI(n) }
+    }
+
+    /// 挂上：PGM / PVW / 多画面 = sender 直接当 PGM 帧的消费者；输入 n = 分支槽 + tap。音频按源挂。
+    private func attachNDI(_ entry: NDIEntry) {
+        let sender = entry.sender
+        var audioSource: AudioTapSource? = .master
+        if case .input(let m) = entry.key.source {
+            entry.inputSource = lastInputs.first { $0.number == m }?.source
+            if let branch = inputs?.openBranch(input: m) {
+                let tap = ISOFrameTap(inputNumber: m, branch: branch, sink: NDIInputFeed(sender: sender), name: "ndi\(entry.number).in\(m)")
+                entry.branch = branch
+                entry.inputTap = tap
+                entry.consumer = tap
+                engine.addConsumer(tap)
+            } else if entry.inputSource != nil {
+                // 那一路在，但分支用完了（与 ISO / Aux 共用每路 4 个）：sender 照跑，没画面
+                onEvent?(.ndiFailed(output: entry.number, message: L("notice.ndiBranchUnavailable", entry.number, m, InputFrameTee.maxBranches)))
+            }
+            audioSource = (audio?.registeredInputs.contains(m) ?? false) ? .input(number: m) : nil
+        } else {
+            entry.consumer = sender
+            engine.addConsumer(sender)
+        }
+        if let audio, let audioSource {
+            do { entry.audioToken = try audio.engine.addConsumer(sender, source: audioSource) } catch { NSLog("NDI 发送 \(entry.number) 挂不上音频：\(error)") }
+        }
+    }
+
+    /// 摘下：不再收帧 / 音频块，分支还给那一路。
+    private func detachNDI(_ entry: NDIEntry) {
+        if let c = entry.consumer { engine.removeConsumer(c) }
+        entry.consumer = nil
+        entry.inputTap = nil
+        if let b = entry.branch, case .input(let m) = entry.key.source { inputs?.releaseBranch(b, input: m) }
+        entry.branch = nil
+        entry.inputSource = nil
+        if let t = entry.audioToken { audio?.engine.removeConsumer(t) }
+        entry.audioToken = nil
+    }
+
+    /// 停：主线程摘下，后台线程 stop（等发送线程退出、销毁 NDI 实例），回主线程收尾；还在起的等起完再停（ndiStarted 会再对一次快照）。
+    private func stopNDI(_ n: Int) {
+        guard let entry = ndiSenders[n], entry.phase == .running else { return }
+        entry.phase = .stopping
+        detachNDI(entry)
+        let sender = entry.sender
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            sender.stop()
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.ndiStopped(entry) } }
+        }
+    }
+
+    private func ndiStopped(_ entry: NDIEntry) {
+        let n = entry.number
+        if ndiSenders[n] === entry { ndiSenders.removeValue(forKey: n) }
+        finishedNDI[n] = entry.sender
+        onEvent?(.ndiStopped(output: n))
+        // 停的过程中又被打开 / 改了设置：按最新快照再起
+        if ndiSenders[n] == nil, let latest = lastOutputs.first(where: { $0.number == n }), latest.kind == .ndi { reconcileNDI(latest) }
+        rebuildStats()
+    }
+
     // MARK: Stats
+
+    /// 某个输出在 Stats.encoder 里的项：encoder 与 outputs 里带编码器（record / stream / ndi）的输出同序（测试标准 §7）。
+    nonisolated static func encoderEntry(_ entries: [Stats.EncoderEntry], forOutput number: Int, outputs: [OutputState]) -> Stats.EncoderEntry? {
+        let withEncoders = outputs.filter { [.record, .stream, .ndi].contains($0.kind) }
+        guard let i = withEncoders.firstIndex(where: { $0.number == number }), i < entries.count else { return nil }
+        return entries[i]
+    }
+
+    nonisolated static func encoderEntry(in stats: Stats, forOutput number: Int, outputs: [OutputState]) -> Stats.EncoderEntry? {
+        encoderEntry(stats.encoder, forOutput: number, outputs: outputs)
+    }
 
     /// Stats.encoder 的来源表：与 outputs 里带编码器的输出（record / stream / ndi）同序；没在跑的报 idle / stopped / failed。
     private func rebuildStats() {
@@ -506,7 +711,9 @@ final class OutputRuntime {
                 else if let s = finishedStreams[output.number] { sources.append(.stream(s)) }
                 else { sources.append(.idle) }
             case .ndi:
-                sources.append(.idle)   // NDI 发送的 App 接线（W3-A 的输入之后）
+                if let e = ndiSenders[output.number] { sources.append(.ndi(e.sender)) }
+                else if let s = finishedNDI[output.number] { sources.append(.ndi(s)) }
+                else { sources.append(.idle) }
             default:
                 break
             }
@@ -530,12 +737,13 @@ extension OutputSource {
     var inputNumber: Int? { if case .input(let n) = self { n } else { nil } }
 }
 
-/// 把录制器 / 推流的计数变成 Stats.encoder 的项（每个输出一项，顺序 = outputs 顺序）：skipped / frames / dropped / disk_free_mb /
+/// 把录制器 / 推流 / NDI 的计数变成 Stats.encoder 的项（每个输出一项，顺序 = outputs 顺序）：skipped / frames / dropped / disk_free_mb /
 /// reconnects / state 由各自的 statsEntry 填，bitrate 按上次采样以来的窗口算。只在 Stats 采样线程上被调；表由主线程换。
 final class EncoderStatsSource: @unchecked Sendable {
     enum Source {
         case recorder(Recorder)
         case stream(StreamOutput)
+        case ndi(NDISender)
         case idleRecord(directory: String)
         case idle
     }
@@ -544,6 +752,7 @@ final class EncoderStatsSource: @unchecked Sendable {
         var source: Source
         var previousRecorder: RecorderCounters?
         var previousStream: StreamCounters?
+        var previousNDI: NDISendCounters?
         var at: HostTime?
     }
 
@@ -554,7 +763,7 @@ final class EncoderStatsSource: @unchecked Sendable {
             // 同一对象继续用上次的计数（窗口不断）；换了对象就从头算
             old = sources.map { s in
                 let prev = old.first { same($0.source, s) }
-                return Slot(source: s, previousRecorder: prev?.previousRecorder, previousStream: prev?.previousStream, at: prev?.at)
+                return Slot(source: s, previousRecorder: prev?.previousRecorder, previousStream: prev?.previousStream, previousNDI: prev?.previousNDI, at: prev?.at)
             }
         }
     }
@@ -563,6 +772,7 @@ final class EncoderStatsSource: @unchecked Sendable {
         switch (a, b) {
         case (.recorder(let x), .recorder(let y)): x === y
         case (.stream(let x), .stream(let y)): x === y
+        case (.ndi(let x), .ndi(let y)): x === y
         default: false
         }
     }
@@ -582,6 +792,11 @@ final class EncoderStatsSource: @unchecked Sendable {
                     let c = s.counters
                     out.append(c.statsEntry(previous: list[i].previousStream, windowSeconds: window, encoderSkipped: s.videoEncoder.counters.skipped))
                     list[i].previousStream = c
+                case .ndi(let s):
+                    // 同一份快照算这一项、也当下一窗口的起点（sender.statsEntry 自己另取快照，两次之间送出的帧会两边都不算）
+                    let c = s.countersSnapshot
+                    out.append(c.statsEntry(previous: list[i].previousNDI, windowSeconds: window, bytesPerFrame: s.uyvyBytesPerFrame, running: s.isRunning))
+                    list[i].previousNDI = c
                 case .idleRecord(let directory):
                     // 按目录所在卷取（DiskGuard 的算法：非启动卷也对，Recorder.freeBytes 在那些卷上是 0）
                     let free = DiskGuard.freeBytes(for: URL(fileURLWithPath: directory, isDirectory: true))
@@ -593,5 +808,21 @@ final class EncoderStatsSource: @unchecked Sendable {
             }
             return out
         }
+    }
+}
+
+/// 源是输入 n 的 NDI 发送：ISOFrameTap 每拍在该路分支槽上挑好帧（换上这一拍的拍点）交到这里，转给 NDISender.send(frame:tickTime:)
+/// （NDISender.consume 只从 RenderedFrame 挑 PGM / PVW / 多画面，对 .input 不动）。在引擎派发线程上被调，只转一手，零分配。
+final class NDIInputFeed: FrameConsumer, @unchecked Sendable {
+    let sender: NDISender
+    let consumerName: String
+
+    init(sender: NDISender) {
+        self.sender = sender
+        consumerName = sender.consumerName + ".input"
+    }
+
+    func consume(_ frame: RenderedFrame) {
+        sender.send(frame: frame.program, tickTime: frame.tickTime)
     }
 }
