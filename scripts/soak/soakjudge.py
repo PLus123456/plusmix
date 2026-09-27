@@ -257,3 +257,40 @@ def a3_from_probe(probe, hours):
             "slope_ms_per_s": slope, "span_s": span, "pairs": int(on.get("count", 0)),
             "a2_max_abs_ms": on.get("maxAbsMs"), "a2_mean_ms": on.get("meanMs"), "a2_std_ms": on.get("stdMs"),
             "pass_a2": av.get("passA2"), "note": "" if full else f"只跑了 {span / 3600:.2f} h：斜率 × 8 h 外推"}
+
+
+def combine_segment_probes(segments, a2_threshold_ms=1000.0 / 60):
+    """按段跑的 frameprobe av 结果合并成整条录像的 AVOutput 形状（soak_report / a3_from_probe 照常读）。
+    segments = [(段起点在整条录像里的秒数, 该段的 probe JSON)]。整秒配对的判定用 frameprobe 自己的（每段给了对应的 --start-tick），
+    这里只把段内时刻加上段起点，再对全部整秒配对做与 FrameAnalysis.AVStats 相同的统计（均值 / 标准差 / 最大绝对值 / 最小二乘斜率 / 斜率 × 首尾间隔）。"""
+    times, offsets = [], []
+    flash = click = matched = off_second = 0
+    events = []
+    for start, probe in segments:
+        av = (probe or {}).get("av") or {}
+        flash += int(av.get("flashCount", 0))
+        click += int(av.get("clickCount", 0))
+        matched += int(av.get("matchedCount", 0))
+        off_second += int(av.get("offSecondCount", 0))
+        for p in av.get("pairs") or []:
+            if p.get("offsetMs") is None or not p.get("onSecondTick"):
+                continue
+            times.append(float(start) + float(p["flashTimeSeconds"]))
+            offsets.append(float(p["offsetMs"]))
+        for e in ((probe or {}).get("discontinuities") or {}).get("events") or []:
+            events.append(dict(e, timeSeconds=float(start) + float(e["timeSeconds"])))
+    order = sorted(range(len(times)), key=lambda i: times[i])
+    times = [times[i] for i in order]
+    offsets = [offsets[i] for i in order]
+    n = len(offsets)
+    mean = sum(offsets) / n if n else 0.0
+    std = (sum((o - mean) ** 2 for o in offsets) / n) ** 0.5 if n else 0.0
+    slope = pj.linear_fit(times, offsets)[0] if n >= 2 else None
+    span = (times[-1] - times[0]) if n else 0.0
+    on = {"count": n, "meanMs": mean, "stdMs": std, "maxAbsMs": max((abs(o) for o in offsets), default=0.0),
+          "slopeMsPerSecond": slope or 0.0, "driftOverSpanMs": (slope or 0.0) * span, "spanSeconds": span}
+    disc_count = sum(int((((p or {}).get("discontinuities") or {}).get("count")) or 0) for _, p in segments)
+    return {"av": {"onSecond": on, "flashCount": flash, "clickCount": click, "matchedCount": matched, "offSecondCount": off_second,
+                   "passA2": (on["maxAbsMs"] <= a2_threshold_ms) if n else None},
+            "discontinuities": {"count": disc_count, "events": sorted(events, key=lambda e: e["timeSeconds"])},
+            "segments": len(segments)}

@@ -158,6 +158,46 @@ class S2Tests(unittest.TestCase):
         self.assertEqual(s2["verdict"], "fail")
 
 
+class SegmentProbeTests(unittest.TestCase):
+    """frameprobe 对整条长录像的内存随帧数线性涨（1 h 约 41 GB），soak 改成按 5 分钟切段逐段跑、再合并。"""
+    def seg(self, pairs, clicks=300, discs=()):
+        return {"av": {"pairs": [{"flashTimeSeconds": t, "offsetMs": o, "onSecondTick": on, "tick": 0} for t, o, on in pairs],
+                       "flashCount": len(pairs), "clickCount": clicks, "matchedCount": sum(1 for _, o, _ in pairs if o is not None),
+                       "offSecondCount": sum(1 for _, o, on in pairs if o is not None and not on)},
+                "discontinuities": {"count": len(discs), "events": [{"timeSeconds": t, "jump": 0.6} for t in discs]}}
+
+    def test_A3_segmentsCombineOnAbsoluteTimeline(self):
+        # 两段：第 0 段偏移 0，第 1 段（300 s 起）偏移 1 ms → 斜率 = 1 ms / 300 s；非整秒配对不进拟合
+        s0 = self.seg([(1.0, 0.0, True), (2.0, 0.0, True), (2.5, -40.0, False)])
+        s1 = self.seg([(1.0, 1.0, True), (2.0, 1.0, True)], discs=(10.0,))
+        c = sj.combine_segment_probes([(0.0, s0), (300.0, s1)])
+        on = c["av"]["onSecond"]
+        self.assertEqual(on["count"], 4)
+        self.assertAlmostEqual(on["spanSeconds"], 301.0)
+        self.assertAlmostEqual(on["meanMs"], 0.5)
+        self.assertAlmostEqual(on["maxAbsMs"], 1.0)
+        self.assertGreater(on["slopeMsPerSecond"], 0)
+        self.assertAlmostEqual(on["driftOverSpanMs"], on["slopeMsPerSecond"] * 301.0)
+        self.assertEqual(c["av"]["offSecondCount"], 1)
+        self.assertEqual(c["av"]["passA2"], True)
+        self.assertEqual(c["discontinuities"]["count"], 1)
+        self.assertAlmostEqual(c["discontinuities"]["events"][0]["timeSeconds"], 310.0, msg="不连续的时刻换回整条录像的时间轴")
+        self.assertEqual(c["segments"], 2)
+
+    def test_A3_combinedProbeFeedsSameJudgement(self):
+        s0 = self.seg([(float(t), 0.0, True) for t in range(1, 300)])
+        s1 = self.seg([(float(t), 0.0, True) for t in range(1, 300)])
+        c = sj.combine_segment_probes([(0.0, s0), (28500.0, s1)])
+        a3 = sj.a3_from_probe(c, hours=8)
+        self.assertFalse(a3["extrapolated"], "两段跨满 8 小时：直接用斜率 × 首尾间隔")
+        self.assertAlmostEqual(a3["drift_ms"], 0.0)
+        self.assertTrue(a3["pass"])
+
+    def test_A2_segmentOverThresholdFailsPassA2(self):
+        c = sj.combine_segment_probes([(0.0, self.seg([(1.0, 20.0, True)]))])
+        self.assertEqual(c["av"]["passA2"], False)
+
+
 class A3Tests(unittest.TestCase):
     def av(self, drift, span, slope):
         return {"av": {"onSecond": {"count": 1000, "driftOverSpanMs": drift, "spanSeconds": span, "slopeMsPerSecond": slope,

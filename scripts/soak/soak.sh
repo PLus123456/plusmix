@@ -7,7 +7,7 @@
 # 采集：stats.jsonl 每秒一行（引擎自己的 Stats，铁律 4）；每分钟采一次进程 RSS / CPU（ps）、电源 / 温度 / 负载 / 在跑的编译进程（env.log）、MediaMTX 各路收到的字节（mtx.log）；
 #   有 sudo 时 powermetrics（-f plist，默认 10 s 一样：GPU 占用、频率、thermal pressure）。
 # 判定（跑完自动）：每 5 分钟窗口 V2 / A1 / E1（scripts/soak/soakjudge.py）；S2 预热 30 分钟后每分钟 RSS 拟合；S3 CPU / GPU avg / p95；
-#   A3 = frameprobe av 对整条录像的整秒配对斜率 × 时长（短跑外推到 8 h）；异常（窗口超阈值、missed_render、欠载、编码跳帧、重连、状态切换、stats 断档、输入停帧……）
+#   A3 = frameprobe av（按 5 分钟分段跑、合到整条时间轴）的整秒配对斜率 × 时长（短跑外推到 8 h）；异常（窗口超阈值、missed_render、欠载、编码跳帧、重连、状态切换、stats 断档、输入停帧……）
 #   自动截前后 5 分钟的 stats / headless / 采样 / 系统日志；结束出 §7 报告 reports/W4-soak-<label>.md。
 #
 # 无人值守：caffeinate -u -i -d -s -w <headless>（prompt 70 第 7 条，照 scripts/gate4.sh；只 -i 时用户"空闲"下实时线程晚醒 10–18 ms）。
@@ -76,7 +76,7 @@ thermal_bin=.build/soak/thermal-state
 if [ "$do_run" = 1 ]; then
   # ---- 0. 前置检查 ----
   for tool in mediamtx ffmpeg ffprobe curl; do command -v "$tool" >/dev/null || { red "没有 $tool（brew install $tool）"; exit 2; }; done
-  need_gb=$(( (duration_s * 3 + 3599) / 3600 * (1 + 2 * mtx_record) + 20 ))      # 录制 6 Mb/s ≈ 2.7 GB/h（+ 两路落盘）+ 余量
+  need_gb=$(( (duration_s * 3 + 3599) / 3600 * (2 + 2 * mtx_record) + 20 ))      # 录制 6 Mb/s ≈ 2.7 GB/h，分段分析时再占一份（+ 两路落盘）+ 余量
   free_gb=$(df -g "$out_dir" | awk 'NR==2{print $4}')
   [ "$free_gb" -ge "$need_gb" ] || { red "磁盘只剩 ${free_gb} GB，这次要 ≥ ${need_gb} GB"; exit 2; }
   for p in "$rtmp_port" "$mtx_api_port"; do
@@ -291,10 +291,27 @@ if [ -s "$movie" ]; then
     ffprobe -v error -count_packets -show_entries format=duration:stream=index,codec_type,codec_name,nb_read_packets,duration,start_time -of json "$movie" > "$out_dir/ffprobe.json" 2>/dev/null || true
     ffprobe -v error "$movie" > "$out_dir/ffprobe-errors.txt" 2>&1 || true
   fi
-  if [ "$do_probe" = 1 ] && { [ "$do_run" = 1 ] || [ ! -s "$out_dir/probe-av.json" ]; }; then
-    step "frameprobe av --discontinuities（A2 / A3、A1 离线口径；8 小时录像约 40 分钟）"
-    "$frameprobe" av "$movie" --fps 60 --discontinuities --out "$out_dir/probe-av.json" --markdown > "$out_dir/probe-av.md" 2> "$out_dir/probe-av.err" \
-      || red "frameprobe av 失败（$out_dir/probe-av.err）"
+  if [ "$do_probe" = 1 ] && { [ "$do_run" = 1 ] || [ ! -s "$out_dir/probe-seg/segments.csv" ]; }; then
+    # frameprobe 对整条录像的内存随帧数线性涨（本会话实测：10 分钟 7.6 GB、1 小时 41 GB，8 小时估 330 GB，reports/issues/W4A-w1-testkit-frameprobe-memory-grows-with-length.md），
+    # 所以按 5 分钟切段（与 S1 窗口一致；stream copy、-avoid_negative_ts disabled 让第一段保住 AAC priming 的编辑列表），逐段跑、跑完删段文件，
+    # 每段给自己的 --start-tick（整秒配对仍由 frameprobe 判），soak_report.py 把各段合到整条时间轴上做 A2 / A3 与离线不连续。
+    seg_dir="$out_dir/probe-seg"; rm -rf "$seg_dir"; mkdir -p "$seg_dir"
+    step "frameprobe av --discontinuities，按 5 分钟分段（A2 / A3、A1 离线口径；8 小时约 45 分钟）"
+    if ffmpeg -hide_banner -loglevel error -i "$movie" -map 0 -c copy -avoid_negative_ts disabled -f segment -segment_time 300 -segment_format mov \
+         -segment_list "$seg_dir/segments.csv" -segment_list_type csv -reset_timestamps 1 "$seg_dir/seg%04d.mov"; then
+      total=$(wc -l < "$seg_dir/segments.csv" | tr -d ' '); n=0
+      while IFS=, read -r name start _end; do
+        n=$((n + 1))
+        tick=$(python3 -c "print(round(float('$start') * 60))")
+        "$frameprobe" av "$seg_dir/$name" --fps 60 --start-tick "$tick" --discontinuities --out "$seg_dir/${name%.mov}.json" \
+            < /dev/null > /dev/null 2>> "$seg_dir/probe.err" || echo "$name" >> "$seg_dir/failed.txt"
+        rm -f "$seg_dir/$name"
+        if [ $((n % 12)) = 0 ]; then echo "   frameprobe $n / $total 段"; fi
+      done < "$seg_dir/segments.csv"
+      [ -s "$seg_dir/failed.txt" ] && red "frameprobe 有段失败：$(tr '\n' ' ' < "$seg_dir/failed.txt")（$seg_dir/probe.err）"
+    else
+      red "切段失败（ffmpeg segment）：A2 / A3 与离线不连续这次判不了"
+    fi
   fi
 fi
 

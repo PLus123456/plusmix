@@ -1,0 +1,53 @@
+{
+ "a3": {
+  "a2_max_abs_ms": 0,
+  "a2_mean_ms": 0,
+  "a2_std_ms": 0,
+  "drift_ms": 0.0,
+  "extrapolated": true,
+  "meets_target": true,
+  "note": "只跑了 1.00 h：斜率 × 8 h 外推",
+  "pairs": 1823,
+  "pass": true,
+  "pass_a2": true,
+  "slope_ms_per_s": 0.0,
+  "span_s": 3598.0
+ },
+ "checkpoint": "W4-A-soak1h",
+ "commit": "af2414f",
+ "date": "2026-09-27T20:41:32",
+ "key": {
+  "a3_drift_ms": 0.0,
+  "cpu_avg_pct": 54.900092599789076,
+  "cpu_p95_pct": 57.120460447383245,
+  "gpu_avg_pct": 26.441821716189946,
+  "gpu_p95_pct": 37.0,
+  "s2_mb_per_h": 108.93347930639179,
+  "v1_avg_ms": 1.7440053514620764,
+  "v1_p99_ms": 2.3440934166666665,
+  "v2_ratio": 0.0,
+  "v3_p99_ms": 0.035
+ },
+ "machine": "m5max",
+ "notes": {
+  "camera": "none",
+  "macos": "27.0",
+  "ndi": "1",
+  "power": "AC",
+  "streams": "2"
+ },
+ "s2": {
+  "after_warmup": true,
+  "fit_span_s": 1799.9997057914734,
+  "meets_target": false,
+  "r2": 0.3889957287135161,
+  "rss_first_mb": 989.89208984375,
+  "rss_fit_first_mb": 1050.2515335083008,
+  "rss_fit_last_mb": 1144.5328979492188,
+  "rss_last_mb": 1144.5328979492188,
+  "rss_max_mb": 1144.5328979492188,
+  "samples": 31,
+  "slope_mb_per_h": 108.93347930639179,
+  "verdict": "reference"
+ }
+}

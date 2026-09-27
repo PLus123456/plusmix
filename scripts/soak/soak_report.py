@@ -137,7 +137,27 @@ def main():
     fps = 60.0
 
     # ---- frameprobe / ffprobe ----
-    probe = load_json(os.path.join(od, "probe-av.json"))
+    # soak.sh 按 5 分钟切段逐段跑 frameprobe（整条跑内存随帧数涨），这里合到整条时间轴；老的整条结果（probe-av.json）也认
+    seg_csv = os.path.join(od, "probe-seg", "segments.csv")
+    seg_missing = []
+    seg_count = 0
+    if os.path.exists(seg_csv):
+        segs = []
+        for raw in open(seg_csv, encoding="utf-8"):
+            parts = raw.strip().split(",")
+            if len(parts) < 2:
+                continue
+            got = load_json(os.path.join(od, "probe-seg", parts[0].rsplit(".", 1)[0] + ".json"))
+            if got is None:
+                seg_missing.append(parts[0])
+            else:
+                segs.append((float(parts[1]), got))
+        seg_count = len(segs) + len(seg_missing)
+        probe = sj.combine_segment_probes(segs) if segs else None
+        if probe is not None:
+            json.dump(probe, open(os.path.join(od, "probe-av-combined.json"), "w"), ensure_ascii=False)
+    else:
+        probe = load_json(os.path.join(od, "probe-av.json"))
     disc = (probe or {}).get("discontinuities") or {}
     ffp = load_json(os.path.join(od, "ffprobe.json")) or {}
     ff_err = open(os.path.join(od, "ffprobe-errors.txt"), encoding="utf-8", errors="replace").read().strip() if os.path.exists(os.path.join(od, "ffprobe-errors.txt")) else None
@@ -253,7 +273,8 @@ def main():
                      "dup": int(last_p.get("dup", 0)) - int(first_p.get("dup", 0)), "drop": int(last_p.get("drop", 0)) - int(first_p.get("drop", 0)),
                      "latency_max_ms": max(float(l["per_input"][n].get("latency_max_ms", 0)) for l in lines if n in (l.get("per_input") or {}))}
 
-    # MediaMTX：每路收到的字节 → 平均码率、有没有哪一分钟一个字节都没收到
+    # MediaMTX：每路收到的字节 → 平均码率、有没有哪一分钟一个字节都没收到。只用"就绪"期间的样本：推流端断开后那一路的计数会归零
+    # （停机时推流先断，最后一个样本比第一个小，平均就成了负的——1 小时那次的 s1 就是这样）
     mtx = {}
     if os.path.exists(os.path.join(od, "mtx.log")):
         prev = {}
@@ -262,20 +283,26 @@ def main():
                 rec = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            in_run = t0 + 60 < rec["ts"] < tlast - 30
             for item in ((rec.get("paths") or {}).get("items") or []):
-                name, b = item.get("name"), float(item.get("bytesReceived", 0))
-                if name not in mtx and b == 0 and not item.get("ready", False):
-                    continue      # 配置里有、这次没人推的路（scripts/mediamtx.yml 的 s3 / srt1）
-                m = mtx.setdefault(name, {"samples": 0, "stalled_minutes": 0, "first": (rec["ts"], b), "ready_false": 0})
+                name, b, ready = item.get("name"), float(item.get("bytesReceived", 0)), bool(item.get("ready", False))
+                if name not in mtx and not ready:
+                    continue      # 还没人推（或配置里有、这次没人推的路：scripts/mediamtx.yml 的 s3 / srt1）
+                m = mtx.setdefault(name, {"samples": 0, "stalled_minutes": 0, "not_ready_in_run": 0, "first": None, "last": None})
                 m["samples"] += 1
-                if not item.get("ready", False):
-                    m["ready_false"] += 1
-                if name in prev and b <= prev[name] and rec["ts"] > t0 + 60 and rec["ts"] < tlast - 30:
+                if not ready:
+                    if in_run:
+                        m["not_ready_in_run"] += 1
+                    continue
+                if m["first"] is None:
+                    m["first"] = (rec["ts"], b)
+                if name in prev and b <= prev[name] and in_run:
                     m["stalled_minutes"] += 1
                 prev[name] = b
-                m["last"] = (rec["ts"], b)
+                if m["last"] is None or b >= m["last"][1]:
+                    m["last"] = (rec["ts"], b)
         for m in mtx.values():
-            dt = m["last"][0] - m["first"][0]
+            dt = (m["last"][0] - m["first"][0]) if m["first"] and m["last"] else 0
             m["mbps_avg"] = ((m["last"][1] - m["first"][1]) * 8 / dt / 1e6) if dt > 0 else 0
 
     # 电源 / 温度（每分钟的 env.log）
@@ -368,7 +395,7 @@ def main():
     s2_txt = "—" if s2.get("slope_mb_per_h") is None else f"{s2['slope_mb_per_h']:.2f} MB/h（{'预热 30 min 后' if s2['after_warmup'] else '整段'}逐分钟 {s2['samples']} 点、拟合 {s2.get('fit_span_s', 0) / 3600:.2f} h，R² {f(s2.get('r2'), 3)}；RSS {f(s2.get('rss_first_mb'), 0)} → {f(s2.get('rss_last_mb'), 0)} MB，最大 {f(s2.get('rss_max_mb'), 0)}）"
     if s2_ps and s2_ps.get("slope_mb_per_h") is not None:
         s2_txt += f"；对照：ps 的 RSS（resident）{s2_ps['slope_mb_per_h']:.2f} MB/h"
-    w(f"| S2 内存增长 | {s2_txt} | ≤ 10 MB/h | ≤ 2 MB/h | {'✅' if s2['verdict'] == 'pass' else ('❌' if s2['verdict'] == 'fail' else '参考（拟合段不足 1 h，只作参考）')}{' 达目标' if s2['verdict'] == 'pass' and s2.get('meets_target') else ''} | {delta('s2_mb_per_h', 2, ' MB/h')} |")
+    w(f"| S2 内存增长 | {s2_txt} | ≤ 10 MB/h | ≤ 2 MB/h | {'✅' if s2['verdict'] == 'pass' else ('❌' if s2['verdict'] == 'fail' else ('⚠️ 参考值已超 10 MB/h（拟合段不足 1 h，不判；8 小时那次判）' if (s2.get('slope_mb_per_h') or 0) > sj.S2_MUST_MB_H else '参考（拟合段不足 1 h，只作参考）'))}{' 达目标' if s2['verdict'] == 'pass' and s2.get('meets_target') else ''} | {delta('s2_mb_per_h', 2, ' MB/h')} |")
     pm_txt = (f"；powermetrics GPU avg {f(pm.get('pm_gpu_active_avg_pct'), 1)}% / p95 {f(pm.get('pm_gpu_active_p95_pct'), 1)}%，GPU 频率均值 {f(pm.get('pm_gpu_freq_avg_mhz'), 0)} MHz（最低 {f(pm.get('pm_gpu_freq_min_mhz'), 0)}）"
               if pm and "pm_gpu_active_avg_pct" in pm else "；powermetrics 未采（无 sudo）")
     w(f"| S3 CPU | avg {f(perf['cpu_avg_pct'], 1)}% / p95 {f(perf['cpu_p95_pct'], 1)}% / max {f(perf['cpu_max_pct'], 1)}%（进程级，100 = 一个核） | avg ≤ 60% | ≤ 40% | {'✅' if perf['cpu_avg_pct'] <= 60 else '❌'}{' 达目标' if perf['cpu_avg_pct'] <= 40 else ''} | {delta('cpu_avg_pct', 1, ' pt')} |")
@@ -410,7 +437,7 @@ def main():
           f"{'、'.join(f'{k} {v}' for k, v in o['states'].items())} | {o['bitrate_avg'] / 1e6:.2f} Mb/s |")
     if mtx:
         w("")
-        w("MediaMTX 收到的（每分钟采 API）：" + "；".join(f"{k} 平均 {v['mbps_avg']:.2f} Mb/s，没进字节的分钟 {v['stalled_minutes']}，未就绪 {v['ready_false']} 次" for k, v in sorted(mtx.items())))
+        w("MediaMTX 收到的（每分钟采 API）：" + "；".join(f"{k} 平均 {v['mbps_avg']:.2f} Mb/s，运行中没进字节的分钟 {v['stalled_minutes']}、未就绪 {v['not_ready_in_run']} 次" for k, v in sorted(mtx.items())))
     w("")
     w("| 输入 | 名字 | fps 均值 / 最低 | fps = 0 的秒数 | 重复 dup | 丢弃 drop | L1 最大 |\n|---|---|---|---|---|---|---|")
     for n, v in inputs.items():
@@ -433,7 +460,10 @@ def main():
     w("## 7. 数据存放\n")
     w(f"- stats：`{show_path(stats_path)}`；headless（带墙钟时间戳）：`{show_path(os.path.join(od, 'headless.log'))}`；录像：`{show_path(os.path.join(od, 'soak.mov'))}`")
     w(f"- 每分钟采样：`rss.log`、`env.log`、`mtx.log`，每 5 s：`load.log`；powermetrics：`powermetrics.plist`{'' if pm_all else '（没有）'}；MediaMTX 日志：`mediamtx.log`")
-    w(f"- frameprobe：`probe-av.json` / `probe-av.md`{'' if probe else '（没有）'}；ffprobe：`ffprobe.json`、`ffprobe-errors.txt`")
+    if seg_count:
+        w(f"- frameprobe：按 5 分钟分段 `probe-seg/seg*.json`（{seg_count} 段{('，缺 ' + str(len(seg_missing)) + ' 段：' + '、'.join(seg_missing[:10])) if seg_missing else ''}），合并结果 `probe-av-combined.json`；ffprobe：`ffprobe.json`、`ffprobe-errors.txt`")
+    else:
+        w(f"- frameprobe：`probe-av.json` / `probe-av.md`{'' if probe else '（没有）'}；ffprobe：`ffprobe.json`、`ffprobe-errors.txt`")
     w(f"- 崩溃报告：{('`' + show_path(crash_dir) + '/`：' + '、'.join(crashes)) if crashes else '无'}；Instruments（S2 的 Leaks）：scripts/soak/leaks.sh 单独跑，见 reports/W4-leaks.md")
     w("")
     w("## 8. 已知问题与放行说明\n")
@@ -452,6 +482,8 @@ def main():
         notes.append("A3 按整秒配对斜率外推到 8 小时（与 G3 / G4 的 10 分钟外推同口径）；正式值用 8 小时那次。")
     if run.get("camera_note"):
         notes.append(run["camera_note"])
+    if seg_missing:
+        notes.append(f"frameprobe 有 {len(seg_missing)} 段没出结果（probe-seg/failed.txt、probe.err）：这些段的 A2 配对与离线不连续没算进来。")
     if not notes:
         notes.append("无。")
     for n_ in notes:
