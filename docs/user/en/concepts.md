@@ -20,16 +20,17 @@ One vocabulary is used everywhere: interface, show files, API and this manual ([
 ## The main window
 
 ```
-┌──────────────────────────────┬──────────────────────────────┐ ┌──────────┐
-│  PVW (green)                 │  PGM (red)                   │ │ Mixer     │
-├──────────────────────────────┴──────────────────────────────┤ │ per-input │
-│  Transition: Cut Fade Wipe Zoom Stinger  Duration  Params… FTB│ │ faders,   │
-│  T-bar ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  │ │ buses,    │
-├──────────────────────────────────────────────────────────────┤ │ AFV,      │
-│  1 Cam 1   2 Cam 2   3 Screen   4 Titles   …  (input strip)   │ │ meters    │
-├──────────────────────────────────────────────────────────────┤ │           │
-│  Add Input…  Overlay…  Record  Stream  Multiview  External  ISO…  status │ │           │
-└──────────────────────────────────────────────────────────────┘ └──────────┘
+┌──────────────────────┬─────────────────────┬──────────────────────┐ ┌──────────┐
+│  PVW (green)         │ Transition: Cut     │  PGM (red)           │ │ Mixer     │
+│                      │ Fade Wipe Zoom      │                      │ │ per-input │
+│                      │ Stinger  Duration   │                      │ │ faders,   │
+│                      │ Params…  FTB        │                      │ │ buses,    │
+│                      │ T-bar ▮▮▮▮▮▮▮▮▮▮▮▮  │                      │ │ AFV,      │
+├──────────────────────┴─────────────────────┴──────────────────────┤ │ meters    │
+│  1 Cam 1   2 Cam 2   3 Screen   4 Titles   …  (input strip)       │ │           │
+├───────────────────────────────────────────────────────────────────┤ │           │
+│  Add Input…  Record  ISO…  Stream  External  Multiview  Overlay… status│ │           │
+└───────────────────────────────────────────────────────────────────┘ └──────────┘
 ```
 
 - Click a thumbnail to put it on PVW; Shift-click cuts it straight to PGM. Right-click › Settings… opens that input's settings.

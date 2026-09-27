@@ -11,8 +11,10 @@ Swift 6（严格并发）+ Metal，macOS 15+，Apache-2.0。
 
 要求：Apple Silicon Mac、macOS 15 以上、Xcode 26.x 或 27.x、Homebrew（`brew install xcodegen jq ffmpeg mediamtx`）。
 
+克隆本仓库后在仓库根目录：
+
 ```bash
-git clone https://github.com/PLus123456/plusmix.git && cd plusmix && make gen build-app && open .build/DerivedData/Build/Products/Debug/Switcher.app
+make gen build-app && open .build/DerivedData/Build/Products/Debug/Switcher.app
 ```
 
 1. 节目 › 打开… 选 `Samples/event/event.switcher.json`（四路合成源 + 多画面 + 四路 ISO，不需要任何设备；[示例说明](Samples/README.md)）。
