@@ -3,11 +3,12 @@
 <plist version="1.0">
 <dict>
 	<!-- 虚拟摄像头系统扩展（CMIO Camera Extension）的 Info.plist，由 project.yml 的 INFOPLIST_FILE 引用。
-	     CMIOExtensionMachServiceName 必须以 Team ID 开头、并且是扩展所属的 app group（CameraExtension.entitlements 里同名）。 -->
+	     CMIOExtensionMachServiceName 必须以 Team ID 开头、并且是扩展所属的 app group（CameraExtension.entitlements 里同名）。
+	     CFBundleDisplayName 是系统设置里显示的名字：用 ASCII（= VirtualCameraConstants.deviceModel），要本地化等 W4-B 定 bundle id 时加 InfoPlist.strings。 -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Switcher 虚拟摄像头</string>
+	<string>Switcher Virtual Camera</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

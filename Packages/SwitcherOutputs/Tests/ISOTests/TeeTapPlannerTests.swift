@@ -114,19 +114,33 @@ final class TeeTapPlannerTests: XCTestCase {
         XCTAssertNil(s.pending)
     }
 
-    func testDiskEstimate_and_fallbackURL_and_classify() throws {
-        let bps = DiskEstimate.bytesPerSecond(video: VideoEncodeSettings(bitrateBps: 8_000_000), audio: AudioEncodeSettings(bitrateBps: 160_000))
-        XCTAssertEqual(bps, 1_020_000, accuracy: 0.5)
-        let pcm = DiskEstimate.bytesPerSecond(video: nil, audio: AudioEncodeSettings(codec: .pcm, bitrateBps: 0))
-        XCTAssertEqual(pcm, 48000 * 2 * 3, accuracy: 0.5)
-        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 1_020_000 * 100 + 1000, reserveBytes: 1000, bytesPerSecond: bps), 100, accuracy: 0.01)
-        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 10, reserveBytes: 100, bytesPerSecond: bps), 0)
-        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 10, reserveBytes: 0, bytesPerSecond: 0), .infinity)
-        XCTAssertEqual(DiskEstimate.describe(seconds: 30), "不足 1 分钟")
-        XCTAssertEqual(DiskEstimate.describe(seconds: 12 * 60 + 5), "约 12 分钟")
-        XCTAssertEqual(DiskEstimate.describe(seconds: 83 * 60), "约 1 小时 23 分")
-        XCTAssertEqual(DiskEstimate.describe(seconds: .infinity), "不受磁盘限制")
+    /// W3-C3 交付 3：DiskEstimate 只出数——每秒写多少字节、还能录多少秒（没有码率 = +inf）；"约 1 小时 23 分"之类的文案归组装方
+    /// （App 的 ISORoutes.remainingText 按同样的分档查表），包里的 `describe(seconds:)` 删了。
+    func testS7_diskEstimateReturnsNumbersOnly() {
+        // 视频码率 + 音频码率（bit/s）→ 字节 / 秒
+        let h264 = DiskEstimate.bytesPerSecond(video: VideoEncodeSettings(bitrateBps: 8_000_000), audio: AudioEncodeSettings(bitrateBps: 160_000))
+        XCTAssertEqual(h264, 1_020_000, accuracy: 0.5)
+        XCTAssertEqual(DiskEstimate.bytesPerSecond(video: VideoEncodeSettings(codec: .hevc, bitrateBps: 20_000_000), audio: nil), 2_500_000, accuracy: 0.5, "只有视频")
+        XCTAssertEqual(DiskEstimate.bytesPerSecond(video: nil, audio: AudioEncodeSettings(bitrateBps: 192_000)), 24_000, accuracy: 0.5, "只有 AAC")
+        XCTAssertEqual(DiskEstimate.bytesPerSecond(video: nil, audio: nil), 0)
+        // PCM 按 48 kHz × 声道 × 24 bit（Recorder 写 LPCM 用 24 bit），与码率设置无关
+        XCTAssertEqual(DiskEstimate.bytesPerSecond(video: nil, audio: AudioEncodeSettings(codec: .pcm, bitrateBps: 0)), 48_000 * 2 * 3, accuracy: 0.5)
+        XCTAssertEqual(DiskEstimate.bytesPerSecond(video: nil, audio: AudioEncodeSettings(codec: .pcm, bitrateBps: 999), audioChannels: 8), 48_000 * 8 * 3, accuracy: 0.5)
+        // 秒 = (剩余 − 保留) / 每秒字节
+        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 1_020_000 * 100 + 1000, reserveBytes: 1000, bytesPerSecond: h264), 100, accuracy: 0.01)
+        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 10, reserveBytes: 100, bytesPerSecond: h264), 0, "保留比剩余多：0 秒，不是负数")
+        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 100, reserveBytes: 100, bytesPerSecond: h264), 0)
+        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 10, reserveBytes: 0, bytesPerSecond: 0), .infinity, "没有码率 = 不受磁盘限制（+inf；文案归 App）")
+        // 大盘：8 TB 按 1.02 MB/s 约 90.8 天，双精度算得准（App 按分钟 / 小时分档）
+        XCTAssertEqual(DiskEstimate.remainingSeconds(freeBytes: 8_000_000_000_000, reserveBytes: 0, bytesPerSecond: h264), 8_000_000_000_000 / 1_020_000, accuracy: 1e-3)
+        // PGM + 4 路 ISO 的码率相加（App 的 OutputRuntime.estimate 就是这么加的）
+        let routes = (0..<5).map { _ in DiskEstimate.bytesPerSecond(video: VideoEncodeSettings(bitrateBps: 6_000_000), audio: AudioEncodeSettings()) }
+        XCTAssertEqual(routes.reduce(0, +), 5 * (6_000_000 + 160_000) / 8, accuracy: 0.5)
+    }
 
+    /// 切备用目录的路径；失败归因（W3-C3：只看文案里与语言无关的错误码 + 剩余空间，不再认中文字样——
+    /// 那是 W1-E 录制器给人看的文案、系统描述也随语言变；录制器自己按下限停的按它的读数归，见 RecorderDiskTests）。
+    func testS7_fallbackURL_and_classifyByErrorCodeAndFreeSpace() throws {
         let dir = TestPaths.file("fallback-\(UUID().uuidString.prefix(6))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let original = URL(fileURLWithPath: "/Volumes/Tiny/show-2026-09-19-10-00-00.mov")
@@ -136,8 +150,15 @@ final class TeeTapPlannerTests: XCTestCase {
         FileManager.default.createFile(atPath: u1.path, contents: Data())
         XCTAssertEqual(RecordingFallback.url(for: original, directory: dir.path).lastPathComponent, "show-2026-09-19-10-00-00-2.mov", "同名已存在就加序号")
 
-        XCTAssertEqual(DiskGuard.classify(message: "磁盘剩余 123 字节，低于下限 209715200", freeBytes: 10_000_000_000), .disk)
+        // 磁盘错误码（S7 实测：写满时 AVAssetWriter 报 -11807，下面挂着 ENOSPC）：空间还多也归磁盘
+        XCTAssertEqual(DiskGuard.classify(message: "视频写入失败：Error Domain=AVFoundationErrorDomain Code=-11807 \"Operation Stopped\"", freeBytes: 10_000_000_000), .disk, "AVError.diskFull")
+        XCTAssertEqual(DiskGuard.classify(message: "Error Domain=NSPOSIXErrorDomain Code=28 \"No space left on device\"", freeBytes: 10_000_000_000), .disk, "ENOSPC")
+        XCTAssertEqual(DiskGuard.classify(message: "Error Domain=NSCocoaErrorDomain Code=640", freeBytes: 10_000_000_000), .disk, "NSFileWriteOutOfSpaceError")
+        XCTAssertEqual(DiskGuard.classify(message: "The disk is full; not enough space", freeBytes: 10_000_000_000), .disk)
         XCTAssertEqual(DiskGuard.classify(message: "视频写入失败：Error Domain=AVFoundationErrorDomain Code=-11800", freeBytes: 1_000_000), .disk, "剩余不足 64 MB 的写失败归磁盘")
         XCTAssertEqual(DiskGuard.classify(message: "编码器启动失败：sessionCreateFailed(-12903)", freeBytes: 10_000_000_000), .other)
+        // 空间充足、没有磁盘错误码的写失败：other（W3-C3 之前"写入失败"四个字就算磁盘；拔盘这种写不下去的情况剩余空间量出来是 0，仍归磁盘）
+        XCTAssertEqual(DiskGuard.classify(message: "视频写入失败：Error Domain=AVFoundationErrorDomain Code=-11800 \"这项操作无法完成\"", freeBytes: 10_000_000_000), .other)
+        XCTAssertEqual(DiskGuard.freeBytes(for: URL(fileURLWithPath: "/Volumes/switcher-no-such-volume-\(UUID().uuidString)/x.mov")), 0, "卷不在（拔了）：剩余 0")
     }
 }

@@ -1,8 +1,10 @@
 // 虚拟摄像头扩展（CMIOExtension API，macOS 12.3+）：一个 provider → 一个设备 → 两条流。
 //   source stream：给 FaceTime / QuickTime 等读，1080p NV12，帧率跟主程序送来的帧。
 //   sink stream：Switcher 主程序经 CoreMediaIO 客户端 API 往里写 PGM 帧（IOSurface，PTS = 拍点时刻 host time）；
-//                每收到一帧就原样从 source stream 发出去，不拷像素。没有主程序在送时，按 placeholderFrameRate 产占位画面（深灰 + 移动的白条），
+//                每收到一帧就原样从 source stream 发出去，不拷像素，发出去之后回报"已输出"（notifyScheduledOutputChanged，带主程序挂的
+//                CMIO 序号：主程序按序号跳号算扩展丢的帧，W3-C3）。没有主程序在送时，按 placeholderFrameRate 产占位画面（深灰 + 移动的白条），
 //                让选到摄像头的 App 看得见"设备活着"。
+// 日志用英文（包 / 扩展里不写中文字面量，W3-C3）。
 // 常量（设备名 / UID / 流 UID / 允许写 sink 的签名 ID 前缀）来自 Packages/SwitcherOutputs/Sources/VirtualCamera/Shared/（project.yml 按路径编进来）。
 // 线程：CMIOExtension 在自己的队列上调 start / stop / 属性；占位画面在 timerQueue；consumeSampleBuffer 的回调在扩展队列。共享状态用一把锁。
 import CoreMedia
@@ -34,7 +36,7 @@ final class CameraProviderSource: NSObject, CMIOExtensionProviderSource {
         do {
             try provider.addDevice(deviceSource.device)
         } catch {
-            os_log(.error, log: log, "加不上设备：%{public}@", "\(error)")
+            os_log(.error, log: log, "cannot add device: %{public}@", "\(error)")
         }
     }
 
@@ -94,7 +96,7 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
             try device.addStream(sourceStream.stream)
             try device.addStream(sinkStream.stream)
         } catch {
-            os_log(.error, log: log, "加不上流：%{public}@", "\(error)")
+            os_log(.error, log: log, "cannot add streams: %{public}@", "\(error)")
         }
         let attrs: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
@@ -162,19 +164,26 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
     /// sink 只让 Switcher 主程序写（签名 ID 前缀）；开发期 ad-hoc 签名的 signingID 也是 bundle ID，能过；拿不到签名 ID 的放行并记日志。
     func authorizeSink(client: CMIOExtensionClient) -> Bool {
         guard let id = client.signingID else {
-            os_log(.info, log: log, "sink 客户端没有签名 ID，放行（开发期）")
+            os_log(.info, log: log, "sink client has no signing ID; allowed (development)")
             return true
         }
         let ok = id.hasPrefix(VirtualCameraConstants.allowedClientSigningIDPrefix)
-        if !ok { os_log(.error, log: log, "拒绝往 sink 写的客户端：%{public}@", id) }
+        if !ok { os_log(.error, log: log, "rejected sink client: %{public}@", id) }
         return ok
     }
 
     // MARK: 主程序 → sink → source
 
-    /// 从 sink 取一帧，原样从 source 发出去，再取下一帧（直到 sink 停）。hostTimeInNanoseconds = 帧的 PTS（主程序打的拍点 host time）。
+    /// 从 sink 取一帧，原样从 source 发出去，回报"已输出"，再取下一帧（直到 sink 停）。hostTimeInNanoseconds = 帧的 PTS（主程序打的拍点 host time）。
+    ///
+    /// 回报（W3-C3，issue W3C2-camera-extension-scheduled-output）：`sequenceNumber` 是主程序挂在样本上的 CMIO 序号（每个连接从 0 连续，
+    /// 排不进 sink 的不占号）。发出去之后 `notifyScheduledOutputChanged`，CMIO 把它转成主程序在 sink stream 上注册的
+    /// kCMIOStreamPropertyScheduledOutputNotificationProc（'sonp'）回调，主程序按序号跳号记扩展丢的帧（VirtualCameraOutput 的 dropped）。
+    /// 扩展自己决定丢的帧（以后要是加"没有 source 客户端时不转发"之类）就不要为它回报——跳号就是丢帧的记账方式，不另开计数。
+    /// 没挂序号（kCMIOInvalidSequenceNumber = UInt64.max，CMIOSampleBuffer.h 不在 Swift 模块里）的不回报。
+    /// 回报的时刻按头文件是"这一帧输出的 host time（纳秒）"，所以是发出去那一刻，不是 PTS。探针：进程内对没接服务的流调它不崩、什么也不做。
     private func consumeNext(from client: CMIOExtensionClient) {
-        sinkStream.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, _, _, _, error in
+        sinkStream.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, sequenceNumber, _, _, error in
             guard let self else { return }
             let streaming = self.lock.withLock { self.sinkStreaming }
             guard streaming else { return }
@@ -182,9 +191,13 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
                 let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                 let ns = pts.isNumeric ? UInt64(max(0, CMTimeGetSeconds(pts)) * 1_000_000_000) : mach_absolute_time_nanoseconds()
                 self.sourceStream.stream.send(sampleBuffer, discontinuity: [], hostTimeInNanoseconds: ns)
+                if sequenceNumber != UInt64.max {
+                    self.sinkStream.stream.notifyScheduledOutputChanged(
+                        CMIOExtensionScheduledOutput(sequenceNumber: sequenceNumber, hostTimeInNanoseconds: mach_absolute_time_nanoseconds()))
+                }
                 self.lock.withLock { self.forwarded += 1 }
             } else if let error {
-                os_log(.error, log: log, "sink 取帧失败：%{public}@", "\(error)")
+                os_log(.error, log: log, "sink consume failed: %{public}@", "\(error)")
             }
             self.consumeNext(from: client)
         }

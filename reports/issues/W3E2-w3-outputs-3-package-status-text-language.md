@@ -28,3 +28,14 @@ App 从 W3-E2 起**不再调用**下面这几个返回中文的函数，改成�
   注意 `VirtualCameraAppTests.testVirtualCamera_extensionActivationInAdHocSignedApp_reportsBlocked` 断言失败文案里含"签名 / 权限 / BLOCKED-签名"——改枚举时 App 那条断言一起改（归 App，找 W3-E 系列或检查点）。
 - 窗口标题给一个可注入的参数（默认英文 "Switcher External Output"），App 传本地化后的。
 - 四个 `describe` 可以保留给 headless / 日志用，注释写明"日志用，界面文案在 App"。
+
+## W3-C3（w3-outputs-4，2026-09-27）处理结果
+
+包里不再有中文字面量（`VirtualCameraTests.SourceLanguageTests` 扫 External / VirtualCamera / ISO 与 CameraExtension/，0 处）：
+1. `SystemExtensionInstaller.Status.failed(Failure)`：`Failure.reason` 是枚举（extensionNotFound / requirementsNotMet / canceled / superseded / other），
+   另带系统给的 `domain` / `code` / `detail`（系统本地化的 localizedDescription）；`isSigningBlocked` = 前两种。`describe` / `developerModeHint` 删了。
+2. 外部显示窗口标题：`ExternalDisplayWindow.windowTitle`（默认 ASCII "Switcher External Output"），`ExternalDisplayManager.windowTitle` 下发。
+   `ExternalDisplayManager.describe` / `ExternalDisplaySpec.describe` 删了。Aux 占位默认文案 "No signal"（App 本来就传 input.noSignal）。
+3. `CMIOSinkStreamClient.Error` 只有枚举（去掉中文 description）；`VirtualCameraOutput.Counters.lastError(String)` → `lastFailure(ConnectionFailure)`。
+4. `DiskEstimate.describe` 删了。
+App 侧要跟的几行（OutputStatusText 的 `.failed`、两条测试、新键）在 `reports/issues/W3C3-app-extension-failure-reason-and-disk-free.md`。

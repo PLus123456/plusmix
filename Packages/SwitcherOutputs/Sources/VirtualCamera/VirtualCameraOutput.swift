@@ -40,13 +40,25 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
         public var framesOutput: UInt64 = 0
         /// 扩展在回报（"已输出"通知注册上了）。
         public var extensionReports = false
+        /// 扩展回报里对不上的（序号不是本连接排过的，见 `SinkOutputReport.unmatched`）；不进 dropped。
+        public var extensionUnmatched: UInt64 = 0
         /// 找设备的次数。
         public var connectAttempts: UInt64 = 0
         /// 连上之后因为连续排不进而关掉重找的次数。
         public var sinkLosses: UInt64 = 0
-        /// 最近一次找设备失败的原因。
-        public var lastError: String?
+        /// 最近一次没连上 / 断开的原因（连上了清掉）。
+        public var lastFailure: ConnectionFailure?
         public init() {}
+    }
+
+    /// 没连上 / 断开的原因（W3-C3：以前是包拼好的中文句子；包只给枚举，文字由组装方查表）。
+    public enum ConnectionFailure: Hashable, Sendable {
+        /// 打开 sink 失败：CMIO 客户端的错误（deviceNotFound = 扩展没装 / 没激活 → waitingExtension；其余 = 设备在但连不上 → failed）。
+        case open(CMIOSinkStreamClient.Error)
+        /// 打开时抛了别的错误（不是 CMIO 客户端的 sink，例如测试的假 sink）：错误的调试描述，只给日志。
+        case openOther(String)
+        /// 连上之后连续 `frames` 帧排不进 sink（扩展停了 / 被卸载），已关掉重找。
+        case sinkStalled(frames: Int)
     }
 
     public let consumerName: String
@@ -201,6 +213,7 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
                 counters.extensionReports = true
                 counters.framesOutput = report.output
                 counters.droppedExtension = report.dropped
+                counters.extensionUnmatched = report.unmatched
             }
         }
         if consecutiveSendFailures >= sinkLossThreshold {
@@ -210,7 +223,7 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
                 stateValue = .searching
                 waitingForExtension = true
                 counters.sinkLosses += 1
-                counters.lastError = "连续 \(sinkLossThreshold) 帧排不进 sink（扩展停了或被卸载），重新找设备"
+                counters.lastFailure = .sinkStalled(frames: sinkLossThreshold)
             }
         }
     }
@@ -227,14 +240,14 @@ public final class VirtualCameraOutput: FrameConsumer, @unchecked Sendable {
             lock.withLock {
                 stateValue = .connected
                 waitingForExtension = false
-                counters.lastError = nil
+                counters.lastFailure = nil
             }
         } catch {
-            let notFound = (error as? CMIOSinkStreamClient.Error) == .deviceNotFound
+            let clientError = error as? CMIOSinkStreamClient.Error
             lock.withLock {
                 stateValue = .searching
-                waitingForExtension = notFound
-                counters.lastError = "\(error)"
+                waitingForExtension = clientError == .deviceNotFound
+                counters.lastFailure = clientError.map(ConnectionFailure.open) ?? .openOther(String(reflecting: error))
             }
         }
     }
