@@ -1,4 +1,4 @@
-# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，W3-C2 落地提案 018）
+# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则）
 
 代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
@@ -15,7 +15,11 @@
 → **提案 014（用户 2026-09-23 批并指定 W2-A2 落地，分支 w2-inputs-2，叠在 P3 之上）：`InputSource.audio` / `.decklink` 的 `channels`（声道映射），
 外加纯音频输入（`videoSlot` 为 nil）进 Program / 多画面的口径（W2-A2 报告 §4 第 2 条，同日定）**
 → **提案 018（用户 2026-09-23 批并指定 W3-C2 落地，分支 w3-outputs-3）：`Stats.DisplayEntry.undelivered`（不在呈现 / 发布时没送出去的帧），
-`dropped` 的口径收紧成"在呈现 / 发布时没送出去的"，两者不重叠**。提案文件留在 docs/contract-changes/ 当决策记录。
+`dropped` 的口径收紧成"在呈现 / 发布时没送出去的"，两者不重叠**
+→ 提案 015（G4 续做合入会话按授权落地：`DisplayOutputSettings.fallbackToMain` 默认与缺键改 false）、016（W3-E2 落地：`Command.setTransitionParams`，34 个 case）
+→ 提案 017（用户 2026-09-24 批，G4 续做合入会话落地：`Stats.audio.meters` 的 `rms_db`）
+→ **P4（2026-09-27，分支 p4-contracts）：过期注释 / 口径收口；reducer 两条小规则（removeInput 清 Stinger 引用，addOutput / setOutputSettings / loadShow 先搬过渡键）；
+搬迁清掉 `border` 效果格与悬空的 Stinger 引用；`validate()` 只查结构、不查引用（用户 2026-09-27 定）。没有加改任何公开类型与 JSON 键**。提案文件留在 docs/contract-changes/ 当决策记录。
 
 ---
 
@@ -72,7 +76,7 @@
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `FrameSlot` 协议 | 每路一个，容量 2–3；`push` / `latest(atOrBefore:)` / `stats`。实现在 SwitcherEngine（W1-B） | 输入线程 push | 渲染线程 latest | SPSC，无锁零分配 |
+| `FrameSlot` 协议 | 每路一个，容量 2–3；`push` / `latest(atOrBefore:)` / `stats`。实现在 SwitcherEngine（W1-B） | 输入线程 push | 渲染线程 latest；分支槽（`SwitcherISO.InputFrameTee.addBranch`）由它唯一的读者 latest（ISO 的 tap、Aux 显示在显示刷新上读） | SPSC（每个槽一个生产者、一个消费者），无锁零分配 |
 | `FrameSlotStats` | pushed / consumed / dropped / reused，累计 | 帧槽 | Stats.per_input、测试 | 原子读 |
 | `AudioRing` 协议 | 每路一个 SPSC 环，float32 非交错 48 kHz，每块带 host time；`write` / `read` / `availableFrames` / `stats` / `raw`。实现在 SwitcherAudio（W1-D，C） | 输入线程 write | 混音回调经 `raw` 直接读 | SPSC，无锁零分配 |
 | `sw_audio_ring`（C） | 环头布局，256 字节，layout_version 1；生产者计数在偏移 128、消费者计数在 192（各占一条缓存线） | W1-D 的实现 | 混音 C 热路径、Swift 包装 | 音频 |
@@ -113,7 +117,8 @@ DeckLink 开的内嵌音频路数 = max(`Options.audioChannels`, 映射用得上
 
 **纯音频输入（`InputSource.audio`，`Input.videoSlot` 为 nil；W2-A2 报告 §4 第 2 条，用户 2026-09-23 定）**：引擎对这一路挑帧恒为 nil（组装方不登记帧槽，或登记一个没人推的空槽——App 现在就是后者）；
 它照样能被选进 Program / Preview / 叠加，画面按"没帧"画黑场，音频照常按每路 AFV 走（切到它就出它的声）；多画面里它的格子画占位（名字 + 电平表），
-不是黑画面。引擎与渲染器今天的行为已经满足前两条（没槽 → nil → 画黑）；多画面占位格与 App 接线待做（reports/issues/W2A2-*）。
+不是黑画面。引擎与渲染器的行为满足前两条（没槽 → nil → 画黑）；多画面占位格（深灰底 + 电平表 + 名字，电平表不看 `MultiviewLayoutSettings.meters`）W3-B2 做了，
+App 接线 W3-E2 做了（reports/issues/W2A2-w3-compositor2-multiview-audio-only-cell.md、W2A2-w3-app-3-audio-device-input-wiring.md）。
 
 **`InputState` 的 noSignal / error 分界（W3-A 口径，用户 2026-09-22 定）= 会不会自己好**：驱动没装 / 设备不在 / NDI 源还没出现 / 显示器拔了 → `noSignal` + `lastError` 文案（装上、插回、源上线就自己恢复）；SDK 没编进来 / 起流失败 / 权限被拒 → `error(message:)`（不会自己好）。
 
@@ -139,30 +144,38 @@ DeckLink 开的内嵌音频路数 = max(`Options.audioChannels`, 映射用得上
 | `peakLimiter` | `attackSeconds`、`decaySeconds`、`preGainDb` |
 
 链的顺序 = 处理顺序；`enabled = false` 的格旁路。`InputSettings.effects`（每路）与 `BusState.effects`（每总线）同一套。
-视频效果格由合成会话定义：`border`（画中画边框）是提案 010 落地前的过渡做法，正式字段是 `OverlayState.border`，渲染器保留读它一个版本作后备。
+视频效果格由合成会话定义，目前没有：`border`（画中画边框）是提案 010 落地前的过渡做法，正式字段是 `OverlayState.border`；渲染器读它的后备 W3-B2 删了，
+`Show.load` 的搬迁把启用的那格搬进用到这路输入的叠加通道，然后把所有 `border` 格清掉（P4，见 §2.8）。
 
 ### 2.5 状态（MixerState.swift）
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `MixerState` | 不可变快照：format, inputs, program, preview, transition, ftb, overlays[4], audio, outputs；`validate()`、`tally(ofInput:)`、`tallies` | 状态机（reduce / advance） | 渲染（每拍一次）、音频、UI、API、录制 | 值类型；经 `MixerSnapshot` 发布 |
+| `MixerState` | 不可变快照：format, inputs, program, preview, transition, ftb, overlays[4], audio, outputs；`validate()`（只查结构不变量，不查引用，见下）、`tally(ofInput:)`、`tallies` | 状态机（reduce / advance） | 渲染（每拍一次）、音频、UI、API、录制 | 值类型；经 `MixerSnapshot` 发布 |
 | `MixerSnapshot` | final class {state, sequence, tick, publishedAt}，不可变；状态机用原子指针交换发布；`publishedAt` = 发布时刻 host time（提案 003 §B，C2 从它算） | 状态机 | 渲染、音频、控制 | 读方只 retain，不进 actor |
-| `TransitionState` | {type, durationTicks, progress 0–1, source auto/tbar, startTick, wipe, stinger}；空闲时 type/duration 就是"下一次转场"的选择；wipe / stinger 由 `setTransitionParams` 改（提案 016，转场进行中被拒） | 状态机 | 渲染 | — |
+| `TransitionState` | {type, durationTicks, progress 0–1, source auto/tbar, startTick, wipe, stinger}；空闲时 type/duration 就是"下一次转场"的选择；wipe / stinger 由 `setTransitionParams` 改（提案 016，转场进行中被拒）；`stinger.input` 在 removeInput 删掉那一路时置 nil（P4） | 状态机 | 渲染 | — |
 | `FadeToBlack` | {on 目标, durationTicks, level 当前黑比例, startTick} | 状态机 | 渲染、音频（可选淡出 Master） | — |
 | `OverlayState` | {input?, on 目标, rect, animProgress 0–1, animation, startTick, border?, anchor, previewOn}（提案 010）；`isVisible` | 状态机 | 渲染 | — |
 | `OverlayAnimation` | {kind, durationTicks, slideFrom?}（提案 010：slideFrom nil = 离 rect 最近的边） | 状态机 | 渲染 | — |
-| `OverlayBorder` / `OverlayAnchor` / `OverlayEdge` | {width 占节目高的比例, color} / 九宫格锚点 / {left, right, top, bottom}（提案 010） | 同上 | 渲染 | — |
+| `OverlayBorder` / `OverlayAnchor` / `OverlayEdge` | {width 占节目高的比例（渲染器钳 0–0.1，界面只给到 0.05，更宽的只能从 API / 节目文件给）, color} / 九宫格锚点 / {left, right, top, bottom}（提案 010） | 同上 | 渲染 | — |
 | `AudioState` | {buses[4] 顺序 = Bus.allCases, afv 总开关, monitorMode, alignmentFrames = 2048, monitorPoint}（提案 007） | 状态机 | 混音、UI | — |
 | `MonitorPoint` | {preDelayLine（默认）, postDelayLine}：耳机 / 监听总线取对齐延迟线之前还是之后（提案 007） | Show / 设置面板 | 集成层填 `AudioEngineConfiguration` | — |
-| `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`} | 状态机 | 输出实现、UI | — |
+| `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`}；kind = multiview 的 enabled = 要不要把多画面 NV12 送给下游，布局与它无关（见下） | 状态机 | 输出实现、UI | — |
 | `OutputSettings` | {source, video?, audio?, record?, stream?, multiview?（010）, display?（013）, extra 占位} | Show / 命令 | 编码、录制、推流、多画面、外部显示 | — |
-| `MultiviewLayoutSettings` / `MultiviewCell` | {preset, custom[], safeArea, meters} / {source, rect}（提案 010；`OutputSource.multiview` 作格子源无效，渲染器忽略） | Show / setOutputSettings | 渲染（多画面） | 解析只在快照 sequence 变化时做 |
+| `MultiviewLayoutSettings` / `MultiviewCell` | {preset, custom[], safeArea, meters} / {source, rect}（提案 010；`OutputSource.multiview` 作格子源无效，渲染器忽略）；meters = 画真实电平（`Stats.audio.meters` 经 `setMeters` 喂进渲染器：输入格画该路、PGM 格 = Master、PVW 格 = 当前 PVW 那路），纯音频输入格总是画、不看它 | Show / setOutputSettings | 渲染（多画面） | 解析只在快照 sequence 变化时做 |
 | `DisplayOutputSettings` | {displayID?（CGDirectDisplayID；nil = 主显示器）, fallbackToMain（默认 false = 显示器不在时黑着等、不动主屏；提案 013 定 true，015 改 false 与运行时一致）} | Show / setOutputSettings | 外部显示运行表 | — |
 | `Tally` | {program, preview}，由快照推导 | 契约代码 | UI、API、多画面、外部 tally | — |
 
 progress 的意义：新画面（= preview 输入）盖在旧画面上的比例。auto 转场第 s 拍应用命令，第 s + k 拍 progress = k / durationTicks，到 1 时状态机对调 program/preview 并回空闲（W1-B）。运行时统计（帧数、丢帧、码率）**不在** OutputState 里，在 Stats（铁律 4）。
 
 `StingerParams.cutAtTick`（W3-B 口径，用户 2026-09-22 定）：第 s 拍应用命令时 progress = 0（渲染器什么都不叠），第 s + 1 拍才是 stinger 第一帧，所以 **cutAtTick 0 与 1 等价**；cutAtTick ≥ durationTicks 等于"完成时换"。`TransitionRenderer.stingerShowsNewUnder` 是定义。
+
+**输入引用的口径（P4，用户 2026-09-27 定）**：状态里四处引用输入编号——`program`、`preview`、`overlays[k].input`、`transition.stinger.input`。removeInput 把前两个置 0（黑场）、后两个置 nil；
+`validate()` 只查结构不变量（叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复），**不查引用**，渲染器对不存在的输入按"没有这路"画（跳过）。
+P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的悬空编号由搬迁清掉（§2.8）；引用存在与否在命令入口由 `CommandValidator` 查（setTransitionParams / overlay / setPreview……）。
+
+**多画面输出的 enabled（W3-E2 报告 §4 第 2 条）**：kind = multiview 的输出的 enabled = 要不要把多画面 NV12 送给下游——enabled 且 `settings.source` = `.multiview` 时渲染器每拍多转一次 NV12 填 `RenderedFrame.multiview`（§3）；
+多画面**布局**取第一个 kind = multiview 的输出的 `settings.multiview`，与 enabled 无关。App 新建的那个只承载布局、enabled = false；`scenarios/g4-show.json` 里那个是 enabled 的（headless 每拍多转一次，没有下游）。
 
 `OutputState.enabled` 的口径（提案 007 B 第 1 条）：节目文件里的 enabled **只对 headless 的场景文件生效**（t0 起录 / 起推）；App 打开任何节目文件（含退出时自动存的 LastSession）时把 record / stream 的 enabled 清掉，这两类输出只由用户动作（按钮 / 快捷键 / API）起（App 的 `ShowDocuments.stoppingOutputs`）。record / stream 的 enabled 由 startRecord / startStream 置，其余 kind 由 `setOutputEnabled` 置（提案 012）。
 
@@ -183,14 +196,13 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop,latency_ms,latency_max_ms}, encoder[{skipped,bitrate,frames,dropped,disk_free_mb,reconnects,state}], display[{output,kind,frames,dropped,undelivered,state}]（P3 提案 013，undelivered 是 018）, audio{dropouts,underruns,discontinuities,meters{buses[{bus,peak_db, rms_db,true_peak_db,lufs_m,lufs_s,lufs_i,lra}],inputs{n:{peak_db}}}}, rss_mb, cpu_pct, gpu_pct（P2 按提案 001 / 002 / 004 / 005 扩，2026-09-18） | 引擎每秒汇总一次（W1-B）：encoder[] 由各输出的 `statsEntry` 填（`Recorder` / `StreamOutput` / `NDISender`），audio 由 `AudioEngine.audioCounters` 填（W2-E 集成层），per_input 的 L1 由引擎填（W1-B2）；写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
+| `Stats` | 测试标准 §7 那一行，键名逐字：ts, tick, render_ms, missed_render, jitter_ms, per_input{fps,dup,drop,latency_ms,latency_max_ms}, encoder[{skipped,bitrate,frames,dropped,disk_free_mb,reconnects,state}], display[{output,kind,frames,dropped,undelivered,state}]（P3 提案 013，undelivered 是 018）, audio{dropouts,underruns,discontinuities,meters{buses[{bus,peak_db,rms_db,true_peak_db,lufs_m,lufs_s,lufs_i,lra}],inputs{n:{peak_db,rms_db}}}}, rss_mb, cpu_pct, gpu_pct（P2 按提案 001 / 002 / 004 / 005 扩，2026-09-18；rms_db 是 017，2026-09-24） | 引擎每秒汇总一次（W1-B）：encoder[] 由各输出的 `statsEntry` 填（`Recorder` / `StreamOutput` / `NDISender`），audio 由 `AudioEngine.audioCounters` 填（W2-E 集成层），per_input 的 L1 由引擎填（W1-B2）；写 jsonl 的是 TestKit（W1-A） | UI 状态行、API、StatsSummary | 汇总在普通线程；来源计数是原子量 |
 
 口径：`render_ms` = 窗口内"拍点时刻 → GPU 完成"平均 ms（V1）；`jitter_ms` = 窗口内 |派发时刻 − 理想拍点| 最大值（V3）；计数类（missed_render, dup, drop, skipped, dropouts, underruns, frames, dropped, reconnects, discontinuities）全是自启动累计，相邻两行相减得窗口增量；`fps` = 窗口内该输入 push 帧数 / 秒；`bitrate` = 窗口平均 bit/s；`ts` = Unix 秒。`Stats.jsonLine()` / `parse(line:)` 是唯一的编解码入口。
 
 P2 加的字段（口径全文在 Stats.swift 的文档注释）：
 - `per_input[n].latency_ms` / `latency_max_ms`（提案 005）：窗口内 L1（帧交给第一个 FrameConsumer 的时刻 − 该帧 `Frame.ingressTime`）的平均 / 最大 ms，只算每拍第一次用到的帧，窗口内没样本写 0；引擎侧算法归 W1-B2（prompt 42），之前引擎写 0。
 - `encoder[i].frames`（001）：写进文件 / 交给传输层的帧数累计；`dropped`（001）：编码之后、落地之前丢的帧累计（录制 = writer 不接的 `videoFramesRejected`；推流 = E9 网络丢帧 `networkDropped`；NDI = 队列满丢的帧），与编码前的 E1 `skipped` 是两回事；`disk_free_mb`（001）：录制目录所在卷剩余 MB（2^20 字节，与 rss_mb 同口径），非录制输出 0；`reconnects`（002）：推流重连成功次数累计，录制 / NDI 0；`state`（002）：推流 idle / connecting / publishing / backoff / stopping / stopped / failed，NDI publishing / idle / unavailable（SDK 不在），录制 idle / recording / stopping / stopped / failed。
-- `audio.meters.buses[].rms_db` / `inputs[].rms_db`（017，2026-09-24）：推子后（与 peak_db 同一取样点）的均方根电平 dBFS，300 ms 一阶指数平均、每块更新、采样那一刻的值，下限 −120；缺键 = 空数组 = 没有 RMS（017 之前的文件），读表的只画峰值。C 热路径只累平方和与一阶平均（不开方、不进 libm），dB 换算在 Swift 侧。
 - `audio.discontinuities`（004）：A1 第三项，Master 消费者流上相邻样本跳变 > 0.5 满幅的次数累计（集成层泵线程的流式检测，合成信号的 click 按平台启发式排除；正式判定用离线口径）；`audio.meters`（004）：采样那一刻的表读数，`buses` 顺序 = `Bus.allCases`（`bus` = `Bus.name`：master / busA / busB / headphones），`inputs` 键 = 输入编号；峰值 / 真峰值 dBFS / dBTP、响度 LUFS、LRA LU，dB / LUFS 下限 −120（`Stats.AudioCounters.Meters.floorDb`，静音也钳到它，JSON 写不了 −inf），来源只有 `AudioMixer.meters`。
 - 兼容：老 stats.jsonl 缺这些键时解码给 0 / "idle" / 空（`decodeIfPresent`），写出总是写全；Show 文件不受影响（Stats 不在 Show 里）。
 
@@ -209,6 +221,11 @@ W3-C2 加的字段（提案 018）：
   填数方：`VirtualCameraOutput.statsEntry`（= `countersSnapshot.droppedNoDevice`）、`ExternalDisplayManager.statsEntries`（`DisplayFrameLedger` / `AuxInputPresenter`）；
   App 的 monitor / multiviewWindow 两项不填就是 0。缺键 = 0（013 的老条目照解），写出总是写全；`StatsSummary.DisplaySummary.undelivered` 同算法（末行 − 首行）。
 
+G4 续做落地的字段（提案 017，用户 2026-09-24 批）：
+- `audio.meters.buses[].rms_db` / `inputs{n}.rms_db`：推子后（与 peak_db 同一取样点）的均方根电平 dBFS，[L, R]，20·log10(rms)、下限 −120（`Meters.floorDb`）；
+  300 ms 一阶指数平均（IEC 60268-17 的 VU 积分时间）、每个混音块更新、采样那一刻的值。C 热路径只累平方和与一阶平均（不开方、不进 libm），开方与 dB 换算在 Swift 侧（`AudioEngine.statsMeters`）。
+  缺键 = 空数组 = 没有 RMS（017 之前的文件），读表的只画峰值；写出总是写全。多画面电平表有 RMS 时画"RMS 实心条 + 峰值细线 + 保持线"。
+
 ### 2.8 文件与脚本（Show.swift、Scenario.swift）
 
 | 类型 | 是什么 | 谁写 | 谁读 |
@@ -221,9 +238,15 @@ W3-C2 加的字段（提案 018）：
 
 `Show ↔ MixerState`：`Show(name:state:layout:)` 和 `show.makeState()`；makeState 清瞬态（进度、startTick），目标值直接到位。
 
-过渡键的一次性搬迁（提案 010 / 013，P3 落地）：`Show.load(from:)` 解完就调 `migratingLegacyKeys()`，把 `OutputSettings.extra["layout"]` 搬进 `.multiview`、
-`extra["displayID"]` / `["fallbackToMain"]` 搬进 `.display`、某路输入效果链里的 `EffectSlot(id: "border")` 搬进用到它的叠加通道的 `OverlayState.border`（没有通道用它就不动），
-搬完清掉旧键；幂等，正式字段已有值的不动。放在契约里是为了 App / headless / 测试读同一份。渲染器与 `ExternalDisplaySpec` 的读取仍保留过渡键作后备（一个版本）。
+过渡键的一次性搬迁（提案 010 / 013，P3 落地，P4 收口）：`Show.load(from:)` 解完就调 `migratingLegacyKeys()`，把 `OutputSettings.extra["layout"]` 搬进 `.multiview`、
+`extra["displayID"]` / `["fallbackToMain"]` 搬进 `.display`、某路输入效果链里第一个启用的 `EffectSlot(id: "border")` 搬进用到这路输入、还没有边框的叠加通道的 `OverlayState.border`，
+搬完清掉旧键；幂等，正式字段已有值的不动。放在契约里是为了 App / headless / 测试读同一份。P4 起另外三条：
+- 搬完之后 `border` 格**一律清掉**：没有叠加通道用到的、停用的、通道已有正式边框而没搬的都算——读它的后备 W3-B2 删了，留着是没人读的死数据（用户 2026-09-27 定全清；
+  停用格里的宽度 / 颜色随之丢掉，新模型里"关着的边框"就是 `border = nil`）；
+- `transition.stinger.input` 指向不存在的输入的置 nil：P4 之前 removeInput 不清它，那时存下的文件里可能有（不清的话 App 改 Wipe 参数会被总线以"Stinger 输入不存在"拒）；
+- 状态机对 loadShow（整份 `Show.migratingLegacyKeys()`）与 addOutput / setOutputSettings（`OutputSettings.migratingLegacyKeys()`）进来的数据也先搬：
+  API 客户端直接带旧键的与读文件结果一致，运行时状态里不会再有过渡键。搬迁不碰 `validate()` 查的结构，`CommandValidator` 不用改。
+读取方：渲染器（W3-B2）与 `ExternalDisplaySpec`（W3-C2）已经只读正式字段；App 的 `OutputExtras.displayNumber` 还留着 `extra["displayID"]` 的后备，归 W3-E3（prompt 68 第 6 条）删。
 `Show.schemaVersion` 不升：新字段全部带默认值，008 与 `InputAudioSettings.afv` 靠 `decodeIfPresent`。
 
 ### 2.9 渲染 / 消费者协议（Render.swift：Renderer、RenderSink、FrameConsumer、AudioBlockConsumer）见 §7。
@@ -246,7 +269,8 @@ W3-C2 加的字段（提案 018）：
 - **无信号**：`InputState.noSignal`，帧槽保留最后一帧；渲染不阻塞。noSignal 与 error 的分界见 §2.4（会不会自己好）。
 - **纯音频输入**：没有帧槽，能切进 Program（画黑、音频按 AFV 走），多画面画占位格 + 电平表（§2.4，用户 2026-09-23 定）；声道映射口径见 §2.4 提案 014。
 - **PVW / 多画面出不出 NV12**（用户 2026-09-22 定）：状态里有 enabled 的输出、其 `settings.source` 是 `.preview` / `.multiview` 时 `RenderedFrame.preview` / `.multiview` 自动填；
-  `MetalRendererOptions.previewOutput` / `multiviewOutput` 保留为强制开的覆盖（取或）。
+  `MetalRendererOptions.previewOutput` / `multiviewOutput` 保留为强制开的覆盖（取或）。kind = multiview 的输出的 enabled 就是这个意思（要不要把多画面 NV12 送给下游），
+  多画面布局取第一个 kind = multiview 的输出、与 enabled 无关（§2.5）。
 - **PVW 画不画叠加**：每通道的 `OverlayState.previewOn`，与渲染器的"全部预览"总开关 `MetalRendererOptions.overlaysInPreview` 取或。
 
 ---
@@ -347,13 +371,13 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 | — | `.setMonitorMode(mode:)`、`.setBusEffects(bus:effects:)` | 加的（提案 012）：调音台的 PFL / AFL 与总线效果链；监听**点**（延迟线前 / 后）是 `AudioState.monitorPoint`，走 Show，不是命令 |
 | startRecord / stopRecord | `.startRecord(output:)` / `.stopRecord(output:)` | output = 录制输出编号；ISO = 同一拍发多条 |
 | startStream(dest) / stopStream | `.startStream(output:)` / `.stopStream(output:)` | dest = 编号为 output 的 stream 输出，url/key 在其设置里 |
-| — | `.setOutputEnabled(output:on:)`、`.renameOutput(output:name:)` | 加的（提案 012）：ndi / externalDisplay / virtualCamera / multiview 的目标开关与改名；record / stream 的 setOutputEnabled 被拒（起停与拍绑定） |
+| — | `.setOutputEnabled(output:on:)`、`.renameOutput(output:name:)` | 加的（提案 012）：ndi / externalDisplay / virtualCamera / multiview 的目标开关与改名；record / stream 的 setOutputEnabled 被拒（起停与拍绑定）；multiview 的开关 = 要不要把多画面 NV12 送给下游，布局与它无关 |
 | setInputSetting(...) | `.setInputSettings(input:settings:)` | 整体替换，reducer 先 clamped() |
 | — | `.renameInput(input:name:)` | 加的 |
-| addInput / removeInput | `.addInput(config:)` / `.removeInput(input:)` | |
+| addInput / removeInput | `.addInput(config:)` / `.removeInput(input:)` | removeInput 把 PGM / PVW 用它的置 0、叠加与 Stinger 对它的引用置 nil（Stinger 是 P4 加的） |
 | — | `.setInputSource(input:source:)` | 加的（提案 012）：换来源，编号 / 名字 / 设置 / PGM / PVW / 叠加引用全保留（removeInput 会清引用，直播中不能用） |
-| — | `.addOutput(config:)` / `.removeOutput(output:)` / `.setOutputSettings(output:settings:)` | 加的：输出表要能改 |
-| loadShow | `.loadShow(show:)` | 整体替换状态 |
+| — | `.addOutput(config:)` / `.removeOutput(output:)` / `.setOutputSettings(output:settings:)` | 加的：输出表要能改；addOutput / setOutputSettings 进来的设置先搬过渡键（P4，同 Show.load） |
+| loadShow | `.loadShow(show:)` | 整体替换状态；先按 Show.load 同一套规则搬迁（P4），`validate()` 不过的被拒 |
 
 每条命令在总线上加信封 `IssuedCommand{sequence, issuedAt}`（prompt 的"每条命令带 sequence 和 issuedAt"）；`Scenario` 和 HTTP API 只有 `Command`。
 
