@@ -296,3 +296,65 @@ W3-B2 的渲染器改动（标签线程、电平表三块交接、按需建环�
 | SwitcherRenderTests | 93 个：92 过、1 失败 = `DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`（blit 0 次：显示器仍不可见，与 §11.2 同一环境原因）；新 `testV8_multiviewMetersWithRMS`（参考图 PSNR ∞ + 结构断言）、`testMultiview_meterFeedCarriesRMS` 过，24 + 1 张参考图全部 PSNR ∞，零分配用例照过 |
 | App（UISmokeTests / MixerPanelTests / LocalizationTests / MultiviewLayoutTests / InputWiringTests 五个类，`caffeinate` 下） | 15 过 1 失败：唯一红的是 `InputWiringTests.testInputs_builtInCameraLiveWithin5sAndPictureShows`（"缩略图格子应在画"——合盖、内置摄像头与窗口都不可见，环境，与 §11.2 同类）；UISmoke 两条过，清零后本条的快照分发峰值 39 / s；`testMixer_perInputAFVToggle…` / `testMixer_stripsMetersAndCommands` 过（MeterBar 改三段色没影响读数断言） |
 | lint | 禁词 / 版本 / Package.swift 约束、依赖方向、实时符号审计（清单不变）、归属（App 胶水 24 / 50）全绿 |
+
+## 13. 第三批续做合入（2026-09-27）：P4 / W3-C3 / W3-E3（用户："那三个已经结束了，你来检查一下，有什么要拍版的、要增减的，你统一再给我汇报一下"）
+
+三个分支都从 main 67d0f6b 开，两两 `git merge-tree` 无冲突、没有共同改动的文件；按契约 → 包 → App 的顺序 `--no-ff` 合入 g4。三份报告（reports/p4-contracts.md、w3-outputs-4.md、w3-app-4.md）逐条对过 prompt 67 / 68 / 69 的交付，没有漏项；三个会话各自的 lint 只有 w3-app-4 的 project.yml 一条越界（§13.3 第 1 条）。
+
+### 13.1 合入与检查点自己的改动
+
+| 事 | 提交 | 说明 |
+|---|---|---|
+| 合入 P4（p4-contracts ac598d1） | 04551ab | reducer：removeInput 清 Stinger 引用、addOutput / setOutputSettings / loadShow 先搬过渡键；搬迁清 border 格与悬空 Stinger 引用；契约注释 / CONTRACTS.md / 命令目录跟上；schemaVersion 不升。开工时用户定的三条（validate 不查引用、border 全清、loadShow 也搬）在其报告开头 |
+| 合入 W3-C3（w3-outputs-4 d7cfa67） | ae065bb | External / VirtualCamera / ISO 与 CameraExtension 中文字面量 0 处（SourceLanguageTests）；`SystemExtensionInstaller.Status.failed(Failure)` 枚举原因；扩展侧 `notifyScheduledOutputChanged` + 主程序 'sonp' 守卫（unmatched 不算丢）；`DiskEstimate` 只出数；`DiskGuard.classify` 不认中文字样（**行为变化**：空间充足、无磁盘错误码的写失败归 other，不再切备用目录）；在跑录制器的 disk_free_mb 非启动卷兜底 |
+| 合入 W3-E3（w3-app-4 ec648ee） | 8238431 | App 接 NDI 发送（kind = ndi 按 enabled 起停 NDISender；输入 n 走帧槽分支 + ISOFrameTap；Stats.encoder 由 sender 填；NDI 页名字 / 分组改成回车才落）；Aux "原始画面"说明 + 偏好"外部输出在主屏上不盖住主界面"；监视器 / 多画面窗口 dropped / undelivered 走 DisplayFrameLedger；50 ms `AudioMeterFeed` 喂三处电平表（撤检查点 1 Hz 那条）、MeterBar 画 RMS 实心条 + 峰值细线；缩略图切掉名字条；删 App 侧 displayID 后备；**project.yml 加 SwitcherNDISend 产品依赖 2 行** |
+| App 胶水 | e380db5 | W3-C3 问题单的必需 33 行 + 可选 6 行都打了（`OutputStatusText.failureReason` 查表 + 两种语言 6 个键、`aux.external.windowTitle`、`OutputRuntime` 录制项改调 `DiskGuard.statsEntry`、LocalizationTests / VirtualCameraAppTests 跟枚举）；`git apply --3way` 三处相邻行冲突（两个 strings 与 SwitcherSession，W3-E3 在同一位置加了 `aux.rawPictureNote` / `mainScreenLayering`）两边都留。P4 那条 App 缩略图用例按其问题单**补丁 B**改成"旧键被搬进 3x3、缩略图与渲染器一起按 3x3 切"（`testThumbnails_legacyLayoutKeyFromAPIMigratedLikeRenderer`）。G4Factory 注释"电平表占位"改成现状。App 胶水 42 / 50 行 |
+| Makefile | e0434f7 | `make test` / `test-packages` 三组六包都跑完再判失败：三个会话都撞到 macOS 27 上 SwitcherRender 的 3 处环境红让 `make test` 停在第一个包 |
+| `Recorder.freeBytes` | faa20e9 | 非启动卷（镜像 / 外置盘）上 importantUsage 键给 0 → 退到 `volumeAvailableCapacity` 再退 `systemFreeSize`（W3-C 问题单建议 G4 按胶水额度修，W3-C3 再次建议）；`DiskProtectionTests` 记录这个问题的断言改成"> 30 MB"；W3-C3 的兜底留着。SwitcherOutputs 胶水 15 / 50 行 |
+| 持久化 | 64401ef | 提案 019（待批）；prompt 70 / 71 / 72 / 80 增补、新 prompt 73（W3-E4，视裁定）与 OWNERSHIP 行；P4 / W3-E3 / W3-C3 行记完成与合入；docs/checklists/G4.md §11；四张问题单的处理结果 |
+
+### 13.2 测试与 gate（机器 M5 Max / macOS 27.0 (26A428) / Xcode 27.0，接电、盖子开、内建屏 + LG 外接屏在线；全程 `caffeinate -u -i -d -s`；日志在本会话 scratchpad 的 g4f/，不入库）
+
+流水线一次跑完（`swift test` 六包 → 工具冒烟 → `make gen` → `make test-app` → `scripts/gate4.sh --minutes 10 --label g4f`，11:42–12:57），红的单独复跑：
+
+| 步骤 | 结果 |
+|---|---|
+| SwitcherCore | Render 93：**红 2 条**（`testV8_multiviewMetersFromStats` / `testV8_multiviewMetersWithRMS` 的 3 处"逐像素相同"，macOS 27 中文字形，main 67d0f6b 同样，issue P4-w3-compositor-multiview-cjk-labels-macos27）；Engine 93 / 0；Contracts 81（跳 1）/ 0 |
+| SwitcherInputs | 55（跳 6）/ 25（跳 2）/ 25（跳 3）全过 |
+| SwitcherAudio | 63（跳 2）/ 41（跳 3）全过 |
+| SwitcherOutputs | VirtualCamera 12（含 W3-C3 的扫描与 'sonp' 记账）/ Outputs 25 / Streaming 28（MediaMTX 六条与 A4 都跑了，release frameprobe 在）/ NDISend 8（跳 2）/ ISO 10（含 `Recorder.freeBytes` 修后的两条）全过；**External 15（跳 1）红 1** = `DisplayStatsTests.testStats_displayEntriesCountPresentedFrames` 的 Aux 窗口 10 s 呈现 572 帧、dropped 30（PGM 窗口 601 / 0）——**单独复跑 2 次都过**（Aux 606 / 600 帧，dropped 0），与 W3-C2 §2 记过的"负载下 PGM 窗口 29 个 dropped"同类，是那 10 s 里窗口被盖 / 显示器被抢的环境事，不是合入引起的 |
+| SwitcherControl | 25（跳 1）/ 3 / 28 全过 |
+| SwitcherTestKit | 70 / 0（含唤醒延迟那条） |
+| 六包合计 | **700 个用例：红 3 条（2 环境 + 1 复跑过），跳 21（都是原有 BLOCKED / 人工项）** |
+| 工具冒烟 | switcher-headless 0.1.0、frameprobe 0.1.0 |
+| App 第一次全量（81 + 胶水后的用例，203 s） | **红 2 条**：`PanelTests.testPanels_externalDisplayPageWritesFormalDisplayFields`——**P4 预期内的前提变化**（API 带过渡键的 addOutput 现在被 reducer 搬进正式字段，W3-E3 那条"读不到"断言不成立了；与缩略图那条同一类，P4 只验了缩略图那条）→ 改成"搬进来了、旧键清掉、App 读正式字段"（5d679d3，PanelTests.swift 在 G4 行内）；`ThumbnailRateTests.testThumbnail_refreshRateAtMost24fpsWhileMonitorsRunFullSpeed`——缩略图 3.2 fps、PGM / PVW 监视器 9.0 fps（窗口被盖住时的节流数，`testThumbnail_pausesWhenWindowIsCovered` 就是测这个行为的）→ **单独复跑过**（两个类 9 / 9） |
+| App 第二次全量（5d679d3 之后） | **81 个：79 过、0 失败、2 跳**（内置摄像头 BLOCKED-权限、虚拟摄像头出口 BLOCKED-签名；13:01–13:05，218 s）——含 NDI 回环两条（本机有 SDK）、S7 两条、UISmoke、缩略图 / 面板两条改过前提的用例 |
+| gate4 g4f（10 分钟，caffeinate 自动） | **自动项 ✅ 通过**：V1 avg 2.060 / p99 2.476 ms，V2 0 / 35940 拍，V3 p99 0.052 ms，V4 设计外 0，V5 Δ0，V6 第 1000 拍 Cut 干净，V7 Fade 0.252 帧 / Wipe / Zoom ≤ 1 帧，A1 0，A2 整秒 0.000 ms，A3 0，A4 click 极差 0.208 ms / 闪光 0.000，E1 0，E2 6.002 Mbps（0.62%，1.052×），E3 精确 120，E5 无错，C1 50 / 50（mean 10.72 ms），C2 p99 1.6 ms，C3 0 不一致，C4 12000 / 12000，S3 CPU 52.3% / GPU 26.9%；S2 37 MB/h 是 10 分钟整段拟合的参考值（RSS 859 → 881 MB；8 小时归 W4-A）。基线 baselines/g4-m5max.json 没重写。报告 reports/G4-run-g4f.md，已拼进 reports/G4.md |
+| lint（`make lint BRANCH=g4`） | 全绿：禁词 / 版本号 0.1.0 / Package.swift 约束、依赖方向 8 个包、归属 27 个改动文件都在范围内（App 胶水 42 / 50、SwitcherOutputs 胶水 15 / 50）、CSwitcherAudioRT 实时符号审计清单不变 |
+
+
+
+### 13.3 等用户拍板的（汇总；建议项在前）
+
+1. **project.yml 归属**（W3-E3 报告 §4 第 1 条）：App import NDISender 必须链接 SwitcherNDISend 产品，2 行越界。建议给 W3-E3 行加 `project.yml`（备注"只加 App 对本仓库包产品的依赖"，同 W2-B2 / W3-C / G4 先例）；不加就由 G4 认领（G4 行已有 project.yml，lint 现状已绿，只差记录）。
+2. **macOS 27 上 7 张多画面参考图的中文字形**（issue P4-w3-compositor-multiview-cjk-labels-macos27；main 同样复现，PSNR 58–60 dB）三选一：**建议 2**——在 27 上 `scripts/gen-references.sh` 重生成、README 记系统版本（Tests/References/ 在 G4 行内，批了检查点就做）；1 = 随包带 CJK 字体（要开合成会话，产品级改动）；3 = 掩掉标签区域（放宽断言）。
+3. **提案 019**（docs/contract-changes/019）：A `EncoderEntry.output`、B `connections`、C NDI state `failed`、D reducer 对 addInput / setInputSettings 剥 border 格。四条可分开批；**建议都批**，契约 + 填数 + headless 由 main 快进后的下一轮检查点顺手落地（或开 P5），App 那几行进 prompt 73。
+4. **虚拟摄像头页的"来源"下拉是摆设**（issue W3E3-virtual-camera-source-picker-ignored）：**建议 2**——去掉下拉、写明"送 PGM"（设计方案 §2 / §3 的数据流），进 prompt 73；选 1 要先改设计方案 §8 再开输出会话。
+5. **App 的 S7 `missed_render` 断言要不要留余量**（W3-E3 §5 第 3 条；机器忙时偶发 +1，空机器 6 / 6 过）：**建议不放宽**（阈值归用户），改成空机器上跑——已写进 prompt 70 / 80。
+6. **prompt 73（W3-E4）开不开**：视 3 / 4；不开的话那几条（虚拟摄像头下拉、两处死路径、l10n-exempt、019 的读法）进 G5 的 KNOWN_ISSUES。
+7. **ExternalTests 的 Aux 窗口 dropped**：见 §13.2 的复跑结论；是偶发就不用拍板，是真的就退回 W3-C。
+
+### 13.4 增减（已经做了，不要就划掉）
+
+- prompt 70 加第 7 条（无人值守 `caffeinate -u -i -d -s`、soak 期间不跑 App 测试、27 上的基线单独存）；prompt 71 加第 8–10 条（NDI 运行库随包 + 许可证、扩展显示名 InfoPlist.strings、第一次签名跑通的验证清单）；prompt 72 加第 7 条（虚拟摄像头来源 / NDI 一节按裁定写）；prompt 80 加 L0 的前提（参考图裁定、两条偶发用例先单独重跑）。
+- 新 prompt 73 W3-E4（`w3-app-5`，App/）与 OWNERSHIP 行；docs/checklists/G4.md §11（NDI 发送在别的机器上、主屏层级、底栏 / NDI 页状态、扩展回报、窗口标题、磁盘归因）；10-5 标成可测。
+- Makefile 的 make test 不再停在第一个红包；`Recorder.freeBytes` 修了（上表）。
+- 没做的：`OutputSettingsPanel` 两处死的 `migratingLegacyKeys()`（P4 §3 第 5 条）、`AppTest.chineseLiteralViolations` 的 l10n-exempt（W3-C3 §5 第 6 条）——进 prompt 73；`ExternalDisplaySpec.displayIDKey` 包里自己还在用（搬迁时删旧键），不删。
+
+### 13.5 给下一个会话的坑
+
+1. 合并后要 `make gen`（project.yml 多了 SwitcherNDISend）；App 测试里 NDI 两条要本机装 NDI SDK（/Library/NDI SDK for Apple），没有就 BLOCKED-SDK 跳过；SDK 不在时包自动退空实现，App 照编。
+2. `make test` 现在六包 + 工具 + App 都跑完才判，红的包在末尾列出；macOS 27 上 SwitcherRender 那 3 处中文字形红在参考图裁定前一直在。
+3. `DiskGuard.classify` 不认中文字样了：App 只对错误码 / 剩余空间归的"磁盘"切备用目录。
+4. `Recorder.freeBytes` 修好之后 `RecorderCounters.diskFreeBytes` 在镜像上不再是 0，W3-C3 兜底那条路径平时不走；两边的用例都改成不依赖 0。
+5. 检查点合入三路时 App 的相邻行冲突（strings 键、SwitcherSession 接线）是常态：`git apply --3way` 后两边都留，键按字母序。

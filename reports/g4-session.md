@@ -104,3 +104,10 @@ worktree `.claude/worktrees/g4-checkpoint-merge-b5a2dc`，分支直接改名 `g4
 ## 9. 第三轮（2026-09-24，本会话续）
 
 用户："017 批了，电平表按你说的，UISmoke 用 (a)，都顺手做了"。提案 017（RMS）从契约到 C 热路径、集成层、渲染器与参考图一次落地；三处电平表统一成设计方案 §7 新写的口径；UISmoke 的快照分发计数改成只量本条。明细与数字在 reports/G4-notes.md §12。
+
+## 10. 第四轮（2026-09-27，本会话续）
+
+用户："那三个已经结束了，你来检查一下，有什么要拍版的、要增减的，你统一再给我汇报一下"。P4（p4-contracts）/ W3-C3（w3-outputs-4）/ W3-E3（w3-app-4）三路对过报告与 prompt 后按契约 → 包 → App 合入 g4，
+App 胶水 42 / 50 行（W3-C3 的安装器失败原因查表 + P4 的两条用例前提），Makefile 的 make test 改成三组跑完再判，`Recorder.freeBytes` 按两张问题单的建议修了；
+六包 700 个用例只剩 macOS 27 中文字形那 2 条环境红，gate4 g4f 自动项通过。等拍板的七条、已做的增减在 reports/G4-notes.md §13.3 / §13.4；提案 019 待批；prompt 73（W3-E4）视裁定。
+
