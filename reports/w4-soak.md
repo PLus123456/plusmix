@@ -17,7 +17,7 @@ worktree `.claude/worktrees/w4-soak-baseline-56b8ec`；桌面端给的分支 `cl
 
 | # | 问题 | 结论 |
 |---|---|---|
-| 1 | frameprobe 能不能分析 8 小时录像 | 1 分钟录像（3600 帧）`frameprobe av --discontinuities` 4.5 s、峰值 RSS 730 MB（约 800 帧 / 秒）。8 小时 172.8 万帧估 35–40 分钟；它把整条音轨读成单声道 float 进内存，8 小时 13.8 亿样本 ≈ 5.5 GB（数组扩容时峰值可到两倍）——本机 128 GB 可以，8 GB 的 Air 上别对 8 小时录像跑 |
+| 1 | frameprobe 能不能分析 8 小时录像 | 1 分钟录像（3600 帧）`frameprobe av --discontinuities` 4.5 s、峰值 RSS 730 MB（约 800 帧 / 秒）。当时按"整条音轨读成单声道 float 进内存"估 8 小时约 5.5 GB、本机够——**估错了**，内存其实随帧数线性涨，见第 9 条 |
 | 2 | 会话 / CI 里能不能跑 Instruments Leaks | **不能**：`DevToolsSecurity -status` = disabled，xctrace 附加进程要当场输管理员密码；非交互时 xctrace 一直挂着、目标进程停在 T 状态（7 分钟没动，手动停了；这期间屏幕上可能弹过一次"开发者工具访问"的密码框，已随进程退出取消）→ leaks.sh 开跑前查它、非交互直接写 BLOCKED；另加 90 s 看门狗 |
 | 3 | 摄像头授权在本会话里是什么状态 | 20 行探针（只查 `authorizationStatus`、不请求）：video = **notDetermined**（授权归属于负责进程，本会话 = Claude），audio = authorized。直接跑 `--camera auto` 会在无人时弹系统授权框 → soak.sh 的规则见 §1 交付 1 |
 | 4 | "温度环境"不经 sudo 能读到什么 | macOS 27 上 `AppleSmartBattery` 已经没有 Temperature 键（ioreg 全树没有）；`pmset -g therm` 只有告警级别；`ProcessInfo.thermalState` 不要权限 → 编一个 14 行探针（thermal-state.swift）每分钟采；有 sudo 时再加 powermetrics 的 thermal_pressure；室温读不到，留 `--ambient` 给人填 |
@@ -135,7 +135,8 @@ g4-m5max.json（26.6.2、10 分钟、带 API 客户端）只作参考列：V1 2.
    新写的长脚本照这个做（`SWITCHER_SCRIPT_COPY` 那几行）。
 2. **摄像头授权归属于"负责进程"**：在终端里跑就是那个终端 App，在 Claude 里跑就是 Claude，CI 里是 runner。非交互且授权未决时 soak 不接摄像头（不弹框），报告 §2 会有 ⚠️。
 3. **开发者工具访问没开时 Instruments 附加会挂住**：xctrace 不报错、目标进程停在 T 状态、一直等管理员密码；leaks.sh 有前置检查和 90 s 看门狗，别的地方用 xctrace 也要防这个。
-4. **frameprobe 对 8 小时录像**：约 40 分钟、整条音轨进内存（约 5.5 GB，扩容时峰值更高）。8 GB 的机器别跑；需要的话按小时切段是 W1-A 的活。
+4. **soak 的文件输入是 ProRes 422 HQ（约 430 Mb/s 的 E4 源）**：这种片段会让文件输入每圈在循环点空一拍、推帧线程大量晚醒（H.264 没有，问题单给 W2-A）；
+   报告的输入表里 11 号的 dup 就是这个，不是引擎挑帧的问题。
 5. **headless 收尾顺序**：带自身音频的输入（文件）要先从音频引擎摘掉再停，否则音频引擎等录制封口 / 推流排空的那几秒全记成欠载；以后给 headless 接别的"自己带声音"的输入（摄像头麦克风、DeckLink）照这个做。
    soak 的判定只看运行段（拍号第一次到达最终值的那一行为止），停机段单列不判。
 6. **BSD 的 `seq 1 0` 会倒着数出 `1 0`**：计数循环用 while。
