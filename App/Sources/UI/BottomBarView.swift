@@ -99,7 +99,9 @@ final class BottomBarView: NSView {
 
     /// 1 Hz：状态行 + 按钮的实际状态。
     func apply(stats: Stats) {
-        let text = StatusLineFormatter.line(current: stats, previous: previousStats, format: format)
+        // encoder 的项不带类型：按快照里带编码器的输出同序给（NDI 的原始码率不顶掉录制 / 推流的码率，W3-E3）
+        let kinds = state.outputs.filter { [.record, .stream, .ndi].contains($0.kind) }.map(\.kind)
+        let text = StatusLineFormatter.line(current: stats, previous: previousStats, format: format, kinds: kinds)
         statusLabel.stringValue = text
         lastStatusLine = (stats, text)
         previousStats = stats

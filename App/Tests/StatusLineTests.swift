@@ -82,5 +82,23 @@ final class StatusLineTests: XCTestCase {
                          encoder: [Stats.EncoderEntry(skipped: 0, bitrate: 0, diskFreeMb: 512, state: "idle")],
                          audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 12.4, gpuPct: 26.6)
         XCTAssertEqual(StatusLineFormatter.fields(current: idle, previous: b, format: .hd1080p60).map(\.value).suffix(3), ["—", "—", "512 MB"])
+
+        // W3-E3：NDI 发送进了 encoder[]（码率 = UYVY 原始码率）。给了输出类型时先找录制 / 推流，NDI 排在前面也不顶掉它们；
+        // 只有 NDI 在发时才显示 NDI 的；unavailable（没有 SDK）不算在跑
+        let ndiFirst = Stats(ts: 103, tick: Tick(780), renderMs: 2, missedRender: 3, jitterMs: 0.1, perInput: [:],
+                             encoder: [Stats.EncoderEntry(skipped: 1, bitrate: 1_990_000_000, frames: 60, dropped: 1, state: "publishing"),
+                                       Stats.EncoderEntry(skipped: 2, bitrate: 6_000_000, frames: 60, state: "recording")],
+                             audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 12.4, gpuPct: 26.6)
+        XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60, kinds: [.ndi, .record]).map(\.value)[6...7], ["2", "6.00 Mb/s"])
+        XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60).map(\.value)[6...7], ["1", "1990.00 Mb/s"], "不给类型 = 旧行为")
+        XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60, kinds: [.ndi]).map(\.value)[6...7], ["1", "1990.00 Mb/s"],
+                       "类型个数对不上 = 不分类型")
+        var onlyNDI = ndiFirst
+        onlyNDI.encoder[1].state = "idle"
+        XCTAssertEqual(StatusLineFormatter.fields(current: onlyNDI, previous: b, format: .hd1080p60, kinds: [.ndi, .record]).map(\.value)[6...7], ["1", "1990.00 Mb/s"],
+                       "只有 NDI 在发：显示它")
+        onlyNDI.encoder[0].state = "unavailable"
+        XCTAssertEqual(StatusLineFormatter.fields(current: onlyNDI, previous: b, format: .hd1080p60, kinds: [.ndi, .record]).map(\.value)[6...7], ["—", "—"],
+                       "unavailable 不算在跑")
     }
 }
