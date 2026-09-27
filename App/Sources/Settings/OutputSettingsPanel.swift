@@ -217,11 +217,10 @@ final class OutputSettingsModel: ObservableObject {
         return n
     }
 
-    /// 改显示器 / 来源：只写正式字段 `OutputSettings.display`（提案 013）。没经过 Show.load 的内存状态（API 直接 addOutput 的老写法）
-    /// 可能还带过渡键 extra["displayID"] / ["fallbackToMain"]：先按 Show.load 同一套规则搬进正式字段、清掉旧键，再改。
+    /// 改显示器 / 来源：只写正式字段 `OutputSettings.display`（提案 013），只改要改的那一项。状态机里的状态不会带输出的过渡键
+    /// （P4 起 addOutput / setOutputSettings / loadShow 进 reducer 时都先按 Show.load 同一套规则搬迁），这里不用再搬（W3-E4 删了多余的调用）。
     func setExternalDisplay(_ number: Int, screenNumber: UInt32?, source: OutputSource?) {
         updateOutput(number) { s in
-            s = s.migratingLegacyKeys()
             if let screenNumber {
                 var d = s.display ?? DisplayOutputSettings()
                 d.displayID = screenNumber
@@ -234,7 +233,6 @@ final class OutputSettingsModel: ObservableObject {
     /// 显示器不在时退回主屏（true）还是黑着等它回来（false，默认）。
     func setExternalFallback(_ number: Int, on: Bool) {
         updateOutput(number) { s in
-            s = s.migratingLegacyKeys()
             var d = s.display ?? DisplayOutputSettings()
             d.fallbackToMain = on
             s.display = d

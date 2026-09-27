@@ -2,7 +2,7 @@
 //   NDI 发送：ndi.groups = 分组；ndi.conversion 是 W2-D 定的（NDISender.Configuration.Conversion.extraKey）
 // 提案 010 / 013 落地后，显示器 ID 与多画面布局都是正式字段（`OutputSettings.display` / `.multiview`），不再走 extra：只读正式字段
 // （W3-E3 删了读过渡键 extra["displayID"] 的后备——包的 ExternalDisplaySpec 从 W3-C2 起、契约从 P3 起都不读了）；
-// 旧节目文件由 `Show.load` 一次性搬迁，没经过 Show.load 的内存状态由设置页改动前的 `migratingLegacyKeys()` 搬。
+// 旧节目文件由 `Show.load` 一次性搬迁，API 直接 addOutput / setOutputSettings 进来的由 reducer 搬（P4）；App 自己不搬（W3-E4 删了设置页里多余的那两处调用）。
 import AppKit
 import SwitcherContracts
 

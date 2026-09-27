@@ -382,7 +382,7 @@ final class PanelTests: XCTestCase {
     }
 
     /// 外部显示页（W3-E2 交付第 6 条 / 提案 013、015）：保存后快照 outputs[n].settings.display?.displayID 变了、extra 里没有 displayID 键
-    /// （没经过 Show.load 的内存状态可能还带过渡键：页上一改就只写正式字段、清掉旧键）；fallbackToMain 默认 false 不再显式写；启用开关走 setOutputEnabled。
+    /// （API 直接 addOutput 带过渡键的由 reducer 搬迁——P4；页上只写正式字段，W3-E4 起不再自己搬）；fallbackToMain 默认 false 不再显式写；启用开关走 setOutputEnabled。
     func testPanels_externalDisplayPageWritesFormalDisplayFields() throws {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 1)
@@ -441,5 +441,56 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(w.spec.displayID, screen)
         w.onCloseRequested?()   // = 用户在外部窗口按 Esc（W3-C：组装方收到后删输出；closeOutput 是管理器按快照关窗口用的）
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number) == nil && session.aux.external.windows.isEmpty }, "用户关窗口应移除输出")
+    }
+
+
+    @MainActor final class SentCommands { var list: [Command] = [] }
+
+    /// W3-E4 交付第 2 条（P4 报告 §3 第 5 条 / §5 第 5 条；问题单 P4-w3-app-4-legacy-layout-thumbnail-test"顺带"一节）：外部显示页改显示器 / 退回主屏
+    /// 只写它要改的那一项——App 里不再调 `migratingLegacyKeys()`：状态机里的状态不会带输出的过渡键（P4 起 addOutput / setOutputSettings / loadShow
+    /// 进 reducer 都先搬迁），那两处调用是死路径。
+    func testW3E4_2_externalDisplayPageWritesOnlyTheChangedField_noLegacyMigrationInApp() throws {
+        // 1. 源码：App/Sources 里没有 migratingLegacyKeys 的调用（注释里提到不算）——搬迁是 Show.load / reducer 的事
+        let root = try AppTest.repoRoot().appendingPathComponent("App/Sources")
+        var callers: [String] = []
+        for file in try AppTest.swiftFiles(in: root) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for (i, raw) in text.components(separatedBy: "\n").enumerated() where AppTest.stripLineComment(raw).contains("migratingLegacyKeys") {
+                callers.append("\(file.lastPathComponent):\(i + 1)")
+            }
+        }
+        XCTAssertEqual(callers, [], "App 不该再调 migratingLegacyKeys")
+
+        // 2. 模型级：故意给模型一份带过渡键的状态（App 里不会出现——只为证明页面不再碰它）：改显示器只改 display.displayID、改退回只改 fallbackToMain、
+        //    改来源只改 source，extra 原样发出去（原来的 migratingLegacyKeys 会顺手把两个旧键剥掉）
+        let extra: [String: JSONValue] = ["displayID": .number(1), "fallbackToMain": .bool(false), "someOtherKey": .string("x")]
+        var show = ShowDocuments.emptyShow()
+        show.outputs.append(OutputState(number: 5, kind: .externalDisplay, name: "legacy", enabled: false,
+                                        settings: OutputSettings(source: .program, display: DisplayOutputSettings(displayID: 1), extra: extra)))
+        let model = OutputSettingsModel(state: show.makeState(), tab: .external, defaultRecordDirectory: "/tmp", showName: "t", queriesSystemExtensions: false)
+        let sent = SentCommands()
+        model.send = { sent.list.append($0) }
+        model.setExternalDisplay(5, screenNumber: 7, source: nil)
+        model.setExternalFallback(5, on: true)
+        model.setExternalDisplay(5, screenNumber: nil, source: .preview)
+        XCTAssertEqual(sent.list, [
+            .setOutputSettings(output: 5, settings: OutputSettings(source: .program, display: DisplayOutputSettings(displayID: 7), extra: extra)),
+            .setOutputSettings(output: 5, settings: OutputSettings(source: .program, display: DisplayOutputSettings(displayID: 7, fallbackToMain: true), extra: extra)),
+            .setOutputSettings(output: 5, settings: OutputSettings(source: .preview, display: DisplayOutputSettings(displayID: 7, fallbackToMain: true), extra: extra)),
+        ], "页面只写它要改的那一项，extra 原样：搬迁不是它的事")
+
+        // 3. 端到端：API 直接 addOutput 一个带过渡键的外部显示输出 → 页面拿到的状态里旧键已经被 reducer 搬走（删掉那两处调用的前提，P4）
+        let session = try AppTest.freshSession()
+        let page = AppTest.controller.panels.showOutputSettings(tab: .external).model
+        let n = page.nextOutputNumber()
+        session.send(.addOutput(config: OutputState(number: n, kind: .externalDisplay, name: "legacy", enabled: false,
+                                                    settings: OutputSettings(source: .program, extra: ["displayID": .number(3), "fallbackToMain": .bool(true)]))))
+        XCTAssertTrue(AppTest.waitUntil(3) { page.state.output(n) != nil })
+        XCTAssertEqual(page.state.output(n)?.settings.display, DisplayOutputSettings(displayID: 3, fallbackToMain: true), "reducer 搬进正式字段")
+        XCTAssertEqual(page.state.output(n)?.settings.extra, [:], "页面看到的状态里没有过渡键")
+        page.removeOutput(n)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(n) == nil })
+        XCTAssertEqual(session.control.bus.counters.rejected, 0)
+        AppTest.controller.panels.closeAll()
     }
 }
