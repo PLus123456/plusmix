@@ -288,12 +288,12 @@ final class ContractsP3Tests: XCTestCase {
         XCTAssertEqual(hardened.mixer.overlays[0].border?.width, OverlayBorder.defaultWidth, "NaN 宽度当没给")
         XCTAssertEqual(hardened.outputs[0].settings.multiview?.custom, [], "编号超出范围的格子忽略（不崩）")
 
-        // 没有叠加通道用那路输入时，效果格留着（渲染器的后备路径还认它）
+        // 没有叠加通道用那路输入时：不搬，效果格也清掉（P4：渲染器的后备读取 W3-B2 删了，留着没人读；细节见 ContractsP4Tests）
         var unused = state
         unused.overlays[0].input = nil
-        let untouched = Show(name: "没用到", state: unused).migratingLegacyKeys()
-        XCTAssertEqual(untouched.inputs[0].settings.effects.map(\.id), ["parametricEQ", OverlayBorder.legacyEffectID])
-        XCTAssertNil(untouched.mixer.overlays[0].border)
+        let cleared = Show(name: "没用到", state: unused).migratingLegacyKeys()
+        XCTAssertEqual(cleared.inputs[0].settings.effects.map(\.id), ["parametricEQ"])
+        XCTAssertNil(cleared.mixer.overlays[0].border)
     }
 
     /// 老 stats.jsonl 每行仍能解（display 缺键 = 空数组）：仓库里留档的 W2 状态行文件 + 本工作树 `.build/gate*/` 里跑过的 gate 输出。
