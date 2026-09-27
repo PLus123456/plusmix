@@ -38,8 +38,10 @@ yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
 step()  { printf '\033[36m== %s\033[0m\n' "$*"; }
 mkdir -p "$out_dir"
 duration=$((minutes * 60))
-model=$(system_profiler SPHardwareDataType 2>/dev/null | sed -n 's/^ *Model Name: //p' | head -1)
-chip=$(system_profiler SPHardwareDataType 2>/dev/null | sed -n 's/^ *Chip: //p' | head -1)
+# system_profiler 的文字标签随系统语言本地化，JSON 键名不会
+hw_json=$(system_profiler -json SPHardwareDataType 2>/dev/null)
+model=$(printf '%s' "$hw_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SPHardwareDataType"][0].get("machine_name", ""))' 2>/dev/null)
+chip=$(printf '%s' "$hw_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SPHardwareDataType"][0].get("chip_type", ""))' 2>/dev/null)
 machine=$(python3 -c "import sys; sys.path.insert(0, 'scripts/perf'); import perfjudge as pj; print(pj.machine_tag('$chip', '$model'))")
 [ -n "$report" ] || report="reports/W4-s4-$machine.md"
 
@@ -87,6 +89,6 @@ if [ "$do_run" = 1 ]; then
   echo "exit_code=$rc" >> "$out_dir/run.txt"
   sleep 1; pkill -P "$pm_pid" cat 2>/dev/null; wait "$pm_pid" 2>/dev/null
   trap - EXIT
-  [ "$rc" = 0 ] || red "headless 退出码 $rc（$out_dir/headless.log）"
+  [ "$rc" = 0 ] || red "headless 退出码 ${rc}（$out_dir/headless.log）"
 fi
 python3 scripts/perf/s4_report.py --out-dir "$out_dir" --machine "$machine" --report "$report" $([ "$force" = 1 ] && [[ "$model" != *"MacBook Air"* ]] && echo --not-fanless)

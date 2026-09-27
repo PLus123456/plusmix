@@ -225,3 +225,20 @@ class A3Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShellLocaleTests(unittest.TestCase):
+    def test_S1_shellScriptsBraceVariablesBeforeNonASCII(self):
+        # macOS 的 /bin/bash 3.2 在 UTF-8 locale 下把 `$label（` 里"（"的首字节也算进变量名，set -u 下直接"未定义变量"退出
+        # （2026-09-27 用户在终端里跑 make soak 就这么断在 env-snapshot.sh / make-e4-clip.sh；会话里的 Bash 没设 LANG，测不出来）。
+        # 变量后面紧跟中文 / 全角标点一律写成 ${name}。
+        import glob
+        import re
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+        bad = []
+        for path in sorted(glob.glob(os.path.join(root, "soak", "*.sh")) + glob.glob(os.path.join(root, "perf", "*.sh"))):
+            with open(path, "rb") as f:
+                for n, line in enumerate(f, 1):
+                    for m in re.finditer(rb"\$[A-Za-z_][A-Za-z0-9_]*(?=[\x80-\xff])", line):
+                        bad.append(f"{os.path.relpath(path, root)}:{n}: {m.group().decode()}")
+        self.assertEqual(bad, [], "变量后面紧跟非 ASCII 字符要写成 ${name}：\n" + "\n".join(bad))

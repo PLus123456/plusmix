@@ -75,7 +75,7 @@ thermal_bin=.build/soak/thermal-state
 
 if [ "$do_run" = 1 ]; then
   # ---- 0. 前置检查 ----
-  for tool in mediamtx ffmpeg ffprobe curl; do command -v "$tool" >/dev/null || { red "没有 $tool（brew install $tool）"; exit 2; }; done
+  for tool in mediamtx ffmpeg ffprobe curl; do command -v "$tool" >/dev/null || { red "没有 ${tool}（brew install ${tool}）"; exit 2; }; done
   need_gb=$(( (duration_s * 3 + 3599) / 3600 * (2 + 2 * mtx_record) + 20 ))      # 录制 6 Mb/s ≈ 2.7 GB/h，分段分析时再占一份（+ 两路落盘）+ 余量
   free_gb=$(df -g "$out_dir" | awk 'NR==2{print $4}')
   [ "$free_gb" -ge "$need_gb" ] || { red "磁盘只剩 ${free_gb} GB，这次要 ≥ ${need_gb} GB"; exit 2; }
@@ -85,8 +85,8 @@ if [ "$do_run" = 1 ]; then
   if lsof -nP -iUDP:"$mtx_srt_port" >/dev/null 2>&1; then red "UDP $mtx_srt_port 被占（MediaMTX 的 SRT 端口）"; exit 2; fi
   src=$(pmset -g batt | head -1)
   if ! printf '%s' "$src" | grep -q "AC Power"; then
-    if [ "$allow_battery" = 1 ]; then yellow "没接电源（$src）：--allow-battery 照跑，报告里会注明"
-    else red "没接电源（$src）。§2.8 要求接电源；非要跑加 --allow-battery"; exit 2; fi
+    if [ "$allow_battery" = 1 ]; then yellow "没接电源（${src}）：--allow-battery 照跑，报告里会注明"
+    else red "没接电源（${src}）。§2.8 要求接电源；非要跑加 --allow-battery"; exit 2; fi
   fi
   if [ "$use_ndi" = 1 ] && [ ! -f "/Library/NDI SDK for Apple/include/Processing.NDI.Lib.h" ]; then
     yellow "没装 NDI SDK：这次不开 NDI 发送（报告里算偏离标准负载）"; use_ndi=0
@@ -120,7 +120,7 @@ if [ "$do_run" = 1 ]; then
         camera_note="非交互环境且摄像头授权未定（没人点授权框）：这次不接摄像头"
         yellow "$camera_note"; camera=none ;;
       *)
-        camera_note="摄像头授权是 $cam_auth：CameraInput 会停在 error（画黑），负载少了摄像头这一路；系统设置 → 隐私与安全性 → 摄像头 给终端开权限"
+        camera_note="摄像头授权是 ${cam_auth}：CameraInput 会停在 error（画黑），负载少了摄像头这一路；系统设置 → 隐私与安全性 → 摄像头 给终端开权限"
         yellow "$camera_note" ;;
     esac
     echo "camera_auth=$cam_auth" >> "$env_file"
@@ -192,7 +192,7 @@ if [ "$do_run" = 1 ]; then
     echo "camera=$camera"; echo "camera_note=$camera_note"; echo "file=$use_file"; echo "mtx_record=$mtx_record"; echo "rtmp_port=$rtmp_port"
     echo "command=$headless run --show $show --script $scenario --duration $duration_s --stats $stats --record $movie --audio-device null ${ndi_args[*]} ${stream_args[*]}"
   } > "$run_info"
-  step "跑 $label（$duration_s s）：$(sed -n 's/^command=//p' "$run_info" | sed "s|$PWD/||g")"
+  step "跑 ${label}（$duration_s s）：$(sed -n 's/^command=//p' "$run_info" | sed "s|$PWD/||g")"
   # stdout / stderr 每行加墙钟时间戳（异常截取按时间找行）；$! 仍是 headless 自己
   "$headless" run --show "$show" --script "$scenario" --duration "$duration_s" --stats "$stats" --record "$movie" --audio-device null \
       ${ndi_args[@]+"${ndi_args[@]}"} ${stream_args[@]+"${stream_args[@]}"} \
@@ -280,7 +280,7 @@ print(time.strftime('%H:%M:%S'), f\"拍 {l['tick']}  V2 {l['missed_render']}  A1
   mkdir -p "$out_dir/crash"
   find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -newer "$out_dir/.start-marker" \( -iname 'switcher-headless*' -o -iname 'mediamtx*' \) -exec cp {} "$out_dir/crash/" \; 2>/dev/null
   tail -n 25 "$run_log" | cut -c 25-
-  [ "$rc" = 0 ] || red "headless 退出码 $rc（$run_log）"
+  [ "$rc" = 0 ] || red "headless 退出码 ${rc}（${run_log}）"
 fi
 
 [ -s "$stats" ] || { red "没有 $stats"; exit 1; }

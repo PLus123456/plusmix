@@ -29,7 +29,7 @@ command -v ffmpeg >/dev/null || { echo "没有 ffmpeg（brew install ffmpeg）" 
 mkdir -p "$out"
 clip="$out/e4-source.mov"; meta="$out/e4-source.json"
 if [ "$force" = 0 ] && [ -s "$clip" ] && [ -s "$meta" ]; then
-  echo "E4 片段已存在：$clip（sha256 $(python3 -c "import json;print(json.load(open('$meta'))['sha256'][:12])")）"
+  echo "E4 片段已存在：${clip}（sha256 $(python3 -c "import json;print(json.load(open('$meta'))['sha256'][:12])")）"
   exit 0
 fi
 

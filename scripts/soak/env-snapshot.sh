@@ -34,10 +34,12 @@ kv epoch "$(date +%s)"
 kv commit "$(git rev-parse --short HEAD 2>/dev/null)"
 kv branch "$(git symbolic-ref --short -q HEAD 2>/dev/null || echo detached)"
 kv dirty "$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
-hw=$(system_profiler SPHardwareDataType 2>/dev/null)
-kv chip "$(printf '%s\n' "$hw" | sed -n 's/^ *Chip: //p' | head -1)"
-kv model "$(printf '%s\n' "$hw" | sed -n 's/^ *Model Name: //p' | head -1)"
-kv model_id "$(printf '%s\n' "$hw" | sed -n 's/^ *Model Identifier: //p' | head -1)"
+# system_profiler 的文字输出标签会随系统语言本地化，JSON 的键名不会
+hw_json=$(system_profiler -json SPHardwareDataType 2>/dev/null)
+hw() { printf '%s' "$hw_json" | python3 -c 'import json,sys; d=json.load(sys.stdin)["SPHardwareDataType"][0]; print(d.get(sys.argv[1], ""))' "$1" 2>/dev/null; }
+kv chip "$(hw chip_type)"
+kv model "$(hw machine_name)"
+kv model_id "$(hw machine_model)"
 kv cores "$(sysctl -n hw.ncpu)（perflevel0 $(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null) / perflevel1 $(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null)）"
 kv memory_gb "$(( $(sysctl -n hw.memsize) / 1073741824 ))"
 kv macos "$(sw_vers -productVersion)"
@@ -45,7 +47,7 @@ kv macos_build "$(sw_vers -buildVersion)"
 kv xcode "$(xcodebuild -version 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')"
 kv swift "$(swift --version 2>&1 | head -1)"
 vmaf=no; ffmpeg -hide_banner -filters 2>/dev/null | grep -q ' libvmaf ' && vmaf=yes
-kv ffmpeg "$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3)（libvmaf $vmaf）"
+kv ffmpeg "$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3)（libvmaf ${vmaf}）"
 kv mediamtx "$(mediamtx --version 2>/dev/null | head -1)"
 kv ndi_sdk "$(cat '/Library/NDI SDK for Apple/Version.txt' 2>/dev/null | head -1 | tr -d '\r')"
 batt=$(pmset -g batt 2>/dev/null)

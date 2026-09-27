@@ -85,7 +85,7 @@ g4-m5max.json（26.6.2、10 分钟、带 API 客户端）只作参考列：V1 2.
 | S4 | BLOCKED-机型（MacBook Pro 有风扇）；`scripts/perf/s4-thermal.sh` 在本机只写报告头 `reports/W4-s4-m5max.md`；解锁：借 M1 Air | BLOCKED |
 | 单元：headless 预设（`swift test --package-path Tools/switcher-headless`） | 9 / 9 过（soak 节目 8 合成 + 摄像头 + 文件、输出编号、叠加换成摄像头 / 文件、每 30 s 切换、每 5 min 翻叠加、PGM 只轮 1–8、perf-e4） | ✅ |
 | 单元：`python3 -B -m unittest discover -s scripts/perf -p 'test_*.py'` | 20 / 20 过（百分位、V1–V3 / S3 口径、10% 规则、基线为 0、floor、同机同大版本选基线、机型标记、powermetrics plist 解析、E4 对齐与分段 VMAF、S4 降频判定） | ✅ |
-| 单元：`python3 -B -m unittest discover -s scripts/soak -p 'test_*.py'` | 25 / 25 过（窗口切分与累计相减、V2 / A1 / E1 窗口判定、离线不连续落窗、运行段 / 停机段、拍号停走、事件与并段、崩溃 / 短跑、每分钟 RSS、S2 预热后拟合与参考、A3 满 8 h 与外推、分段合并、Leaks 导出解析） | ✅ |
+| 单元：`python3 -B -m unittest discover -s scripts/soak -p 'test_*.py'` | 26 / 26 过（shell 脚本里 `$变量` 后不许紧跟非 ASCII、窗口切分与累计相减、V2 / A1 / E1 窗口判定、离线不连续落窗、运行段 / 停机段、拍号停走、事件与并段、崩溃 / 短跑、每分钟 RSS、S2 预热后拟合与参考、A3 满 8 h 与外推、分段合并、Leaks 导出解析） | ✅ |
 
 
 ## 3. 没做的和原因
@@ -131,6 +131,11 @@ g4-m5max.json（26.6.2、10 分钟、带 API 客户端）只作参考列：V1 2.
 
 ## 5. 下一个会话需要知道的坑
 
+0. **macOS 的 /bin/bash 3.2 在 UTF-8 locale 下会把 `$变量` 后面紧跟的中文 / 全角标点的首字节并进变量名**：`"跑 $label（…"` 在 `set -u` 下直接
+   "label�: unbound variable" 退出。会话里的 Bash 工具没设 LANG（C locale），**所有验证都测不出来**；用户在自己的终端里第一次跑 `make soak` 就断在
+   env-snapshot.sh / make-e4-clip.sh（2026-09-27 晚，已修：16 处全改成 `${name}`，并在中文 UTF-8 locale 下把 soak / perf 整条实跑过）。
+   `scripts/soak/test_soakjudge.py` 的 `test_S1_shellScriptsBraceVariablesBeforeNonASCII` 扫 scripts/soak、scripts/perf 的脚本防回归；
+   别的目录写中文的 bash 脚本也要注意（验证时加 `LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8`）。机型也别从 `system_profiler` 的文字标签里抠，用 `-json`。
 1. **别在脚本跑着的时候改它**：bash 边执行边按偏移读脚本，中途改文件（编辑、`git pull`、合并）会让正在跑的那一轮读到错位的行。soak / perf-baseline / leaks / s4-thermal 现在开跑先把自己拷到 `$TMPDIR` 再 exec 拷贝；
    新写的长脚本照这个做（`SWITCHER_SCRIPT_COPY` 那几行）。
 2. **摄像头授权归属于"负责进程"**：在终端里跑就是那个终端 App，在 Claude 里跑就是 Claude，CI 里是 runner。非交互且授权未决时 soak 不接摄像头（不弹框），报告 §2 会有 ⚠️。

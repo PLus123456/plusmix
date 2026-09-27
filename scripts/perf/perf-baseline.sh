@@ -60,7 +60,7 @@ yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
 step()  { printf '\033[36m== %s\033[0m\n' "$*"; }
 
 command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || { red "没有 ffmpeg / ffprobe（brew install ffmpeg）"; exit 2; }
-[ -f "$show" ] && [ -f "$script" ] || { red "缺 $show / $script（G4 检查点入库的场景；scenarios/ 不归 W4-A，本脚本不生成）"; exit 2; }
+[ -f "$show" ] && [ -f "$script" ] || { red "缺 $show / ${script}（G4 检查点入库的场景；scenarios/ 不归 W4-A，本脚本不生成）"; exit 2; }
 
 # ---- 0. 环境（§2.8：接电源、关低电量模式、记录机型和 macOS、关掉占 GPU 的程序；§7 报告头）----
 env_file="$out_dir/environment.txt"
@@ -137,7 +137,7 @@ if [ "$do_run" = 1 ]; then
   echo "busy_processes_after=$(scripts/soak/env-snapshot.sh --busy-only)" >> "$env_file"
   [ -n "$thermal_bin" ] && echo "thermal_state_after=$("$thermal_bin" | sed 's/^thermal=//; s/ low_power=.*//')" >> "$env_file"
   tail -n 12 "$run_log"
-  [ "$rc" = 0 ] || { red "headless 退出码 $rc（$run_log）"; exit 1; }
+  [ "$rc" = 0 ] || { red "headless 退出码 ${rc}（${run_log}）"; exit 1; }
 fi
 [ -s "$stats" ] || { red "没有 $stats"; exit 1; }
 
@@ -192,7 +192,7 @@ fi
 
 # ---- 5. StatsSummary（summary 段与 G2–G4 的基线同结构，headless summarize --baseline 能直接读）----
 "$headless" summarize --stats "$stats" --write-baseline "$out_dir/summary-baseline.json" \
-  --meta checkpoint=W4-A-L5 --meta "commit=$(git rev-parse --short HEAD)" --meta "scenario=$script（前 $minutes 分钟）" \
+  --meta checkpoint=W4-A-L5 --meta "commit=$(git rev-parse --short HEAD)" --meta "scenario=${script}（前 $minutes 分钟）" \
   --meta "show=$show" --meta "label=$label" --meta "macos=$(sw_vers -productVersion)" >/dev/null 2>&1 || { red "summarize 失败"; exit 1; }
 
 # ---- 6. 判定 + 报告 + 基线 ----
@@ -203,5 +203,5 @@ args=(--out-dir "$out_dir" --label "$label" --minutes "$minutes" --show "$show" 
 [ "$do_e4" = 1 ] && args+=(--e4-dir "$e4_dir" --e4-meta .build/perf/e4/e4-source.json)
 python3 scripts/perf/perf_report.py "${args[@]}"
 rc=$?
-if [ "$rc" = 0 ]; then green "L5 无退步（$out_dir）"; else red "L5 有退步或掉出必须档（看报告的判定表）：$out_dir"; fi
+if [ "$rc" = 0 ]; then green "L5 无退步（${out_dir}）"; else red "L5 有退步或掉出必须档（看报告的判定表）：$out_dir"; fi
 exit $rc
