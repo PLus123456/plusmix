@@ -290,7 +290,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 | 参数 | 含义 |
 |---|---|
 | `channel` | 1–4 |
-| `border` | {width: 占节目高的比例, color: {red, green, blue}} 或 null（不画） |
+| `border` | {width: 占节目高的比例（渲染器钳到 0–0.1）, color: {red, green, blue}} 或 null（不画） |
 | `anchor` | topLeft / top / topRight / left / center / right / bottomLeft / bottom / bottomRight；缩放动画绕它缩 |
 | `previewOn` | true = 这一路也画进 PVW |
 
@@ -514,7 +514,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setOutputEnabled`
 
-非录制 / 推流输出（NDI / 外部显示 / 虚拟摄像头 / 多画面）的目标开关；record / stream 被拒。
+非录制 / 推流输出（NDI / 外部显示 / 虚拟摄像头 / 多画面）的目标开关；record / stream 被拒。多画面的开关 = 要不要把多画面送给下游（NDI 之类），布局与它无关。
 
 | 参数 | 含义 |
 |---|---|
@@ -716,7 +716,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `removeInput`
 
-删一路输入；它若在 PGM / PVW / 叠加上，那些位置变成 0 / null。
+删一路输入；它若在 PGM / PVW / 叠加 / Stinger 上，那些位置变成 0 / null。
 
 | 参数 | 含义 |
 |---|---|
@@ -758,7 +758,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `addOutput`
 
-加一个输出；编号已存在则拒绝。
+加一个输出；编号已存在则拒绝。settings.extra 里的旧写法（layout / displayID / fallbackToMain）先搬进正式字段 multiview / display，与读节目文件相同。
 
 | 参数 | 含义 |
 |---|---|
@@ -819,7 +819,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setOutputSettings`
 
-整体替换一个输出的设置。
+整体替换一个输出的设置；extra 里的旧写法同 addOutput 先搬进正式字段。
 
 | 参数 | 含义 |
 |---|---|
@@ -860,7 +860,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `loadShow`
 
-用节目文件整体替换状态（show.makeState()）；不合法的节目文件被拒。
+用节目文件整体替换状态；旧写法按读节目文件同一套规则先搬迁（show.migratingLegacyKeys().makeState()），不合法的节目文件被拒。
 
 | 参数 | 含义 |
 |---|---|
