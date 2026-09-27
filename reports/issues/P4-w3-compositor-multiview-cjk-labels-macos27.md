@@ -38,5 +38,6 @@
 
 `DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`：2 秒内 display link 回调 0 次、blit 0 次（`SkipCounters` 全 0），main 上一样。
 这次**盖子开着、屏幕没锁、内建屏与外接 2560×1440 都在线**，同一个类里的 `testDisplay_windowManipulationDoesNotCauseMissedRenders` 过（预览窗口有 blit）。
-G4 §12.1 把它归为"显示器不可见"，但这次显示器是可见的——可能与 macOS 27、预览窗口开在哪块屏 / 哪个 Space 有关。需要合成会话坐在桌面前复查
-（窗口落点、`NSView.displayLink` 在 27 上对这个用例的窗口的行为）；复查前别把它当成代码回归。
+G4 §12.1 把它归为"显示器不可见"，但这次显示器是可见的。**同一天第二次整包跑（10:48–10:53，P4 顶 3d2ba59）这条又过了**——偶发，
+可能与预览窗口开在哪块屏 / 哪个 Space、当时有没有别的窗口抢前台有关。需要合成会话坐在桌面前复查（窗口落点、`NSView.displayLink` 在 27 上的行为）；
+复查前别把它当成代码回归。
