@@ -467,7 +467,8 @@
 "notice.hotkeyTableUnreadable" = "快捷键表 %@ 读不出来，用默认表：%@";
 "notice.isoBranchUnavailable" = "ISO 输入 %d 不存在或分支用完（每路最多 %d 个 ISO / Aux）";
 "notice.midiFailed" = "MIDI 起不来：%@";
-"notice.ndiBranchUnavailable" = "NDI 发送 %d：输入 %d 的帧槽分支用完了（每路最多 %d 个，与 ISO / Aux 共用），暂时没有画面";
+"notice.ndiBranchRestored" = "NDI 发送 %d：输入 %d 空出了分支，已重新接上、开始送画面";
+"notice.ndiBranchUnavailable" = "NDI 发送 %d：输入 %d 的帧槽分支用完了（每路最多 %d 个，与 ISO / Aux 共用），暂时没有画面；那一路空出分支后自动恢复";
 "notice.ndiFailed" = "NDI 发送 %d 起不来：%@";
 "notice.ndiStarted" = "NDI 发送 %d 开始：%@";
 "notice.ndiStopped" = "NDI 发送 %d 停止";

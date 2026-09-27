@@ -19,7 +19,8 @@
 //   （NDISender.consume 对 .input 不动）。音频：PGM / PVW / 多画面送 Master，输入 n 送该路推子后的 ISO 音轨（没有音频的路不带）。
 //   名字 / 分组 / 源定死在 sender 里，变了就停掉旧的、按新设置起新的（接收方要重新选源）；转换方式 setConversion 运行时改。
 //   start（NDIlib_initialize、send_create、Metal 转换器编译）/ stop（等发送线程退出、销毁实例）都放后台线程做，不卡主线程；
-//   起 / 停的过程中快照又变了，做完按最新快照再对一次。Stats.encoder 那一项由 sender 的 statsEntry 填（publishing / idle / unavailable）。
+//   起 / 停的过程中快照又变了，做完按最新快照再对一次。Stats.encoder 那一项由 sender 的 statsEntry 填（publishing / idle / unavailable / failed，019 起带接收方数）。
+//   源是输入 n、那一路分支用完了（与 ISO / Aux 共用每路 4 个）：sender 照跑、没画面、提示一次、记着在等；InputRuntime 还分支时回调 → 重新要分支、接上、再提示一次（W3-E4）。
 import Foundation
 import Synchronization
 import SwitcherContracts
@@ -65,6 +66,8 @@ final class OutputRuntime {
         case ndiStarted(output: Int, name: String)
         case ndiStopped(output: Int)
         case ndiFailed(output: Int, message: String)
+        /// 源是输入 n 的 NDI 发送等到了分支、接上了（W3-E4）。
+        case ndiBranchRestored(output: Int, input: Int)
     }
 
     /// 一路在跑的录制（主线程改，封口回调经主线程；标 @unchecked Sendable 只为能捕获进回调）。
@@ -127,6 +130,8 @@ final class OutputRuntime {
         var inputTap: ISOFrameTap?
         var branch: LockFreeFrameSlot?
         var inputSource: InputSource?
+        /// 源是输入 n、那一路分支用完了：在等 InputRuntime 还分支（W3-E4）；接上 / 摘下时清。
+        var branchPending = false
         var audioToken: AudioConsumerToken?
         init(number: Int, key: NDIKey, sender: NDISender) {
             self.number = number
@@ -189,6 +194,11 @@ final class OutputRuntime {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.handleDisk(output: key, event: event) } }
         }
         diskMonitor.start()
+        // 某路还回来一个分支（ISO 停 / Aux 窗口关 / 别的 NDI 发送摘下）：在等分支的 NDI 发送重新要（W3-E4）。回调在还分支的调用栈上，
+        // 挪到下一轮主线程再做，不在别人的收尾里插一手
+        inputs?.onBranchReleased = { [weak self] m in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.retryPendingNDIBranches(input: m) } }
+        }
     }
 
     /// Stats.encoder（采样线程上调）。
@@ -625,20 +635,15 @@ final class OutputRuntime {
         if let latest = lastOutputs.first(where: { $0.number == n }), latest.kind == .ndi { reconcileNDI(latest) } else { stopNDI(n) }
     }
 
-    /// 挂上：PGM / PVW / 多画面 = sender 直接当 PGM 帧的消费者；输入 n = 分支槽 + tap。音频按源挂。
+    /// 挂上：PGM / PVW / 多画面 = sender 直接当 PGM 帧的消费者；输入 n = 分支槽 + tap（分支用完就记着等，W3-E4）。音频按源挂。
     private func attachNDI(_ entry: NDIEntry) {
         let sender = entry.sender
         var audioSource: AudioTapSource? = .master
         if case .input(let m) = entry.key.source {
             entry.inputSource = lastInputs.first { $0.number == m }?.source
-            if let branch = inputs?.openBranch(input: m) {
-                let tap = ISOFrameTap(inputNumber: m, branch: branch, sink: NDIInputFeed(sender: sender), name: "ndi\(entry.number).in\(m)")
-                entry.branch = branch
-                entry.inputTap = tap
-                entry.consumer = tap
-                engine.addConsumer(tap)
-            } else if entry.inputSource != nil {
-                // 那一路在，但分支用完了（与 ISO / Aux 共用每路 4 个）：sender 照跑，没画面
+            if !openNDIBranch(entry, input: m), entry.inputSource != nil {
+                // 那一路在，但分支用完了（与 ISO / Aux 共用每路 4 个）：sender 照跑、没画面，提示一次；那一路还回分支时 retryPendingNDIBranches 再要
+                entry.branchPending = true
                 onEvent?(.ndiFailed(output: entry.number, message: L("notice.ndiBranchUnavailable", entry.number, m, InputFrameTee.maxBranches)))
             }
             audioSource = (audio?.registeredInputs.contains(m) ?? false) ? .input(number: m) : nil
@@ -651,6 +656,29 @@ final class OutputRuntime {
         }
     }
 
+    /// 给源是输入 m 的 NDI 发送开一个分支 + tap、挂到引擎上；那一路分支用完（或没有这路）返回 false。
+    private func openNDIBranch(_ entry: NDIEntry, input m: Int) -> Bool {
+        guard let branch = inputs?.openBranch(input: m) else { return false }
+        let tap = ISOFrameTap(inputNumber: m, branch: branch, sink: NDIInputFeed(sender: entry.sender), name: "ndi\(entry.number).in\(m)")
+        entry.branch = branch
+        entry.inputTap = tap
+        entry.consumer = tap
+        engine.addConsumer(tap)
+        return true
+    }
+
+    /// 输入 m 还回来一个分支：在等分支的 NDI 发送（源是输入 m、在跑、还没接上）重新要一个；要到了接上、提示一次（W3-E4，W3-E3 报告 §3 第 2 条）。
+    /// 那一路换了来源 / 删了的不在这里管（reconcileNDI 会摘下重挂）。
+    private func retryPendingNDIBranches(input m: Int) {
+        guard lastInputs.contains(where: { $0.number == m }) else { return }
+        for entry in ndiSenders.values.sorted(by: { $0.number < $1.number })
+        where entry.phase == .running && entry.branchPending && entry.branch == nil && entry.key.source == .input(number: m) {
+            guard openNDIBranch(entry, input: m) else { return }   // 还是没有：等下一次
+            entry.branchPending = false
+            onEvent?(.ndiBranchRestored(output: entry.number, input: m))
+        }
+    }
+
     /// 摘下：不再收帧 / 音频块，分支还给那一路。
     private func detachNDI(_ entry: NDIEntry) {
         if let c = entry.consumer { engine.removeConsumer(c) }
@@ -659,6 +687,7 @@ final class OutputRuntime {
         if let b = entry.branch, case .input(let m) = entry.key.source { inputs?.releaseBranch(b, input: m) }
         entry.branch = nil
         entry.inputSource = nil
+        entry.branchPending = false
         if let t = entry.audioToken { audio?.engine.removeConsumer(t) }
         entry.audioToken = nil
     }
@@ -760,12 +789,13 @@ final class EncoderStatsSource: @unchecked Sendable {
 
     private let slots = Mutex<[Slot]>([])
 
-    func replace(_ sources: [Source]) {
+    func replace(_ sources: [(output: Int, source: Source)]) {
         slots.withLock { old in
             // 同一对象继续用上次的计数（窗口不断）；换了对象就从头算
             old = sources.map { s in
-                let prev = old.first { same($0.source, s) }
-                return Slot(source: s, previousRecorder: prev?.previousRecorder, previousStream: prev?.previousStream, previousNDI: prev?.previousNDI, at: prev?.at)
+                let prev = old.first { same($0.source, s.source) }
+                return Slot(output: s.output, source: s.source, previousRecorder: prev?.previousRecorder, previousStream: prev?.previousStream,
+                            previousNDI: prev?.previousNDI, at: prev?.at)
             }
         }
     }

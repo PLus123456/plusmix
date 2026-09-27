@@ -267,6 +267,7 @@ final class SwitcherSession {
         case .ndiStarted(let n, let name): notify(L("notice.ndiStarted", n, name))
         case .ndiStopped(let n): notify(L("notice.ndiStopped", n))
         case .ndiFailed(_, let message): notify(message)
+        case .ndiBranchRestored(let n, let m): notify(L("notice.ndiBranchRestored", n, m))
         }
     }
 

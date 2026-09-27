@@ -467,7 +467,8 @@
 "notice.hotkeyTableUnreadable" = "Shortcut table %@ is unreadable; using defaults: %@";
 "notice.isoBranchUnavailable" = "ISO input %d does not exist or has no free branch (at most %d ISO / Aux per input)";
 "notice.midiFailed" = "MIDI failed to start: %@";
-"notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now";
+"notice.ndiBranchRestored" = "NDI output %d: a branch on input %d became free; reconnected and sending";
+"notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now, recovers automatically when one is freed";
 "notice.ndiFailed" = "NDI output %d failed to start: %@";
 "notice.ndiStarted" = "NDI output %d started: %@";
 "notice.ndiStopped" = "NDI output %d stopped";
