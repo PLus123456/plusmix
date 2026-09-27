@@ -295,6 +295,11 @@ final class OutputSettingsModel: ObservableObject {
     /// 输出来源选项：PGM / PVW / 多画面 / 每路输入。
     var sourceChoices: [OutputSource] { [.program, .preview, .multiview] + state.inputs.map { .input(number: $0.number) } }
 
+    /// 来源下面的说明：选某路输入（Aux）= 该路原始画面，抠像 / 裁切 / 变换不生效（外部显示由本包自己画该路帧，NDI 从该路帧槽分支取帧）；其他来源没有说明。
+    func sourceNote(for source: OutputSource) -> String? {
+        source.inputNumber == nil ? nil : L("aux.rawPictureNote")
+    }
+
     // MARK: 多画面布局（提案 010：OutputSettings.multiview）
 
     /// 承载布局的输出：渲染器取第一个 kind = multiview 的输出的布局（不看 enabled）。
@@ -550,6 +555,7 @@ struct OutputSettingsView: View {
                     screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }),
                                  current: OutputExtras.displayNumber(of: output))
                     sourcePicker(Binding(get: { output.settings.source }, set: { model.setExternalDisplay(output.number, screenNumber: nil, source: $0) }))
+                    sourceNote(output.settings.source)
                     Toggle(L("outputSettings.external.fallbackToMain"), isOn: Binding(get: { output.settings.display?.fallbackToMain ?? false },
                                                                                        set: { model.setExternalFallback(output.number, on: $0) }))
                         .help(L("outputSettings.external.fallbackHelp"))
@@ -560,6 +566,7 @@ struct OutputSettingsView: View {
             Section(L("outputSettings.external.add")) {
                 screenPicker($newExternalScreen)
                 sourcePicker($newExternalSource)
+                sourceNote(newExternalSource)
                 Button(L("outputSettings.external.open")) { model.addExternalDisplay(screenNumber: newExternalScreen, source: newExternalSource) }
                 Text(L("outputSettings.external.hint")).font(.caption).foregroundStyle(.secondary)
             }
@@ -575,6 +582,14 @@ struct OutputSettingsView: View {
     private func sourcePicker(_ b: Binding<OutputSource>) -> some View {
         Picker(L("outputSettings.source"), selection: b) {
             ForEach(model.sourceChoices, id: \.self) { Text($0.title(in: model.state)).tag($0) }
+        }
+    }
+
+    /// 来源选了某路输入时的一行说明（Aux = 原始画面）。
+    @ViewBuilder
+    private func sourceNote(_ source: OutputSource) -> some View {
+        if let note = model.sourceNote(for: source) {
+            Text(note).font(.caption).foregroundStyle(.secondary)
         }
     }
 

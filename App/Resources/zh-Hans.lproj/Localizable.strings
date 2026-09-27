@@ -142,6 +142,7 @@
 "aux.external.fallbackToMain" = "显示器 %u 不在，暂用主显示器";
 "aux.external.showing" = "显示中（显示器 %u）";
 "aux.external.waitingForDisplay" = "等待显示器 %u 接上";
+"aux.rawPictureNote" = "Aux = 原始画面（抠像 / 裁切 / 变换不生效）";
 "aux.virtualCamera.disabled" = "未启用";
 "aux.virtualCamera.idle" = "未启动";
 "aux.virtualCamera.publishing" = "已连接，送出 %ld 帧";
@@ -621,6 +622,9 @@
 "prefs.compat.pending" = "开关与端口下次起引擎生效（\"应用并重起引擎\"立刻生效）。";
 "prefs.compat.port" = "TCP 端口";
 "prefs.compat.title" = "第三方 API 兼容层（VMixCompat）";
+"prefs.external.behindInterface" = "外部输出在主屏上不盖住主界面";
+"prefs.external.hint" = "只影响开在主屏（带菜单栏的那块）上的外部显示窗口：打开后它垫在主界面和其他窗口下面，点它也不会翻上来；外接屏上照常全屏在最前。点「应用」立刻生效，存在本机偏好里（不进节目文件）。";
+"prefs.external.title" = "外部输出";
 "prefs.format.apply" = "应用格式（重起引擎）";
 "prefs.format.frameRate" = "帧率";
 "prefs.format.hint" = "格式存在节目文件里；改了要换一个引擎，录制 / 推流会停。";

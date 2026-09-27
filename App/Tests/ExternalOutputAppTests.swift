@@ -87,7 +87,8 @@ final class ExternalOutputAppTests: XCTestCase {
         let menu = try XCTUnwrap(wc.externalOutputMenu())
         XCTAssertEqual(menu.items.count, NSScreen.screens.count, "每块显示器一项（没有外部输出时没有关闭项）")
         let sub = try XCTUnwrap(menu.items.first?.submenu)
-        XCTAssertEqual(sub.items.map(\.title), ["PGM", "PVW", "多画面", "输入 1 合成 1"])
+        // 能选的源（有动作的项）；输入那一组前面另有一行"Aux = 原始画面"的说明（W3-E3 交付第 2 条，AuxLayeringAppTests 看它）
+        XCTAssertEqual(sub.items.filter { $0.action != nil }.map(\.title), ["PGM", "PVW", "多画面", "输入 1 合成 1"])
         XCTAssertTrue(sub.items.allSatisfy { $0.state == .off })
         // 选 PVW → 加输出；菜单重建后打勾；再选 → 删
         sub.performActionForItem(at: 1)

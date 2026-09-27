@@ -106,6 +106,8 @@ final class SwitcherSession {
             close: { [weak inputs] n, slot in if let s = slot as? LockFreeFrameSlot { inputs?.releaseBranch(s, input: n) } })
         aux.external.inputStateProvider = { [weak inputs] n in inputs?.runtimeState(of: n) }
         aux.external.noSignalText = L("input.noSignal")
+        // 外部输出开在主屏上时盖不盖住主界面（偏好设置，本机选项、不进节目文件；W3-E3）
+        aux.external.mainScreenLayering = settings.externalMainScreenLayering
         control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable,
                                  compat: settings.compatConfiguration)
         meterFeed = AudioMeterFeed(status: { audio.status }, sink: { meters, at in renderer.setMeters(meters, at: at) })

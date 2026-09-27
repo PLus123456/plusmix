@@ -142,6 +142,7 @@
 "aux.external.fallbackToMain" = "Display %u is missing, using the main display";
 "aux.external.showing" = "Showing (display %u)";
 "aux.external.waitingForDisplay" = "Waiting for display %u";
+"aux.rawPictureNote" = "Aux = raw input picture (keying / crop / transform not applied)";
 "aux.virtualCamera.disabled" = "not enabled";
 "aux.virtualCamera.idle" = "not started";
 "aux.virtualCamera.publishing" = "Connected, %ld frames sent";
@@ -621,6 +622,9 @@
 "prefs.compat.pending" = "The switch and port take effect the next time the engine starts (\"Apply and Restart Engine\" applies them now).";
 "prefs.compat.port" = "TCP port";
 "prefs.compat.title" = "Third-party API compatibility layer (VMixCompat)";
+"prefs.external.behindInterface" = "Keep external outputs on the main display behind the interface";
+"prefs.external.hint" = "Only affects external display windows on the main display (the one with the menu bar): they stay below the interface and other windows, even when clicked; on other displays they stay full screen in front. Takes effect on Apply; stored in this Mac's preferences, not in the show file.";
+"prefs.external.title" = "External outputs";
 "prefs.format.apply" = "Apply Format (restarts engine)";
 "prefs.format.frameRate" = "Frame rate";
 "prefs.format.hint" = "The format lives in the show file; changing it restarts the engine and stops recording / streaming.";

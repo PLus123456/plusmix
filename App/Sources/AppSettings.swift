@@ -9,9 +9,12 @@
 //   --record-min-free-mb <N> 录制目录剩余空间低于 N MB 就停该路录制（默认 200）
 // 同名 UserDefaults 键：audioOutputDevice / apiEnabled / apiListen / apiToken / recordFallbackDirectory / recordMinimumFreeMB；
 // W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）；
-// W3-E2 加 overlaysInPreview（PVW 预览全部叠加 = MetalRendererOptions.overlaysInPreview，渲染器选项在 init 定死，换 session 生效）。命令行参数优先于 UserDefaults。
+// W3-E2 加 overlaysInPreview（PVW 预览全部叠加 = MetalRendererOptions.overlaysInPreview，渲染器选项在 init 定死，换 session 生效）；
+// W3-E3 加 externalOutputBehindInterface（外部输出在主屏上不盖住主界面 = ExternalDisplayManager.mainScreenLayering，包内选项、运行时可改，
+// 不进 OutputSettings.display——那是节目文件里的输出设置，这个是本机偏好）。命令行参数优先于 UserDefaults。
 import Foundation
 import SwitcherControl
+import SwitcherExternal
 import SwitcherRender
 import VMixCompat
 
@@ -50,6 +53,7 @@ struct AppSettings: Equatable, Sendable {
         static let compatLayerEnabled = "compatLayerEnabled"
         static let compatLayerPort = "compatLayerPort"
         static let overlaysInPreview = "overlaysInPreview"
+        static let externalBehindInterface = "externalOutputBehindInterface"
     }
 
     var audioDevice: AudioDevice = .systemDefault
@@ -68,6 +72,11 @@ struct AppSettings: Equatable, Sendable {
     var recordMinimumFreeMB = 200
     /// PVW 预览全部叠加（渲染器总开关，与每通道 OverlayState.previewOn 取或；默认关）。
     var overlaysInPreview = false
+    /// 外部输出开在主屏（带菜单栏的那块）上时垫在主界面下面（默认关 = 盖住，W3-C 起的行为）。
+    var externalBehindInterface = false
+
+    /// 外部显示管理器的主屏层级（ExternalDisplayManager.mainScreenLayering）。
+    var externalMainScreenLayering: ExternalDisplayWindow.MainScreenLayering { externalBehindInterface ? .behindInterface : .front }
 
     /// 起 session 用的渲染器选项。
     var rendererOptions: MetalRendererOptions {
@@ -110,6 +119,7 @@ struct AppSettings: Equatable, Sendable {
             s.compatLayerPort = defaults.integer(forKey: Keys.compatLayerPort)
         }
         if defaults.object(forKey: Keys.overlaysInPreview) != nil { s.overlaysInPreview = defaults.bool(forKey: Keys.overlaysInPreview) }
+        if defaults.object(forKey: Keys.externalBehindInterface) != nil { s.externalBehindInterface = defaults.bool(forKey: Keys.externalBehindInterface) }
 
         func value(after flag: String) -> String? {
             guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
@@ -139,5 +149,6 @@ struct AppSettings: Equatable, Sendable {
         defaults.set(compatLayerEnabled, forKey: Keys.compatLayerEnabled)
         defaults.set(compatLayerPort, forKey: Keys.compatLayerPort)
         defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview)
+        defaults.set(externalBehindInterface, forKey: Keys.externalBehindInterface)
     }
 }
