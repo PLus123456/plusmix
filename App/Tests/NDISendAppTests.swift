@@ -163,6 +163,19 @@ final class NDISendAppTests: XCTestCase {
         XCTAssertEqual(session.outputs.ndiSenders[number]?.inputTap?.inputNumber, 2)
         XCTAssertEqual(session.inputs.entries[2]?.tee.branchCount, 1, "输入 2 开了一个分支")
 
+        // 输入 2 换来源（setInputSource：InputRuntime 重建那一路、换一个新 tee）→ 分支跟到新 tee 上，sender 不重建、接着送
+        let senderBefore = try XCTUnwrap(session.outputs.ndiSenders[number]?.sender)
+        let tapBefore = try XCTUnwrap(session.outputs.ndiSenders[number]?.inputTap)
+        let oldTee = try XCTUnwrap(session.inputs.entries[2]?.tee)
+        session.send(.setInputSource(input: 2, source: AppTest.syntheticConfig(number: 2, gray: 200).source))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.entries[2]?.tee !== oldTee && session.inputs.runtimeState(of: 2) == .live }, "输入 2 应按新来源重建")
+        XCTAssertTrue(AppTest.waitUntil(5) {
+            guard let e = session.outputs.ndiSenders[number], let tap = e.inputTap else { return false }
+            return tap !== tapBefore && tap.counters.forwarded > 30
+        }, "分支应换到新 tee 上接着送：\(String(describing: session.outputs.ndiSenders[number]?.inputTap?.counters))")
+        XCTAssertTrue(session.outputs.ndiSenders[number]?.sender === senderBefore, "换的是分支，不是 sender")
+        XCTAssertEqual(session.inputs.entries[2]?.tee.branchCount, 1, "新 tee 上一个分支")
+
         // 转换方式：运行时改，同一个 sender
         let s4 = try XCTUnwrap(session.outputs.ndiSenders[number]?.sender)
         page.setNDI(number, conversion: "cpu")
