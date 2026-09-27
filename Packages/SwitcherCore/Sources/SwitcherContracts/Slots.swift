@@ -10,7 +10,7 @@ import CSwitcherContracts
 ///
 /// 口径（测试标准 V4 的依据）：
 /// - `pushed`：生产者 push 进来的帧数。
-/// - `consumed`：`latest(atOrBefore:)` 返回了帧的次数（渲染线程每拍每路调一次，所以约等于用到这路的拍数）。
+/// - `consumed`：`latest(atOrBefore:)` 返回了帧的次数（引擎的槽由渲染线程每拍每路调一次，所以约等于用到这路的拍数）。
 /// - `reused`：其中返回的是"上一次已经返回过的同一帧"的次数。30 fps 进 60 fps 节目 → reused / consumed = 50%（设计内）。
 /// - `dropped`：从未被 `latest` 返回过就被淘汰的帧数（槽满被挤掉，或被更新的帧跳过）。
 public struct FrameSlotStats: Hashable, Sendable, Codable {
@@ -30,10 +30,12 @@ public struct FrameSlotStats: Hashable, Sendable, Codable {
     }
 }
 
-/// 每路输入一个的小队列（设计方案 §3.2、§12 决策 1）：采集线程写，渲染线程读，最多留 2–3 帧。
+/// 每路输入一个的小队列（设计方案 §3.2、§12 决策 1）：采集线程写，渲染线程读（分支槽由它唯一的读者读），最多留 2–3 帧。
 ///
 /// 线程规则：
-/// - `push` 只能由该输入的采集线程调；`latest(atOrBefore:)` 只能由渲染线程调（单生产者单消费者）。
+/// - `push` 只能由该输入的采集线程调；`latest(atOrBefore:)` 单消费者：引擎的渲染线程，或分支槽的唯一读者（ISO / Aux）。
+///   分支槽 = 输入帧分流出来的另一个槽（`SwitcherISO.InputFrameTee.addBranch`），每个分支只有一个读者（ISO 录制的 tap、Aux 显示在显示刷新上读），
+///   与引擎的槽互不相干；同一个槽永远只有一个生产者、一个消费者（SPSC）。
 /// - 两者都不许加锁、不许分配（实现用无锁 SPSC + 原子量；Frame 是值类型，存取只是 retain / release）。
 /// - `stats` 任何线程可读。
 public protocol FrameSlot: AnyObject {

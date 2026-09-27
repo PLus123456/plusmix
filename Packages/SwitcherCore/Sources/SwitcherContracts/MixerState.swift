@@ -31,7 +31,8 @@ public struct WipeParams: Hashable, Codable, Sendable {
 
 /// Stinger 参数（W3-B 用）：带 alpha 的输入叠上去，在它的第 cutAtTick 拍换底。
 public struct StingerParams: Hashable, Codable, Sendable {
-    /// 作 stinger 的输入（带 alpha 的文件 / 图片）；nil = 未设置。
+    /// 作 stinger 的输入（带 alpha 的文件 / 图片）；nil = 未设置。删掉这一路（removeInput）时置 nil，与叠加引用同口径（P4）；
+    /// `MixerState.validate()` 不查它指不指向存在的输入（引用一律不查），P4 之前存下的悬空编号由 `Show.migratingLegacyKeys()` 清掉。
     public var input: Int?
     /// 在 stinger 的第几拍换底。按状态机口径，第 s 拍应用命令时 progress = 0（渲染器什么都不叠），
     /// 第 s + 1 拍才是 stinger 的第一帧，所以 cutAtTick 0 与 1 等价；cutAtTick ≥ durationTicks 等于"完成时换"。
@@ -165,7 +166,8 @@ public struct OverlayAnimation: Hashable, Codable, Sendable {
 
 /// 画中画边框（提案 010）。
 public struct OverlayBorder: Hashable, Codable, Sendable {
-    /// 边框宽，占节目高的比例（1080p 下 0.006 ≈ 6 px）；渲染器钳到 0–0.1。
+    /// 边框宽，占节目高的比例（1080p 下 0.006 ≈ 6 px）；渲染器钳到 0–0.1。界面（叠加面板）只给到 0.05（1080p 下 54 px，再宽就不像边框了），
+    /// 0.05–0.1 只能从 API / 节目文件给（W3-E2 报告 §4 第 3 条）。
     public var width: Double
     /// 边框颜色。
     public var color: RGB8
@@ -480,7 +482,8 @@ public struct MultiviewLayoutSettings: Hashable, Codable, Sendable {
     public var custom: [MultiviewCell]
     /// PGM / PVW 格画安全框（EBU R95：动作安全 3.5%，字幕安全 5%）。
     public var safeArea: Bool
-    /// 输入格右侧画电平表占位条。
+    /// 画电平表（真实读数：`Stats.audio.meters`，经渲染器的 `setMeters` 喂进来，数只有这一份）：输入格画该路的表（还没有读数时画空表），
+    /// PGM 格 = Master 总线、PVW 格 = 当前 PVW 那一路（没有读数时这两格不画）。纯音频输入的格子总是画表（那是它唯一的内容），不看这个开关。
     public var meters: Bool
 
     /// 默认预设名。
@@ -578,6 +581,8 @@ public struct OutputState: Hashable, Codable, Sendable, Identifiable {
     /// 显示名。
     public var name: String
     /// 目标状态：true = 应该在跑。record / stream 由 startRecord / startStream 置，其余 kind 由 `setOutputEnabled` 置（提案 012）。
+    /// kind = multiview 的 enabled = 要不要把多画面 NV12 送给下游（enabled 且 `settings.source` = `.multiview` 时渲染器每拍多转一次 NV12 填 `RenderedFrame.multiview`）；
+    /// 多画面布局取第一个 kind = multiview 的输出的 `settings.multiview`，与 enabled 无关，只承载布局的那一个可以一直关着（W3-E2 报告 §4 第 2 条）。
     /// 节目文件里的 enabled 只对 headless 的场景文件生效（t0 起录 / 起推）；App 打开任何节目文件（含退出时自动存的 LastSession）
     /// 时把 record / stream 的 enabled 清掉，这两类输出只由用户动作（按钮 / 快捷键 / API）起（提案 007 B 第 1 条，
     /// App 的 `ShowDocuments.stoppingOutputs` 实现）。
@@ -666,7 +671,8 @@ public struct MixerState: Hashable, Codable, Sendable {
         self.outputs = outputs
     }
 
-    /// 不变量检查（解码 / 载入节目文件后调）。
+    /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复。
+    /// 不查引用（PGM / PVW / 叠加 / Stinger 指向的输入在不在）：悬空引用由 reducer 的 removeInput 清，渲染器按"没有这路"画（用户 2026-09-27 定）。
     public func validate() throws {
         guard overlays.count == MixerState.overlayCount else { throw MixerStateError.overlayCount(overlays.count) }
         guard audio.buses.map(\.bus) == Bus.allCases else { throw MixerStateError.busOrder }

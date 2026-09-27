@@ -213,7 +213,7 @@ public struct Stats: Hashable, Codable, Sendable {
         public static let jsonKeys = ["dropouts", "underruns", "discontinuities", "meters"]
 
         /// 表读数（提案 004）：`buses` 顺序 = Bus.allCases（4 条），`inputs` 键 = 输入编号。
-        /// 峰值 / 真峰值 dBFS / dBTP（20·log10，下限 `floorDb`），响度 LUFS（静音也钳到下限，JSON 写不了 −inf），LRA 单位 LU。
+        /// 峰值 / RMS / 真峰值 dBFS / dBTP（20·log10，下限 `floorDb`），响度 LUFS（静音也钳到下限，JSON 写不了 −inf），LRA 单位 LU。
         public struct Meters: Hashable, Codable, Sendable {
             public var buses: [BusMeter]
             public var inputs: [Int: InputMeter]
@@ -242,8 +242,9 @@ public struct Stats: Hashable, Codable, Sendable {
             public var bus: String
             /// JSON 键 peak_db：本块采样峰值 dBFS，[L, R]。
             public var peakDb: [Double]
-            /// JSON 键 rms_db（提案 017）：推子后（与 peak_db 同一取样点）的均方根电平 dBFS，[L, R]；300 ms 一阶指数平均（IEC 60268-17 的 VU 积分时间），
-            /// 每个混音块更新一次，采样那一刻的值；空数组 = 这份数没有 RMS（017 之前的文件），读表的照只有峰值画。
+            /// JSON 键 rms_db（提案 017）：推子后（与 peak_db 同一取样点）的均方根电平 dBFS，[L, R]，20·log10(rms)、下限 `Meters.floorDb`（−120）；
+            /// 300 ms 一阶指数平均（IEC 60268-17 的 VU 积分时间），每个混音块更新一次，采样那一刻的值。C 热路径只累均方（不开方、不进 libm），
+            /// 开方与 dB 换算在 Swift 侧。空数组 = 这份数没有 RMS（017 之前的文件），读表的照只有峰值画。
             public var rmsDb: [Double]
             /// JSON 键 true_peak_db：真峰值 dBTP，[L, R]。
             public var truePeakDb: [Double]
