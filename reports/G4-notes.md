@@ -371,5 +371,17 @@ W3-B2 的渲染器改动（标签线程、电平表三块交接、按需建环�
 | 6 | prompt 73 开 | docs/plan/prompts/73-W3E4-App收尾三.md 定稿（分支 w3-app-5，从本轮合入后的 main 开）；OWNERSHIP W3-E4 行 |
 | 7 | `Recorder.freeBytes` 修 | 已在 faa20e9（§13.1） |
 
-<!-- G4-13.6-tests -->
+裁定落地后的全量（g4 = 1c13457；机器 / 环境同 §13.2；16:46–18:0x，同一条流水线）：
+
+| 步骤 | 结果 |
+|---|---|
+| SwitcherCore | Render 93 / 0（**七张多画面参考图重生成后全部 PSNR ∞，§13.2 那 2 条环境红没了**）；Engine 94 / 0（+ `test019_addInputAndSetInputSettings_stripLegacyBorderEffectSlots`）；Contracts 82（跳 1）/ 0（+ `Contracts019Tests`） |
+| SwitcherInputs / Audio / Control / TestKit | 55（跳 6）/ 25（跳 2）/ 25（跳 3）；63（跳 2）/ 41（跳 3）；25（跳 1）/ 3 / 28；70——全过 |
+| SwitcherOutputs | VirtualCamera 12 / Outputs 25 / Streaming 28 / NDISend 9（跳 2，+ `Stats019Tests`）/ ISO 10 / External 15（跳 2）——全过；`DisplayStatsTests.testStats_displayEntriesCountPresentedFrames` 这次一次过 |
+| 六包合计 | **703 个用例：0 失败**，跳 22（原有 BLOCKED / 人工项；External 多跳的一条是真外接屏那条，当时 LG 屏没醒） |
+| 工具冒烟 | switcher-headless 0.1.0、frameprobe 0.1.0（headless 带 019 的编号填数） |
+| App 全量 | **81 个：79 过、0 失败、2 跳**（摄像头权限、扩展签名）——App 写出的 encoder[].output 暂为 0（填法归 W3-E4），读它的用例都没受影响 |
+| gate4 g4g（10 分钟） | **自动项 ✅ 通过**（20 项 ✅；S2 14.3 MB/h 是 10 分钟拟合的参考值）：V1 avg 2.061 / p99 2.483 ms，V2 0，V4 设计外 0，V7 Fade 0.199 帧，A2 整秒 0.000 ms，A4 0.208 ms，C1 50 / 50，S3 CPU 49.2% / GPU 27.2%；stats.jsonl 的 encoder[] 已带 019 的 output（PGM 录制器 = 1，ISO 音轨 0）与 connections，gate 报告链路（summarize / gate3-report.py / StatsSummary）对新键无感。报告 reports/G4-run-g4g.md，已拼进 reports/G4.md |
+| lint | 全绿：归属 35 个改动文件都在范围内（Core 胶水 48 / 50 = reducer D + 用例；Outputs 胶水 24 / 50 = Recorder.freeBytes + 三处 statsEntry 的 output 参数；Contracts019Tests / NDISender / NDISendTests / Tests/References 走 G4 行 token） |
+
 
