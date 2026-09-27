@@ -41,3 +41,9 @@
 G4 §12.1 把它归为"显示器不可见"，但这次显示器是可见的。**同一天第二次整包跑（10:48–10:53，P4 顶 3d2ba59）这条又过了**——偶发，
 可能与预览窗口开在哪块屏 / 哪个 Space、当时有没有别的窗口抢前台有关。需要合成会话坐在桌面前复查（窗口落点、`NSView.displayLink` 在 27 上的行为）；
 复查前别把它当成代码回归。
+
+## 处理（G4 续做合入会话，2026-09-27）
+
+等用户三选一。检查点的建议：**第 2 条**——在 macOS 27 上 `scripts/gen-references.sh` 重生成七张多画面图、`Tests/References/README.md` 记"生成于 macOS 27.0 (26A428)"，
+以后系统升级再来一次就好；第 1 条（随包带 CJK 字体）是产品级改动、要新开合成会话；第 3 条是放宽断言。`Tests/References/` 在 OWNERSHIP 的 G4 行内，批了检查点就做，做完 7 张重新 PSNR ∞。
+`testDisplay_maxFrameRateCapsThumbnailBlits` 那条偶发另记在 G4-notes §13。

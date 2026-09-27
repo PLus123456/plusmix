@@ -105,3 +105,8 @@ index a3c5ad1..5bfaf02 100644
 
 - `App/Sources/Settings/OutputSettingsPanel.swift` 的 `setExternalDisplay` / `setExternalFallback` 里两处 `s = s.migratingLegacyKeys()` 与第 217 行注释"没经过 Show.load 的内存状态（API 直接 addOutput 的老写法）可能还带过渡键"：
   P4 之后状态机里的状态不会再有输出的过渡键，这两处调用成了多余（幂等、无害），注释的前提也不成立了。
+
+## 处理结果（G4 续做合入会话，2026-09-27）
+
+合入顺序 P4（04551ab）→ W3-C3（ae065bb）→ W3-E3（8238431），打的是**补丁 B**（胶水提交 e380db5，App 胶水额度内）；`MultiviewSettingsTests` 与 App 全量的结果在 reports/G4-notes.md §13。
+"顺带"一节的两处（`OutputSettingsPanel` 的死路径与注释）留给 prompt 73（W3-E4）。

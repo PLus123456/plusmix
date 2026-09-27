@@ -188,3 +188,8 @@ index 416b695..efc3538 100644
          // 输出设置 › 虚拟摄像头页用的是同一个安装器（W3-C 的 SystemExtensionInstaller，扩展 ID 来自 VirtualCameraConstants），
          // 不再另有一个猜 bundle ID 的查询器：状态文案跟着它走
 ```
+
+## 处理结果（G4 续做合入会话，2026-09-27）
+
+必需 33 行与可选 6 行**都打了**（胶水提交 e380db5，App 胶水额度 42 / 50）。`git apply --3way` 时三个文件各一处相邻行冲突（两个 Localizable.strings 与 `SwitcherSession.swift`：W3-E3 在同一位置加了 `aux.rawPictureNote` / `mainScreenLayering`），两边都留。
+App 全量结果在 reports/G4-notes.md §13。
