@@ -7,7 +7,7 @@
 
 ## 1. 做了什么
 
-12 个提交（`git log main..w3-app-4`，最后两个是本报告）：前 5 个按交付各一个（缩略图 / 显示记账 / 电平表 / Aux 与层级与过渡键 / NDI），后面是自查补的两处
+13 个提交（`git log main..w3-app-4`，最后三个是本报告）：前 5 个按交付各一个（缩略图 / 显示记账 / 电平表 / Aux 与层级与过渡键 / NDI），后面是自查补的两处
 （NDI 页分组也改成草稿、状态行先看录制 / 推流）、一段用例、两张旧问题单的处理结果和一张新问题单。App/ 下 29 个文件 +1501 / −102 行，另 `project.yml` 2 行（越界，§4 第 1 条）。
 
 | prompt 交付 | 落在哪 | 说明 |
@@ -94,3 +94,7 @@ reports/issues/（3 张）与本报告；归属那步红了 make 就停，后面
 8. macOS 升到了 27.0（26A428）；Xcode 27.0 编 / 测都照常；本 worktree 用钉版本的 Package.resolved 编 frameprobe 49 s，起得来。
 9. 输出设置 › 虚拟摄像头页的"来源"下拉是摆设：`VirtualCameraOutput` 恒发 PGM（本会话读代码时发现，没改，问题单 `reports/issues/W3E3-virtual-camera-source-picker-ignored.md`）。
 10. App 里不再用 `ExternalDisplaySpec.displayIDKey`（包里为 App 的后备留着的常量），包会话可以一起删。
+11. **给合并检查点**：W3-C3（`w3-outputs-4` 顶 d7cfa67，同日完成）与本分支 `git merge-tree` 试合并**没有文本冲突**；但它把 `SystemExtensionInstaller.Status.failed` 改成了枚举，
+    App 要按它的问题单 `W3C3-app-extension-failure-reason-and-disk-free` 补胶水（`OutputStatusText.extensionStatus`、两个 Localizable.strings、LocalizationTests、VirtualCameraAppTests；
+    可选的 `EncoderStatsSource` 录制项改调 `DiskGuard.statsEntry`）——这几处本分支也动过同一文件的别的位置（`OutputStatusText.ndi`、NDI 的键、`EncoderStatsSource.ndi`），手工合时留两边。
+    合并后要 `make gen`（project.yml 加了产品依赖）；App 测试里的 NDI 两条要本机装 NDI SDK，没有就 BLOCKED-SDK 跳过。
