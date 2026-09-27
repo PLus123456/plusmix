@@ -245,7 +245,8 @@ G4 续做落地的字段（提案 017，用户 2026-09-24 批）：
   停用格里的宽度 / 颜色随之丢掉，新模型里"关着的边框"就是 `border = nil`）；
 - `transition.stinger.input` 指向不存在的输入的置 nil：P4 之前 removeInput 不清它，那时存下的文件里可能有（不清的话 App 改 Wipe 参数会被总线以"Stinger 输入不存在"拒）；
 - 状态机对 loadShow（整份 `Show.migratingLegacyKeys()`）与 addOutput / setOutputSettings（`OutputSettings.migratingLegacyKeys()`）进来的数据也先搬：
-  API 客户端直接带旧键的与读文件结果一致，运行时状态里不会再有过渡键。搬迁不碰 `validate()` 查的结构，`CommandValidator` 不用改。
+  API 客户端直接带旧键的与读文件结果一致，状态机里的状态不会再有输出的过渡键。搬迁不碰 `validate()` 查的结构，`CommandValidator` 不用改。
+  没收的一处：setInputSettings / addInput 带进来的 `border` 效果格不搬也不清（没有叠加通道的上下文），存盘再读时清掉（reports/p4-contracts.md §4 第 1 条）。
 读取方：渲染器（W3-B2）与 `ExternalDisplaySpec`（W3-C2）已经只读正式字段；App 的 `OutputExtras.displayNumber` 还留着 `extra["displayID"]` 的后备，归 W3-E3（prompt 68 第 6 条）删。
 `Show.schemaVersion` 不升：新字段全部带默认值，008 与 `InputAudioSettings.afv` 靠 `decodeIfPresent`。
 

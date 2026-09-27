@@ -122,7 +122,8 @@ public struct Show: Hashable, Codable, Sendable {
 
     /// 过渡键 → 正式字段的一次性搬迁（提案 010 / 013；`schemaVersion` 不升，全部字段带默认值），顺带清掉老版本留下的死数据（P4）。
     /// 幂等：正式字段已经有值的不动；搬完清掉旧键，写出只写正式字段。放在这里是为了 App / headless / 测试读同一份；
-    /// 状态机对 loadShow（整份）与 addOutput / setOutputSettings（`OutputSettings` 那一份）进来的数据也先跑它（P4），所以运行时状态里不会再有过渡键。
+    /// 状态机对 loadShow（整份）与 addOutput / setOutputSettings（`OutputSettings.migratingLegacyKeys()`）进来的数据也先搬（P4），
+    /// 所以状态机里的状态不会再有输出的过渡键；setInputSettings / addInput 带进来的 border 格不搬（没有叠加通道的上下文），存盘再读时清掉。
     ///
     /// - `OutputSettings.extra["layout"]` → `OutputSettings.multiview`（010）；
     /// - `OutputSettings.extra["displayID"]` / `["fallbackToMain"]` → `OutputSettings.display`（013）；
