@@ -44,6 +44,8 @@ final class SwitcherSession {
     /// 外部显示窗口 + 虚拟摄像头（W3-C）。
     let aux: AuxOutputRuntime
     let control: ControlRuntime
+    /// 表读数的 50 ms 分发（W3-E3）：同一份 AudioEngineStatus 喂多画面电平表（renderer.setMeters）和调音台 / 缩略图的表。
+    let meterFeed: AudioMeterFeed
     /// 界面布局（Show.layout 原样带着）。
     var layout: ShowLayout
     /// 最新快照（主线程副本）。
@@ -83,12 +85,14 @@ final class SwitcherSession {
         format = initial.format
         state = initial
         self.settings = settings
-        renderer = try MetalRenderer(options: settings.rendererOptions)   // PVW 预览全部叠加（偏好设置）在这里定死，换 session 生效
+        let renderer = try MetalRenderer(options: settings.rendererOptions)   // PVW 预览全部叠加（偏好设置）在这里定死，换 session 生效
+        self.renderer = renderer
         stateMachine = StateMachine(initialState: initial)
         let maxNumber = initial.inputs.map(\.number).max() ?? 1
         let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
         self.engine = engine
-        audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio)
+        let audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio)
+        self.audio = audio
         let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
         self.inputs = inputs
         outputs = OutputRuntime(engine: engine, audio: audio, inputs: inputs, format: format, showName: show.name)
@@ -104,6 +108,7 @@ final class SwitcherSession {
         aux.external.noSignalText = L("input.noSignal")
         control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable,
                                  compat: settings.compatConfiguration)
+        meterFeed = AudioMeterFeed(status: { audio.status }, sink: { meters, at in renderer.setMeters(meters, at: at) })
         lastSnapshot = stateMachine.publisher.latest
         let audioEngine = audio.engine
         engine.audioStatsProvider = { audioEngine.audioCounters }
@@ -136,13 +141,14 @@ final class SwitcherSession {
         try await engine.start(t0: t0)
         isRunning = true
         inputs.startAll()
+        // 多画面电平表不再挂在这里 1 Hz 喂（G4 检查点的胶水），改由 meterFeed 按 50 ms 的 AudioEngineStatus 喂（W3-E3）
         let hub = StatsHub(engine: engine, consumers: [
             { [weak self] stats in DispatchQueue.main.async { MainActor.assumeIsolated { self?.publish(stats: stats) } } },
             { [feed = control.feed] stats in feed.publish(stats: stats) },
-            { [renderer] stats in renderer.setMeters(stats.audio.meters) },   // W3-B2：多画面真实电平表，1 Hz 够用；50 ms 的喂法归 W3-E3
         ])
         try hub.start()
         statsHub = hub
+        meterFeed.start()
         outputs.clock = spec
         outputs.reconcile(state)
         aux.reconcile(state)
@@ -158,6 +164,7 @@ final class SwitcherSession {
         guard isRunning else { return }
         pollTimer?.invalidate()
         pollTimer = nil
+        meterFeed.stop()   // 显式 setMeters(nil)：音频引擎要停了，多画面退回占位
         await control.stopAPI()
         await outputs.stopAll()
         aux.stopAll()

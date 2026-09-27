@@ -31,6 +31,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
     private var noticeToken: ObserverToken?
+    private var meterToken: ObserverToken?
     private var overlayPopover: NSPopover?
     private var externalMenuBuilder: ExternalOutputMenuBuilder?
     private(set) var multiviewWindow: MultiviewWindowController?
@@ -157,9 +158,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         stateToken?.invalidate()
         statsToken?.invalidate()
         noticeToken?.invalidate()
+        meterToken?.invalidate()
         stateToken = nil
         statsToken = nil
         noticeToken = nil
+        meterToken = nil
         self.session = session
         let send: ((Command) -> Void)? = session.map { s in { [weak s] c in s?.send(c) } }
         transitionPanel.send = send
@@ -173,7 +176,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         inputStrip.displaySource = source
         multiviewWindow?.source = source
         bottomBar.resetStats()
-        mixerPanel.audio = session?.audio
+        mixerPanel.clearMeters()
         guard let session else {
             window?.title = "Switcher \(SwitcherVersion.current)"
             return
@@ -183,6 +186,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
         statsToken = session.observeStats { [weak self] stats in self?.apply(stats: stats) }
         noticeToken = session.observeNotices { [weak self] message in self?.bottomBar.showNotice(message) }
+        // 调音台条子 / 纯音频缩略图的表：session 的 50 ms 分发（与多画面电平表同一份 AudioEngineStatus，W3-E3）
+        meterToken = session.meterFeed.observe { [weak self] status in self?.mixerPanel.apply(audioStatus: status) }
         if let notice = session.lastNotice { bottomBar.showNotice(notice) }
         multiviewWindow?.restore(from: session.layout)
         // 提案 013：主界面 PGM 监视器（output 0）与多画面窗口的呈现帧数进 Stats.display[]
