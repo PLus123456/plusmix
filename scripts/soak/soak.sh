@@ -127,6 +127,21 @@ if [ "$do_run" = 1 ]; then
   fi
   busy=$(grep '^busy_processes=' "$env_file" | cut -d= -f2-)
   [ -n "$busy" ] && yellow "机器上还有编译 / 测试进程：$busy"
+  # powermetrics 要不要采：开跑前问（和摄像头授权一起，人只需要在开头守一下），真正启动在 headless 起来之后
+  pm_ok=0
+  if [ "$pm_mode" != off ]; then
+    if sudo -n true 2>/dev/null; then pm_ok=1
+    elif [ -t 0 ] && [ "$pm_mode" = on ]; then echo "powermetrics 要 root：输入本机密码（只这一次）"; sudo -v && pm_ok=1
+    elif [ -t 0 ]; then
+      # auto + 终端：问一句，60 s 没人答就跳过（人走开了也不会卡在密码提示上、整晚没开跑）
+      ans=""; read -r -t 60 -p "要采 powermetrics（GPU 频率 / thermal pressure，要 sudo 密码）吗？[y/N]（60 s 不答 = 不采）" ans || true; echo
+      if [ "$ans" = y ] || [ "$ans" = Y ]; then sudo -v && pm_ok=1; fi
+    fi
+  fi
+  trap '[ -n "${sudo_keepalive_pid:-}" ] && kill "$sudo_keepalive_pid" 2>/dev/null' EXIT
+  # 票据默认 5 分钟过期，而开跑前还有编译 / 生成片段 / 起 MediaMTX：保活到 powermetrics 启动为止
+  sudo_keepalive_pid=""
+  if [ "$pm_ok" = 1 ]; then ( while true; do sudo -n -v 2>/dev/null; sleep 60; done ) & sudo_keepalive_pid=$!; fi
 
   # ---- 2. 编译 ----
   if [ "$do_build" = 1 ]; then
@@ -164,7 +179,7 @@ if [ "$do_run" = 1 ]; then
     curl -sf "http://127.0.0.1:$mtx_api_port/v3/paths/list" >/dev/null 2>&1 || { red "MediaMTX 没起来（$out_dir/mediamtx.log）"; kill "$mtx_pid" 2>/dev/null; exit 2; }
   fi
   stream_args=()
-  for i in $(seq 1 "$streams"); do stream_args+=(--stream "rtmp://127.0.0.1:$rtmp_port/s$i"); done
+  i=1; while [ "$i" -le "$streams" ]; do stream_args+=(--stream "rtmp://127.0.0.1:$rtmp_port/s$i"); i=$((i + 1)); done   # 不用 seq：BSD 的 seq 1 0 会倒着数出 1 0
   ndi_args=(); [ "$use_ndi" = 1 ] && ndi_args=(--ndi-send "$ndi_name")
 
   # ---- 5. 跑 ----
@@ -206,20 +221,16 @@ if [ "$do_run" = 1 ]; then
   load_pid=$!
 
   # powermetrics：本用户的 cat 在管道另一头；headless 提前退出时杀掉 cat，powermetrics 下一次写就 SIGPIPE 退出（sudo 票据 8 小时后早过期了，不能指望 sudo kill）
-  pm_pid=""; pm_ok=0
-  if [ "$pm_mode" != off ]; then
-    if sudo -n true 2>/dev/null; then pm_ok=1
-    elif [ -t 0 ] && [ "$pm_mode" = on ]; then echo "powermetrics 要 root：输入本机密码（只这一次）"; sudo -v && pm_ok=1
-    elif [ -t 0 ]; then
-      # auto + 终端：问一句，60 s 没人答就跳过（人走开了也不会卡在密码提示上、整晚没开跑）
-      ans=""; read -r -t 60 -p "要采 powermetrics（GPU 频率 / thermal pressure，要 sudo 密码）吗？[y/N]（60 s 不答 = 不采）" ans || true; echo
-      if [ "$ans" = y ] || [ "$ans" = Y ]; then sudo -v && pm_ok=1; fi
-    fi
+  pm_pid=""
+  if [ -n "${sudo_keepalive_pid:-}" ]; then kill "$sudo_keepalive_pid" 2>/dev/null; fi
+  if [ "$pm_ok" = 1 ] && ! sudo -n true 2>/dev/null; then
+    yellow "开跑前拿到的 sudo 票据已经过期，powermetrics 这次不采"; pm_ok=0
   fi
   if [ "$pm_ok" = 1 ]; then
     ( sudo -n /usr/bin/powermetrics -f plist -i $((pm_interval * 1000)) -n $((duration_s / pm_interval + 6)) --samplers cpu_power,gpu_power,thermal \
         2>"$out_dir/powermetrics.err" | cat > "$out_dir/powermetrics.plist" ) &
     pm_pid=$!
+    sleep 2
     echo "powermetrics_start_epoch=$(date +%s)" >> "$run_info"
   else
     yellow "powermetrics 不采（sudo 要密码；自己的终端里 make soak SOAK_ARGS='--powermetrics on'，或 sudoers 给 /usr/bin/powermetrics NOPASSWD）"
