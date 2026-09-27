@@ -6,8 +6,8 @@ import SwitcherOutputs
 
 /// W3-C3 交付 3 的两处 ISO 侧兜底，都不靠 W1-E 录制器给人看的（中文）失败文案：
 /// - 录制器自己按下限停的（它记下的剩余空间低于它的 minimumFreeBytes）归磁盘——以前靠文案里的"磁盘"二字认；
-/// - 在跑的录制器在 Stats 里的 disk_free_mb：`Recorder.freeBytes` 只看 importantUsage 键，非启动卷（磁盘镜像 / 外置盘）上恒 0
-///   （问题单 W3C-w1-outputs-recorder-freebytes-nonboot-volume，W1-E 还没修），读到 0 时用 `DiskGuard.freeBytes` 重新量。
+/// - 在跑的录制器在 Stats 里的 disk_free_mb：`Recorder.freeBytes` 原来只看 importantUsage 键，非启动卷（磁盘镜像 / 外置盘）上恒 0
+///   （问题单 W3C-w1-outputs-recorder-freebytes-nonboot-volume；G4 2026-09-27 修了，读数不再是 0），读到 0 时用 `DiskGuard.freeBytes` 重新量的兜底留着。
 final class RecorderDiskTests: XCTestCase {
     private let format = ProgramFormat.hd720p60
 

@@ -40,7 +40,8 @@ final class DiskProtectionTests: XCTestCase {
         let signal = TestSignal(t0: t0, clickPeriod: TestPattern.flashPeriod(frameRate: format.frameRate))
         let highRate = VideoEncodeSettings(codec: .h264, bitrateBps: 40_000_000)
         XCTAssertGreaterThan(DiskGuard.freeBytes(for: mount.appendingPathComponent("x.mov")), 40 * 1024 * 1024, "DiskGuard 在镜像上算得出剩余空间")
-        XCTAssertEqual(Recorder.freeBytes(for: mount.appendingPathComponent("x.mov")), 0, "W1-E 的 Recorder.freeBytes 在镜像上是 0（问题单）")
+        XCTAssertGreaterThan(Recorder.freeBytes(for: mount.appendingPathComponent("x.mov")), 30 * 1_048_576,
+                             "Recorder.freeBytes 在镜像上不再是 0（问题单 W3C-w1-outputs-recorder-freebytes-nonboot-volume，G4 2026-09-27 修）")
         // 1 号：监视器按下限 12 MB 报 belowMinimum → 测试停它；2 号：下限 0，真写到满
         let doomedA = Recorder(configuration: .init(url: mount.appendingPathComponent("doomed-a.mov"), format: format, video: highRate,
                                                     audio: AudioEncodeSettings(), minimumFreeBytes: 0, name: "doomed-a"))

@@ -26,3 +26,8 @@ if let v = try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportan
 - `SwitcherISO.DiskGuard.freeBytes(for:)` 按上面的顺序算；`RecordingDiskMonitor` 自己算剩余空间、按每路下限报 `.belowMinimum`，由组装方停那一路；
 - App 建 Recorder 时 `minimumFreeBytes: 0`（下限交给监视器），Stats 里 idle 录制输出的 `disk_free_mb` 改用 `DiskGuard.freeBytes`；
   **在跑的录制器的 `disk_free_mb` 仍是 Recorder 算的（非启动卷上 0）**，等 Recorder 修好自然对。
+
+## 处理结果（G4 续做合入会话，2026-09-27）
+
+按上面的改法修了（`Recorder.freeBytes`：importantUsage 为 0 就退到 `volumeAvailableCapacity`，再退到 `systemFreeSize`；SwitcherOutputs 包走 G4 的胶水额度，W3-C 与 W3-C3 两次建议）。
+`DiskProtectionTests` 里记录这个问题的那句断言改成"镜像上 > 30 MB"；W3-C3 在 ISO 侧的兜底（`DiskGuard.statsEntry` 读到 0 时重新量）留着不撤。结果在 reports/G4-notes.md §13。

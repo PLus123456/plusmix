@@ -682,9 +682,11 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
     /// 录制目录所在卷的可用空间。
     public static func freeBytes(for url: URL) -> UInt64 {
         let dir = url.deletingLastPathComponent()
-        if let v = try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-           let cap = v.volumeAvailableCapacityForImportantUsage {
-            return UInt64(max(0, cap))
+        // importantUsage 是启动卷的概念（含可清理空间），非启动卷（磁盘镜像 / 外置盘）上系统给 0：0 就退到 volumeAvailableCapacity，
+        // 再退到 systemFreeSize（问题单 W3C-w1-outputs-recorder-freebytes-nonboot-volume；G4 2026-09-27 按胶水额度修）
+        if let v = try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey]) {
+            if let cap = v.volumeAvailableCapacityForImportantUsage, cap > 0 { return UInt64(cap) }
+            if let cap = v.volumeAvailableCapacity, cap > 0 { return UInt64(cap) }
         }
         if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: dir.path),
            let free = attrs[.systemFreeSize] as? UInt64 {
