@@ -9,11 +9,11 @@ public enum VirtualCameraConstants {
     public static let deviceModel = "Switcher Virtual Camera"
     /// 设备 UID（主程序按它找设备）。
     public static let deviceUID = "com.example.switcher.virtual-camera.device"
-    /// 给其他 App 读的流（扩展的 source stream）。
-    public static let sourceStreamName = "Switcher 节目"
+    /// 给其他 App 读的流（扩展的 source stream）。设备 / 流名是系统里给人看的字，用 ASCII（W3-C3：包里不写中文字面量）。
+    public static let sourceStreamName = "Switcher Program"
     public static let sourceStreamUID = "com.example.switcher.virtual-camera.source"
     /// 主程序写进来的流（扩展的 sink stream）。
-    public static let sinkStreamName = "Switcher 输入"
+    public static let sinkStreamName = "Switcher Program Sink"
     public static let sinkStreamUID = "com.example.switcher.virtual-camera.sink"
     /// 扩展的 bundle ID（= 主程序 bundle ID + ".camera-extension"；正式 bundle ID 由 W4-B 定，两处一起改）。
     public static let extensionBundleIdentifier = "com.example.switcher.camera-extension"

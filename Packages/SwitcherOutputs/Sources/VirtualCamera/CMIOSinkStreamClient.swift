@@ -6,20 +6,16 @@ import Foundation
 /// 拿到 stream 的 CMSimpleQueue，把 CMSampleBuffer 排进去。全部是 C API 的薄包装；只在 VirtualCameraOutput 的线程上用。
 /// W3-C2：打开时在 sink stream 上注册"已输出"通知（'sonp'，`ScheduledOutputTracker`），扩展回报的输出 / 丢帧从这里读（`extensionReport`）。
 public final class CMIOSinkStreamClient: VirtualCameraSink, @unchecked Sendable {
-    /// 错误。
-    public enum Error: Swift.Error, Equatable, CustomStringConvertible {
+    /// 错误（W3-C3：只有枚举，不带文案；给人看的文字由组装方按 case 查表，日志里打出来就是 case 名和 OSStatus）。
+    public enum Error: Swift.Error, Hashable, Sendable {
+        /// 找不到虚拟摄像头设备（扩展没装 / 没激活）。
         case deviceNotFound
+        /// 设备上没有 sink stream（方向 0 的流）。
         case sinkStreamNotFound
+        /// 拿不到 sink stream 的队列（CMIOStreamCopyBufferQueue 的 OSStatus）。
         case queueUnavailable(OSStatus)
+        /// sink stream 起不来（CMIODeviceStartStream 的 OSStatus；签名不符被扩展拒也是这个）。
         case startFailed(OSStatus)
-        public var description: String {
-            switch self {
-            case .deviceNotFound: "找不到虚拟摄像头设备（扩展没装或没激活）"
-            case .sinkStreamNotFound: "虚拟摄像头设备上没有 sink stream"
-            case .queueUnavailable(let s): "拿不到 sink stream 的队列（\(s)）"
-            case .startFailed(let s): "sink stream 起不来（\(s)）"
-            }
-        }
     }
 
     public let deviceUID: String
@@ -139,6 +135,7 @@ public final class CMIOSinkStreamClient: VirtualCameraSink, @unchecked Sendable 
     public func send(_ sampleBuffer: CMSampleBuffer) -> Bool {
         guard isOpen, let queue else { return false }
         if CMSimpleQueueGetCount(queue) >= CMSimpleQueueGetCapacity(queue) { return false }
+        tracker.noteSent(sequence: CMIOSequenceNumber.get(sampleBuffer))   // 排队之前：扩展可能在 Enqueue 返回之前就取走并回报
         let retained = Unmanaged.passRetained(sampleBuffer)   // 队列拿走这一份引用，设备取走后释放
         let st = CMSimpleQueueEnqueue(queue, element: retained.toOpaque())
         if st != noErr {

@@ -19,13 +19,17 @@ public protocol VirtualCameraSink: AnyObject {
     var extensionReport: SinkOutputReport? { get }
 }
 
-/// 扩展回报的累计：已输出的帧、序号跳过的帧（= 扩展收了没输出，丢了）。
+/// 扩展回报的累计：已输出的帧、序号跳过的帧（= 扩展收了没输出，丢了）、对不上的回报（序号不是本连接排过的，不算输出也不算丢）。
 public struct SinkOutputReport: Hashable, Sendable {
     public var output: UInt64
     public var dropped: UInt64
-    public init(output: UInt64, dropped: UInt64) {
+    /// 回报的序号是 kCMIOInvalidSequenceNumber、比本连接排过的都大、或是旧连接迟到的（W3-C3）。> 0 说明 CMIO 桥没把本进程挂的序号
+    /// 原样带给扩展（第一次签名跑通时看它，见 issue W3C2-camera-extension-scheduled-output）。
+    public var unmatched: UInt64
+    public init(output: UInt64, dropped: UInt64, unmatched: UInt64 = 0) {
         self.output = output
         self.dropped = dropped
+        self.unmatched = unmatched
     }
 }
 
@@ -37,13 +41,17 @@ public struct SinkOutputReport: Hashable, Sendable {
 ///    `sinkStream.notifyScheduledOutputChanged(CMIOExtensionScheduledOutput(sequenceNumber:hostTimeInNanoseconds:))`；
 /// 3. 系统把它转成本进程在 sink stream 上注册的 `kCMIOStreamPropertyScheduledOutputNotificationProc`（'sonp'）回调，落到这里。
 /// 相邻两次通知的序号差 − 1 = 扩展收了却没输出的帧；一个连接里第一次通知之前的序号同样算。重复 / 倒退的序号只记输出不记丢。
-/// 扩展侧那一行（第 2 步）在 CameraExtension/，不归 W3-C2（issue W3C2-camera-extension-scheduled-output）；没有它就收不到通知，
-/// 回报恒为 0——激活扩展本身也 BLOCKED-签名。
+/// 扩展侧（第 2 步）在 CameraExtension/ 的 consumeNext（W3-C3 加上）；激活扩展本身 BLOCKED-签名，本机收不到真通知。
+/// W3-C3 的守卫：sink 在排队之前记下这一帧的序号（`noteSent`）；回报的序号不是本连接排过的（kCMIOInvalidSequenceNumber、
+/// 比排过的都大、新连接还没排过帧时到的旧连接回报）只记 `unmatched`——CMIO 桥万一没把序号原样带过去，Stats 里不会冒出上亿的"丢帧"。
 public final class ScheduledOutputTracker: @unchecked Sendable {
     private struct State {
         var last: UInt64?
+        /// 本连接排进 sink 的最大序号；nil = 还没排过。
+        var highestSent: UInt64?
         var output: UInt64 = 0
         var dropped: UInt64 = 0
+        var unmatched: UInt64 = 0
     }
     private let state = Mutex(State())
 
@@ -51,12 +59,27 @@ public final class ScheduledOutputTracker: @unchecked Sendable {
 
     /// 新连接：序号从 0 重来，不和上一个连接比（累计值保留）。
     public func beginConnection() {
-        state.withLock { $0.last = nil }
+        state.withLock {
+            $0.last = nil
+            $0.highestSent = nil
+        }
+    }
+
+    /// 一帧要排进 sink 了（sink 在排队之前调：扩展可能在排队调用返回之前就取走并回报）。没挂上序号的（invalid）不算。
+    public func noteSent(sequence: UInt64) {
+        guard sequence != CMIOSequenceNumber.invalid else { return }
+        state.withLock { s in
+            if s.highestSent.map({ sequence > $0 }) ?? true { s.highestSent = sequence }
+        }
     }
 
     /// 一条"已输出"通知（CMIO 的线程上）。
     public func noteOutput(sequence: UInt64) {
         state.withLock { s in
+            guard sequence != CMIOSequenceNumber.invalid, let sent = s.highestSent, sequence <= sent else {
+                s.unmatched &+= 1
+                return
+            }
             s.output &+= 1
             if let last = s.last {
                 guard sequence > last else { return }
@@ -69,7 +92,7 @@ public final class ScheduledOutputTracker: @unchecked Sendable {
     }
 
     public var report: SinkOutputReport {
-        state.withLock { SinkOutputReport(output: $0.output, dropped: $0.dropped) }
+        state.withLock { SinkOutputReport(output: $0.output, dropped: $0.dropped, unmatched: $0.unmatched) }
     }
 
     /// 注册给 CMIO 的 C 回调（refCon = `Unmanaged.passUnretained(tracker).toOpaque()`，tracker 的寿命由注册方保证长于注册）。
