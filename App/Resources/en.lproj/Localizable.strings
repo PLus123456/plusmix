@@ -520,6 +520,7 @@
 "outputSettings.multiview.title" = "Multiview layout";
 "outputSettings.ndi.add" = "Add NDI output";
 "outputSettings.ndi.addButton" = "Add";
+"outputSettings.ndi.apply" = "Apply name / groups";
 "outputSettings.ndi.conversion" = "Conversion";
 "outputSettings.ndi.conversion.auto" = "Auto";
 "outputSettings.ndi.conversion.cpu" = "CPU";
@@ -529,7 +530,6 @@
 "outputSettings.ndi.hint" = "The NDI source name is this output's name (shown on the network as “MACHINE (name)”). Renaming or changing the source or groups recreates the sender (receivers must pick the source again); conversion switches live. With PVW / multiview as the source the renderer produces that picture on demand, so the first frame or two may be missing. Audio: Master for PGM / PVW / multiview, the input's post-fader audio for an input.";
 "outputSettings.ndi.name" = "Source name";
 "outputSettings.ndi.remove" = "Remove";
-"outputSettings.ndi.rename" = "Rename";
 "outputSettings.ndi.section" = "NDI %d · %@";
 "outputSettings.ndi.status" = "Status";
 "outputSettings.record.container" = "Container";

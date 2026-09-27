@@ -520,6 +520,7 @@
 "outputSettings.multiview.title" = "多画面布局";
 "outputSettings.ndi.add" = "添加 NDI 发送";
 "outputSettings.ndi.addButton" = "添加";
+"outputSettings.ndi.apply" = "应用名字 / 分组";
 "outputSettings.ndi.conversion" = "转换";
 "outputSettings.ndi.conversion.auto" = "自动";
 "outputSettings.ndi.conversion.cpu" = "CPU";
@@ -529,7 +530,6 @@
 "outputSettings.ndi.hint" = "源名就是这一路输出的名字，网络上显示为「机器名 (源名)」；改名 / 改来源 / 改分组会重建发送端（接收方要重新选源），转换方式随时切换。来源选 PVW / 多画面时渲染器按需多出一路画面，开头可能缺一两帧。音频：PGM / PVW / 多画面送 Master，某路输入送该路推子后的声音。";
 "outputSettings.ndi.name" = "源名";
 "outputSettings.ndi.remove" = "删除";
-"outputSettings.ndi.rename" = "改名";
 "outputSettings.ndi.section" = "NDI %d · %@";
 "outputSettings.ndi.status" = "状态";
 "outputSettings.record.container" = "容器";

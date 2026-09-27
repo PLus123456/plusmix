@@ -644,35 +644,45 @@ struct OutputSettingsView: View {
     }
 }
 
-/// NDI 页的一路（W3-E3：名字 / 源 / 开关生效）。名字 = 输出名 = NDI 源名，改了要重建发送端（接收方重新选源），所以不跟着每个按键发：
-/// 回车或点"改名"才发 renameOutput；来源 / 分组 / 转换方式走 setOutputSettings，开关走 setOutputEnabled。状态行只读 Stats.encoder。
+/// NDI 页的一路（W3-E3：名字 / 源 / 开关生效）。名字（= 输出名 = NDI 源名）和分组定死在发送端里，改了要重建它（接收方重新选源），
+/// 所以不跟着每个按键发：回车或点"应用"才发 renameOutput / setOutputSettings；来源 / 转换方式直接走 setOutputSettings（选一次改一次），
+/// 开关走 setOutputEnabled。状态行只读 Stats.encoder。
 struct NDIOutputSection: View {
     @ObservedObject var model: OutputSettingsModel
     let output: OutputState
     @State private var draftName: String
+    @State private var draftGroups: String
 
     init(model: OutputSettingsModel, output: OutputState) {
         self.model = model
         self.output = output
         _draftName = State(initialValue: output.name)
+        _draftGroups = State(initialValue: OutputExtras.string(output, OutputExtras.ndiGroups) ?? "")
+    }
+
+    private var savedGroups: String { OutputExtras.string(output, OutputExtras.ndiGroups) ?? "" }
+    private var trimmedName: String { draftName.trimmingCharacters(in: .whitespaces) }
+    private var edited: Bool { draftName != output.name || draftGroups != savedGroups }
+
+    /// 名字 / 分组一起落：同一轮快照里两样都变了，运行表只重建一次发送端。
+    private func commit() {
+        if !trimmedName.isEmpty, trimmedName != output.name { model.rename(output.number, trimmedName) }
+        if draftGroups != savedGroups { model.setNDI(output.number, groups: draftGroups) }
     }
 
     var body: some View {
         Section(L("outputSettings.ndi.section", output.number, output.name)) {
             Toggle(L("outputSettings.ndi.enabled"), isOn: Binding(get: { output.enabled }, set: { model.setOutputEnabled(output.number, on: $0) }))
-            HStack {
-                TextField(L("outputSettings.ndi.name"), text: $draftName)
-                    .onSubmit { model.rename(output.number, draftName) }
-                Button(L("outputSettings.ndi.rename")) { model.rename(output.number, draftName) }
-                    .disabled(draftName.trimmingCharacters(in: .whitespaces).isEmpty || draftName == output.name)
-            }
+            TextField(L("outputSettings.ndi.name"), text: $draftName).onSubmit(commit)
+            TextField(L("outputSettings.ndi.groups"), text: $draftGroups).onSubmit(commit)
+            Button(L("outputSettings.ndi.apply")) { commit() }
+                .disabled(!edited || trimmedName.isEmpty)
             Picker(L("outputSettings.source"), selection: Binding(get: { output.settings.source }, set: { model.setNDI(output.number, source: $0) })) {
                 ForEach(model.sourceChoices, id: \.self) { Text($0.title(in: model.state)).tag($0) }
             }
             if let note = model.sourceNote(for: output.settings.source) {
                 Text(note).font(.caption).foregroundStyle(.secondary)
             }
-            TextField(L("outputSettings.ndi.groups"), text: Binding(get: { OutputExtras.string(output, OutputExtras.ndiGroups) ?? "" }, set: { model.setNDI(output.number, groups: $0) }))
             Picker(L("outputSettings.ndi.conversion"), selection: Binding(get: { OutputExtras.string(output, OutputExtras.ndiConversion) ?? "auto" }, set: { model.setNDI(output.number, conversion: $0) })) {
                 ForEach(OutputExtras.ndiConversions, id: \.self) { Text(L("outputSettings.ndi.conversion.\($0)")).tag($0) }
             }
@@ -680,6 +690,7 @@ struct NDIOutputSection: View {
             Button(L("outputSettings.ndi.remove")) { model.removeOutput(output.number) }
         }
         .onChange(of: output.name) { _, name in draftName = name }
+        .onChange(of: savedGroups) { _, groups in draftGroups = groups }
     }
 }
 
