@@ -20,8 +20,12 @@ final class ThumbnailRateTests: XCTestCase {
         let cell2 = try XCTUnwrap(wc.inputStrip.cells[2])
         XCTAssertEqual(cell1.display.maxFramesPerSecond, 24)
         XCTAssertEqual(cell1.display.target, .multiview)
-        XCTAssertEqual(cell1.display.sourceRect, MultiviewLayout.inputCell(index: 0, inputCount: 2, width: 1920, height: 1080))
-        XCTAssertEqual(cell2.display.sourceRect, MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080))
+        // 缩略图 = 多画面里这一路格子的内框、切掉底部渲染器画的名字条（W3-E3 交付第 5 条：名字只在标题条出现一次）
+        let placements = MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080)
+        let p1 = try XCTUnwrap(placements.first { $0.source == .input(number: 1) }), p2 = try XCTUnwrap(placements.first { $0.source == .input(number: 2) })
+        XCTAssertEqual(p1.inner, MultiviewLayout.inputCell(index: 0, inputCount: 2, width: 1920, height: 1080))
+        XCTAssertEqual(cell1.display.sourceRect, InputStripView.thumbnailRect(for: p1, width: 1920, height: 1080))
+        XCTAssertEqual(cell2.display.sourceRect, InputStripView.thumbnailRect(for: p2, width: 1920, height: 1080))
         XCTAssertNil(wc.programMonitor.display.maxFramesPerSecond, "PGM 监视器不限速")
         XCTAssertNil(wc.previewMonitor.display.maxFramesPerSecond, "PVW 监视器不限速")
 

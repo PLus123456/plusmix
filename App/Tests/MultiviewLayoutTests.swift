@@ -75,7 +75,14 @@ final class MultiviewSettingsTests: XCTestCase {
         let page = AppTest.controller.panels.showOutputSettings(tab: .multiview).model
         XCTAssertNil(page.multiviewOutput, "空节目没有多画面输出")
         XCTAssertEqual(page.multiviewLayout, MultiviewLayoutSettings(), "没有就显示默认布局")
-        XCTAssertEqual(wc.inputStrip.cells[1]?.display.sourceRect, MultiviewLayout.inputCell(index: 0, inputCount: 2, width: 1920, height: 1080))
+        // 缩略图 = 格子内框切掉底部的名字条（W3-E3 交付第 5 条）；这里看的是"按哪个布局切"
+        func thumb(_ settings: MultiviewLayoutSettings?, _ n: Int) -> NormalizedRect? {
+            MultiviewLayout.placements(settings: settings, inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: n) }
+                .map { InputStripView.thumbnailRect(for: $0, width: 1920, height: 1080) }
+        }
+        XCTAssertEqual(MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 1) }?.inner,
+                       MultiviewLayout.inputCell(index: 0, inputCount: 2, width: 1920, height: 1080))
+        XCTAssertEqual(wc.inputStrip.cells[1]?.display.sourceRect, thumb(nil, 1))
 
         page.setMultiviewPreset("3x3")
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .multiview }?.settings.multiview?.preset == "3x3" }, "\(session.state.outputs)")
@@ -92,7 +99,10 @@ final class MultiviewSettingsTests: XCTestCase {
         let placements = MultiviewLayout.placements(settings: wanted, inputs: [1, 2], width: 1920, height: 1080)
         let rect1 = try XCTUnwrap(placements.first { $0.source == .input(number: 1) }?.inner)
         XCTAssertNotEqual(rect1, MultiviewLayout.inputCell(index: 0, inputCount: 2, width: 1920, height: 1080), "3×3 与默认布局的格子不同（否则测不出东西）")
-        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[1]?.display.sourceRect == rect1 }, "缩略图应按 3×3 切：\(String(describing: wc.inputStrip.cells[1]?.display.sourceRect))")
+        let thumb1 = try XCTUnwrap(thumb(wanted, 1))
+        XCTAssertEqual(thumb1.x, rect1.x)
+        XCTAssertEqual(thumb1.y, rect1.y)
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[1]?.display.sourceRect == thumb1 }, "缩略图应按 3×3 切：\(String(describing: wc.inputStrip.cells[1]?.display.sourceRect))")
 
         // 自定义格子（节目文件 / API 给的）：页上只读列出，预设不起作用；布局里没有 2 号 → 2 号缩略图显示占位文案
         var settings = try XCTUnwrap(session.state.output(mv.number)?.settings)
@@ -116,7 +126,10 @@ final class MultiviewSettingsTests: XCTestCase {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 2)
         let wc = AppTest.controller.windowController
-        let defaultRect = MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080)
+        // 默认布局 2 号格子（内框切掉名字条，W3-E3 交付第 5 条）
+        let defaultPlacement = try XCTUnwrap(MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) })
+        XCTAssertEqual(defaultPlacement.inner, MultiviewLayout.inputCell(index: 1, inputCount: 2, width: 1920, height: 1080))
+        let defaultRect = InputStripView.thumbnailRect(for: defaultPlacement, width: 1920, height: 1080)
         XCTAssertTrue(AppTest.waitUntil(2) { wc.inputStrip.cells[2]?.display.sourceRect == defaultRect })
         let number = (session.state.outputs.map(\.number).max() ?? 0) + 1
         session.send(.addOutput(config: OutputState(number: number, kind: .multiview, name: "legacy", enabled: false,
@@ -124,7 +137,7 @@ final class MultiviewSettingsTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(number) != nil })
         AppTest.pump(seconds: 0.5)
         XCTAssertEqual(wc.inputStrip.cells[2]?.display.sourceRect, defaultRect, "过渡键被忽略：缩略图仍按默认布局切，与渲染器一致")
-        XCTAssertEqual(MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) }?.inner, defaultRect)
+        XCTAssertEqual(MultiviewLayout.placements(settings: nil, inputs: [1, 2], width: 1920, height: 1080).first { $0.source == .input(number: 2) }?.inner, defaultPlacement.inner)
         session.send(.removeOutput(output: number))
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(number) == nil && wc.inputStrip.cells[2]?.display.sourceRect == defaultRect })
     }

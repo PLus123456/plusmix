@@ -1,5 +1,5 @@
-// 输入缩略图格子：标题条（编号、名字、tally 色）、缩略图（多画面纹理里这一路的格子，≤ 24 fps）、
-// 底行 Overlay 1–4 小按钮 + 静音小按钮。点缩略图 = 选 PVW，Shift 点 = 直切 PGM。
+// 输入缩略图格子：标题条（编号、名字、tally 色）、缩略图（多画面纹理里这一路的格子，切掉渲染器画在格子底部的名字条——名字只在标题条出现一次，
+// W3-E3；≤ 24 fps）、底行 Overlay 1–4 小按钮 + 静音小按钮。点缩略图 = 选 PVW，Shift 点 = 直切 PGM。
 import AppKit
 import SwitcherContracts
 import SwitcherRender
@@ -133,7 +133,7 @@ final class InputCellView: NSView {
         toolTip = L("cell.tooltip", config.number, config.name, L("addInput.kind.\(config.kind.rawValue)"))
     }
 
-    /// 缩略图取多画面纹理里的哪一块（InputStripView 按当前布局算好的内框）；nil = 布局里没有这一路（自定义格子没放它），不画、写一句说明。
+    /// 缩略图取多画面纹理里的哪一块（InputStripView.thumbnailRect：按当前布局算好的内框、去掉底部名字条）；nil = 布局里没有这一路（自定义格子没放它），不画、写一句说明。
     func setThumbnail(rect: NormalizedRect?) {
         isOutsideMultiviewLayout = rect == nil
         display.sourceRect = rect ?? .full
