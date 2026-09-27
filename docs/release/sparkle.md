@@ -18,6 +18,9 @@ scripts/release/sparkle-keys.sh import key.txt     # 新打包机导入
 ```
 
 - 一套密钥对应产品的全部版本：换私钥 = 老用户更新不了（Sparkle 用旧 App 里的公钥验新包）。私钥只在打包机钥匙串与 CI secret 里；丢了就只能靠代码签名一致性发一个带新公钥的版本。
+- **第一次在打包机上跑 `generate_appcast` / `sign_update` 会弹钥匙串授权框**（密钥是 `generate_keys` 存的，别的二进制读要授权）：点"始终允许"。无人值守的场景（CI、脚本测试）
+  一律用 `--ed-key-file`（文件或标准输入），不碰钥匙串——W4-B 的 R5 一开始用钥匙串账户，`generate_appcast` 在授权框上卡了十分钟。
+- 私钥文件格式 = 32 字节 ed25519 种子的 base64（`generate_keys -x` 导出的就是这个；测试里 `head -c 32 /dev/urandom | base64` 造的临时钥匙同样能用）。
 - 公钥与更新源在构建时才进 Info.plist，所以本地 `make build-app` 出来的 App 不会去检查更新，也不会误连别人的 appcast。
 
 ## appcast
@@ -30,6 +33,9 @@ make appcast DIR=.build/release/0.1.0 APPCAST_FLAGS="--download-url-prefix https
 `appcast.sh` 调 Sparkle 发行包里的 `generate_appcast`（`sparkle-bin.sh` 在 `.build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin` 找；`SPARKLE_BIN` 可指定），
 出 `appcast.xml`：每项 `sparkle:version`（= CFBundleVersion 构建号，判新旧）、`sparkle:shortVersionString`、`sparkle:edSignature`、`length`、`sparkle:minimumSystemVersion`（从 App 的 LSMinimumSystemVersion 推）。
 CI（release.yml）用 `--ed-key-file -` 从 secret 读私钥。
+
+**`generate_appcast` 只在 App 的 `SUPublicEDKey` 与私钥配对时才写 `sparkle:edSignature`**：公钥为空或不配它只警告（"SUPublicEDKey … does not match"）、不签，Sparkle 装不了这种更新。
+所以发布归档一定要带 `SPARKLE_PUBLIC_ED_KEY`（`archive.sh` 在 Team 模式下没给会黄字警告，release.yml 从变量读）。R5 用推出来的公钥注入测试副本验证了这两种行为。
 
 托管：`SUFeedURL` 用固定地址，例如 `https://github.com/<owner>/<repo>/releases/latest/download/appcast.xml`（每次发布把 appcast.xml 作为 Release 资产上传，latest 自动指到最新）。
 appcast 只需要含最新版本；用户跨多个版本升级也是直接装最新。

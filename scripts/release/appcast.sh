@@ -29,7 +29,7 @@ n=$(ls "$dir"/*.dmg "$dir"/*.zip "$dir"/*.tar.xz 2>/dev/null | wc -l | tr -d ' '
 [ "$n" -gt 0 ] || { echo "[appcast] $dir 里没有 .dmg / .zip" >&2; exit 1; }
 [ -n "$out" ] && extra+=(-o "$out")
 echo "[appcast] generate_appcast（$bin）→ $dir（$n 个包）"
-"$bin/generate_appcast" "${extra[@]}" "$dir" || { echo "[appcast] generate_appcast 失败" >&2; exit 1; }
+"$bin/generate_appcast" ${extra[@]+"${extra[@]}"} "$dir" || { echo "[appcast] generate_appcast 失败" >&2; exit 1; }   # bash 3.2 + set -u：空数组的展开写法
 result=${out:-$dir/appcast.xml}
 [ -f "$result" ] || { echo "[appcast] 没产出 $result" >&2; exit 1; }
 echo "[appcast] 写了 $result："

@@ -32,12 +32,15 @@ extract_entitlements() { # $1 = code path, $2 = out file；返回 0 = 有权限�
 }
 sign_one() { # $1 = path, 其余 = 附加参数（--entitlements F）
   local p=$1; shift
-  if [ "$verbose" = 1 ]; then codesign --force --sign "$sign_id" "${opts[@]}" "$@" --verbose=2 "$p"; else codesign --force --sign "$sign_id" "${opts[@]}" "$@" "$p" 2>&1 | grep -v "replacing existing signature" || true; fi
+  # bash 3.2 + set -u：空数组要用 ${opts[@]+"${opts[@]}"} 展开（ad-hoc 时 opts 为空）
+  if [ "$verbose" = 1 ]; then codesign --force --sign "$sign_id" ${opts[@]+"${opts[@]}"} "$@" --verbose=2 "$p"; else codesign --force --sign "$sign_id" ${opts[@]+"${opts[@]}"} "$@" "$p" 2>&1 | grep -v "replacing existing signature" || true; fi
   codesign --verify --strict "$p" >/dev/null 2>&1 || { echo "[sign] 签完验不过：$p" >&2; exit 1; }
 }
 # 带权限表签：给定文件 → 用它；否则抽现有的
 sign_with_entitlements() { # $1 = path, $2 = 指定的权限表（可空）
-  local p=$1 given=$2 f="$tmp/$(basename "$p").ent.plist"
+  local p=$1
+  local given=${2:-}
+  local f="$tmp/$(basename "$p").ent.plist"
   if [ -n "$given" ]; then sign_one "$p" --entitlements "$given"
   elif extract_entitlements "$p" "$f"; then sign_one "$p" --entitlements "$f"
   else sign_one "$p"; fi

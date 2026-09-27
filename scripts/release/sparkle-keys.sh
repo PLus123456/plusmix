@@ -8,7 +8,7 @@
 #   sparkle-keys.sh public   [--account NAME]     只打印公钥（base64）
 #   sparkle-keys.sh export --to FILE [--account NAME]   把私钥导出到文件（放到 CI secret 后删掉文件）
 #   sparkle-keys.sh import FILE [--account NAME]  从文件导入私钥到钥匙串（新打包机）
-# --account 默认 ed25519（Sparkle 的默认账户名）；测试用临时名字，测完 security delete-generic-password -s https://sparkle-project.org -a NAME。
+# --account 默认 ed25519（Sparkle 的默认账户名）。第一次让 generate_appcast / sign_update 读这把钥匙会弹钥匙串授权框（点"始终允许"）；无人值守用 export 出来的文件 + --ed-key-file。
 set -uo pipefail
 . "$(dirname "$0")/sparkle-bin.sh"
 cmd=${1:-}; [ $# -gt 0 ] && shift

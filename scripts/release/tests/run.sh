@@ -19,8 +19,8 @@ for t in "${tests[@]}"; do
     77) skipn=$((skipn + 1)); status=SKIP ;;
     *)  failn=$((failn + 1)); status=FAIL ;;
   esac
-  # 把断言行原样打出来（ok / FAIL / SKIP），方便直接看
-  grep -E '^\s+(ok|FAIL|SKIP|·)' "$log" | sed 's/^/   /'
+  # 把断言行原样打出来（ok / FAIL / SKIP），方便直接看；lib.sh 的颜色码在行首，先剥掉再匹配
+  LC_ALL=C sed $'s/\e\\[[0-9;]*m//g' "$log" | grep -E '^ +(ok|FAIL|SKIP|·) ' | sed 's/^/   /'
   [ "$status" = FAIL ] && tail -20 "$log" | sed 's/^/   | /'
   rows+=("$(printf '%-6s %-44s %4ss  %s' "$status" "$t" "$secs" "$log")")
   # R1 产出的 App 给后面的测试复用
