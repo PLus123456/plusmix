@@ -51,7 +51,7 @@ final class NDISendAppTests: XCTestCase {
     }
 
     private func encoderEntry(_ session: SwitcherSession, output number: Int) -> Stats.EncoderEntry? {
-        session.stats.flatMap { OutputRuntime.encoderEntry(in: $0, forOutput: number, outputs: session.state.outputs) }
+        session.stats.flatMap { OutputRuntime.encoderEntry(in: $0, forOutput: number) }   // 019：按 EncoderEntry.output 对号
     }
 
     /// 输出设置 NDI 页加一路（源 PGM）→ NDISender 起来、挂在引擎上；Stats.encoder 那一项 = sender 的 statsEntry（publishing、帧数在涨、
@@ -84,6 +84,7 @@ final class NDISendAppTests: XCTestCase {
         XCTAssertEqual(e.dropped, e.skipped, "NDI 的 dropped = 队列满丢的帧（提案 001）")
         XCTAssertEqual(e.reconnects, 0)
         XCTAssertEqual(e.diskFreeMb, 0)
+        XCTAssertEqual(e.output, number, "019：encoder 项带输出编号，App 按它对号（不再按顺序）")
         XCTAssertLessThanOrEqual(e.frames, sender.countersSnapshot.framesSent, "Stats 里的帧数来自 sender 的计数（采样在前）")
         let rawBitrate = Double(session.format.width * session.format.height * 2 * 8) * session.format.frameRate.framesPerSecond.doubleValue
         XCTAssertEqual(e.bitrate, rawBitrate, accuracy: rawBitrate * 0.25, "NDI 码率 = 窗口内送出的 UYVY 字节 × 8 / 秒")
@@ -114,6 +115,13 @@ final class NDISendAppTests: XCTestCase {
               + "Stats.encoder：frames \(e.frames) skipped \(e.skipped) bitrate \(String(format: "%.0f", e.bitrate / 1e6)) Mb/s；"
               + "sender：发 \(sender.countersSnapshot.framesSent) 帧，转换 \(sender.countersSnapshot.conversion)\(sender.countersSnapshot.usingGPU ? "(GPU)" : "(CPU)")，接收方 \(sender.countersSnapshot.connections)")
         XCTAssertTrue(lags.allSatisfy { (0...30).contains($0) }, "回环画面落后 PGM 0–30 帧（合理区间，不是阈值）：\(lags)")
+        // 019（W3-E4）：接收方数进 Stats（本机回环输入 = 1 个接收方），NDI 页的状态行读同一行显示它
+        XCTAssertTrue(AppTest.waitUntil(5) { (self.encoderEntry(session, output: number)?.connections ?? 0) >= 1 },
+                      "Stats.encoder 应报接收方数：\(String(describing: self.encoderEntry(session, output: number)))")
+        XCTAssertTrue(AppTest.waitUntil(3) { page.ndiStatus(output: number) == OutputStatusText.ndi(enabled: true, entry: self.encoderEntry(session, output: number)) },
+                      "NDI 页状态行 = 同一行 Stats：\(page.ndiStatus(output: number))")
+        XCTAssertTrue(page.ndiStatus(output: number).contains(L("ndi.status.connections", Int(self.encoderEntry(session, output: number)?.connections ?? 0))), page.ndiStatus(output: number))
+        print("NDI 发送（App）019：output \(String(describing: self.encoderEntry(session, output: number)?.output))，接收方 \(String(describing: self.encoderEntry(session, output: number)?.connections))，状态行「\(page.ndiStatus(output: number))」")
 
         // 4. 删输出 → sender 停、运行表里没有它；删回环输入
         session.send(.removeInput(input: 2))

@@ -453,11 +453,13 @@
 "ndi.bandwidth.audioOnly" = "只要音频";
 "ndi.bandwidth.highest" = "最高（全分辨率）";
 "ndi.bandwidth.lowest" = "最低（预览流）";
+"ndi.status.connections" = " · 接收方 %ld";
 "ndi.status.disabled" = "没在发（开关关着）";
 "ndi.status.dropped" = "（队列丢 %ld）";
+"ndi.status.failed" = "起不来：有 NDI SDK，但初始化 / 建发送实例失败（看日志）";
 "ndi.status.publishing" = "发送中 · %ld 帧";
 "ndi.status.starting" = "启动中…";
-"ndi.status.unavailable" = "不可用（没有 NDI SDK / 初始化失败）";
+"ndi.status.unavailable" = "不可用：没有 NDI SDK（装 NDI SDK for Apple 后重新编译）";
 "notice.apiFailed" = "API 起不来（%@）：%@";
 "notice.audioDeviceFallback" = "音频设备「%@」建不起来（%@），退到空设备";
 "notice.audioFailed" = "音频引擎起不来：%@";

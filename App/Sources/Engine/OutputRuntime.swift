@@ -1,5 +1,6 @@
 // 输出接线（W2-B2 接缝 5、6；W3-C 加 ISO 分路、同一拍起停、磁盘保护）：把 MixerState.outputs 里"应该在跑"（enabled）的录制 / 推流
-// 变成活的 Recorder（W1-E）/ StreamOutput（W2-D），跟着快照起停；Stats.encoder 的项也从这里出（与 outputs 里带编码器的输出同序，测试标准 §7）。
+// 变成活的 Recorder（W1-E）/ StreamOutput（W2-D），跟着快照起停；Stats.encoder 的项也从这里出（每项带输出编号 output——提案 019，读的一方按它对号；
+// 顺序仍 = outputs 里带编码器的输出，测试标准 §7）。
 //
 // 录制的起点 / 终点都是拍（Recorder 的时间基 = 起始拍的拍点），由 SharedTickPlanner（SwitcherISO）定：
 // - 起：同一次 reconcile 里新打开的录制输出是一批，共用一个起始拍 = max(现在 + 2, 最晚的生效拍 + 10 + 每多一路 3 拍)；上一批的拍还在
@@ -686,34 +687,34 @@ final class OutputRuntime {
 
     // MARK: Stats
 
-    /// 某个输出在 Stats.encoder 里的项：encoder 与 outputs 里带编码器（record / stream / ndi）的输出同序（测试标准 §7）。
-    nonisolated static func encoderEntry(_ entries: [Stats.EncoderEntry], forOutput number: Int, outputs: [OutputState]) -> Stats.EncoderEntry? {
-        let withEncoders = outputs.filter { [.record, .stream, .ndi].contains($0.kind) }
-        guard let i = withEncoders.firstIndex(where: { $0.number == number }), i < entries.count else { return nil }
-        return entries[i]
+    /// 某个输出在 Stats.encoder 里的项：按 `EncoderEntry.output` 对号（提案 019）。019 之前靠"与 outputs 里带编码器的输出同序"，
+    /// 两次采样之间输出表变了会错一拍（W3-E3 报告 §4 第 2 条）；现在过期的一行也对得准。
+    nonisolated static func encoderEntry(_ entries: [Stats.EncoderEntry], forOutput number: Int) -> Stats.EncoderEntry? {
+        entries.first { $0.output == number }
     }
 
-    nonisolated static func encoderEntry(in stats: Stats, forOutput number: Int, outputs: [OutputState]) -> Stats.EncoderEntry? {
-        encoderEntry(stats.encoder, forOutput: number, outputs: outputs)
+    nonisolated static func encoderEntry(in stats: Stats, forOutput number: Int) -> Stats.EncoderEntry? {
+        encoderEntry(stats.encoder, forOutput: number)
     }
 
-    /// Stats.encoder 的来源表：与 outputs 里带编码器的输出（record / stream / ndi）同序；没在跑的报 idle / stopped / failed。
+    /// Stats.encoder 的来源表：与 outputs 里带编码器的输出（record / stream / ndi）同序、每项带输出编号（019）；没在跑的报 idle / stopped / failed。
     private func rebuildStats() {
-        var sources: [EncoderStatsSource.Source] = []
+        var sources: [(output: Int, source: EncoderStatsSource.Source)] = []
         for output in lastOutputs {
+            let n = output.number
             switch output.kind {
             case .record:
-                if let e = recorders[output.number] { sources.append(.recorder(e.recorder)) }
-                else if let r = finishedRecorders[output.number] { sources.append(.recorder(r)) }
-                else { sources.append(.idleRecord(directory: output.settings.record?.directory ?? ShowDocuments.defaultRecordDirectory)) }
+                if let e = recorders[n] { sources.append((n, .recorder(e.recorder))) }
+                else if let r = finishedRecorders[n] { sources.append((n, .recorder(r))) }
+                else { sources.append((n, .idleRecord(directory: output.settings.record?.directory ?? ShowDocuments.defaultRecordDirectory))) }
             case .stream:
-                if let e = streams[output.number] { sources.append(.stream(e.stream)) }
-                else if let s = finishedStreams[output.number] { sources.append(.stream(s)) }
-                else { sources.append(.idle) }
+                if let e = streams[n] { sources.append((n, .stream(e.stream))) }
+                else if let s = finishedStreams[n] { sources.append((n, .stream(s))) }
+                else { sources.append((n, .idle)) }
             case .ndi:
-                if let e = ndiSenders[output.number] { sources.append(.ndi(e.sender)) }
-                else if let s = finishedNDI[output.number] { sources.append(.ndi(s)) }
-                else { sources.append(.idle) }
+                if let e = ndiSenders[n] { sources.append((n, .ndi(e.sender))) }
+                else if let s = finishedNDI[n] { sources.append((n, .ndi(s))) }
+                else { sources.append((n, .idle)) }
             default:
                 break
             }
@@ -737,8 +738,8 @@ extension OutputSource {
     var inputNumber: Int? { if case .input(let n) = self { n } else { nil } }
 }
 
-/// 把录制器 / 推流 / NDI 的计数变成 Stats.encoder 的项（每个输出一项，顺序 = outputs 顺序）：skipped / frames / dropped / disk_free_mb /
-/// reconnects / state 由各自的 statsEntry 填，bitrate 按上次采样以来的窗口算。只在 Stats 采样线程上被调；表由主线程换。
+/// 把录制器 / 推流 / NDI 的计数变成 Stats.encoder 的项（每个输出一项，顺序 = outputs 顺序，每项带输出编号 output——提案 019）：skipped / frames /
+/// dropped / disk_free_mb / reconnects / connections / state 由各自的 statsEntry 填，bitrate 按上次采样以来的窗口算。只在 Stats 采样线程上被调；表由主线程换。
 final class EncoderStatsSource: @unchecked Sendable {
     enum Source {
         case recorder(Recorder)
@@ -749,6 +750,7 @@ final class EncoderStatsSource: @unchecked Sendable {
     }
 
     private struct Slot {
+        var output: Int
         var source: Source
         var previousRecorder: RecorderCounters?
         var previousStream: StreamCounters?
@@ -787,23 +789,23 @@ final class EncoderStatsSource: @unchecked Sendable {
                 case .recorder(let r):
                     let c = r.counters
                     // disk_free_mb：录制器自己读到 0（非启动卷，Recorder.freeBytes 的问题单）时由 DiskGuard 重新量（W3-C3）
-                    out.append(DiskGuard.statsEntry(for: r, counters: c, previous: list[i].previousRecorder, windowSeconds: window))
+                    out.append(DiskGuard.statsEntry(for: r, counters: c, previous: list[i].previousRecorder, windowSeconds: window, output: list[i].output))
                     list[i].previousRecorder = c
                 case .stream(let s):
                     let c = s.counters
-                    out.append(c.statsEntry(previous: list[i].previousStream, windowSeconds: window, encoderSkipped: s.videoEncoder.counters.skipped))
+                    out.append(c.statsEntry(previous: list[i].previousStream, windowSeconds: window, encoderSkipped: s.videoEncoder.counters.skipped, output: list[i].output))
                     list[i].previousStream = c
                 case .ndi(let s):
                     // 同一份快照算这一项、也当下一窗口的起点（sender.statsEntry 自己另取快照，两次之间送出的帧会两边都不算）
                     let c = s.countersSnapshot
-                    out.append(c.statsEntry(previous: list[i].previousNDI, windowSeconds: window, bytesPerFrame: s.uyvyBytesPerFrame, running: s.isRunning))
+                    out.append(c.statsEntry(previous: list[i].previousNDI, windowSeconds: window, bytesPerFrame: s.uyvyBytesPerFrame, running: s.isRunning, output: list[i].output))
                     list[i].previousNDI = c
                 case .idleRecord(let directory):
                     // 按目录所在卷取（DiskGuard 的算法：非启动卷也对，Recorder.freeBytes 在那些卷上是 0）
                     let free = DiskGuard.freeBytes(for: URL(fileURLWithPath: directory, isDirectory: true))
-                    out.append(Stats.EncoderEntry(skipped: 0, bitrate: 0, diskFreeMb: Double(free) / 1_048_576, state: "idle"))
+                    out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, diskFreeMb: Double(free) / 1_048_576, state: "idle"))
                 case .idle:
-                    out.append(Stats.EncoderEntry(skipped: 0, bitrate: 0, state: "idle"))
+                    out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, state: "idle"))
                 }
                 list[i].at = now
             }

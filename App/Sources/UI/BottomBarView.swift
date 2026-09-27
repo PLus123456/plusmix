@@ -111,9 +111,9 @@ final class BottomBarView: NSView {
         }
     }
 
-    /// 某个输出在 Stats.encoder 里的项：encoder 与 outputs 里带编码器（record / stream / ndi）的输出同序。
+    /// 某个输出在 Stats.encoder 里的项：按 `EncoderEntry.output` 对号（提案 019；不再按顺序）。
     func encoderEntry(forOutput number: Int) -> Stats.EncoderEntry? {
-        OutputRuntime.encoderEntry(encoderStates, forOutput: number, outputs: state.outputs)
+        OutputRuntime.encoderEntry(encoderStates, forOutput: number)
     }
 
     private func updateButtons() {

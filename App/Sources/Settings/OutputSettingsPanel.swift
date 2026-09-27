@@ -23,7 +23,7 @@ final class OutputSettingsModel: ObservableObject {
     @Published private(set) var virtualCameraStatus: String = ""
     /// 最近一行 Stats 的 display[]（提案 013：外部显示 / 虚拟摄像头的状态与帧数都读它）。
     @Published private(set) var displayStats: [Stats.DisplayEntry] = []
-    /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；与 outputs 里带编码器的输出同序）。
+    /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；每项带输出编号 `output`，按它对号——提案 019）。
     @Published private(set) var encoderStats: [Stats.EncoderEntry] = []
     var send: ((Command) -> Void)?
     /// 新建录制输出的默认目录。
@@ -271,7 +271,7 @@ final class OutputSettingsModel: ObservableObject {
 
     /// 一路 NDI 发送的状态行：只读 Stats.encoder 里它那一项（铁律 4）。
     func ndiStatus(output number: Int) -> String {
-        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number, outputs: state.outputs)
+        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number)
         return OutputStatusText.ndi(enabled: state.output(number)?.enabled ?? false, entry: entry)
     }
 

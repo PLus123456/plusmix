@@ -453,11 +453,13 @@
 "ndi.bandwidth.audioOnly" = "Audio only";
 "ndi.bandwidth.highest" = "Highest (full resolution)";
 "ndi.bandwidth.lowest" = "Lowest (preview stream)";
+"ndi.status.connections" = " · receivers: %ld";
 "ndi.status.disabled" = "Not sending (off)";
 "ndi.status.dropped" = " (%ld dropped in queue)";
+"ndi.status.failed" = "Failed to start: NDI SDK present, but initialize / send_create failed (see the log)";
 "ndi.status.publishing" = "Sending · %ld frames";
 "ndi.status.starting" = "Starting…";
-"ndi.status.unavailable" = "Unavailable (no NDI SDK / initialization failed)";
+"ndi.status.unavailable" = "Unavailable: no NDI SDK (install the NDI SDK for Apple and rebuild)";
 "notice.apiFailed" = "API failed to start (%@): %@";
 "notice.audioDeviceFallback" = "Audio device “%@” unavailable (%@); using the null device";
 "notice.audioFailed" = "Audio engine failed to start: %@";

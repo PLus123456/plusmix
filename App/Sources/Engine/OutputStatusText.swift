@@ -49,15 +49,17 @@ enum OutputStatusText {
         return e.dropped > 0 ? base + L("aux.display.dropped", Int(clamping: e.dropped)) : base
     }
 
-    /// NDI 发送一行（输出设置 NDI 页）。enabled = 输出的目标开关；entry = Stats.encoder 里它那一项（state：publishing / idle / unavailable，提案 002）。
+    /// NDI 发送一行（输出设置 NDI 页）。enabled = 输出的目标开关；entry = Stats.encoder 里它那一项（state：publishing / idle / unavailable / failed，提案 002 / 019）。
+    /// publishing 带接收方数（`connections`，019）；unavailable = SDK 不在（要做的事是装 SDK），failed = SDK 在但 initialize / send_create 失败（要做的事是看日志）——两句分开。
     static func ndi(enabled: Bool, entry: Stats.EncoderEntry?) -> String {
         guard enabled else { return L("ndi.status.disabled") }
         guard let e = entry else { return L("ndi.status.starting") }
         switch e.state {
         case "publishing":
-            let base = L("ndi.status.publishing", Int(clamping: e.frames))
+            let base = L("ndi.status.publishing", Int(clamping: e.frames)) + L("ndi.status.connections", Int(clamping: e.connections))
             return e.dropped > 0 ? base + L("ndi.status.dropped", Int(clamping: e.dropped)) : base
         case "unavailable": return L("ndi.status.unavailable")
+        case "failed": return L("ndi.status.failed")
         case "idle": return L("ndi.status.starting")
         default: return e.state
         }
