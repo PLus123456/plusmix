@@ -10,6 +10,7 @@
 // 数学模式 = fast：渲染器实际跑的是构建时编好的 default.metallib（swift build / Xcode 都把 Compositor.metal 编进包里，
 // Metal 编译器默认 fast-math；RenderResources 里"运行时编译、.safe"那条只是没有 metallib 时的后备）。实验（报告 §1）：
 // 随机色度的 1080p NV12 帧，.safe 编的这份与渲染器有 12 / 207 万像素差 1 LSB（单精度求值顺序不同、落在舍入边界上），.fast / .relaxed 逐像素相等。
+// 着色器源码里的注释、断言与报错文案用英文（W3-C3：包的源码里不写中文字面量，着色器源码也是字符串字面量）；中文说明写在这里的 Swift 注释里。
 @preconcurrency import Metal
 import Foundation
 
@@ -75,14 +76,14 @@ enum AuxShaderSource {
         int    matrix;      // 0 BT.709 1 BT.601 2 BT.2020
         int    taps;        // 1 / 2 / 4
     };
-    static_assert(sizeof(AuxUniforms) == 48, "AuxUniforms 布局变了，同步改 AuxShaders.swift");
+    static_assert(sizeof(AuxUniforms) == 48, "AuxUniforms layout changed: update AuxShaders.swift too");
 
     struct AuxOut {
         float4 position [[position]];
         float2 uv;
     };
 
-    // 单位正方形，四个角由 vertex_id 生成（0 左上 1 右上 2 左下 3 右下，triangle strip）
+    // Unit square; corners from vertex_id (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right; triangle strip)
     vertex AuxOut auxVertex(uint vid [[vertex_id]], constant AuxUniforms &u [[buffer(0)]]) {
         float2 corner = float2(float(vid & 1u), float(vid >> 1u));
         AuxOut out;
@@ -91,9 +92,9 @@ enum AuxShaderSource {
         return out;
     }
 
-    // —— 以下两个函数与 SwitcherRender/Shaders/Compositor.metal 的同名函数逐项相同 ——
+    // -- The two functions below are identical, term by term, to the ones of the same name in SwitcherRender/Shaders/Compositor.metal --
 
-    /// YCbCr 码值（0–255 标尺）→ 非线性 RGB（0–1）。
+    /// YCbCr code values (0-255 scale) -> non-linear RGB (0-1).
     static inline float3 ycbcrToRGB(float3 codes, int fullRange, int matrixID) {
         float kr, kb;
         if (matrixID == 1)      { kr = 0.299;  kb = 0.114;  }   // BT.601
@@ -118,20 +119,20 @@ enum AuxShaderSource {
 
     constexpr sampler linearSampler(coord::normalized, filter::linear, mip_filter::none, address::clamp_to_edge);
 
-    /// 取一个采样点的预乘 RGBA。
+    /// Premultiplied RGBA at one sample point.
     static inline float4 fetch(float2 uv, constant AuxUniforms &u, texture2d<float> tex0, texture2d<float> tex1) {
         switch (u.format) {
         case 0:
-            return tex0.sample(linearSampler, uv);                       // BGRA，已预乘
+            return tex0.sample(linearSampler, uv);                       // BGRA, already premultiplied
         case 1: {
             float y = tex0.sample(linearSampler, uv).r * 255.0;
-            // 4:2:0 色度水平左对齐（与偶数亮度样本共址）、垂直居中：色度坐标 = uv + (0.25 / 色度宽, 0)
+            // 4:2:0 chroma: horizontally left-sited (co-sited with even luma samples), vertically centered: chroma uv = uv + (0.25 / chroma width, 0)
             float2 cuv = float2(uv.x + 0.25 / u.chromaSize.x, uv.y);
             float2 c = tex1.sample(linearSampler, cuv).rg * 255.0;
             return float4(ycbcrToRGB(float3(y, c.x, c.y), u.fullRange, u.matrix), 1.0);
         }
         case 2: {
-            // bgrg422：硬件给 (Cr, Y, Cb, 1)
+            // bgrg422: the hardware returns (Cr, Y, Cb, 1)
             float3 s = tex0.sample(linearSampler, uv).rgb * 255.0;
             return float4(ycbcrToRGB(float3(s.g, s.b, s.r), u.fullRange, u.matrix), 1.0);
         }
@@ -140,12 +141,12 @@ enum AuxShaderSource {
         }
     }
 
-    // 显示用：不透明（CAMetalLayer 是 opaque，预乘颜色落在黑底上 = rgb 本身）
+    // For display: opaque (the CAMetalLayer is opaque; a premultiplied color over black = its rgb)
     fragment float4 auxFragment(AuxOut in [[stage_in]], constant AuxUniforms &u [[buffer(0)]],
                                 texture2d<float> tex0 [[texture(0)]], texture2d<float> tex1 [[texture(1)]]) {
         int taps = clamp(u.taps, 1, 4);
         if (taps == 1) {
-            return float4(fetch(in.uv, u, tex0, tex1).rgb, 1.0);        // 1:1 或放大：采样点落在纹素中心时逐电平精确
+            return float4(fetch(in.uv, u, tex0, tex1).rgb, 1.0);        // 1:1 or upscaling: exact per level when samples hit texel centers
         }
         float inv = 1.0 / float(taps);
         float4 acc = float4(0.0);
@@ -173,12 +174,12 @@ final class AuxPipeline: @unchecked Sendable {
 
     private init(device: any MTLDevice) throws {
         precondition(MemoryLayout<AuxUniforms>.stride == AuxUniforms.expectedStride,
-                     "AuxUniforms 的 Swift 布局（\(MemoryLayout<AuxUniforms>.stride)）与着色器不一致")
+                     "AuxUniforms Swift stride \(MemoryLayout<AuxUniforms>.stride) does not match the shader")
         let options = MTLCompileOptions()
         options.mathMode = .fast   // 与渲染器的 default.metallib 同一数学模式（见文件头），这样才逐像素相同
         let library = try device.makeLibrary(source: AuxShaderSource.text, options: options)
         guard let vertex = library.makeFunction(name: "auxVertex"), let fragment = library.makeFunction(name: "auxFragment") else {
-            throw AuxRenderError.shader("找不到 auxVertex / auxFragment")
+            throw AuxRenderError.shader("auxVertex / auxFragment not found")
         }
         let d = MTLRenderPipelineDescriptor()
         d.label = "switcher.aux"
@@ -228,7 +229,7 @@ final class AuxPipeline: @unchecked Sendable {
             lock.lock()
             compiling.remove(key)
             lock.unlock()
-            if p == nil { NSLog("Aux 着色器编译失败") }
+            if p == nil { NSLog("Aux shader compilation failed") }
         }
     }
 
@@ -238,12 +239,12 @@ final class AuxPipeline: @unchecked Sendable {
     }
 }
 
-/// Aux 画不了的原因。
+/// Aux 画不了的原因（诊断用，不是给人看的文案）。
 enum AuxRenderError: Error, CustomStringConvertible {
     case shader(String)
     var description: String {
         switch self {
-        case .shader(let s): "Aux 着色器：\(s)"
+        case .shader(let s): "Aux shader: \(s)"
         }
     }
 }

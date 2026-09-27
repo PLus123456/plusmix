@@ -59,8 +59,8 @@ public final class AuxInputPresenter {
         case unsupportedFormat(UInt32)
     }
 
-    /// "无信号"的默认文案（与 App 多画面缩略格子的 input.noSignal 同字；App 按本地化表换 `noSignalText`）。
-    public static let defaultNoSignalText = "无信号"
+    /// "无信号"的默认文案：ASCII（包里不写中文字面量，W3-C3）；App 按本地化表换 `noSignalText`（与多画面缩略格子的 input.noSignal 同一个键）。
+    public static let defaultNoSignalText = "No signal"
     /// 帧断了多少个帧间隔算无信号（输入的 NoSignalWatchdog 同一个 N）。
     public static let staleFrameMultiplier = 3
     /// 帧间隔很短时的下限（60 fps × 3 = 50 ms）。

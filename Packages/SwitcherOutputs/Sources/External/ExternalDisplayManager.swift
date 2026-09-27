@@ -5,7 +5,7 @@ import SwitcherRender
 
 /// 多个外部显示窗口，跟着快照的输出表增删（一个 `kind = .externalDisplay` 且 enabled 的输出 = 一个窗口，键 = 输出编号）。
 /// 显示器插拔：观察 `NSApplication.didChangeScreenParametersNotification`，让每个窗口重新找目标屏。
-/// Aux（源 = 输入 n）的全分辨率画面要组装方给 `auxFrames`（每路开一个帧槽分支）；运行状态、"无信号"文案、主屏层级都是包内选项，
+/// Aux（源 = 输入 n）的全分辨率画面要组装方给 `auxFrames`（每路开一个帧槽分支）；运行状态、"无信号"文案、窗口标题、主屏层级都是包内选项，
 /// 设在管理器上就下发到每个窗口（现有的和以后开的）。
 @MainActor
 public final class ExternalDisplayManager {
@@ -29,6 +29,10 @@ public final class ExternalDisplayManager {
     /// 窗口开在主屏上时是否盖住主界面（默认盖住 = W3-C 起的行为）。
     public var mainScreenLayering: ExternalDisplayWindow.MainScreenLayering = .front {
         didSet { for w in windows.values { w.mainScreenLayering = mainScreenLayering } }
+    }
+    /// 窗口标题（App 按本地化表给；默认 ASCII 的 `ExternalDisplayWindow.defaultWindowTitle`，W3-C3）。
+    public var windowTitle = ExternalDisplayWindow.defaultWindowTitle {
+        didSet { for w in windows.values { w.windowTitle = windowTitle } }
     }
     /// 某个窗口的状态变了（编号、状态）。
     public var onStatusChange: ((Int, ExternalDisplayWindow.Status) -> Void)?
@@ -71,7 +75,7 @@ public final class ExternalDisplayManager {
                 w.update(spec: spec)
             } else {
                 let w = ExternalDisplayWindow(spec: spec, source: source, inputs: inputs, textureWidth: format.width, textureHeight: format.height,
-                                              auxFrames: auxFrames, mainScreenLayering: mainScreenLayering)
+                                              auxFrames: auxFrames, mainScreenLayering: mainScreenLayering, windowTitle: windowTitle)
                 w.inputStateProvider = inputStateProvider
                 w.noSignalText = noSignalText
                 let number = output.number
@@ -113,13 +117,5 @@ public final class ExternalDisplayManager {
         }
         .sorted { $0.output < $1.output }
     }
-
-    /// 某个窗口的状态文案（状态行 / 菜单用）。
-    public static func describe(_ status: ExternalDisplayWindow.Status) -> String {
-        switch status {
-        case .showing(let id): "显示中（显示器 \(id)）"
-        case .waitingForDisplay(let id): "等待显示器 \(id) 接上"
-        case .fallbackToMain(let id): "显示器 \(id) 不在，暂用主显示器"
-        }
-    }
+    // 状态的文字由组装方按 `ExternalDisplayWindow.Status` 查表（App 的 OutputStatusText.externalWindow）；包里的 describe 在 W3-C3 删了。
 }

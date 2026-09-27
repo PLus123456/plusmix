@@ -33,6 +33,10 @@ public final class ExternalDisplayWindow: NSWindowController {
     /// 垫在普通窗口下面用的层级。
     public static let behindInterfaceLevel = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
 
+    /// 窗口标题的默认值（全屏无边框，平时看不见；Mission Control / 窗口菜单里看得见）。包里非有不可的文字用 ASCII，
+    /// 组装方传本地化后的（`windowTitle` / 管理器的 `windowTitle`；W3-C3）。
+    public static let defaultWindowTitle = "Switcher External Output"
+
     public let displayView = MetalDisplayView(frame: .zero)
     public let auxView: AuxInputView
     public private(set) var spec: ExternalDisplaySpec
@@ -62,6 +66,10 @@ public final class ExternalDisplayWindow: NSWindowController {
         didSet {
             if mainScreenLayering != oldValue { place(reorder: true) }
         }
+    }
+    /// 窗口标题（组装方给本地化后的；默认 `defaultWindowTitle`）。
+    public var windowTitle: String {
+        didSet { window?.title = windowTitle }
     }
     /// 用户按 Esc / 关窗口时回调（组装方删输出）。
     public var onCloseRequested: (() -> Void)?
@@ -97,12 +105,13 @@ public final class ExternalDisplayWindow: NSWindowController {
 
     /// textureWidth / textureHeight：G4 时 Aux 取多画面格子要用；W3-C2 起 Aux 自己画输入帧，不再用，参数留着兼容调用方。
     public init(spec: ExternalDisplaySpec, source: (any DisplayFrameSource)?, inputs: [InputConfig] = [], textureWidth: Int = 1920, textureHeight: Int = 1080,
-                auxFrames: AuxFrameTap? = nil, mainScreenLayering: MainScreenLayering = .front) {
+                auxFrames: AuxFrameTap? = nil, mainScreenLayering: MainScreenLayering = .front, windowTitle: String = ExternalDisplayWindow.defaultWindowTitle) {
         self.spec = spec
         self.source = source
         self.inputs = inputs
         self.auxFrames = auxFrames
         self.mainScreenLayering = mainScreenLayering
+        self.windowTitle = windowTitle
         auxView = AuxInputView()
         status = .waitingForDisplay(displayID: spec.displayID ?? 0)
         let window = OutputWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -113,7 +122,7 @@ public final class ExternalDisplayWindow: NSWindowController {
         window.hidesOnDeactivate = false
         window.level = .normal
         window.collectionBehavior = [.fullScreenAuxiliary, .canJoinAllSpaces, .stationary, .ignoresCycle]
-        window.title = "Switcher 外部输出"
+        window.title = windowTitle
         let container = NSView(frame: window.contentRect(forFrameRect: window.frame))
         container.wantsLayer = true
         container.layer?.backgroundColor = CGColor(gray: 0, alpha: 1)
@@ -140,7 +149,7 @@ public final class ExternalDisplayWindow: NSWindowController {
     }
 
     @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("不支持 coder") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     deinit {
         if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }

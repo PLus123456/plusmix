@@ -43,14 +43,5 @@ public struct ExternalDisplaySpec: Hashable, Sendable {
         apply(to: &s)
         return s
     }
-
-    /// 源的显示名。
-    public static func describe(_ source: OutputSource, inputs: [InputConfig] = []) -> String {
-        switch source {
-        case .program: "PGM"
-        case .preview: "PVW"
-        case .multiview: "多画面"
-        case .input(let n): "输入 \(n)" + (inputs.first { $0.number == n }.map { " \($0.name)" } ?? "")
-        }
-    }
+    // 源的显示名由组装方查表（App 的 OutputSource.title(in:)）；包里的 describe 在 W3-C3 删了。
 }

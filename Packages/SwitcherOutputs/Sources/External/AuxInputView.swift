@@ -53,7 +53,7 @@ public final class AuxInputView: NSView {
     }
 
     @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("不支持 coder") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     public override var wantsUpdateLayer: Bool { true }
     public override func makeBackingLayer() -> CALayer { metalLayer }
