@@ -2,7 +2,8 @@
 // 选中 = 节目里加一个 kind = .externalDisplay 的输出（addOutput，enabled）；已有的打勾，再选一次 = 删（removeOutput）。
 // 全部走命令：外部窗口跟着快照开关（AuxOutputRuntime），节目文件里也就带着它们。
 // 文案走 L10n（W3-E2）；源的名字用 App 的 OutputSource.title（包里的 ExternalDisplaySpec.describe 是中文）；
-// "关闭 n …（状态）"里的状态与帧数只读 Stats.display[]（提案 013）。
+// "关闭 n …（状态）"里的状态与帧数只读 Stats.display[]（提案 013）。输入那一组（Aux）前面一行说明"Aux = 原始画面（抠像 / 裁切 / 变换不生效）"，
+// 每个输入项的提示也是这句（W3-E3；G4 裁定 Aux 画该路原始帧）。
 import AppKit
 import SwitcherContracts
 import SwitcherExternal
@@ -50,11 +51,19 @@ final class ExternalOutputMenuBuilder: NSObject {
         }
         for display in displays {
             let sub = NSMenu(title: display.name)
+            var auxNoted = false
             for source in Self.sources(in: state) {
+                // 输入那一组（Aux）前面一行说明：外部显示的"输入 n"画的是该路原始画面，抠像 / 裁切 / 变换不生效（G4 裁定、W3-C2 本包自己画输入帧）
+                if source.inputNumber != nil, !auxNoted {
+                    sub.addItem(.separator())
+                    sub.addItem(.sectionHeader(title: L("aux.rawPictureNote")))
+                    auxNoted = true
+                }
                 let item = NSMenuItem(title: source.title(in: state), action: #selector(sourcePicked(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = Pick(displayID: display.id, displayName: display.name, source: source)
                 item.state = Self.existingOutput(in: state, displayID: display.id, source: source) == nil ? .off : .on
+                if source.inputNumber != nil { item.toolTip = L("aux.rawPictureNote") }
                 sub.addItem(item)
             }
             let size = (Int(display.frame.width), Int(display.frame.height), display.maximumFramesPerSecond)

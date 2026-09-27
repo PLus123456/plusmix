@@ -23,6 +23,8 @@ final class OutputSettingsModel: ObservableObject {
     @Published private(set) var virtualCameraStatus: String = ""
     /// 最近一行 Stats 的 display[]（提案 013：外部显示 / 虚拟摄像头的状态与帧数都读它）。
     @Published private(set) var displayStats: [Stats.DisplayEntry] = []
+    /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；与 outputs 里带编码器的输出同序）。
+    @Published private(set) var encoderStats: [Stats.EncoderEntry] = []
     var send: ((Command) -> Void)?
     /// 新建录制输出的默认目录。
     let defaultRecordDirectory: String
@@ -53,6 +55,7 @@ final class OutputSettingsModel: ObservableObject {
 
     func apply(stats: Stats) {
         if stats.display != displayStats { displayStats = stats.display }
+        if stats.encoder != encoderStats { encoderStats = stats.encoder }
     }
 
     /// 扩展的 bundle ID（安装器用的那个）。
@@ -258,12 +261,20 @@ final class OutputSettingsModel: ObservableObject {
         return n
     }
 
+    /// 改分组 / 转换方式 / 来源（setOutputSettings）。运行表（OutputRuntime）按新设置重建 sender（分组 / 来源）或运行时切换（转换方式）；
+    /// 名字 = 输出名，走 rename（renameOutput）；开关走 setOutputEnabled。
     func setNDI(_ number: Int, groups: String? = nil, conversion: String? = nil, source: OutputSource? = nil) {
         updateOutput(number) { s in
             if let groups { s.extra[OutputExtras.ndiGroups] = groups.isEmpty ? nil : .string(groups) }
             if let conversion { s.extra[OutputExtras.ndiConversion] = .string(conversion) }
             if let source { s.source = source }
         }
+    }
+
+    /// 一路 NDI 发送的状态行：只读 Stats.encoder 里它那一项（铁律 4）。
+    func ndiStatus(output number: Int) -> String {
+        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number, outputs: state.outputs)
+        return OutputStatusText.ndi(enabled: state.output(number)?.enabled ?? false, entry: entry)
     }
 
     // MARK: 虚拟摄像头
@@ -294,6 +305,11 @@ final class OutputSettingsModel: ObservableObject {
 
     /// 输出来源选项：PGM / PVW / 多画面 / 每路输入。
     var sourceChoices: [OutputSource] { [.program, .preview, .multiview] + state.inputs.map { .input(number: $0.number) } }
+
+    /// 来源下面的说明：选某路输入（Aux）= 该路原始画面，抠像 / 裁切 / 变换不生效（外部显示由本包自己画该路帧，NDI 从该路帧槽分支取帧）；其他来源没有说明。
+    func sourceNote(for source: OutputSource) -> String? {
+        source.inputNumber == nil ? nil : L("aux.rawPictureNote")
+    }
 
     // MARK: 多画面布局（提案 010：OutputSettings.multiview）
 
@@ -550,6 +566,7 @@ struct OutputSettingsView: View {
                     screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }),
                                  current: OutputExtras.displayNumber(of: output))
                     sourcePicker(Binding(get: { output.settings.source }, set: { model.setExternalDisplay(output.number, screenNumber: nil, source: $0) }))
+                    sourceNote(output.settings.source)
                     Toggle(L("outputSettings.external.fallbackToMain"), isOn: Binding(get: { output.settings.display?.fallbackToMain ?? false },
                                                                                        set: { model.setExternalFallback(output.number, on: $0) }))
                         .help(L("outputSettings.external.fallbackHelp"))
@@ -560,6 +577,7 @@ struct OutputSettingsView: View {
             Section(L("outputSettings.external.add")) {
                 screenPicker($newExternalScreen)
                 sourcePicker($newExternalSource)
+                sourceNote(newExternalSource)
                 Button(L("outputSettings.external.open")) { model.addExternalDisplay(screenNumber: newExternalScreen, source: newExternalSource) }
                 Text(L("outputSettings.external.hint")).font(.caption).foregroundStyle(.secondary)
             }
@@ -578,19 +596,20 @@ struct OutputSettingsView: View {
         }
     }
 
+    /// 来源选了某路输入时的一行说明（Aux = 原始画面）。
+    @ViewBuilder
+    private func sourceNote(_ source: OutputSource) -> some View {
+        if let note = model.sourceNote(for: source) {
+            Text(note).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: NDI
 
     private var ndiTab: some View {
         Group {
             ForEach(model.ndiOutputs) { output in
-                Section(L("outputSettings.ndi.section", output.number, output.name)) {
-                    sourcePicker(Binding(get: { output.settings.source }, set: { model.setNDI(output.number, source: $0) }))
-                    TextField(L("outputSettings.ndi.groups"), text: Binding(get: { OutputExtras.string(output, OutputExtras.ndiGroups) ?? "" }, set: { model.setNDI(output.number, groups: $0) }))
-                    Picker(L("outputSettings.ndi.conversion"), selection: Binding(get: { OutputExtras.string(output, OutputExtras.ndiConversion) ?? "auto" }, set: { model.setNDI(output.number, conversion: $0) })) {
-                        ForEach(OutputExtras.ndiConversions, id: \.self) { Text(L("outputSettings.ndi.conversion.\($0)")).tag($0) }
-                    }
-                    Button(L("outputSettings.ndi.remove")) { model.removeOutput(output.number) }
-                }
+                NDIOutputSection(model: model, output: output)
             }
             Section(L("outputSettings.ndi.add")) {
                 TextField(L("outputSettings.ndi.name"), text: $newNDIName)
@@ -622,6 +641,56 @@ struct OutputSettingsView: View {
             Text(L("outputSettings.vcam.hint")).font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { if model.queriesSystemExtensions { model.refreshVirtualCameraStatus() } }
+    }
+}
+
+/// NDI 页的一路（W3-E3：名字 / 源 / 开关生效）。名字（= 输出名 = NDI 源名）和分组定死在发送端里，改了要重建它（接收方重新选源），
+/// 所以不跟着每个按键发：回车或点"应用"才发 renameOutput / setOutputSettings；来源 / 转换方式直接走 setOutputSettings（选一次改一次），
+/// 开关走 setOutputEnabled。状态行只读 Stats.encoder。
+struct NDIOutputSection: View {
+    @ObservedObject var model: OutputSettingsModel
+    let output: OutputState
+    @State private var draftName: String
+    @State private var draftGroups: String
+
+    init(model: OutputSettingsModel, output: OutputState) {
+        self.model = model
+        self.output = output
+        _draftName = State(initialValue: output.name)
+        _draftGroups = State(initialValue: OutputExtras.string(output, OutputExtras.ndiGroups) ?? "")
+    }
+
+    private var savedGroups: String { OutputExtras.string(output, OutputExtras.ndiGroups) ?? "" }
+    private var trimmedName: String { draftName.trimmingCharacters(in: .whitespaces) }
+    private var edited: Bool { draftName != output.name || draftGroups != savedGroups }
+
+    /// 名字 / 分组一起落：同一轮快照里两样都变了，运行表只重建一次发送端。
+    private func commit() {
+        if !trimmedName.isEmpty, trimmedName != output.name { model.rename(output.number, trimmedName) }
+        if draftGroups != savedGroups { model.setNDI(output.number, groups: draftGroups) }
+    }
+
+    var body: some View {
+        Section(L("outputSettings.ndi.section", output.number, output.name)) {
+            Toggle(L("outputSettings.ndi.enabled"), isOn: Binding(get: { output.enabled }, set: { model.setOutputEnabled(output.number, on: $0) }))
+            TextField(L("outputSettings.ndi.name"), text: $draftName).onSubmit(commit)
+            TextField(L("outputSettings.ndi.groups"), text: $draftGroups).onSubmit(commit)
+            Button(L("outputSettings.ndi.apply")) { commit() }
+                .disabled(!edited || trimmedName.isEmpty)
+            Picker(L("outputSettings.source"), selection: Binding(get: { output.settings.source }, set: { model.setNDI(output.number, source: $0) })) {
+                ForEach(model.sourceChoices, id: \.self) { Text($0.title(in: model.state)).tag($0) }
+            }
+            if let note = model.sourceNote(for: output.settings.source) {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+            }
+            Picker(L("outputSettings.ndi.conversion"), selection: Binding(get: { OutputExtras.string(output, OutputExtras.ndiConversion) ?? "auto" }, set: { model.setNDI(output.number, conversion: $0) })) {
+                ForEach(OutputExtras.ndiConversions, id: \.self) { Text(L("outputSettings.ndi.conversion.\($0)")).tag($0) }
+            }
+            LabeledContent(L("outputSettings.ndi.status"), value: model.ndiStatus(output: output.number))
+            Button(L("outputSettings.ndi.remove")) { model.removeOutput(output.number) }
+        }
+        .onChange(of: output.name) { _, name in draftName = name }
+        .onChange(of: savedGroups) { _, groups in draftGroups = groups }
     }
 }
 

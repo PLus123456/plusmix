@@ -392,12 +392,12 @@ final class PanelTests: XCTestCase {
         let added = page.addExternalDisplay(screenNumber: screen, source: .preview)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(added)?.settings.display == DisplayOutputSettings(displayID: screen) }, "\(String(describing: session.state.output(added)?.settings))")
         XCTAssertEqual(session.state.output(added)?.settings.extra, [:])
-        // 2. 带过渡键的内存状态（API 直接 addOutput 的老写法）：读时过渡键作后备，页上改显示器 → 只写正式字段、旧键清掉
+        // 2. 带过渡键的内存状态（API 直接 addOutput 的老写法）：W3-E3 起读时不再认过渡键（与包、契约一致），页上改显示器 → 只写正式字段、旧键清掉
         let legacyNumber = page.nextOutputNumber()
         session.send(.addOutput(config: OutputState(number: legacyNumber, kind: .externalDisplay, name: "legacy", enabled: false,
                                                      settings: OutputSettings(source: .program, extra: ["displayID": .number(Double(screen)), "fallbackToMain": .bool(false)]))))
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(legacyNumber) != nil })
-        XCTAssertEqual(OutputExtras.displayNumber(of: try XCTUnwrap(session.state.output(legacyNumber))), screen, "过渡键作后备")
+        XCTAssertNil(OutputExtras.displayNumber(of: try XCTUnwrap(session.state.output(legacyNumber))), "过渡键不再作后备（W3-E3 交付第 6 条）")
         let missing: UInt32 = 0x0BAD_F00D   // 不存在的显示器：窗口（若启用）只会等它接上，不会盖住任何一块屏
         page.setExternalDisplay(legacyNumber, screenNumber: missing, source: nil)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(legacyNumber)?.settings.display?.displayID == missing },

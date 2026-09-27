@@ -170,10 +170,11 @@ final class AppController {
         await replaceSession(show: show)
     }
 
-    /// 偏好设置：写 UserDefaults（同一组键）并记下，下次起 session 生效。
+    /// 偏好设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的包内选项（外部输出的主屏层级）同时落到跑着的 session。
     func updateSettings(_ s: AppSettings) {
         s.save(to: defaults)
         settings = s
+        session?.aux.external.mainScreenLayering = settings.externalMainScreenLayering
     }
 
     /// 快捷键编辑器保存后：换给派发器，下次起 session 也用它。

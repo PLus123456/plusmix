@@ -127,9 +127,25 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         thumbnailLayoutKey = key
         let placements = MultiviewLayout.placements(settings: key.layout, inputs: key.inputs, width: key.width, height: key.height)
         for number in key.inputs {
-            cells[number]?.setThumbnail(rect: placements.first { $0.source == .input(number: number) }?.inner)
+            let placement = placements.first { $0.source == .input(number: number) }
+            cells[number]?.setThumbnail(rect: placement.map { Self.thumbnailRect(for: $0, width: key.width, height: key.height) })
         }
     }
+
+    /// 缩略图切多画面格子的哪一块：内框去掉底部渲染器画的名字条（W3-E3 交付第 5 条：名字只在标题条出现一次——标题条是主标签，带编号和 tally 色；
+    /// 缩略图只要画面）。名字条的几何与 CompositorPasses.drawCellLabel 同一个算式（Float）：贴内框底边，高 = 格高 × 14%，≥ 12 px，≤ 画面高 × 3.5%；
+    /// 再多切 2 px，缩略图下采样的采样脚印碰不到名字条的上沿。切完不是 16:9，显示视图按比例放（上下留一点黑边），不拉伸。
+    nonisolated static func thumbnailRect(for placement: MultiviewCellPlacement, width: Int, height: Int) -> NormalizedRect {
+        let frameHeight = Float(height)
+        let cellHeight = Float(placement.outer.height * Double(height))
+        let label = max(12, min((cellHeight * 0.14).rounded(), (frameHeight * 0.035).rounded()))
+        let cut = Double(label + thumbnailLabelMargin) / Double(height)
+        let inner = placement.inner
+        return NormalizedRect(x: inner.x, y: inner.y, width: inner.width, height: max(0, inner.height - cut))
+    }
+
+    /// 名字条上面再多切的像素（多画面纹理的像素）。
+    nonisolated static let thumbnailLabelMargin: Float = 2
 
     private struct ThumbnailLayoutKey: Equatable {
         let layout: MultiviewLayoutSettings?

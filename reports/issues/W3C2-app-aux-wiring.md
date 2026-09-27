@@ -66,3 +66,14 @@ W3-C2 复核后 **dropped = "被扩展丢弃"（连上之后丢的）**，扩展
   关着 = 不报这一项或报 "idle"，开着 = "presenting"，不需要 noDisplay。
 - App 的 `OutputExtras.displayNumber(of:)` 还在读过渡键 `extra["displayID"]` 作后备（包里的 `ExternalDisplaySpec` 从 W3-C2 起已不读）；
   按 P3 报告 §4 第 1 条，W4 / G5 与 `MultiviewLayoutTable.parse(layout:)` 等一起删。`ExternalDisplaySpec.displayIDKey` 常量为它留着。
+
+## 处理结果（W3-E3 / w3-app-4，2026-09-27，报告 `reports/w3-app-4.md`）
+
+§1 / §2 / §4 由 G4 第二批合入的检查点做了（Aux 三根线、第 3 步断言、undelivered 文案）；§3 / §5 这次做完：
+- §3"Aux = 原始画面"：外部输出菜单每块屏的子菜单里，输入那一组前面一行 section header（不能点），每个输入项的提示同一句；外部显示设置页 / NDI 页选了输入时来源下面显示同一句
+  （键 `aux.rawPictureNote`，两种语言）。`AuxLayeringAppTests.testAux_rawPictureNoteInExternalMenuAndSettingsPages`。
+- §3 主屏层级：偏好设置"外部输出在主屏上不盖住主界面"→ UserDefaults 键 `externalOutputBehindInterface`（不进 OutputSettings）→ 新 session 建好就设 `mainScreenLayering`，
+  点"应用"落到跑着的 session。`testExternal_mainScreenLayeringPreferenceReachesManager`（窗口 level = behindInterfaceLevel、换 session 仍在、关掉恢复 normal）。
+- §5 监视器 / 多画面窗口的 dropped：PGM 监视器与多画面窗口各夹一层 `DisplayFrameLedger`，dropped / undelivered 都从它来，遮挡变化断开连续呈现；多画面窗口关着报 idle、不记。
+  `DisplayLedgerAppTests`（卡主线程 300 ms dropped +18、noDrawable 不变；遮住 1.2 s undelivered +71、dropped 不变）。
+- §5 `OutputExtras.displayNumber(of:)` 只读正式字段，过渡键后备删了（`ExternalDisplaySpec.displayIDKey` 常量 App 里不再用）。

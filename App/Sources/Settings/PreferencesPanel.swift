@@ -1,6 +1,7 @@
 // 偏好设置（W3-E 交付第 7 条）：节目分辨率 / 帧率（在 Show 里，改了要换 session）、API 端口 / token、音频输出设备、PVW 预览全部叠加（W3-E2）、
-// 第三方 API 兼容层（VMixCompat）开关（带法律提示）、语言、更新（W4-B 接 Sparkle，这里只留位置）。
+// 外部输出在主屏上不盖住主界面（W3-E3）、第三方 API 兼容层（VMixCompat）开关（带法律提示）、语言、更新（W4-B 接 Sparkle，这里只留位置）。
 // API / 音频 / 兼容层用 W2-B2 的同一组 UserDefaults 键（AppSettings.Keys），下次起 session 生效；"应用并重启引擎"立刻生效。
+// 外部输出的主屏层级是包内选项、运行时可改：点"应用"就落到跑着的 session（AppController.updateSettings）。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -36,6 +37,8 @@ final class PreferencesModel: ObservableObject {
     @Published var compatLayerPort: Int
     /// PVW 预览全部叠加（渲染器总开关，换 session 生效）。
     @Published var overlaysInPreview: Bool
+    /// 外部输出在主屏上不盖住主界面（ExternalDisplayManager.mainScreenLayering，应用即生效）。
+    @Published var externalBehindInterface: Bool
     /// 节目音频的对齐延迟（48 kHz 帧）与监听点（提案 007）：存在节目文件里，不是全局偏好；改了要重建音频引擎（换 session）。
     @Published var alignmentFrames: Int
     @Published var monitorPoint: SwitcherContracts.MonitorPoint
@@ -65,6 +68,7 @@ final class PreferencesModel: ObservableObject {
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
         overlaysInPreview = s.overlaysInPreview
+        externalBehindInterface = s.externalBehindInterface
         let audio = controller.session?.state.audio ?? AudioState()
         alignmentFrames = audio.alignmentFrames
         monitorPoint = audio.monitorPoint
@@ -106,6 +110,7 @@ final class PreferencesModel: ObservableObject {
         s.compatLayerEnabled = compatLayerEnabled
         s.compatLayerPort = max(1, min(65535, compatLayerPort))
         s.overlaysInPreview = overlaysInPreview
+        s.externalBehindInterface = externalBehindInterface
         controller.updateSettings(s)
         if language == Self.systemLanguage {
             controller.defaults.removeObject(forKey: "AppleLanguages")
@@ -193,6 +198,10 @@ struct PreferencesView: View {
             Section(L("prefs.preview.title")) {
                 Toggle(L("prefs.preview.overlaysAll"), isOn: $model.overlaysInPreview)
                 Text(L("prefs.preview.hint")).font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L("prefs.external.title")) {
+                Toggle(L("prefs.external.behindInterface"), isOn: $model.externalBehindInterface)
+                Text(L("prefs.external.hint")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("prefs.compat.title")) {
                 Toggle(L("prefs.compat.enabled"), isOn: $model.compatLayerEnabled)
