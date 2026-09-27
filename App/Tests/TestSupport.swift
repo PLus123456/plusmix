@@ -477,11 +477,12 @@ extension AppTest {
         return keys
     }
 
-    /// 写死在字符串字面量里的中文（CJK）文案；注释、日志 / 断言行、`// l10n-exempt` 行不算。
+    /// 写死在字符串字面量里的中文（CJK）文案；注释、日志 / 断言行、带 `// l10n-exempt` 标记的行不算。
+    /// 标记在整行（剥行尾注释之前）找——W3-E4 之前是剥完注释再找，标记又总写在行尾注释里，所以从来不起作用（reports/w3-outputs-4.md §5 第 6 条）。
     static func chineseLiteralViolations(in directory: URL) throws -> [String] {
         let cjk = try NSRegularExpression(pattern: #"[一-鿿　-〿！-～]"#)
         let literal = try NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*""#)
-        let exempt = ["NSLog(", "print(", "preconditionFailure(", "fatalError(", "assertionFailure(", "os_log", "l10n-exempt", "Logger("]
+        let exempt = ["NSLog(", "print(", "preconditionFailure(", "fatalError(", "assertionFailure(", "os_log", "Logger("]
         var out: [String] = []
         for file in try swiftFiles(in: directory) {
             let text = try String(contentsOf: file, encoding: .utf8)
@@ -489,6 +490,7 @@ extension AppTest {
             for (i, rawLine) in text.components(separatedBy: "\n").enumerated() {
                 if rawLine.contains("\"\"\"") { inBlockString.toggle(); continue }
                 if inBlockString { continue }
+                if rawLine.contains("l10n-exempt") { continue }   // 显式豁免：整行看，剥注释之前
                 let line = stripLineComment(rawLine)
                 if exempt.contains(where: { line.contains($0) }) { continue }
                 for m in literal.matches(in: line, range: NSRange(line.startIndex..., in: line)) {

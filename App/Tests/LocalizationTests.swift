@@ -91,4 +91,28 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(L("addInput.defaultName.synthetic", 3, "60"), "合成 3 · 60")
         XCTAssertEqual(L10n.string("addInput.defaultName.synthetic", language: "en", 3, "60"), "Synthetic 3 · 60")
     }
+
+
+    /// W3-E4 交付第 3 条（reports/w3-outputs-4.md §5 第 6 条）：`// l10n-exempt` 标记原来在剥掉行尾注释之后才找、从来不起作用。
+    /// 二选一选"修成先看标记"（整行、剥注释之前）：给将来确实不是界面文案的中文字面量留一个显式、code review 里看得见的豁免口子；现在 App/Sources 没人用它。
+    func testW3E4_3_l10nExemptMarkerHonoredBeforeStrippingComments() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-l10n-exempt-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sample = """
+        let a = "写死的中文"
+        let b = "豁免的中文"   // l10n-exempt：不是界面文案
+        let c = "ascii only"   // 注释里的中文不算
+        NSLog("日志里的中文不算")
+        // let d = "整行注释里的中文不算"
+        let e = \"\"\"
+        多行字符串里的中文不算
+        \"\"\"
+        let f = "第二处写死的中文"
+        """
+        try sample.write(to: dir.appendingPathComponent("Sample.swift"), atomically: true, encoding: .utf8)
+        let violations = try AppTest.chineseLiteralViolations(in: dir)
+        XCTAssertEqual(violations, ["Sample.swift:1 \"写死的中文\"", "Sample.swift:9 \"第二处写死的中文\""],
+                       "只报没标记、不在注释 / 日志 / 多行字符串里的两处；带 // l10n-exempt 的那行要豁免")
+    }
 }
