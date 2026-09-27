@@ -41,3 +41,23 @@ sinkStream.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, 
 注：'sonp' 在扩展背后的 CMIO 桥上是否照样转发 `notifyScheduledOutputChanged`，本机没法验（没有签名的扩展）；
 头文件（CMIOExtensionStream.h / CMIOHardwareStream.h）的描述是这么设计的。第一次签名跑通时看 `extensionReports` 是否为 true、`framesOutput` 是否在涨，
 不涨就说明桥没转发，换扩展自定义属性（CMIOExtensionProperty 自定义键）回报计数。
+
+## W3-C3（w3-outputs-4，2026-09-27）处理结果
+
+- **扩展侧已加**（`CameraExtension/Sources/CameraExtensionProvider.swift` 的 `consumeNext`）：接住 `sampleBufferSequenceNumber`，
+  `sourceStream.stream.send` 之后 `sinkStream.stream.notifyScheduledOutputChanged(CMIOExtensionScheduledOutput(sequenceNumber:hostTimeInNanoseconds:))`；
+  时刻用发出去那一刻（头文件："the host time … when the buffer was output"），不是 PTS；序号是 `UInt64.max`（kCMIOInvalidSequenceNumber，没挂上）的不回报。
+  探针（w3-outputs-4 报告 §1）：`CMIOExtensionScheduledOutput` 的 Swift 形状与头文件一致；进程内对没接服务的流调 notify 不崩、什么也不做。
+- **主程序侧加了守卫**：sink 排队之前 `ScheduledOutputTracker.noteSent` 记下序号；回报的序号不是本连接排过的（invalid / 比排过的都大 /
+  新连接还没排过帧时到的旧连接回报）只记 `unmatched`（`VirtualCameraOutput.countersSnapshot.extensionUnmatched`），不算输出也不算丢。
+- **记账用例**：`VirtualCameraTests.testVirtualCamera_extensionReportsViaSonp_sequenceGapsBecomeDropped`（假扩展走注册在 sink 上的 'sonp' C 回调，
+  同步 / 异步 / 重连三段）。
+
+## 第一次签名跑通时怎么看（补上一节"解锁后怎么验"的第 2 步）
+
+`VirtualCameraOutput.countersSnapshot`（App：`session.aux.virtualCamera?.countersSnapshot`，或断点 / 日志打出来）：
+1. `extensionReports == true`（'sonp' 注册上了）；
+2. `framesOutput` 跟着 `framesSent` 涨（差几帧是在路上的）→ 桥在转发扩展的回报；**不涨** = 桥没转发 → 换扩展自定义属性回报计数（见上文注）；
+3. `extensionUnmatched == 0` → 扩展拿到的就是本进程挂的序号；**在涨** = 桥改了 / 丢了序号（`framesOutput` 不涨、dropped 不可信）——看扩展日志里
+   `sampleBufferSequenceNumber` 是什么，按它改 `ScheduledOutputTracker` 的对法；
+4. `droppedExtension` 平时是 0；上一节第 3 步（扩展里临时每 10 帧不 send、不 notify）时每秒涨 6。
