@@ -63,10 +63,14 @@ build-app: $(XCODEPROJ)/project.pbxproj
 	$(XCB) $(XCB_FLAGS) build
 
 # ---------- test ----------
-test: test-packages test-tools test-app
+# 三组都跑完再判（P4 / W3-E3 / W3-C3 三个会话都撞到"第一个包红了后面全不跑"：macOS 27 上 SwitcherRender 有 3 处环境红，make test 每次都停在第一个包）
+test:
+	@fail=0; for t in test-packages test-tools test-app; do $(MAKE) --no-print-directory $$t || fail=1; done; \
+	  [ $$fail = 0 ] || { echo "make test：有失败的组（见上）"; exit 1; }
 
 test-packages:
-	@for p in $(PACKAGES); do echo "== swift test $$p"; swift test --package-path $$p || exit 1; done
+	@failed=""; for p in $(PACKAGES); do echo "== swift test $$p"; swift test --package-path $$p || failed="$$failed $$p"; done; \
+	  if [ -n "$$failed" ]; then echo "test-packages：失败的包：$$failed"; exit 1; else echo "test-packages：$(words $(PACKAGES)) 个包全过"; fi
 
 # 工具目前只打印版本；冒烟 = 编出来、跑得起、输出里有自己的名字和版本号
 test-tools:
