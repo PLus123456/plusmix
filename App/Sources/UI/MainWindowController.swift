@@ -47,6 +47,12 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private var snapshotsInWindow = 0
     /// 最近一秒内快照回调的最大次数（测试用）。
     private(set) var maxSnapshotsPerSecond = 0
+    /// PGM 监视器的记账源（W3-E3：DisplayFrameLedger 夹在渲染器与显示视图之间，Stats.display[] 的 monitor 项从它来；显示视图对来源是弱引用，这里持有）。
+    private(set) var programLedger: DisplayFrameLedger?
+    /// 换 session（= 换渲染器）之前的旧账，累计值不回退（frames 用的 presentedFrames 本来就跨 session 累计）。
+    private var retiredProgramDropped: UInt64 = 0
+    private var retiredProgramUndelivered: UInt64 = 0
+    nonisolated(unsafe) private var occlusionObserver: (any NSObjectProtocol)?
 
     /// 测试用：清零快照分发的计数，让一条用例只量自己（UISmokeTests 的"每秒最多 60 次"，用户 2026-09-24 选的做法 (a)；
     /// 计数原来跨用例累计、以事件为锚的 1 s 窗口偶发数到 61，W3-E2 报告 §5 第 13 条）。
@@ -71,10 +77,18 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         buildLayout()
         window.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
         window.center()
+        // 主窗口被遮住 / 最小化 / 到别的 Space（监视器的 display link 随之暂停）和露出来：断开 PGM 监视器的连续呈现，这段记 undelivered（提案 018）
+        occlusionObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.programLedger?.breakRun(countingUndelivered: true) }
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit {
+        if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+    }
 
     private func buildLayout() {
         guard let window, let content = window.contentView else { return }
@@ -155,7 +169,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         inputStrip.runtimeState = session.map { s in { [weak s] n in s?.inputs.runtimeState(of: n) } }
         let source = session?.displaySource
         previewMonitor.display.source = source
-        programMonitor.display.source = source
+        bindProgramLedger(to: source)
         inputStrip.displaySource = source
         multiviewWindow?.source = source
         bottomBar.resetStats()
@@ -175,15 +189,31 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         session.aux.uiDisplayEntries = { [weak self] in self?.displayStatsEntries ?? [] }
     }
 
-    /// 界面上两个显示视图在 Stats 里的项（提案 013）：PGM 监视器 kind "monitor"、多画面窗口 kind "multiviewWindow"，
-    /// 都不是输出表里的输出，output 用 0。dropped = 拿不到 drawable 的次数（W3-C2 复核细分口径）。
-    private var displayStatsEntries: [Stats.DisplayEntry] {
+    /// PGM 监视器换来源（换 session）：记账源包住新的渲染器交给显示视图，旧账并进 retired。
+    private func bindProgramLedger(to source: (any DisplayFrameSource)?) {
+        retiredProgramDropped &+= programLedger?.droppedFrames ?? 0
+        retiredProgramUndelivered &+= programLedger?.undeliveredFrames ?? 0
+        if let source {
+            let ledger = DisplayFrameLedger(upstream: source, view: programMonitor.display)
+            programLedger = ledger
+            programMonitor.display.source = ledger
+        } else {
+            programLedger = nil
+            programMonitor.display.source = nil
+        }
+    }
+
+    /// 界面上两个显示视图在 Stats 里的项（提案 013）：PGM 监视器 kind "monitor"、多画面窗口 kind "multiviewWindow"，都不是输出表里的输出，output 用 0。
+    /// dropped / undelivered 走 DisplayFrameLedger（W3-E3，与外部显示窗口同一个记账源、同一口径）：dropped = 两次显示刷新之间被覆盖的版本，
+    /// undelivered = 窗口被遮住 / 最小化期间渲染器出了、视图没画的版本（提案 018）。多画面窗口没开过不报，关着报 idle（关着的那段两样都不记）。
+    var displayStatsEntries: [Stats.DisplayEntry] {
         var out = [Stats.DisplayEntry(output: 0, kind: "monitor", frames: programMonitor.display.presentedFrames,
-                                      dropped: programMonitor.display.skipCounters.noDrawable, state: "presenting")]
+                                      dropped: retiredProgramDropped &+ (programLedger?.droppedFrames ?? 0),
+                                      undelivered: retiredProgramUndelivered &+ (programLedger?.undeliveredFrames ?? 0), state: "presenting")]
         if let w = multiviewWindow {
             out.append(Stats.DisplayEntry(output: 0, kind: "multiviewWindow", frames: w.displayView.presentedFrames,
-                                          dropped: w.displayView.skipCounters.noDrawable,
-                                          state: w.isShowing ? "presenting" : "idle"))
+                                          dropped: w.droppedFrames, undelivered: w.undeliveredFrames,
+                                          state: w.isOpen ? "presenting" : "idle"))
         }
         return out
     }
