@@ -2,6 +2,7 @@
 
 提出会话 / 分支：W3-B / w3-compositor2（2026-09-19）
 状态：**已落地**（p3-contracts，2026-09-23，提交 cb85fbe…c73aab2；过渡键搬迁对脏数据的加固 44d9144）：A1–A3 的正式字段全部加上（`OverlayState.border / anchor / previewOn`、`OverlayAnimation.slideFrom`、`OutputSettings.multiview: MultiviewLayoutSettings?`，`MultiviewCell.source` 复用 `OutputSource`、其中 `.multiview` 被渲染器忽略）。**A4 由 P3 定：加 `Command.setOverlayDecoration(channel:border:anchor:previewOn:)`**——扩 `setOverlay` 的参数会改它已经在用的 JSON 形态；多画面布局走现有 `setOutputSettings`。reducer 规则：通道不在 1–4 拒绝，三项整体替换（相同值 reducer 原样返回，回执 applied = false）。渲染器的两个单一读取点改成正式字段优先、过渡做法（`effects["border"]` / `extra["layout"]`）保留一个版本作后备，两条路径逐像素相同（有用例）；`MetalRendererOptions.overlaysInPreview` 保留为"全部预览"总开关，与每通道 `previewOn` 取或。**旧 Show 的一次性转换由 P3 定：放在契约的 `Show.load` 里（`Show.migratingLegacyKeys()`）**，App / headless / 测试读同一份，幂等、正式字段已有值的不动、搬完清旧键。`scenarios/g4-show.json` 由 `make-show --preset g4` 重新生成（格子 rect 逐位不变）。设置面板归 W3-E2 / prompt 63。
+后续：过渡键的后备读取 W3-B2（渲染器的 `OverlayDecoration` / `MultiviewLayoutTable`）与 W3-C2（`ExternalDisplaySpec`）删了，App `OutputExtras.displayNumber` 的一处归 W3-E3（prompt 68 第 6 条）。**P4（2026-09-27，分支 p4-contracts）**：`Show.migratingLegacyKeys()` 搬完把 `border` 效果格一律清掉（没有叠加通道用到的、停用的也清，用户 2026-09-27 定全清）；状态机对 addOutput / setOutputSettings / loadShow 进来的数据也先搬，API 客户端直接带 `extra["layout"]` 的不再静默变成默认布局（W3-B2 报告 §4 第 3 / 4 条）。见 CONTRACTS.md §2.8、reports/p4-contracts.md。
 
 ## A. 改什么（类型）
 

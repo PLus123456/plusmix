@@ -16,7 +16,7 @@ public struct RenderedFrame: Sendable {
     /// `MetalRendererOptions.previewOutput` 保留为强制开的覆盖（两者取或）。
     public let preview: Frame?
     /// 多画面；用不着时为 nil。填充条件同 `preview`：状态里有 enabled 且 source = `.multiview` 的输出时自动填，
-    /// `MetalRendererOptions.multiviewOutput` 是强制开的覆盖。
+    /// `MetalRendererOptions.multiviewOutput` 是强制开的覆盖。多画面的布局不看 enabled（见 `OutputState.enabled`）。
     public let multiview: Frame?
     /// 命令缓冲区提交时刻。
     public let submitTime: HostTime

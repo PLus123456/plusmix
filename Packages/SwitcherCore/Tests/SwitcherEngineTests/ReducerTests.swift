@@ -417,6 +417,63 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(reducer.reduce(Self.baseState(), .loadShow(show: show), at: Tick(1)), Self.baseState())
     }
 
+    // MARK: P4：reducer 的两条小规则（prompt 67 交付 3）
+
+    /// removeInput 删掉 Stinger 用的那一路：`transition.stinger.input` 置 nil，与叠加引用同口径（W3-E2 报告 §4 第 1 条）；换底拍不动，删别的输入不碰它。
+    /// 引用留着悬空的话，App 改 Wipe 参数时带上的 stinger 会让整条 setTransitionParams 被拒。
+    func testP4_removeInput_clearsStingerReference() {
+        var s = Self.baseState()
+        s.transition.stinger = StingerParams(input: 3, cutAtTick: 12)
+        XCTAssertEqual(reducer.reduce(s, .removeInput(input: 4), at: Tick(1)).transition.stinger, StingerParams(input: 3, cutAtTick: 12), "删别的输入不碰 stinger")
+
+        let removed = reducer.reduce(s, .removeInput(input: 3), at: Tick(1))
+        var expected = s
+        expected.inputs.remove(at: 2)
+        expected.transition.stinger = StingerParams(input: nil, cutAtTick: 12)
+        XCTAssertEqual(removed, expected, "stinger 用的输入删了就置 nil，换底拍与别的字段不动")
+
+        let wipe = WipeParams(direction: .diagonal, softness: 0.1)
+        XCTAssertEqual(reducer.reduce(removed, .setTransitionParams(wipe: wipe, stinger: removed.transition.stinger), at: Tick(2)).transition.wipe, wipe,
+                       "删完之后照当前 stinger 改 Wipe 参数照常生效")
+    }
+
+    /// addOutput / setOutputSettings / loadShow 进来的设置先过一遍 `migratingLegacyKeys()`（W3-B2 报告 §4 第 4 条；loadShow 用户 2026-09-27 定一并做）：
+    /// API 客户端直接带过渡键（extra["layout"] / ["displayID"] / ["fallbackToMain"]、效果格 "border"）的，与读节目文件得到同一份正式字段，不再静默变成默认布局 / 没有边框。
+    func testP4_outputSettingsFromCommands_migrateLegacyKeys() {
+        let layoutKey = MultiviewLayoutSettings.legacyExtraKey
+        let legacyLayout = OutputSettings(source: .multiview, extra: [layoutKey: .string("3x3"), "ndi.groups": .string("studio")])
+
+        let added = reducer.reduce(Self.baseState(), .addOutput(config: OutputState(number: 3, kind: .multiview, name: "多画面", settings: legacyLayout)), at: Tick(1))
+        XCTAssertEqual(added.output(3)?.settings.multiview, MultiviewLayoutSettings(preset: "3x3"), "addOutput 带的 extra[\"layout\"] 搬进正式字段")
+        XCTAssertEqual(added.output(3)?.settings.extra, ["ndi.groups": .string("studio")], "旧键清掉，别的 extra 键原样留着")
+        XCTAssertEqual(added.output(3)?.settings, legacyLayout.migratingLegacyKeys(), "与 Show.load 同一套规则")
+
+        var s = Self.baseState()
+        s.outputs.append(OutputState(number: 3, kind: .externalDisplay, name: "外屏"))
+        let legacyDisplay = OutputSettings(source: .preview, extra: [DisplayOutputSettings.legacyDisplayIDKey: .number(2),
+                                                                     DisplayOutputSettings.legacyFallbackKey: .bool(true)])
+        let set = reducer.reduce(s, .setOutputSettings(output: 3, settings: legacyDisplay), at: Tick(1))
+        XCTAssertEqual(set.output(3)?.settings, OutputSettings(source: .preview, display: DisplayOutputSettings(displayID: 2, fallbackToMain: true)),
+                       "setOutputSettings 带的 extra[\"displayID\"] / [\"fallbackToMain\"] 搬进正式字段")
+        XCTAssertEqual(reducer.reduce(set, .setOutputSettings(output: 3, settings: legacyDisplay), at: Tick(2)), set, "搬完与现状相同 → 原样返回（回执 applied = false）")
+        var official = legacyDisplay
+        official.display = DisplayOutputSettings(displayID: 7, fallbackToMain: false)
+        XCTAssertEqual(reducer.reduce(s, .setOutputSettings(output: 3, settings: official), at: Tick(1)).output(3)?.settings.display,
+                       DisplayOutputSettings(displayID: 7, fallbackToMain: false), "正式字段已有值时旧键不覆盖，只清掉")
+
+        // loadShow：整份节目按 Show.load 同一套规则搬迁（输出过渡键、叠加用到的输入里的 "border" 效果格）
+        var old = Self.baseState()
+        old.outputs.append(OutputState(number: 3, kind: .multiview, name: "多画面", enabled: true, settings: legacyLayout))
+        old.inputs[1].settings.effects = [EffectSlot(id: OverlayBorder.legacyEffectID, params: ["width": 0.02, "color": .array([255, 0, 0])])]
+        old.overlays[0].input = 2
+        let show = Show(name: "API 发来的老节目", state: old)
+        let loaded = reducer.reduce(Self.baseState(), .loadShow(show: show), at: Tick(1))
+        XCTAssertEqual(loaded, show.migratingLegacyKeys().makeState())
+        XCTAssertEqual(loaded.output(3)?.settings.multiview?.preset, "3x3")
+        XCTAssertEqual(loaded.overlays[0].border, OverlayBorder(width: 0.02, color: RGB8(red: 255, green: 0, blue: 0)))
+        XCTAssertEqual(loaded.inputs[1].settings.effects, [], "搬走的效果格清掉")
+    }
+
     static let allCaseNames = ["cut", "fade", "setTransition", "setTransitionParams", "autoTransition", "setPreview", "setProgram", "tbar", "ftb", "overlay", "setOverlay",
                                "setOverlayDecoration",
                                "audioGain", "mute", "busGain", "busMute", "setAFV", "setMonitorMode", "setBusEffects",

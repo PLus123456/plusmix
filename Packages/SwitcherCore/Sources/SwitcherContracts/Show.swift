@@ -120,29 +120,33 @@ public struct Show: Hashable, Codable, Sendable {
         return try migrate(from: try fileDecoder.decode(JSONValue.self, from: data), schemaVersion: version)
     }
 
-    /// 过渡键 → 正式字段的一次性搬迁（提案 010 / 013；`schemaVersion` 不升，全部字段带默认值）。
-    /// 幂等：正式字段已经有值的不动；搬完清掉旧键，写出只写正式字段。放在这里是为了 App / headless / 测试读同一份。
+    /// 过渡键 → 正式字段的一次性搬迁（提案 010 / 013；`schemaVersion` 不升，全部字段带默认值），顺带清掉老版本留下的死数据（P4）。
+    /// 幂等：正式字段已经有值的不动；搬完清掉旧键，写出只写正式字段。放在这里是为了 App / headless / 测试读同一份；
+    /// 状态机对 loadShow（整份）与 addOutput / setOutputSettings（`OutputSettings.migratingLegacyKeys()`）进来的数据也先搬（P4），
+    /// 所以状态机里的状态不会再有输出的过渡键；setInputSettings / addInput 带进来的 border 格不搬（没有叠加通道的上下文），存盘再读时清掉。
     ///
     /// - `OutputSettings.extra["layout"]` → `OutputSettings.multiview`（010）；
     /// - `OutputSettings.extra["displayID"]` / `["fallbackToMain"]` → `OutputSettings.display`（013）；
-    /// - 某路输入效果链里的 `EffectSlot(id: "border")` → 用到它的叠加通道的 `OverlayState.border`（010）。
-    ///   没有叠加通道用这路输入时不动（渲染器的后备路径还认它）。
+    /// - 某路输入效果链里第一个启用的 `EffectSlot(id: "border")` → 用到这路输入、还没有边框的叠加通道的 `OverlayState.border`（010）。
+    ///   搬完之后所有 "border" 格一律清掉：没有叠加通道用到的、停用的、通道已有正式边框而没搬的都算——读它的后备路径 W3-B2 删了，留着没人读（P4）；
+    /// - `transition.stinger.input` 指向不存在的输入 → nil：P4 之前 removeInput 不清这个引用，删掉 Stinger 用的那一路之后存下的文件里留着悬空编号，
+    ///   清成与 removeInput 现在的规则同一结果（`validate()` 不查引用）。
     public func migratingLegacyKeys() -> Show {
         var show = self
         for i in show.outputs.indices { show.outputs[i].settings = show.outputs[i].settings.migratingLegacyKeys() }
         // 边框：叠加通道 → 它用的输入 → 那路效果链里第一个启用的 "border" 格
-        var movedFrom = Set<Int>()
         for k in show.mixer.overlays.indices {
             guard show.mixer.overlays[k].border == nil, let n = show.mixer.overlays[k].input,
                   let input = show.inputs.first(where: { $0.number == n }),
                   let slot = input.settings.effects.first(where: { $0.enabled && $0.id == OverlayBorder.legacyEffectID })
             else { continue }
             show.mixer.overlays[k].border = OverlayBorder(legacyParams: slot.params)
-            movedFrom.insert(n)
         }
-        for i in show.inputs.indices where movedFrom.contains(show.inputs[i].number) {
-            // 只清掉搬走的那种（启用的）；停用的边框格是"配过但关了"，留着
-            show.inputs[i].settings.effects.removeAll { $0.enabled && $0.id == OverlayBorder.legacyEffectID }
+        for i in show.inputs.indices {
+            show.inputs[i].settings.effects.removeAll { $0.id == OverlayBorder.legacyEffectID }
+        }
+        if let n = show.mixer.transition.stinger.input, !show.inputs.contains(where: { $0.number == n }) {
+            show.mixer.transition.stinger.input = nil
         }
         return show
     }

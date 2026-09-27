@@ -215,26 +215,30 @@ public struct MixerReducer: MixerReducing {
             if s.program == input { s.program = MixerState.noInput }
             if s.preview == input { s.preview = MixerState.noInput }
             for k in s.overlays.indices where s.overlays[k].input == input { s.overlays[k].input = nil }
+            // Stinger 引用与叠加同口径（P4）：留着悬空的话，带着它的 setTransitionParams（App 改 Wipe 参数也带）会被整条拒掉
+            if s.transition.stinger.input == input { s.transition.stinger.input = nil }
         case .setInputSource(let input, let source):
             // 编号 / 名字 / 设置 / PGM / PVW / 叠加引用全部保留；kind 由 source 推出，不另存
             guard let i = Self.inputIndex(input, in: s) else { return state }
             s.inputs[i].source = source
 
-        // 输出表
+        // 输出表（进来的设置先按 Show.load 同一套规则搬过渡键（P4）：API 客户端直接带 extra["layout"] 的不会静默变成默认布局）
         case .addOutput(let config):
             guard config.number > 0, s.output(config.number) == nil else { return state }
-            let at = s.outputs.firstIndex { $0.number > config.number } ?? s.outputs.count
-            s.outputs.insert(config, at: at)
+            var c = config
+            c.settings = c.settings.migratingLegacyKeys()
+            let at = s.outputs.firstIndex { $0.number > c.number } ?? s.outputs.count
+            s.outputs.insert(c, at: at)
         case .removeOutput(let output):
             guard let i = s.outputs.firstIndex(where: { $0.number == output }) else { return state }
             s.outputs.remove(at: i)
         case .setOutputSettings(let output, let settings):
             guard let i = s.outputs.firstIndex(where: { $0.number == output }) else { return state }
-            s.outputs[i].settings = settings
+            s.outputs[i].settings = settings.migratingLegacyKeys()
 
-        // 节目
+        // 节目（整份先搬迁，与 Show.load 读文件同一结果；搬迁不碰 validate 查的结构，所以与命令校验器的判定一致）
         case .loadShow(let show):
-            let loaded = show.makeState()
+            let loaded = show.migratingLegacyKeys().makeState()
             guard (try? loaded.validate()) != nil else { return state }
             s = loaded
         }

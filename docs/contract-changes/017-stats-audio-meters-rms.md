@@ -2,6 +2,7 @@
 
 提出会话 / 分支：W3-B2 / w3-compositor-3（worktree 分支 `claude/w3-compositor-audio-meters-labels-e0dba1`，2026-09-23）
 状态：**已落地**（用户 2026-09-24 批："017 批了 … 都顺手做了"；G4 续做合入会话按授权落地：契约 `BusMeter` / `InputMeter` 加 `rmsDb`（缺键 = 空数组），C 热路径每块每声道平方和 → 300 ms 一阶平均的均方（不在回调里开方，Swift 侧 10·log10），`AudioMixer.meters` / `AudioEngine.audioCounters` / `AudioEngineStatus` 带出，渲染器有 RMS 时画"RMS 实心条 + 峰值细线 + 保持线"、没有时照旧，新参考图 `v8-multiview-meters-rms.png`；CONTRACTS.md §2.7、测试标准 §7 同步）
+后续：P4（2026-09-27）核对 CONTRACTS.md §2.7 与 `Stats.swift` 的注释：§2.7 键名表的 `inputs{n:{peak_db}}` 补上 `rms_db`、017 那条从"P2 加的字段"挪到自己一节，`Stats.swift` 的 rms_db 注释补上"20·log10、下限 −120、C 侧只累均方"——两边现在同一句话；契约类型与 JSON 没动。
 
 ## 改什么
 

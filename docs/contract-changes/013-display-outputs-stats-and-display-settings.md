@@ -2,6 +2,7 @@
 
 提出会话 / 分支：G4 / g4（2026-09-22；来源 W3-C 报告 §4 第 1 / 2 条与 §3 第 6 条，W2-B 的 `MetalDisplayView.presentedFrames` 同类；G4 报告 §8 第 5 条）
 状态：**已落地**（p3-contracts，2026-09-23，提交 cb85fbe…c73aab2；过渡键搬迁对脏数据的加固 44d9144）：A 的 `Stats.display: [DisplayEntry]` 与 B 的 `OutputSettings.display: DisplayOutputSettings?` 按提案原样落地，字段形态没有微调。填数方：`ExternalDisplayManager.statsEntries`（每个外部显示窗口一项，frames = `MetalDisplayView.presentedFrames`，state showing → presenting、waitingForDisplay / fallbackToMain → noDisplay）、`VirtualCameraOutput.statsEntry(output:)`（frames = 已排进 sink stream 的帧，dropped = 队列满 + 无设备 + sink 丢的三项之和，searching → waitingExtension、connected → publishing）、App `MainWindowController` 供 monitor 与 multiviewWindow 两项；汇总走 App `StatsHub` → `Engine.displayStatsProvider`，headless 写空数组。**dropped 暂时只算"拿不到 drawable"那一种**（其余 skip 是没有新帧 / 没必要画，不算丢），multiviewWindow 没有独立的 noDisplay 细分——这两条由 W3-C2（prompt 65）复核。`ExternalDisplaySpec` 与 App `OutputExtras` 改成正式字段优先、过渡键作后备，写出只写正式字段。`StatsSummary` 多一列 `displays`（可选字段，P3 之前的基线解出来是 nil）。测试标准 §7 的 stats.jsonl 字段列表已加 `display[]`（用户 2026-09-23 让 P3 直接加，只改那一段）。
+后续：W3-C2（提案 018）把 dropped 的口径钉死并加 `undelivered`，`ExternalDisplaySpec` 不再读过渡键（App `OutputExtras.displayNumber` 那一处归 W3-E3）；015 把 `fallbackToMain` 的默认改成 false。**P4（2026-09-27）**：状态机对 addOutput / setOutputSettings / loadShow 进来的 `extra["displayID"]` / `["fallbackToMain"]` 也先搬进 `OutputSettings.display`。
 
 ## 改什么
 

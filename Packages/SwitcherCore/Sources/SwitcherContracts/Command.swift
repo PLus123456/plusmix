@@ -54,6 +54,7 @@ public enum Command: Hashable, Codable, Sendable {
     case startStream(output: Int)
     case stopStream(output: Int)
     /// 非录制 / 推流输出（ndi / externalDisplay / virtualCamera / multiview）的目标开关（提案 012）。
+    /// multiview 的开关 = 要不要把多画面 NV12 送给下游，布局与它无关（见 `OutputState.enabled`）。
     /// record / stream 被拒：它们走 startRecord / startStream，语义与起止拍绑定。
     case setOutputEnabled(output: Int, on: Bool)
     /// 改输出显示名（提案 012）。
@@ -65,18 +66,21 @@ public enum Command: Hashable, Codable, Sendable {
     case renameInput(input: Int, name: String)
     /// 编号已存在则拒绝。
     case addInput(config: InputConfig)
+    /// 删一路输入：PGM / PVW 用它的变成 0（黑场），叠加通道与 Stinger 对它的引用置 nil（Stinger 是 P4 加的，与叠加同口径）。
     case removeInput(input: Int)
     /// 换一路输入的来源（提案 012）：编号、名字、设置、PGM / PVW / 叠加引用全部保留，kind 由 source 推出。
     /// 与 removeInput + addInput 的区别就在这里——后者会清掉 PGM / PVW / 叠加对它的引用，直播中不可接受。
     case setInputSource(input: Int, source: InputSource)
 
     // 输出表
+    /// 编号已存在则拒绝。设置先按 `OutputSettings.migratingLegacyKeys()` 搬过渡键（P4，与 Show.load 同一套规则）。
     case addOutput(config: OutputState)
     case removeOutput(output: Int)
+    /// 整体替换一个输出的设置；同样先搬过渡键（P4）。
     case setOutputSettings(output: Int, settings: OutputSettings)
 
     // 节目
-    /// 用节目文件整体替换状态（`show.makeState()`）。
+    /// 用节目文件整体替换状态（`show.migratingLegacyKeys().makeState()`：与 Show.load 读文件同一套搬迁，P4）；`validate()` 不过的被拒。
     case loadShow(show: Show)
 }
 

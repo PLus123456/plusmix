@@ -2,7 +2,7 @@
 
 提出会话 / 分支：W3-C2 / w3-outputs-3（2026-09-23；来源：本分支复核 013 的填数时把虚拟摄像头的 dropped 收窄成"被扩展丢弃"，
 扩展没装时丢的帧从此不在 Stats 里——reports/w3-outputs-3.md §4 第 2 条；用户 2026-09-23："dropped 走提案吧"）
-状态：**已批并落地**（用户 2026-09-23 选"批，本分支落地"；W3-C2 在 w3-outputs-3 上落地：`Stats.DisplayEntry.undelivered` 按本文 A / B 原样，填数方 VirtualCamera / External，TestKit `DisplaySummary` 加列；OWNERSHIP 的 W3-C2 行记了授权与多出的文件。**测试标准 §7 的 display[] 字段表还没加 undelivered——测试标准只有用户能改或授权**；App 的状态行文案归合并检查点）
+状态：**已批并落地**（用户 2026-09-23 选"批，本分支落地"；W3-C2 在 w3-outputs-3 上落地：`Stats.DisplayEntry.undelivered` 按本文 A / B 原样，填数方 VirtualCamera / External，TestKit `DisplaySummary` 加列；OWNERSHIP 的 W3-C2 行记了授权与多出的文件。测试标准 §7 的 display[] 字段表当时没加 undelivered（测试标准只有用户能改或授权），**G4 续做合入会话 2026-09-23 按 G4 行的口径权限加上了**；App 的状态行文案（虚拟摄像头 waitingExtension 那句改读 undelivered）也由合并检查点改了，reports/G4.md §11.1）
 
 ## 改什么
 
