@@ -170,3 +170,21 @@ gate4-matrix:
 
 gate4-report:
 	scripts/gate4-report.sh --label 10min --baseline $(GATE4_PREVIOUS)
+
+# ---------- W4-A 长稳与性能（prompt 70；脚本在 scripts/soak/、scripts/perf/，数据在 .build/soak/、.build/perf/，不入库）----------
+# make soak           8 小时长稳（S1 / S2 / S3 / A3；§3 S1 的负载 + 内置摄像头 + 文件输入）→ reports/W4-soak-8h.md；接电源、无人值守、别跑 App 测试
+# make soak-1h        每晚缩短版（1 小时）→ reports/W4-soak-1h.md
+# make perf-baseline  L5：G4 场景 5 分钟（V1–V3、S3）+ E4（文件输入 → 编码 → 录制，libvmaf 对源），与同机同 macOS 大版本的上一版基线比，退步 > 10% 非零退出
+# 参数：SOAK_ARGS='--powermetrics on --ambient "约 24 °C"'、PERF_ARGS='--powermetrics on'（powermetrics 要 sudo，会在终端里问一次密码）
+# S2 的 Instruments Leaks（30 分钟）：scripts/soak/leaks.sh；S4 热降频（无风扇机型）：scripts/perf/s4-thermal.sh
+SOAK_ARGS ?=
+PERF_ARGS ?=
+.PHONY: soak soak-1h perf-baseline
+soak:
+	scripts/soak/soak.sh --hours 8 --label 8h $(SOAK_ARGS)
+
+soak-1h:
+	scripts/soak/soak.sh --hours 1 --label 1h $(SOAK_ARGS)
+
+perf-baseline:
+	scripts/perf/perf-baseline.sh $(PERF_ARGS)
