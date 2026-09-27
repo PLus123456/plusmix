@@ -497,13 +497,23 @@ final class HeadlessSession: @unchecked Sendable {
         //    中断的情况：时钟还在跑，先停引擎（否则末尾几拍每路多 1–2 次 reuse），视频源紧接着停。
         //    然后录制封口（边界 = 最后一拍 + 1：音频恰好裁到最后一帧末尾，再多 writer 会因为音频超前于已结束的视频拒收而死等；
         //    封口期间音频源、泵、设备都还在跑）→ 泵 → 音频设备 → 音频源 → stats 关文件
+        //    W4-A：文件输入的声音在它自己身上，停了它环就空了，而音频引擎要等录制封口、推流排空之后才停——这几秒里混音器把这一路记成欠载
+        //    （soak 冒烟：最后一拍后 1 s 内 +8、停机段 +179，E4 同样）。所以先把文件输入从音频引擎摘掉（3 ms 淡出后 detach），过 50 ms 再停；
+        //    合成源不受影响（先停），没有文件输入时顺序与原来完全相同。
+        func stopOtherInputs() async {
+            if !fileAudioInputs.isEmpty {
+                for entry in fileAudioInputs { audioEngine.unregisterInput(number: entry.number) }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            for input in otherInputs { input.stop() }
+        }
         if interrupted {
             await engine.stop()
             for input in inputs { input.stop() }
-            for input in otherInputs { input.stop() }
+            await stopOtherInputs()
         } else {
             for input in inputs { input.stop() }
-            for input in otherInputs { input.stop() }
+            await stopOtherInputs()
             await engine.stop()
         }
         if let sender = ndiSender {
