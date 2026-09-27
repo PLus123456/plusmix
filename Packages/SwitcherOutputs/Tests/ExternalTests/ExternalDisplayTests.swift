@@ -108,7 +108,33 @@ final class ExternalDisplayTests: XCTestCase {
         ExternalDisplaySpec(settings: legacy).apply(to: &legacy)
         XCTAssertNil(legacy.extra[ExternalDisplaySpec.displayIDKey])
         XCTAssertNil(legacy.extra[ExternalDisplaySpec.fallbackKey])
-        XCTAssertEqual(ExternalDisplaySpec.describe(.input(number: 2), inputs: [InputConfig(number: 2, name: "机位二", source: .image(path: "/x.png"))]), "输入 2 机位二")
+        // 源的显示名不在包里（W3-C3 删了 ExternalDisplaySpec.describe，App 用 OutputSource.title(in:) 查表）
+    }
+
+    /// W3-C3：窗口标题是包里唯一非有不可的文字——默认 ASCII，组装方（App）可以传本地化后的；管理器下发给现有的和以后开的窗口。
+    /// 目标显示器用不存在的 ID：窗口收起等它，不在屏上闪。
+    func testL10n_windowTitleDefaultsToASCIIAndIsInjectable() throws {
+        launchApp()
+        let source = try FakeDisplaySource()
+        let manager = ExternalDisplayManager(source: source.source)
+        defer { manager.closeAll() }
+        XCTAssertEqual(ExternalDisplayWindow.defaultWindowTitle, "Switcher External Output")
+        XCTAssertTrue(ExternalDisplayWindow.defaultWindowTitle.unicodeScalars.allSatisfy(\.isASCII))
+        func output(_ n: Int) -> OutputState {
+            OutputState(number: n, kind: .externalDisplay, name: "外部 \(n)", enabled: true,
+                        settings: ExternalDisplaySpec(displayID: 0xDEAD_BEEF, source: .program).outputSettings)
+        }
+        manager.reconcile(outputs: [output(1)], inputs: [], format: .hd1080p60)
+        XCTAssertEqual(manager.windowTitle, ExternalDisplayWindow.defaultWindowTitle)
+        XCTAssertEqual(manager.windows[1]?.window?.title, ExternalDisplayWindow.defaultWindowTitle)
+        manager.windowTitle = "Switcher 外部输出"   // App 按本地化表给
+        XCTAssertEqual(manager.windows[1]?.windowTitle, "Switcher 外部输出")
+        XCTAssertEqual(manager.windows[1]?.window?.title, "Switcher 外部输出", "现有窗口跟着换")
+        manager.reconcile(outputs: [output(1), output(2)], inputs: [], format: .hd1080p60)
+        XCTAssertEqual(manager.windows[2]?.window?.title, "Switcher 外部输出", "以后开的窗口也用它")
+        let lone = ExternalDisplayWindow(spec: ExternalDisplaySpec(displayID: 0xDEAD_BEEF), source: nil, windowTitle: "Aux")
+        defer { lone.closeOutput() }
+        XCTAssertEqual(lone.window?.title, "Aux", "直接建窗口也能传")
     }
 
     func testDisplays_listContainsMainScreenWithItsID() throws {

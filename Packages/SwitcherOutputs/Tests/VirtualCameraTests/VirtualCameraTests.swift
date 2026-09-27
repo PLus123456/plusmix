@@ -2,6 +2,7 @@
 // 系统扩展安装器的状态映射与在未签名宿主里的失败路径。设备本身要签名的扩展才有（BLOCKED-签名）：QuickTime / FaceTime 里选到摄像头、
 // L1 到虚拟摄像头出口的测量都在 App 级测试里 XCTSkip，解锁条件 = Team ID 签名 + /Applications。
 import CoreMedia
+import CoreMediaIO
 import CoreVideo
 import Foundation
 import SystemExtensions
@@ -73,13 +74,13 @@ final class VirtualCameraTests: XCTestCase {
         _ = waitUntil(2) { output.countersSnapshot.droppedNoDevice + output.countersSnapshot.droppedQueueFull >= 60 }
         let c = output.countersSnapshot
         let p99 = pushDurations.sorted()[Int(Double(pushDurations.count) * 0.99)]
-        print("无设备：收 \(c.framesIn) 丢（无设备）\(c.droppedNoDevice) 丢（队列）\(c.droppedQueueFull) 送 \(c.framesSent) 找设备 \(c.connectAttempts) 次，push p99 \(String(format: "%.4f", p99)) ms，最近错误：\(c.lastError ?? "无")")
+        print("无设备：收 \(c.framesIn) 丢（无设备）\(c.droppedNoDevice) 丢（队列）\(c.droppedQueueFull) 送 \(c.framesSent) 找设备 \(c.connectAttempts) 次，push p99 \(String(format: "%.4f", p99)) ms，最近失败：\(c.lastFailure.map { "\($0)" } ?? "无")")
         XCTAssertEqual(c.framesIn, 60)
         XCTAssertEqual(c.framesSent, 0)
         XCTAssertEqual(c.droppedNoDevice + c.droppedQueueFull, 60, "没有设备全部丢掉并计数")
         XCTAssertGreaterThanOrEqual(c.connectAttempts, 3, "1 s 里按 200 ms 间隔重试了好几次")
         XCTAssertLessThanOrEqual(c.connectAttempts, 8, "重试有间隔，不是每帧都找")
-        XCTAssertEqual(c.lastError, "\(CMIOSinkStreamClient.Error.deviceNotFound)")
+        XCTAssertEqual(c.lastFailure, .open(.deviceNotFound), "W3-C3：失败原因是枚举（文字由组装方查表），不是包拼好的文案")
         XCTAssertLessThan(p99, 0.1, "consume 只入队，微秒级")
         XCTAssertEqual(output.state, .searching)
         output.stop()
@@ -194,6 +195,7 @@ final class VirtualCameraTests: XCTestCase {
         sink.openError = CMIOSinkStreamClient.Error.startFailed(-1)
         feed(10)
         XCTAssertTrue(waitUntil(2) { output.statsEntry(output: 7).state == "failed" }, output.statsEntry(output: 7).state)
+        XCTAssertEqual(output.countersSnapshot.lastFailure, .open(.startFailed(-1)))
         // 6. 好了：重连，序号从 0 重新开始
         sink.openError = nil
         sink.acceptSends = true
@@ -206,25 +208,114 @@ final class VirtualCameraTests: XCTestCase {
 
     /// 扩展经 CMIO 的"已输出"通知（CMIOExtensionStream.notifyScheduledOutputChanged → 本进程的 kCMIOStreamPropertyScheduledOutputNotificationProc）
     /// 回报每一帧；序号跳过的就是扩展丢的。走真的 C 回调入口（注册到 sink stream 上的就是它），不需要扩展。
+    /// W3-C3：sink 排队之前先记下这一帧的序号（`noteSent`，CMIOSinkStreamClient.send 里做）；回报的序号不是本连接排过的
+    /// （kCMIOInvalidSequenceNumber、比排过的都大、旧连接迟到的）只记 unmatched，不算输出也不算丢——桥没把我们的序号带过去时 Stats 不出乱数。
     func testVirtualCamera_scheduledOutputNotificationsCountExtensionDrops() throws {
         let tracker = ScheduledOutputTracker()
         let proc = ScheduledOutputTracker.notificationProc
         let refCon = Unmanaged.passUnretained(tracker).toOpaque()
         tracker.beginConnection()
+        for seq: UInt64 in 0...6 { tracker.noteSent(sequence: seq) }
         for seq: UInt64 in [0, 1, 2, 5, 6] { proc(seq, 0, refCon) }
         XCTAssertEqual(tracker.report, SinkOutputReport(output: 5, dropped: 2), "3、4 没输出 = 扩展丢了")
         proc(6, 0, refCon)   // 重复 / 乱序：不算新的丢
         XCTAssertEqual(tracker.report.dropped, 2)
         // 新连接：序号从 0 重来，不和上一个连接比
         tracker.beginConnection()
+        for seq: UInt64 in 0...3 { tracker.noteSent(sequence: seq) }
         proc(0, 0, refCon)
         proc(3, 0, refCon)
         XCTAssertEqual(tracker.report, SinkOutputReport(output: 8, dropped: 4))
         // 第一条通知之前的序号也算（扩展起流时扔掉的开头几帧）
         tracker.beginConnection()
+        for seq: UInt64 in 0...2 { tracker.noteSent(sequence: seq) }
         proc(2, 0, refCon)
         XCTAssertEqual(tracker.report.dropped, 6)
         proc(0, 0, nil)   // 没有 refCon 的通知不崩
+        // 不是本连接排过的序号：只记 unmatched
+        proc(CMIOSequenceNumber.invalid, 0, refCon)   // kCMIOInvalidSequenceNumber（桥没带序号）
+        proc(3, 0, refCon)                             // 本连接只排到 2
+        XCTAssertEqual(tracker.report, SinkOutputReport(output: 9, dropped: 6, unmatched: 2))
+        tracker.beginConnection()
+        proc(1, 0, refCon)                             // 新连接还没排过帧：旧连接迟到的回报
+        XCTAssertEqual(tracker.report, SinkOutputReport(output: 9, dropped: 6, unmatched: 3))
+        tracker.noteSent(sequence: CMIOSequenceNumber.invalid)   // 没挂上序号的帧不抬高"排过的最大序号"
+        proc(0, 0, refCon)
+        XCTAssertEqual(tracker.report.unmatched, 4)
+    }
+
+    /// W3-C3 交付 2：扩展侧回报"已输出"的整条记账——`VirtualCameraOutput` 给每帧挂 CMIO 序号 → 假扩展（`FakeExtensionSink`，
+    /// 与 CameraExtension 的 consumeNext 同一套：读样本上的序号、发出去之后回报、自己丢的帧不回报）经注册在 sink 上的
+    /// 'sonp' C 回调（`ScheduledOutputTracker.notificationProc`，CMIO 把 notifyScheduledOutputChanged 转给主程序的那条路）回报
+    /// → 序号跳号记成扩展丢的帧 → `countersSnapshot` 与 `Stats.display[]` 的 dropped。真扩展 BLOCKED-签名（Team ID + /Applications）。
+    func testVirtualCamera_extensionReportsViaSonp_sequenceGapsBecomeDropped() throws {
+        // 扩展每 10 帧丢 1 帧（序号 9、19、29……）
+        let sink = FakeExtensionSink { ($0 + 1) % 10 == 0 }
+        let output = VirtualCameraOutput(format: .hd1080p60, sink: sink)
+        output.retryInterval = HostDuration(milliseconds: 20)
+        output.start()
+        defer { output.stop() }
+        let frame = nv12Frame(pts: .now())
+        var sent: UInt64 = 0
+        func feed(_ n: Int) {
+            for _ in 0..<n {
+                let t = HostTime.now()
+                output.consume(RenderedFrame(tick: Tick(Int64(sent)), tickTime: t, program: frame, submitTime: t, gpuStart: t, gpuEnd: t))
+                sent += 1
+                usleep(3_000)
+            }
+            XCTAssertTrue(waitUntil(2) {
+                let c = output.countersSnapshot
+                return c.framesSent + c.droppedNoDevice + c.droppedQueueFull + c.droppedSink == sent
+            }, "\(output.countersSnapshot)")
+        }
+
+        // 1. 同步回报（在 send 里就回，记账当场可比）：61 帧 = 序号 0…60，扩展丢 9 / 19 / 29 / 39 / 49 / 59；59 的缺口由 60 的回报揭出来
+        feed(61)
+        var c = output.countersSnapshot
+        XCTAssertEqual(c.framesSent, 61)
+        XCTAssertEqual(sink.received, Array(0...60), "扩展按排进去的顺序收到每一帧的序号")
+        XCTAssertTrue(c.extensionReports, "'sonp' 注册上了")
+        XCTAssertEqual(c.framesOutput, 55)
+        XCTAssertEqual(c.droppedExtension, 6)
+        XCTAssertEqual(c.extensionUnmatched, 0)
+        var e = output.statsEntry(output: 3)
+        XCTAssertEqual(e.state, "publishing")
+        XCTAssertEqual(e.frames, 61, "frames = 排进 sink 的帧（= 扩展收到的）")
+        XCTAssertEqual(e.dropped, 6, "dropped = 扩展丢的（本端队列 / sink 都没丢）")
+        XCTAssertEqual(e.undelivered, 0)
+
+        // 2. 异步回报（扩展自己的队列上回，和真的一样）：再 40 帧（61…100，丢 69 / 79 / 89 / 99）；回报追上之后，下一次送帧时同步进计数
+        sink.asynchronous = true
+        feed(40)
+        sink.drain()
+        XCTAssertEqual(sink.extensionReport, SinkOutputReport(output: 91, dropped: 10), "101 帧里扩展丢了 10 帧")
+        feed(1)   // 序号 101：送帧时读回报（它自己的回报可能还在路上）
+        c = output.countersSnapshot
+        XCTAssertEqual(c.droppedExtension, 10)
+        XCTAssertTrue((91...92).contains(c.framesOutput), "\(c.framesOutput)：差的那一帧是最后一帧的回报还在路上")
+        XCTAssertEqual(output.statsEntry(output: 3).dropped, 10)
+
+        // 3. 断开重连：新连接序号从 0 重来、不和旧连接比；旧连接迟到的回报与没带序号的回报只记 unmatched，不进 dropped
+        sink.drain()
+        sink.asynchronous = false
+        sink.dropSequences = { _ in false }
+        sink.close()   // 流没了（真机上是扩展停了 / 被卸载，VirtualCameraOutput 连续排不进后自己关；这里直接关掉看重连）
+        let receivedBefore = sink.received.count
+        feed(1)        // 发现没连着 → 重连，这一帧是新连接的 0 号
+        XCTAssertTrue(waitUntil(2) { output.state == .connected })
+        XCTAssertEqual(sink.received.dropFirst(receivedBefore).first, 0, "新连接从 0 编号")
+        sink.lateNotification(sequence: 100)   // 旧连接迟到的回报（新连接只排到 0）
+        feed(10)
+        sink.lateNotification(sequence: CMIOSequenceNumber.invalid)
+        feed(1)
+        c = output.countersSnapshot
+        XCTAssertEqual(c.droppedExtension, 10, "新连接没丢；跨连接的序号不比；迟到 / 无效的回报不算丢")
+        XCTAssertEqual(c.extensionUnmatched, 2)
+        e = output.statsEntry(output: 3)
+        XCTAssertEqual(e.dropped, c.droppedQueueFull &+ c.droppedSink &+ c.droppedExtension, "Stats 的 dropped 与 countersSnapshot 同源（铁律 4）")
+        XCTAssertEqual(e.dropped, 10)
+        print("扩展回报（假扩展）：送 \(c.framesSent) 输出 \(c.framesOutput) 扩展丢 \(c.droppedExtension) 对不上 \(c.extensionUnmatched)，Stats dropped \(e.dropped) undelivered \(e.undelivered)")
     }
 
     /// CMIO 序号挂在 CMSampleBuffer 上（CMIOSampleBuffer.h 不在 Swift 模块里，dlsym 取 C 函数；探针：附件键 com.apple.cmio.buffer_attachment.sequence_number）。
@@ -239,24 +330,47 @@ final class VirtualCameraTests: XCTestCase {
         XCTAssertTrue(CMIOSequenceNumber.usesCFunctions, "本机 CoreMediaIO 导出了 CMIOSampleBufferSet/GetSequenceNumber")
     }
 
-    func testInstaller_statusMapping() {
+    /// 请求结果 / 错误 → 状态。W3-C3：失败只给枚举原因（按 OSSystemExtensionError 的码归类）+ 系统给的诊断（域 / 码 / 系统本地化的描述），
+    /// 文字由组装方按原因查表（App 的 OutputStatusText）；包里不再拼中文文案，`describe` / `developerModeHint` 删了（没人调，提示挪进注释与 README）。
+    func testInstaller_statusMapping() throws {
         XCTAssertEqual(SystemExtensionInstaller.status(for: .completed, version: "0.1.0"), .installed(version: "0.1.0"))
         XCTAssertEqual(SystemExtensionInstaller.status(for: .willCompleteAfterReboot, version: "0.1.0"), .needsReboot)
-        let notFound = NSError(domain: OSSystemExtensionErrorDomain, code: OSSystemExtensionError.Code.extensionNotFound.rawValue, userInfo: [NSLocalizedDescriptionKey: "Extension not found"])
-        guard case .failed(let m1) = SystemExtensionInstaller.status(for: notFound) else { return XCTFail() }
-        XCTAssertTrue(m1.contains("BLOCKED-签名"), m1)
-        let badSig = NSError(domain: OSSystemExtensionErrorDomain, code: OSSystemExtensionError.Code.codeSignatureInvalid.rawValue, userInfo: [:])
-        guard case .failed(let m2) = SystemExtensionInstaller.status(for: badSig) else { return XCTFail() }
-        XCTAssertTrue(m2.contains("签名"), m2)
-        XCTAssertEqual(SystemExtensionInstaller.status(for: NSError(domain: OSSystemExtensionErrorDomain, code: OSSystemExtensionError.Code.authorizationRequired.rawValue, userInfo: [:])), .needsUserApproval)
-        guard case .failed = SystemExtensionInstaller.status(for: NSError(domain: "x", code: 1, userInfo: [:])) else { return XCTFail() }
-        XCTAssertEqual(SystemExtensionInstaller.describe(.needsUserApproval), "等待在「系统设置 → 隐私与安全性」里允许")
-        XCTAssertTrue(SystemExtensionInstaller.developerModeHint.contains("SIP"))
+        func failure(_ code: OSSystemExtensionError.Code, description: String? = nil) -> SystemExtensionInstaller.Failure? {
+            let error = NSError(domain: OSSystemExtensionErrorDomain, code: code.rawValue,
+                                userInfo: description.map { [NSLocalizedDescriptionKey: $0] } ?? [:])
+            guard case .failed(let f) = SystemExtensionInstaller.status(for: error) else { return nil }
+            return f
+        }
+        let notFound = try XCTUnwrap(failure(.extensionNotFound, description: "Extension not found"))
+        XCTAssertEqual(notFound, SystemExtensionInstaller.Failure(reason: .extensionNotFound, domain: OSSystemExtensionErrorDomain,
+                                                                  code: OSSystemExtensionError.Code.extensionNotFound.rawValue, detail: "Extension not found"))
+        XCTAssertTrue(notFound.isSigningBlocked, "App 里没有扩展 = 没带 Team ID 签名嵌进去：BLOCKED-签名")
+        // 签名 / 权限 / 位置 / 系统策略：一类（探针 2：未签名的命令行宿主回的是 missingEntitlement）
+        for code: OSSystemExtensionError.Code in [.codeSignatureInvalid, .validationFailed, .missingEntitlement, .unsupportedParentBundleLocation, .forbiddenBySystemPolicy] {
+            let f = try XCTUnwrap(failure(code), "\(code.rawValue)")
+            XCTAssertEqual(f.reason, .requirementsNotMet, "\(code.rawValue)")
+            XCTAssertTrue(f.isSigningBlocked)
+            XCTAssertEqual(f.code, code.rawValue)
+        }
+        XCTAssertEqual(failure(.requestCanceled)?.reason, .canceled)
+        XCTAssertEqual(failure(.requestSuperseded)?.reason, .superseded)
+        XCTAssertEqual(failure(.requestCanceled)?.isSigningBlocked, false)
+        XCTAssertEqual(SystemExtensionInstaller.status(for: NSError(domain: OSSystemExtensionErrorDomain, code: OSSystemExtensionError.Code.authorizationRequired.rawValue, userInfo: [:])),
+                       .needsUserApproval)
+        // 扩展包本身有问题（缺标识 / 重复 / 类别不认识）与未知码：other，带着码给日志
+        for code: OSSystemExtensionError.Code in [.unknown, .extensionMissingIdentifier, .duplicateExtensionIdentifer, .unknownExtensionCategory] {
+            XCTAssertEqual(failure(code)?.reason, .other, "\(code.rawValue)")
+        }
+        // 别的域：other，域 / 码 / 系统描述原样带着
+        let foreign = NSError(domain: "x", code: 1, userInfo: [NSLocalizedDescriptionKey: "系统给的描述"])
+        XCTAssertEqual(SystemExtensionInstaller.status(for: foreign), .failed(.init(reason: .other, domain: "x", code: 1, detail: "系统给的描述")))
+        XCTAssertEqual(Set(SystemExtensionInstaller.Failure.Reason.allCases), [.extensionNotFound, .requirementsNotMet, .canceled, .superseded, .other],
+                       "组装方的查表要覆盖全部原因")
     }
 
-    /// 在没有扩展 / 未签名的宿主里发激活请求：不崩，几秒内回到 failed（文案带 BLOCKED-签名）。真正的激活 BLOCKED-签名。
+    /// 在没有扩展 / 未签名的宿主里发激活请求：不崩，几秒内回到 failed，原因是签名那一类（BLOCKED-签名）。真正的激活 BLOCKED-签名。
     @MainActor
-    func testInstaller_activateInUnsignedHost_failsWithClearMessage() throws {
+    func testInstaller_activateInUnsignedHost_failsWithSigningReason() throws {
         let installer = SystemExtensionInstaller()
         var statuses: [SystemExtensionInstaller.Status] = []
         installer.onStatusChange = { statuses.append($0) }
@@ -268,10 +382,12 @@ final class VirtualCameraTests: XCTestCase {
             if case .needsUserApproval = installer.status { break }
             RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
         }
-        print("未签名宿主里的激活请求：\(statuses.map(SystemExtensionInstaller.describe))")
+        print("未签名宿主里的激活请求：\(statuses)")
         switch installer.status {
-        case .failed(let message):
-            XCTAssertFalse(message.isEmpty)
+        case .failed(let failure):
+            XCTAssertTrue(failure.isSigningBlocked, "未签名宿主应是签名那一类：\(failure)")
+            XCTAssertEqual(failure.domain, OSSystemExtensionErrorDomain)
+            XCTAssertFalse(failure.detail.isEmpty, "系统给的描述带着（给日志 / 附在查表文案后面）")
         case .needsUserApproval:
             XCTFail("未签名宿主不该走到用户批准")
         default:
@@ -326,6 +442,78 @@ final class FakeSink: VirtualCameraSink, @unchecked Sendable {
         }
     }
     var extensionReport: SinkOutputReport? { report }
+}
+
+/// 假扩展（W3-C3）：像 CameraExtension 的 consumeNext 那样处理 sink 收到的每一帧——读样本上的 CMIO 序号，发出去之后回报"已输出"，
+/// 自己丢的帧不回报；回报走注册在 sink 上的 'sonp' C 回调（refCon = 记账对象），就是 CMIO 把扩展的 notifyScheduledOutputChanged
+/// 转给主程序的那条路。注册 / 注销 / 排队前记序号（noteSent）与 CMIOSinkStreamClient 同一套步骤。
+/// 回报默认同步（在 send 里就回，测试好比数）；`asynchronous` = 在自己的串行队列上回，和真扩展一样。
+final class FakeExtensionSink: VirtualCameraSink, @unchecked Sendable {
+    /// 注册在 sink stream 上的 'sonp'（C 回调 + refCon），与 CMIOStreamScheduledOutputNotificationProcAndRefCon 对应。
+    private struct Registration: @unchecked Sendable {
+        let proc: CMIOStreamScheduledOutputNotificationProc
+        let refCon: UnsafeMutableRawPointer
+    }
+    private let lock = NSLock()
+    private let tracker = ScheduledOutputTracker()
+    private let extensionQueue = DispatchQueue(label: "fake.camera-extension")
+    private var registration: Registration?
+    private var _dropSequences: @Sendable (UInt64) -> Bool
+    private var _asynchronous = false
+    private var _received: [UInt64] = []
+
+    init(dropSequences: @escaping @Sendable (UInt64) -> Bool) {
+        _dropSequences = dropSequences
+    }
+
+    /// 扩展要丢哪些帧（按序号；丢 = 收了不发出去、不回报）。
+    var dropSequences: @Sendable (UInt64) -> Bool {
+        get { lock.withLock { _dropSequences } }
+        set { lock.withLock { _dropSequences = newValue } }
+    }
+    var asynchronous: Bool {
+        get { lock.withLock { _asynchronous } }
+        set { lock.withLock { _asynchronous = newValue } }
+    }
+    /// 扩展收到的序号（按收到的顺序）。
+    var received: [UInt64] { lock.withLock { _received } }
+
+    var isOpen: Bool { lock.withLock { registration != nil } }
+
+    func open() throws {
+        lock.withLock {
+            tracker.beginConnection()
+            registration = Registration(proc: ScheduledOutputTracker.notificationProc, refCon: Unmanaged.passUnretained(tracker).toOpaque())
+        }
+    }
+
+    func send(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        let sequence = CMIOSequenceNumber.get(sampleBuffer)
+        guard let snapshot = lock.withLock({ registration.map { ($0, _dropSequences, _asynchronous) } }) else { return false }
+        let (registration, drop, deliverLater) = snapshot
+        tracker.noteSent(sequence: sequence)   // 排队之前（扩展可能在排队返回之前就回报）
+        let consume: @Sendable () -> Void = { [self] in
+            lock.withLock { _received.append(sequence) }
+            guard !drop(sequence) else { return }
+            registration.proc(sequence, mach_absolute_time(), registration.refCon)   // = notifyScheduledOutputChanged 经 CMIO 到这里
+        }
+        if deliverLater { extensionQueue.async(execute: consume) } else { consume() }
+        return true
+    }
+
+    func close() {
+        lock.withLock { registration = nil }
+    }
+
+    var extensionReport: SinkOutputReport? { tracker.report }
+
+    /// 等扩展队列上的回报都回完。
+    func drain() { extensionQueue.sync {} }
+
+    /// 注销之后 / 新连接开始之后才到的回报（CMIO 线程上在路上的那一条）：直接调同一个 C 回调。
+    func lateNotification(sequence: UInt64) {
+        ScheduledOutputTracker.notificationProc(sequence, mach_absolute_time(), Unmanaged.passUnretained(tracker).toOpaque())
+    }
 }
 
 extension XCTestCase {

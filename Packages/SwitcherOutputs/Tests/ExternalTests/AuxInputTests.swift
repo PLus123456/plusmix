@@ -187,6 +187,9 @@ final class AuxInputTests: XCTestCase {
         let queue = device.makeCommandQueue()!
         _ = try AuxPipeline.shared(for: device)
         let presenter = AuxInputPresenter(device: device)
+        XCTAssertEqual(AuxInputPresenter.defaultNoSignalText, "No signal", "W3-C3：包里的默认文案是 ASCII，App 按本地化表给 input.noSignal")
+        XCTAssertEqual(presenter.noSignalText, AuxInputPresenter.defaultNoSignalText)
+        presenter.noSignalText = "无信号"   // App 中文界面给的（SwitcherSession：aux.external.noSignalText = L("input.noSignal")）
         let slot = TestFrameSlot()
         presenter.attach(input: 2, name: "机位二", slot: slot)
         XCTAssertEqual(presenter.placeholderLines.center, "无信号")
@@ -254,10 +257,10 @@ final class AuxInputTests: XCTestCase {
         let back = drawOnce(presenter, queue: queue, now: again3 + HostDuration(milliseconds: 1))
         guard case .frame = back.draw else { return XCTFail("状态回到 live 应画帧：\(back.draw)") }
 
-        // 5. 文案可由组装方换（App 按本地化表给）
-        presenter.noSignalText = "No signal"
+        // 5. 文案可由组装方换（App 按本地化表给；英文界面就是包里的默认）
+        presenter.noSignalText = "Kein Signal"
         presenter.inputState = .noSignal
-        XCTAssertEqual(presenter.placeholderLines.center, "No signal")
+        XCTAssertEqual(presenter.placeholderLines.center, "Kein Signal")
 
         // 6. 没接帧槽（组装方没给 / 分支用完）→ 占位
         presenter.attach(input: 2, name: "机位二", slot: nil)
