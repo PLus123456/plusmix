@@ -43,7 +43,7 @@ removeInput 把前两个置 0、后两个置 nil；`validate()` 只查结构不�
 | `CommandBusTests.testValidator_agreesWithReducer` | 校验器拒的命令 reducer 也原样返回 | 通过 |
 | `CommandCatalogTests`（含 docs/api.md 与生成器同步） | 34 条、api.md 逐字等于 switcher-apidoc 输出 | 通过 |
 | SwitcherRenderTests 的 V8 参考图 | 017 已由 G4 落地（新图 `v8-multiview-meters-rms.png`，`v8-multiview-meters.png` 没重生成）；本会话没动渲染器与参考图，只跑。**PGM / PVW 类 18 张 PSNR ∞；7 张多画面图 PSNR 58.3–60.2 dB（≥ 40 dB 的比对过），`MultiviewMetersTests` 里三处"逐像素相同"断言红**——本机 2026-09-25 升了 macOS 27，名字标签的中文字形变了；**main 67d0f6b 同样复现、本分支与 main 渲染结果逐像素相同**，不是 P4 引入。没改参考图也没放宽断言（铁律 9），问题单 `reports/issues/P4-w3-compositor-multiview-cjk-labels-macos27.md` | **红（环境，main 同样）** |
-| 整仓测试（最终提交 3d2ba59；`make test` 在 SwitcherCore 红了就停，其余包 / 工具 / App 逐个补跑，见 §6） | 六个包 693 个用例：**红 4**——SwitcherRenderTests 3 处中文字形逐像素断言（环境，上一行）、TestKit `testW1A_syntheticVideo_60fps10s…` 平均唤醒延迟 0.546 ms > 0.5 ms（整包负载下偶发：单独重跑 3 / 3 过，0.006–0.009 ms）；跳 26（都是原有的 BLOCKED / 人工项，另 5 条"没有编好的 frameprobe"见 §6 补跑）。两个工具冒烟过。App 71 个：67 过、2 跳、**红 2**——`MultiviewSettingsTests.testThumbnails_ignoreLegacyLayoutKeyLikeRenderer`（**P4 预期内的行为变化**：API 带旧键的 addOutput 现在被搬成 3x3，用例的前提"旧键被忽略"不成立了；改法在本机验证过，App/ 不归本会话，交检查点 / W3-E3：`reports/issues/P4-w3-app-4-legacy-layout-thumbnail-test.md`）与 `DiskProtectionAppTests.testS7_…` missed_render 1（整包负载下偶发：单独重跑 2 / 2 过） | 见左 |
+| 整仓测试（最终提交 3d2ba59；`make test` 在 SwitcherCore 红了就停，其余包 / 工具 / App 逐个补跑，见 §6） | 六个包 693 个用例：**红 4**——SwitcherRenderTests 3 处中文字形逐像素断言（环境，上一行）、TestKit `testW1A_syntheticVideo_60fps10s…` 平均唤醒延迟 0.546 ms > 0.5 ms（整包负载下偶发：单独重跑 3 / 3 过，0.006–0.009 ms）；跳 26（都是原有的 BLOCKED / 人工项，另 5 条"没有编好的 frameprobe"见 §6 补跑）。两个工具冒烟过。App 71 个：67 过、2 跳、**红 2**——`MultiviewSettingsTests.testThumbnails_ignoreLegacyLayoutKeyLikeRenderer`（**P4 预期内的行为变化**：API 带旧键的 addOutput 现在被搬成 3x3，用例的前提"旧键被忽略"不成立了；改法在本机验证过（只合 P4 / 连 w3-app-4 一起合两种各一份），App/ 不归本会话，交合并检查点：`reports/issues/P4-w3-app-4-legacy-layout-thumbnail-test.md`）与 `DiskProtectionAppTests.testS7_…` missed_render 1（整包负载下偶发：单独重跑 2 / 2 过） | 见左 |
 | `git branch -f p4-contracts HEAD && make lint BRANCH=p4-contracts` | 禁词 / 版本号 / Package.swift 约束、依赖方向（8 个包）、归属（改动文件全在 P4 行内，没用胶水额度）、check-rt-symbols | **全绿**（exit 0） |
 
 ---
@@ -51,14 +51,16 @@ removeInput 把前两个置 0、后两个置 nil；`validate()` 只查结构不�
 ## 3. 没做的和原因
 
 1. **App 那条过渡键缩略图用例没改**：P4 的 reducer 搬迁让它的前提失效（见 §2），App/ 不在 P4 的归属里（胶水额度只给 Packages/*）。
-   补丁在本机验证过（打上后 `MultiviewSettingsTests` 2 / 2 过，验证完已还原），交检查点 / W3-E3，**合入 P4 时必须同时打**（`reports/issues/P4-w3-app-4-legacy-layout-thumbnail-test.md`，13 行）。
+   两份补丁都在本机验证过、验证完已还原：A = 只合 P4（main + P4），B = W3-E3 的 w3-app-4 也合了（它改了同一条用例的缩略图算法）。交合并检查点，
+   **合入 P4 时必须同时打其中一份**（`reports/issues/P4-w3-app-4-legacy-layout-thumbnail-test.md`，各十几行）。
 2. **多画面参考图没重生成、断言没放宽**：macOS 27 下中文标签字形变了（main 同样复现），铁律 9 + OWNERSHIP（渲染器与参考图只为 017 动）→
    `reports/issues/P4-w3-compositor-multiview-cjk-labels-macos27.md`，交合成会话 / 用户定（钉字体 / 在 27 上重生成 / 掩标签三条路）。
 3. **`MixerState.validate()` 不查 Stinger 引用**：用户 2026-09-27 定（见开头）。要查就得给 `MixerStateError` 加 case（公开类型变更），而且 PGM / PVW / 叠加引用 validate 也都不查，单查 Stinger 口径不一。
 4. **`setInputSettings` / `addInput` 带进来的 `border` 效果格**：reducer 不搬也不清（prompt 只要 OutputSettings 与整份节目）。它们在状态里是死数据，存盘再读（`Show.load`）时被清掉。见 §4 第 1 条。
 5. **几处不归本会话的过期文字，只记下没改**（归属外；胶水额度只给"必要的胶水"）：
    - `App/Sources/Settings/OutputSettingsPanel.swift:217` 的注释"没经过 Show.load 的内存状态（API 直接 addOutput 的老写法）可能还带过渡键"与那两处 `s.migratingLegacyKeys()`：
-     P4 之后状态机里的状态不会再有输出的过渡键，调用成了多余（幂等、无害）——归 W3-E3（prompt 68，与第 6 条删 `OutputExtras` 后备一起；问题单里也写了）。
+     P4 之后状态机里的状态不会再有输出的过渡键，调用成了多余（幂等、无害）。W3-E3（w3-app-4，已完成未合并）删了 `OutputExtras` 的后备但这两处还在——
+     归下一个 App 会话或合并检查点（问题单"顺带"一节）。
    - `Tools/switcher-headless/Sources/switcher-headless/G4Factory.swift:14`"安全框 + 电平表占位"：W3-B2 之后是真实电平（headless 每秒 `setMeters`）——归检查点。
    - `Packages/SwitcherCore/Tests/SwitcherRenderTests/MultiviewLayoutTests.swift:252` 注释里的例子"API 直接 addOutput 的"：P4 之后 API 进不来了，用例本身（渲染器忽略旧键）仍成立——下一个合成会话顺手改（OWNERSHIP 的 P4 行写明渲染器测试只为 017 动）。
    - `Packages/SwitcherControl/Sources/SwitcherControl/SwitcherControl.swift:8`"27 个 case 的目录"（现在 34）：不在 CommandBus/ 下，留给控制会话。
@@ -81,7 +83,8 @@ removeInput 把前两个置 0、后两个置 nil；`validate()` 只查结构不�
 2. **reducer 的 loadShow 现在先搬迁**：拿 `reduce(.loadShow(show))` 与 `show.makeState()` 比的用例，节目里要是带过渡键 / border 格 / 悬空 Stinger 就不相等了——比 `show.migratingLegacyKeys().makeState()`。现有用例的节目都不带，全过。
 3. **将来谁要给 `validate()` 加引用检查**：校验器（loadShow 只跑 validate、不搬迁）与 reducer（先搬迁、再 validate）会对"悬空 Stinger"判得不一样，`testValidator_agreesWithReducer` 那条不变量就破了——要么校验器也先搬迁，要么 reducer 先 validate 再搬。
 4. **`border` 这个效果格 id 被搬迁永久占用**：`Show.load` 会无条件剥掉 `InputSettings.effects` 里 id = "border" 的格。以后真要做输入级的视频效果，别用这个 id。
-5. **App 里的两处 `migratingLegacyKeys()` 与 `OutputExtras.displayNumber` 的 extra 后备现在都是死路径**（状态里不会再有过渡键）：W3-E3 删的时候不用担心 API 客户端。
+5. **App 里 OutputSettingsPanel 的两处 `migratingLegacyKeys()` 现在是死路径**（状态机里的状态不会再有输出的过渡键；`OutputExtras.displayNumber` 的后备 W3-E3 在 w3-app-4 上已删）：删的时候不用担心 API 客户端。
+   **合并顺序**：P4 与 w3-app-4、w3-outputs-4 两两 `git merge-tree` 无冲突、没有共同改动的文件；但 App 那条过渡键缩略图用例两边都动了语义——先合谁都行，按问题单选补丁 A（只合 P4）或 B（w3-app-4 也合了）。
 6. **本机 2026-09-25 升了 macOS 27.0（26A428）+ CLT 27.0**：7 张多画面参考图的中文标签字形变了（问题单见 §3 第 2 条），整仓测试在这台机器上不会全绿，别当成新代码的回归。
    `make test-packages` 遇到第一个红的包就 `exit 1`（SwitcherCore 排第一），后面五个包、工具、App 都不跑——要逐个补跑（本会话的做法见 §6）。
 7. **新 worktree 里 Outputs 有 5 条要 release 版 frameprobe**（`MediaMTXTests` 四条 + `ISOAlignmentTests.testA4_…`），没编就 XCTSkip（"BLOCKED-工具"），不会红：
@@ -109,7 +112,8 @@ removeInput 把前两个置 0、后两个置 nil；`validate()` 只查结构不�
 | App | `make test-app` | 3d2ba59，10:43–10:47 | 71 个：67 过、2 跳、红 2（过渡键缩略图 = P4 预期内、S7 = 偶发，见 §2） |
 | SwitcherCore 最终一轮 | `swift test --package-path Packages/SwitcherCore` | 3d2ba59，10:48–10:55 | Render 93 红 3（只剩中文字形那 3 处；显示那条这轮过了）、Engine 93 / 0、Contracts 81（跳 1）/ 0 |
 | 两条计时用例单独重跑 | TestKit 那条 × 3；App S7 `-only-testing` × 2 | 3d2ba59，10:56–11:00 | 3 / 3 过（唤醒延迟平均 0.006–0.009 ms）；2 / 2 过 |
-| App 过渡键用例的补丁 | 临时改 `App/Tests/MultiviewLayoutTests.swift` → `xcodebuild test -only-testing:SwitcherTests/MultiviewSettingsTests` → `git checkout` 还原 | 3d2ba59 + 补丁，10:5x | 2 / 2 过；diff 进问题单，分支不含 App/ 改动 |
+| App 过渡键用例的补丁 A | 临时改 `App/Tests/MultiviewLayoutTests.swift` → `xcodebuild test -only-testing:SwitcherTests/MultiviewSettingsTests` → `git checkout` 还原 | 3d2ba59 + 补丁，10:5x | 2 / 2 过；diff 进问题单，分支不含 App/ 改动 |
+| App 过渡键用例的补丁 B（w3-app-4 也合了之后） | 临时 detached worktree：w3-app-4 `merge --no-ff p4-contracts` → `make gen` → 同上只跑这个类，打补丁前后各一次 → 删 worktree | ec648ee + 678556d，11:13–11:18 | 不打补丁红 1、打了 2 / 2 过；没动任何分支 |
 | 要 release frameprobe 的 5 条 | `swift build -c release --package-path Tools/frameprobe`；`swift test --package-path Packages/SwitcherOutputs --filter 'MediaMTXTests\|ISOAlignmentTests/testA4'` | 3d2ba59，11:00–11:12 | MediaMTX 整组 6 条（E2/E3 67 s、E7 76 s、E8 172 s、E9 337 s、RTMP、SRT）与 ISO A4 全过 |
 | lint | `git branch -f p4-contracts HEAD && make lint BRANCH=p4-contracts` | 3d2ba59，11:1x | 全绿 |
 

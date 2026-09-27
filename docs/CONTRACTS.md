@@ -247,7 +247,7 @@ G4 续做落地的字段（提案 017，用户 2026-09-24 批）：
 - 状态机对 loadShow（整份 `Show.migratingLegacyKeys()`）与 addOutput / setOutputSettings（`OutputSettings.migratingLegacyKeys()`）进来的数据也先搬：
   API 客户端直接带旧键的与读文件结果一致，状态机里的状态不会再有输出的过渡键。搬迁不碰 `validate()` 查的结构，`CommandValidator` 不用改。
   没收的一处：setInputSettings / addInput 带进来的 `border` 效果格不搬也不清（没有叠加通道的上下文），存盘再读时清掉（reports/p4-contracts.md §4 第 1 条）。
-读取方：渲染器（W3-B2）与 `ExternalDisplaySpec`（W3-C2）已经只读正式字段；App 的 `OutputExtras.displayNumber` 还留着 `extra["displayID"]` 的后备，归 W3-E3（prompt 68 第 6 条）删。
+读取方：渲染器（W3-B2）与 `ExternalDisplaySpec`（W3-C2）已经只读正式字段；App 的 `OutputExtras.displayNumber` 在 main 上还留着 `extra["displayID"]` 的后备，W3-E3（prompt 68 第 6 条，w3-app-4）已删、待合并。
 `Show.schemaVersion` 不升：新字段全部带默认值，008 与 `InputAudioSettings.afv` 靠 `decodeIfPresent`。
 
 ### 2.9 渲染 / 消费者协议（Render.swift：Renderer、RenderSink、FrameConsumer、AudioBlockConsumer）见 §7。
