@@ -22,6 +22,6 @@
 
 1. G5 判定：L0–L2 全过、L3 无 S0 / S1、L4 8 小时过、L5 无退步、KNOWN_ISSUES 更新（prompt 80）。
 2. `scripts/release/bump-version.sh X.Y.Z` → 看 diff → 提交"发布 X.Y.Z"。
-3. `git tag vX.Y.Z` → push tag → release.yml 出 DMG + appcast + 草稿 Release；或本机 `DEVELOPMENT_TEAM=… make archive` + `make appcast DIR=.build/release/X.Y.Z APPCAST_FLAGS="--download-url-prefix …"`。
-4. 干净机器验证（docs/release/README.md §4）→ 发布草稿 → 把 appcast.xml 放到 `SUFeedURL` 指的地址。
+3. `git tag vX.Y.Z` → push tag → release.yml 出 `PlusMix-X.Y.Z.dmg`（产物名 = project.yml 的 `PRODUCT_NAME`，W4-D）+ appcast + 草稿 Release "PlusMix X.Y.Z"；或本机 `DEVELOPMENT_TEAM=… make archive` + `make appcast DIR=.build/release/X.Y.Z APPCAST_FLAGS="--download-url-prefix …"`。
+4. 干净机器验证（[signing.md 的 Gatekeeper 与干净机器验证](signing.md#gatekeeper-与干净机器验证人工)）→ 发布草稿 → 把 appcast.xml 放到 `SUFeedURL` 指的地址。
 5. 提交里把 `## 未发布` 留空的新小节带上（bump-version 已经加好）。

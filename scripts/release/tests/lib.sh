@@ -27,8 +27,10 @@ assert_false() { local msg=$1; shift; if "$@" >/dev/null 2>&1; then fail "$msg�
 assert_file() { if [ -e "$1" ]; then ok "存在：${2:-$1}"; else fail "缺文件：${2:-$1}"; fi; }
 assert_no_file() { if [ -e "$1" ]; then fail "不该存在：${2:-$1}"; else ok "不存在：${2:-$1}"; fi; }
 assert_eq() { if [ "$1" = "$2" ]; then ok "$3 = $1"; else fail "$3：期望 [$2]，实际 [$1]"; fi; }
-assert_contains() { if printf '%s' "$1" | grep -q -- "$2"; then ok "$3"; else fail "$3（找不到 [$2]）"; fi; }
-assert_not_contains() { if printf '%s' "$1" | grep -q -- "$2"; then fail "$3（不该出现 [$2]）"; else ok "$3"; fi; }
+# 用 here-string 喂 grep、不走管道：bash 3.2 的 printf 内建往管道按行写，grep -q 命中就退出，printf 吃 SIGPIPE，pipefail 下整条管道 141
+# ——assert_contains 误报"找不到"、assert_not_contains 误报通过（W4-B2 探针；R6 开头有回归）
+assert_contains() { if grep -q -- "$2" <<< "$1"; then ok "$3"; else fail "$3（找不到 [$2]）"; fi; }
+assert_not_contains() { if grep -q -- "$2" <<< "$1"; then fail "$3（不该出现 [$2]）"; else ok "$3"; fi; }
 
 finish() {
   if [ "$_failures" = 0 ]; then green "通过：$_checks 项断言"; exit 0; fi

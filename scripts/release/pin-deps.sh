@@ -130,7 +130,8 @@ PY
       [ -f "$bin" ] || { red "[pin-deps] 不是文件：$bin"; status=1; continue; }
       undefined=$(nm -arch arm64 -u "$bin" 2>/dev/null || nm -u "$bin" 2>/dev/null)
       hits=""
-      for sym in $DENYLIST; do printf '%s\n' "$undefined" | grep -qx "$sym" && hits="$hits $sym"; done
+      # here-string：pipefail 下 printf | grep -qx 命中即退出会让 printf 吃 SIGPIPE，恰好在"真有坏符号"时漏报（W4-B2）
+      for sym in $DENYLIST; do grep -qx -- "$sym" <<< "$undefined" && hits="$hits $sym"; done
       if [ -n "$hits" ]; then red "[pin-deps] $bin 引用了只有更新的 Swift 运行时才有的符号：$hits（依赖没钉住？pin-deps.sh check）"; status=1
       else green "[pin-deps] $bin：不引用 $DENYLIST"; fi
     done

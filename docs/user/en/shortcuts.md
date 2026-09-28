@@ -25,7 +25,7 @@ flagged and cannot be saved; "Reset to defaults" restores the table above.
 Bindable actions: any command (preview input / program input / Cut / Fade with ticks / auto transition / other command) and state-aware toggles:
 FTB, overlay channel, input mute, record, stream, AFV.
 
-The table is stored outside the show file in `~/Library/Application Support/Switcher/hotkeys.json`:
+The table is stored outside the show file in `~/Library/Application Support/PlusMix/hotkeys.json`:
 
 ```json
 {
@@ -57,7 +57,7 @@ Transition › MIDI Mapping…: CoreMIDI, all online devices are listened to; "L
 | 14-bit CC (controller 0–31 coarse, +32 fine) | Same, with a smoother fader |
 | Note (on, velocity > 0) | The same actions as shortcuts (a command or a toggle) |
 
-Stored in `~/Library/Application Support/Switcher/midi.json`:
+Stored in `~/Library/Application Support/PlusMix/midi.json`:
 
 ```json
 {

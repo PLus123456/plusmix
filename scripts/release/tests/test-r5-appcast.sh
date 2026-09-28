@@ -40,9 +40,9 @@ assert_file "$work/arch/appcast.xml" "appcast.xml"
 xml=$(cat "$work/arch/appcast.xml")
 assert_not_contains "$(cat "$RELEASE_TEST_OUT/r5-appcast.log")" "does not match" "generate_appcast 没抱怨公钥不配（Info.plist 里的公钥与私钥配对）"
 assert_contains "$xml" 'sparkle:edSignature="' "enclosure 带 EdDSA 签名"
-printf '%s' "$xml" | grep -qE "sparkle:shortVersionString(=\"|>)$ver(\"|<)" && ok "shortVersionString = $ver" || fail "shortVersionString 不是 $ver"
+grep -qE "sparkle:shortVersionString(=\"|>)$ver(\"|<)" <<< "$xml" && ok "shortVersionString = $ver" || fail "shortVersionString 不是 $ver"
 build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$RELEASE_TEST_APP/Contents/Info.plist")
-printf '%s' "$xml" | grep -qE "sparkle:version(=\"|>)$build(\"|<)" && ok "version = CFBundleVersion（$build）" || fail "version 不是 $build"
+grep -qE "sparkle:version(=\"|>)$build(\"|<)" <<< "$xml" && ok "version = CFBundleVersion（$build）" || fail "version 不是 $build"
 assert_contains "$xml" "url=\"https://example.invalid/downloads/$product-$ver.dmg\"" "下载地址用了前缀（$product-$ver.dmg）"
 assert_contains "$xml" "sparkle:minimumSystemVersion>15.0<" "最低系统 15.0（从 LSMinimumSystemVersion 推）"
 assert_contains "$xml" "sparkle:hardwareRequirements>arm64<" "硬件要求 arm64（从二进制架构推）"

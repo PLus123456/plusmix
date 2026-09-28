@@ -73,14 +73,17 @@ if [ -n "$app" ]; then
   if [ -n "$ext" ]; then
     if codesign --verify --strict "$ext" >/dev/null 2>&1; then pass extension_signed "$(basename "$ext")"; else bad extension_signed "$(basename "$ext") 验不过"; fi
     ent=$(codesign -d --entitlements - --xml "$ext" 2>/dev/null)
-    printf '%s' "$ent" | grep -q "com.apple.security.app-sandbox" && pass extension_sandboxed "" || bad extension_sandboxed "扩展没有 app-sandbox 权限"
+    # here-string 不走管道：pipefail 下 `printf | grep -q` 命中即退出会让 printf（按行写）吃 SIGPIPE，结果随调度翻转（W4-B2）
+    grep -q "com.apple.security.app-sandbox" <<< "$ent" && pass extension_sandboxed "" || bad extension_sandboxed "扩展没有 app-sandbox 权限"
     for lang in en zh-Hans; do [ -f "$ext/Contents/Resources/$lang.lproj/InfoPlist.strings" ] && pass "extension_strings_$lang" "" || warn "extension_strings_$lang" "缺 $lang.lproj/InfoPlist.strings"; done
   else bad extension_present "Contents/Library/SystemExtensions 里没有扩展"; fi
   # libndi
   if otool -L "$bin" 2>/dev/null | grep -q "libndi.dylib"; then
     set_r links_ndi true
     if [ -f "$app/Contents/Frameworks/libndi.dylib" ] && codesign --verify --strict "$app/Contents/Frameworks/libndi.dylib" >/dev/null 2>&1; then pass ndi_bundled "Contents/Frameworks/libndi.dylib"; else bad ndi_bundled "链接了 libndi 却没随包（或没签名）"; fi
-    if otool -l "$bin" | grep -A2 LC_RPATH | grep -q "NDI SDK"; then bad ndi_rpath_clean "主二进制还带着 SDK 目录的 LC_RPATH"; else pass ndi_rpath_clean ""; fi
+    # otool -l 输出几十 KB、分几次写：先收齐再 grep -q，不让命中即退出的 grep -q 把上游截断（同上，W4-B2）
+    rpaths=$(otool -l "$bin" | grep -A2 LC_RPATH || true)
+    if grep -q "NDI SDK" <<< "$rpaths"; then bad ndi_rpath_clean "主二进制还带着 SDK 目录的 LC_RPATH"; else pass ndi_rpath_clean ""; fi
     [ -f "$app/Contents/Resources/Licenses/NDI/libndi_licenses.txt" ] && pass ndi_license "" || bad ndi_license "缺 Resources/Licenses/NDI/libndi_licenses.txt（SDK 再分发条款要求）"
   else set_r links_ndi false; say "  info  这份构建没链接 libndi（编译机没装 NDI SDK；Stats 会标 unavailable）"; fi
   # Sparkle

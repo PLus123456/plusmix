@@ -95,5 +95,5 @@ Show › New / Open / Save / Save As / Open Recent. The file is readable JSON wi
 
 - An input's **runtime state** (signal or not) and an output's **runtime numbers** (frames, bitrate) are not in the file; only configuration is.
 - Recording / streaming outputs are always stopped when a file is opened; only a button, shortcut or API call starts them.
-- On quit, an unsaved show is autosaved to `~/Library/Application Support/Switcher/LastSession.switcher.json` and restored on the next launch.
+- On quit, an unsaved show is autosaved to `~/Library/Application Support/PlusMix/LastSession.switcher.json` and restored on the next launch.
 - The shortcut table and MIDI map are **not** in the show file; they live next to it as `hotkeys.json` / `midi.json` ([Shortcuts](shortcuts.md)).
