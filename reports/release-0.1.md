@@ -43,7 +43,8 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 8. **CHANGELOG.md 没建**：不在 G5 归属里；发布说明草稿在 reports/G5.md §9。
 9. **OWNERSHIP 没改**：W4-A / W4-B 的越界待用户认领；G5 行没有 docs/OWNERSHIP.md（G4 行有），我不动。
 10. **App 的相对路径（W4C 问题单，约 10 行）没修**：G5 行没有 App 胶水额度（`~App/:50` 只在 G2–G4 行），进 KNOWN_ISSUES。
-11. **check-links 没挂进 make lint**：scripts/ 不在 G5 归属里；一行 `scripts/check-links.sh` 转调即可，下一个检查点或用户认领后做。
+11. **docs/testing/README.md 的 G5 那行没改**（仍写"待做 / 未生成"）：docs/ 归 W4-C，不在 G5 归属里；下一个动 docs/ 的会话把它改成"2026-09-28 · 不发（S2 泄漏、签名账号）· reports/G5.md"。
+12. **check-links 没挂进 make lint**：scripts/ 不在 G5 归属里；一行 `scripts/check-links.sh` 转调即可，下一个检查点或用户认领后做。
 
 ## 4. 对契约的疑问
 
