@@ -141,6 +141,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.plusmix.switcher.tests
         GENERATE_INFOPLIST_FILE: YES
+        # W4-D：XcodeGen 按宿主 target 的名字（Switcher）推 TEST_HOST，不看它的 PRODUCT_NAME（PlusMix），所以这里写死成产品名的路径
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PlusMix.app/Contents/MacOS/PlusMix"
+        BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: Switcher
 
