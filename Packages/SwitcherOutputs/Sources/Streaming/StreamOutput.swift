@@ -11,8 +11,12 @@ import SwitcherOutputs
 /// - VideoEncoder 的回调线程：`EncodedVideoSample` → `SendQueue.pushVideo`（锁内几个下标操作）→ 唤醒发送 Task。
 /// - `consumeAudio`（组装方的泵线程，非实时）：PCM 块拷进 `PCMBlockRing`，唤醒音频编码线程。
 /// - 音频编码线程（自己的 Thread）：AudioEncoder → `SendQueue.pushAudio` → 唤醒发送 Task。
-/// - 发送 Task（Swift 并发，每路一个）：状态机 —— 连接 → 起步对齐 → 按时间交错送样本 → 停滞 / 断线检测 → 退避重连。
-///   传输层（HaishinKit）的调用都是 actor 跳转，返回即入了它的队列；真正的网络背压靠它每秒上报的队列字节做"门"（见 publishLoop）。
+/// - 发送 Task（Swift 并发，每路一个）：状态机 —— 缓冲（start 起就收，握手期间的帧 / 包排队）→ 连接 → 起步对齐 → 按时间交错送样本 →
+///   停滞 / 断线检测 → 回到缓冲、退避重连。传输层（HaishinKit）的调用都是 actor 跳转，返回即入了它的队列；
+///   真正的网络背压靠它每秒上报的队列字节做"门"（见 publishLoop）。
+///
+/// 推流的原点（W2-D2）：第一次连上后送出的第一个关键帧，音频原点包对齐到它，两轨从同一时刻起送。原点之前的帧 / 包不算丢
+/// （StreamCounters.videoBeforeStart / audioBeforeStart）；第一次连上之后，断线期间没送出的才是损失。缓冲策略见 SendQueue。
 ///
 /// 多目的地互不影响：每个实例自己的编码器、队列、Task、连接对象；没有任何共享锁或共享队列（E7）。
 public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked Sendable {
@@ -163,15 +167,25 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
         let counters = atomicCounters
         let q = queue
         let wc = wakeContinuation
-        videoEncoder.output = { [counters, q, wc] sample in
+        videoEncoder.output = { [counters, q, wc, weak enc = videoEncoder] sample in
             counters.framesReceived.add(1, ordering: .relaxed)
             switch q.pushVideo(sample) {
-            case .queued: wc.yield()
+            case .queued:
+                wc.yield()
+            case .queuedAfterReset(let dv, let da):
+                // 缓冲满了从这个关键帧重来：清掉的是"开始之前"（还没连上过）或断线期间的损失
+                counters.countNotSent(video: dv, audio: da)
+                wc.yield()
+            case .bufferedDrop(let dv, let da, let restarted):
+                counters.countNotSent(video: dv + 1, audio: da)
+                if restarted { enc?.requestKeyframe() }   // 缓冲清空了：别等两秒后那个排程的关键帧，现在就要
             case .droppedFull: counters.droppedQueueFull.add(1, ordering: .relaxed)
             case .droppedWaitingKeyframe: counters.droppedWaitingKeyframe.add(1, ordering: .relaxed)
             case .droppedNotAccepting: counters.droppedDisconnected.add(1, ordering: .relaxed)
             }
-            counters.queueDepth.store(q.depth.video, ordering: .relaxed)
+            let depth = q.depth
+            counters.queueDepth.store(depth.video, ordering: .relaxed)
+            counters.audioQueueDepth.store(depth.audio, ordering: .relaxed)
         }
     }
 
@@ -198,6 +212,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             guard !running else { throw Error.alreadyRunning }
             stopInitiated.store(false, ordering: .releasing)
             stopRequested.store(false, ordering: .releasing)
+            atomicCounters.published.store(false, ordering: .releasing)
+            queue.beginBuffering()   // 编码器起来之前就开始收：握手期间的帧 / 包排在缓冲里，连上后照送（W2-D2）
             try videoEncoder.start()
             if let audio = configuration.audio, let ring = pcmRing {
                 let enc: AudioEncoder
@@ -217,8 +233,9 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                     switch q.pushAudio(packet) {
                     case .queued: wc.yield()
                     case .droppedFull: counters.audioDropped.add(1, ordering: .relaxed); wc.yield()
-                    case .droppedWaitingKeyframe: break
+                    case .bufferedDrop(_, let da, _): counters.countNotSent(video: 0, audio: da)
                     case .droppedNotAccepting: counters.audioDropped.add(1, ordering: .relaxed)
+                    case .queuedAfterReset, .droppedWaitingKeyframe: break
                     }
                     counters.audioQueueDepth.store(q.depth.audio, ordering: .relaxed)
                 }
@@ -367,30 +384,37 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 failures += 1
                 continue
             }
+            let firstSession = !everConnected
             if everConnected {
                 atomicCounters.reconnects.add(1, ordering: .relaxed)
                 if let at = disconnectedAt { atomicCounters.recordReconnect(seconds: (HostClock.now() - at).seconds) }
             }
             everConnected = true
+            atomicCounters.published.store(true, ordering: .releasing)
             failures = 0
             setState(.publishing)
-            queue.beginSession()
-            videoEncoder.requestKeyframe()
-            let reason = await publishLoop(transport, wake: &wakeIterator)
+            // 缓冲里握手 / 断线期间攒下的那段（从关键帧起、≤ 容量）就是要送的第一段：转直播，内容保留
+            queue.goLive()
+            let reason = await publishLoop(transport, wake: &wakeIterator, firstSession: firstSession)
             lastExitReason.withLock { $0 = "\(reason)" }
-            let discarded = queue.endSession()
+            // 回到缓冲：队列里没送出的是断线的损失（队头未必是关键帧，不能接着送）；下一帧要关键帧，断线期间的最近一段留在缓冲里等重连
+            let discarded = queue.beginBuffering()
             atomicCounters.discardedOnDisconnect.add(UInt64(discarded.video), ordering: .relaxed)
             atomicCounters.audioDropped.add(UInt64(discarded.audio), ordering: .relaxed)
             atomicCounters.queueDepth.store(0, ordering: .relaxed)
             atomicCounters.audioQueueDepth.store(0, ordering: .relaxed)
             await transport.close()
             if reason == .stopped { break }
+            videoEncoder.requestKeyframe()
             logger.warning("[\(self.consumerName, privacy: .public)] 断线：\(String(describing: reason), privacy: .public)")
             atomicCounters.disconnects.add(1, ordering: .relaxed)
             disconnectedAt = HostClock.now()
             failures = 1
         }
-        queue.endSession()
+        let leftover = queue.endSession()
+        atomicCounters.countNotSent(video: leftover.video, audio: leftover.audio, published: everConnected)
+        atomicCounters.queueDepth.store(0, ordering: .relaxed)
+        atomicCounters.audioQueueDepth.store(0, ordering: .relaxed)
         setState(finalState)
     }
 
@@ -418,8 +442,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
         var handedVideoSizes: [Int] = []   // 最近交出的视频帧大小（估算断线时未发出的帧数）
     }
 
-    /// 发布循环：返回退出原因。
-    private func publishLoop(_ transport: any StreamTransport, wake: inout AsyncStream<Void>.AsyncIterator) async -> ExitReason {
+    /// 发布循环：返回退出原因。`firstSession` = 这是第一次连上：起步对齐裁掉的原点之前的音频记"开始之前"，重连时记损失。
+    private func publishLoop(_ transport: any StreamTransport, wake: inout AsyncStream<Void>.AsyncIterator, firstSession: Bool) async -> ExitReason {
         let policy = configuration.queue
         let maxInFlight = configuration.effectiveMaxInFlightBytes
         let alignment = transport.startAlignment
@@ -488,11 +512,11 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                             // 原点 = 最后一个不晚于关键帧时刻的包；关键帧 DTS 设成它的时刻（CTS = 差值）。原点在关键帧之后（不该发生）就不偏移。
                             if let (origin, dropped) = queue.alignAudio(to: k.tickTime, nearest: false, preroll: 0) {
                                 if origin <= k.tickTime { s.dtsOffset = k.tickTime - origin }
-                                atomicCounters.audioDropped.add(UInt64(dropped), ordering: .relaxed)
+                                atomicCounters.countNotSent(video: 0, audio: dropped, published: !firstSession)
                             }
                         case .nearestPacket(let preroll):
                             if let (_, dropped) = queue.alignAudio(to: k.tickTime, nearest: true, preroll: preroll) {
-                                atomicCounters.audioDropped.add(UInt64(dropped), ordering: .relaxed)
+                                atomicCounters.countNotSent(video: 0, audio: dropped, published: !firstSession)
                             }
                         }
                         s.aligned = true

@@ -89,6 +89,21 @@ enum FFprobe {
         }
     }
 
+    /// 两条轨的 start_time（秒）：MediaMTX 从第一个关键帧起录，音轨起点 = 我们送的原点包；两者之差就是落盘文件里两轨起点的距离。
+    static func streamStartTimes(_ url: URL) throws -> (video: Double, audio: Double) {
+        let obj = try Proc.json(path, ["-v", "error", "-print_format", "json", "-show_entries", "stream=codec_type,start_time", url.path])
+        var v = Double.nan, a = Double.nan
+        for st in obj["streams"] as? [[String: Any]] ?? [] {
+            let t = (st["start_time"] as? String).flatMap(Double.init) ?? .nan
+            switch st["codec_type"] as? String {
+            case "video": v = t
+            case "audio": a = t
+            default: break
+            }
+        }
+        return (v, a)
+    }
+
     /// 视频帧数（逐帧解码数，慢但准）。
     static func countFrames(_ url: URL) throws -> Int {
         let obj = try Proc.json(path, ["-v", "error", "-print_format", "json", "-select_streams", "v:0", "-count_frames", "-show_entries",
@@ -122,6 +137,19 @@ enum Frameprobe {
         let gaps = inputs.reduce(0) { $0 + (($1["dropGaps"] as? [Any])?.count ?? 0) }
         return Stats(totalFrames: st["totalFrames"] as? Int ?? 0, droppedFrames: dropped, duplicateFrames: dup,
                      undecodable: st["undecodableFrames"] as? Int ?? 0, dropGaps: gaps, durationSeconds: st["durationSeconds"] as? Double ?? 0)
+    }
+
+    struct Frame { var index: Int; var ptsSeconds: Double; var frameNumber: Int?; var flash: Bool }
+
+    /// 逐帧：烧进画面的帧号（= 拍号）、PTS、是否闪光帧。落盘文件从哪一拍开始就看第一帧的 frameNumber。
+    /// 同 `stats`：关掉自证（实时喂送的文件第一帧没有"节奏"可投票，会被判成解不出，见上）。
+    static func frames(_ url: URL, limit: Int = 100) throws -> [Frame] {
+        let obj = try Proc.json(try StreamTestPaths.frameprobe().path, ["frames", url.path, "--limit", "\(limit)", "--no-self-check"])
+        let arr = obj["frames"] as? [[String: Any]] ?? []
+        return arr.map { f in
+            Frame(index: f["index"] as? Int ?? 0, ptsSeconds: f["ptsSeconds"] as? Double ?? .nan, frameNumber: f["frameNumber"] as? Int,
+                  flash: (f["flash"] as? Bool) == true)
+        }
     }
 
     struct AV { var meanMs: Double; var maxAbsMs: Double; var matched: Int; var flashes: Int }
@@ -334,7 +362,13 @@ func frameprobeTotals(_ files: [URL]) throws -> (frames: Int, dropped: Int, gaps
 enum AVOffsetFFmpeg {
     static let ffmpeg = "/opt/homebrew/bin/ffmpeg"
 
-    struct Result { var meanMs: Double; var maxAbsMs: Double; var pairs: [(flash: Double, click: Double)] }
+    struct Result {
+        var meanMs: Double
+        var maxAbsMs: Double
+        var pairs: [(flash: Double, click: Double)]
+        /// 解出的音轨在 [0.1 s, 1.0 s) 的 RMS（跳过 AAC 解码器前 2112 样本的热身）：1 kHz −20 dBFS 正弦 ≈ 0.071；没有音频 = 0。
+        var rmsFirstSecond: Double
+    }
 
     static func measure(_ url: URL, fps: Int = 60) throws -> Result {
         // 闪光帧
@@ -349,12 +383,19 @@ enum AVOffsetFFmpeg {
         let data = try Data(contentsOf: raw)
         try? FileManager.default.removeItem(at: raw)
         var clicks: [Double] = []
+        var rmsFirst = 0.0
         data.withUnsafeBytes { (p: UnsafeRawBufferPointer) in
             let samples = p.bindMemory(to: Float.self)
             var last = -1000
             for i in 0..<samples.count where samples[i] > 0.9 {
                 if i - last > 100 { clicks.append(Double(i) / 48000) }
                 last = i
+            }
+            let lo = 4800, hi = min(samples.count, 48000)
+            if hi > lo {
+                var acc = 0.0
+                for i in lo..<hi { acc += Double(samples[i]) * Double(samples[i]) }
+                rmsFirst = (acc / Double(hi - lo)).squareRoot()
             }
         }
         var pairs: [(Double, Double)] = []
@@ -365,7 +406,7 @@ enum AVOffsetFFmpeg {
         let offsets = pairs.map { ($0.0 - $0.1) * 1000 }
         let mean = offsets.isEmpty ? .nan : offsets.reduce(0, +) / Double(offsets.count)
         let maxAbs = offsets.map(abs).max() ?? .nan
-        return Result(meanMs: mean, maxAbsMs: maxAbs, pairs: pairs.map { (flash: $0.0, click: $0.1) })
+        return Result(meanMs: mean, maxAbsMs: maxAbs, pairs: pairs.map { (flash: $0.0, click: $0.1) }, rmsFirstSecond: rmsFirst)
     }
 }
 

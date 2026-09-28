@@ -21,6 +21,8 @@ final class FakeTransport: StreamTransport, @unchecked Sendable {
         var disconnectAfterVideoFrames: Int?
         /// 起步对齐方式。
         var alignment: StartAlignment = .dtsOffset
+        /// connect 要花这么久（模拟远端握手 / 慢服务器；W2-D2 握手期间排队的用例用）。
+        var connectDelaySeconds: Double = 0
     }
 
     struct SentVideo: Sendable {
@@ -57,6 +59,7 @@ final class FakeTransport: StreamTransport, @unchecked Sendable {
     var isClosed: Bool { lock.withLock { closed } }
 
     func connect() async throws {
+        if behavior.connectDelaySeconds > 0 { try? await Task.sleep(for: .milliseconds(Int(behavior.connectDelaySeconds * 1000))) }
         if behavior.connectFails { throw StreamTransportError.connectFailed("fake") }
         lock.withLock { connected = true; lastDrain = HostClock.now() }
     }
@@ -199,15 +202,17 @@ final class FrameSource {
     }
 }
 
-/// 音频喂料：TestSignal 按 256 帧块给，块首 host time 精确。
+/// 音频喂料：TestSignal 按 256 帧块给，块首 host time 精确。`startSample` 为负 = 从 t0 之前开始喂（headless 里音频引擎比视频早起的顺序）。
 final class AudioSource {
     let signal: TestSignal
     let feeder: SignalFeeder
-    init(t0: HostTime) {
+    init(t0: HostTime, startSample: Int64 = 0) {
         signal = TestSignal(t0: t0)
-        feeder = SignalFeeder(signal: signal)
+        feeder = SignalFeeder(signal: signal, startSample: startSample)
     }
     func feed(upTo time: HostTime, to consumers: [any AudioBlockConsumer]) { feeder.feed(upTo: time, to: consumers) }
+    /// 精确喂到样本序号 end（含不足一块的尾巴）。
+    func flush(upToSample end: Int64, to consumers: [any AudioBlockConsumer]) { feeder.flush(upToSample: end, to: consumers) }
 }
 
 extension StreamOutput {

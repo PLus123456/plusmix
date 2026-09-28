@@ -4,14 +4,20 @@ import SwitcherOutputs
 
 /// 一路推流的累计计数（值快照）。全部自启动累计、单调不减；窗口量由读方相减（Stats 口径）。
 ///
-/// 网络丢帧（E9 口径，测试标准 §1 E9 / §8）：**编码器交出之后、没有送上网络的视频帧**，分项：
+/// 网络丢帧（E9 口径，测试标准 §1 E9 / §8）：**这路推流开始之后、编码器交出而没有送上网络的视频帧**，分项：
 /// - `droppedQueueFull`：发送队列满，丢的是新来的这一帧（丢新不丢旧：队列里的 GOP 保持可解码）；
 /// - `droppedWaitingKeyframe`：丢过一帧之后到下一个关键帧之前的非关键帧（避免送出去的 P 帧引用丢掉的帧）；
-/// - `droppedDisconnected`：断线 / 重连 / 退避期间到达的帧；
+/// - `droppedDisconnected`：断线 / 退避 / 重连期间到达而没留在缓冲里的帧（缓冲只留从关键帧起的最近一段，满了从下一个关键帧重来）；
 /// - `discardedOnDisconnect`：断线那一刻队列里还没送出的帧；
 /// - `lostInTransport`：断线那一刻已交给传输层但按其上报的未发字节估算没发出去的帧（估算值，见报告）。
 /// `networkDropped` = 五项之和。`framesSent` 是**交给传输层**的帧数，其中 `lostInTransport` 那部分估计没发出去，所以恒等式是
-/// framesReceived == framesSent + (networkDropped − lostInTransport) + queueDepth；真正到达对端的 ≈ framesSent − lostInTransport。
+/// framesReceived == framesSent + (networkDropped − lostInTransport) + videoBeforeStart + queueDepth；真正到达对端的 ≈ framesSent − lostInTransport。
+///
+/// 开始之前（W2-D2）：推流的原点是第一次连上后送出的第一个关键帧，两轨从它同一时刻起送。原点之前编码器就交出的帧 / 包不是丢：
+/// 握手期间到的先排在缓冲里、连上后照送；握手比缓冲长时缓冲从下一个关键帧重来，清掉的旧内容记 `videoBeforeStart` / `audioBeforeStart`；
+/// 起步对齐裁掉的原点之前的音频包（headless 里音频引擎比视频 t0 早起那 ~1 s 的 47 包就是这种：没有画面可配）记 `audioBeforeStart`。
+/// 第一次连上之后再断线，同样的事就是损失（droppedDisconnected / audioDropped）。
+/// 音频恒等式：audioPacketsReceived == audioPacketsSent + audioDropped + audioBeforeStart + audioQueueDepth。
 public struct StreamCounters: Hashable, Sendable {
     /// 编码器交出的视频帧数。
     public var framesReceived: UInt64 = 0
@@ -26,10 +32,13 @@ public struct StreamCounters: Hashable, Sendable {
     public var droppedDisconnected: UInt64 = 0
     public var discardedOnDisconnect: UInt64 = 0
     public var lostInTransport: UInt64 = 0
-    /// 音频：编码器交出的包、送出的包、丢掉的包（队列满 / 断线 / 起步对齐前的）。
+    /// 音频：编码器交出的包、送出的包、丢掉的包（开始之后：队列满 / 断线丢弃 / 重连起步对齐裁掉的）。
     public var audioPacketsReceived: UInt64 = 0
     public var audioPacketsSent: UInt64 = 0
     public var audioDropped: UInt64 = 0
+    /// 开始之前（第一次连上、送出第一个关键帧之前）没成为推流内容的视频帧 / 音频包：不算网络丢帧 / 音频丢包（见上）。
+    public var videoBeforeStart: UInt64 = 0
+    public var audioBeforeStart: UInt64 = 0
     /// 交给传输层的字节（视频 + 音频有效载荷）；bitrate = Δbytes × 8 / 秒。
     public var bytesSent: UInt64 = 0
     /// 连接尝试次数（含第一次）。
@@ -120,6 +129,8 @@ final class AtomicStreamCounters: @unchecked Sendable {
     let audioPacketsReceived = Atomic<UInt64>(0)
     let audioPacketsSent = Atomic<UInt64>(0)
     let audioDropped = Atomic<UInt64>(0)
+    let videoBeforeStart = Atomic<UInt64>(0)
+    let audioBeforeStart = Atomic<UInt64>(0)
     let bytesSent = Atomic<UInt64>(0)
     let connectAttempts = Atomic<UInt64>(0)
     let reconnects = Atomic<UInt64>(0)
@@ -130,10 +141,27 @@ final class AtomicStreamCounters: @unchecked Sendable {
     let audioQueueDepth = Atomic<Int>(0)
     let inFlightBytes = Atomic<Int>(0)
     private let stateLock = Mutex<StreamState>(.idle)
+    /// 第一次连上之后为 true（start 时清）：缓冲里没送出的从此算损失（断线期间），之前算"开始之前"。放在这里是因为编码器回调闭包只捕获本对象。
+    let published = Atomic<Bool>(false)
 
     var state: StreamState {
         get { stateLock.withLock { $0 } }
         set { stateLock.withLock { $0 = newValue } }
+    }
+
+    /// 缓冲里没送出的帧 / 包（缓冲重来清掉的、起步对齐裁掉的、停止时剩下的）：第一次连上之前算"开始之前"，之后算损失（断线期间）。
+    func countNotSent(video: Int, audio: Int) {
+        countNotSent(video: video, audio: audio, published: published.load(ordering: .relaxed))
+    }
+
+    func countNotSent(video: Int, audio: Int, published: Bool) {
+        if published {
+            if video > 0 { droppedDisconnected.add(UInt64(video), ordering: .relaxed) }
+            if audio > 0 { audioDropped.add(UInt64(audio), ordering: .relaxed) }
+        } else {
+            if video > 0 { videoBeforeStart.add(UInt64(video), ordering: .relaxed) }
+            if audio > 0 { audioBeforeStart.add(UInt64(audio), ordering: .relaxed) }
+        }
     }
 
     func recordReconnect(seconds: Double) {
@@ -161,6 +189,8 @@ final class AtomicStreamCounters: @unchecked Sendable {
         c.audioPacketsReceived = audioPacketsReceived.load(ordering: .relaxed)
         c.audioPacketsSent = audioPacketsSent.load(ordering: .relaxed)
         c.audioDropped = audioDropped.load(ordering: .relaxed)
+        c.videoBeforeStart = videoBeforeStart.load(ordering: .relaxed)
+        c.audioBeforeStart = audioBeforeStart.load(ordering: .relaxed)
         c.bytesSent = bytesSent.load(ordering: .relaxed)
         c.connectAttempts = connectAttempts.load(ordering: .relaxed)
         c.reconnects = reconnects.load(ordering: .relaxed)
