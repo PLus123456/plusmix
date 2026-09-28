@@ -5,6 +5,7 @@
 //   不等 drawable、不阻塞：GPU 还压着 maxInflight（默认 2）帧没完成就返回 .skipped。
 // - 完成线程（switcher.render.completion）：按提交顺序 waitUntilCompleted，读 GPU 时间戳，组 RenderedFrame，调 sink。
 //   不用 addCompletedHandler 是因为每帧的闭包 / block 都是堆分配。
+// - prepare 末尾做一次首帧空渲染（warmUpGPU，W1-B3）：命令队列的第一次提交、管线 / 私有纹理的第一次用都在起时钟之前付掉。
 // - 标签线程：见 LabelRenderer。
 // - 显示视图（MetalDisplayView）在主线程从 latestDisplayFrame 拿"最新完成的纹理"，用同一个命令队列 blit，
 //   同队列上 Metal 自动追踪读写冲突，所以三重缓冲 + 在途 ≤ 2 就够，不需要第四重。
@@ -100,6 +101,9 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     private let finished = DispatchSemaphore(value: 0)
     private let stopping = Atomic<Bool>(false)
     private var completionThread: Thread?
+    /// prepare 里做过的预热帧数（0 或 1）与预热帧的 gpuStart − 提交 延迟（W1-B3；测试 / 报告看）。
+    private(set) var warmupFrames = 0
+    private(set) var warmupGpuStartLatency: HostDuration = .zero
 
     public init(device: (any MTLDevice)? = nil, options: MetalRendererOptions = MetalRendererOptions()) throws {
         guard let dev = device ?? MTLCreateSystemDefaultDevice() else { throw RenderError.noDevice }
@@ -136,6 +140,8 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         // 标签：输入槽按输入表容量要，LabelSet 封顶 64（多画面最多 64 格）
         let lbl = try LabelRenderer(device: device, inputSlots: max(1, maxInputs),
                                     completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
+        // W1-B3 首帧空渲染：不预热时第 0 帧的 gpuStart − 提交 要 13 ms（队列第一次提交、管线 / 私有纹理第一次用），稳态 < 1 ms；在起时钟之前付掉
+        try warmUpGPU(resources: res, slot: newSlots[0], table: tbl, ring: rng, format: format)
         stateLock.lock()
         resources = res
         slots = newSlots
@@ -159,6 +165,28 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         t.qualityOfService = .userInteractive
         completionThread = t
         t.start()
+    }
+
+    /// 首帧空渲染（W1-B3）：空状态、空输入表，真走一遍 encodeFrame（PGM / PVW / 多画面 + NV12）到 slot 与输出环的一个缓冲，同步等 GPU 完成，
+    /// 再放资源。不经过完成线程、不进提交 / 完成计数、不给 sink。
+    private func warmUpGPU(resources: RenderResources, slot: RenderSlot, table: SurfaceTextureTable, ring: OutputBufferRing, format: ProgramFormat) throws {
+        guard let out = ring.nextSlot(), let cb = commandQueue.makeCommandBuffer() else { throw RenderError.resource("预热帧建不出命令缓冲区") }
+        cb.label = "warmup"
+        let state = MixerState(format: format)
+        let inputs = RenderInputTable(capacity: 1)
+        layout.parse(state: state, width: format.width, height: format.height)
+        let program = out.target ?? nv12Target(out.buffer, table: table, width: format.width, height: format.height, frame: 0)
+        let context = CompositorPasses.Context(resources: resources, table: table, labels: nil, layout: layout, frameIndex: 0)
+        slot.outputBuffer = out.buffer
+        CompositorPasses.encodeFrame(state: state, inputs: inputs, slot: slot, context: context, commandBuffer: cb,
+                                     outputs: CompositorPasses.FrameOutputs(program: program), multiview: options.multiview)
+        let submitTime = HostClock.now()
+        cb.commit()
+        cb.waitUntilCompleted()
+        let gpuStart = HostTime(nanoseconds: UInt64(max(0, cb.gpuStartTime) * 1e9))
+        warmupGpuStartLatency = gpuStart - submitTime
+        warmupFrames += 1
+        slot.releaseFrame()
     }
 
     public func render(tick: Tick, at tickTime: HostTime, snapshot: MixerSnapshot, inputs: RenderInputTable) -> RenderVerdict {

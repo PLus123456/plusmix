@@ -115,6 +115,28 @@ final class RealtimeRendererTests: XCTestCase {
         XCTAssertEqual(engine.skipped.load(ordering: .relaxed), 0)
     }
 
+    // MARK: W1-B3 启动预热 / 完成线程实时策略 / 跳拍归因
+
+    /// W1-B3 交付 1（渲染器侧）：prepare 里做一次首帧空渲染，命令队列的第一次提交、管线 / 私有纹理的第一次用都在起时钟之前付掉。
+    /// 量的是时钟起来后第一帧的 gpuStart − 提交：修前（没有预热）headless 探针 12.9 ms、本用例 3 次 4.4–5.7 ms（稳态 0.9）；修后应与稳态同量级。
+    func testW1B3_prepare_warmRender_firstRealFrameGpuStartLatencyUnder4ms() throws {
+        let renderer = try MetalRenderer()
+        try renderer.prepare(format: .hd1080p60, maxInputs: 9)
+        let engine = FakeEngine(renderer: renderer, format: .hd1080p60, inputs: FakeInputs.nv12(count: 8), state: LoadStates.eightInputsFourOverlays())
+        engine.run(seconds: 1)
+        renderer.shutdown()
+        let samples = engine.sink.samples
+        XCTAssertGreaterThan(samples.count, 30)
+        let first = (samples[0].gpuStart - samples[0].submitTime).milliseconds
+        let second = (samples[1].gpuStart - samples[1].submitTime).milliseconds
+        let steady = samples.dropFirst(10).map { ($0.gpuStart - $0.submitTime).milliseconds }
+        print(String(format: "W1B3 首帧 gpuStart − 提交：第 0 帧 %.2f ms，第 1 帧 %.2f ms，稳态中位 %.2f ms，最大 %.2f ms", first, second, steady.sorted()[steady.count / 2], steady.max() ?? 0))
+        XCTAssertLessThanOrEqual(first, 4, "预热后时钟起来的第一帧不该再付队列首次提交的代价")
+        XCTAssertEqual(engine.skipped.load(ordering: .relaxed), 0)
+        XCTAssertEqual(renderer.warmupFrames, 1, "prepare 里应做过一次首帧空渲染")
+        print(String(format: "W1B3 预热帧自己的 gpuStart − 提交：%.2f ms", renderer.warmupGpuStartLatency.milliseconds))
+    }
+
     /// T3：GPU 压不住时 render 返回 .skipped 而不是等；在途永远 ≤ 2。用 4K + 16 路 + 4 overlay + 超高频调用制造压力。
     func testT3_cpuNeverLeadsGPUByMoreThanTwoFrames() throws {
         var options = MetalRendererOptions()
