@@ -217,6 +217,83 @@ final class MIDITests: XCTestCase {
         let gone = await waitUntil(timeout: 5) { !controller.sources.contains { $0.name == name } }
         XCTAssertTrue(gone, "源消失后应从列表移除")
     }
+
+    // MARK: W2-C2 换过节目之后的热插拔
+
+    /// W2-C2：控制器停过一次（同一个实例重起）、或换了一个全新的控制器（App 换节目就是这样）之后，新出现的源仍要热插拔连上、
+    /// 能收 CC / Note、learn 照常；三轮起停都要收到源的增删通知。
+    /// 修前：CoreMIDI 把通知派到"进程里第一次建客户端那条线程的 run loop"上，第一个控制器的线程退出后再也收不到 msgObjectAdded
+    /// （reports/issues/W3E-w2-control-midi-hotplug-after-restart.md）。
+    func testW2C2_midiHotplug_survivesControllerRestart() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        let table = MIDIMapTable(mappings: [
+            MIDIMapping(trigger: .cc(channel: 1, controller: 1), action: .tbar),
+            MIDIMapping(trigger: .note(channel: 1, note: 60), action: .action(.command(.cut))),
+        ])
+        let tag = UUID().uuidString.prefix(8)
+        let first = MIDIController(bus: f.bus, table: table, clientName: "PlusMix 测试 A \(tag)")
+        do { try first.start() } catch { throw XCTSkip("CoreMIDI 不可用：\(error)") }
+        // 第 1 轮：同一个控制器起 → 停 → 再起；第 2、3 轮：前一个停了之后换全新的控制器
+        first.stop()
+        XCTAssertFalse(first.isRunning)
+        try first.start()
+        let second = MIDIController(bus: f.bus, table: table, clientName: "PlusMix 测试 B \(tag)")
+        let third = MIDIController(bus: f.bus, table: table, clientName: "PlusMix 测试 C \(tag)")
+        for (index, controller) in [first, second, third].enumerated() {
+            let round = index + 1
+            if round > 1 { try controller.start() }
+            XCTAssertTrue(controller.isRunning, "第 \(round) 轮")
+            let before = controller.sources.count
+            let seq0 = f.bus.lastSequence
+            let name = "PlusMix 虚拟源 \(round) \(tag)"
+            let source = try VirtualMIDISource(name: name)
+            // 增通知：新源自动连上
+            let connected = await waitUntil(timeout: 5) { controller.sources.contains { $0.name == name && $0.connected } }
+            XCTAssertTrue(connected, "第 \(round) 轮：换过控制器之后新建的源应自动连上；现有：\(controller.sources)")
+            XCTAssertEqual(controller.sources.count, before + 1, "第 \(round) 轮")
+            // CC1 = 64 → tbar 64/127
+            try source.send(cc: 1, value: 64, channel: 1)
+            var ok = await waitUntil { f.bus.lastSequence >= seq0 + 1 }
+            XCTAssertTrue(ok, "第 \(round) 轮：CC 应派发")
+            var state = await f.stateMachine.state
+            XCTAssertEqual(state.transition.source, .tbar, "第 \(round) 轮")
+            XCTAssertEqual(state.transition.progress, 64.0 / 127.0, accuracy: 1e-9, "第 \(round) 轮")
+            // 推到顶提交：对调
+            try source.send(cc: 1, value: 127, channel: 1)
+            ok = await waitUntil { f.bus.lastSequence >= seq0 + 2 }
+            XCTAssertTrue(ok, "第 \(round) 轮")
+            state = await f.stateMachine.state
+            XCTAssertEqual(state.program, 2, "第 \(round) 轮")
+            XCTAssertEqual(state.preview, 1, "第 \(round) 轮")
+            // Note 60 → cut：换回来
+            try source.send(noteOn: 60, velocity: 100, channel: 1)
+            ok = await waitUntil { f.bus.lastSequence >= seq0 + 3 }
+            XCTAssertTrue(ok, "第 \(round) 轮：Note 应派发")
+            state = await f.stateMachine.state
+            XCTAssertEqual(state.program, 1, "第 \(round) 轮")
+            XCTAssertEqual(state.preview, 2, "第 \(round) 轮")
+            // learn 照常：捕获、不派发
+            let learned = LearnBox()
+            controller.startLearn { learned.set($0) }
+            try source.send(cc: 9, value: 33, channel: 3)
+            ok = await waitUntil { learned.value != nil }
+            XCTAssertTrue(ok, "第 \(round) 轮：learn 应收到")
+            XCTAssertEqual(learned.value?.trigger, .cc(channel: 3, controller: 9))
+            XCTAssertEqual(learned.value?.value, 33)
+            XCTAssertFalse(controller.isLearning)
+            try await Task.sleep(for: .milliseconds(50))
+            XCTAssertEqual(f.bus.lastSequence, seq0 + 3, "第 \(round) 轮：learn 的消息不派发")
+            // 删通知：源销毁后从列表移除
+            source.dispose()
+            let gone = await waitUntil(timeout: 5) { !controller.sources.contains { $0.name == name } }
+            XCTAssertTrue(gone, "第 \(round) 轮：源销毁后应收到删通知并移除；现有：\(controller.sources)")
+            XCTAssertEqual(controller.sources.count, before, "第 \(round) 轮")
+            controller.stop()
+            XCTAssertFalse(controller.isRunning, "第 \(round) 轮")
+        }
+    }
+
 }
 
 final class LearnBox: @unchecked Sendable {
