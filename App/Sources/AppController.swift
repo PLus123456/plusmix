@@ -122,7 +122,9 @@ final class AppController {
         defer { replacing = false }
         await stopSession()
         do {
-            let s = try SwitcherSession(show: show, settings: settings, hotkeyTable: hotkeyTable, midiTable: midiTable)
+            // 素材相对路径按节目文件所在目录找（W3-E5）；新建 / 从 LastSession 恢复的没有文件，退到默认录制目录
+            let s = try SwitcherSession(show: show, settings: settings, hotkeyTable: hotkeyTable, midiTable: midiTable,
+                                        mediaBaseDirectory: documents.mediaBaseDirectory)
             session = s
             windowController.bind(session: s)
             panels.bind(session: s)
@@ -255,6 +257,7 @@ final class AppController {
             try documents.save(s, to: url)
             session?.name = s.name
             session?.layout = s.layout
+            session?.mediaBaseDirectory = documents.mediaBaseDirectory   // 另存到别处后，之后加的素材按新位置找（已在跑的路不重建）
             windowController.window?.title = "Switcher \(SwitcherVersion.current) — \(s.name)"
         } catch {
             presentError(error, context: L("error.save", url.lastPathComponent))

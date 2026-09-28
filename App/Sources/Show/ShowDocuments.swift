@@ -68,6 +68,12 @@ final class ShowDocuments {
     /// 新建：忘掉当前文件。
     func startNew() { currentURL = nil }
 
+    /// 素材（图片 / 视频文件）相对路径的基准目录（W3-E5）：节目文件所在目录（与 headless 同一条规则）；节目没保存过 = 默认录制目录 ~/Movies/PlusMix
+    /// （录制目录的相对路径也挂在那里，OutputRuntime.startRecordings）。
+    var mediaBaseDirectory: URL {
+        currentURL?.deletingLastPathComponent() ?? URL(fileURLWithPath: Self.defaultRecordDirectory, isDirectory: true)
+    }
+
     // MARK: 最近 / 上次
 
     var recentURLs: [URL] {

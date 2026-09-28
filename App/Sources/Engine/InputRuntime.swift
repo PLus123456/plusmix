@@ -26,6 +26,10 @@ final class InputRuntime {
     private(set) var entries: [Int: Entry] = [:]
     /// 输入是否已经 start（引擎起来之前先建好、注册好，引擎起来后统一 start）。
     private var started = false
+    /// 素材（图片 / 视频文件）相对路径的基准目录（W3-E5，reports/issues/W4C-app-relative-media-paths.md）：节目文件所在目录；
+    /// 节目没保存过 = 默认录制目录 ~/Movies/PlusMix（AppController 按 ShowDocuments 给，另存后换成新位置）。只影响之后建的输入：
+    /// 已在跑的路不重建（"另存为"到别的目录时素材要跟着搬，Samples/README.md §2）。
+    var mediaBaseDirectory = URL(fileURLWithPath: ShowDocuments.defaultRecordDirectory, isDirectory: true)
 
     init(engine: Engine, factory: any InputFactory, audio: AudioRuntime?) {
         self.engine = engine
@@ -56,7 +60,8 @@ final class InputRuntime {
         let tee = InputFrameTee(primary: slot)
         let made: MadeInput
         do {
-            made = try factory.makeInput(config: config, slot: tee, timing: timing)
+            // 只改交给输入对象的那份配置：运行表 / 快照 / 节目文件里仍是相对路径
+            made = try factory.makeInput(config: Self.resolvingMediaPaths(config, against: mediaBaseDirectory), slot: tee, timing: timing)
         } catch {
             made = MadeInput(input: PlaceholderInput(config: config, message: "\(error)"), audioRing: nil, audioBlockFrames: 0)
         }
@@ -66,6 +71,20 @@ final class InputRuntime {
         }
         entries[config.number] = Entry(config: config, made: made, slot: slot, tee: tee)
         if started { startInput(made.input) }
+    }
+
+    /// 图片 / 视频文件输入的相对路径挂到 base 下，与 headless 同一条规则（HeadlessRun 第 1 步：以 / 开头原样，否则 `showURL 所在目录/path`）；
+    /// 绝对路径与别的来源原样。之前 App 把路径原样交给 ImageInput / FileInput，等于相对进程工作目录（Finder / Dock 起的 App 是 /），
+    /// 从菜单打开样例节目时图片那几路建不出来、变占位（W4-C 的问题单）。
+    nonisolated static func resolvingMediaPaths(_ config: InputConfig, against base: URL) -> InputConfig {
+        func resolve(_ path: String) -> String { path.hasPrefix("/") ? path : base.appendingPathComponent(path).path }
+        var resolved = config
+        switch config.source {
+        case .image(let path): resolved.source = .image(path: resolve(path))
+        case .file(let path, let endAction, let rate): resolved.source = .file(path: resolve(path), endAction: endAction, rate: rate)
+        default: break
+        }
+        return resolved
     }
 
     /// 给某路开一个分支槽（ISO 录制 / Aux）；没有这路或分支用完为 nil。用完 `releaseBranch`。

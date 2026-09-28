@@ -34,13 +34,6 @@ Tools/switcher-headless/.build/release/switcher-headless run --show Samples/even
 图片输入的 `path`（`assets/lyrics.png` 之类）**相对节目文件所在目录**，录制目录（`教会` / `教室` / `活动`）**相对默认录制目录** `~/Movies/PlusMix/`（无界面引擎里相对当前目录）。
 "另存为"到别的地方时把 `assets/` 一起搬走。
 
-App 修好前的临时办法（[问题单](../reports/issues/W4C-app-relative-media-paths.md)）：App 现在把图片路径按进程工作目录解析，从菜单打开样例时字幕 / 台标那两路会显示"图片不存在：assets/…"，
-其余照跑。要看到字幕，从样例目录里起 App：
-
-```bash
-cd Samples/church && ../../.build/DerivedData/Build/Products/Debug/PlusMix.app/Contents/MacOS/PlusMix --show church.switcher.json
-```
-
 ## 3. 换成你的设备
 
 两条路都保留编号、名字、设置和 PGM / PVW / 叠加引用：
