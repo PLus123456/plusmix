@@ -4,11 +4,12 @@
 <dict>
 	<!-- 虚拟摄像头系统扩展（CMIO Camera Extension）的 Info.plist，由 project.yml 的 INFOPLIST_FILE 引用。
 	     CMIOExtensionMachServiceName 必须以 Team ID 开头、并且是扩展所属的 app group（CameraExtension.entitlements 里同名）。
-	     CFBundleDisplayName 是系统设置里显示的名字：用 ASCII（= VirtualCameraConstants.deviceModel），要本地化等 W4-B 定 bundle id 时加 InfoPlist.strings。 -->
+	     CFBundleDisplayName 是系统设置里显示的名字：默认值用 ASCII 的产品名（"PlusMix Virtual Camera"，W4-D；本地化在 Resources/{en,zh-Hans}.lproj/InfoPlist.strings，W4-B 加的）。
+	     摄像头设备本身在 FaceTime 里的名字是 VirtualCameraConstants.deviceName（Packages/SwitcherOutputs，归 W3-C），还是代码名，见 reports/issues/W4D-… -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Switcher Virtual Camera</string>
+	<string>PlusMix Virtual Camera</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

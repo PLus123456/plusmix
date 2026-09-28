@@ -1,7 +1,9 @@
 #!/bin/bash
 # 发布工程脚本的测试公共库（scripts/release/tests/test-*.sh 都 source 它）。
 # 约定：每个测试脚本自己 set -uo pipefail；断言失败调 fail（累计，最后 finish 退出 1）；测不了调 skip "BLOCKED-xxx：…"（退出 77，run.sh 记 SKIP）。
-# 环境：RELEASE_TEST_OUT（run.sh 给，默认 .build/release-tests）；RELEASE_TEST_APP（R1 产出的 Switcher.app，后面的测试复用，不重编）。
+# 环境：RELEASE_TEST_OUT（run.sh 给，默认 .build/release-tests）；RELEASE_TEST_APP（R1 产出的 <产品名>.app，后面的测试复用，不重编）。
+# 产物名（W4-D，用户 2026-09-28 定名 PlusMix）：.app / .xcarchive / DMG 都叫 project.yml 里 App target 的 PRODUCT_NAME（product_name），
+# 可执行名从包的 CFBundleExecutable 读（app_executable）；scheme / target / 模块仍叫代码名 Switcher。
 set -uo pipefail
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 RELEASE_TEST_OUT=${RELEASE_TEST_OUT:-$REPO_ROOT/.build/release-tests}
@@ -37,12 +39,16 @@ finish() {
 require_archived_app() {
   if [ -n "${RELEASE_TEST_APP:-}" ] && [ -d "$RELEASE_TEST_APP" ]; then return 0; fi
   local dir="$RELEASE_TEST_OUT/r1"
-  if [ -d "$dir" ] && ls "$dir"/*/Switcher.app >/dev/null 2>&1; then
-    RELEASE_TEST_APP=$(ls -d "$dir"/*/Switcher.app | head -1); export RELEASE_TEST_APP; return 0
+  if [ -d "$dir" ] && ls -d "$dir"/*/*.app >/dev/null 2>&1; then
+    RELEASE_TEST_APP=$(ls -d "$dir"/*/*.app | head -1); export RELEASE_TEST_APP; return 0
   fi
   note "没有 R1 的产物，先跑一次 ad-hoc 归档（几分钟）"
   "$REPO_ROOT/scripts/release/archive.sh" --adhoc --skip-notarize --out "$dir" >"$RELEASE_TEST_OUT/r1-archive.log" 2>&1 || { fail "ad-hoc 归档失败（$RELEASE_TEST_OUT/r1-archive.log）"; finish; }
-  RELEASE_TEST_APP=$(ls -d "$dir"/*/Switcher.app | head -1); export RELEASE_TEST_APP
+  RELEASE_TEST_APP=$(ls -d "$dir"/*/*.app | head -1); export RELEASE_TEST_APP
 }
 
 marketing_version() { sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\{0,1\}\([0-9][0-9.]*\)"\{0,1\}.*/\1/p' "$REPO_ROOT/project.yml" | head -1; }
+# App target 的 PRODUCT_NAME（project.yml 里第一个 PRODUCT_NAME；扩展的在后面、等于它的 bundle id）
+product_name() { sed -n 's/^[[:space:]]*PRODUCT_NAME:[[:space:]]*"\{0,1\}\([A-Za-z0-9][A-Za-z0-9._-]*\)"\{0,1\}.*/\1/p' "$REPO_ROOT/project.yml" | head -1; }
+# 一个 .app 的可执行名（Contents/MacOS/ 下那个文件）
+app_executable() { /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$1/Contents/Info.plist" 2>/dev/null; }

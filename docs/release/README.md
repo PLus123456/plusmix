@@ -18,10 +18,11 @@
 make archive-adhoc            # 没有账号：全流程走一遍（公证 BLOCKED-账号），产物 .build/release/<版本>/
 make release-test             # scripts/release/tests/：R1–R6、R11–R14
 DEVELOPMENT_TEAM=XXXXXXXXXX SPARKLE_FEED_URL=https://… SPARKLE_PUBLIC_ED_KEY=… make archive     # 正式
-make release-verify TARGET=.build/release/0.1.0/Switcher-0.1.0.dmg VERIFY_FLAGS=--expect-notarized
+make release-verify TARGET=.build/release/0.1.0/PlusMix-0.1.0.dmg VERIFY_FLAGS=--expect-notarized
 ```
 
 脚本都在 `scripts/release/`，每个文件头写用法；`scripts/release/release.mk` 是 make 入口（根 Makefile 末尾 include）。
+产物名 = project.yml 里 App target 的 `PRODUCT_NAME`（PlusMix，W4-D 改名）：`PlusMix.xcarchive` / `PlusMix.app` / `PlusMix-<版本>.dmg`；scheme、工程、模块、bundle id 仍叫代码名 Switcher。
 
 ## 前置条件
 

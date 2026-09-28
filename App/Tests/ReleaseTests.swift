@@ -46,6 +46,7 @@ final class ReleaseTests: XCTestCase {
         let ditto = try AppTest.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
         XCTAssertEqual(ditto.code, 0, "ditto 解包失败：\(ditto.stderr)")
         let root = try XCTUnwrap(try FileManager.default.contentsOfDirectory(at: unpacked, includingPropertiesForKeys: nil).first { $0.hasDirectoryPath })
+        XCTAssertTrue(root.lastPathComponent.hasPrefix("PlusMix-diagnostics-"), "诊断包顶层目录用产品名（W4-D）：\(root.lastPathComponent)")
         let names = Set(try FileManager.default.contentsOfDirectory(atPath: root.path))
         for required in ["README.txt", "system.txt", "settings.txt", "stats-latest.jsonl", "show.switcher.json", "log.txt", "crashes", "config"] {
             XCTAssertTrue(names.contains(required), "诊断包缺 \(required)：\(names.sorted())")
@@ -152,5 +153,61 @@ final class ReleaseTests: XCTestCase {
         XCTAssertNotNil(help.items.first { $0.title == L("menu.help.exportDiagnostics") }, "帮助菜单缺“导出诊断包…”")
         XCTAssertNotNil(help.items.first { $0.title == L("menu.help.showDiagnosticsFolder") }, "帮助菜单缺“打开诊断文件夹”")
         XCTAssertNotEqual(L("prefs.update.pending"), "自动更新由 W4-B 接 Sparkle；这里先留位置。", "占位文案该换掉了")
+    }
+
+    /// W4-D（prompt 75，用户 2026-09-28 定：产品名 PlusMix，只改用户看得到的名字）：
+    /// - 看得到的：Info.plist 的显示名 / 产品名 / 可执行名与用途说明、扩展的显示名（默认值 + 两种语言）、App 菜单标题、主窗口标题、默认录制目录 ~/Movies/PlusMix；
+    /// - 不动的：bundle id 仍是 com.plusmix.switcher（发布后不能改）、`SwitcherVersion.current` 仍在且等于 CFBundleShortVersionString、
+    ///   project.yml 的工程名 / target / scheme 仍叫 Switcher（Makefile 的 -scheme Switcher 不用改）。
+    func testW4D_displayNameIsPlusMix_codeNameUntouched() throws {
+        let info = Bundle.main.infoDictionary ?? [:]
+        XCTAssertEqual(info["CFBundleDisplayName"] as? String, "PlusMix", "App/Info.plist 的 CFBundleDisplayName")
+        XCTAssertEqual(info["CFBundleName"] as? String, "PlusMix", "PRODUCT_NAME → CFBundleName")
+        XCTAssertEqual(info["CFBundleExecutable"] as? String, "PlusMix", "可执行名跟 PRODUCT_NAME 走")
+        XCTAssertEqual(Bundle.main.bundleURL.lastPathComponent, "PlusMix.app")
+        XCTAssertEqual(Bundle.main.bundleIdentifier, "com.plusmix.switcher", "bundle id 是代码名，发布后不能改")
+        XCTAssertEqual(info["CFBundleShortVersionString"] as? String, SwitcherVersion.current, "版本号仍只在 project.yml 与 Version.swift 两处")
+        XCTAssertEqual(ProductName.display, "PlusMix")
+        for key in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"] {
+            let text = try XCTUnwrap(info[key] as? String, "缺 \(key)")
+            XCTAssertTrue(text.contains("PlusMix"), "\(key) 该用产品名：\(text)")
+            XCTAssertFalse(text.contains("Switcher"), "\(key) 不该出现代码名：\(text)")
+        }
+
+        // 源文件：project.yml 的 App target 是 PRODUCT_NAME: PlusMix；工程名 / target / scheme / bundle id 原样
+        let root = try AppTest.repoRoot()
+        let yml = try String(contentsOf: root.appendingPathComponent("project.yml"), encoding: .utf8)
+        XCTAssertTrue(yml.contains("PRODUCT_NAME: PlusMix"), "project.yml 的 App target 该是 PRODUCT_NAME: PlusMix")
+        XCTAssertTrue(yml.contains("\nname: Switcher\n"), "工程名（代码名）不动")
+        XCTAssertTrue(yml.contains("\n  Switcher:\n"), "App target / scheme 名不动")
+        XCTAssertTrue(yml.contains("PRODUCT_BUNDLE_IDENTIFIER: com.plusmix.switcher\n"), "bundle id 不动")
+
+        // 扩展：Info.plist 默认值（ASCII）与两种语言的 InfoPlist.strings
+        let extInfo = try XCTUnwrap(NSDictionary(contentsOf: root.appendingPathComponent("CameraExtension/Info.plist")) as? [String: Any])
+        XCTAssertEqual(extInfo["CFBundleDisplayName"] as? String, "PlusMix Virtual Camera", "CameraExtension/Info.plist 的默认显示名")
+        let en = try String(contentsOf: root.appendingPathComponent("CameraExtension/Resources/en.lproj/InfoPlist.strings"), encoding: .utf8)
+        let zh = try String(contentsOf: root.appendingPathComponent("CameraExtension/Resources/zh-Hans.lproj/InfoPlist.strings"), encoding: .utf8)
+        XCTAssertTrue(en.contains("\"CFBundleDisplayName\" = \"PlusMix Virtual Camera\";"), "en.lproj/InfoPlist.strings：\(en)")
+        XCTAssertTrue(zh.contains("\"CFBundleDisplayName\" = \"PlusMix 虚拟摄像头\";"), "zh-Hans.lproj/InfoPlist.strings：\(zh)")
+        // 编进 App 的扩展也带着（Contents/Library/SystemExtensions/<bundle id>.systemextension）
+        let embedded = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions/com.plusmix.switcher.camera-extension.systemextension")
+        if FileManager.default.fileExists(atPath: embedded.path) {
+            let embeddedInfo = NSDictionary(contentsOf: embedded.appendingPathComponent("Contents/Info.plist")) as? [String: Any]
+            XCTAssertEqual(embeddedInfo?["CFBundleDisplayName"] as? String, "PlusMix Virtual Camera")
+            XCTAssertEqual(embeddedInfo?["CFBundleIdentifier"] as? String, "com.plusmix.switcher.camera-extension")
+            for lang in ["en", "zh-Hans"] {
+                XCTAssertTrue(FileManager.default.fileExists(atPath: embedded.appendingPathComponent("Contents/Resources/\(lang).lproj/InfoPlist.strings").path),
+                              "编进 App 的扩展里缺 \(lang).lproj/InfoPlist.strings")
+            }
+        } else {
+            print("App 包里没有嵌入扩展（\(embedded.path)），跳过嵌入件的检查")
+        }
+
+        // 界面：App 菜单标题、主窗口标题、默认录制目录
+        let main = try XCTUnwrap(NSApp.mainMenu)
+        XCTAssertEqual(main.items.first?.title, "PlusMix", "App 菜单标题")
+        let title = try XCTUnwrap(AppTest.controller.windowController.window?.title)
+        XCTAssertTrue(title.hasPrefix("PlusMix \(SwitcherVersion.current)"), "主窗口标题：\(title)")
+        XCTAssertTrue(ShowDocuments.defaultRecordDirectory.hasSuffix("/Movies/PlusMix"), "默认录制目录 ~/Movies/PlusMix：\(ShowDocuments.defaultRecordDirectory)")
     }
 }

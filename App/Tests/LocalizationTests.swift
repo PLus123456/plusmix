@@ -93,6 +93,28 @@ final class LocalizationTests: XCTestCase {
     }
 
 
+    /// W4-D（prompt 75，用户 2026-09-28 定名 PlusMix）：界面文案里的产品名是 PlusMix，代码名 Switcher 不进两种语言的任何一条文案
+    /// （模块名 / 命令行工具名 / 键名 / `show.switcher.json` 这种小写的文件后缀不在此列）。点名的几条：App 菜单（关于 / 隐藏 / 退出）、外部输出窗口标题、
+    /// 诊断包的文件名与 README、底栏"没有录制输出"的提示里的默认目录（~/Movies/PlusMix）。
+    func testW4D_uiStringsUseProductNameNotCodeName() throws {
+        let zh = try XCTUnwrap(L10n.table(language: "zh-Hans"))
+        let en = try XCTUnwrap(L10n.table(language: "en"))
+        let named = ["menu.about", "menu.hide", "menu.quit", "aux.external.windowTitle", "diagnostics.save.name", "diagnostics.readme", "bottom.noRecordOutputTip"]
+        for key in named {
+            XCTAssertTrue(zh[key]?.contains("PlusMix") == true, "zh-Hans \(key) 该带产品名：\(zh[key] ?? "<缺键>")")
+            XCTAssertTrue(en[key]?.contains("PlusMix") == true, "en \(key) 该带产品名：\(en[key] ?? "<缺键>")")
+        }
+        for (table, lang) in [(zh, "zh-Hans"), (en, "en")] {
+            let leaks = table.filter { $0.value.contains("Switcher") }.keys.sorted()
+            XCTAssertEqual(leaks, [], "\(lang) 文案里出现了代码名 Switcher（界面上该用 PlusMix）")
+        }
+        XCTAssertEqual(L("menu.about"), "关于 PlusMix")
+        XCTAssertEqual(L10n.string("menu.about", language: "en"), "About PlusMix")
+        XCTAssertEqual(L("aux.external.windowTitle"), "PlusMix 外部输出")
+        XCTAssertEqual(L10n.string("bottom.noRecordOutputTip", language: "en"), "No record output in this show: clicking adds a default one (~/Movies/PlusMix)")
+        XCTAssertEqual(L10n.string("diagnostics.save.name", language: "en", "20260928-1200"), "PlusMix-diagnostics-20260928-1200.zip")
+    }
+
     /// W3-E4 交付第 3 条（reports/w3-outputs-4.md §5 第 6 条）：`// l10n-exempt` 标记原来在剥掉行尾注释之后才找、从来不起作用。
     /// 二选一选"修成先看标记"（整行、剥注释之前）：给将来确实不是界面文案的中文字面量留一个显式、code review 里看得见的豁免口子；现在 App/Sources 没人用它。
     func testW3E4_3_l10nExemptMarkerHonoredBeforeStrippingComments() throws {

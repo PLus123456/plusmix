@@ -33,7 +33,7 @@ AVFoundation: built-in camera, USB / UVC cameras and capture cards, and iPhone C
 
 ## DeckLink (SDI / HDMI)
 
-Requires the Blackmagic Desktop Video driver (`/Library/Frameworks/DeckLinkAPI.framework`); building Switcher needs the DeckLink SDK
+Requires the Blackmagic Desktop Video driver (`/Library/Frameworks/DeckLinkAPI.framework`); building PlusMix needs the DeckLink SDK
 (`DECKLINK_SDK_DIR` or `~/SDKs/DeckLink`), otherwise this kind is an empty implementation (error with a message).
 
 - The panel lists cards and input connections (SDI / HDMI / optical SDI / component / composite / S-Video); "keep" uses what Desktop Video
@@ -50,10 +50,10 @@ Requires the Blackmagic Desktop Video driver (`/Library/Frameworks/DeckLinkAPI.f
 
 ScreenCaptureKit: a whole display, a single window, or all windows of one application.
 
-- **Screen recording has no system prompt.** Add Switcher yourself in System Settings › Privacy & Security › Screen & System Audio Recording
+- **Screen recording has no system prompt.** Add PlusMix yourself in System Settings › Privacy & Security › Screen & System Audio Recording
   ([Troubleshooting](troubleshooting.md#1-permissions)).
 - Frame rate defaults to the program's and can be lowered (30 fps is plenty for documents and saves GPU). "Capture system audio" brings
-  that display's / application's sound in (Switcher's own audio excluded).
+  that display's / application's sound in (PlusMix's own audio excluded).
 - Frames enter the compositor as BGRA (text is not chroma-subsampled); sources larger than the program are scaled to fit. A static
   picture is re-pushed as the last frame and does not fall to noSignal.
 
@@ -84,7 +84,7 @@ Requires the NDI SDK for Apple (default `/Library/NDI SDK for Apple`) at build t
   ("no NDI source found on the network … sender not running, different subnet, or wrong name") and connects when it appears.
 - Bandwidth: highest / lowest / audio only; sources used only for thumbnails can use "lowest" to save more than half the bandwidth and decoding.
 - Jitter buffer 0–2 frames directly sets this input's latency (each frame adds about one frame); default 1.
-- Loopback on one machine (Switcher sending and receiving) measured 1–2 frames behind PGM.
+- Loopback on one machine (PlusMix sending and receiving) measured 1–2 frames behind PGM.
 
 ## Audio-only device
 

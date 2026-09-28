@@ -5,23 +5,23 @@
 
 ## 安装
 
-前提：Switcher 的本地 API 打开（默认 127.0.0.1:8765），Stream Deck 软件 6.6+（自带 Node 20），开发机装 Node ≥ 20。
+前提：PlusMix 的本地 API 打开（默认 127.0.0.1:8765），Stream Deck 软件 6.6+（自带 Node 20），开发机装 Node ≥ 20。
 
 ```bash
 cd Tools/streamdeck-plugin
 npm install                                          # @elgato/streamdeck、ws
-npx streamdeck link com.plusmix.switcher.sdPlugin    # 开发：链接进插件目录，Stream Deck 里出现 "Switcher" 分类
+npx streamdeck link com.plusmix.switcher.sdPlugin    # 开发：链接进插件目录，Stream Deck 里出现 "PlusMix" 分类
 npx streamdeck pack com.plusmix.switcher.sdPlugin    # 发布：出 com.plusmix.switcher.streamDeckPlugin，双击安装
 ```
 
-第一次拖任一按钮上去，设置面板里填 Switcher 地址 / 端口 / token（全局设置，所有按钮共用）。连上之后按钮从灰色"未连接"变成各自的颜色。
+第一次拖任一按钮上去，设置面板里填 PlusMix 地址 / 端口 / token（全局设置，所有按钮共用）。连上之后按钮从灰色"未连接"变成各自的颜色。
 
 ## 按钮
 
 | 动作 | 设置 | 按下 | 颜色 |
 |---|---|---|---|
 | Cut | — | PGM / PVW 对调 | 固定 |
-| Auto / Fade | 方式（Auto = 按 Switcher 里已选的转场；Fade + 毫秒） | `autoTransition` 或 `fade` | 转场进行中红 |
+| Auto / Fade | 方式（Auto = 按 PlusMix 里已选的转场；Fade + 毫秒） | `autoTransition` 或 `fade` | 转场进行中红 |
 | Preview | 输入编号 | 选到 PVW | 这路的 tally：红 PGM / 绿 PVW / 灰；转场中红底绿边 |
 | Program | 输入编号 | 直切 PGM（PVW 不变） | 同上 |
 | Tally | 输入编号 | 只看；按下 = 选到 PVW | 同上 |

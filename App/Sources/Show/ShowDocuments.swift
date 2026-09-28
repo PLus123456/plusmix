@@ -24,13 +24,13 @@ final class ShowDocuments {
         self.recordDirectory = recordDirectory
     }
 
-    /// 默认录制目录：~/Movies/Switcher。
+    /// 默认录制目录：~/Movies/PlusMix（目录名是产品名，W4-D；0.1.0 之前叫 ~/Movies/Switcher，没发布过所以不迁移）。
     static var defaultRecordDirectory: String {
         FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("Switcher").path ?? NSHomeDirectory()
+            .appendingPathComponent("PlusMix").path ?? NSHomeDirectory()
     }
 
-    /// 空节目：没有输入，带一个默认录制输出（录到 recordDirectory，默认 ~/Movies/Switcher），PGM / PVW 都是黑场。
+    /// 空节目：没有输入，带一个默认录制输出（录到 recordDirectory，默认 ~/Movies/PlusMix），PGM / PVW 都是黑场。
     static func emptyShow(name: String = L("show.untitled"), recordDirectory: String = ShowDocuments.defaultRecordDirectory) -> Show {
         let record = OutputState(number: 1, kind: .record, name: L("show.defaultRecordName"), enabled: false,
                                  settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
@@ -91,6 +91,8 @@ final class ShowDocuments {
     }
 
     /// 退出时未保存的节目自动存到这里，下次启动没有"上次文件"时从这里恢复。
+    /// 目录名 "Switcher" 故意没跟 W4-D 改成产品名：hotkeys.json / midi.json / Diagnostics/ 都在 SwitcherControl 的 `UserConfig.directory`
+    /// （~/Library/Application Support/Switcher，包内定义、不归 App 改）下，配置目录要一个整体，等包那边改了一起换（reports/w4-rename.md §3）。
     static var autosaveURL: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
         return support.appendingPathComponent("Switcher", isDirectory: true).appendingPathComponent("LastSession.\(fileExtension)")

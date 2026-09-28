@@ -8,7 +8,7 @@
 #   make release-test                scripts/release/tests/（R1–R6、R11–R14）
 #   make pin-check / pin-sync        依赖钉版本一致性检查 / 把模板拷进工作区（同 make gen 那一步）
 #   make runner-install RUNNER_FLAGS="--url https://github.com/<owner>/<repo> --token <token>"   装 GitHub Actions self-hosted runner
-# 产物：$(RELEASE_OUT)/<版本>/{Switcher.xcarchive,Switcher.app,Switcher-<版本>.dmg,release-report.md,verify.json}
+# 产物：$(RELEASE_OUT)/<版本>/{PlusMix.xcarchive,PlusMix.app,PlusMix-<版本>.dmg,release-report.md,verify.json}（产物名 = project.yml 的 PRODUCT_NAME，W4-D）
 RELEASE_OUT     ?= .build/release
 RELEASE_SCRIPTS := scripts/release
 ARCHIVE_FLAGS   ?=
@@ -25,7 +25,7 @@ archive-adhoc:
 	$(RELEASE_SCRIPTS)/archive.sh --adhoc --skip-notarize --out $(RELEASE_OUT) $(ARCHIVE_FLAGS)
 
 release-verify:
-	@[ -n "$(TARGET)" ] || { echo "用法：make release-verify TARGET=<Switcher.app 或 .dmg> [VERIFY_FLAGS=--expect-notarized]"; exit 2; }
+	@[ -n "$(TARGET)" ] || { echo "用法：make release-verify TARGET=<PlusMix.app 或 .dmg> [VERIFY_FLAGS=--expect-notarized]"; exit 2; }
 	$(RELEASE_SCRIPTS)/verify.sh $(TARGET) $(VERIFY_FLAGS)
 
 appcast:

@@ -1,7 +1,7 @@
 # 第三方 API 兼容层
 
 > **法律提示（先读）。** 这个模块模仿 vMix（StudioCoast Pty Ltd 的产品）公开的 HTTP / TCP 控制协议的一个子集，目的只有一个：
-> 让你为它配好的 Companion 页面、Stream Deck 配置、平板遥控不改就能控制 Switcher。Switcher 与 vMix、StudioCoast 没有任何关系，
+> 让你为它配好的 Companion 页面、Stream Deck 配置、平板遥控不改就能控制 PlusMix。PlusMix 与 vMix、StudioCoast 没有任何关系，
 > 不是它的替代品或衍生品；实现只参考了公开的协议文档和 Companion 模块（MIT 许可）的源码来学接口形状，没有复制任何代码、文案或素材。
 > "兼容 vMix API"这类描述属于法律灰区（[设计方案 §0 / §9.3](../spec/导播台设计方案.md)），所以它是独立模块、**默认关闭**、不进默认产品，
 > 正式发布前要请律师看过。本文不是法律意见。产品其他文档、界面文案一律不提对方的名字。
@@ -18,13 +18,13 @@
 
 ## Companion 里怎么配
 
-Connections 加 "vMix" 类型的连接，Target host = Switcher 所在机器，TCP port = 8099，API polling 250 ms；连接变绿后按平时的方式配按钮。
+Connections 加 "vMix" 类型的连接，Target host = PlusMix 所在机器，TCP port = 8099，API polling 250 ms；连接变绿后按平时的方式配按钮。
 按动作分的覆盖表：
 
 | Companion 动作 | 支持 | 说明 |
 |---|---|---|
 | Transition → Cut / Fade / Wipe / Zoom（带 Duration、可选 Input） | ✅ | 带 Input 时先选到 PVW 再切（旧 PGM 进 PVW） |
-| Transition → Stinger 1 | ✅ | 要在 Switcher 里先设好 Stinger 输入，否则 409 NotConfigured |
+| Transition → Stinger 1 | ✅ | 要在 PlusMix 里先设好 Stinger 输入，否则 409 NotConfigured |
 | Transition → Transition 1 / Set transition effect 1 / duration 1 | ✅ | 只有一个转场槽；Transition 2–4 与对方的其他效果名返回 NotImplemented |
 | Set fader（T-bar） | ✅ | 0–255 映射到推杆 0–1 |
 | Input → Preview input / Send input to program / Preview next / previous | ✅ | Input 可以是编号、`0` = 当前 PVW、`-1` = 当前 PGM、XML 里的 key、或整个标题 |
@@ -37,10 +37,10 @@ Connections 加 "vMix" 类型的连接，Target host = Switcher 所在机器，T
 | Audio → Master / Bus A / Bus B mute | ✅ | |
 | Overlay → Overlay 1–4 toggle / in / out / off / last / all off（带可选 Input） | ✅ | |
 | Tally / Status 反馈：Program、Preview、Overlay、Recording、Streaming、FTB | ✅ | 由 XML 轮询 + TALLY / ACTS 订阅驱动；转场进行中 XML 只报旧 PGM（TALLY 订阅正确） |
-| Overlay 5–8、Overlay zoom、Preview overlay | ❌ NotImplemented | Switcher 只有四个叠加通道、没有"叠加预览"概念 |
+| Overlay 5–8、Overlay zoom、Preview overlay | ❌ NotImplemented | PlusMix 只有四个叠加通道、没有"叠加预览"概念 |
 | Transition 2–4、Stinger 2–8、对方的其他转场效果（Slide / Fly / Merge / CubeZoom …） | ❌ NotImplemented | |
-| External / MultiCorder / Fullscreen / SRT output 开关、Snapshot、SetOutput 2–4 | ❌ NotImplemented | 外部输出在 Switcher 里没有对应的开关命令 |
-| Audio auto（AFV per input）、Bus solo、Send to master、Set gain、Volume fade、声道混音器、音频插件 | ❌ NotImplemented | AFV 在 Switcher 里是全局开关 + 每路标志，语义不同 |
+| External / MultiCorder / Fullscreen / SRT output 开关、Snapshot、SetOutput 2–4 | ❌ NotImplemented | 外部输出在 PlusMix 里没有对应的开关命令 |
+| Audio auto（AFV per input）、Bus solo、Send to master、Set gain、Volume fade、声道混音器、音频插件 | ❌ NotImplemented | AFV 在 PlusMix 里是全局开关 + 每路标志，语义不同 |
 | Title / List / Replay / PTZ / Browser / Video call / Virtual set / 数据源 / 脚本等整族 | ❌ NotImplemented | 第一版没有这些功能 |
 
 不支持的动作返回明确的错误（HTTP 501 / TCP `FUNCTION ER NotImplemented: …`），Companion 的 Log 里能看到；完全不认识的名字是 UnknownFunction。
@@ -49,7 +49,7 @@ Connections 加 "vMix" 类型的连接，Target host = Switcher 所在机器，T
 
 - HTTP：`GET /api/?Function=<名字>&Input=<n>&Duration=<ms>&Value=<v>`；`GET /api` 返回 XML 状态文档。
 - TCP（8099）：`FUNCTION` / `TALLY` / `XML` / `ACTS` / `SUBSCRIBE TALLY` / `SUBSCRIBE ACTS` / `PING` / `VERSION` / `QUIT`；`XMLTEXT` 未实现。
-- XML `<version>` 报的是 Switcher 自己的版本，`<edition>` 是 "Switcher"，不冒充对方。
+- XML `<version>` 报的是 PlusMix 自己的版本，`<edition>` 是 "Switcher"（代码名，包内默认值），不冒充对方。
 
 函数级别的完整映射表、XML 节点、ACTS 事件、错误码和 C5 的测法在 [docs/integrations/vmix-compat.md](../integrations/vmix-compat.md)；
 真 Companion 的六项验收（Cut / Fade / Overlay / Record / Stream / Tally）在 [docs/integrations/companion.md §1](../integrations/companion.md#1-用兼容层c5)。

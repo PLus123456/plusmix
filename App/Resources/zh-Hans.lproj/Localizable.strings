@@ -1,4 +1,4 @@
-/* Switcher 界面文案（W3-E 本地化骨架）。键是稳定标识；两种语言的键集合必须相同（LocalizationTests）。 */
+/* PlusMix（代码名 Switcher）界面文案（W3-E 本地化骨架；产品名 PlusMix 是 W4-D 改的，文案里不再出现代码名）。键是稳定标识；两种语言的键集合必须相同（LocalizationTests）。 */
 
 "addInput.add" = "添加";
 "addInput.audio.detail" = "%@：%d 个输入声道，%@，%@";
@@ -148,7 +148,7 @@
 "aux.external.fallbackToMain" = "显示器 %u 不在，暂用主显示器";
 "aux.external.showing" = "显示中（显示器 %u）";
 "aux.external.waitingForDisplay" = "等待显示器 %u 接上";
-"aux.external.windowTitle" = "Switcher 外部输出";
+"aux.external.windowTitle" = "PlusMix 外部输出";
 "aux.rawPictureNote" = "Aux = 原始画面（抠像 / 裁切 / 变换不生效）";
 "aux.virtualCamera.disabled" = "未启用";
 "aux.virtualCamera.idle" = "未启动";
@@ -161,7 +161,7 @@
 "bottom.externalTip" = "外部显示：每块屏 × 来源";
 "bottom.multiview" = "多画面";
 "bottom.multiviewTip" = "多画面独立窗口";
-"bottom.noRecordOutputTip" = "节目里没有录制输出：点一下会加一个默认的（~/Movies/Switcher）";
+"bottom.noRecordOutputTip" = "节目里没有录制输出：点一下会加一个默认的（~/Movies/PlusMix）";
 "bottom.noStreamOutputTip" = "节目里没有推流目的地：在 输出 › 推流设置… 里添加";
 "bottom.notice" = "提示";
 "bottom.overlay" = "叠加…";
@@ -349,7 +349,7 @@
 "inputSettings.windowTitle" = "输入 %d 设置 — %@";
 "key.return" = "回车";
 "key.space" = "空格";
-"menu.about" = "关于 Switcher";
+"menu.about" = "关于 PlusMix";
 "menu.edit" = "编辑";
 "menu.edit.copy" = "复制";
 "menu.edit.cut" = "剪切";
@@ -357,7 +357,7 @@
 "menu.edit.redo" = "重做";
 "menu.edit.selectAll" = "全选";
 "menu.edit.undo" = "撤销";
-"menu.hide" = "隐藏 Switcher";
+"menu.hide" = "隐藏 PlusMix";
 "menu.input" = "输入";
 "menu.input.add" = "添加输入…";
 "menu.input.settings" = "输入设置…";
@@ -377,7 +377,7 @@
 "menu.output.virtualCamera.toggle" = "启用 / 停用虚拟摄像头输出";
 "menu.output.virtualCamera.uninstall" = "卸载扩展";
 "menu.preferences" = "偏好设置…";
-"menu.quit" = "退出 Switcher";
+"menu.quit" = "退出 PlusMix";
 "menu.show" = "节目";
 "menu.show.clearRecent" = "清除列表";
 "menu.show.new" = "新建";
@@ -738,8 +738,8 @@
 "diagnostics.alert.includeAll" = "包含崩溃诊断与日志";
 "diagnostics.alert.minimal" = "只导出设置与统计";
 "diagnostics.alert.cancel" = "取消";
-"diagnostics.save.name" = "Switcher-诊断-%@.zip";
+"diagnostics.save.name" = "PlusMix-诊断-%@.zip";
 "diagnostics.done.title" = "诊断包已导出";
 "diagnostics.done.text" = "已写到 %@。报问题时把这个文件附上；发出前可以自己打开检查。";
 "diagnostics.failed.title" = "导出诊断包失败";
-"diagnostics.readme" = "Switcher 诊断包\n\n里面有什么：\n- system.txt        程序版本、签名、机型、macOS 版本、GPU、显示器、当前节目格式与输入 / 输出列表\n- settings.txt      偏好设置（API token 只写“已设置 / 未设置”）\n- stats-latest.jsonl 导出时最近一秒的统计，字段与 stats.jsonl 同一套\n- stats.jsonl       启动时带 --stats 时正在写的整份统计（没有就没这个文件）\n- show.switcher.json 当前节目文件，推流密钥与地址里的口令已换成 <redacted>\n- config/           快捷键表、MIDI 映射\n- crashes/          MetricKit 崩溃 / 卡死诊断与系统崩溃报告（只在你选“包含崩溃诊断与日志”时有内容）\n- log.txt           最近一段本程序与虚拟摄像头扩展的系统日志（同上）\n\n发出前可以自己打开看一遍。报问题时把整个 zip 附上。\n";
+"diagnostics.readme" = "PlusMix 诊断包\n\n里面有什么：\n- system.txt        程序版本、签名、机型、macOS 版本、GPU、显示器、当前节目格式与输入 / 输出列表\n- settings.txt      偏好设置（API token 只写“已设置 / 未设置”）\n- stats-latest.jsonl 导出时最近一秒的统计，字段与 stats.jsonl 同一套\n- stats.jsonl       启动时带 --stats 时正在写的整份统计（没有就没这个文件）\n- show.switcher.json 当前节目文件，推流密钥与地址里的口令已换成 <redacted>\n- config/           快捷键表、MIDI 映射\n- crashes/          MetricKit 崩溃 / 卡死诊断与系统崩溃报告（只在你选“包含崩溃诊断与日志”时有内容）\n- log.txt           最近一段本程序与虚拟摄像头扩展的系统日志（同上）\n\n发出前可以自己打开看一遍。报问题时把整个 zip 附上。\n";

@@ -2,7 +2,7 @@
   "name": "switcher-streamdeck-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "Switcher 导播台的 Stream Deck 插件（官方 SDK）：按钮 = 命令，颜色 = tally",
+  "description": "PlusMix 导播台的 Stream Deck 插件（官方 SDK；包名与 UUID 用代码名 switcher）：按钮 = 命令，颜色 = tally",
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {

@@ -1,6 +1,6 @@
 # 本地 API
 
-Switcher 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、MIDI 之外的一切外部控制都对着它写（[设计方案 §9.2](../spec/导播台设计方案.md)）。
+PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、MIDI 之外的一切外部控制都对着它写（[设计方案 §9.2](../spec/导播台设计方案.md)）。
 它和界面、快捷键发的是**同一套命令**，读的是**同一份状态和统计**，所以任何一处改了状态，其他地方立刻一致。
 
 | 文档 | 内容 |
@@ -95,4 +95,4 @@ Switcher 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、
 
 ## 6. 版本
 
-`hello.version` / `state.version` = Switcher 版本（0.1.0）。API 路径带 `v1`；字段只加不删，加字段不升版本号，客户端按键名读、忽略不认识的键。
+`hello.version` / `state.version` = PlusMix 版本（0.1.0）。API 路径带 `v1`；字段只加不删，加字段不升版本号，客户端按键名读、忽略不认识的键。

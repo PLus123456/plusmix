@@ -7,7 +7,8 @@
 #                  [--feed-url URL] [--public-key BASE64] [--ndi-sdk DIR] [--verbose]
 # 环境变量（参数优先）：DEVELOPMENT_TEAM、CODESIGN_IDENTITY、SPARKLE_FEED_URL、SPARKLE_PUBLIC_ED_KEY、NDI_SDK_DIR、公证凭据见 notarize.sh。
 # 模式：有 Team ID + 钥匙串里有该 Team 的 "Developer ID Application" 身份 → Developer ID；否则 ad-hoc（公证标 BLOCKED-账号，其余步骤照走）。
-# 产物：<out>/<版本>/{Switcher.xcarchive, Switcher.app, Switcher-<版本>.dmg(.sha256), verify.json, release-report.md, logs/}
+# 产物：<out>/<版本>/{PlusMix.xcarchive, PlusMix.app, PlusMix-<版本>.dmg(.sha256), verify.json, release-report.md, logs/}
+#       产物名 = project.yml 里 App target 的 PRODUCT_NAME（W4-D 改名后是 PlusMix；scheme / 工程仍叫代码名 Switcher），可执行名从包的 CFBundleExecutable 读。
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 repo=$PWD
@@ -41,6 +42,9 @@ step "预检"
 command -v xcodebuild >/dev/null || die "没有 xcodebuild"
 ver=$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\{0,1\}\([0-9][0-9A-Za-z.-]*\)"\{0,1\}.*/\1/p' project.yml | head -1)
 [ -n "$ver" ] || die "读不到 project.yml 的 MARKETING_VERSION"
+# App target 的 PRODUCT_NAME（第一个 PRODUCT_NAME；扩展的在后面、等于它的 bundle id）→ .app / .xcarchive / DMG 的名字
+product=$(sed -n 's/^[[:space:]]*PRODUCT_NAME:[[:space:]]*"\{0,1\}\([A-Za-z0-9][A-Za-z0-9._-]*\)"\{0,1\}.*/\1/p' project.yml | head -1)
+[ -n "$product" ] || die "读不到 project.yml 的 PRODUCT_NAME（App target）"
 identities=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" || true)
 if [ "$mode" = auto ]; then
   if [ -n "$team" ] && printf '%s' "$identities" | grep -q "($team)"; then mode=team; else
@@ -89,18 +93,18 @@ $S/pin-deps.sh check >/dev/null || die "make gen 之后工作区 Package.resolve
 
 # ---- 3. archive ----
 step "xcodebuild archive（Release, arm64）"
-archive="$dir/Switcher.xcarchive"
+archive="$dir/$product.xcarchive"
 xcb=(xcodebuild archive -project Switcher.xcodeproj -scheme Switcher -configuration Release -destination "generic/platform=macOS"
      -archivePath "$archive" -derivedDataPath .build/DerivedData -onlyUsePackageVersionsFromResolvedFile
      ARCHS=arm64 ONLY_ACTIVE_ARCH=NO SPARKLE_FEED_URL="$feed" SPARKLE_PUBLIC_ED_KEY="$pubkey")
 [ "$mode" = team ] && xcb+=(-allowProvisioningUpdates DEVELOPMENT_TEAM="$team")
 run_logged archive "${xcb[@]}" || { tail -40 "$dir/logs/archive.log"; die "xcodebuild archive 失败（$dir/logs/archive.log）"; }
-[ -d "$archive/Products/Applications/Switcher.app" ] || die "归档里没有 Switcher.app"
+[ -d "$archive/Products/Applications/$product.app" ] || die "归档里没有 $product.app（project.yml 的 PRODUCT_NAME 与归档产物对不上：$(ls "$archive/Products/Applications" 2>/dev/null | tr '\n' ' ')）"
 row "xcodebuild archive" "通过" "$archive（$(elapsed)）"
 
 # ---- 4. 导出 ----
 step "导出"
-app="$dir/Switcher.app"
+app="$dir/$product.app"
 if [ "$mode" = team ]; then
   plist="$dir/logs/exportOptions.plist"
   cat > "$plist" <<PL
@@ -115,13 +119,14 @@ if [ "$mode" = team ]; then
 PL
   run_logged export xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$plist" -exportPath "$dir/export" -allowProvisioningUpdates \
     || { tail -40 "$dir/logs/export.log"; die "xcodebuild -exportArchive 失败（$dir/logs/export.log）"; }
-  ditto "$dir/export/Switcher.app" "$app"
+  ditto "$dir/export/$product.app" "$app"
   row "导出" "通过" "developer-id（自动签名，含描述文件）"
 else
-  ditto "$archive/Products/Applications/Switcher.app" "$app"
+  ditto "$archive/Products/Applications/$product.app" "$app"
   row "导出" "通过" "ad-hoc：直接拷 xcarchive 里的 App"
 fi
-bin="$app/Contents/MacOS/Switcher"
+bin="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+[ -f "$bin" ] || die "包里没有可执行：$bin"
 
 # ---- 5. NDI 运行库 + 许可证 ----
 step "随包的第三方运行库与许可证"
@@ -185,7 +190,7 @@ else row "公证 App" "BLOCKED-账号" "没有 Developer ID / Apple Developer Pr
 # ---- 9. DMG ----
 if [ "$make_dmg" = 1 ]; then
   step "DMG"
-  dmg="$dir/Switcher-$ver.dmg"
+  dmg="$dir/$product-$ver.dmg"
   if [ "$mode" = team ]; then $S/dmg.sh "$app" --out "$dmg" --identity "$identity" || die "DMG 失败"; else $S/dmg.sh "$app" --out "$dmg" || die "DMG 失败"; fi
   row "DMG" "通过" "$(basename "$dmg")（$(du -h "$dmg" | cut -f1 | tr -d ' ')，sha256 见同名 .sha256）"
   if [ "$notarized" = 1 ]; then
@@ -204,12 +209,12 @@ fi
 # ---- 10. 报告 ----
 step "报告"
 {
-  echo "# 发布归档报告：Switcher $ver"
+  echo "# 发布归档报告：$product $ver"
   echo
   echo "- 时间：$(date '+%Y-%m-%d %H:%M:%S')；用时 $(elapsed)；机器：$(sysctl -n hw.model 2>/dev/null) / macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))；Xcode $(xcodebuild -version | head -1 | sed 's/Xcode //')"
   echo "- 提交：$(git rev-parse --short HEAD 2>/dev/null)$( [ -n "$(git status --porcelain 2>/dev/null)" ] && echo '（工作树有未提交改动）')；分支 $(git symbolic-ref --short -q HEAD 2>/dev/null)"
   echo "- 模式：$( [ "$mode" = team ] && echo "Developer ID（Team $team）" || echo 'ad-hoc（BLOCKED-账号）')；Sparkle feed：${feed:-<空：不带更新>}；公钥：$( [ -n "$pubkey" ] && echo 已注入 || echo '<空>')"
-  echo "- 产物：\`$dir/\`（Switcher.xcarchive、Switcher.app、$( [ "$make_dmg" = 1 ] && echo "Switcher-$ver.dmg + .sha256、" )verify.json、logs/）"
+  echo "- 产物：\`$dir/\`（$product.xcarchive、$product.app、$( [ "$make_dmg" = 1 ] && echo "$product-$ver.dmg + .sha256、" )verify.json、logs/）"
   echo
   echo "| 步骤 | 结果 | 说明 |"; echo "|---|---|---|"
   printf '%s\n' "${rows[@]}"

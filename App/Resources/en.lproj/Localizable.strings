@@ -1,4 +1,4 @@
-/* Switcher 界面文案（W3-E 本地化骨架）。键是稳定标识；两种语言的键集合必须相同（LocalizationTests）。 */
+/* PlusMix（代码名 Switcher）界面文案（W3-E 本地化骨架；产品名 PlusMix 是 W4-D 改的，文案里不再出现代码名）。键是稳定标识；两种语言的键集合必须相同（LocalizationTests）。 */
 
 "addInput.add" = "Add";
 "addInput.audio.detail" = "%@: %d input channels, %@, %@";
@@ -148,7 +148,7 @@
 "aux.external.fallbackToMain" = "Display %u is missing, using the main display";
 "aux.external.showing" = "Showing (display %u)";
 "aux.external.waitingForDisplay" = "Waiting for display %u";
-"aux.external.windowTitle" = "Switcher External Output";
+"aux.external.windowTitle" = "PlusMix External Output";
 "aux.rawPictureNote" = "Aux = raw input picture (keying / crop / transform not applied)";
 "aux.virtualCamera.disabled" = "not enabled";
 "aux.virtualCamera.idle" = "not started";
@@ -161,7 +161,7 @@
 "bottom.externalTip" = "External display: screen × source";
 "bottom.multiview" = "Multiview";
 "bottom.multiviewTip" = "Multiview window";
-"bottom.noRecordOutputTip" = "No record output in this show: clicking adds a default one (~/Movies/Switcher)";
+"bottom.noRecordOutputTip" = "No record output in this show: clicking adds a default one (~/Movies/PlusMix)";
 "bottom.noStreamOutputTip" = "No stream destination in this show: add one in Output › Streaming Settings…";
 "bottom.notice" = "Notice";
 "bottom.overlay" = "Overlay…";
@@ -349,7 +349,7 @@
 "inputSettings.windowTitle" = "Input %d Settings — %@";
 "key.return" = "Return";
 "key.space" = "Space";
-"menu.about" = "About Switcher";
+"menu.about" = "About PlusMix";
 "menu.edit" = "Edit";
 "menu.edit.copy" = "Copy";
 "menu.edit.cut" = "Cut";
@@ -357,7 +357,7 @@
 "menu.edit.redo" = "Redo";
 "menu.edit.selectAll" = "Select All";
 "menu.edit.undo" = "Undo";
-"menu.hide" = "Hide Switcher";
+"menu.hide" = "Hide PlusMix";
 "menu.input" = "Input";
 "menu.input.add" = "Add Input…";
 "menu.input.settings" = "Input Settings…";
@@ -377,7 +377,7 @@
 "menu.output.virtualCamera.toggle" = "Enable / Disable Virtual Camera Output";
 "menu.output.virtualCamera.uninstall" = "Uninstall Extension";
 "menu.preferences" = "Preferences…";
-"menu.quit" = "Quit Switcher";
+"menu.quit" = "Quit PlusMix";
 "menu.show" = "Show";
 "menu.show.clearRecent" = "Clear Menu";
 "menu.show.new" = "New";
@@ -738,8 +738,8 @@
 "diagnostics.alert.includeAll" = "Include crashes and log";
 "diagnostics.alert.minimal" = "Settings and stats only";
 "diagnostics.alert.cancel" = "Cancel";
-"diagnostics.save.name" = "Switcher-diagnostics-%@.zip";
+"diagnostics.save.name" = "PlusMix-diagnostics-%@.zip";
 "diagnostics.done.title" = "Diagnostics exported";
 "diagnostics.done.text" = "Written to %@. Attach this file when reporting a problem; you can inspect it before sending.";
 "diagnostics.failed.title" = "Could not export diagnostics";
-"diagnostics.readme" = "Switcher diagnostics bundle\n\nContents:\n- system.txt         app version, signing, machine model, macOS version, GPU, displays, current program format and input / output list\n- settings.txt       preferences (the API token is only reported as set / not set)\n- stats-latest.jsonl the latest stats line at export time, same fields as stats.jsonl\n- stats.jsonl        the full stats log being written when the app was launched with --stats (absent otherwise)\n- show.switcher.json the current show file; stream keys and passphrases in URLs replaced with <redacted>\n- config/            hotkey table, MIDI map\n- crashes/           MetricKit crash / hang diagnostics and system crash reports (only when you chose to include crashes and log)\n- log.txt            recent system log of this app and the virtual camera extension (same)\n\nFeel free to inspect everything before sending. Attach the whole zip when reporting a problem.\n";
+"diagnostics.readme" = "PlusMix diagnostics bundle\n\nContents:\n- system.txt         app version, signing, machine model, macOS version, GPU, displays, current program format and input / output list\n- settings.txt       preferences (the API token is only reported as set / not set)\n- stats-latest.jsonl the latest stats line at export time, same fields as stats.jsonl\n- stats.jsonl        the full stats log being written when the app was launched with --stats (absent otherwise)\n- show.switcher.json the current show file; stream keys and passphrases in URLs replaced with <redacted>\n- config/            hotkey table, MIDI map\n- crashes/           MetricKit crash / hang diagnostics and system crash reports (only when you chose to include crashes and log)\n- log.txt            recent system log of this app and the virtual camera extension (same)\n\nFeel free to inspect everything before sending. Attach the whole zip when reporting a problem.\n";

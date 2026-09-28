@@ -1,6 +1,6 @@
-# Switcher 的 Stream Deck 插件
+# PlusMix 的 Stream Deck 插件
 
-对着 Switcher 的本地 API（`docs/api.md`：WS `/api/v1/events` 收整快照 + tally，连接上发命令）做的官方 SDK 插件：
+对着 PlusMix（代码名 Switcher：插件 UUID / 目录名 / npm 包名仍用它）的本地 API（`docs/api.md`：WS `/api/v1/events` 收整快照 + tally，连接上发命令）做的官方 SDK 插件：
 **按钮 = 命令，按钮颜色 = tally**（PGM 红、PVW 绿，转场中红底绿边）。用法与安装见 [docs/integrations/stream-deck.md](../../docs/integrations/stream-deck.md)。
 
 ```

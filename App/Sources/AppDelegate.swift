@@ -1,6 +1,6 @@
 // Switcher App —— AppKit 主程序（W2-B：显示路径 + 主界面骨架；W2-B2：接上输入 / 命令 / API / 音频 / 录制 / 推流 / Stats；W3-E：设置面板与窗口）。
 // 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：自动保存 → 停引擎。
-// 菜单：Switcher（偏好设置）、节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加 / 设置）、切换（Cut / Fade / FTB / 快捷键编辑器 / MIDI 映射）、
+// 菜单：App 菜单（标题是产品名 PlusMix，W4-D：关于 / 检查更新 / 偏好设置）、节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加 / 设置）、切换（Cut / Fade / FTB / 快捷键编辑器 / MIDI 映射）、
 // 输出（W3-E：录制 / ISO / 推流 / 外部输出 / NDI / 虚拟摄像头设置页；W3-C：外部输出子菜单、多画面窗口、虚拟摄像头的安装 / 卸载 / 启用）、
 // 窗口（调音台 / 多画面）、帮助（W4-B：导出诊断包 / 打开诊断文件夹；App 菜单加"检查更新…"）。文案全部走 L10n（W3-C 那几项 W3-E2 补齐；包里返回中文的状态在 App 侧查表，OutputStatusText）。启动参数与设置见 AppSettings。
 import AppKit
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appMenu.addItem(withTitle: L("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L("menu.quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        main.addItem(submenu(appMenu, title: "Switcher"))
+        main.addItem(submenu(appMenu, title: ProductName.display))   // 产品名 PlusMix（W4-D），不是代码名
 
         let show = NSMenu(title: L("menu.show"))
         show.addItem(withTitle: L("menu.show.new"), action: #selector(newShow), keyEquivalent: "n")
