@@ -30,7 +30,7 @@
 | 检查 | 结果 |
 |---|---|
 | `python3 docs/tools/check-links.py docs/ui-study`（make lint 的 check-links） | 通过：23 个 Markdown 的相对链接与锚点都能解析 |
-| `make lint BRANCH=claude/vmix-28-guide-menu-ui-c83cd1` | 见下方提交后补记 |
+| `make lint BRANCH=claude/vmix-28-guide-menu-ui-c83cd1`（提交后跑） | 全部通过：禁词、版本号 0.1.0 一致、Package.swift 约束、依赖方向（8 个包）、归属（56 个改动文件都在允许范围内）、check-links（全仓 143 个 Markdown）、check-rt-symbols |
 | 目视检查实测：转场列可见左沿 | 改前 6 种（8 / 14 / 23–28 / 91 / 103）；原型全部 8…141 |
 | 目视检查实测：转场列最小高 | 改前 483 pt，大于 1100×700 时能分到的 476；原型 409 |
 | 目视检查实测："外部输出"菜单伸出窗口下沿 | 改前 25 pt（4 种窗口位置），子菜单 228 pt；原型朝上且拍平后在窗口内 |
