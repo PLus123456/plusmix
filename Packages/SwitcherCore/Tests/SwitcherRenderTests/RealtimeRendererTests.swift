@@ -115,6 +115,93 @@ final class RealtimeRendererTests: XCTestCase {
         XCTAssertEqual(engine.skipped.load(ordering: .relaxed), 0)
     }
 
+    // MARK: W1-B3 启动预热 / 完成线程实时策略 / 跳拍归因
+
+    /// W1-B3 交付 1（渲染器侧）：prepare 里做一次首帧空渲染，命令队列的第一次提交、管线 / 私有纹理的第一次用都在起时钟之前付掉。
+    /// 量的是时钟起来后第一帧的 gpuStart − 提交：修前（没有预热）headless 探针 12.9 ms、本用例 3 次 4.4–5.7 ms（稳态 0.9）；修后应与稳态同量级。
+    func testW1B3_prepare_warmRender_firstRealFrameGpuStartLatencyUnder4ms() throws {
+        let renderer = try MetalRenderer()
+        try renderer.prepare(format: .hd1080p60, maxInputs: 9)
+        let engine = FakeEngine(renderer: renderer, format: .hd1080p60, inputs: FakeInputs.nv12(count: 8), state: LoadStates.eightInputsFourOverlays())
+        engine.run(seconds: 1)
+        renderer.shutdown()
+        let samples = engine.sink.samples
+        XCTAssertGreaterThan(samples.count, 30)
+        let first = (samples[0].gpuStart - samples[0].submitTime).milliseconds
+        let second = (samples[1].gpuStart - samples[1].submitTime).milliseconds
+        let steady = samples.dropFirst(10).map { ($0.gpuStart - $0.submitTime).milliseconds }
+        print(String(format: "W1B3 首帧 gpuStart − 提交：第 0 帧 %.2f ms，第 1 帧 %.2f ms，稳态中位 %.2f ms，最大 %.2f ms", first, second, steady.sorted()[steady.count / 2], steady.max() ?? 0))
+        XCTAssertLessThanOrEqual(first, 4, "预热后时钟起来的第一帧不该再付队列首次提交的代价")
+        XCTAssertEqual(engine.skipped.load(ordering: .relaxed), 0)
+        XCTAssertEqual(renderer.warmupFrames, 1, "prepare 里应做过一次首帧空渲染")
+        print(String(format: "W1B3 预热帧自己的 gpuStart − 提交：%.2f ms", renderer.warmupGpuStartLatency.milliseconds))
+    }
+
+    /// W1-B3 交付 2：完成线程挂 time-constraint 实时策略，线程策略读回来是实时（thread_policy_get 的 get_default = 0、period = 拍长）。
+    /// 修前完成线程是普通 Thread（QoS user-interactive），读回是默认策略（get_default = 1）。
+    func testW1B3_completionThread_timeConstraintPolicyReadsBackRealtime() throws {
+        let renderer = try MetalRenderer()
+        try renderer.prepare(format: .hd1080p60, maxInputs: 9)
+        defer { renderer.shutdown() }
+        XCTAssertTrue(renderer.completionThreadIsRealtime)
+        let port = renderer.completionThreadPort
+        XCTAssertNotEqual(port, 0)
+        let readback = try XCTUnwrap(ThreadPolicyProbe.timeConstraint(of: port))
+        let period = UInt32(clamping: TickClockSpec(t0: .zero, frameRate: FrameRate.fps60).duration(ofTicks: 1).ticks)
+        print("W1B3 完成线程策略读回：default \(readback.isDefault) period \(readback.period) computation \(readback.computation) constraint \(readback.constraint)（拍长 \(period) tick）")
+        XCTAssertFalse(readback.isDefault, "完成线程应是 time-constraint 实时线程")
+        XCTAssertEqual(readback.period, period, "period 应等于拍长")
+        XCTAssertEqual(readback.computation, period / 4, "与节目时钟线程同一套参数（申报 1/8 拍时内核读回 1/4 拍：有下限）")
+        XCTAssertEqual(readback.constraint, period / 2)
+        // 对照：本线程（测试线程）读回来是默认
+        let mine = try XCTUnwrap(ThreadPolicyProbe.timeConstraint(of: pthread_mach_thread_np(pthread_self())))
+        XCTAssertTrue(mine.isDefault)
+    }
+
+    /// W1-B3 交付 2：跳拍归因规则——跳拍那一刻最旧在途帧的 gpuEnd ≤ 跳拍时刻是完成线程晚放行，否则是 GPU 侧晚。
+    func testW1B3_skipAttribution_classifiesByGpuEndVsSkipTime() {
+        let t = HostTime(ticks: 1_000_000)
+        XCTAssertEqual(MetalRenderer.classifySkip(skipTime: t, oldestGpuEnd: HostTime(ticks: 999_999)), .completionLate)
+        XCTAssertEqual(MetalRenderer.classifySkip(skipTime: t, oldestGpuEnd: t), .completionLate)
+        XCTAssertEqual(MetalRenderer.classifySkip(skipTime: t, oldestGpuEnd: HostTime(ticks: 1_000_001)), .gpuLate)
+    }
+
+    /// W1-B3 交付 2：T3 的压力场景（4K + 16 路、每 0.5 ms 调一次）下每次 .skipped 都被归因，两类之和 = skipped。
+    /// 两类的比例不断言：这里每 0.5 ms 就问一次，"GPU 已完成、完成线程还没放行"的窗口（醒来 0.1–0.2 ms + 放行）占了相当比例
+    /// （单跑 11 : 2，整包跑时 23 : 46）；真引擎 60 Hz 下这个窗口只有一拍的 1%，归 completionLate 的才真是完成线程晚。
+    func testW1B3_skipAttribution_underGPUPressure_sumEqualsSkipped() throws {
+        var options = MetalRendererOptions()
+        options.maxInflight = 2
+        let renderer = try MetalRenderer(options: options)
+        try renderer.prepare(format: .uhd2160p30, maxInputs: 17)
+        let inputs = FakeInputs.nv12(count: 16, width: 1920, height: 1080, poolDepth: 2)
+        var state = LoadStates.eightInputsFourOverlays()
+        state.inputs = ReferenceStates.inputs(count: 16)
+        state.format = .uhd2160p30
+        let table = RenderInputTable(capacity: 17)
+        for i in inputs {
+            table[inputNumber: i.number] = Frame(pixelBuffer: i.buffers[0], pts: .zero, duration: .zero, color: .bt709Limited, inputNumber: i.number, sequence: 0, ingressTime: .zero)
+        }
+        let snap = MixerSnapshot(state: state, sequence: 1, tick: .zero)
+        let sink = CollectingSink()
+        renderer.sink = sink
+        var submitted = 0, skipped = 0
+        for i in 0..<1000 {
+            if renderer.render(tick: Tick(Int64(i)), at: HostClock.now(), snapshot: snap, inputs: table) == .submitted { submitted += 1 } else { skipped += 1 }
+            usleep(500)
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        let attribution = renderer.skipAttribution
+        let wakeLag = renderer.takeCompletionWakeLagMax().milliseconds
+        let oldestAge = renderer.takeSkipOldestAgeMax().milliseconds
+        renderer.shutdown()
+        print("W1B3 跳拍归因：提交 \(submitted)，跳过 \(skipped)，GPU 侧晚 \(attribution.gpuLate)，完成线程晚 \(attribution.completionLate)；完成线程放行延迟最大 \(String(format: "%.3f", wakeLag)) ms，跳拍时最旧在途帧年龄最大 \(String(format: "%.2f", oldestAge)) ms")
+        XCTAssertGreaterThan(skipped, 0, "全速调用时应该出现 .skipped")
+        XCTAssertEqual(attribution.gpuLate + attribution.completionLate, UInt64(skipped), "每次跳拍都要被归因")
+        XCTAssertGreaterThan(attribution.gpuLate, 0, "GPU 压不住的场景至少有一部分归 GPU 侧")
+        XCTAssertEqual(sink.count, submitted)
+    }
+
     /// T3：GPU 压不住时 render 返回 .skipped 而不是等；在途永远 ≤ 2。用 4K + 16 路 + 4 overlay + 超高频调用制造压力。
     func testT3_cpuNeverLeadsGPUByMoreThanTwoFrames() throws {
         var options = MetalRendererOptions()

@@ -261,6 +261,58 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(engine.counters.snapshotStale, 0)
     }
 
+    // MARK: W1-B3 启动：先预热再定 t0，头 2 秒不跳拍、不丢帧
+
+    /// W1-B3 交付 1（reports/issues/W2B2-w1-core-startup-stall-pacing-drops.md、G4 §6.5）：
+    /// 真 App 打开节目后第一秒 jitter 467 ms / missed_render 28 / 每路 drop 12——探针量出来不是"停顿"，是节目时钟起在 t0 之后 477 ms
+    /// （App 定 t0 = now + 300 ms 之后还做了 686 ms 的 control.start；引擎自己的 prepare 只有 2 ms）。这里按 App 的顺序建模：
+    /// 渲染器 prepare 要 600 ms（模拟着色器缓存未命中 / 纹理池分配），组装方给 300 ms 提前量，两路 30 fps 源按自己的时钟从 t0 起推帧。
+    /// 断言头 2 秒 missed_render ≤ 2、各路 drop = 0、时钟起晚 ≤ 20 ms。
+    /// 修前（没有 warmUp，prepare 在 start 里、t0 已定）：起晚 316 ms、missed_render 18、每路 drop 9、jitter_ms 316（红）；
+    /// 修后（先 warmUp 再定 t0）：起晚 0、missed_render 0、drop 0。
+    func testW1B3_startup_firstTwoSeconds_missedRenderAtMostTwo() async throws {
+        let renderer = FakeRenderer(gpuDelay: HostDuration(milliseconds: 2), prepareDelay: HostDuration(milliseconds: 600))
+        let engine = makeEngine(renderer: renderer)
+        let slots = [LockFreeFrameSlot(capacity: 3), LockFreeFrameSlot(capacity: 3)]
+        engine.registerInput(number: 1, slot: slots[0])
+        engine.registerInput(number: 2, slot: slots[1])
+        // 组装方：先预热（慢活都在这里）→ 定 t0（300 ms 提前量）→ 起输入（按自己的时钟推帧，不管引擎起没起）→ 起引擎
+        try await engine.warmUp()
+        let t0 = HostClock.now() + HostDuration(milliseconds: 300)
+        let running = RunFlag()
+        let inputSpec = TickClockSpec(t0: t0 - HostDuration(milliseconds: 8), frameRate: .fps30)
+        let producers = try (0..<2).map { i -> NativeThread in
+            let slot = slots[i]
+            let t = NativeThread(config: NativeThreadConfig(name: "producer\(i)", qos: QOS_CLASS_USER_INITIATED)) {
+                var k: Int64 = 0
+                while running.value.load(ordering: .acquiring) {
+                    let pts = inputSpec.time(of: Tick(k))
+                    mach_wait_until((pts + HostDuration(milliseconds: 1)).ticks)
+                    if !running.value.load(ordering: .acquiring) { break }
+                    slot.push(TestFrames.frame(input: i + 1, sequence: UInt64(k), pts: pts, ingress: HostClock.now()))
+                    k += 1
+                }
+            }
+            try t.start()
+            return t
+        }
+        try await engine.start(t0: t0, lastTick: Tick(179))   // 3 s
+        let lag = engine.clockStartLag
+        XCTAssertTrue(waitUntil(timeout: 5) { engine.counters.ticksDispatched + engine.counters.missedRender >= 120 })
+        let twoSeconds = engine.makeStats()
+        engine.clock!.join()
+        running.stop()
+        producers.forEach { $0.join() }
+        renderer.waitForCompletion()
+        await engine.stop()
+        let drops = twoSeconds.perInput.values.map(\.drop)
+        print("W1B3 startup：时钟起晚 \(String(format: "%.1f", lag.milliseconds)) ms，头 2 秒 missed_render \(twoSeconds.missedRender)，各路 drop \(drops)，jitter_ms \(String(format: "%.1f", twoSeconds.jitterMs))")
+        XCTAssertLessThanOrEqual(twoSeconds.missedRender, 2, "头 2 秒 missed_render ≤ 2")
+        XCTAssertEqual(drops, [0, 0], "各路 drop 不因启动停顿而计")
+        XCTAssertLessThanOrEqual(lag.milliseconds, 20, "时钟应在 t0 之前起来（prepare 不该吃掉提前量）")
+        XCTAssertEqual(renderer.prepareCalls.load(ordering: .acquiring), 1)
+    }
+
     // MARK: L1 统计（提案 005 引擎侧）
 
     /// 生产者开关（Atomic 不可拷贝，装进类里给闭包捕获）。

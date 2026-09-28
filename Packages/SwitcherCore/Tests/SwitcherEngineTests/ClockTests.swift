@@ -66,6 +66,36 @@ final class ClockTests: XCTestCase {
         XCTAssertLessThanOrEqual(p99, 4.0, "必须档：p99 ≤ 4 ms")
     }
 
+    /// W1-B3 交付 2：渲染线程（= 时钟线程）的调度策略从内核读回来是 time-constraint 实时（get_default = 0、period = 拍长、
+    /// computation / constraint 按选项比例），不只是 thread_policy_set 返回成功。线程在跑的时候读（有界运行的最后一拍之前）。
+    func testW1B3_clockThread_timeConstraintPolicyReadsBackRealtime() throws {
+        final class HoldHandler: ProgramClockHandler {
+            let ticks = Atomic<UInt64>(0)
+            func programClock(_ clock: ProgramClock, tick: Tick, ideal: HostTime, wake: HostTime) { ticks.add(1, ordering: .relaxed) }
+            func programClock(_ clock: ProgramClock, didSkipTicks count: Int, upTo tick: Tick) {}
+        }
+        let spec = TickClockSpec(t0: HostClock.now() + HostDuration(milliseconds: 20), frameRate: .fps60)
+        let clock = ProgramClock(spec: spec)
+        let handler = HoldHandler()
+        try clock.start(handler: handler, firstTick: .zero, lastTick: Tick(119))   // 2 s
+        XCTAssertTrue(waitUntil(timeout: 2) { handler.ticks.load(ordering: .acquiring) >= 10 })
+        XCTAssertTrue(clock.isRealtime)
+        let readback = try XCTUnwrap(clock.readBackTimeConstraint())
+        let expected = clock.timeConstraint
+        print("W1B3 时钟线程策略读回：default \(readback.isDefault) period \(readback.period) computation \(readback.computation) constraint \(readback.constraint)（申报 \(expected.period) / \(expected.computation) / \(expected.constraint)）")
+        XCTAssertFalse(readback.isDefault, "渲染线程应是 time-constraint 实时线程")
+        XCTAssertEqual(readback.period, expected.period)
+        XCTAssertEqual(readback.computation, expected.computation)
+        XCTAssertEqual(readback.constraint, expected.constraint)
+        // 对照：普通线程读回来是默认策略
+        let plain = NativeThread(config: NativeThreadConfig(name: "plain", qos: QOS_CLASS_USER_INTERACTIVE)) { Thread.sleep(forTimeInterval: 0.3) }
+        try plain.start()
+        let plainReadback = try XCTUnwrap(plain.readBackTimeConstraint())
+        XCTAssertTrue(plainReadback.isDefault)
+        plain.join()
+        clock.join()
+    }
+
     /// 假渲染耗时 30 ms（忙到 tickTime + 30 ms）：每个渲染的拍之后恰好跳过 ⌈30 / 16.67⌉ − 1 = 1 拍，
     /// 600 拍里渲染 300、跳过 300，missed_render 精确等于理论值；被渲染的拍恰好是偶数拍。
     func testV2_missedRender_30msRenderer_exactSkipCount() throws {

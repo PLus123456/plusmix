@@ -28,6 +28,9 @@ final class FakeRenderer: Renderer, @unchecked Sendable {
     let gpuDelay: HostDuration
     let busyUntilOffset: HostDuration?
     let skipEvery: Int
+    /// prepare 的耗时（模拟着色器编译 / 纹理池分配等一次性准备；W1-B3 启动用例）。
+    let prepareDelay: HostDuration
+    let prepareCalls = Atomic<UInt64>(0)
     private let queue = SPSCOverwriteRing<Pending>(capacity: 64)
     private let semaphore = DispatchSemaphore(value: 0)
     private let running = Atomic<Bool>(false)
@@ -49,16 +52,20 @@ final class FakeRenderer: Renderer, @unchecked Sendable {
         var submitTime: HostTime
     }
 
-    init(gpuDelay: HostDuration = HostDuration(milliseconds: 2), busyUntilOffset: HostDuration? = nil, skipEvery: Int = 0) {
+    init(gpuDelay: HostDuration = HostDuration(milliseconds: 2), busyUntilOffset: HostDuration? = nil, skipEvery: Int = 0,
+         prepareDelay: HostDuration = .zero) {
         self.gpuDelay = gpuDelay
         self.busyUntilOffset = busyUntilOffset
         self.skipEvery = skipEvery
+        self.prepareDelay = prepareDelay
         input1Sequence = .allocate(capacity: recordCapacity)
         input1Sequence.initialize(repeating: -1, count: recordCapacity)
     }
     deinit { input1Sequence.deallocate() }
 
     func prepare(format: ProgramFormat, maxInputs: Int) throws {
+        prepareCalls.add(1, ordering: .relaxed)
+        if prepareDelay > .zero { mach_wait_until((HostClock.now() + prepareDelay).ticks) }
         var pb: CVPixelBuffer?
         CVPixelBufferCreate(nil, 64, 64, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, nil, &pb)
         programBuffer = pb
