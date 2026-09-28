@@ -366,6 +366,95 @@ final class FileInputTests: XCTestCase {
         XCTAssertLessThan(slope, 0.1, "循环每圈 footprint 涨 \(String(format: "%.3f", slope)) MB（\(first) → \(last)）：解码线程的 AVAssetReader 没被释放")
     }
 
+    // MARK: W2-A4：ProRes 循环点不空拍（问题单 W4A-w2-inputs-file-loop-memory-and-prores-starve §2）
+
+    /// ProRes 422 HQ 这类重片段循环时，旧代码要到视频读到尾那一刻才重开 reader，"建 reader + 解出新一圈第 0 帧"要 30–50 ms
+    /// （探针，reports/w2-inputs-4.md），而视频队列只领先 3 帧（50 ms）——每圈在循环点空一拍（重复上一圈末帧、下一拍跳过第 0 帧），
+    /// 推帧线程还在断供的音频块上自旋（每个循环点晚醒十几万次）。现场写 1 s 的 1080p60 ProRes 422 HQ（噪声底、帧号图案、AAC）循环 20 圈：
+    /// 帧号逐拍 +1 mod 60，ticksStarved / framesRejected / 帧槽 reused 全 0，晚醒不再每秒上千次（< 100 / s）。
+    func testW2A4_prores_loopBoundary_noStarveNoSkip() throws {
+        let url = RepoPaths.output.appendingPathComponent("w2a4-prores422hq-1s.mov")
+        try LoopClipWriter.write(to: url, width: 1920, height: 1080, fps: 60, frames: 60, codec: .proRes422HQ,
+                                 content: .testPattern(background: .noise(level: 128, amplitude: 40, seed: 7)))
+        let timing = makeTiming(.hd1080p60)
+        let slot = LockFreeFrameSlot(capacity: 3)
+        let ring = RecordingAudioRing(channelCount: 2)
+        ring.keepSamplesUpTo = 0
+        let input = try makeInput(timing: timing, slot: slot, endAction: .loop, audioRing: ring, path: url.path)
+        defer { input.stop() }
+        try startAndWaitLive(input)
+        XCTAssertEqual(input.info?.codec, "apch", "片段应是 ProRes 422 HQ：\(String(describing: input.info))")
+        XCTAssertEqual(input.info?.hasAudio, true)
+        let driver = TickDriver(timing: timing)
+        let start = try anchor(of: input)
+        let loops = 20
+        let result = picks(driver, slot: slot, from: start, count: 60 * loops + 30)
+        let fc = input.fileCountersSnapshot
+        let c = input.counters
+        input.stop()   // 先停，帧槽统计才不会被最后一拍之后推进来的帧污染
+        let seconds = Double(result.count) / 60
+        let numbers = result.compactMap(\.number)
+        XCTAssertEqual(numbers.count, result.count, "每拍都该有帧：\(result.filter { $0.number == nil }.prefix(5))")
+        XCTAssertEqual(numbers.first, 0, "播放从第 0 帧起：\(result.prefix(3))")
+        var breaks: [String] = []
+        for i in 1..<numbers.count where numbers[i] != (numbers[i - 1] + 1) % 60 { breaks.append("\(result[i - 1]) → \(result[i])") }
+        XCTAssertTrue(breaks.isEmpty, "循环点跳号 / 重复 \(breaks.count) 处：\(breaks.prefix(6))")
+        XCTAssertGreaterThanOrEqual(fc.loops, UInt64(loops), "应转满 \(loops) 圈：\(fc)")
+        XCTAssertEqual(fc.ticksStarved, 0, "循环点空拍（解码没跟上）：\(fc)")
+        XCTAssertEqual(c.framesRejected, 0, "60 进 60 不该跳帧：\(c)")
+        XCTAssertEqual(slot.stats.reused, 0, "循环点不该靠帧槽重复上一帧：\(slot.stats)")
+        XCTAssertEqual(fc.audioChunksSkipped, 0, "循环点音频不该断供：\(fc)")
+        XCTAssertLessThan(Double(fc.lateWakes), 100 * seconds, "推帧线程晚醒 \(fc.lateWakes) 次 / \(seconds) s（循环点自旋）：\(fc)")
+        print("W2A4 ProRes 循环 \(fc.loops) 圈 / \(String(format: "%.1f", seconds)) s：没跟上 \(fc.ticksStarved) 跳帧 \(c.framesRejected) reused \(slot.stats.reused) 晚醒 \(fc.lateWakes) 音频块写 \(fc.audioChunksWritten) 跳 \(fc.audioChunksSkipped) 帧号断点 \(breaks.count)")
+    }
+
+    // MARK: W2-A4：高速率带音频不饿死（问题单 W2A3-w2-inputs-file-high-rate-audio-starves）
+
+    /// 速率 × 片段 fps / 节目 fps ≥ 4 帧 / 拍且带音轨时，旧代码推帧线程每拍最多 pop 3 帧（队列深度）、解码位置永远落后时间线；
+    /// 下一圈的音频被本圈的视频尾巴挡住（要 videoDone && audioDone 才重开），推帧线程要不到样本就跳块、跳块不 trim，FIFO 满、
+    /// 解码线程停在门口——两边互等（8 s 只转 2–3 圈，晚醒 220 万次）。0.2 s 的 H.264 + AAC 小片段（30 fps × 6 帧）：
+    /// 速率 8（4 帧 / 拍）跑 10 s，圈数 ≥ 预期 400 的 90%、ticksStarved ≤ 3、音频块一块不跳且 host time 连续、晚醒 < 100 / s；对照速率 1 / 2 各 3 s 仍正常。
+    func testW2A4_highRate_withAudio_keepsUp() throws {
+        let url = RepoPaths.output.appendingPathComponent("w2a4-loop-clip-0p2s.mov")
+        try LoopClipWriter.write(to: url, frames: 6)
+        let clipSeconds = 0.2
+        for (rate, seconds) in [(1.0, 3.0), (2.0, 3.0), (8.0, 10.0)] {
+            let timing = makeTiming(.hd1080p60)
+            let slot = LockFreeFrameSlot(capacity: 3)
+            let ring = RecordingAudioRing(channelCount: 2)
+            ring.keepSamplesUpTo = 0
+            let input = try makeInput(timing: timing, slot: slot, endAction: .loop, rate: rate, audioRing: ring, path: url.path)
+            defer { input.stop() }
+            try startAndWaitLive(input)
+            XCTAssertEqual(input.info?.hasAudio, true)
+            let start = try anchor(of: input)
+            let end = timing.time(of: start) + HostDuration(seconds: seconds)
+            while HostClock.now() < end { usleep(5000) }
+            let fc = input.fileCountersSnapshot
+            let c = input.counters
+            input.stop()
+            let expectedLoops = seconds * rate / clipSeconds
+            let blocks = ring.recorded
+            var gaps = 0
+            if let first = blocks.first {
+                for (i, b) in blocks.enumerated() {
+                    let expected = first.hostTime + HostDuration(nanoseconds: Int64(i) * 256 * 1_000_000_000 / 48_000)
+                    if abs(Int64(b.hostTime.ticks) - Int64(expected.ticks)) > 2 { gaps += 1 }
+                }
+            }
+            let tag = "速率 \(rate)"
+            print("W2A4 \(tag)：\(seconds) s 转 \(fc.loops) 圈（预期 \(expectedLoops)）没跟上 \(fc.ticksStarved) 晚醒 \(fc.lateWakes) 跳帧 \(c.framesRejected) 音频块写 \(fc.audioChunksWritten) 跳 \(fc.audioChunksSkipped) 环块 \(blocks.count) 不连续 \(gaps)")
+            XCTAssertEqual(input.state, .noSignal)   // stop 之后
+            XCTAssertGreaterThanOrEqual(Double(fc.loops), expectedLoops * 0.9, "\(tag)：\(seconds) s 只转了 \(fc.loops) 圈（预期 \(expectedLoops)）：\(fc)")
+            XCTAssertLessThanOrEqual(fc.ticksStarved, 3, "\(tag)：解码没跟上 \(fc.ticksStarved) 拍：\(fc)")
+            XCTAssertEqual(fc.audioChunksSkipped, 0, "\(tag)：跳过了 \(fc.audioChunksSkipped) 块音频：\(fc)")
+            XCTAssertLessThan(Double(fc.lateWakes), 100 * seconds, "\(tag)：推帧线程晚醒 \(fc.lateWakes) 次 / \(seconds) s（自旋）：\(fc)")
+            XCTAssertGreaterThanOrEqual(Double(blocks.count), seconds * 48_000 / 256 * 0.9, "\(tag)：\(seconds) s 只写了 \(blocks.count) 块音频")
+            XCTAssertEqual(gaps, 0, "\(tag)：音频块 host time 不连续 \(gaps) 处（跳块 / 重锚）")
+            XCTAssertEqual(c.audioFramesRejected, 0, "\(tag)：\(c)")
+        }
+    }
+
     // MARK: 错误：文件不存在 → error(文案)
 
     func testFile_missingFile_stateIsErrorWithMessage() throws {
