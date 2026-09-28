@@ -2,16 +2,17 @@
 
 模板 docs/release/KNOWN_ISSUES-template.md；每次发布由 G5 更新，发布说明里列出（测试标准 §6 发布门槛第 5 条）。
 每条一行，按严重级排（§6：S0 直播中断类、S1 功能错但节目能继续、S2 有绕过办法、S3 外观文案）。"来源"是问题单（reports/issues/）或报告章节；"计划"是归属会话。
-S0 / S1 不许出现在已发布版本的表里——下面 0.1.0 候选表里还有 S1，所以这个版本**没有发**（reports/G5.md 的判定）。
+S0 / S1 不许出现在已发布版本的表里——0.1.0 候选的 S1（文件输入循环泄漏）2026-09-28 已修、等 8 小时复验；这个版本**还没有发**（reports/G5.md 的判定与阻塞项）。
 
-## 0.1.0 候选（分支 release/0.1，2026-09-28 G5 判定：不发；S1 修完并重跑 8 小时后再判）
+## 0.1.0 候选（分支 release/0.1，2026-09-28 G5 判定：不发；S1 已修，重跑 8 小时通过后再判）
 
 ### 产品缺陷
 
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
-| S1 | 视频文件输入**循环播放**时内存每圈涨约 0.5 MB：30 s 片段循环 8 小时涨 480 MB（长稳 S2 实测 60.8 MB/h，门槛 ≤ 10 MB/h）。根因是文件解码线程没有自动释放池，每圈重开的 AVAssetReader 永远不释放 | 用短片段循环长时间直播的节目（台标 / 背景循环） | 用长片段（每圈固定 0.5 MB，5 分钟片段约 6 MB/h）；不循环的文件不受影响；直播中途换节目重开可释放 | reports/issues/W4A-w2-inputs-file-loop-memory-and-prores-starve.md §3 | W2-A（用户 2026-09-28 定必修）；修后重跑 8 小时长稳。**发布阻塞项** |
+| S1 → 已修（等 8 小时复验） | 视频文件输入**循环播放**时内存每圈涨约 0.5 MB（长稳 S2 实测 60.8 MB/h，门槛 ≤ 10）。根因：文件解码线程没有自动释放池。**W2-A3 2026-09-28 已修**（解码 / 推帧线程每轮迭代包 `autoreleasepool`）：用例修前 0.465 → 修后 0.017 MB/圈，fileprobe 120 圈 footprint 从 +65.7 MB 变平 | 修前：短片段循环长时间直播的节目 | — | reports/issues/W4A-w2-inputs-file-loop-memory-and-prores-starve.md §3；reports/w2-inputs-3.md | 正式的 S2 值等用户终端重跑 8 小时 `make soak`；通过后从表里删 |
 | S2 | ProRes 422 HQ 这类高码率片段循环时，循环点每圈空一拍（重复上一圈末帧、跳过新一圈第 0 帧），推帧线程大量晚醒 | 循环播放高码率 ProRes 文件 | 转成 H.264 再用（同内容 H.264 两项都是 0） | 同上 §2 | W2-A |
+| S2 | 文件输入带音频、且播放速率 × 片段帧率 / 节目帧率 ≥ 4 帧/拍时推帧线程饿死（8 s 只转 2–3 圈、每拍最多取 3 帧、音频 FIFO 满后解码线程卡住）；≤ 2 帧/拍正常 | 高倍速播放高帧率文件 | 速率降到 2 倍以内，或先把片段转成节目帧率 | reports/issues/W2A3-w2-inputs-file-high-rate-audio-starves.md | W2-A |
 | S2 | 推流每次开始丢前约 1 s 的音频包（46–47 包），画面一帧不丢：推流头一秒有画无声 | RTMP 推流开始时 | 提前几秒起推流再切正式内容 | reports/issues/W4A-w2-stream-ndi-send-cpu-share.md 第 3 条 | W2-D |
 | S2 | App 里图片 / 视频文件输入的**相对路径按进程工作目录解析**，不是相对节目文件：从 Finder / Dock 起的 App 打开带相对路径素材的节目（含 Samples/ 三个样例）时那几路显示"图片不存在"、fps = 0，其余照跑；无界面引擎相对节目文件解析，没有这个问题 | 节目文件里写相对路径素材 | 节目里写绝对路径；或在样例目录里用命令行起 App（Samples/README.md 的临时办法） | reports/issues/W4C-app-relative-media-paths.md | App 会话（约 10 行 + 一条用例） |
 | S2 | App 打开节目后的第一秒有一次约 400 ms 的停顿：渲染跳拍约 28 拍、到达余量把已注册的输入丢 3 s 左右，之后恢复 | 打开节目后的头 1–4 s | 起好后等几秒再切上直播 | reports/issues/W2B2-w1-core-startup-stall-pacing-drops.md；reports/G4.md §6.5 | W1-B |
@@ -26,7 +27,7 @@ S0 / S1 不许出现在已发布版本的表里——下面 0.1.0 候选表里�
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
 | S1（发布） | 没有 Apple Developer Program 账号：构建只能 ad-hoc 签名——Gatekeeper 拦（"无法验证开发者"）、公证 / staple / spctl 不通过、虚拟摄像头扩展装不上、Sparkle 不能装更新 | 所有用户 | 第一次打开被拦后到 系统设置 › 隐私与安全性 › 底部"仍要打开"（macOS 15 起右键 → 打开对未公证的 App 不再管用）；虚拟摄像头 / 自动更新在正式签名前用不了 | reports/w4-release.md §2 BLOCKED 表；docs/release/signing.md | 用户：注册账号 + Team ID + Developer ID 证书 + notarytool 凭据 → `DEVELOPMENT_TEAM=… make archive` → docs/release/checklist-first-signed-run.md。**发布阻塞项** |
-| S1（发布） | bundle id 仍是占位 `com.example.switcher`（Stream Deck 插件 UUID 是 `com.plusmix.switcher`，两边不一致）；发布后不能改 | 发布身份 | — | docs/release/bundle-id.md | 用户定域名 → 检查点跑 `scripts/release/set-bundle-id.sh <前缀>` 一次提交。**发布阻塞项** |
+| — | bundle id 已定为 `com.plusmix.switcher`（用户 2026-09-28 定前缀 com.plusmix，G5 用 set-bundle-id.sh 切换；Stream Deck 插件 UUID 与之一致）；产品名定为 PlusMix，改名归 W4-D（prompt 75），发布前完成 | 发布身份 | — | docs/release/bundle-id.md | 已解决（bundle id）/ W4-D（改名） |
 | S2 | Sparkle 更新源 / 公钥未配置（`SPARKLE_FEED_URL` / `SPARKLE_PUBLIC_ED_KEY` 为空）：这份构建不会检查更新，偏好设置里写"未配置" | 所有用户 | 手动下载新版本 | docs/release/sparkle.md | 随远程仓库与 bundle id 一起定 |
 | S2 | 依赖钉在 swift-collections 1.6.0（1.7.0 要 Swift 6.4 运行时，macOS 15 / 26 上一起就崩）；本版本只在 macOS 27.0 上验证过，15 / 26.x 没有机器验（BLOCKED-机器） | macOS 15 / 26 用户 | — | docs/release/dependencies.md；reports/issues/W3C2-g5-swift-collections-1.7-dyld-crash.md | 借一台 26.x / 15 机器各起一次 App 与 frameprobe |
 

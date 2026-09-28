@@ -3,7 +3,7 @@
 name: Switcher
 
 options:
-  bundleIdPrefix: com.example            # 占位；正式 bundle id 由 W4-B 定
+  bundleIdPrefix: com.plusmix            # 用户 2026-09-28 定（产品名 PlusMix）；G5 用 scripts/release/set-bundle-id.sh 切换，发布后不能改
   deploymentTarget:
     macOS: "15.0"                        # 落地方案 §7 第 8 条：NSView.displayLink 需要 14+，矩阵取当前和上一个大版本
   xcodeVersion: "26.0"
@@ -59,7 +59,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Switcher
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.switcher
+        PRODUCT_BUNDLE_IDENTIFIER: com.plusmix.switcher
         INFOPLIST_FILE: App/Info.plist   # 手写，见文件内注释；不用 XcodeGen 生成（它会把版本写死成 1.0）
         GENERATE_INFOPLIST_FILE: NO
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
@@ -124,8 +124,8 @@ targets:
       - path: CameraExtension/Resources      # W4-B：en / zh-Hans 的 InfoPlist.strings（系统设置里的扩展显示名，prompt 71 第 9 条）
     settings:
       base:
-        PRODUCT_NAME: com.example.switcher.camera-extension
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.switcher.camera-extension
+        PRODUCT_NAME: com.plusmix.switcher.camera-extension
+        PRODUCT_BUNDLE_IDENTIFIER: com.plusmix.switcher.camera-extension
         INFOPLIST_FILE: CameraExtension/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: CameraExtension/CameraExtension.entitlements
@@ -139,7 +139,7 @@ targets:
       - path: App/Tests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.switcher.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.plusmix.switcher.tests
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: Switcher

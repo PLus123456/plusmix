@@ -110,7 +110,7 @@ final class ShowRoundTripTests: XCTestCase {
 
     /// ShowDocuments：文件里来的节目只清录制 / 推流的 enabled（G3 定），其余原样。
     func testShow_documentsRoundTripKeepsEverythingButOutputTargets() throws {
-        let suite = "com.example.switcher.tests.roundtrip-\(UUID().uuidString)"
+        let suite = "com.plusmix.switcher.tests.roundtrip-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let docs = ShowDocuments(defaults: defaults)

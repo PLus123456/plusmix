@@ -28,7 +28,7 @@
 	<key>CMIOExtension</key>
 	<dict>
 		<key>CMIOExtensionMachServiceName</key>
-		<string>$(TeamIdentifierPrefix)com.example.switcher.camera</string>
+		<string>$(TeamIdentifierPrefix)com.plusmix.switcher.camera</string>
 	</dict>
 </dict>
 </plist>

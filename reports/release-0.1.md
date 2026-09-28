@@ -14,6 +14,7 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 6. **1 小时 soak 交叉验证**：`scripts/soak/soak.sh --hours 1 --label g5-1h --powermetrics off --report reports/G5-soak-1h.md`（非交互：不接摄像头）。
 7. **docs/KNOWN_ISSUES.md**（从模板建）、reports/G5.md（§7 模板 + 六条逐条判定 + 阻塞项归属 + 发布说明草稿）、本报告。
 8. 没做的：打 tag、改版本号（判定不发）。main 的快进用户看完报告后指示做了（§3 第 2 条）。
+9. **用户 2026-09-28 的后续指示**：(a) OWNERSHIP 认领 W4-A / W4-B 越界；(b) 泄漏修复派 agent 直接做 → W2-A3（prompt 74，分支 w2-inputs-3）当天修完、`--no-ff` 合入 release/0.1（e39dda3）；(c) 产品名定 PlusMix、bundle id 前缀 com.plusmix → `set-bundle-id.sh com.plusmix` 切成 `com.plusmix.switcher`（10 个文件），改名本身写成 prompt 75（W4-D）；合入与切换后的验证：`make gen build`、VirtualCameraTests / FileInputTests、App 全量、`make release-test`（结果见 §2 末行）。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
@@ -27,6 +28,7 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 | L4 8 小时（W4-A） | S1 ✅、A3 ✅（0.00 ms）、**S2 ❌ 60.8 MB/h**、S3 CPU ❌ 60.1%（用户定不阻塞）；1 小时交叉验证 ✅（S1 13 / 13 窗口、A3 0.00 ms、CPU 54.6%；S2 参考 87 MB/h 同一根因） |
 | L5 | ✅ 无退步（g5b：V1 1.919 / 2.415 ms、CPU 42.0%、GPU 31.8%、VMAF 91.005，全部等于或好于基线；脚本因 V3 p99 +52 µs、GPU p95 +4 pt 退出 1 = W4-A 已记的误报，第一次 g5 被桌面抢 GPU 不采信） |
 | 第 6 条 | ad-hoc 归档走通、`make release-test` 10 / 10 过；spctl rejected / 公证 / staple / Sparkle 装更新 = **BLOCKED-账号 / 签名** |
+| bundle id 切换 + W2-A3 合入后的验证（13:30–13:38） | `make gen build` 过；VirtualCameraTests 12 / 12；FileInputTests 12 / 12（S2 用例 20.4 → 20.5 MB、0.002 MB/圈）；App 90 = 88 过 2 跳 0 失败（宿主已是 com.plusmix.switcher）；`make release-test` **9 / 10**：R1 归档 verify.json 的 bundle_id = com.plusmix.switcher、R11 一条断言写死占位前缀 com.example 而红（issue G5-w4-release-r11-assumes-placeholder-prefix，S3，W4-B 一行修） |
 | lint / check-links / pin-deps | 全绿 |
 
 **判定：不发**（硬性项 L4 S2 红；L3 有 S1；无签名账号）。
@@ -64,4 +66,5 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 10. **soak / perf 两个脚本都有 `--report <md>`**，G5 用它把报告写到 reports/G5-*.md，不覆盖 W4-A 的 reports/W4-*.md；`--label` 决定 `.build/soak|perf/<label>/`。Claude 会话里 soak 不接摄像头（TCC 未决不弹框）、没 powermetrics，只作参考。
 11. **Sparkle 的 SwiftPM 二进制包缓存在 `~/Library/Caches/org.swift.swiftpm/artifacts/`**（W4-B 放好的），新 worktree 的 `make gen` / xcodebuild 解析没再卡；`$TMPDIR` 里那几个 0 字节的 `*.lock` 是 SwiftPM 的 flock 文件，没人持有时无害，别顺手删。
 12. **check-links 现在扫 110 个 Markdown**（含新写的 docs/KNOWN_ISSUES.md），docs/ 下任何新文件的相对链接都会被它抓；它还没挂进 make lint。
-13. **W2-A2 留给检查点的清单（reports/issues/W2A2-g5-pending-items.md）**：1-1 / 1-2 / 1-3 / 2-1 已由 W3-E2 / W3-B2 做完，3-2（headless 接纯音频输入）G4 第一批续做合入时做了（G4-notes §10.1），3-1（探针子命令）与 4-x 硬件项仍开着；W3C2-g5-swift-collections-1.7-dyld-crash 的正式修法 W3-E2 + W4-B 已落地（三份 Package.resolved 入库 + 模板 + pin-deps.sh）。
+13. **`test-r11-set-bundle-id.sh` 第 10 行写死了占位前缀 com.example**：bundle id 一切就红一条（21 / 22 过），一行改成从 project.yml 读前缀即可（issue G5-w4-release-r11-…，归 W4-B）。
+14. **W2-A2 留给检查点的清单（reports/issues/W2A2-g5-pending-items.md）**：1-1 / 1-2 / 1-3 / 2-1 已由 W3-E2 / W3-B2 做完，3-2（headless 接纯音频输入）G4 第一批续做合入时做了（G4-notes §10.1），3-1（探针子命令）与 4-x 硬件项仍开着；W3C2-g5-swift-collections-1.7-dyld-crash 的正式修法 W3-E2 + W4-B 已落地（三份 Package.resolved 入库 + 模板 + pin-deps.sh）。

@@ -87,7 +87,7 @@ final class ControlWiringTests: XCTestCase {
 /// 启动参数 / UserDefaults → AppSettings 的纯逻辑。
 final class AppSettingsTests: XCTestCase {
     func testSettings_argumentsOverrideDefaults() throws {
-        let suite = "com.example.switcher.tests.settings-\(UUID().uuidString)"
+        let suite = "com.plusmix.switcher.tests.settings-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let empty = AppSettings.load(arguments: [], defaults: defaults)

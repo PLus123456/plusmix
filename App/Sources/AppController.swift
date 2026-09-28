@@ -35,7 +35,7 @@ final class AppController {
     private var replacing = false
 
     /// 测试宿主的 UserDefaults suite。
-    static let testDefaultsSuite = "com.example.switcher.tests"
+    static let testDefaultsSuite = "com.plusmix.switcher.tests"
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost

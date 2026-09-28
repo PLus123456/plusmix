@@ -32,7 +32,7 @@ final class ShortcutAndShowTests: XCTestCase {
     }
 
     func testShow_newSaveOpenRecentAndAutosave() throws {
-        let suite = "com.example.switcher.tests.show-\(UUID().uuidString)"
+        let suite = "com.plusmix.switcher.tests.show-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let docs = ShowDocuments(defaults: defaults)
@@ -77,7 +77,7 @@ final class ShortcutAndShowTests: XCTestCase {
 
     /// 打开文件不自动起输出（G3 2026-09-19 定）：保存时录制 / 推流 enabled 的节目，load / loadAutosave 回来 enabled 都是 false，其余字段原样。
     func testShow_openedFileDoesNotAutoStartOutputs() throws {
-        let suite = "com.example.switcher.tests.show-open-\(UUID().uuidString)"
+        let suite = "com.plusmix.switcher.tests.show-open-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let docs = ShowDocuments(defaults: defaults)

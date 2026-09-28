@@ -3,7 +3,7 @@
 W3-C 实现：`Sources/` 是 CMIOExtension API 的 provider → 设备 → 两条流（source 给别的 App 读、sink 给主程序写），
 设备名 / UID / 流 UID 等常量在 `Packages/SwitcherOutputs/Sources/VirtualCamera/Shared/`（project.yml 按路径编进本 target，主程序那边的 SwitcherVirtualCamera 也编它）。
 
-- project.yml 的 target `SwitcherCameraExtension`（type system-extension，产品名 = bundle ID `com.example.switcher.camera-extension`），
+- project.yml 的 target `SwitcherCameraExtension`（type system-extension，产品名 = bundle ID `com.plusmix.switcher.camera-extension`），
   嵌在 Switcher.app/Contents/Library/SystemExtensions/。`make gen` / `make build` 一起编。
 - 主程序侧：`SwitcherVirtualCamera` 的 `VirtualCameraOutput`（PGM 帧 → sink stream）和 `SystemExtensionInstaller`（激活 / 卸载）。
 - 帧的路：主程序 CMIOStreamCopyBufferQueue + CMSimpleQueueEnqueue → 扩展 `consumeSampleBuffer` → `sourceStream.send`（不拷像素，PTS = 拍点 host time）。
