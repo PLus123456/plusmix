@@ -47,7 +47,8 @@ product=$(sed -n 's/^[[:space:]]*PRODUCT_NAME:[[:space:]]*"\{0,1\}\([A-Za-z0-9][
 [ -n "$product" ] || die "读不到 project.yml 的 PRODUCT_NAME（App target）"
 identities=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" || true)
 if [ "$mode" = auto ]; then
-  if [ -n "$team" ] && printf '%s' "$identities" | grep -q "($team)"; then mode=team; else
+  # here-string 不走管道：printf 内建按行写，grep -q 命中先退出 → printf 吃 SIGPIPE，pipefail 下会误判成"没有身份"退成 ad-hoc（W4-B2）
+  if [ -n "$team" ] && grep -q "($team)" <<< "$identities"; then mode=team; else
     mode=adhoc
     [ -n "$team" ] && yellow "[archive] 设了 DEVELOPMENT_TEAM=$team 但钥匙串里没有该 Team 的 Developer ID Application 身份，退成 ad-hoc"
   fi
