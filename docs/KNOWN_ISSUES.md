@@ -11,16 +11,23 @@ S0 / S1 不许出现在已发布版本的表里——0.1.0 候选的 S1（文件
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
 | S1 → 已修（等 8 小时复验） | 视频文件输入**循环播放**时内存每圈涨约 0.5 MB（长稳 S2 实测 60.8 MB/h，门槛 ≤ 10）。根因：文件解码线程没有自动释放池。**W2-A3 2026-09-28 已修**（解码 / 推帧线程每轮迭代包 `autoreleasepool`）：用例修前 0.465 → 修后 0.017 MB/圈，fileprobe 120 圈 footprint 从 +65.7 MB 变平 | 修前：短片段循环长时间直播的节目 | — | reports/issues/W4A-w2-inputs-file-loop-memory-and-prores-starve.md §3；reports/w2-inputs-3.md | 正式的 S2 值等用户终端重跑 8 小时 `make soak`；通过后从表里删 |
-| S2 | ProRes 422 HQ 这类高码率片段循环时，循环点每圈空一拍（重复上一圈末帧、跳过新一圈第 0 帧），推帧线程大量晚醒 | 循环播放高码率 ProRes 文件 | 转成 H.264 再用（同内容 H.264 两项都是 0） | 同上 §2 | W2-A |
-| S2 | 文件输入带音频、且播放速率 × 片段帧率 / 节目帧率 ≥ 4 帧/拍时推帧线程饿死（8 s 只转 2–3 圈、每拍最多取 3 帧、音频 FIFO 满后解码线程卡住）；≤ 2 帧/拍正常 | 高倍速播放高帧率文件 | 速率降到 2 倍以内，或先把片段转成节目帧率 | reports/issues/W2A3-w2-inputs-file-high-rate-audio-starves.md | W2-A |
-| S2 | 推流每次开始丢前约 1 s 的音频包（46–47 包），画面一帧不丢：推流头一秒有画无声 | RTMP 推流开始时 | 提前几秒起推流再切正式内容 | reports/issues/W4A-w2-stream-ndi-send-cpu-share.md 第 3 条 | W2-D |
-| S2 | App 里图片 / 视频文件输入的**相对路径按进程工作目录解析**，不是相对节目文件：从 Finder / Dock 起的 App 打开带相对路径素材的节目（含 Samples/ 三个样例）时那几路显示"图片不存在"、fps = 0，其余照跑；无界面引擎相对节目文件解析，没有这个问题 | 节目文件里写相对路径素材 | 节目里写绝对路径；或在样例目录里用命令行起 App（Samples/README.md 的临时办法） | reports/issues/W4C-app-relative-media-paths.md | App 会话（约 10 行 + 一条用例） |
-| S2 | App 打开节目后的第一秒有一次约 400 ms 的停顿：渲染跳拍约 28 拍、到达余量把已注册的输入丢 3 s 左右，之后恢复 | 打开节目后的头 1–4 s | 起好后等几秒再切上直播 | reports/issues/W2B2-w1-core-startup-stall-pacing-drops.md；reports/G4.md §6.5 | W1-B |
-| S2 | 系统守护进程 / 桌面活动突发时渲染线程成串跳拍（10 分钟里 1–11 拍；V2 仍在 0.02% 以内） | 直播机同时跑重桌面任务 | 直播时关掉其它占 GPU / CPU 的程序（测试标准 §2.8） | reports/issues/G4-w1-core-missed-render-bursts-under-daemon-activity.md | W1-B / W1-C |
-| S2 | App 换过节目（第一个会话的 MIDI 线程停过）之后 MIDI 热插拔通知收不到，之后插的控制器连不上 | 换节目后才插 MIDI 设备 | 先插好 MIDI 设备再打开节目，或重启 App | reports/issues/W3E-w2-control-midi-hotplug-after-restart.md | W2-C |
+| S2 | 系统守护进程 / 桌面活动突发时渲染线程成串跳拍（10 分钟里 1–11 拍；V2 仍在 0.02% 以内）。W1-B3 定位：突发让整个进程的非实时线程和 GPU 一起停 100 ms 量级，只有实时线程按时醒，是 GPU 侧；已给渲染完成线程挂实时策略并给每次跳拍归因（GPU 晚 / 完成线程晚），在途深度是契约（≤ 2 帧）没动 | 直播机同时跑重桌面任务 | 直播时关掉其它占 GPU / CPU 的程序（测试标准 §2.8） | reports/issues/G4-w1-core-missed-render-bursts-under-daemon-activity.md；reports/w1-core-3.md §4 | 要不要把在途深度提到 4 等 8 小时长稳的 V2 累计定（契约） |
 | S2 | 标准负载（8 路合成源 + 摄像头 + 文件 + 录制 + 2 路推流 + NDI 发送）下进程 CPU 合计约 0.6 个核（8 小时均值 60.1%，门槛 ≤ 60%），其中 NDI SDK 自己的发送线程约 0.25 核（没有接收方也压两路） | 开着 NDI 发送时 | 不需要 NDI 时关掉该输出 | reports/issues/W4A-w2-stream-ndi-send-cpu-share.md；W4A-g5-cpu-multicore-distribution.md | 用户 2026-09-28 定：不阻塞；多核探查项到检查点安排 |
+| S3 | 进程里第一次打开节目时连 MIDIServer 冷启动约 0.6 s，在主线程上同步等：界面卡一下（节目时钟不再受影响，W3-E6 已把它挪到定 t0 之前） | 每次启动 App 后的第一次打开节目 | — | reports/w3-app-7.md §3 | W2-C（挪到后台线程） |
 | S3 | 已存节目里虚拟摄像头输出的 source 字段可能是 PVW / 输入 n，运行时一律送 PGM（页面已写明"送 PGM"，不再可选） | 旧节目文件 | — | reports/w3-app-5.md §3 第 1 条 | 不处理 |
-| S3 | 底栏状态行的"编码跳帧 / 码率"按输出顺序对号，输出表与 Stats 个数对不上的一瞬退回不分类型 | 增删输出的一瞬 | — | reports/w3-app-5.md §3 第 2 条 | 下一个 App 会话 |
+
+### 2026-09-28 发布前已修（不再出现在上表；每条有先红后绿的用例）
+
+| 原级别 | 现象 | 修在 | 报告 |
+|---|---|---|---|
+| S2 | ProRes 等重片段循环点每圈空一拍、推帧线程晚醒自旋 | 离尾预开下一圈 reader、音频断供按周期轮询（W2-A4） | reports/w2-inputs-4.md |
+| S2 | 文件输入带音频、高速率（≥ 4 帧/拍）推帧线程饿死 | 队列深度随速率、解码侧丢落后帧、FIFO 三态不阻塞（W2-A4） | reports/w2-inputs-4.md |
+| S2 | 推流开始时握手期间的帧 / 包直接丢、落盘从连上那一拍才开始；长稳那 47 包是音频引擎早起 1 s 被起步对齐裁掉、错在计进 audioDropped | start 起就缓冲、两轨从第一个送出的关键帧同一原点起送（W2-D2） | reports/w2-stream-2.md |
+| S2 | App 素材相对路径按进程工作目录解析（Finder 起的 App 打开样例字幕 / 台标变占位） | 相对节目文件所在目录解析，节目文件仍存相对路径（W3-E5） | reports/w3-app-6.md |
+| S2 | App 打开节目后第一秒约 470 ms 停顿、missed_render 28、已注册的路丢 3 s | 根因是先定 t0 再冷启动控制层（MIDIServer 686 ms）：引擎加 warmUp / clockStartLag（W1-B3），App 预热完再定 t0（W3-E6）；冷启动 clockStartLag 500 ms → 0 | reports/w1-core-3.md、reports/w3-app-7.md |
+| S2 | 换过节目之后 MIDI 热插拔通知收不到 | CoreMIDI 通知放到进程级常驻线程 + 永不销毁的锚客户端（W2-C2） | reports/w2-control-2.md |
+| S3 | 底栏状态行"编码跳帧 / 码率"按输出顺序对号 | 按 encoder[].output 查输出类型（W3-E5） | reports/w3-app-6.md |
+| 工具 | frameprobe av 内存随录像长度线性涨（1 小时 41 GB） | 根因是多声道音频每块 reserveCapacity 的 O(n²) 重拷；10 分钟 7.6 GB → 172 MB（W1-A4） | reports/w1-testkit-4.md |
 
 ### 发布工程（不是产品缺陷，但这份候选构建有）
 
@@ -41,7 +48,6 @@ S0 / S1 不许出现在已发布版本的表里——0.1.0 候选的 S1（文件
 
 ### 测试与工具（不影响产品，影响谁跑测试）
 
-- `frameprobe av` 的内存随录像长度线性涨（1 小时录像 41 GB）：长稳脚本已按 5 分钟切段绕过；别对长录像直接跑（reports/issues/W4A-w1-testkit-frameprobe-memory-grows-with-length.md，W1-A）。
 - 几条依赖窗口 / 时序的用例在机器忙或窗口被盖住时偶发红，单独重跑都过：`DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`、`ExternalTests` 的 `DisplayStatsTests`、App 的 S7 两条与 `ThumbnailRateTests`、NDI 回环两条计时断言、`ThrottleProxyTests`。
 - 七张多画面参考图是 macOS 27 的中文字形，26.x 机器上按 PSNR ≥ 40 dB 看（reports/issues/P4-w3-compositor-multiview-cjk-labels-macos27.md）。
 - L5 的"退步 > 10%"规则在 V3（微秒量级）与 CPU / GPU 上会因运行间起伏误报，绝对下限（`scripts/perf/regression.json` 的 `floor`）等用户定（reports/w4-soak.md §4 第 2 条）。
