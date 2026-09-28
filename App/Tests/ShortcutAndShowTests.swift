@@ -296,6 +296,33 @@ final class ShortcutAndShowTests: XCTestCase {
         defer { L10n.languageOverride = "zh-Hans" }
         XCTAssertEqual(ChannelMapChoice.summary([4, 5]), "channels 5, 6")
     }
+
+    /// W3-E5 交付 3：退出时自动存的 LastSession 与 hotkeys.json / midi.json / Diagnostics/ 同一个配置目录（SwitcherControl 的 `UserConfig.directory`
+    /// = ~/Library/Application Support/PlusMix，W2-C2 改的），App 不再自己拼 Application Support/Switcher（代码与注释都不留）；
+    /// App 侧的 MIDI 锚（MIDINotificationAnchor）删了，热插拔通知由包里的进程级 MIDIHost 锚接管（守门用例 testMIDI_hotplugAfterShowReplaced_newSourceConnects）。
+    func testW3E5_lastSessionLivesInUserConfigDirectory() throws {
+        let url = ShowDocuments.autosaveURL
+        XCTAssertEqual(url, UserConfig.directory.appending(path: "LastSession.\(ShowDocuments.fileExtension)"))
+        let dir = url.deletingLastPathComponent().standardizedFileURL.path
+        XCTAssertEqual(dir, HotkeyTable.defaultFileURL.deletingLastPathComponent().standardizedFileURL.path, "与 hotkeys.json 同目录")
+        XCTAssertEqual(dir, MIDIMapTable.defaultFileURL.deletingLastPathComponent().standardizedFileURL.path, "与 midi.json 同目录")
+        XCTAssertEqual(dir, CrashDiagnosticsStore.defaultDirectory.deletingLastPathComponent().standardizedFileURL.path, "与 Diagnostics/ 同目录")
+        XCTAssertEqual(url.deletingLastPathComponent().lastPathComponent, "PlusMix")
+        XCTAssertEqual(url.lastPathComponent, "LastSession.switcher.json")
+        XCTAssertFalse(url.pathComponents.contains("Switcher"), url.path)
+
+        let sources = try AppTest.repoRoot().appendingPathComponent("App/Sources")
+        var stale: [String] = []
+        for file in try AppTest.swiftFiles(in: sources) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for (i, line) in text.components(separatedBy: "\n").enumerated()
+            where line.contains("Application Support/Switcher") || line.contains("MIDINotificationAnchor") {
+                stale.append("\(file.lastPathComponent):\(i + 1) \(line.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+        XCTAssertEqual(stale, [], "旧目录 / 旧锚仍在：\n" + stale.joined(separator: "\n"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sources.appendingPathComponent("Engine/MIDINotificationAnchor.swift").path), "App 侧的锚应删掉")
+    }
 }
 
 @MainActor
@@ -349,4 +376,5 @@ final class AddInputSheetTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.count == 2 && session.state.input(2)?.kind == .synthetic }, "确定应加一路合成源")
         XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet == nil })
     }
+
 }

@@ -19,7 +19,7 @@ final class AppController {
     var settings = AppSettings() {
         didSet { if isTestHost { applyTestHostOverrides() } }
     }
-    /// 快捷键表：用户表 ~/Library/Application Support/Switcher/hotkeys.json，没有就默认表；测试宿主固定默认表（文件在临时目录）。
+    /// 快捷键表：用户表 ~/Library/Application Support/PlusMix/hotkeys.json，没有就默认表；测试宿主固定默认表（文件在临时目录）。
     private(set) var hotkeyTable: HotkeyTable
     /// MIDI 映射表：用户表 midi.json，没有就空表。
     private(set) var midiTable: MIDIMapTable
@@ -39,8 +39,8 @@ final class AppController {
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost
-        // 第一个 session 的 MIDIController 起来之前：让 CoreMIDI 的热插拔通知走主 run loop（换节目后新插的设备也能连上，W3-E2）
-        MIDINotificationAnchor.install()
+        // CoreMIDI 的热插拔通知：W2-C2 起由 SwitcherControl 的进程级 MIDIHost（常驻线程 + 永不销毁的锚客户端）接住，换节目后新插的设备照常连上；
+        // App 自己在主线程建的锚客户端（W3-E2 加的绕法）删了（W3-E5），守门用例 testMIDI_hotplugAfterShowReplaced_newSourceConnects
         defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
         updateController = UpdateController(defaults: defaults, isTestHost: isTestHost)
         if isTestHost {

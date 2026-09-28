@@ -1,5 +1,5 @@
 // 控制层接线（W2-B2 接缝 2、3）：W2-C 的 CommandBus（UI / 快捷键 / MIDI / API 的统一入口）+ StateFeed（状态推送源）+ APIServer
-// （HTTP / WS，默认 127.0.0.1:8765）+ HotkeyDispatcher（用户表 ~/Library/Application Support/Switcher/hotkeys.json，没有就默认表）
+// （HTTP / WS，默认 127.0.0.1:8765）+ HotkeyDispatcher（用户表 ~/Library/Application Support/PlusMix/hotkeys.json，没有就默认表）
 // + MIDIController（映射编辑是 W3-E；这里只起来）+ 第三方 API 兼容层（W3-D VMixCompat，偏好设置开关，默认关；G4 接线）。
 // 起停顺序（reports/w2-control.md §5 第 1 条）：feed.start → api.start（先于引擎，客户端第 0 拍前就能连上）；停：api → 引擎 → feed。
 import AppKit

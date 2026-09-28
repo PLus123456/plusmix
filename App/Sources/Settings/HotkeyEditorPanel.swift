@@ -1,5 +1,5 @@
 // 快捷键编辑器（W3-E 交付第 6 条）：编辑 W2-C 的 HotkeyTable（组合键 → 动作 + 备注），录键、冲突检查、恢复默认表，
-// 保存到用户配置文件（~/Library/Application Support/Switcher/hotkeys.json；测试宿主是临时目录）并立刻换给 HotkeyDispatcher。
+// 保存到用户配置文件（~/Library/Application Support/PlusMix/hotkeys.json；测试宿主是临时目录）并立刻换给 HotkeyDispatcher。
 import AppKit
 import SwiftUI
 import SwitcherContracts
