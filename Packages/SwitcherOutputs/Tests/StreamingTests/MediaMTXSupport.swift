@@ -142,8 +142,9 @@ enum Frameprobe {
     struct Frame { var index: Int; var ptsSeconds: Double; var frameNumber: Int?; var flash: Bool }
 
     /// 逐帧：烧进画面的帧号（= 拍号）、PTS、是否闪光帧。落盘文件从哪一拍开始就看第一帧的 frameNumber。
+    /// 同 `stats`：关掉自证（实时喂送的文件第一帧没有"节奏"可投票，会被判成解不出，见上）。
     static func frames(_ url: URL, limit: Int = 100) throws -> [Frame] {
-        let obj = try Proc.json(try StreamTestPaths.frameprobe().path, ["frames", url.path, "--limit", "\(limit)"])
+        let obj = try Proc.json(try StreamTestPaths.frameprobe().path, ["frames", url.path, "--limit", "\(limit)", "--no-self-check"])
         let arr = obj["frames"] as? [[String: Any]] ?? []
         return arr.map { f in
             Frame(index: f["index"] as? Int ?? 0, ptsSeconds: f["ptsSeconds"] as? Double ?? .nan, frameNumber: f["frameNumber"] as? Int,
