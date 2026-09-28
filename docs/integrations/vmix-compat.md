@@ -1,8 +1,8 @@
 # 第三方 API 兼容层（VMixCompat）
 
 > **法律说明（先读）。** 这个模块让为 vMix（StudioCoast Pty Ltd 的产品）写的控制面板配置——Companion 的 vMix 模块、
-> 各种 Stream Deck / TouchPortal / 平板遥控——不改配置就能控制 Switcher。它是一个**适配器**：只实现对方公开协议的一个子集，
-> 把函数名映射到 Switcher 自己的命令；和 vMix、StudioCoast 没有任何关系，也不是它的替代品或衍生品。
+> 各种 Stream Deck / TouchPortal / 平板遥控——不改配置就能控制 PlusMix。它是一个**适配器**：只实现对方公开协议的一个子集，
+> 把函数名映射到 PlusMix 自己的命令；和 vMix、StudioCoast 没有任何关系，也不是它的替代品或衍生品。
 > 实现时只读了公开的协议文档和 Companion 模块（MIT 许可）的源码来学接口形状，**没有复制任何代码、文案或素材**。
 > 设计方案 §0 把"兼容 X 的 API"这类描述性用法列为法律灰区，所以（1）它是独立的 SwiftPM target，不进默认产品；
 > （2）**默认关闭**，用户在设置里显式打开（W3-E 的偏好设置页带这段提示）；（3）**发布前问律师**——包括产品文案里能不能出现对方的名字、
@@ -23,7 +23,7 @@
 | `recordOutput` | nil | StartRecording 等操作哪个录制输出；nil = 编号最小的录制输出 |
 | `streamOutput` | nil | StartStreaming 没带 `Value` 时用哪个推流输出；nil = 编号最小的；`Value=k` 选第 k 路（0 起） |
 | `reportedVersion` | `SwitcherVersion.current` | XML `<version>` 与 TCP 问候里报的版本——报本产品的版本，不冒充对方 |
-| `edition` | Switcher | XML `<edition>` |
+| `edition` | Switcher | XML `<edition>`（包内默认值是代码名；产品名 PlusMix 的改名没动包，见 reports/w4-rename.md §3） |
 
 接线（App 与 headless 都一样，都在检查点 / W3-E 做）：
 

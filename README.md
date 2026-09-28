@@ -1,8 +1,9 @@
-# Switcher
+# PlusMix
 
 Apple Silicon 原生的多机位导播台：编号输入（摄像头 / 采集卡、DeckLink、屏幕、文件、图片、NDI、纯音频）、PGM / PVW 范式、Cut / Fade / Wipe / Zoom / Stinger 转场、
 T-bar、FTB、四个叠加通道、四条音频总线，输出到录制（含 ISO 分路）、推流（RTMP / RTMPS / SRT）、NDI、第二块显示器、虚拟摄像头和多画面。
 Swift 6（严格并发）+ Metal，macOS 15+，Apache-2.0。
+代码名 Switcher：模块（`Switcher*`）、命令行工具（`switcher-headless` / `frameprobe`）、scheme、bundle id（`com.plusmix.switcher`）仍叫这个名字；界面、`PlusMix.app` 与发布产物用产品名 PlusMix。
 
 **状态**：0.1.0 第一版功能已全部合入，检查点 G2–G4 的自动化门槛通过（[测试报告索引](docs/testing/README.md)），发布门槛 G5（8 小时长稳、设备矩阵、签名与公证）还没跑。
 现在能用来干活，但请先在自己的设备上按 [测试标准](docs/testing/测试标准.md) 验一遍。
@@ -14,11 +15,11 @@ Swift 6（严格并发）+ Metal，macOS 15+，Apache-2.0。
 克隆本仓库后在仓库根目录：
 
 ```bash
-make gen build-app && open .build/DerivedData/Build/Products/Debug/Switcher.app
+make gen build-app && open .build/DerivedData/Build/Products/Debug/PlusMix.app
 ```
 
 1. 节目 › 打开… 选 `Samples/event/event.switcher.json`（四路合成源 + 多画面 + 四路 ISO，不需要任何设备；[示例说明](Samples/README.md)）。
-2. 键盘 `2` 选 2 号到 PVW，`空格` Cut，`回车` Fade，`F` 渐黑；底栏"录制"录到 `~/Movies/Switcher/`。
+2. 键盘 `2` 选 2 号到 PVW，`空格` Cut，`回车` Fade，`F` 渐黑；底栏"录制"录到 `~/Movies/PlusMix/`。
 3. 输入 › 添加输入…（⌘I）接自己的摄像头。屏幕录制权限要在 系统设置 › 隐私与安全性 里手动给（[故障排查](docs/user/故障排查.md#1-权限)）。
 
 不开界面、纯命令行跑同一个节目 30 秒并写每秒统计：

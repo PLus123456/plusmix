@@ -15,7 +15,7 @@ shortcuts into them. Every output has a number, a name, a "should be running" sw
 
 ## 1. Recording
 
-Output › Recording Settings…. Default directory `~/Movies/Switcher`; a relative directory in the show file lives under it.
+Output › Recording Settings…. Default directory `~/Movies/PlusMix`; a relative directory in the show file lives under it.
 
 | Item | Notes |
 |---|---|
@@ -99,15 +99,15 @@ Output › External Output…, or the External button (a display × source menu)
 
 ## 5. Virtual camera
 
-Output › Virtual Camera: lets FaceTime, QuickTime, browser meetings etc. use Switcher as a camera. **It sends PGM** (no source selection).
+Output › Virtual Camera: lets FaceTime, QuickTime, browser meetings etc. use PlusMix as a camera. **It sends PGM** (no source selection).
 
 Install once:
 
-1. Build with a Team ID (`DEVELOPMENT_TEAM=<TeamID> make gen build-app`), move Switcher.app to `/Applications` and launch from there —
+1. Build with a Team ID (`DEVELOPMENT_TEAM=<TeamID> make gen build-app`), move PlusMix.app to `/Applications` and launch from there —
    system extensions can only be activated from an App in /Applications.
 2. Output › Virtual Camera › Install / Activate Extension…, then allow it in System Settings › General › Login Items & Extensions
    (older releases: Privacy & Security). "Check Extension Status" shows the current state.
-3. Output › Virtual Camera › Enable / Disable Virtual Camera Output. Pick the "Switcher" camera in FaceTime / QuickTime › New Movie Recording.
+3. Output › Virtual Camera › Enable / Disable Virtual Camera Output. Pick the "Switcher" camera in FaceTime / QuickTime › New Movie Recording (in 0.1.0 the device is still named after the code name, Switcher).
 
 - Development builds (no Team ID, ad-hoc signature) cannot activate: the status says signing / entitlement / location requirements are not met
   (BLOCKED-signing); the App keeps running.

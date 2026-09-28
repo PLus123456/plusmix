@@ -1,6 +1,6 @@
 # API 示例
 
-下面的命令都对着一个在跑的 Switcher（App 默认已开 API）或无界面引擎。没有设备也能试：另开一个终端跑示例节目并开 API：
+下面的命令都对着一个在跑的 PlusMix（App 默认已开 API）或无界面引擎。没有设备也能试：另开一个终端跑示例节目并开 API：
 
 ```bash
 swift build -c release --package-path Tools/switcher-headless && Tools/switcher-headless/.build/release/switcher-headless run --show Samples/event/event.switcher.json --duration 600 --audio-device null --api

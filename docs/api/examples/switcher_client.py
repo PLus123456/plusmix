@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Switcher 本地 API 的最小客户端（只用 Python 3 标准库）。
+"""PlusMix 本地 API 的最小客户端（只用 Python 3 标准库）。
 
     python3 docs/api/examples/switcher_client.py state                 # PGM / PVW / tally 一览
     python3 docs/api/examples/switcher_client.py cut                   # 发一条命令

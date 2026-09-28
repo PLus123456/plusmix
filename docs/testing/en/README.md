@@ -1,6 +1,6 @@
 # Testing (English summary)
 
-Live-production software has exactly three qualities that matter: **no dropped frames, no A/V drift, no crashes**. Switcher turns them into
+Live-production software has exactly three qualities that matter: **no dropped frames, no A/V drift, no crashes**. PlusMix turns them into
 metrics that can be measured, run automatically and compared across versions. The full standard (definitions, test methods, thresholds,
 report template and the `stats.jsonl` fields) is published in Chinese: [测试标准.md](../测试标准.md). This page is the map.
 

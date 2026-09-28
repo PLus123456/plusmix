@@ -1,6 +1,6 @@
 # 测试
 
-直播软件的质量只有三件事：**不掉帧、不失步、不崩**。Switcher 把它们变成能量、能自动跑、能跨版本比的指标，测法和阈值全部公开，
+直播软件的质量只有三件事：**不掉帧、不失步、不崩**。PlusMix 把它们变成能量、能自动跑、能跨版本比的指标，测法和阈值全部公开，
 每次检查点的报告也入库——你可以自己跑一遍，也可以对照报告决定这个版本值不值得上场。English summary: [en/](en/README.md).
 
 | 文档 | 内容 |
@@ -54,4 +54,4 @@ swift build -c release --package-path Tools/frameprobe && Tools/frameprobe/.buil
 
 ## 4. 报问题
 
-附上：Switcher 版本 / 提交号、机型与 macOS、`stats.jsonl`（`--stats` 或 API 的 `stats`）、能复现的节目文件（去掉推流密钥），能用无界面引擎复现最好（[故障排查 §8](../user/故障排查.md#8-日志与诊断)）。
+附上：PlusMix 版本 / 提交号、机型与 macOS、`stats.jsonl`（`--stats` 或 API 的 `stats`）、能复现的节目文件（去掉推流密钥），能用无界面引擎复现最好（[故障排查 §8](../user/故障排查.md#8-日志与诊断)）。

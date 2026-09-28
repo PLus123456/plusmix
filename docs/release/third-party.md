@@ -1,6 +1,6 @@
 # 随发布包分发的第三方组件与许可证（prompt 71 第 8 条）
 
-`scripts/release/archive.sh` 把每个组件的许可证原文放进 `Switcher.app/Contents/Resources/Licenses/<组件>/`，仓库里 THIRD_PARTY/ 保留一份副本与来源说明。
+`scripts/release/archive.sh` 把每个组件的许可证原文放进 `PlusMix.app/Contents/Resources/Licenses/<组件>/`，仓库里 THIRD_PARTY/ 保留一份副本与来源说明。
 
 | 组件 | 形式 | 许可证 | 我们要做的 | 在哪 |
 |---|---|---|---|---|

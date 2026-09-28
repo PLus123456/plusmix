@@ -7,12 +7,12 @@ and the notice in the bottom status line (outputs and system-level events). Both
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Camera cell: "camera access denied. Open System Settings › Privacy & Security › Camera; allowing this app recovers automatically, no restart" | "Don't allow" was clicked, or the prompt never appeared | Enable Switcher there; recovers within about 2 s |
+| Camera cell: "camera access denied. Open System Settings › Privacy & Security › Camera; allowing this app recovers automatically, no restart" | "Don't allow" was clicked, or the prompt never appeared | Enable PlusMix there; recovers within about 2 s |
 | Camera has picture but no sound; audio-only cell mentions microphone access | A device's microphone / an audio input needs separate microphone access | System Settings › Privacy & Security › Microphone |
-| Screen input stays "no signal" or says screen recording denied, and **no prompt ever appeared** | Screen recording has no system prompt by design | System Settings › Privacy & Security › Screen & System Audio Recording, add Switcher.app with +; recovers automatically |
+| Screen input stays "no signal" or says screen recording denied, and **no prompt ever appeared** | Screen recording has no system prompt by design | System Settings › Privacy & Security › Screen & System Audio Recording, add PlusMix.app with +; recovers automatically |
 | Access granted, asked again after rebuilding / updating | Ad-hoc signatures without a Team ID change on every build; macOS treats it as a new app | `DEVELOPMENT_TEAM=<TeamID> make gen` for a stable identity, or grant again each time |
 | "restricted by system policy (parental controls / MDM)" | Device management forbids it | Ask the administrator; the app cannot lift it |
-| Switcher started from a terminal / script gets no camera | TCC grants belong to the launching process (Terminal, IDE) | Grant to Terminal.app, or launch from Finder / Dock |
+| PlusMix started from a terminal / script gets no camera | TCC grants belong to the launching process (Terminal, IDE) | Grant to Terminal.app, or launch from Finder / Dock |
 
 ## 2. No signal
 
@@ -60,7 +60,7 @@ the `.mov` up to the last 1 s fragment (E6 allows at most 2 s loss).
 | Virtual camera: signing / entitlement / location requirements not met (BLOCKED-signing) | Development builds cannot activate system extensions: follow the three steps in [Outputs › Virtual camera](outputs.md#5-virtual-camera) |
 | Virtual camera: "waiting for approval in System Settings" | macOS showed the approval prompt; on macOS 15+ it is under General › Login Items & Extensions |
 | Virtual camera: "device not found (extension not installed / not activated); n frames dropped" | Output on, extension not connected; retried every second, starts automatically after activation |
-| Extension not listed in System Settings / no "Switcher" camera in FaceTime after activation | The extension must be embedded in an App inside /Applications; after changing bundle id / Team ID uninstall the extension first |
+| Extension not listed in System Settings / no "Switcher" camera in FaceTime after activation (in 0.1.0 the virtual camera device is still named after the code name, Switcher) | The extension must be embedded in an App inside /Applications; after changing bundle id / Team ID uninstall the extension first |
 
 ## 6. Picture and sound
 
@@ -76,7 +76,7 @@ the `.mov` up to the last 1 s fragment (E6 allows at most 2 s loss).
 
 | Symptom | Meaning |
 |---|---|
-| "API failed to start (127.0.0.1:8765): …" | Port in use (a previous Switcher / headless still running): `lsof -i :8765`; change the port in Preferences |
+| "API failed to start (127.0.0.1:8765): …" | Port in use (a previous PlusMix / headless still running): `lsof -i :8765`; change the port in Preferences |
 | curl returns 401 | A token is set: send `Authorization: Bearer <token>` (WebSocket may use `?token=`) |
 | 200 with `applied = false` | The state machine ignored the command by rule (transition running, already at target); not an error |
 | 400 | Malformed command / unknown input or output number; the body says why |
@@ -87,7 +87,7 @@ the `.mov` up to the last 1 s fragment (E6 allows at most 2 s loss).
 - Status-line notices also go to the system log. The last 10 minutes:
 
 ```bash
-log show --predicate 'process == "Switcher"' --last 10m --style compact
+log show --predicate 'process == "PlusMix"' --last 10m --style compact
 ```
 
 - One statistics line per second (`stats.jsonl`, fields in [test standard §7](../../testing/测试标准.md#71-统计字段-statsjsonl), Chinese): launch with `--stats <file>`,

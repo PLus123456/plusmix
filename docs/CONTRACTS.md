@@ -180,7 +180,7 @@ P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的�
 
 `OutputState.enabled` 的口径（提案 007 B 第 1 条）：节目文件里的 enabled **只对 headless 的场景文件生效**（t0 起录 / 起推）；App 打开任何节目文件（含退出时自动存的 LastSession）时把 record / stream 的 enabled 清掉，这两类输出只由用户动作（按钮 / 快捷键 / API）起（App 的 `ShowDocuments.stoppingOutputs`）。record / stream 的 enabled 由 startRecord / startStream 置，其余 kind 由 `setOutputEnabled` 置（提案 012）。
 
-`RecordSettings.directory` 的相对路径（提案 007 B 第 2 条）：headless 相对进程工作目录；App 相对 `~/Movies/Switcher`。
+`RecordSettings.directory` 的相对路径（提案 007 B 第 2 条）：headless 相对进程工作目录；App 相对 `~/Movies/PlusMix`（W4-D 改名前是 `~/Movies/Switcher`；`MixerState.swift` 里 `RecordSettings.directory` 的注释还写着旧名，等下一次契约会话顺手改）。
 
 录制器的停止边界（提案 007 B 第 3 条）：`Recorder.stop(atTick:)` 给拍边界，两轨都由录制器裁到该拍点，越界块只计数不写；边界可以在到达之前预告（`setStopTick`）；nil = 最后一个已收帧的下一拍。
 

@@ -5,10 +5,10 @@
 ```bash
 DEVELOPMENT_TEAM=XXXXXXXXXX make archive          # Developer ID：archive → export → 随包 libndi → 重签 → 校验 → DMG → 公证 App 与 DMG 并 staple → 终校验
 make archive-adhoc                                # 没有账号时：同样的步骤，ad-hoc 签名，公证一行标 BLOCKED-账号
-make release-verify TARGET=.build/release/0.1.0/Switcher-0.1.0.dmg VERIFY_FLAGS=--expect-notarized
+make release-verify TARGET=.build/release/0.1.0/PlusMix-0.1.0.dmg VERIFY_FLAGS=--expect-notarized
 ```
 
-产物在 `.build/release/<版本>/`：`Switcher.xcarchive`（含 dSYM，留着符号化崩溃）、`Switcher.app`、`Switcher-<版本>.dmg` + `.sha256`、`verify.json`、`release-report.md`、`logs/`。
+产物在 `.build/release/<版本>/`：`PlusMix.xcarchive`（含 dSYM，留着符号化崩溃）、`PlusMix.app`、`PlusMix-<版本>.dmg` + `.sha256`（产物名 = project.yml 的 `PRODUCT_NAME`，W4-D）、`verify.json`、`release-report.md`、`logs/`。
 
 ## 步骤与脚本（scripts/release/）
 
@@ -44,7 +44,7 @@ SUFeedURL / SUPublicEDKey（都非空才 sparkle_configured）、架构、最低
 
 1. 另建一个 macOS 用户账户（没装过本 App、没给过 TCC）。
 2. 拷 DMG 过去，双击、拖到 /Applications、首次启动：正式版应无任何拦截；ad-hoc 版会被拦（"无法验证开发者"），右键 → 打开也能起——这是预期，记进报告即可。
-3. 输出 → 虚拟摄像头 → 安装 / 激活扩展 → 系统设置允许 → FaceTime 里选 "Switcher"。
+3. 输出 → 虚拟摄像头 → 安装 / 激活扩展 → 系统设置允许（扩展显示名 "PlusMix 虚拟摄像头" / "PlusMix Virtual Camera"）→ FaceTime 里选 "Switcher"（0.1.0 里摄像头设备名仍是代码名）。
 4. 偏好设置 → 更新 → 检查更新…（docs/release/sparkle.md §5 的本地 appcast）。
 5. 帮助 → 导出诊断包… 出一份，打开看没有密钥。
 

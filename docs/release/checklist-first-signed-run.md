@@ -4,13 +4,13 @@
 
 ```bash
 DEVELOPMENT_TEAM=<TeamID> make gen build-app         # 权限表自动换成 App/Switcher-signed.entitlements（含 system-extension.install、camera、audio-input）
-# 或直接 DEVELOPMENT_TEAM=<TeamID> make archive 拿签好的 .build/release/<版本>/Switcher.app
+# 或直接 DEVELOPMENT_TEAM=<TeamID> make archive 拿签好的 .build/release/<版本>/PlusMix.app
 ```
 
 - [ ] **硬化运行时下摄像头 / 麦克风能用**：添加内置摄像头输入 → 出画面；纯音频设备输入 → 有电平。不行 = App/Switcher-signed.entitlements 少了 device.camera / device.audio-input（W4-B 加的两条）。
 - [ ] **libndi 在库校验下能加载**：App 起来、NDI 输出能起（Stats 不是 unavailable）。起不来 = libndi.dylib 没用同一 Team 重签（archive.sh 的 sign.sh 那步）。
-- [ ] **虚拟摄像头扩展**：输出 → 虚拟摄像头 → 安装 / 激活扩展 → 系统设置允许 → FaceTime / QuickTime 里选 "Switcher" 出画面。
-      系统设置 → 登录项与扩展 → 摄像头扩展里显示名中文系统 "Switcher 虚拟摄像头"、英文 "Switcher Virtual Camera"（W4-B 的 InfoPlist.strings）。
+- [ ] **虚拟摄像头扩展**：输出 → 虚拟摄像头 → 安装 / 激活扩展 → 系统设置允许 → FaceTime / QuickTime 里选 "Switcher" 出画面（0.1.0 里摄像头设备名仍是代码名，VirtualCameraConstants.deviceName 归 W3-C）。
+      系统设置 → 登录项与扩展 → 摄像头扩展里显示名中文系统 "PlusMix 虚拟摄像头"、英文 "PlusMix Virtual Camera"（W4-B 的 InfoPlist.strings，W4-D 改成产品名）。
 - [ ] **扩展回报 'sonp' 的四步**（issue W3C2-camera-extension-scheduled-output 末节；`session.aux.virtualCamera?.countersSnapshot`）：
       1. `extensionReports == true`；2. `framesOutput` 跟着 `framesSent` 涨（不涨 = CMIO 桥没转发 notify → 换扩展自定义属性回报）；
       3. `extensionUnmatched == 0`（在涨 = 桥改了 / 丢了序号）；4. `droppedExtension` 平时 0，扩展里临时每 10 帧不 send 不 notify 时每秒涨 6。
