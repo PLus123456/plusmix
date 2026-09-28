@@ -164,7 +164,7 @@ public struct MIDIMapTable: Hashable, Codable, Sendable {
         try jsonData().write(to: url, options: .atomic)
     }
 
-    /// ~/Library/Application Support/Switcher/midi.json。
+    /// ~/Library/Application Support/PlusMix/midi.json。
     public static var defaultFileURL: URL { UserConfig.directory.appending(path: "midi.json") }
 
     public static func loadUserTableOrDefault() -> MIDIMapTable {

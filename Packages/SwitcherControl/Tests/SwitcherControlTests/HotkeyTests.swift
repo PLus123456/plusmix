@@ -160,7 +160,8 @@ final class HotkeyTests: XCTestCase {
         XCTAssertFalse(state.ftb.on)
         // 异步入口：handle 返回 true 并在后台投递
         XCTAssertTrue(d.handle(KeyCombo("shift+2")!))
-        let ok = await waitUntil { f.bus.lastSequence == 5 }
+        // 等回执进日志（lastSequence 在分配 sequence 时就变了，状态机可能还没应用；整包跑时撞过一次 program 仍是 3）
+        let ok = await waitUntil { f.bus.recentEntries().count == 5 }
         XCTAssertTrue(ok)
         state = await f.stateMachine.state
         XCTAssertEqual(state.program, 2)

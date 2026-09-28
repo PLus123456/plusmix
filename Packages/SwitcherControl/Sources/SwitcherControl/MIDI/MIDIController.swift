@@ -3,9 +3,10 @@ import Foundation
 import Synchronization
 import SwitcherContracts
 
-// CoreMIDI 控制器（设计方案 §9.4）。探针（reports/w2-control.md §5）验证的事实：
-//   - MIDIClientCreateWithBlock 的通知块在"创建客户端的那条线程的 run loop"上派发：没有 run loop 就没有热插拔通知，
-//     所以客户端和输入口在一条自带 CFRunLoop 的专用线程上创建，通知（源增删）也在那条线程上处理。
+// CoreMIDI 控制器（设计方案 §9.4）。探针（reports/w2-control.md §5、reports/w2-control-2.md §1）验证的事实：
+//   - MIDIClientCreateWithBlock 的通知块在"进程里第一次建客户端的那条线程的 run loop"上派发，对之后建的所有客户端都是这条：
+//     那条线程退出就再也没有热插拔通知。所以客户端 / 输入口都在进程级的 MIDIHost 线程上建 / 销毁（它先建了一个永不销毁的锚），
+//     通知（源增删）也在那条线程上处理；控制器 stop 只销毁自己的输入口和客户端，宿主线程一直活着（W2-C2）。
 //   - 输入口的接收块在 CoreMIDI 自己的线程上调，与 run loop 无关；收到的是 MIDIEventList（UMP），用 unsafeSequence() 遍历，
 //     packet.words 是 64 个 UInt32 的元组，wordCount 说明有效字数。
 //   - 虚拟源（MIDISourceCreateWithProtocol）对本进程也是普通的源，会触发 msgObjectAdded → 热插拔路径就是测试路径。
@@ -28,6 +29,8 @@ public struct MIDIError: Error, CustomStringConvertible {
 }
 
 /// MIDI 控制器。
+/// `@unchecked Sendable` 的理由：`client` / `port` 只在 MIDIHost 的线程上读写（setUp / tearDown / 通知处理都在那条线程上串行）；
+/// 其余可变状态都在 Mutex / Atomic 里；`onMessage` 是测试挂钩，start 之前设。
 public final class MIDIController: @unchecked Sendable {
     public struct Counters: Hashable, Sendable {
         public var messages: UInt64 = 0
@@ -47,17 +50,17 @@ public final class MIDIController: @unchecked Sendable {
     private let rejected = Atomic<UInt64>(0)
     private let ignored = Atomic<UInt64>(0)
     private let learned = Atomic<UInt64>(0)
+    /// 客户端与输入口：只在 MIDIHost 的线程上碰；0 = 没起 / 已停。
     private var client = MIDIClientRef()
     private var port = MIDIPortRef()
-    private var thread: Thread?
-    private var runLoop: CFRunLoop?
     private let started = Atomic<Bool>(false)
-    private var dispatchTask: Task<Void, Never>?
-    private var queue: AsyncStream<Command>.Continuation?
+    /// 顺序派发：CoreMIDI 接收线程 yield，一条常驻 Task 顺序 submit。
+    private let pipeline = Mutex<(queue: AsyncStream<Command>.Continuation, task: Task<Void, Never>)?>(nil)
     /// 测试挂钩：每条解析出的消息（learn 之前）。
     public var onMessage: (@Sendable (MIDIMessage) -> Void)?
 
-    public init(bus: CommandBus, table: MIDIMapTable = .default, clientName: String = "Switcher") {
+    /// clientName：CoreMIDI 客户端名（输入口叫 "<clientName> 输入"），默认产品名。
+    public init(bus: CommandBus, table: MIDIMapTable = .default, clientName: String = "PlusMix") {
         self.bus = bus
         self.clientName = clientName
         mapper = Mutex(MIDIMapper(table: table))
@@ -82,13 +85,11 @@ public final class MIDIController: @unchecked Sendable {
 
     // MARK: 生命周期
 
-    /// 起 MIDI 线程、建客户端和输入口、连上现有的源。
+    /// 在宿主线程上建客户端和输入口、连上现有的源；起顺序派发的 Task。
     public func start() throws {
         guard !started.exchange(true, ordering: .acquiringAndReleasing) else { return }
-        // 顺序派发的 Task
         let (stream, continuation) = AsyncStream<Command>.makeStream(bufferingPolicy: .bufferingNewest(1024))
-        queue = continuation
-        dispatchTask = Task { [self] in
+        let task = Task { [self] in
             for await command in stream {
                 do {
                     _ = try await self.bus.submit(command, source: .midi)
@@ -98,46 +99,19 @@ public final class MIDIController: @unchecked Sendable {
                 }
             }
         }
-        let ready = DispatchSemaphore(value: 0)
-        let failure = Mutex<MIDIError?>(nil)
-        let t = Thread { [self] in
-            if let e = setUpOnThread() {
-                failure.withLock { $0 = e }
-                ready.signal()
-                return
-            }
-            runLoop = CFRunLoopGetCurrent()
-            ready.signal()
-            // 跑 run loop 直到 stop() 叫停；加个空端口保证有输入源、不会立即返回
-            RunLoop.current.add(Port(), forMode: .default)
-            while started.load(ordering: .acquiring) {
-                RunLoop.current.run(mode: .default, before: .distantFuture)
-            }
-            tearDownOnThread()
-        }
-        t.name = "switcher.midi"
-        t.qualityOfService = .userInteractive
-        thread = t
-        t.start()
-        ready.wait()
-        if let e = failure.withLock({ $0 }) {
+        pipeline.withLock { $0 = (continuation, task) }
+        if let e = MIDIHost.shared.sync({ self.setUpOnHost() }) {
             started.store(false, ordering: .releasing)
-            queue?.finish()
-            thread = nil
+            pipeline.withLock { $0?.queue.finish(); $0 = nil }
             throw e
         }
     }
 
-    /// 停线程、断开并销毁客户端。
+    /// 断开源、销毁输入口和客户端（在宿主线程上，返回时已完成）；宿主线程和通知 run loop 不动。
     public func stop() {
         guard started.exchange(false, ordering: .acquiringAndReleasing) else { return }
-        if let rl = runLoop { CFRunLoopStop(rl) }
-        // 线程退出后 client 已销毁（tearDownOnThread）
-        queue?.finish()
-        queue = nil
-        dispatchTask = nil
-        thread = nil
-        runLoop = nil
+        MIDIHost.shared.sync { self.tearDownOnHost() }
+        pipeline.withLock { $0?.queue.finish(); $0 = nil }
     }
 
     // MARK: learn
@@ -151,12 +125,14 @@ public final class MIDIController: @unchecked Sendable {
 
     public var isLearning: Bool { learnHandler.withLock { $0 != nil } }
 
-    // MARK: MIDI 线程
+    // MARK: 宿主线程
 
-    /// 在 MIDI 线程上：建客户端 + 输入口，连所有源。
-    private func setUpOnThread() -> MIDIError? {
+    /// 建客户端 + 输入口，连所有源。
+    private func setUpOnHost() -> MIDIError? {
         var st = MIDIClientCreateWithBlock(clientName as CFString, &client) { [weak self] notification in
-            self?.handleNotification(notification)
+            // 在 CoreMIDI 选定的通知 run loop 上（宿主线程；App 若先在主线程建过锚则是主线程）：只把指针里的内容抄出来，回宿主线程处理
+            guard let self, let notice = MIDINotice(notification) else { return }
+            MIDIHost.shared.async { self.handleNotice(notice) }
         }
         guard st == noErr else { return MIDIError(what: "MIDIClientCreate", status: st) }
         st = MIDIInputPortCreateWithProtocol(client, "\(clientName) 输入" as CFString, ._1_0, &port) { [weak self] eventList, _ in
@@ -164,13 +140,14 @@ public final class MIDIController: @unchecked Sendable {
         }
         guard st == noErr else {
             MIDIClientDispose(client)
+            client = 0
             return MIDIError(what: "MIDIInputPortCreate", status: st)
         }
         rescanSources()
         return nil
     }
 
-    private func tearDownOnThread() {
+    private func tearDownOnHost() {
         let table = sourceTable.withLock { t -> [MIDIEndpointRef: MIDISourceInfo] in
             let copy = t
             t.removeAll()
@@ -181,20 +158,13 @@ public final class MIDIController: @unchecked Sendable {
         if client != 0 { MIDIClientDispose(client); client = 0 }
     }
 
-    private func handleNotification(_ notification: UnsafePointer<MIDINotification>) {
-        switch notification.pointee.messageID {
-        case .msgObjectAdded, .msgObjectRemoved:
-            let n = notification.withMemoryRebound(to: MIDIObjectAddRemoveNotification.self, capacity: 1) { $0.pointee }
-            guard n.childType == .source else { return }
-            if notification.pointee.messageID == .msgObjectAdded {
-                connect(source: n.child)
-            } else {
-                disconnect(source: n.child)
-            }
-        case .msgSetupChanged:
-            rescanSources()
-        default:
-            break
+    /// 源增删 / 配置变化。停了之后才到的通知丢掉。
+    private func handleNotice(_ notice: MIDINotice) {
+        guard client != 0 else { return }
+        switch notice {
+        case .sourceAdded(let source): connect(source: source)
+        case .sourceRemoved(let source): disconnect(source: source)
+        case .setupChanged: rescanSources()
         }
     }
 
@@ -266,6 +236,6 @@ public final class MIDIController: @unchecked Sendable {
             ignored.add(1, ordering: .relaxed)
             return
         }
-        _ = queue?.yield(command)
+        pipeline.withLock { _ = $0?.queue.yield(command) }
     }
 }
