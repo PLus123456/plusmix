@@ -1,36 +1,49 @@
 import CoreMIDI
 import Foundation
+import Synchronization
 import SwitcherContracts
 
 // 虚拟 MIDI 源：给 MIDI 映射的自测用（CoreMIDI 虚拟端点，对所有客户端可见，本进程的 MIDIController 也会热插拔连上它）。
 // 也可以拿来做"软件推杆"（App 里的 T-bar 走它就和真 MIDI 推杆同一条路），所以放在正式代码里。
+// 客户端 / 端点在 MIDIHost 的线程上建 / 销毁：保证进程里第一个 CoreMIDI 客户端是宿主的锚，热插拔通知永远有 run loop 收（W2-C2）。
 
 /// 一个虚拟 MIDI 源。
+/// `@unchecked Sendable` 的理由：`client` / `endpoint` 在 init 里写一次、之后只读；`disposed` 是原子量。
 public final class VirtualMIDISource: @unchecked Sendable {
     public let name: String
-    private var client = MIDIClientRef()
-    private var endpoint = MIDIEndpointRef()
-    private var disposed = false
+    private let client: MIDIClientRef
+    private let endpoint: MIDIEndpointRef
+    private let disposed = Atomic<Bool>(false)
 
     public init(name: String) throws {
         self.name = name
-        var st = MIDIClientCreateWithBlock("\(name) 客户端" as CFString, &client, nil)
-        guard st == noErr else { throw MIDIError(what: "MIDIClientCreate", status: st) }
-        st = MIDISourceCreateWithProtocol(client, name as CFString, ._1_0, &endpoint)
-        guard st == noErr else {
-            MIDIClientDispose(client)
-            throw MIDIError(what: "MIDISourceCreate", status: st)
+        let made: Result<(client: MIDIClientRef, endpoint: MIDIEndpointRef), MIDIError> = MIDIHost.shared.sync {
+            var client = MIDIClientRef()
+            var st = MIDIClientCreateWithBlock("\(name) 客户端" as CFString, &client, nil)
+            guard st == noErr else { return .failure(MIDIError(what: "MIDIClientCreate", status: st)) }
+            var endpoint = MIDIEndpointRef()
+            st = MIDISourceCreateWithProtocol(client, name as CFString, ._1_0, &endpoint)
+            guard st == noErr else {
+                MIDIClientDispose(client)
+                return .failure(MIDIError(what: "MIDISourceCreate", status: st))
+            }
+            return .success((client, endpoint))
         }
+        let refs = try made.get()
+        client = refs.client
+        endpoint = refs.endpoint
     }
 
     deinit { dispose() }
 
     /// 销毁端点（客户端会收到 msgObjectRemoved）。
     public func dispose() {
-        guard !disposed else { return }
-        disposed = true
-        MIDIEndpointDispose(endpoint)
-        MIDIClientDispose(client)
+        guard !disposed.exchange(true, ordering: .acquiringAndReleasing) else { return }
+        let (client, endpoint) = (client, endpoint)
+        MIDIHost.shared.sync {
+            MIDIEndpointDispose(endpoint)
+            MIDIClientDispose(client)
+        }
     }
 
     /// 发一个 MIDI 1.0 通道消息（UMP 消息类型 2）。
