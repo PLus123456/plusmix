@@ -59,3 +59,51 @@ $H run --show /tmp/f.json --duration 600 --stats /tmp/f.jsonl --record /tmp/f.mo
 # 看 /tmp/f.jsonl 的 rss_mb 每分钟最小值；headless 结束时打印的"输入 1（file）"一行有 解码没跟上 / 跳过 / 晚醒
 ```
 H.264 对照片段：`ffmpeg -i .build/perf/e4/e4-source.mov -c:v h264_videotoolbox -b:v 40M -pix_fmt yuv420p -c:a aac clip30.mov`。
+
+## 3. 定位结果（2026-09-28，8 小时跑完之后补；结论：FileInput 解码线程没有自动释放池，每圈的 AVAssetReader 永远不释放）
+
+**8 小时确认**（`reports/W4-soak-8h.md`，`.build/soak/8h/`）：S2 = **60.82 MB/h**（预热 30 min 后逐分钟 451 点、拟合 7.5 h，R² 0.955；footprint 995 → 1617 MB），
+ps 的 resident 同步涨 62.23 MB/h；文件输入循环 960 圈 → **每圈 0.5 MB**，与 §1 的对照实验一致。判定 ❌（≤ 10 MB/h）。
+
+**按圈，且主要是音频那一路**（5 s 的 H.264 片段，10 分钟 120 圈，每分钟最小 footprint 拟合；`.build/soak/leakhunt3/`）：
+
+| headless 全引擎（单路文件在 PGM 上） | 斜率 | 每圈 |
+|---|---|---|
+| 5 s A+V | 333.6 MB/h（R² 1.00） | 0.463 MB |
+| 5 s A+V + 录制 | 334.4 MB/h | 0.464 MB（录制无关） |
+| 5 s 只视频 | 51.5 MB/h（R² 1.00） | 0.071 MB |
+
+**排除渲染器**（`scripts/soak/fileprobe/`：只起 FileInput，LockFreeFrameSlot(3) + CAudioRing(2)，不接引擎 / 渲染器 / 音频引擎；`.build/soak/fileprobe/*.log`，各 120 圈）：
+
+| 变体 | footprint 30 s → 600 s | 每圈 |
+|---|---|---|
+| A+V 片段，有音频环，另起线程每拍取帧、读空音频环 | 22.7 → 93.5 MB | 0.62 MB |
+| A+V 片段，有音频环，没人取帧 / 读环 | 20.9 → 87.5 MB | 0.58 MB |
+| A+V 片段，`audioRing = nil`（FileReader 不建音频 track output） | 38.6 → 34.0 MB | **0** |
+| 只视频片段 | 15.0 → 27.4 MB | 0.11 MB |
+
+`stop()` 之后 footprint 掉回（93.5 → 51.8 MB）：泄漏的对象在**线程退出时**才释放——这就是自动释放池的行为（TLS 析构时清 pool 页）。
+
+**机制（运行时直接抓到）**：`OBJC_DEBUG_MISSING_POOLS=YES` 跑 fileprobe 45 s（8 圈，A+V）：**10174 条** `Object … of class X autoreleased with no pool in place - just leaking`，
+其中 `NSKVONotifying_AVAssetReaderTrackOutput` 5452、`AVAssetReader` 3085，其余是 `__NSSetI` / `__NSCFString` / `NSKeyValueObservance` / `AVCMNotificationDispatcherListenerKey` 等
+（只视频片段 30 s：4198 条，同样两个类为主；`.build/soak/fileprobe/missing-pools-*.log`）。
+`decodeLoop` 跑在 `InputThread`（`Common/InputThread.swift`，裸 `pthread_create`）上，线程上从来没有 push 过自动释放池；`copyNextSampleBuffer()` 每调一次，
+AVFoundation 内部都会 autorelease 一次 reader / track output（KVO 代理），这些引用永远不 release → **每圈的 AVAssetReader 和两个 track output 连同内部解码器状态永远活着**。
+音频 track output（AAC → LPCM 的转换器）内部大约 0.5 MB / 个，视频那个约 0.07–0.1 MB，所以"有音轨才明显"、"只视频也在涨"。`SurfaceTracker`、`DecodedAudioFIFO`、帧槽都不是（上面的变体已排除）。
+
+**建议修法**：`decodeLoop` / `paceLoop` 的每次迭代包在 `autoreleasepool { }` 里（或者 `InputThread` 提供"按迭代排水"的入口，所有在 InputThread 上碰 AVFoundation / CoreMedia
+对象的输入统一受益——`CameraInput` 若也在自己的 InputThread 上调 AVFoundation，请一并查）。修完的**验证**：
+
+```bash
+swift build -c release --package-path scripts/soak/fileprobe
+H="$(swift build -c release --package-path Tools/switcher-headless --show-bin-path)/switcher-headless"
+ffmpeg -i .build/perf/e4/e4-source.mov -t 5 -c:v h264_videotoolbox -b:v 40M -pix_fmt yuv420p -c:a aac /tmp/clip5.mov
+$H make-show --preset perf-e4 --file /tmp/clip5.mov --out /tmp/f.json
+python3 -c "import json; p='/tmp/f.json'; s=json.load(open(p)); s['inputs'][0]['source']['file']['endAction']='loop'; json.dump(s, open(p,'w'))"
+OBJC_DEBUG_MISSING_POOLS=YES scripts/soak/fileprobe/.build/release/fileprobe /tmp/f.json 60 --consume 2>&1 | grep -c "no pool in place"   # 应为 0
+scripts/soak/fileprobe/.build/release/fileprobe /tmp/f.json 600 --consume    # 120 圈，footprint 应平（现在 +70 MB）
+```
+之后 `make soak-1h` 的 S2 参考值应 ≤ 10 MB/h（现在 108.9，8 小时 60.8）。
+
+**顺带（8 小时数据）**：第 2 条的 ProRes 循环点空拍 8 小时里 765 / 960 圈，推帧线程晚醒 1142 万次（每秒 397 次；1 小时那次每秒 158 次，随时间变多）；
+进程 CPU 均值逐小时 59.0 → 61.4%（+0.37 pt/h）——修完泄漏后看这两条是否还随时间变差。
