@@ -26,7 +26,7 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
     - W3-E6 App 启动顺序（w3-app-7 = e0960b3 → 合入，Opus）：预热完再定 t0；真 App 冷启动 clockStartLag 491–507 ms / missed 29–30 → 0 / 0；App 99 用例 97 过 0 失败 2 跳。MIDI 冷启动（第一次连 MIDIServer 约 0.6 s）仍在主线程，只是不再拖时钟。
     - W1-A4 frameprobe 内存（w1-testkit-4 = 2af7b53 → 合入，Opus）：根因不是缺池而是多声道音频每块 reserveCapacity 的 O(n²) 重拷；10 分钟录像峰值 7.6 GB → 172 MB、1 小时 41 GB → 795 MB，输出逐字节相同；TestKit 71 用例 0 失败。
     - W4-B2 发布脚本收尾（w4-release-2 = 064bfd5 → 合入 36db44b，Opus）：R11 读当前前缀、check-links 挂进 make lint、release.yml 产物名读 PRODUCT_NAME、发布文档与用户手册配置目录跟上；顺手修了脚本测试 printf | grep -q 在 pipefail 下的误报；release-test 10 / 10、actionlint 0。
-    - 八路合入后的最终全量（本 worktree，phase5，2026-09-28 21:14 起）：FINAL_PLACEHOLDER
+    - 八路合入后的最终全量（本 worktree，phase5，2026-09-28 21:14 起）：六包 722 用例 0 失败（显示类 2 条锁屏时红、解锁复跑过）、App 99 = 97 过 2 跳、gate4 g5-final 18 / 20（V4 设计外 1 帧 = 用户回来用机器时的一次晚到，A4 = 已知的 frameprobe 配对平局），明细在 reports/G5.md §11.1；g5-final2 复跑：18 / 20（A4 / V4 在播段都过；V2 = 2 是 22:35 Spotlight / iCloud 守护进程突发的一串跳拍，派生 V4 引擎口径 32），明细 §11.1
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
