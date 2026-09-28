@@ -22,6 +22,8 @@ import SwitcherContracts
 ///   混音器的年龄设定点才对得上）；速率 ≠ 1 时按有理数位置线性插值变速（音调随之变）。
 /// - 带 alpha 的素材（ProRes 4444 / HEVC alpha）输出 BGRA；解码器标 StraightAlpha 的就地预乘（渲染器约定预乘）。
 /// - 线程：解码线程（普通优先级）+ 推帧线程（time-constraint，周期 = 一拍）。都允许锁和分配；帧槽 push / 环 write 无锁。
+///   两条都是裸 pthread（InputThread），每轮迭代各包一个自动释放池：AVFoundation 每次 copyNextSampleBuffer 都会 autorelease
+///   reader / track output，没有池就攒到停机（S2 每圈 +0.5 MB；W2-A3）。
 public final class FileInput: Input, @unchecked Sendable {
     /// 可调参数。
     public struct Options: Sendable, Hashable {
