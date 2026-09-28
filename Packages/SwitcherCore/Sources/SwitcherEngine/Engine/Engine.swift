@@ -88,7 +88,11 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
     private let consumers = Mutex<[ConsumerBox]>([])
     private var assembler: StatsAssembler?
     private let started = Atomic<Bool>(false)
+    private var warmedUp = false
     private var startedAt = HostTime.zero
+    /// 时钟线程起晚了多少：起时钟那一刻已经过了第 firstTick 拍的时刻多久（准时或提前为 0）。诊断量，start 之后有效：
+    /// 非 0 说明组装方定 t0 之后做的事吃掉了提前量（见 warmUp）；开头会有 ⌊lag / 拍长⌋ 拍 missed_render、各路帧槽在这段时间挤掉的帧算 drop。
+    public private(set) var clockStartLag: HostDuration = .zero
 
     /// - Parameters:
     ///   - stateMachine: 已构造的状态机（引擎 start 时起它的线程）。
@@ -175,28 +179,47 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
 
     // MARK: 生命周期
 
-    /// 起引擎：渲染器 prepare → 状态机线程 → 时钟线程。t0 = 第 firstTick 拍的时刻；lastTick 非 nil 时跑到它为止（测试）。
-    public func start(t0: HostTime = .now(), firstTick: Tick = .zero, lastTick: Tick? = nil) async throws {
-        guard !started.exchange(true, ordering: .acquiringAndReleasing) else { throw EngineError.alreadyStarted }
+    /// 预热：所有一次性的慢活——渲染器 prepare（管线状态、纹理池、输出环、首帧空渲染）、状态机线程、第 0 拍的快照。幂等；`start` 没预热会自己调。
+    ///
+    /// 组装方应**先 warmUp、再定 t0、再 start**（W1-B3）：t0 一旦定下（音频引擎、输入、录制都按它起），引擎起晚多少就有 ⌊晚 / 拍长⌋ 拍
+    /// missed_render，这段时间进帧槽的帧也被挤掉算 drop。真 App 定 t0 = now + 300 ms 之后先做了 686 ms 的控制层启动才调 start，第一秒就是
+    /// jitter 477 ms / missed_render 28 / 每路 drop 12（reports/w1-core-3.md §1）；引擎 prepare 本身只要 2 ms，但 headless 的着色器从源码
+    /// 编译在系统缓存未命中时要 0.6–1 s。起晚了多少看 `clockStartLag`。warmUp / start / stop 由组装方顺序调用，不支持并发。
+    public func warmUp() async throws {
+        guard !warmedUp else { return }
         try renderer.prepare(format: format, maxInputs: maxInputs + 1)
         renderer.sink = self
         stateMachine.start()
+        await stateMachine.prepare(upTo: .zero)
+        warmedUp = true
+    }
+
+    /// 起引擎：（没预热就先 warmUp）→ 状态机准备到 firstTick → 时钟线程。t0 = 第 firstTick 拍的时刻；lastTick 非 nil 时跑到它为止（测试）。
+    /// 调用时 t0 应仍在未来：起时钟那一刻已过 t0 的话开头会跳拍（`clockStartLag`），先 warmUp 再定 t0 就不会。
+    public func start(t0: HostTime = .now(), firstTick: Tick = .zero, lastTick: Tick? = nil) async throws {
+        guard !started.exchange(true, ordering: .acquiringAndReleasing) else { throw EngineError.alreadyStarted }
+        do { try await warmUp() } catch {
+            started.store(false, ordering: .releasing)
+            throw error
+        }
         await stateMachine.prepare(upTo: firstTick)
         startedAt = HostClock.now()
         assembler = StatsAssembler(counters: counters, startedAt: startedAt)
         let clock = ProgramClock(spec: TickClockSpec(t0: t0, frameRate: format.frameRate), options: options.clock)
         self.clock = clock
         latency.t0.store(clock.spec.time(of: firstTick).ticks, ordering: .releasing)
+        clockStartLag = max(.zero, HostClock.now() - clock.spec.time(of: firstTick))
         try clock.start(handler: self, firstTick: firstTick, lastTick: lastTick)
     }
 
-    /// 停引擎：时钟停 → 渲染器 shutdown → 状态机线程停。
+    /// 停引擎：时钟停 → 渲染器 shutdown → 状态机线程停。只预热没起的引擎也用它释放渲染器与状态机线程。
     public func stop() async {
-        guard started.load(ordering: .acquiring) else { return }
+        guard started.load(ordering: .acquiring) || warmedUp else { return }
         clock?.stop()
         renderer.shutdown()
         renderer.sink = nil
         stateMachine.stop()
+        warmedUp = false
         started.store(false, ordering: .releasing)
     }
 
