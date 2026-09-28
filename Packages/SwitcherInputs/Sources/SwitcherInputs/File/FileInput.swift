@@ -14,9 +14,10 @@ import SwitcherContracts
 ///
 /// - 预解码：解码线程领先推帧线程 `predecodeDepth`（3）帧（速率高时加到"每拍要前进的帧数 + 2"）；音频解成 float32 非交错 48 kHz 进 FIFO，
 ///   最多囤 0.5 s。解出来的帧已经落后当前拍位置超过一帧的不入队直接丢（计 `framesRejected`），解码器才追得上时间线（W2-A4）。
-/// - 循环：视频离尾不到 `loopPrerollSeconds` × 速率（或音频先到尾）就把下一圈的 reader 开好（AVAssetReader startReading 之后自己预解首帧，
-///   探针：等 300 ms 再取首帧 0.1 ms），视频 / 音频各自读到尾就各自换到下一圈的 reader，两圈的 reader 短暂并存；展开后的媒体位置连续
-///   （第 k 圈 + k × 时长）。以前到尾才重开，"建 reader + 解首帧"ProRes 422 HQ 要 30–50 ms、赶不上 3 帧余量，每圈在循环点空一拍（W2-A4）。
+/// - 循环：视频离尾不到 `loopPrerollSeconds` × 速率就把下一圈的 reader 开好（AVAssetReader startReading 之后自己预解首帧，
+///   探针：等 300 ms 再取首帧 0.1 ms），视频 / 音频各自读到尾就各自换到下一圈的 reader，两圈的 reader 只在离尾那一小段并存（每个 reader
+///   自己常驻约 10 帧预解，1080p ProRes 约 30–70 MB，所以不能常驻双 reader）；展开后的媒体位置连续（第 k 圈 + k × 时长）。
+///   以前到尾才重开，"建 reader + 解首帧"ProRes 422 HQ 要 30–50 ms、赶不上 3 帧余量，每圈在循环点空一拍（W2-A4）。
 /// - 定位 `seek`：换代——解码线程重开 reader，队列作废；新锚点 = 现在 + seekLead 之后的第一拍显示目标位置，所以定位到
 ///   第 300 帧后首帧就是 300。暂停：位置冻结，每拍把停住的帧以 pts = 拍点 重新推（帧槽不靠 reused 撑画面）。
 /// - 结束动作：holdLastFrame → 末帧显示期结束时置 noSignal、不再推（帧槽保留末帧）；black → 推一帧黑场再置 noSignal；
@@ -40,8 +41,9 @@ public final class FileInput: Input, @unchecked Sendable {
         public var audioChunkFrames = 256
         /// 音频解码领先上限（帧）。
         public var audioAheadFrames = AudioFormat.sampleRate / 2
-        /// 循环时提前多久（真实时间秒）开好下一圈的 reader；片段内的提前量 = 它 × 速率。片段比它短就一直双 reader。
-        public var loopPrerollSeconds = 0.5
+        /// 循环时视频离尾多久（真实时间秒）开好下一圈的 reader；片段内的提前量 = 它 × 速率。建 reader 16–20 ms + 它自己预解首帧 15–42 ms（ProRes 1080p60 探针），
+        /// 加上解码位置本来领先显示 3 帧，0.15 s 够用 2 倍以上；片段比它短就一直双 reader（小片段才会这样，代价小）。
+        public var loopPrerollSeconds = 0.15
         /// 定位 / 恢复后多久的第一拍作为新锚点。
         /// 目标位置的第一帧解出来之后，多久之后的第一拍作为新锚点。
         public var seekLead = HostDuration(milliseconds: 30)
@@ -390,11 +392,12 @@ public final class FileInput: Input, @unchecked Sendable {
                     queueDepth = want
                     queue.setDepth(want)
                 }
-                // 预开下一圈：视频离尾不到 lead（真实时间 loopPrerollSeconds × 速率）或音频已到尾，就把下一圈的 reader 开好——
-                // AVAssetReader startReading 之后自己会把首帧预解出来（探针：等 300 ms 再取首帧 0.1 ms；同时另一个 reader 满速解也一样），交接时不用等
+                // 预开下一圈：视频离尾不到 lead（真实时间 loopPrerollSeconds × 速率）就把下一圈的 reader 开好——AVAssetReader startReading 之后
+                // 自己会把首帧预解出来（探针：等 300 ms 再取首帧 0.1 ms；同时另一个 reader 满速解也一样），交接时不用等。只看视频不看音频：音频领先 0.5 s，
+                // next 的音频在它还是 next 时就会被拉完，交接后 cur.audioDone 立刻为真，拿它当触发条件双 reader 就常驻了（fileprobe 重 ProRes 212 MB）
                 if looping, next == nil, !prerollFailed {
                     let lead = Rational(approximating: options.loopPrerollSeconds, maxDenominator: 1000) * p.timeline.rate
-                    if cur.videoDone || cur.audioDone || cur.lastVideoMedia + lead >= duration {
+                    if cur.videoDone || cur.lastVideoMedia + lead >= duration {
                         do {
                             next = LoopReader(reader: try asset.makeReader(from: .zero), base: cur.base + duration)
                         } catch {
