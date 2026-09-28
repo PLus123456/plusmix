@@ -43,6 +43,16 @@ headless 只加了参数（`Tools/switcher-headless/`，已有参数与预设行
 `run` 接节目里的摄像头（只接画面、不开麦克风）/ 文件输入（相对路径相对节目文件；收尾时先从音频引擎摘掉再停）；`make-show --preset soak|perf-e4`（`--camera auto|none|<uniqueID>`、`--file`）、`make-scenario --preset soak`；
 新增 `switcher-headlessTests`（9 条；`swift test --package-path Tools/switcher-headless`，make test 不跑工具用例）。
 
+### 8 小时跑完之后（2026-09-28 上午）
+
+- 8 小时结果（§2 第一张表）：S1 / A3 过，**S2 60.8 MB/h 与 S3 CPU 60.1% 红**。两项都定位了：
+  - S2 → `reports/issues/W4A-w2-inputs-file-loop-memory-and-prores-starve.md` §3：FileInput 的解码线程（裸 pthread）没有自动释放池，每圈重开的 AVAssetReader 永远不释放；
+    用 `OBJC_DEBUG_MISSING_POOLS=YES` 抓到 45 s 里 10174 个对象"just leaking"。复现 / 验证工具 `scripts/soak/fileprobe/`（只起 FileInput 的 SwiftPM 包，不接引擎）。
+  - S3 → `reports/issues/W4A-w2-stream-ndi-send-cpu-share.md`：按线程拆，NDI SDK 自己的两个线程占 25 pt（一个核的 %），我们的 NDI 线程 1 pt；阈值 / 标准负载怎么处理等你定（§4 第 5 条）。
+- 报告脚本修了一个判定漏洞：总判定原来只看 S1 / S2 / A3，**S3 红了顶行不显示、退出码还是 0**（§5 L4 明写 S1、S2、S3、A3）；现在 `soakjudge.s3_verdict` / `overall_verdict` 判，8 小时报告已重出，加了 5 条用例。
+- soak.sh 每分钟多采一份每线程 CPU 时间（`scripts/soak/thread-cpu.swift`：proc_pidinfo，不要 sudo / task port），报告 §5 出"S3 按线程"表，3 条用例；以后 S3 红了直接看是谁的。
+- `--ambient "约 NN °C"` 这种没换的占位符按未记录处理（8 小时那次原样记进了报告头）。
+
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
 ### 1 小时 soak（`make soak-1h`，本会话 19:28–20:28；报告 `reports/W4-soak-1h.md`，数据 `.build/soak/1h/`）
@@ -80,28 +90,32 @@ g4-m5max.json（26.6.2、10 分钟、带 API 客户端）只作参考列：V1 2.
 
 | 测试 ID | 数值 | 通过 |
 |---|---|---|
-| S1 / S2 / A3（8 小时） | 等今晚实跑（命令见文末） | 待跑 |
+| **S1（8 小时，`make soak`，用户终端 2026-09-27 23:31 → 28 07:31，`reports/W4-soak-8h.md`）** | 97 个 5 分钟窗口 0 超（V2 0 / 1727995 拍，A1 0，E1 0）；退出码 0，崩溃 0；录制 / NDI / 2 路推流各 172.8 万帧一帧不丢；V5 1728000 / 1728000 | ✅ |
+| S2（8 小时） | **60.82 MB/h**（预热后 451 点、7.5 h，R² 0.955；footprint 995 → 1617 MB；ps resident 62.2 MB/h）/ ≤ 10 | ❌（根因见 §1、issue W4A-w2-inputs…§3） |
+| S3 CPU（8 小时） | **avg 60.1%** / p95 62.7% / max 74.9%（100 = 一核；逐小时 59.0 → 61.4）/ ≤ 60 | ❌（归因见 issue W4A-w2-stream-ndi-send-cpu-share） |
+| S3 GPU（8 小时） | avg 25.8% / p95 28.0%（IOKit，正式口径）/ ≤ 50；powermetrics 49.7% / 64.8%，频率 8 小时全在最低档 338 MHz（dvfm_states 只有这一档有占用） | ✅ 达目标（口径疑问见 §4 第 6 条） |
+| A3（8 小时） | +0.00 ms（整秒配对 13499 对、跨 7.94 h；A2 max 0.000）/ ≤ 16 | ✅ 达目标 |
+| S3 按线程（8 分钟对照 `.build/soak/tcpu/`，同负载无摄像头） | `ndis:async` 18.9 + `ndis:lowQ` 6.2 + 无名 SDK / 系统线程 13.0 + AAC 1.3 + 推流音频 2.4 + 我们的 NDI 1.0 + 文件 1.0 + 引擎 / 音频 1.6 + 编码器交帧 1.7 + 合成源 1.6 = 49.2（cpu_pct 53.2） | 信息 |
 | S2 · Instruments Leaks 30 分钟 | BLOCKED-权限（开发者工具访问没开，非交互附加不上）；解锁：终端里跑 `scripts/soak/leaks.sh` 输一次管理员密码，或 `DevToolsSecurity -enable` | BLOCKED |
 | S4 | BLOCKED-机型（MacBook Pro 有风扇）；`scripts/perf/s4-thermal.sh` 在本机只写报告头 `reports/W4-s4-m5max.md`；解锁：借 M1 Air | BLOCKED |
 | 单元：headless 预设（`swift test --package-path Tools/switcher-headless`） | 9 / 9 过（soak 节目 8 合成 + 摄像头 + 文件、输出编号、叠加换成摄像头 / 文件、每 30 s 切换、每 5 min 翻叠加、PGM 只轮 1–8、perf-e4） | ✅ |
 | 单元：`python3 -B -m unittest discover -s scripts/perf -p 'test_*.py'` | 20 / 20 过（百分位、V1–V3 / S3 口径、10% 规则、基线为 0、floor、同机同大版本选基线、机型标记、powermetrics plist 解析、E4 对齐与分段 VMAF、S4 降频判定） | ✅ |
-| 单元：`python3 -B -m unittest discover -s scripts/soak -p 'test_*.py'` | 26 / 26 过（shell 脚本里 `$变量` 后不许紧跟非 ASCII、窗口切分与累计相减、V2 / A1 / E1 窗口判定、离线不连续落窗、运行段 / 停机段、拍号停走、事件与并段、崩溃 / 短跑、每分钟 RSS、S2 预热后拟合与参考、A3 满 8 h 与外推、分段合并、Leaks 导出解析） | ✅ |
+| 单元：`python3 -B -m unittest discover -s scripts/soak -p 'test_*.py'` | 34 / 34 过（shell 脚本里 `$变量` 后不许紧跟非 ASCII、窗口切分与累计相减、V2 / A1 / E1 窗口判定、离线不连续落窗、运行段 / 停机段、拍号停走、事件与并段、崩溃 / 短跑、每分钟 RSS、S2 预热后拟合与参考、S3 必须 / 目标档与总判定含 S3、线程快照解析与首尾归因、A3 满 8 h 与外推、分段合并、Leaks 导出解析） | ✅ |
 
 
 ## 3. 没做的和原因
 
-- **今晚 8 小时的 S2 大概率红**：原因已定位到文件输入的循环重开（每圈 +0.5 MB，30 s 片段每小时 120 圈 ≈ 60 MB/h，问题单给 W2-A）。
-  我没有为了让它过而把 soak 的文件换成长片段（那等于绕开缺陷）；如果你想让今晚那次先看其它项，可以加 `--no-file`，但那就不是 prompt 要的标准负载了——我建议照原样跑，S2 红就红，归 W2-A。
-
-- **8 小时实跑（S1 / S2 / A3 的正式值）**：按 prompt 由用户晚上触发。命令见文末；跑完自动出 `reports/W4-soak-8h.md`，通过时写 `baselines/soak8h-m5max-macos27.json`。
-  本会话用同一套脚本跑了 1 小时（`reports/W4-soak-1h.md`，§2）验证流程与判定。
+- **8 小时的 S2 / S3 红着，没有为了让它过动任何东西**：S2 是 W2-A 的泄漏（每圈 0.5 MB × 960 圈，预测 60、实测 60.8 MB/h），S3 是 NDI SDK 的固定成本 + 摄像头；
+  soak 的负载、阈值、文件片段都照 prompt 原样。修好 W2-A 之后要**重跑 8 小时**才有正式的 S2 值；8 小时不通过所以没写 `baselines/soak8h-*.json`（失败的跑不当基线）。
+- **8 小时报告头的室温是 "约 NN °C"**：命令里的占位符没换就跑了；environment.txt 已经记下、报告我没手改（自动生成物）。下次给实际值或去掉 `--ambient`。
+- **摄像头那一路的 CPU 份额是推出来的**（8 小时 60.1 − 1 小时 54.9 ≈ 5 pt，两次的其它条件一样）：带线程采样的对照在 Claude 会话里接不上摄像头（TCC 未决），
+  下次你在终端里跑 `make soak-1h`，threads.log 会把摄像头的线程直接列出来。
+- **CPU 逐小时 +0.37 pt 没有解释**：8 小时 59.0 → 61.4；等 W2-A 修完泄漏再看是否还爬（issue 里写了）。
 - **Instruments Leaks 30 分钟**：BLOCKED-权限（§1 探针 2）。解锁：在自己的终端里跑 `scripts/soak/leaks.sh`（附加时输一次管理员密码），或先 `DevToolsSecurity -enable`；
   跑完出 `reports/W4-leaks.md`。导出解析是按 xctrace export 的 id / ref 结构写的、用造的样例测过，**没见过这台机器真实的 Leaks 表**——第一次跑要看一眼报告里的"全部表"与列名。
-- **powermetrics（S3 的 GPU 对照、频率、thermal pressure）**：BLOCKED-sudo（本会话非交互、没有密码）。GPU 按 §3 S3 的正式口径（IOKit）判了；
-  你在终端里跑时脚本会先问一句要不要采（60 s 不答 = 不采），或 `SOAK_ARGS='--powermetrics on'` / `PERF_ARGS='--powermetrics on'` 直接问密码。
-  plist 的键名按公开工具的读法写（gpu.idle_ratio / freq_hz、processor.clusters、thermal_pressure），用造的样例测过，**没见过本机真实输出**。
-- **摄像头这一路**：本会话里授权未决、按规则没接（没弹框）。CameraInput 本身是 W2-A 的、App 里一直在用；headless 这边只是按 App 的 `DefaultInputFactory` 同样接上，
-  8 小时那次在你的终端里开跑前会先问授权。
+- **powermetrics**：8 小时那次采到了（用户给的 sudo；2875 样，168 MB plist），键名与预写的一致（gpu.idle_ratio / freq_hz / dvfm_states、thermal_pressure），解析没出错；
+  perf-baseline 那三轮仍是没 sudo 的（GPU 只有 IOKit）。Claude 会话里仍 BLOCKED-sudo。
+- **摄像头这一路**：8 小时那次接上了（`camera_auth=authorized`，收 863899 帧、30 fps、到达延迟均值 58 ms），Claude 会话里仍是授权未决不接。
 - **S4**：BLOCKED-机型（这台是有风扇的 MacBook Pro）。脚本写好了、本机走过 BLOCKED 分支；`--force` 在本机把整条流程跑一遍需要 sudo（没有），没跑。解锁：借到 M1 Air。
 - **Makefile 的三个目标**：越出归属，单独提交（bf11a15）、`make lint` 的归属检查因此报红 1 个文件——批不批见 §4 第 1 条。
 
@@ -128,6 +142,14 @@ g4-m5max.json（26.6.2、10 分钟、带 API 客户端）只作参考列：V1 2.
    另：V2 的基线是 0 时比例算不出，脚本按必须档（≤ 0.02%）判、在说明列写明——这也是我的解释，你看行不行。
 3. **每晚 1 小时那次的 S2 只作参考**：预热 30 分钟后只剩 30 分钟可拟合，噪声大；判定留给 8 小时那次（§3 S2 本来就是"长稳期间"）。A3 在 1 小时里按斜率外推到 8 小时判（G3 / G4 的口径）。
 4. （信息）NDI 发送那一项的 `encoder[].bitrate` 是未压缩 UYVY 的码率（约 1.9 Gb/s），soak 报告的输出表里原样列了；字段口径是 019 定的，只提一句免得看报告的人吓一跳。
+5. **S3 CPU 的 60% 线和 §3 S1 的标准负载在这个 NDI SDK 上是紧张的**：8 小时 60.1%（超 0.1 pt），按线程拆 NDI SDK 自己的线程 25 pt、无名 SDK / 系统线程 13 pt、摄像头约 5 pt，
+   我们自己所有线程加起来约 10 pt（issue W4A-w2-stream-ndi-send-cpu-share 有整表）。三个选项：(a) 阈值不动，W2-D 查 SDK 有没有省的办法（`ndis:lowQ` 那 6 pt 是给低带宽接收方的第二路），
+   没有就按 §4 末尾"个案放行一次"写进已知问题；(b) S3 拆成"不含 NDI / 含 NDI"两行记；(c) 改阈值。我建议 (a)，并把按线程的表存进基线、退步只看 `ndis:*` 之外的部分。阈值是你的。
+6. **GPU 占用的两个计数器对不上**：§3 S3 写 IOKit 的 `Device Utilization %` "与 powermetrics 同一计数器"，8 小时第一次并排量：IOKit 25.8% / powermetrics 活跃比 49.7%，差一倍；
+   而且 GPU 频率 8 小时全在最低档 338 MHz（`dvfm_states` 里 486–1578 MHz 各档占用全是 0），两个数都是"最低频下的忙时比"，按频率折算真正用掉的算力只有个位数百分比。
+   判定按标准的正式口径（IOKit）；建议 §3 S3 那句"同一计数器"改掉，并在报告里同时列频率（soak 报告已经这么列）。改标准是你的事。
+7. **8 小时 S2 / S3 红了要不要重跑**：S2 必须等 W2-A 修完再跑 8 小时才有正式值；S3 只差 0.1 pt、在运行间起伏（1 小时 54.9、8 分钟对照 53.2、8 小时 60.1）之内，
+   等第 5 条定了再说。两项都不是 soak 脚本的问题，脚本这边能判、能归因、能截日志，已经验证过。
 
 ## 5. 下一个会话需要知道的坑
 
@@ -157,14 +179,26 @@ g4-m5max.json（26.6.2、10 分钟、带 API 客户端）只作参考列：V1 2.
 12. **别用宽匹配的 pkill 停测试进程**：本会话一度用 `pkill -f "caffeinate -u -i -d -s -w"` 收拾自己的实验，这会连别的会话 gate 脚本里同样参数的 caffeinate 一起停掉（当时查过没有别人在跑）。按 PID 停。
 13. **`( … ) &` 里的 `$(run …)` 起的进程不是当前 shell 的子进程**，`wait` 会直接返回（本会话一次对照实验因此把 MediaMTX 提前关了）；要 wait 就在当前 shell 里 `&` 并记 `$!`。
 14. **`read -t 60 -p`**：soak / perf 在终端里问"要不要采 powermetrics"，60 s 不答当作不采——人走开了不会卡在密码提示上。sudo 票据在开跑前拿到后保活到 powermetrics 启动。
+15. **裸 pthread 上调 AVFoundation / CoreMedia 会"autoreleased with no pool in place - just leaking"**：`InputThread` 这种 `pthread_create` 起的线程没有自动释放池，
+    `copyNextSampleBuffer()` 每调一次 AVFoundation 内部 autorelease 的 reader / track output 就永远多一个引用，线程退出才释放（所以短测试看不出、stop() 之后 footprint 掉回）。
+    **查这类泄漏最快的办法**：`OBJC_DEBUG_MISSING_POOLS=YES <程序>`，运行时逐个打印类名，不用 Instruments、不用 sudo（本会话 45 s 就抓到 10174 条）。
+    渲染 / 音频线程按铁律 3 不碰 ObjC 对象没这个问题；输入线程（文件、摄像头、DeckLink、NDI 接收）都要看。
+16. **判定项要对着 §5 的 L4 / L5 那一行逐个核**：soak 的总判定漏了 S3 一整天没人发现，直到 8 小时 CPU 刚好 60.1%。`overall_verdict` 现在有用例锁住四项。
+17. **S3 红了先看 threads.log**：`scripts/soak/thread-cpu.swift <pid>` 随时能对任何自己用户的进程用（proc_pidinfo，不要 task port，DevToolsSecurity 关着也行）；
+    引擎的线程都有名字（`switcher.*`、`file-decode-N`、`synthetic-video-N`），SDK / 系统的没有（VideoToolbox、AVFoundation、HaishinKit 的 GCD 线程），NDI SDK 的叫 `ndis:async` / `ndis:lowQ`。
+18. **powermetrics 的 GPU "占用"是当前频率下的忙时比**：看 `gpu.dvfm_states` 各档的 `used_ratio` 才知道跑在哪一档；最低档 338 MHz 上 50% 忙 ≈ 满频的 10%。别拿它和 IOKit 的数互相验证，两个口径都不是"用了多少算力"。
+19. **`scripts/soak/fileprobe/` 是个独立的 SwiftPM 包**（path 依赖 Core / Inputs / Audio，只起 FileInput），`.build/` 已被 .gitignore 的通配盖住；`make build` / `make test` 不碰它，
+    W2-A 验证修复时 `swift build -c release --package-path scripts/soak/fileprobe`。
 
-## 今晚 8 小时怎么跑
+## 8 小时怎么跑（已跑过一次；W2-A 修完泄漏后重跑）
 
 ```bash
-make soak SOAK_ARGS='--powermetrics on --ambient "约 NN °C"'
+make soak SOAK_ARGS='--powermetrics on --ambient "约 24 °C"'
 ```
 
-开跑前会先问一次 sudo 密码（powermetrics），摄像头没授权过会弹系统授权框（点允许）；之后无人值守。跑完（约 8 小时 + frameprobe 约 40 分钟）看 `reports/W4-soak-8h.md`。
+室温换成实际值（占位符 `NN` 会被当成没给）；开跑前问一次 sudo 密码（powermetrics），摄像头没授权过会弹系统授权框（点允许）；之后无人值守。
+跑完（约 8 小时 + frameprobe 约 40 分钟）看 `reports/W4-soak-8h.md`；改了判定脚本想重出报告：`scripts/soak/soak.sh --skip-run --no-build --hours 8 --label 8h`。
+`.build/soak/8h/` 里 21.5 GB 的录像和 168 MB 的 powermetrics.plist 是这次的原始数据，要不要留由你定。
 Leaks（不必和 soak 同一晚，30 分钟）：
 
 ```bash
