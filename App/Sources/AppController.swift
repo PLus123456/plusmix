@@ -30,6 +30,8 @@ final class AppController {
     private(set) var hotkeyTableError: String?
     /// 面板与窗口（W3-E）。
     lazy var panels = PanelCoordinator(controller: self)
+    /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
+    let updateController: UpdateController
     private var replacing = false
 
     /// 测试宿主的 UserDefaults suite。
@@ -40,6 +42,7 @@ final class AppController {
         // 第一个 session 的 MIDIController 起来之前：让 CoreMIDI 的热插拔通知走主 run loop（换节目后新插的设备也能连上，W3-E2）
         MIDINotificationAnchor.install()
         defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
+        updateController = UpdateController(defaults: defaults, isTestHost: isTestHost)
         if isTestHost {
             L10n.languageOverride = "zh-Hans"
             let configDir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/config", isDirectory: true)

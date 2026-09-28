@@ -1,0 +1,54 @@
+# W4-B：每晚 L4 缩短版（soak-1h）+ L5 性能回归（perf-baseline，退步 > 10% 非零 = job 失败 = 阻塞）。测试标准 §5 的 L4 / L5 行。
+# 两个 make 目标是 W4-A（scripts/soak、scripts/perf）的；合入前本工作流会在"目标存在"那一步失败并说明。
+# perf-baseline 的 GPU 采样用 powermetrics（要 sudo）：runner 用户要有免密码的 sudoers 条目（docs/release/ci.md §3）。
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 19 * * *'        # 每天 03:00 Asia/Shanghai（UTC 19:00）
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  NSUnbufferedIO: "YES"
+  CAFFEINATE: caffeinate -u -i -d -s
+
+jobs:
+  soak-and-perf:
+    name: soak-1h + perf-baseline
+    runs-on: [self-hosted, macOS, ARM64, switcher]
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: make gen
+        run: make gen
+
+      - name: 目标存在（W4-A 合入前没有）
+        run: |
+          for t in soak-1h perf-baseline; do
+            make -n "$t" >/dev/null 2>&1 || { echo "::error::make $t 不存在：W4-A 的 scripts/soak / scripts/perf 还没合入 main"; exit 1; }
+          done
+
+      - name: soak-1h（L4 缩短版：S1 / S2 / S3 / A3）
+        run: $CAFFEINATE make soak-1h
+
+      - name: perf-baseline（L5：V1–V3、S3、E4 对比 baselines/，退步 > 10% 非零）
+        run: $CAFFEINATE make perf-baseline
+
+      - name: 收集结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ github.run_id }}
+          path: |
+            .build/soak/**
+            .build/perf/**
+            reports/*.md
+          if-no-files-found: ignore
+          retention-days: 30

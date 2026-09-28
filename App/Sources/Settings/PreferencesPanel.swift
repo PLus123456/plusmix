@@ -46,8 +46,10 @@ final class PreferencesModel: ObservableObject {
     @Published private(set) var status = ""
     let audioDeviceChoices: [AudioDeviceChoice]
     let languageChoices: [LanguageChoice]
-    /// 更新一节的说明（W4-B 接 Sparkle 前只有文案）。
-    let updateStatus = L("prefs.update.pending")
+    /// 更新一节（W4-B，Sparkle）：是否配置了更新源、上次检查时间、自动检查开关（apply 时写回 Sparkle）。
+    let updatesConfigured: Bool
+    let updateStatus: String
+    @Published var automaticUpdates: Bool
     private unowned let controller: AppController
 
     /// 兼容层的法律提示（设计方案 §0、§9.3：独立模块、默认关、发布前问律师）。
@@ -55,6 +57,9 @@ final class PreferencesModel: ObservableObject {
 
     init(controller: AppController) {
         self.controller = controller
+        updatesConfigured = controller.updateController.isConfigured
+        updateStatus = controller.updateController.statusText
+        automaticUpdates = controller.updateController.automaticallyChecksForUpdates
         let s = controller.settings
         let format = controller.session?.format ?? .hd1080p60
         formatWidth = format.width
@@ -100,7 +105,13 @@ final class PreferencesModel: ObservableObject {
     }
 
     /// 写 UserDefaults + AppController.settings（下次起 session 生效）+ 语言。
+    /// 检查更新（Sparkle 自己的窗口）。
+    func checkForUpdates() { controller.updateController.checkForUpdates() }
+    /// 导出诊断包（与帮助菜单同一个流程）。
+    func exportDiagnostics() { DiagnosticsExport.present(controller: controller) }
+
     func apply() {
+        if updatesConfigured { controller.updateController.automaticallyChecksForUpdates = automaticUpdates }
         var s = controller.settings
         s.apiEnabled = apiEnabled
         s.apiHost = apiHost.trimmingCharacters(in: .whitespaces).isEmpty ? "127.0.0.1" : apiHost.trimmingCharacters(in: .whitespaces)
@@ -217,7 +228,16 @@ struct PreferencesView: View {
             }
             Section(L("prefs.update.title")) {
                 Text(model.updateStatus).font(.caption).foregroundStyle(.secondary)
-                Button(L("prefs.update.check")) {}.disabled(true)
+                if model.updatesConfigured {
+                    Toggle(L("prefs.update.automatic"), isOn: $model.automaticUpdates)
+                    Button(L("prefs.update.check")) { model.checkForUpdates() }
+                    Text(L("prefs.update.pending")).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Button(L("prefs.update.check")) {}.disabled(true)
+                    Text(L("prefs.update.unconfiguredHint")).font(.caption).foregroundStyle(.secondary)
+                }
+                Button(L("prefs.update.exportDiagnostics")) { model.exportDiagnostics() }
+                Text(L("prefs.update.diagnosticsHint")).font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 HStack {

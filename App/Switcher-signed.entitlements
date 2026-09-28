@@ -6,5 +6,11 @@
 	     受限权限，只有 Apple 签发的证书 + 描述文件才生效；ad-hoc 签名带着它 Xcode 直接拒绝构建，所以 ad-hoc 用空的 Switcher.entitlements。 -->
 	<key>com.apple.developer.system-extension.install</key>
 	<true/>
+	<!-- W4-B：有 Team ID 时 App 开硬化运行时（project.yml 的 ENABLE_HARDENED_RUNTIME，公证要求）；硬化运行时下摄像头 / 麦克风要这两条，
+	     否则系统直接拒绝访问（ad-hoc 时 Xcode 关掉硬化运行时，用不到）。 -->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>

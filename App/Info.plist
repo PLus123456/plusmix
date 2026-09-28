@@ -37,5 +37,11 @@
 	<string>Switcher 需要访问摄像头和采集卡，作为节目输入。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Switcher 需要访问麦克风和音频接口，作为节目音频输入。</string>
+	<!-- W4-B：Sparkle 自动更新。两个值来自构建设置（project.yml 默认空 = 这份构建不带更新；scripts/release/archive.sh 传真实值）。
+	     公钥是 EdDSA 公钥的 base64，私钥在打包机的钥匙串里，不进仓库（docs/release/sparkle.md）。 -->
+	<key>SUFeedURL</key>
+	<string>$(SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(SPARKLE_PUBLIC_ED_KEY)</string>
 </dict>
 </plist>
