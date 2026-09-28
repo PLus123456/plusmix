@@ -22,6 +22,8 @@ import SwitcherContracts
 ///   混音器的年龄设定点才对得上）；速率 ≠ 1 时按有理数位置线性插值变速（音调随之变）。
 /// - 带 alpha 的素材（ProRes 4444 / HEVC alpha）输出 BGRA；解码器标 StraightAlpha 的就地预乘（渲染器约定预乘）。
 /// - 线程：解码线程（普通优先级）+ 推帧线程（time-constraint，周期 = 一拍）。都允许锁和分配；帧槽 push / 环 write 无锁。
+///   两条都是裸 pthread（InputThread），每轮迭代各包一个自动释放池：AVFoundation 每次 copyNextSampleBuffer 都会 autorelease
+///   reader / track output，没有池就攒到停机（S2 每圈 +0.5 MB；W2-A3）。
 public final class FileInput: Input, @unchecked Sendable {
     /// 可调参数。
     public struct Options: Sendable, Hashable {
@@ -326,80 +328,85 @@ public final class FileInput: Input, @unchecked Sendable {
         let sampleRate = Int64(AudioFormat.sampleRate)
         let duration = asset.info.duration
         while !thread.isStopRequested {
-            let (generation, restartMedia, endAction) = playback.withLock { ($0.generation, $0.restartMedia, $0.endAction) }
-            if generation != seenGeneration {
-                seenGeneration = generation
-                reader?.cancel()
-                reader = nil
-                queue.flush()
-                fifo?.reset(generation: generation)
-                loopBase = .zero
-                videoDone = false
-                audioDone = false
-                do {
-                    reader = try asset.makeReader(from: restartMedia)
-                } catch {
-                    fail("\(error)")
-                    thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 200))
-                    seenGeneration = 0
-                    continue
-                }
-            }
-            guard let r = reader else {
-                thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 20))
-                continue
-            }
-            var didWork = false
-            if !videoDone && !queue.isFull {
-                if let (t, pb) = r.nextVideo() {
-                    countersBox.framesReceived.add(1, ordering: .relaxed)
-                    countersBox.surfaces.note(pb)
-                    _ = queue.push(.init(media: loopBase + t, buffer: pb, generation: generation, isEnd: false))
-                    resolveAnchorIfPending(generation: generation)
-                } else {
-                    videoDone = true
-                    if let e = r.error { fail("解码出错：\(e)") }
-                }
-                didWork = true
-            }
-            if let fifo, !audioDone, fifo.status.frames < fifo.maxFrames {
-                if let sb = r.nextAudio() {
-                    for c in 0..<audioPlanes.count { audioPlanes[c].removeAll(keepingCapacity: true) }
-                    let frames = LPCM.append(sampleBuffer: sb, to: &audioPlanes)
-                    if frames > 0 {
-                        let pts = CMSampleBufferGetPresentationTimeStamp(sb)
-                        let mediaSeconds = loopBase + Rational(pts.value, Int64(max(pts.timescale, 1)))
-                        let startSample = (mediaSeconds.scaled(by: sampleRate) + Rational(1, 2)).floorValue
-                        _ = fifo.append(generation: generation, start: startSample, planes: audioPlanes, frames: frames)
-                    }
-                } else {
-                    audioDone = true
-                }
-                didWork = true
-            }
-            if videoDone && (fifo == nil || audioDone) {
-                if endAction == .loop && duration.numerator > 0 {
-                    loopBase = loopBase + duration
-                    r.cancel()
+            // 每轮一个自动释放池（S2，问题单 W4A-w2-inputs-file-loop-memory-and-prores-starve §3）：copyNextSampleBuffer() 等 AVFoundation 调用
+            // 内部会 autorelease reader / track output（KVO 代理），这条线程是裸 pthread、没有池就永远不 release——每圈重开 reader 就多 0.5 MB。
+            // 池写在循环里而不是 InputThread 里：每轮的状态都是局部变量，包一层闭包最小；闭包里的 `return` 就是原来的 `continue`。
+            autoreleasepool {
+                let (generation, restartMedia, endAction) = playback.withLock { ($0.generation, $0.restartMedia, $0.endAction) }
+                if generation != seenGeneration {
+                    seenGeneration = generation
+                    reader?.cancel()
+                    reader = nil
+                    queue.flush()
+                    fifo?.reset(generation: generation)
+                    loopBase = .zero
+                    videoDone = false
+                    audioDone = false
                     do {
-                        reader = try asset.makeReader(from: .zero)
-                        videoDone = false
-                        audioDone = false
-                        fileCounters.loops.add(1, ordering: .relaxed)
+                        reader = try asset.makeReader(from: restartMedia)
                     } catch {
-                        fail("循环重开失败：\(error)")
-                        reader = nil
-                    }
-                } else {
-                    _ = queue.push(.init(media: loopBase + duration, buffer: nil, generation: generation, isEnd: true))
-                    // 等换代（seek）或停止
-                    while !thread.isStopRequested && playback.withLock({ $0.generation }) == generation {
-                        thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 20))
+                        fail("\(error)")
+                        thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 200))
+                        seenGeneration = 0
+                        return
                     }
                 }
-                continue
+                guard let r = reader else {
+                    thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 20))
+                    return
+                }
+                var didWork = false
+                if !videoDone && !queue.isFull {
+                    if let (t, pb) = r.nextVideo() {
+                        countersBox.framesReceived.add(1, ordering: .relaxed)
+                        countersBox.surfaces.note(pb)
+                        _ = queue.push(.init(media: loopBase + t, buffer: pb, generation: generation, isEnd: false))
+                        resolveAnchorIfPending(generation: generation)
+                    } else {
+                        videoDone = true
+                        if let e = r.error { fail("解码出错：\(e)") }
+                    }
+                    didWork = true
+                }
+                if let fifo, !audioDone, fifo.status.frames < fifo.maxFrames {
+                    if let sb = r.nextAudio() {
+                        for c in 0..<audioPlanes.count { audioPlanes[c].removeAll(keepingCapacity: true) }
+                        let frames = LPCM.append(sampleBuffer: sb, to: &audioPlanes)
+                        if frames > 0 {
+                            let pts = CMSampleBufferGetPresentationTimeStamp(sb)
+                            let mediaSeconds = loopBase + Rational(pts.value, Int64(max(pts.timescale, 1)))
+                            let startSample = (mediaSeconds.scaled(by: sampleRate) + Rational(1, 2)).floorValue
+                            _ = fifo.append(generation: generation, start: startSample, planes: audioPlanes, frames: frames)
+                        }
+                    } else {
+                        audioDone = true
+                    }
+                    didWork = true
+                }
+                if videoDone && (fifo == nil || audioDone) {
+                    if endAction == .loop && duration.numerator > 0 {
+                        loopBase = loopBase + duration
+                        r.cancel()
+                        do {
+                            reader = try asset.makeReader(from: .zero)
+                            videoDone = false
+                            audioDone = false
+                            fileCounters.loops.add(1, ordering: .relaxed)
+                        } catch {
+                            fail("循环重开失败：\(error)")
+                            reader = nil
+                        }
+                    } else {
+                        _ = queue.push(.init(media: loopBase + duration, buffer: nil, generation: generation, isEnd: true))
+                        // 等换代（seek）或停止
+                        while !thread.isStopRequested && playback.withLock({ $0.generation }) == generation {
+                            thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 20))
+                        }
+                    }
+                    return
+                }
+                if !didWork { thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 2)) }
             }
-            if !didWork { thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 2)) }
         }
         reader?.cancel()
     }
@@ -458,173 +465,179 @@ public final class FileInput: Input, @unchecked Sendable {
         let writer = audioRing.map { AudioSampleWriter(ring: $0) }
 
         while !thread.isStopRequested {
-            var p = playback.withLock { $0 }
-            if p.generation != seenGeneration {
-                seenGeneration = p.generation
-                ended = false
-                nextTick = nil
-            }
-            if p.version != seenVersion {
-                seenVersion = p.version
-                chunkIndex = 0
-                nextTick = nil
-            }
-            let now = HostClock.now()
-            if p.anchorPending {
-                // 等解码线程给出目标位置的第一帧再定锚点；期间不推帧（帧槽保留旧帧）
-                thread.sleep(until: now + HostDuration(milliseconds: 2))
-                continue
-            }
-            // 下一拍：锚点拍之后没处理过的第一拍；落后 2 拍以上直接跳到当前拍
-            var tick = nextTick ?? max(p.timeline.anchorTick, timing.tick(at: now))
-            if tick + 2 < timing.tick(at: now) { tick = timing.tick(at: now) }
-            let videoWake = timing.time(of: tick) - phaseLead - pushLead
-            var audioWake: HostTime?
-            let audioActive = fifo != nil && writer != nil && !p.paused && !ended
-            if audioActive {
-                audioWake = p.timeline.hostTime(ofOutputSample: chunkIndex * Int64(chunk), sampleRate: sampleRate, timing: timing) + chunkDuration
-            }
-            var wake = videoWake
-            if let a = audioWake, a < wake { wake = a }
-            let bound = now + HostDuration(milliseconds: 20)
-            if wake > bound { wake = bound }
-            thread.sleep(until: wake, slice: HostDuration(milliseconds: 20))
-            if thread.isStopRequested { break }
-            let woke = HostClock.now()
-            if woke - wake > HostDuration(milliseconds: 1) { fileCounters.lateWakes.add(1, ordering: .relaxed) }
+            // 每轮一个自动释放池（同 decodeLoop）。这条线程现在只碰帧槽 / 环 / 计数、不调 ObjC 框架，包上是让以后加进来的
+            // CoreMedia / AVFoundation 调用也按轮排水，不会又变成线程退出才释放。闭包返回 false = 原来的 `break`。
+            let keepGoing: Bool = autoreleasepool {
+                var p = playback.withLock { $0 }
+                if p.generation != seenGeneration {
+                    seenGeneration = p.generation
+                    ended = false
+                    nextTick = nil
+                }
+                if p.version != seenVersion {
+                    seenVersion = p.version
+                    chunkIndex = 0
+                    nextTick = nil
+                }
+                let now = HostClock.now()
+                if p.anchorPending {
+                    // 等解码线程给出目标位置的第一帧再定锚点；期间不推帧（帧槽保留旧帧）
+                    thread.sleep(until: now + HostDuration(milliseconds: 2))
+                    return true
+                }
+                // 下一拍：锚点拍之后没处理过的第一拍；落后 2 拍以上直接跳到当前拍
+                var tick = nextTick ?? max(p.timeline.anchorTick, timing.tick(at: now))
+                if tick + 2 < timing.tick(at: now) { tick = timing.tick(at: now) }
+                let videoWake = timing.time(of: tick) - phaseLead - pushLead
+                var audioWake: HostTime?
+                let audioActive = fifo != nil && writer != nil && !p.paused && !ended
+                if audioActive {
+                    audioWake = p.timeline.hostTime(ofOutputSample: chunkIndex * Int64(chunk), sampleRate: sampleRate, timing: timing) + chunkDuration
+                }
+                var wake = videoWake
+                if let a = audioWake, a < wake { wake = a }
+                let bound = now + HostDuration(milliseconds: 20)
+                if wake > bound { wake = bound }
+                thread.sleep(until: wake, slice: HostDuration(milliseconds: 20))
+                if thread.isStopRequested { return false }
+                let woke = HostClock.now()
+                if woke - wake > HostDuration(milliseconds: 1) { fileCounters.lateWakes.add(1, ordering: .relaxed) }
 
-            // ---- 视频：本拍 ----
-            if woke >= videoWake {
-                let tickTime = timing.time(of: tick)
-                if p.paused && !p.pauseApplied {
-                    // 落实暂停：位置冻结在最近推出的那一帧（没有推过就冻结在本拍的位置）
-                    let frozen = held?.media ?? p.timeline.position(at: tick)
-                    playback.withLock { q in
-                        guard q.paused, !q.pauseApplied else { return }
-                        q.timeline.anchorMedia = frozen
-                        q.timeline.anchorTick = tick
-                        q.pauseApplied = true
-                    }
-                    p.timeline.anchorMedia = frozen
-                    p.timeline.anchorTick = tick
-                }
-                let position = p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick)
-                var newest: DecodedVideoQueue.Item?
-                var rejected: UInt64 = 0
-                var endItem: DecodedVideoQueue.Item?
-                while let head = queue.peek() {
-                    if head.generation != p.generation { _ = queue.pop(); continue }   // 旧代
-                    if head.isEnd { endItem = head; break }
-                    if head.media <= position {
-                        _ = queue.pop()
-                        if newest != nil { rejected += 1 }
-                        newest = head
-                    } else {
-                        break
-                    }
-                }
-                if rejected > 0 { countersBox.framesRejected.add(rejected, ordering: .relaxed) }
-                if let f = newest, let pb = f.buffer {
-                    let nextMedia = queue.secondMedia().map { $0 } ?? queue.peek().flatMap { $0.isEnd ? nil : $0.media }
-                    var dur = info.frameDuration
-                    if let nm = nextMedia, nm > f.media { dur = nm - f.media }
-                    let hostDur = (dur / p.timeline.rate).hostDuration
-                    if info.hasAlpha, PixelBuffers.isStraightAlpha(pb) { PixelBuffers.premultiplyInPlace(pb) }
-                    sequence += 1
-                    let ingress = HostClock.now()
-                    slot.push(Frame(pixelBuffer: pb, pts: tickTime - phaseLead, duration: hostDur, color: info.color,
-                                    inputNumber: number, sequence: sequence, ingressTime: ingress))
-                    countersBox.framesPushed.add(1, ordering: .relaxed)
-                    held = (f.media, pb)
-                    hasPushed.store(true, ordering: .releasing)
-                    if ended { ended = false }
-                    stateBox.set(.live)
-                } else if p.paused, let h = held {
-                    sequence += 1
-                    slot.push(Frame(pixelBuffer: h.buffer, pts: tickTime, duration: frameTicks, color: info.color,
-                                    inputNumber: number, sequence: sequence, ingressTime: HostClock.now()))
-                    countersBox.framesPushed.add(1, ordering: .relaxed)
-                } else if let e = endItem, !ended, position >= e.media {
-                    // 末帧显示期结束：按结束动作收尾（loop 的话解码线程不会给哨兵）
-                    ended = true
-                    if p.endAction == .black {
-                        if black == nil, let b = try? PixelBuffers.make(width: max(info.width, 2), height: max(info.height, 2), format: asset.videoPixelFormat) {
-                            PixelBuffers.fill(black: b)
-                            black = b
+                // ---- 视频：本拍 ----
+                if woke >= videoWake {
+                    let tickTime = timing.time(of: tick)
+                    if p.paused && !p.pauseApplied {
+                        // 落实暂停：位置冻结在最近推出的那一帧（没有推过就冻结在本拍的位置）
+                        let frozen = held?.media ?? p.timeline.position(at: tick)
+                        playback.withLock { q in
+                            guard q.paused, !q.pauseApplied else { return }
+                            q.timeline.anchorMedia = frozen
+                            q.timeline.anchorTick = tick
+                            q.pauseApplied = true
                         }
-                        if let b = black {
-                            sequence += 1
-                            slot.push(Frame(pixelBuffer: b, pts: tickTime - phaseLead, duration: frameTicks, color: info.color,
-                                            inputNumber: number, sequence: sequence, ingressTime: HostClock.now()))
-                            countersBox.framesPushed.add(1, ordering: .relaxed)
-                            held = (e.media, b)
+                        p.timeline.anchorMedia = frozen
+                        p.timeline.anchorTick = tick
+                    }
+                    let position = p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick)
+                    var newest: DecodedVideoQueue.Item?
+                    var rejected: UInt64 = 0
+                    var endItem: DecodedVideoQueue.Item?
+                    while let head = queue.peek() {
+                        if head.generation != p.generation { _ = queue.pop(); continue }   // 旧代
+                        if head.isEnd { endItem = head; break }
+                        if head.media <= position {
+                            _ = queue.pop()
+                            if newest != nil { rejected += 1 }
+                            newest = head
+                        } else {
+                            break
                         }
                     }
-                    stateBox.set(.noSignal)
-                } else if !p.paused, !ended, endItem == nil, newest == nil, queue.count == 0,
-                          position >= p.timeline.anchorMedia, hasPushed.load(ordering: .relaxed) {
-                    // 位置已经过了、队列却空：解码器没跟上（定位后重开中也算）
-                    fileCounters.ticksStarved.add(1, ordering: .relaxed)
-                }
-                nextTick = tick + 1
-            }
-
-            // ---- 音频：所有"样本已发生"的块 ----
-            if audioActive, let fifo, let writer, let table = planeTable {
-                var budget = 8
-                while budget > 0 {
-                    budget -= 1
-                    let j0 = chunkIndex * Int64(chunk)
-                    let due = p.timeline.hostTime(ofOutputSample: j0, sampleRate: sampleRate, timing: timing) + chunkDuration
-                    if HostClock.now() < due { break }
-                    // 源样本位置：pos(j) = anchorMedia × 48000 + j × rate，用公共分母做整数运算
-                    let pos0 = p.timeline.sourceSamplePosition(ofOutputSample: j0, sampleRate: sampleRate)
-                    let rate = p.timeline.rate
-                    let den = Int128(pos0.denominator) * Int128(rate.denominator)
-                    let base = Int128(pos0.numerator) * Int128(rate.denominator)
-                    let step = Int128(rate.numerator) * Int128(pos0.denominator)
-                    let firstIndex = Int64(FileInput.floorDiv(base, den))
-                    let lastPos = base + step * Int128(chunk - 1)
-                    let lastIndex = Int64(FileInput.floorDiv(lastPos, den)) + 1
-                    let srcCount = Int(lastIndex - firstIndex + 1)
-                    if srcCount > maxSrc { chunkIndex += 1; continue }
-                    if fifo.copy(start: firstIndex, count: srcCount, into: audioSrc) {
-                        let exact = rate.isInteger && rate.numerator == 1 && (base % den == 0)
-                        for c in 0..<fifo.channels {
-                            let src = audioSrc[c], dst = audioOut[c]
-                            if exact {
-                                dst.update(from: src, count: chunk)
-                            } else {
-                                var num = base
-                                for i in 0..<chunk {
-                                    let q = FileInput.floorDiv(num, den)
-                                    let frac = Float(Double(num - q * den) / Double(den))
-                                    let k = Int(q - Int128(firstIndex))
-                                    dst[i] = src[k] + (src[k + 1] - src[k]) * frac
-                                    num += step
-                                }
+                    if rejected > 0 { countersBox.framesRejected.add(rejected, ordering: .relaxed) }
+                    if let f = newest, let pb = f.buffer {
+                        let nextMedia = queue.secondMedia().map { $0 } ?? queue.peek().flatMap { $0.isEnd ? nil : $0.media }
+                        var dur = info.frameDuration
+                        if let nm = nextMedia, nm > f.media { dur = nm - f.media }
+                        let hostDur = (dur / p.timeline.rate).hostDuration
+                        if info.hasAlpha, PixelBuffers.isStraightAlpha(pb) { PixelBuffers.premultiplyInPlace(pb) }
+                        sequence += 1
+                        let ingress = HostClock.now()
+                        slot.push(Frame(pixelBuffer: pb, pts: tickTime - phaseLead, duration: hostDur, color: info.color,
+                                        inputNumber: number, sequence: sequence, ingressTime: ingress))
+                        countersBox.framesPushed.add(1, ordering: .relaxed)
+                        held = (f.media, pb)
+                        hasPushed.store(true, ordering: .releasing)
+                        if ended { ended = false }
+                        stateBox.set(.live)
+                    } else if p.paused, let h = held {
+                        sequence += 1
+                        slot.push(Frame(pixelBuffer: h.buffer, pts: tickTime, duration: frameTicks, color: info.color,
+                                        inputNumber: number, sequence: sequence, ingressTime: HostClock.now()))
+                        countersBox.framesPushed.add(1, ordering: .relaxed)
+                    } else if let e = endItem, !ended, position >= e.media {
+                        // 末帧显示期结束：按结束动作收尾（loop 的话解码线程不会给哨兵）
+                        ended = true
+                        if p.endAction == .black {
+                            if black == nil, let b = try? PixelBuffers.make(width: max(info.width, 2), height: max(info.height, 2), format: asset.videoPixelFormat) {
+                                PixelBuffers.fill(black: b)
+                                black = b
+                            }
+                            if let b = black {
+                                sequence += 1
+                                slot.push(Frame(pixelBuffer: b, pts: tickTime - phaseLead, duration: frameTicks, color: info.color,
+                                                inputNumber: number, sequence: sequence, ingressTime: HostClock.now()))
+                                countersBox.framesPushed.add(1, ordering: .relaxed)
+                                held = (e.media, b)
                             }
                         }
-                        let hostTime = p.timeline.hostTime(ofOutputSample: j0, sampleRate: sampleRate, timing: timing)
-                        let n = writer.write(planes: UnsafePointer(table), frameCount: chunk, hostTime: hostTime)
-                        countersBox.audioBlocksWritten.add(1, ordering: .relaxed)
-                        countersBox.audioFramesWritten.add(UInt64(n), ordering: .relaxed)
-                        if n < chunk { countersBox.audioFramesRejected.add(UInt64(chunk - n), ordering: .relaxed) }
-                        fileCounters.audioChunksWritten.add(1, ordering: .relaxed)
-                        chunkIndex += 1
-                        if firstIndex - 2 > trimmedTo {
-                            trimmedTo = firstIndex - 2
-                            fifo.trim(before: trimmedTo)
+                        stateBox.set(.noSignal)
+                    } else if !p.paused, !ended, endItem == nil, newest == nil, queue.count == 0,
+                              position >= p.timeline.anchorMedia, hasPushed.load(ordering: .relaxed) {
+                        // 位置已经过了、队列却空：解码器没跟上（定位后重开中也算）
+                        fileCounters.ticksStarved.add(1, ordering: .relaxed)
+                    }
+                    nextTick = tick + 1
+                }
+
+                // ---- 音频：所有"样本已发生"的块 ----
+                if audioActive, let fifo, let writer, let table = planeTable {
+                    var budget = 8
+                    while budget > 0 {
+                        budget -= 1
+                        let j0 = chunkIndex * Int64(chunk)
+                        let due = p.timeline.hostTime(ofOutputSample: j0, sampleRate: sampleRate, timing: timing) + chunkDuration
+                        if HostClock.now() < due { break }
+                        // 源样本位置：pos(j) = anchorMedia × 48000 + j × rate，用公共分母做整数运算
+                        let pos0 = p.timeline.sourceSamplePosition(ofOutputSample: j0, sampleRate: sampleRate)
+                        let rate = p.timeline.rate
+                        let den = Int128(pos0.denominator) * Int128(rate.denominator)
+                        let base = Int128(pos0.numerator) * Int128(rate.denominator)
+                        let step = Int128(rate.numerator) * Int128(pos0.denominator)
+                        let firstIndex = Int64(FileInput.floorDiv(base, den))
+                        let lastPos = base + step * Int128(chunk - 1)
+                        let lastIndex = Int64(FileInput.floorDiv(lastPos, den)) + 1
+                        let srcCount = Int(lastIndex - firstIndex + 1)
+                        if srcCount > maxSrc { chunkIndex += 1; continue }
+                        if fifo.copy(start: firstIndex, count: srcCount, into: audioSrc) {
+                            let exact = rate.isInteger && rate.numerator == 1 && (base % den == 0)
+                            for c in 0..<fifo.channels {
+                                let src = audioSrc[c], dst = audioOut[c]
+                                if exact {
+                                    dst.update(from: src, count: chunk)
+                                } else {
+                                    var num = base
+                                    for i in 0..<chunk {
+                                        let q = FileInput.floorDiv(num, den)
+                                        let frac = Float(Double(num - q * den) / Double(den))
+                                        let k = Int(q - Int128(firstIndex))
+                                        dst[i] = src[k] + (src[k + 1] - src[k]) * frac
+                                        num += step
+                                    }
+                                }
+                            }
+                            let hostTime = p.timeline.hostTime(ofOutputSample: j0, sampleRate: sampleRate, timing: timing)
+                            let n = writer.write(planes: UnsafePointer(table), frameCount: chunk, hostTime: hostTime)
+                            countersBox.audioBlocksWritten.add(1, ordering: .relaxed)
+                            countersBox.audioFramesWritten.add(UInt64(n), ordering: .relaxed)
+                            if n < chunk { countersBox.audioFramesRejected.add(UInt64(chunk - n), ordering: .relaxed) }
+                            fileCounters.audioChunksWritten.add(1, ordering: .relaxed)
+                            chunkIndex += 1
+                            if firstIndex - 2 > trimmedTo {
+                                trimmedTo = firstIndex - 2
+                                fifo.trim(before: trimmedTo)
+                            }
+                        } else if HostClock.now() > due + chunkDuration * 4 {
+                            // 样本迟迟不来（定位后重开 / 音轨比视频短）：跳过这块
+                            fileCounters.audioChunksSkipped.add(1, ordering: .relaxed)
+                            chunkIndex += 1
+                        } else {
+                            break
                         }
-                    } else if HostClock.now() > due + chunkDuration * 4 {
-                        // 样本迟迟不来（定位后重开 / 音轨比视频短）：跳过这块
-                        fileCounters.audioChunksSkipped.add(1, ordering: .relaxed)
-                        chunkIndex += 1
-                    } else {
-                        break
                     }
                 }
+                return true
             }
+            if !keepGoing { break }
         }
     }
 

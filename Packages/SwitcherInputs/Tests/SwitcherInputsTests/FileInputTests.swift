@@ -325,6 +325,47 @@ final class FileInputTests: XCTestCase {
         }
     }
 
+    // MARK: S2：循环 N 圈 footprint 不按圈涨（问题单 W4A-w2-inputs-file-loop-memory-and-prores-starve §3）
+
+    /// 解码线程每圈重开一个 AVAssetReader（两个 track output）；线程是裸 pthread，没有自动释放池时 AVFoundation 内部 autorelease
+    /// 的 reader / track output 永远不 release → 每圈 +0.5 MB（主要是音频 track output 的 AAC → LPCM 转换器）。
+    /// 现场写一段 0.2 s（6 帧）的 H.264 + AAC 小片段，速率 1 循环（每秒 5 圈），预热 10 圈后对"圈数 → phys_footprint"做直线拟合，斜率必须 < 0.1 MB / 圈。
+    func testS2_fileLoop_noAutoreleaseLeakPerLoop() throws {
+        let url = RepoPaths.output.appendingPathComponent("s2-loop-clip-0p2s.mov")
+        try LoopClipWriter.write(to: url, frames: 6)
+        let timing = makeTiming(.hd1080p60)
+        let slot = LockFreeFrameSlot(capacity: 3)
+        let ring = RecordingAudioRing(channelCount: 2)
+        ring.keepSamplesUpTo = 0   // 只计块、不存样本，免得记录本身把 footprint 撑大
+        let input = try makeInput(timing: timing, slot: slot, endAction: .loop, rate: 1, audioRing: ring, path: url.path)
+        defer { input.stop() }
+        XCTAssertNotNil(input.audioRing)
+        try startAndWaitLive(input)
+        XCTAssertEqual(input.info?.hasAudio, true, "片段应带音轨（泄漏大头是音频 track output）")
+
+        let warmupLoops = 10, targetLoops = 60
+        var samples: [(loop: Int, mb: Double)] = []
+        var lastLoops: UInt64 = 0
+        let deadline = HostClock.now() + HostDuration(seconds: 40)
+        while HostClock.now() < deadline {
+            let loops = input.fileCountersSnapshot.loops
+            if loops != lastLoops {
+                lastLoops = loops
+                samples.append((Int(loops), ProcessFootprint.megabytes))
+                if loops >= UInt64(targetLoops) { break }
+            }
+            usleep(1000)
+        }
+        XCTAssertEqual(input.state, .live, input.lastError ?? "")
+        let fit = samples.filter { $0.loop >= warmupLoops }.map { (x: Double($0.loop), y: $0.mb) }
+        XCTAssertGreaterThanOrEqual(fit.count, 40, "40 s 内没转够 \(targetLoops) 圈：\(samples.count) 个采样，\(input.fileCountersSnapshot)")
+        let slope = linearSlope(fit)
+        let first = fit.first.map { "第 \(Int($0.x)) 圈 \(String(format: "%.1f", $0.y)) MB" } ?? "-"
+        let last = fit.last.map { "第 \(Int($0.x)) 圈 \(String(format: "%.1f", $0.y)) MB" } ?? "-"
+        print("S2 文件循环：\(first) → \(last)，斜率 \(String(format: "%.3f", slope)) MB/圈（\(fit.count) 点）")
+        XCTAssertLessThan(slope, 0.1, "循环每圈 footprint 涨 \(String(format: "%.3f", slope)) MB（\(first) → \(last)）：解码线程的 AVAssetReader 没被释放")
+    }
+
     // MARK: 错误：文件不存在 → error(文案)
 
     func testFile_missingFile_stateIsErrorWithMessage() throws {

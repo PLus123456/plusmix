@@ -7,6 +7,11 @@ import SwitcherContracts
 ///
 /// 为什么要实时策略：普通线程的任何定时等待会被内核合并晚醒 1–7 ms（W1-A / W1-B 实测），文件 / 图片按拍点推帧、
 /// 文件音频按块节拍写环，都要准点。这些线程每拍只做几十微秒的事（推帧、写环），不是渲染 / 音频热路径，允许锁和分配。
+///
+/// 自动释放池：pthread_create 起的线程没有池，ObjC 框架（AVFoundation / CoreMedia / KVO）autorelease 的对象会"no pool in place -
+/// just leaking"，要到线程退出才释放（S2 每圈 +0.5 MB，问题单 W4A-w2-inputs-file-loop-memory-and-prores-starve §3）。
+/// `run()` 给整个 body 套一个池兜底（线程退出时排水）；**循环里碰 ObjC 框架的输入必须自己把每轮迭代包进 `autoreleasepool {}`**
+/// （FileInput 的 decodeLoop / paceLoop 就是这么做的），否则一圈一圈攒到停机才放。
 public final class InputThread: @unchecked Sendable {
     /// 线程名。
     public let name: String
@@ -87,7 +92,8 @@ public final class InputThread: @unchecked Sendable {
         ready.signal()
         let work = body
         body = nil
-        work?(self)
+        // 线程级的池：零散的 ObjC 调用（出错文案、格式描述查询）不会变成"no pool in place"；按轮排水由各输入的循环自己做（见类注释）
+        autoreleasepool { work?(self) }
     }
 
     /// 睡到某个 host time（已过去则立刻返回）。
