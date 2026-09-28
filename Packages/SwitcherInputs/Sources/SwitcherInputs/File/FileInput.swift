@@ -12,8 +12,12 @@ import SwitcherContracts
 /// 60 fps 文件在 60 fps 节目里每拍恰好一帧；在 30 fps 节目里每拍前进两帧、每个帧号只出现一次；24 fps 文件在 60 fps
 /// 节目里有的拍没有新帧，帧槽自然重复上一帧（设计内）。
 ///
-/// - 预解码：解码线程领先推帧线程 `predecodeDepth`（3）帧；音频解成 float32 非交错 48 kHz 进 FIFO，最多囤 0.5 s。
-/// - 循环：解码到结尾时立刻重开一个 reader（探针：2 ms + 首帧），展开后的媒体位置连续（第 k 圈 + k × 时长）。
+/// - 预解码：解码线程领先推帧线程 `predecodeDepth`（3）帧（速率高时加到"每拍要前进的帧数 + 2"）；音频解成 float32 非交错 48 kHz 进 FIFO，
+///   最多囤 0.5 s。解出来的帧已经落后当前拍位置超过一帧的不入队直接丢（计 `framesRejected`），解码器才追得上时间线（W2-A4）。
+/// - 循环：视频离尾不到 `loopPrerollSeconds` × 速率就把下一圈的 reader 开好（AVAssetReader startReading 之后自己预解首帧，
+///   探针：等 300 ms 再取首帧 0.1 ms），视频 / 音频各自读到尾就各自换到下一圈的 reader，两圈的 reader 只在离尾那一小段并存（每个 reader
+///   自己常驻约 10 帧预解，1080p ProRes 约 30–70 MB，所以不能常驻双 reader）；展开后的媒体位置连续（第 k 圈 + k × 时长）。
+///   以前到尾才重开，"建 reader + 解首帧"ProRes 422 HQ 要 30–50 ms、赶不上 3 帧余量，每圈在循环点空一拍（W2-A4）。
 /// - 定位 `seek`：换代——解码线程重开 reader，队列作废；新锚点 = 现在 + seekLead 之后的第一拍显示目标位置，所以定位到
 ///   第 300 帧后首帧就是 300。暂停：位置冻结，每拍把停住的帧以 pts = 拍点 重新推（帧槽不靠 reused 撑画面）。
 /// - 结束动作：holdLastFrame → 末帧显示期结束时置 noSignal、不再推（帧槽保留末帧）；black → 推一帧黑场再置 noSignal；
@@ -37,6 +41,9 @@ public final class FileInput: Input, @unchecked Sendable {
         public var audioChunkFrames = 256
         /// 音频解码领先上限（帧）。
         public var audioAheadFrames = AudioFormat.sampleRate / 2
+        /// 循环时视频离尾多久（真实时间秒）开好下一圈的 reader；片段内的提前量 = 它 × 速率。建 reader 16–20 ms + 它自己预解首帧 15–42 ms（ProRes 1080p60 探针），
+        /// 加上解码位置本来领先显示 3 帧，0.15 s 够用 2 倍以上；片段比它短就一直双 reader（小片段才会这样，代价小）。
+        public var loopPrerollSeconds = 0.15
         /// 定位 / 恢复后多久的第一拍作为新锚点。
         /// 目标位置的第一帧解出来之后，多久之后的第一拍作为新锚点。
         public var seekLead = HostDuration(milliseconds: 30)
@@ -319,31 +326,53 @@ public final class FileInput: Input, @unchecked Sendable {
 
     // MARK: 解码线程
 
+    /// 一圈的 reader：展开偏移 + 视频 / 音频各自是否读到尾（各拉各的：音频领先 0.5 s，先到尾就先从下一圈拉，不等视频的尾巴）。
+    private final class LoopReader {
+        let reader: FileReader
+        /// 本圈的展开偏移（第 k 圈 = k × 时长）。
+        let base: Rational
+        var videoDone = false
+        var audioDone = false
+        /// 最近解出的视频帧的文件内位置（判断离尾还有多远）。
+        var lastVideoMedia = Rational.zero
+        init(reader: FileReader, base: Rational) {
+            self.reader = reader
+            self.base = base
+        }
+        func cancel() { reader.cancel() }
+    }
+
     private func decodeLoop(thread: InputThread, asset: FileAsset, queue: DecodedVideoQueue, fifo: DecodedAudioFIFO?) {
+        let timing = self.timing
         var seenGeneration: UInt64 = 0
-        var reader: FileReader?
-        var loopBase = Rational.zero          // 本圈的展开偏移
-        var videoDone = false, audioDone = false
+        var current: LoopReader?
+        var next: LoopReader?              // 预开好的下一圈
+        var prerollFailed = false          // 预开失败过：本圈不再试，交接时按老办法重开
+        var pendingAudio: (start: Int64, frames: Int)?   // FIFO 前面的空洞比容量大、还没放进去的那块（audioPlanes 里）
         var audioPlanes: [[Float]] = Array(repeating: [], count: fifo?.channels ?? 0)
+        var queueDepth = queue.depth
         let sampleRate = Int64(AudioFormat.sampleRate)
         let duration = asset.info.duration
+        let frameDuration = asset.info.frameDuration
+        let canLoop = duration.numerator > 0
         while !thread.isStopRequested {
             // 每轮一个自动释放池（S2，问题单 W4A-w2-inputs-file-loop-memory-and-prores-starve §3）：copyNextSampleBuffer() 等 AVFoundation 调用
             // 内部会 autorelease reader / track output（KVO 代理），这条线程是裸 pthread、没有池就永远不 release——每圈重开 reader 就多 0.5 MB。
             // 池写在循环里而不是 InputThread 里：每轮的状态都是局部变量，包一层闭包最小；闭包里的 `return` 就是原来的 `continue`。
             autoreleasepool {
-                let (generation, restartMedia, endAction) = playback.withLock { ($0.generation, $0.restartMedia, $0.endAction) }
-                if generation != seenGeneration {
-                    seenGeneration = generation
-                    reader?.cancel()
-                    reader = nil
+                let p = playback.withLock { $0 }
+                if p.generation != seenGeneration {
+                    seenGeneration = p.generation
+                    current?.cancel()
+                    next?.cancel()
+                    current = nil
+                    next = nil
+                    pendingAudio = nil
+                    prerollFailed = false
                     queue.flush()
-                    fifo?.reset(generation: generation)
-                    loopBase = .zero
-                    videoDone = false
-                    audioDone = false
+                    fifo?.reset(generation: p.generation)
                     do {
-                        reader = try asset.makeReader(from: restartMedia)
+                        current = LoopReader(reader: try asset.makeReader(from: p.restartMedia), base: .zero)
                     } catch {
                         fail("\(error)")
                         thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 200))
@@ -351,55 +380,105 @@ public final class FileInput: Input, @unchecked Sendable {
                         return
                     }
                 }
-                guard let r = reader else {
+                guard let cur = current else {
                     thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 20))
                     return
                 }
+                let looping = p.endAction == .loop && canLoop
+                // 队列深度跟着速率走：每拍前进 速率 × 一拍 / 帧时长 帧，推帧线程一拍要能把本拍的帧全 pop 到最新那帧（深度固定 3 时 4 帧 / 拍永远追不上）
+                let perTick = p.timeline.rate * p.timeline.programFrame / frameDuration
+                let want = options.predecodeDepth + max(0, FileInput.ceilInt(perTick) - 1)
+                if want != queueDepth {
+                    queueDepth = want
+                    queue.setDepth(want)
+                }
+                // 预开下一圈：视频离尾不到 lead（真实时间 loopPrerollSeconds × 速率）就把下一圈的 reader 开好——AVAssetReader startReading 之后
+                // 自己会把首帧预解出来（探针：等 300 ms 再取首帧 0.1 ms；同时另一个 reader 满速解也一样），交接时不用等。只看视频不看音频：音频领先 0.5 s，
+                // next 的音频在它还是 next 时就会被拉完，交接后 cur.audioDone 立刻为真，拿它当触发条件双 reader 就常驻了（fileprobe 重 ProRes 212 MB）
+                if looping, next == nil, !prerollFailed {
+                    let lead = Rational(approximating: options.loopPrerollSeconds, maxDenominator: 1000) * p.timeline.rate
+                    if cur.videoDone || cur.lastVideoMedia + lead >= duration {
+                        do {
+                            next = LoopReader(reader: try asset.makeReader(from: .zero), base: cur.base + duration)
+                        } catch {
+                            prerollFailed = true
+                            fail("循环预开失败：\(error)")
+                        }
+                    }
+                }
                 var didWork = false
-                if !videoDone && !queue.isFull {
-                    if let (t, pb) = r.nextVideo() {
+                // ---- 视频：本圈没到尾从本圈拉，到尾了从预开的下一圈拉（音频没到尾也不等它）----
+                let videoSource: LoopReader? = !cur.videoDone ? cur : (looping ? next : nil)
+                if !queue.isFull, let src = videoSource, !src.videoDone {
+                    if let (t, pb) = src.reader.nextVideo() {
                         countersBox.framesReceived.add(1, ordering: .relaxed)
                         countersBox.surfaces.note(pb)
-                        _ = queue.push(.init(media: loopBase + t, buffer: pb, generation: generation, isEnd: false))
-                        resolveAnchorIfPending(generation: generation)
+                        src.lastVideoMedia = t
+                        let media = src.base + t
+                        if shouldDrop(media: media, playback: p, timing: timing, frameDuration: frameDuration) {
+                            countersBox.framesRejected.add(1, ordering: .relaxed)
+                        } else {
+                            _ = queue.push(.init(media: media, buffer: pb, generation: p.generation, isEnd: false))
+                            resolveAnchorIfPending(generation: p.generation)
+                        }
                     } else {
-                        videoDone = true
-                        if let e = r.error { fail("解码出错：\(e)") }
+                        src.videoDone = true
+                        if let e = src.reader.error { fail("解码出错：\(e)") }
                     }
                     didWork = true
                 }
-                if let fifo, !audioDone, fifo.status.frames < fifo.maxFrames {
-                    if let sb = r.nextAudio() {
-                        for c in 0..<audioPlanes.count { audioPlanes[c].removeAll(keepingCapacity: true) }
-                        let frames = LPCM.append(sampleBuffer: sb, to: &audioPlanes)
-                        if frames > 0 {
-                            let pts = CMSampleBufferGetPresentationTimeStamp(sb)
-                            let mediaSeconds = loopBase + Rational(pts.value, Int64(max(pts.timescale, 1)))
-                            let startSample = (mediaSeconds.scaled(by: sampleRate) + Rational(1, 2)).floorValue
-                            _ = fifo.append(generation: generation, start: startSample, planes: audioPlanes, frames: frames)
+                // ---- 音频：同样各拉各的；FIFO 满了不放（推帧线程要不到样本会 trim，两边不互等）----
+                if let fifo {
+                    if let pa = pendingAudio {
+                        // 这块前面的空洞比 FIFO 还大：等推帧线程把补的零消费掉一些再放（不阻塞，视频照拉）
+                        if fifo.append(generation: p.generation, start: pa.start, planes: audioPlanes, frames: pa.frames) != .retry {
+                            pendingAudio = nil
+                            didWork = true
                         }
-                    } else {
-                        audioDone = true
+                    } else if fifo.status.frames < fifo.maxFrames {
+                        let audioSource: LoopReader? = !cur.audioDone ? cur : (looping ? next : nil)
+                        if let src = audioSource, !src.audioDone {
+                            if let sb = src.reader.nextAudio() {
+                                for c in 0..<audioPlanes.count { audioPlanes[c].removeAll(keepingCapacity: true) }
+                                let frames = LPCM.append(sampleBuffer: sb, to: &audioPlanes)
+                                if frames > 0 {
+                                    let pts = CMSampleBufferGetPresentationTimeStamp(sb)
+                                    let mediaSeconds = src.base + Rational(pts.value, Int64(max(pts.timescale, 1)))
+                                    let startSample = (mediaSeconds.scaled(by: sampleRate) + Rational(1, 2)).floorValue
+                                    if fifo.append(generation: p.generation, start: startSample, planes: audioPlanes, frames: frames) == .retry {
+                                        pendingAudio = (startSample, frames)
+                                    }
+                                }
+                            } else {
+                                src.audioDone = true
+                            }
+                            didWork = true
+                        }
                     }
-                    didWork = true
                 }
-                if videoDone && (fifo == nil || audioDone) {
-                    if endAction == .loop && duration.numerator > 0 {
-                        loopBase = loopBase + duration
-                        r.cancel()
-                        do {
-                            reader = try asset.makeReader(from: .zero)
-                            videoDone = false
-                            audioDone = false
-                            fileCounters.loops.add(1, ordering: .relaxed)
-                        } catch {
-                            fail("循环重开失败：\(error)")
-                            reader = nil
+                // ---- 本圈读完：交接到下一圈 / 放结尾哨兵 ----
+                if cur.videoDone && (fifo == nil || cur.audioDone) {
+                    if looping {
+                        cur.cancel()
+                        if let n = next {
+                            current = n
+                        } else {
+                            do {
+                                current = LoopReader(reader: try asset.makeReader(from: .zero), base: cur.base + duration)
+                            } catch {
+                                fail("循环重开失败：\(error)")
+                                current = nil
+                            }
                         }
+                        next = nil
+                        prerollFailed = false
+                        fileCounters.loops.add(1, ordering: .relaxed)
                     } else {
-                        _ = queue.push(.init(media: loopBase + duration, buffer: nil, generation: generation, isEnd: true))
+                        next?.cancel()   // 预开之后结束动作改成了 hold / black
+                        next = nil
+                        _ = queue.push(.init(media: cur.base + duration, buffer: nil, generation: p.generation, isEnd: true))
                         // 等换代（seek）或停止
-                        while !thread.isStopRequested && playback.withLock({ $0.generation }) == generation {
+                        while !thread.isStopRequested && playback.withLock({ $0.generation }) == p.generation {
                             thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 20))
                         }
                     }
@@ -408,7 +487,24 @@ public final class FileInput: Input, @unchecked Sendable {
                 if !didWork { thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 2)) }
             }
         }
-        reader?.cancel()
+        current?.cancel()
+        next?.cancel()
+    }
+
+    /// 解码线程侧丢帧：这帧已经落后当前拍的位置超过一帧（推帧线程反正只推"位置 ≤ 本拍"里最新的那帧），不入队直接丢，
+    /// 解码器才能追上时间线（速率高 / 解码慢时不会越落越远）。只差不到一帧的留着——定位到非帧边界时首帧的 pts 略早于锚点，那帧正是要显示的。
+    /// 锚点没定 / 暂停 / 还没到锚点拍时位置无意义，不丢。
+    private func shouldDrop(media: Rational, playback p: Playback, timing: ProgramTiming, frameDuration: Rational) -> Bool {
+        guard !p.anchorPending, !p.paused else { return false }
+        let tick = timing.tick(at: HostClock.now())
+        guard tick > p.timeline.anchorTick else { return false }
+        return media + frameDuration <= p.timeline.position(at: tick)
+    }
+
+    /// 正有理数向上取整。
+    static func ceilInt(_ r: Rational) -> Int {
+        guard r.numerator > 0 else { return 0 }
+        return Int((r.numerator + r.denominator - 1) / r.denominator)
     }
 
     /// 本代的第一帧已解出：把锚点定在 seekLead 之后的第一拍（不早于第 0 拍：引擎还没开始挑帧之前推的帧只会被帧槽挤掉）。
@@ -445,7 +541,8 @@ public final class FileInput: Input, @unchecked Sendable {
         var sequence: UInt64 = 0
         var nextTick: Tick?
         var chunkIndex: Int64 = 0
-        var trimmedTo: Int64 = 0
+        var trimmedTo = Int64.min
+        var audioStalled = false   // 上一轮：当前音频块到点了但样本还没解到（循环点 / 定位后重开），下一轮按块周期轮询
         var black: CVPixelBuffer?
         var audioOut: [UnsafeMutablePointer<Float>] = []
         var audioSrc: [UnsafeMutablePointer<Float>] = []
@@ -473,11 +570,13 @@ public final class FileInput: Input, @unchecked Sendable {
                     seenGeneration = p.generation
                     ended = false
                     nextTick = nil
+                    trimmedTo = .min   // FIFO 换代清空；不重置的话往回定位后要等位置追过旧的 trim 点才会再 trim，FIFO 塞满、解码线程进不来
                 }
                 if p.version != seenVersion {
                     seenVersion = p.version
                     chunkIndex = 0
                     nextTick = nil
+                    audioStalled = false
                 }
                 let now = HostClock.now()
                 if p.anchorPending {
@@ -492,7 +591,14 @@ public final class FileInput: Input, @unchecked Sendable {
                 var audioWake: HostTime?
                 let audioActive = fifo != nil && writer != nil && !p.paused && !ended
                 if audioActive {
-                    audioWake = p.timeline.hostTime(ofOutputSample: chunkIndex * Int64(chunk), sampleRate: sampleRate, timing: timing) + chunkDuration
+                    let due = p.timeline.hostTime(ofOutputSample: chunkIndex * Int64(chunk), sampleRate: sampleRate, timing: timing) + chunkDuration
+                    if audioStalled && due <= now {
+                        // 这块到点了但样本还没解到：按块周期轮询到跳过线，不把 wake 设在过去——那样 sleep 立刻返回、每轮都记一次晚醒，
+                        // 循环点断供几十 ms 就自旋十几万次（问题单 W4A-…-prores-starve §2 的"晚醒"）
+                        audioWake = max(now, min(due + chunkDuration * 4, now + chunkDuration))
+                    } else {
+                        audioWake = due
+                    }
                 }
                 var wake = videoWake
                 if let a = audioWake, a < wake { wake = a }
@@ -580,6 +686,7 @@ public final class FileInput: Input, @unchecked Sendable {
                 }
 
                 // ---- 音频：所有"样本已发生"的块 ----
+                audioStalled = false
                 if audioActive, let fifo, let writer, let table = planeTable {
                     var budget = 8
                     while budget > 0 {
@@ -598,7 +705,8 @@ public final class FileInput: Input, @unchecked Sendable {
                         let lastIndex = Int64(FileInput.floorDiv(lastPos, den)) + 1
                         let srcCount = Int(lastIndex - firstIndex + 1)
                         if srcCount > maxSrc { chunkIndex += 1; continue }
-                        if fifo.copy(start: firstIndex, count: srcCount, into: audioSrc) {
+                        switch fifo.copy(start: firstIndex, count: srcCount, into: audioSrc) {
+                        case .ok:
                             let exact = rate.isInteger && rate.numerator == 1 && (base % den == 0)
                             for c in 0..<fifo.channels {
                                 let src = audioSrc[c], dst = audioOut[c]
@@ -626,12 +734,24 @@ public final class FileInput: Input, @unchecked Sendable {
                                 trimmedTo = firstIndex - 2
                                 fifo.trim(before: trimmedTo)
                             }
-                        } else if HostClock.now() > due + chunkDuration * 4 {
-                            // 样本迟迟不来（定位后重开 / 音轨比视频短）：跳过这块
+                        case .gone:
+                            // 要的样本已经不在 FIFO 里（换代 / 大空洞之后队头在它后面）：永远不会再来，立刻跳过，别等到跳过线
                             fileCounters.audioChunksSkipped.add(1, ordering: .relaxed)
                             chunkIndex += 1
-                        } else {
-                            break
+                        case .notYet:
+                            // 样本还没解到：先把比这块还老的样本丢掉——FIFO 被旧样本塞满时解码线程进不来，不 trim 就两边互等（W2A3 的饿死）；
+                            // 过了 due + 4 块还没来（定位后重开 / 音轨比视频短）就跳过，否则下一轮按块周期轮询
+                            if firstIndex - 2 > trimmedTo {
+                                trimmedTo = firstIndex - 2
+                                fifo.trim(before: trimmedTo)
+                            }
+                            if HostClock.now() > due + chunkDuration * 4 {
+                                fileCounters.audioChunksSkipped.add(1, ordering: .relaxed)
+                                chunkIndex += 1
+                            } else {
+                                audioStalled = true
+                                budget = 0
+                            }
                         }
                     }
                 }
