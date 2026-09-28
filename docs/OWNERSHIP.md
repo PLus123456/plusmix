@@ -62,9 +62,10 @@
 | W2-D2 | 推流开始丢首秒音频包 | `w2-stream-2` | `Packages/SwitcherOutputs/Sources/Streaming/` `Packages/SwitcherOutputs/Tests/StreamingTests/` | prompt 77；用户 2026-09-28 指派 agent；从 main 开 |
 | W2-C2 | MIDI 热插拔在换节目后失效 | `w2-control-2` | `Packages/SwitcherControl/Sources/SwitcherControl/MIDI/` `Packages/SwitcherControl/Tests/SwitcherControlTests/` `Packages/SwitcherControl/Sources/SwitcherControl/Hotkeys/HotkeyTable.swift` `Packages/SwitcherControl/Sources/SwitcherControl/API/APIServer.swift` | prompt 78；用户 2026-09-28 指派 agent；从 main 开；两个额外文件只改 UserConfig 目录名与 serverName（改名 PlusMix 的包内跟改） |
 | W3-E5 | App 相对路径 + 状态行按输出编号 | `w3-app-6` | `App/` `Samples/README.md` | prompt 79；用户 2026-09-28 指派 agent；Samples/README.md 只删临时办法一段；从 W4-D 合入后的 main 开 |
-| W1-B3 | 启动停顿 + 守护进程突发跳拍 | `w1-core-3` | `Packages/SwitcherCore/Sources/SwitcherEngine/` `Packages/SwitcherCore/Tests/SwitcherEngineTests/` `Packages/SwitcherCore/Sources/SwitcherRender/` `Packages/SwitcherCore/Tests/SwitcherRenderTests/` | prompt 81；用户 2026-09-28 指派 agent；参考图不动、Engine / Render 互不依赖；从 main 开 |
+| W1-B3 | 启动停顿 + 守护进程突发跳拍 | `w1-core-3` | `Packages/SwitcherCore/Sources/SwitcherEngine/` `Packages/SwitcherCore/Tests/SwitcherEngineTests/` `Packages/SwitcherCore/Sources/SwitcherRender/` `Packages/SwitcherCore/Tests/SwitcherRenderTests/` `reports/w1-core-3-run.md` | prompt 81；用户 2026-09-28 指派 agent；参考图不动、Engine / Render 互不依赖；从 main 开；gate4 运行报告改名成 reports/w1-core-3-run.md（prompt 81 指定；issue W1B3-g5-ownership-run-report-file） |
 | W1-A4 | frameprobe 内存随录像长度线性涨 | `w1-testkit-4` | `Packages/SwitcherTestKit/` `Tools/frameprobe/` | prompt 82；用户 2026-09-28 指派 agent；从 main 开 |
 | W4-B2 | 发布脚本收尾（R11、check-links 挂 lint、发布文档） | `w4-release-2` | `scripts/release/` `scripts/check-links.sh` `docs/release/` `.github/` `docs/user/` | prompt 83；用户 2026-09-28 指派 agent；从 W4-D 合入后的 main 开；.github/ 只改 release.yml 的产物名（issue W4D-w4-release-github-release-workflow-product-name）；docs/user/ 只改 Application Support 目录名那几行 |
+| W3-E6 | App 启动顺序：control.start / engine.warmUp 挪到定 t0 之前（W1-B3 定位的启动停顿根治） | `w3-app-7` | `App/` | prompt 84；用户 2026-09-28 指派 agent（普通任务）；从 W1-B3 合入后的 main 开 |
 
 ## 补充规则（P0 加的，落地方案里没写明；不同意就改这里）
 
