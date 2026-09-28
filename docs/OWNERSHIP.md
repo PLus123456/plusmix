@@ -64,7 +64,7 @@
 | W3-E5 | App 相对路径 + 状态行按输出编号 | `w3-app-6` | `App/` `Samples/README.md` | prompt 79；用户 2026-09-28 指派 agent；Samples/README.md 只删临时办法一段；从 W4-D 合入后的 main 开 |
 | W1-B3 | 启动停顿 + 守护进程突发跳拍 | `w1-core-3` | `Packages/SwitcherCore/Sources/SwitcherEngine/` `Packages/SwitcherCore/Tests/SwitcherEngineTests/` `Packages/SwitcherCore/Sources/SwitcherRender/` `Packages/SwitcherCore/Tests/SwitcherRenderTests/` | prompt 81；用户 2026-09-28 指派 agent；参考图不动、Engine / Render 互不依赖；从 main 开 |
 | W1-A4 | frameprobe 内存随录像长度线性涨 | `w1-testkit-4` | `Packages/SwitcherTestKit/` `Tools/frameprobe/` | prompt 82；用户 2026-09-28 指派 agent；从 main 开 |
-| W4-B2 | 发布脚本收尾（R11、check-links 挂 lint、发布文档） | `w4-release-2` | `scripts/release/` `scripts/check-links.sh` `docs/release/` `.github/` | prompt 83；用户 2026-09-28 指派 agent；从 W4-D 合入后的 main 开；.github/ 只改 release.yml 的产物名（issue W4D-w4-release-github-release-workflow-product-name） |
+| W4-B2 | 发布脚本收尾（R11、check-links 挂 lint、发布文档） | `w4-release-2` | `scripts/release/` `scripts/check-links.sh` `docs/release/` `.github/` `docs/user/` | prompt 83；用户 2026-09-28 指派 agent；从 W4-D 合入后的 main 开；.github/ 只改 release.yml 的产物名（issue W4D-w4-release-github-release-workflow-product-name）；docs/user/ 只改 Application Support 目录名那几行 |
 
 ## 补充规则（P0 加的，落地方案里没写明；不同意就改这里）
 

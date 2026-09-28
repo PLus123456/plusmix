@@ -20,7 +20,8 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
     - W4-D 改名 PlusMix（w4-rename = bd03b15 → 合入 023e138）：63 文件；agent 自验 App 92 用例 88 过 0 失败 4 跳、archive-adhoc 出 PlusMix.app / PlusMix-0.1.0.dmg、release-test 9 / 10（R11 已知）、check-links 119、lint 全绿；检查点顺手改 VirtualCameraConstants 的 4 个设备 / 流名（2bc4088，VirtualCameraTests 12 / 12），把 release.yml 产物名、Application Support 目录名 / MIDI 客户端名 / serverName、App 侧跟改分别加进 prompt 83 / 78 / 79。
     - W2-A4 文件输入空拍 / 饿死（w2-inputs-4 = 52cdfee → 合入 8760ce5）：ProRes 1080p60 循环 20 圈空拍 2 → 0，速率 8 十秒 7 圈 → 401 圈、lateWakes 298 万 → 0，fileprobe 466 Mb/s ProRes 300 s starved 128 → 0；Inputs 109 用例 0 失败；lateWakes / framesRejected 口径变了（8 小时数据别直接比）。
     - W2-D2 推流首秒音频（w2-stream-2 = a702956 → 合入 f8fabbf）：长稳那 47 包其实是 headless 音频引擎早起 1 s 被起步对齐裁掉、错在计进 audioDropped；真问题是 App 顺序下握手期间的帧 / 包直接丢。修：start 起就缓冲、两轨从第一个送出的关键帧同一原点起送，原点之前记 before-start 不算丢。RTMP App 顺序用例丢 29 / 22 → 0 / 0、落盘从帧号 0；MediaMTX 六条全过；Outputs 105 用例 0 失败。
-    - W2-C2 MIDI 热插拔 + 控制包产品名（w2-control-2）：进行中。
+    - W2-C2 MIDI 热插拔 + 控制包产品名（w2-control-2 = 0f05e36 → 合入）：CoreMIDI 通知放到进程级常驻线程 + 永不销毁的锚客户端；新用例修前 15 处断言失败 → 修后三轮全过；UserConfig 目录 / MIDI 客户端名 / API serverName → PlusMix；Control 58 用例 0 失败；App 侧 LastSession 路径与文档旧路径分别加进 prompt 79 / 83。
+    - W3-E5 App 相对路径 / 状态行 / LastSession 路径（w3-app-6）：进行中。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
