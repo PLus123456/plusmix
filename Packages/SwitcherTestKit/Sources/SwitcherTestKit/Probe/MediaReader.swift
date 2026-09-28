@@ -113,6 +113,7 @@ public enum MediaReader {
     public static func readAudio(url: URL) async throws -> AudioResult? {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return nil }
+        let trackSeconds = try await track.load(.timeRange).duration.seconds
         // 直通读第一个样本：编码类型与 AVFoundation 打算裁掉的 priming 样本数
         var codec = ""
         var trimmed = 0
@@ -148,7 +149,10 @@ public enum MediaReader {
             guard let fd = CMSampleBufferGetFormatDescription(sb), let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee else { continue }
             sampleRate = asbd.mSampleRate
             channels = Int(asbd.mChannelsPerFrame)
-            if start == nil { start = CMSampleBufferGetPresentationTimeStamp(sb).seconds }
+            if start == nil {
+                start = CMSampleBufferGetPresentationTimeStamp(sb).seconds
+                samples.reserveCapacity(expectedSampleCount(trackSeconds: trackSeconds, sampleRate: sampleRate))
+            }
             guard let block = CMSampleBufferGetDataBuffer(sb) else { continue }
             let length = CMBlockBufferGetDataLength(block)
             let frameCount = length / (4 * channels)
@@ -158,7 +162,6 @@ public enum MediaReader {
             if channels == 1 {
                 samples.append(contentsOf: raw)
             } else {
-                samples.reserveCapacity(samples.count + frameCount)
                 let scale = 1 / Float(channels)
                 for i in 0..<frameCount {
                     var s: Float = 0
@@ -171,6 +174,18 @@ public enum MediaReader {
         let info = ProbeAudioInfo(sampleRate: sampleRate, channels: channels, startSeconds: start ?? 0, sampleCount: samples.count)
         // 直通样本的 trim 是按格式描述的采样率计的；解码输出采样率相同（AAC-LC 48 kHz 就是 48 kHz），不换算
         return AudioResult(info: info, samples: samples, codec: codec, primingTrimmedSamples: trimmed)
+    }
+
+    /// 整条音轨的样本数预估（轨长 × 采样率，多留 1 s），读第一块时一次预留。
+    ///
+    /// 为什么不逐块 `reserveCapacity(count + frameCount)`：Swift 的 reserveCapacity 按"刚好够"分配、不按倍数长，
+    /// 每块（约 8192 帧）都把整个数组重新分配、整条拷一遍（O(n²)），放掉的旧块也不还给系统（phys_footprint 不回落）——
+    /// 立体声 1 分钟峰值 0.7 GB、10 分钟 7.6 GB、1 小时 41 GB，耗时也跟着平方涨（W1-A4，问题单 W4A-…-memory-grows-with-length）。
+    /// 预估偏小也没关系，超出的部分 append 照常按倍数长；轨长读不出或离谱（超过 2^31 个样本）就不预留。
+    static func expectedSampleCount(trackSeconds: Double, sampleRate: Double) -> Int {
+        let expected = (trackSeconds + 1) * sampleRate
+        guard trackSeconds > 0, expected.isFinite, expected > 0, expected < Double(Int32.max) else { return 0 }
+        return Int(expected.rounded(.up))
     }
 
     static func fourCC(_ v: FourCharCode) -> String {
