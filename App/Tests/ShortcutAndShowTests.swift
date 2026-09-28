@@ -132,7 +132,7 @@ final class ShortcutAndShowTests: XCTestCase {
         XCTAssertEqual(reopened.state.program, 2)
         XCTAssertTrue(AppTest.waitUntil(10) { reopened.inputs.runtimeState(of: 1) == .live && reopened.inputs.runtimeState(of: 2) == .live }, "打开后输入应重新跑起来")
         XCTAssertEqual(AppTest.controller.windowController.inputStrip.cells.count, 2, "缩略图条应跟着新 session")
-        XCTAssertEqual(AppTest.controller.windowController.window?.title, "Switcher \(SwitcherVersion.current) — round")
+        XCTAssertEqual(AppTest.controller.windowController.window?.title, "PlusMix \(SwitcherVersion.current) — round", "窗口标题用产品名（W4-D）")
     }
 
     /// 还没实现的输入类型（DeckLink / NDI 在 W3-A）是占位：加进去不崩，格子显示提示；不存在的摄像头 uniqueID 是无信号（等它出现），不是占位。

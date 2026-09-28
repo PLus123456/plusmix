@@ -5,7 +5,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 require_archived_app
 pin="$REPO_ROOT/scripts/release/pin-deps.sh"
-bin="$RELEASE_TEST_APP/Contents/MacOS/Switcher"
+bin="$RELEASE_TEST_APP/Contents/MacOS/$(app_executable "$RELEASE_TEST_APP")"   # W4-D：可执行名 = PRODUCT_NAME（PlusMix），从 Info.plist 读
 assert_true "主二进制不引用 _swift_initBorrow 一类符号" "$pin" verify-runtime "$bin"
 for f in "$RELEASE_TEST_APP"/Contents/Frameworks/*.dylib; do
   [ -f "$f" ] || continue

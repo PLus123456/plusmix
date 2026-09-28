@@ -25,7 +25,7 @@ for t in "${tests[@]}"; do
   rows+=("$(printf '%-6s %-44s %4ss  %s' "$status" "$t" "$secs" "$log")")
   # R1 产出的 App 给后面的测试复用
   if [ "$t" = test-r1-archive-adhoc ] && [ -z "${RELEASE_TEST_APP:-}" ]; then
-    app=$(ls -d "$RELEASE_TEST_OUT"/r1/*/Switcher.app 2>/dev/null | head -1); [ -n "$app" ] && export RELEASE_TEST_APP="$app"
+    app=$(ls -d "$RELEASE_TEST_OUT"/r1/*/*.app 2>/dev/null | head -1); [ -n "$app" ] && export RELEASE_TEST_APP="$app"
   fi
 done
 printf '\n%-6s %-44s %5s  %s\n' 状态 测试 用时 日志
