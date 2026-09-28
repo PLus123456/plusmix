@@ -1,0 +1,718 @@
+{
+  "audio": {
+    "afv": true,
+    "alignmentFrames": 2048,
+    "buses": [
+      {
+        "bus": 0,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      },
+      {
+        "bus": 1,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      },
+      {
+        "bus": 2,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      },
+      {
+        "bus": 3,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      }
+    ],
+    "monitorMode": "afl",
+    "monitorPoint": "preDelayLine"
+  },
+  "inputs": [
+    {
+      "name": "机位 1 · 主席台（合成源）",
+      "number": 1,
+      "settings": {
+        "audio": {
+          "afv": true,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": true
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "synthetic": {
+          "settings": {
+            "audio": false,
+            "audioDriftPpm": 0,
+            "background": {
+              "noise": {
+                "amplitude": 24,
+                "level": 80,
+                "seed": 1
+              }
+            },
+            "clockDriftPpm": 0,
+            "dropEveryN": 0,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 60
+            },
+            "height": 1080,
+            "jitterMs": 0,
+            "width": 1920
+          }
+        }
+      }
+    },
+    {
+      "name": "机位 2 · 观众（合成源）",
+      "number": 2,
+      "settings": {
+        "audio": {
+          "afv": true,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": true
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "synthetic": {
+          "settings": {
+            "audio": false,
+            "audioDriftPpm": 0,
+            "background": {
+              "noise": {
+                "amplitude": 24,
+                "level": 112,
+                "seed": 2
+              }
+            },
+            "clockDriftPpm": 0,
+            "dropEveryN": 0,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 60
+            },
+            "height": 1080,
+            "jitterMs": 0,
+            "width": 1920
+          }
+        }
+      }
+    },
+    {
+      "name": "机位 3 · 游机（合成源）",
+      "number": 3,
+      "settings": {
+        "audio": {
+          "afv": true,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": true
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "synthetic": {
+          "settings": {
+            "audio": false,
+            "audioDriftPpm": 0,
+            "background": {
+              "noise": {
+                "amplitude": 24,
+                "level": 144,
+                "seed": 3
+              }
+            },
+            "clockDriftPpm": 0,
+            "dropEveryN": 0,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 60
+            },
+            "height": 1080,
+            "jitterMs": 0,
+            "width": 1920
+          }
+        }
+      }
+    },
+    {
+      "name": "机位 4 · 大屏翻拍（合成源）",
+      "number": 4,
+      "settings": {
+        "audio": {
+          "afv": true,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": true
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "synthetic": {
+          "settings": {
+            "audio": false,
+            "audioDriftPpm": 0,
+            "background": {
+              "noise": {
+                "amplitude": 24,
+                "level": 176,
+                "seed": 4
+              }
+            },
+            "clockDriftPpm": 0,
+            "dropEveryN": 0,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 60
+            },
+            "height": 1080,
+            "jitterMs": 0,
+            "width": 1920
+          }
+        }
+      }
+    },
+    {
+      "name": "调音台（合成源带音频）",
+      "number": 5,
+      "settings": {
+        "audio": {
+          "afv": false,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": true
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "synthetic": {
+          "settings": {
+            "audio": true,
+            "audioDriftPpm": 0,
+            "background": {
+              "noise": {
+                "amplitude": 24,
+                "level": 64,
+                "seed": 5
+              }
+            },
+            "clockDriftPpm": 0,
+            "dropEveryN": 0,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 60
+            },
+            "height": 1080,
+            "jitterMs": 0,
+            "width": 1920
+          }
+        }
+      }
+    },
+    {
+      "name": "标题字幕",
+      "number": 6,
+      "settings": {
+        "audio": {
+          "afv": true,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": false
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "image": {
+          "path": "assets/title.png"
+        }
+      }
+    }
+  ],
+  "layout": {},
+  "mixer": {
+    "format": {
+      "frameRate": {
+        "denominator": 1,
+        "numerator": 60
+      },
+      "height": 1080,
+      "width": 1920
+    },
+    "ftb": {
+      "durationTicks": 30,
+      "level": 0,
+      "on": false
+    },
+    "overlays": [
+      {
+        "anchor": "bottom",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 15,
+          "kind": "slide",
+          "slideFrom": "bottom"
+        },
+        "input": 6,
+        "on": false,
+        "previewOn": false,
+        "rect": {
+          "height": 1,
+          "width": 1,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "anchor": "center",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 0,
+          "kind": "cut"
+        },
+        "on": false,
+        "previewOn": false,
+        "rect": {
+          "height": 1,
+          "width": 1,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "anchor": "center",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 0,
+          "kind": "cut"
+        },
+        "on": false,
+        "previewOn": false,
+        "rect": {
+          "height": 1,
+          "width": 1,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "anchor": "center",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 0,
+          "kind": "cut"
+        },
+        "on": false,
+        "previewOn": false,
+        "rect": {
+          "height": 1,
+          "width": 1,
+          "x": 0,
+          "y": 0
+        }
+      }
+    ],
+    "preview": 2,
+    "program": 1,
+    "transition": {
+      "durationTicks": 30,
+      "progress": 0,
+      "source": "auto",
+      "stinger": {
+        "cutAtTick": 0
+      },
+      "type": "fade",
+      "wipe": {
+        "direction": "leftToRight",
+        "softness": 0.1
+      }
+    }
+  },
+  "name": "活动多机位示例",
+  "outputs": [
+    {
+      "enabled": false,
+      "kind": "record",
+      "name": "节目录制",
+      "number": 1,
+      "settings": {
+        "audio": {
+          "bitrateBps": 160000,
+          "codec": "aac"
+        },
+        "extra": {},
+        "record": {
+          "container": "mov",
+          "directory": "活动",
+          "fileNamePattern": "{show}-{date}-{time}",
+          "fragmentIntervalSeconds": 1,
+          "remuxToMP4": false
+        },
+        "source": {
+          "program": {}
+        },
+        "video": {
+          "bitrateBps": 12000000,
+          "codec": "h264",
+          "keyframeIntervalFrames": 120
+        }
+      }
+    },
+    {
+      "enabled": false,
+      "kind": "record",
+      "name": "ISO 1",
+      "number": 2,
+      "settings": {
+        "audio": {
+          "bitrateBps": 160000,
+          "codec": "aac"
+        },
+        "extra": {},
+        "record": {
+          "container": "mov",
+          "directory": "活动",
+          "fileNamePattern": "{show}-{date}-{time}-{output}",
+          "fragmentIntervalSeconds": 1,
+          "remuxToMP4": false
+        },
+        "source": {
+          "input": {
+            "number": 1
+          }
+        },
+        "video": {
+          "bitrateBps": 12000000,
+          "codec": "h264",
+          "keyframeIntervalFrames": 120
+        }
+      }
+    },
+    {
+      "enabled": false,
+      "kind": "record",
+      "name": "ISO 2",
+      "number": 3,
+      "settings": {
+        "audio": {
+          "bitrateBps": 160000,
+          "codec": "aac"
+        },
+        "extra": {},
+        "record": {
+          "container": "mov",
+          "directory": "活动",
+          "fileNamePattern": "{show}-{date}-{time}-{output}",
+          "fragmentIntervalSeconds": 1,
+          "remuxToMP4": false
+        },
+        "source": {
+          "input": {
+            "number": 2
+          }
+        },
+        "video": {
+          "bitrateBps": 12000000,
+          "codec": "h264",
+          "keyframeIntervalFrames": 120
+        }
+      }
+    },
+    {
+      "enabled": false,
+      "kind": "record",
+      "name": "ISO 3",
+      "number": 4,
+      "settings": {
+        "audio": {
+          "bitrateBps": 160000,
+          "codec": "aac"
+        },
+        "extra": {},
+        "record": {
+          "container": "mov",
+          "directory": "活动",
+          "fileNamePattern": "{show}-{date}-{time}-{output}",
+          "fragmentIntervalSeconds": 1,
+          "remuxToMP4": false
+        },
+        "source": {
+          "input": {
+            "number": 3
+          }
+        },
+        "video": {
+          "bitrateBps": 12000000,
+          "codec": "h264",
+          "keyframeIntervalFrames": 120
+        }
+      }
+    },
+    {
+      "enabled": false,
+      "kind": "record",
+      "name": "ISO 4",
+      "number": 5,
+      "settings": {
+        "audio": {
+          "bitrateBps": 160000,
+          "codec": "aac"
+        },
+        "extra": {},
+        "record": {
+          "container": "mov",
+          "directory": "活动",
+          "fileNamePattern": "{show}-{date}-{time}-{output}",
+          "fragmentIntervalSeconds": 1,
+          "remuxToMP4": false
+        },
+        "source": {
+          "input": {
+            "number": 4
+          }
+        },
+        "video": {
+          "bitrateBps": 12000000,
+          "codec": "h264",
+          "keyframeIntervalFrames": 120
+        }
+      }
+    },
+    {
+      "enabled": false,
+      "kind": "multiview",
+      "name": "多画面",
+      "number": 6,
+      "settings": {
+        "extra": {},
+        "multiview": {
+          "custom": [],
+          "meters": true,
+          "preset": "pgmPvw+grid",
+          "safeArea": true
+        },
+        "source": {
+          "multiview": {}
+        }
+      }
+    },
+    {
+      "enabled": false,
+      "kind": "ndi",
+      "name": "节目 NDI",
+      "number": 7,
+      "settings": {
+        "extra": {},
+        "source": {
+          "program": {}
+        }
+      }
+    }
+  ],
+  "schemaVersion": 1
+}

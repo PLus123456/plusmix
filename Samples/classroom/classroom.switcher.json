@@ -1,0 +1,367 @@
+{
+  "audio": {
+    "afv": true,
+    "alignmentFrames": 2048,
+    "buses": [
+      {
+        "bus": 0,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      },
+      {
+        "bus": 1,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      },
+      {
+        "bus": 2,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      },
+      {
+        "bus": 3,
+        "effects": [],
+        "gainDb": 0,
+        "muted": false
+      }
+    ],
+    "monitorMode": "afl",
+    "monitorPoint": "preDelayLine"
+  },
+  "inputs": [
+    {
+      "name": "屏幕 · 课件（合成源，换成屏幕 / 窗口输入）",
+      "number": 1,
+      "settings": {
+        "audio": {
+          "afv": true,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": true
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "synthetic": {
+          "settings": {
+            "audio": false,
+            "audioDriftPpm": 0,
+            "background": {
+              "noise": {
+                "amplitude": 24,
+                "level": 192,
+                "seed": 1
+              }
+            },
+            "clockDriftPpm": 0,
+            "dropEveryN": 0,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 30
+            },
+            "height": 1080,
+            "jitterMs": 0,
+            "width": 1920
+          }
+        }
+      }
+    },
+    {
+      "name": "摄像头 · 老师（合成源带音频，换成你的摄像头）",
+      "number": 2,
+      "settings": {
+        "audio": {
+          "afv": false,
+          "delayMs": 0,
+          "gainDb": 0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": true
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "synthetic": {
+          "settings": {
+            "audio": true,
+            "audioDriftPpm": 0,
+            "background": {
+              "noise": {
+                "amplitude": 24,
+                "level": 96,
+                "seed": 2
+              }
+            },
+            "clockDriftPpm": 0,
+            "dropEveryN": 0,
+            "frameRate": {
+              "denominator": 1,
+              "numerator": 30
+            },
+            "height": 1080,
+            "jitterMs": 0,
+            "width": 1920
+          }
+        }
+      }
+    },
+    {
+      "name": "课程标题",
+      "number": 3,
+      "settings": {
+        "audio": {
+          "afv": true,
+          "delayMs": 0,
+          "gainDb": 0.0,
+          "muted": false,
+          "pan": 0,
+          "routing": {
+            "busA": false,
+            "busB": false,
+            "headphones": false,
+            "master": false
+          },
+          "solo": false
+        },
+        "crop": {
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "top": 0
+        },
+        "effects": [],
+        "keyer": {
+          "enabled": false,
+          "keyColor": {
+            "blue": 0,
+            "green": 255,
+            "red": 0
+          },
+          "softness": 0.1,
+          "spillSuppression": 0.5,
+          "tolerance": 0.3
+        },
+        "transform": {
+          "flipHorizontal": false,
+          "flipVertical": false,
+          "offsetX": 0,
+          "offsetY": 0,
+          "rotationDegrees": 0,
+          "scale": 1
+        }
+      },
+      "source": {
+        "image": {
+          "path": "assets/title.png"
+        }
+      }
+    }
+  ],
+  "layout": {},
+  "mixer": {
+    "format": {
+      "frameRate": {
+        "denominator": 1,
+        "numerator": 30
+      },
+      "height": 1080,
+      "width": 1920
+    },
+    "ftb": {
+      "durationTicks": 15,
+      "level": 0,
+      "on": false
+    },
+    "overlays": [
+      {
+        "anchor": "bottomRight",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 10,
+          "kind": "zoom"
+        },
+        "border": {
+          "color": {
+            "blue": 255,
+            "green": 255,
+            "red": 255
+          },
+          "width": 0.006
+        },
+        "input": 2,
+        "on": true,
+        "previewOn": false,
+        "rect": {
+          "height": 0.28,
+          "width": 0.28,
+          "x": 0.7,
+          "y": 0.68
+        }
+      },
+      {
+        "anchor": "bottom",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 8,
+          "kind": "slide",
+          "slideFrom": "bottom"
+        },
+        "input": 3,
+        "on": false,
+        "previewOn": false,
+        "rect": {
+          "height": 1,
+          "width": 1,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "anchor": "center",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 0,
+          "kind": "cut"
+        },
+        "on": false,
+        "previewOn": false,
+        "rect": {
+          "height": 1,
+          "width": 1,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "anchor": "center",
+        "animProgress": 0,
+        "animation": {
+          "durationTicks": 0,
+          "kind": "cut"
+        },
+        "on": false,
+        "previewOn": false,
+        "rect": {
+          "height": 1,
+          "width": 1,
+          "x": 0,
+          "y": 0
+        }
+      }
+    ],
+    "preview": 2,
+    "program": 1,
+    "transition": {
+      "durationTicks": 15,
+      "progress": 0,
+      "source": "auto",
+      "stinger": {
+        "cutAtTick": 0
+      },
+      "type": "fade",
+      "wipe": {
+        "direction": "leftToRight",
+        "softness": 0.0
+      }
+    }
+  },
+  "name": "教室录课示例",
+  "outputs": [
+    {
+      "enabled": false,
+      "kind": "record",
+      "name": "课程录制",
+      "number": 1,
+      "settings": {
+        "audio": {
+          "bitrateBps": 160000,
+          "codec": "aac"
+        },
+        "extra": {},
+        "record": {
+          "container": "mov",
+          "directory": "教室",
+          "fileNamePattern": "{show}-{date}-{time}",
+          "fragmentIntervalSeconds": 1,
+          "remuxToMP4": false
+        },
+        "source": {
+          "program": {}
+        },
+        "video": {
+          "bitrateBps": 8000000,
+          "codec": "h264",
+          "keyframeIntervalFrames": 60
+        }
+      }
+    }
+  ],
+  "schemaVersion": 1
+}
