@@ -59,7 +59,8 @@ public final class MIDIController: @unchecked Sendable {
     /// 测试挂钩：每条解析出的消息（learn 之前）。
     public var onMessage: (@Sendable (MIDIMessage) -> Void)?
 
-    public init(bus: CommandBus, table: MIDIMapTable = .default, clientName: String = "Switcher") {
+    /// clientName：CoreMIDI 客户端名（输入口叫 "<clientName> 输入"），默认产品名。
+    public init(bus: CommandBus, table: MIDIMapTable = .default, clientName: String = "PlusMix") {
         self.bus = bus
         self.clientName = clientName
         mapper = Mutex(MIDIMapper(table: table))

@@ -58,7 +58,7 @@ public final class APIServer: Sendable {
         let ready = ReadyBox()
         let app = Application(router: router,
                               server: .http1WebSocketUpgrade(webSocketRouter: wsRouter),
-                              configuration: .init(address: .hostname(configuration.host, port: configuration.port), serverName: "Switcher"),
+                              configuration: .init(address: .hostname(configuration.host, port: configuration.port), serverName: "PlusMix"),
                               onServerRunning: { channel in ready.resolve(.success(channel.localAddress?.port ?? -1)) },
                               logger: logger)
         let group = ServiceGroup(configuration: .init(services: [app], logger: logger))
