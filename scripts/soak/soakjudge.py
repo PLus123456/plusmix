@@ -21,6 +21,8 @@ V2_MUST_RATIO = 0.0002          # §4 V2 必须档
 V3_MUST_MS = 4.0                # §4 V3 必须档（p99；单秒超过只报事件）
 V1_MUST_P99_MS = 12.0           # §4 V1 必须档 p99（单秒超过只报事件）
 S2_MUST_MB_H, S2_TARGET_MB_H = 10.0, 2.0
+S3_CPU_MUST, S3_CPU_TARGET = 60.0, 40.0     # §4 S3：CPU 平均（进程级，100 = 一个核）
+S3_GPU_MUST, S3_GPU_TARGET = 50.0, 35.0     # §4 S3：GPU 平均（IOKit Device Utilization，§3 S3 的正式口径）
 A3_MUST_MS, A3_TARGET_MS = 16.0, 5.0
 
 
@@ -257,6 +259,80 @@ def a3_from_probe(probe, hours):
             "slope_ms_per_s": slope, "span_s": span, "pairs": int(on.get("count", 0)),
             "a2_max_abs_ms": on.get("maxAbsMs"), "a2_mean_ms": on.get("meanMs"), "a2_std_ms": on.get("stdMs"),
             "pass_a2": av.get("passA2"), "note": "" if full else f"只跑了 {span / 3600:.2f} h：斜率 × 8 h 外推"}
+
+
+def s3_verdict(perf):
+    """§4 S3：CPU 平均 ≤ 60%、GPU 平均 ≤ 50%（必须）；≤ 40% / ≤ 35%（目标）。perf 是 perfjudge.perf_metrics 的结果（运行段）。
+    L4 长稳 = S1、S2、S3、A3（§5），S3 不过整次不过——第一次 8 小时（2026-09-28）CPU 60.1% 时总判定漏了它，报告顶行只列 S1 / S2 / A3。"""
+    cpu, gpu = perf.get("cpu_avg_pct"), perf.get("gpu_avg_pct")
+    if cpu is None or gpu is None:
+        return {"pass": None, "cpu_pass": None, "gpu_pass": None, "meets_target": False, "note": "stats 里没有 cpu_pct / gpu_pct"}
+    cpu_pass, gpu_pass = cpu <= S3_CPU_MUST, gpu <= S3_GPU_MUST
+    return {"pass": cpu_pass and gpu_pass, "cpu_pass": cpu_pass, "gpu_pass": gpu_pass,
+            "cpu_avg_pct": cpu, "cpu_p95_pct": perf.get("cpu_p95_pct"), "gpu_avg_pct": gpu, "gpu_p95_pct": perf.get("gpu_p95_pct"),
+            "cpu_meets_target": cpu <= S3_CPU_TARGET, "gpu_meets_target": gpu <= S3_GPU_TARGET,
+            "meets_target": cpu <= S3_CPU_TARGET and gpu <= S3_GPU_TARGET, "note": ""}
+
+
+def overall_verdict(s1, s2, s3, a3):
+    """L4 总判定（§5）：S1 通过，S2 没判失败（短跑只作参考不算失败），S3 通过（判得了的话），A3 没判失败（判不了 = None 不算失败）。"""
+    return bool(s1["pass"]) and s2.get("verdict") != "fail" and s3.get("pass") is not False and a3.get("pass") is not False
+
+
+# ---------------------------------------------------------------- S3 按线程归因（scripts/soak/thread-cpu.swift 每分钟一份快照）
+
+def parse_thread_log(text):
+    """threads.log：若干份快照，每份 "# ts=… pid=… threads=n" 开头，之后每行 tid<TAB>user_us<TAB>system_us<TAB>name。"""
+    snaps = []
+    cur = None
+    for raw in text.splitlines():
+        if raw.startswith("#"):
+            kv = dict(p.split("=", 1) for p in raw[1:].split() if "=" in p)
+            cur = {"ts": float(kv.get("ts", 0)), "pid": int(kv.get("pid", 0)), "threads": {}}
+            snaps.append(cur)
+            continue
+        if cur is None or not raw.strip():
+            continue
+        parts = raw.split("\t")
+        if len(parts) < 3:
+            continue
+        try:
+            cur["threads"][int(parts[0])] = (int(parts[1]), int(parts[2]), parts[3] if len(parts) > 3 else "")
+        except ValueError:
+            continue
+    return snaps
+
+
+def _thread_group(name):
+    if not name:
+        return "（无名：系统 / SDK / GCD 线程）"
+    import re
+    return re.sub(r"\.\d+$", "", name)     # com.apple.coremedia.sharedRootQueue.48 → …sharedRootQueue
+
+
+def thread_cpu_breakdown(snaps, t_start=None, t_end=None, top=20):
+    """首尾两份快照（默认第一份和最后一份；给了 t_start / t_end 就取 ≥ t_start 的第一份和 ≤ t_end 的最后一份）之间，
+    每个线程 (user + system) 的增量 / 墙钟 × 100 = 占一个核的百分比（与 Stats.cpu_pct 同口径）；只在末份里出现的线程按它的累计值算（从 0 起），
+    只在首份里的（已退出）不算。按线程名分组（去掉末尾的 .数字），降序。"""
+    if len(snaps) < 2:
+        return None
+    first = next((s for s in snaps if t_start is None or s["ts"] >= t_start), snaps[0])
+    last = next((s for s in reversed(snaps) if t_end is None or s["ts"] <= t_end), snaps[-1])
+    wall = last["ts"] - first["ts"]
+    if wall <= 0 or last is first:
+        return None
+    groups = {}
+    for tid, (u, s, name) in last["threads"].items():
+        u0, s0, _ = first["threads"].get(tid, (0, 0, name))
+        delta_s = max(0, (u - u0) + (s - s0)) / 1e6
+        g = groups.setdefault(_thread_group(name), {"name": _thread_group(name), "threads": 0, "cpu_s": 0.0})
+        g["threads"] += 1
+        g["cpu_s"] += delta_s
+    rows = sorted(groups.values(), key=lambda g: -g["cpu_s"])
+    for g in rows:
+        g["pct"] = g["cpu_s"] / wall * 100.0
+    total = sum(g["pct"] for g in rows)
+    return {"wall_s": wall, "first_ts": first["ts"], "last_ts": last["ts"], "total_pct": total, "rows": rows[:top], "groups": len(rows)}
 
 
 def combine_segment_probes(segments, a2_threshold_ms=1000.0 / 60):

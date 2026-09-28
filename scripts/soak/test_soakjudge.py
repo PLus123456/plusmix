@@ -242,3 +242,78 @@ class ShellLocaleTests(unittest.TestCase):
                     for m in re.finditer(rb"\$[A-Za-z_][A-Za-z0-9_]*(?=[\x80-\xff])", line):
                         bad.append(f"{os.path.relpath(path, root)}:{n}: {m.group().decode()}")
         self.assertEqual(bad, [], "变量后面紧跟非 ASCII 字符要写成 ${name}：\n" + "\n".join(bad))
+
+
+class S3Tests(unittest.TestCase):
+    """§4 S3 与 §5 L4：S3 是长稳的判定项之一（第一次 8 小时 CPU 60.1% 时总判定漏了它）。"""
+
+    def test_S3_cpuAvgOverSixtyFails(self):
+        s3 = sj.s3_verdict({"cpu_avg_pct": 60.1, "cpu_p95_pct": 62.7, "gpu_avg_pct": 25.8, "gpu_p95_pct": 28.0})
+        self.assertFalse(s3["cpu_pass"]); self.assertTrue(s3["gpu_pass"]); self.assertFalse(s3["pass"])
+
+    def test_S3_gpuAvgOverFiftyFails(self):
+        s3 = sj.s3_verdict({"cpu_avg_pct": 30.0, "cpu_p95_pct": 35.0, "gpu_avg_pct": 50.5, "gpu_p95_pct": 60.0})
+        self.assertTrue(s3["cpu_pass"]); self.assertFalse(s3["gpu_pass"]); self.assertFalse(s3["pass"])
+
+    def test_S3_atMustBoundaryPassesAndTargetIsSeparate(self):
+        s3 = sj.s3_verdict({"cpu_avg_pct": 60.0, "cpu_p95_pct": 65.0, "gpu_avg_pct": 50.0, "gpu_p95_pct": 55.0})
+        self.assertTrue(s3["pass"]); self.assertFalse(s3["meets_target"])
+        s3 = sj.s3_verdict({"cpu_avg_pct": 40.0, "cpu_p95_pct": 45.0, "gpu_avg_pct": 35.0, "gpu_p95_pct": 40.0})
+        self.assertTrue(s3["pass"]); self.assertTrue(s3["meets_target"])
+
+    def test_S3_missingCountersIsNotJudged(self):
+        self.assertIsNone(sj.s3_verdict({})["pass"])
+
+    def test_S3_overallVerdictFailsWhenOnlyS3Fails(self):
+        s1 = {"pass": True}; s2_ok = {"verdict": "pass"}; a3_ok = {"pass": True}
+        s3_bad = sj.s3_verdict({"cpu_avg_pct": 60.1, "cpu_p95_pct": 62.7, "gpu_avg_pct": 25.8, "gpu_p95_pct": 28.0})
+        s3_ok = sj.s3_verdict({"cpu_avg_pct": 54.9, "cpu_p95_pct": 57.1, "gpu_avg_pct": 26.4, "gpu_p95_pct": 37.0})
+        self.assertFalse(sj.overall_verdict(s1, s2_ok, s3_bad, a3_ok))
+        self.assertTrue(sj.overall_verdict(s1, s2_ok, s3_ok, a3_ok))
+        # 参考 / 判不了的项不算失败；S1 / S2 / A3 各自失败时也不过
+        self.assertTrue(sj.overall_verdict(s1, {"verdict": "reference"}, {"pass": None}, {"pass": None}))
+        self.assertFalse(sj.overall_verdict({"pass": False}, s2_ok, s3_ok, a3_ok))
+        self.assertFalse(sj.overall_verdict(s1, {"verdict": "fail"}, s3_ok, a3_ok))
+        self.assertFalse(sj.overall_verdict(s1, s2_ok, s3_ok, {"pass": False}))
+
+
+class ThreadCPUTests(unittest.TestCase):
+    """S3 归因：scripts/soak/thread-cpu.swift 的快照（tid<TAB>user_us<TAB>system_us<TAB>name）按首尾差算占核百分比。"""
+    LOG = ("# ts=1000 pid=42 threads=3\n"
+           "1\t1000000\t0\tswitcher.render\n"
+           "2\t0\t500000\t\n"
+           "3\t100000\t100000\tcom.apple.coremedia.sharedRootQueue.48\n"
+           "# ts=1030 pid=42 threads=3\n"
+           "1\t4000000\t0\tswitcher.render\n"
+           "2\t0\t2000000\t\n"
+           "3\t100000\t100000\tcom.apple.coremedia.sharedRootQueue.48\n"
+           "# ts=1060 pid=42 threads=4\n"
+           "1\t7000000\t0\tswitcher.render\n"
+           "2\t0\t3500000\t\n"
+           "3\t100000\t100000\tcom.apple.coremedia.sharedRootQueue.48\n"
+           "5\t600000\t0\tcom.apple.coremedia.sharedRootQueue.49\n")
+
+    def test_S3_threadLogParsesSnapshots(self):
+        snaps = sj.parse_thread_log(self.LOG)
+        self.assertEqual([s["ts"] for s in snaps], [1000.0, 1030.0, 1060.0])
+        self.assertEqual(snaps[0]["threads"][1], (1000000, 0, "switcher.render"))
+        self.assertEqual(snaps[0]["threads"][2][2], "")
+
+    def test_S3_threadBreakdownUsesFirstAndLastSnapshotAndGroupsNames(self):
+        b = sj.thread_cpu_breakdown(sj.parse_thread_log(self.LOG))
+        self.assertEqual(b["wall_s"], 60.0)
+        rows = {r["name"]: r for r in b["rows"]}
+        self.assertAlmostEqual(rows["switcher.render"]["pct"], 10.0)                       # (7 − 1) s / 60 s
+        self.assertAlmostEqual(rows["（无名：系统 / SDK / GCD 线程）"]["pct"], 5.0)           # 3.5 − 0.5
+        # 两个 sharedRootQueue.NN 合成一组：旧的 0 增量 + 新出现的按累计 0.6 s
+        self.assertEqual(rows["com.apple.coremedia.sharedRootQueue"]["threads"], 2)
+        self.assertAlmostEqual(rows["com.apple.coremedia.sharedRootQueue"]["pct"], 1.0)
+        self.assertAlmostEqual(b["total_pct"], 16.0)
+        self.assertEqual(b["rows"][0]["name"], "switcher.render")
+
+    def test_S3_threadBreakdownHonoursRunSegmentBounds(self):
+        b = sj.thread_cpu_breakdown(sj.parse_thread_log(self.LOG), t_start=1000, t_end=1030)
+        self.assertEqual(b["wall_s"], 30.0)
+        self.assertAlmostEqual({r["name"]: r for r in b["rows"]}["switcher.render"]["pct"], 10.0)
+        self.assertIsNone(sj.thread_cpu_breakdown(sj.parse_thread_log(self.LOG), t_start=1060, t_end=1060))
+        self.assertIsNone(sj.thread_cpu_breakdown([]))

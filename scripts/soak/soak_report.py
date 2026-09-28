@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """make soak / soak-1h 的判定、异常截取与 §7 报告（W4-A）。scripts/soak/soak.sh 跑完调它；也可以对已有产物单独重跑（soak.sh --skip-run）。
 
-退出码：0 = S1 通过且 S2 / A3（判得了的）通过；1 = 有不过的；2 = 产物缺失。
+退出码：0 = S1 通过且 S2 / S3 / A3（判得了的）通过（§5 L4 = S1、S2、S3、A3）；1 = 有不过的；2 = 产物缺失。
 """
 import argparse
 import datetime
@@ -244,6 +244,12 @@ def main():
     perf = pj.perf_metrics(lines)
     pm = pj.powermetrics_summary(pm_all) if pm_all else {}
     a3 = sj.a3_from_probe(probe, a.hours)
+    s3 = sj.s3_verdict(perf)
+    # S3 按线程：soak.sh 每分钟一份 thread-cpu 快照；只取运行段内的首尾两份（停机段的线程已经在退）
+    threads = None
+    if os.path.exists(os.path.join(od, "threads.log")):
+        threads = sj.thread_cpu_breakdown(sj.parse_thread_log(open(os.path.join(od, "threads.log"), encoding="utf-8", errors="replace").read()),
+                                          t_start=t0, t_end=tlast)
 
     # 输出 / 输入
     enc_first, enc_last = lines[0].get("encoder") or [], lines[-1].get("encoder") or []
@@ -339,12 +345,14 @@ def main():
     # ---- 报告 ----
     s2_judged = s2["verdict"] in ("pass", "fail")
     a3_judged = a3.get("pass") is not None
-    overall = s1["pass"] and (s2["verdict"] != "fail") and (a3.get("pass") is not False)
+    overall = sj.overall_verdict(s1, s2, s3, a3)
     report = a.report or f"reports/W4-soak-{a.label}.md"
     out = []
     w = out.append
     w(f"# W4-A 长稳 {a.label}（make {'soak' if a.hours >= 8 else 'soak-1h' if a.hours == 1 else 'soak'}）：{machine} / macOS {macos}\n")
     bits = [f"S1 {'✅' if s1['pass'] else '❌'}", f"S2 {'✅' if s2['verdict'] == 'pass' else ('❌' if s2['verdict'] == 'fail' else '参考')}",
+            f"S3 {'✅' if s3.get('pass') else ('❌' if s3.get('pass') is False else '—')}"
+            + ("" if s3.get("pass") is not False else "（" + " / ".join(x for x, ok in (("CPU", s3.get("cpu_pass")), ("GPU", s3.get("gpu_pass"))) if ok is False) + "）"),
             f"A3 {'✅' if a3.get('pass') else ('❌' if a3.get('pass') is False else '—')}{'（外推）' if a3.get('extrapolated') else ''}"]
     w(f"**判定：{'✅ 通过' if overall else '❌ 未通过'}**（{'；'.join(bits)}）" + ("" if s1["pass"] else f"——S1：{'；'.join(s1['reasons'])}") + "\n")
     w(f"生成：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}。数据：`{show_path(od)}/`。脚本：scripts/soak/soak.sh → scripts/soak/soak_report.py（判定库 soakjudge.py）。\n")
@@ -398,8 +406,9 @@ def main():
     w(f"| S2 内存增长 | {s2_txt} | ≤ 10 MB/h | ≤ 2 MB/h | {'✅' if s2['verdict'] == 'pass' else ('❌' if s2['verdict'] == 'fail' else ('⚠️ 参考值已超 10 MB/h（拟合段不足 1 h，不判；8 小时那次判）' if (s2.get('slope_mb_per_h') or 0) > sj.S2_MUST_MB_H else '参考（拟合段不足 1 h，只作参考）'))}{' 达目标' if s2['verdict'] == 'pass' and s2.get('meets_target') else ''} | {delta('s2_mb_per_h', 2, ' MB/h')} |")
     pm_txt = (f"；powermetrics GPU avg {f(pm.get('pm_gpu_active_avg_pct'), 1)}% / p95 {f(pm.get('pm_gpu_active_p95_pct'), 1)}%，GPU 频率均值 {f(pm.get('pm_gpu_freq_avg_mhz'), 0)} MHz（最低 {f(pm.get('pm_gpu_freq_min_mhz'), 0)}）"
               if pm and "pm_gpu_active_avg_pct" in pm else "；powermetrics 未采（无 sudo）")
-    w(f"| S3 CPU | avg {f(perf['cpu_avg_pct'], 1)}% / p95 {f(perf['cpu_p95_pct'], 1)}% / max {f(perf['cpu_max_pct'], 1)}%（进程级，100 = 一个核） | avg ≤ 60% | ≤ 40% | {'✅' if perf['cpu_avg_pct'] <= 60 else '❌'}{' 达目标' if perf['cpu_avg_pct'] <= 40 else ''} | {delta('cpu_avg_pct', 1, ' pt')} |")
-    w(f"| S3 GPU | avg {f(perf['gpu_avg_pct'], 1)}% / p95 {f(perf['gpu_p95_pct'], 1)}%（IOKit Device Utilization）{pm_txt} | avg ≤ 50% | ≤ 35% | {'✅' if perf['gpu_avg_pct'] <= 50 else '❌'}{' 达目标' if perf['gpu_avg_pct'] <= 35 else ''} | {delta('gpu_avg_pct', 1, ' pt')} |")
+    thr_txt = f"；按线程见 §5（首尾快照跨 {threads['wall_s'] / 3600:.2f} h，各线程之和 {threads['total_pct']:.1f}%）" if threads else "；没有 threads.log，不按线程归因"
+    w(f"| S3 CPU | avg {f(perf['cpu_avg_pct'], 1)}% / p95 {f(perf['cpu_p95_pct'], 1)}% / max {f(perf['cpu_max_pct'], 1)}%（进程级，100 = 一个核{thr_txt}） | avg ≤ 60% | ≤ 40% | {'✅' if s3.get('cpu_pass') else '❌'}{' 达目标' if s3.get('cpu_meets_target') else ''} | {delta('cpu_avg_pct', 1, ' pt')} |")
+    w(f"| S3 GPU | avg {f(perf['gpu_avg_pct'], 1)}% / p95 {f(perf['gpu_p95_pct'], 1)}%（IOKit Device Utilization）{pm_txt} | avg ≤ 50% | ≤ 35% | {'✅' if s3.get('gpu_pass') else '❌'}{' 达目标' if s3.get('gpu_meets_target') else ''} | {delta('gpu_avg_pct', 1, ' pt')} |")
     if a3.get("drift_ms") is not None:
         w(f"| A3 A/V 漂移 | {a3['drift_ms']:+.2f} ms（整秒配对 {a3['pairs']} 对、跨 {a3['span_s'] / 3600:.2f} h，斜率 {a3['slope_ms_per_s'] * 1000:.4f} µs/s{'；' + a3['note'] if a3.get('note') else ''}） | "
           f"8 小时 ≤ 16 ms | ≤ 5 ms | {'✅' if a3['pass'] else '❌'}{' 达目标' if a3.get('meets_target') else ''} | {delta('a3_drift_ms', 2, ' ms')} |")
@@ -443,6 +452,15 @@ def main():
     for n, v in inputs.items():
         w(f"| {n} | {in_names.get(n, '')} | {v['fps_avg']:.2f} / {v['fps_min']:.2f} | {v['zero_seconds']} | {v['dup']} | {v['drop']} | {v['latency_max_ms']:.1f} ms |")
     w("")
+    if threads:
+        w(f"S3 按线程（threads.log 首尾快照 {datetime.datetime.fromtimestamp(threads['first_ts']).strftime('%H:%M:%S')} → "
+          f"{datetime.datetime.fromtimestamp(threads['last_ts']).strftime('%H:%M:%S')}，每线程 user + system 增量 / 墙钟；同 cpu_pct 的口径，100 = 一个核；"
+          f"按线程名分组，共 {threads['groups']} 组，列前 {len(threads['rows'])}；无名线程 = VideoToolbox / AVFoundation / NDI SDK / HaishinKit / GCD 的工作线程）：\n")
+        w("| 线程（组） | 线程数 | CPU 秒 | 占一个核 % |\n|---|---|---|---|")
+        for r in threads["rows"]:
+            w(f"| `{r['name']}` | {r['threads']} | {r['cpu_s']:.0f} | {r['pct']:.1f}% |")
+        w(f"| **合计** | | | **{threads['total_pct']:.1f}%** |")
+        w("")
 
     w("## 6. 异常与截取的日志（事件前后 5 分钟，重叠的并段）\n")
     if not evs:
@@ -478,6 +496,8 @@ def main():
         notes.append("powermetrics 没采（没有 sudo）：GPU 按 §3 S3 的正式口径（IOKit）判，频率 / thermal pressure 缺。")
     if s2["verdict"] == "reference":
         notes.append("S2 在这次运行里只作参考：预热 30 分钟之后的拟合段不足 1 小时（§3 S2 的判定用 8 小时那次）。")
+    if threads is None:
+        notes.append("S3 没按线程归因：没有 threads.log（这次运行的 soak.sh 还没有每分钟的 thread-cpu 快照，或 scripts/soak/thread-cpu.swift 没编译成功）。")
     if a3.get("extrapolated"):
         notes.append("A3 按整秒配对斜率外推到 8 小时（与 G3 / G4 的 10 分钟外推同口径）；正式值用 8 小时那次。")
     if run.get("camera_note"):
@@ -493,7 +513,8 @@ def main():
     open(report, "w", encoding="utf-8").write("\n".join(out) + "\n")
 
     summary = {"label": a.label, "machine": machine, "macos": macos, "commit": env.get("commit"), "overall_pass": overall,
-               "s1": s1, "s2": s2, "s2_ps": s2_ps, "a3": a3, "perf": perf, "powermetrics": pm, "outputs": outputs, "inputs": inputs, "mtx": mtx,
+               "s1": s1, "s2": s2, "s2_ps": s2_ps, "s3": s3, "a3": a3, "perf": perf, "powermetrics": pm, "threads": threads,
+               "outputs": outputs, "inputs": inputs, "mtx": mtx,
                "key": cur_key, "windows": judged, "events": evs, "ranges": [{k: v for k, v in r.items() if k != "events"} | {"events": len(r["events"])} for r in ranges]}
     json.dump(summary, open(os.path.join(od, "summary.json"), "w"), ensure_ascii=False, indent=1, default=str)
     # 第一版基线只在标准时长（make soak / soak-1h 的 8h / 1h 标签）且通过时自动写；其余（冒烟、临时标签）要 --write-baseline

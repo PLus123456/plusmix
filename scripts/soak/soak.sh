@@ -71,7 +71,10 @@ step()  { printf '\033[36m== %s\033[0m\n' "$*"; }
 
 show="$out_dir/soak-show.json"; scenario="$out_dir/soak.json"; stats="$out_dir/stats.jsonl"; movie="$out_dir/soak.mov"
 run_log="$out_dir/headless.log"; env_file="$out_dir/environment.txt"; run_info="$out_dir/run.txt"
+# --ambient 的占位符没换（Makefile 注释里的示例是 "约 NN °C"，第一次 8 小时就原样记进了报告头）：当没给处理，报告写"未记录"
+case "$ambient" in *NN*) yellow "--ambient \"$ambient\" 是占位符，没换成实际室温：按未记录处理"; ambient="" ;; esac
 thermal_bin=.build/soak/thermal-state
+thread_bin=.build/soak/thread-cpu
 
 if [ "$do_run" = 1 ]; then
   # ---- 0. 前置检查 ----
@@ -98,6 +101,9 @@ if [ "$do_run" = 1 ]; then
   # ---- 1. 环境 ----
   if [ ! -x "$thermal_bin" ] || [ scripts/soak/thermal-state.swift -nt "$thermal_bin" ]; then
     mkdir -p .build/soak && swiftc -O -o "$thermal_bin" scripts/soak/thermal-state.swift 2>/dev/null || thermal_bin=""
+  fi
+  if [ ! -x "$thread_bin" ] || [ scripts/soak/thread-cpu.swift -nt "$thread_bin" ]; then
+    mkdir -p .build/soak && swiftc -O -o "$thread_bin" scripts/soak/thread-cpu.swift 2>/dev/null || { yellow "thread-cpu 编译失败：S3 不按线程归因"; thread_bin=""; }
   fi
   scripts/soak/env-snapshot.sh ${thermal_bin:+--thermal-bin "$thermal_bin"} ${ambient:+--ambient "$ambient"} > "$env_file"
   step "环境：$(grep -E '^(chip|macos|power|powermode|thermal_state|load_before)=' "$env_file" | tr '\n' ' ')"
@@ -211,6 +217,8 @@ if [ "$do_run" = 1 ]; then
       tw=$(pmset -g therm 2>/dev/null | grep -iE 'level|limit' | grep -v 'has been recorded' | tr '\n' ' ' | sed 's/  */ /g')
       echo -e "$(date +%s)\t$th\tpower=$b\tsystem_power_in_mw=$spi\tload=$(uptime | sed 's/.*averages: //')\tbusy=$(scripts/soak/env-snapshot.sh --busy-only)\tpmset_therm=${tw:-无告警}" >> "$out_dir/env.log"
       [ -n "$mtx_pid" ] && echo "{\"ts\":$(date +%s),\"paths\":$(curl -s --max-time 5 "http://127.0.0.1:$mtx_api_port/v3/paths/list" || echo null)}" >> "$out_dir/mtx.log"
+      # 每线程 CPU 时间快照（S3 归因：报告里按线程名列占核百分比；第一次 8 小时 CPU 60.1% 红了却说不出是谁的）
+      [ -n "$thread_bin" ] && "$thread_bin" "$headless_pid" >> "$out_dir/threads.log" 2>/dev/null
       sleep 60
     done ) &
   minute_pid=$!
