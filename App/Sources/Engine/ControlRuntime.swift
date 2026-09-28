@@ -51,6 +51,10 @@ final class ControlRuntime {
     var onFeedback: ((CommandFeedback) -> Void)?
     /// 已发出的 UI 命令数（测试看）。
     private(set) var commandsSent: UInt64 = 0
+    /// 测试用（W3-E6）：MIDI 起之前在调用线程（主线程）上同步卡住这么久，模拟进程里第一次连 MIDIServer 的冷启动。
+    /// 真 App / 测试宿主启动时量到 582–592 ms、之后同一进程 0.2 ms（reports/w3-app-7.md §1）：测试宿主里只有启动时那个会话是真冷的，
+    /// 之后的会话要测冷启动就设它（MIDIHost.shared 第一次建锚客户端时也是同步等，所以这里同样阻塞、不用 await）。nil = 不模拟。
+    static var midiColdStartForTesting: TimeInterval?
 
     init(stateMachine: StateMachine, engine: Engine, api: APIServerConfiguration?, hotkeyTable: HotkeyTable, midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault(),
          compat: VMixCompatConfiguration? = nil) {
@@ -89,6 +93,7 @@ final class ControlRuntime {
             }
         }
         do {
+            if let cold = Self.midiColdStartForTesting { usleep(useconds_t(cold * 1_000_000)) }
             try midi.start()
             midiError = nil
         } catch {

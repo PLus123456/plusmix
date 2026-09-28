@@ -76,7 +76,8 @@ final class AudioRuntime {
 
     var registeredInputs: [Int] { registered.sorted() }
 
-    func start(clock: TickClockSpec) async throws { try await engine.start(clock: clock) }
+    /// 非隔离（W3-E6）：SwitcherSession 定 t0 之后把它与引擎的 start 放在同一个非主线程任务里接着做，中间不回主线程。
+    nonisolated func start(clock: TickClockSpec) async throws { try await engine.start(clock: clock) }
 
     func stop() async {
         await engine.stop()

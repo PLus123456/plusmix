@@ -7,10 +7,12 @@
 //   同一帧内的多次状态变化合并成一次（渲染线程 / 音频线程各自走 HazardPublisher 的实时读槽，与这里无关）。
 // - 状态行 1 Hz：StatsPublisher 每秒一行，同一个 Stats 送 UI、stats.jsonl 和 API（铁律 4）。
 //
-// 起停顺序：
-//   起：输入建好并注册（帧槽 → 引擎，音频环 → 音频引擎）→ 控制层（推送源、API、MIDI）→ 音频引擎 start(clock:) → 引擎 start(t0:)
-//      → 输入 start → Stats 采样 → 输出按快照起（录制 / 推流）。
-//   停：API → 输出封口（录制到拍边界）→ 输入 → 引擎 → 音频引擎 → Stats → 推送源。
+// 起停顺序（W3-E6：慢活在定 t0 之前做完，reports/w1-core-3.md §5 第 1 条）：
+//   预热（与节目时钟无关）：控制层（推送源、API、MIDI；进程里第一次连 MIDIServer ≈ 0.6 s）→ 引擎 warmUp（渲染器 prepare + 首帧空渲染、状态机线程、第 0 拍快照）。
+//   起：（没预热就先预热）→ 定 t0 = now + 提前量 → 输入建好并注册（帧槽 → 引擎，音频环 → 音频引擎；输入按 t0 建时间线）
+//      → 音频引擎 start(clock:) → 引擎 start(t0:)（这两步在同一个非主线程任务里接着做）→ 输入 start → Stats 采样 → 输出按快照起（录制 / 推流）。
+//   停：API → 输出封口（录制到拍边界）→ Stats → 输入 → 引擎 → 音频引擎 → 推送源。只预热没起的、起到一半失败的也走同一条（没起的部分是空操作）；
+//      预热 / 起进行中来停，等它在定 t0 之前的检查点停下再收。
 import AppKit
 import SwitcherContracts
 import SwitcherEngine
@@ -52,12 +54,45 @@ final class SwitcherSession {
     private(set) var state: MixerState
     /// 最新一行 Stats（起引擎一秒后才有）。
     private(set) var stats: Stats?
-    private(set) var isRunning = false
-    /// 引擎第 0 拍的时刻（start 时定）。
+    /// 生命周期阶段：idle（没起 / 已停）→ warm（控制层起了、引擎预热了，时钟没起）→ running。stop 按它收拾。
+    enum Stage: Equatable { case idle, warm, running }
+    private(set) var stage: Stage = .idle
+    var isRunning: Bool { stage == .running }
+    /// 引擎第 0 拍的时刻（start 定 t0 时定；只预热没起的为 .zero）。
     private(set) var t0: HostTime = .zero
+    /// 最近一次起好的起步记录（start 成功后有；诊断 / 测试看）。
+    private(set) var startReport: StartReport?
+
+    /// 一次起步的记录（诊断，W3-E6）：各段耗时、定 t0 之后花掉多少提前量、引擎报的时钟起晚。W1-B3 当时靠临时探针才量到这几个数
+    /// （reports/w1-core-3.md §1.1），现在每次起都记下并打一行日志；AppController 另存进程里第一次起好的那份（冷启动只在它身上）。
+    struct StartReport: Equatable, Sendable {
+        /// 控制层 start（推送源 / API / MIDI）。进程里第一次连 MIDIServer 时 ≈ 0.6 s。
+        var controlMs: Double
+        /// 引擎预热（渲染器 prepare + 首帧空渲染、状态机线程、第 0 拍快照）；0 = 没单独预热（在引擎 start 里顺带做了）。
+        var warmUpMs: Double
+        /// 建输入并注册（帧槽 → 引擎、音频环 → 音频引擎）。
+        var inputsMs: Double
+        /// 音频引擎 start(clock:)。
+        var audioMs: Double
+        /// 引擎 start(t0:)。
+        var engineStartMs: Double
+        /// 提前量：t0 = 定 t0 那一刻 + 它。
+        var leadMs: Double
+        /// 定 t0 之后到调引擎 start 之前花掉的时间（超过提前量，时钟就起在 t0 之后）。
+        var spentAfterT0Ms: Double
+        /// 引擎报的时钟起晚（Engine.clockStartLag）；准时为 0。
+        var clockStartLagMs: Double
+    }
 
     private var lastSnapshot: MixerSnapshot?
     private var pollTimer: Timer?
+    /// warmUp / start / stop 串行：主线程上的 await 之间会交错（退出 App 时第一个会话可能还在起控制层），同一时刻只让一个在走。
+    private var lifecycleBusy = false
+    private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
+    /// 有 stop 在排队：进行中的 start 在定 t0 之前的检查点看到它就不起时钟，已起的部分由排着的 stop 收。
+    private var stopRequested = false
+    /// 预热两段的耗时（写进起步记录）。
+    private var warmUpTimes: (controlMs: Double, warmUpMs: Double) = (0, 0)
     // 按登记顺序回调（字典的遍历顺序不定，测试对照状态行时要先让窗口更新再让测试读）
     private var stateObservers: [(key: UInt64, block: @MainActor (MixerState) -> Void)] = []
     private var statsObservers: [(key: UInt64, block: @MainActor (Stats) -> Void)] = []
@@ -135,45 +170,119 @@ final class SwitcherSession {
 
     // MARK: 生命周期
 
-    /// 起引擎：先按初始快照建好输入并注册，再起控制层 / 音频 / 引擎，再 start 输入（合成源到 t0 才出第一帧），最后按快照起输出。
-    func start(leadMilliseconds: Double = 300) async throws {
-        guard !isRunning else { return }
-        t0 = HostClock.now() + HostDuration(milliseconds: leadMilliseconds)
-        let spec = TickClockSpec(t0: t0, frameRate: format.frameRate)
-        inputs.reconcile(state, timing: programTiming())
-        await control.start()
-        if let e = control.apiError { notify(e) }
-        if let e = control.midiError { notify(e) }
-        if let reason = audio.fallbackReason { notify(reason) }
-        do {
-            try await audio.start(clock: spec)
-        } catch {
-            notify(L("notice.audioFailed", "\(error)"))
+    /// 预热：定 t0 之前的慢活——控制层（推送源 / API / MIDI）+ 引擎 warmUp。幂等；start 没预热会自己调。
+    /// 失败时把已起的部分收掉再抛；只预热没起的会话用 stop 收（engine.stop 放掉预热过的渲染器与状态机线程）。
+    func warmUp() async throws {
+        await acquireLifecycle()
+        defer { releaseLifecycle() }
+        do { try await warmUpLocked() } catch {
+            await teardownLocked()
+            throw error
         }
-        try await engine.start(t0: t0)
-        isRunning = true
-        inputs.startAll()
-        // 多画面电平表不再挂在这里 1 Hz 喂（G4 检查点的胶水），改由 meterFeed 按 50 ms 的 AudioEngineStatus 喂（W3-E3）
-        let hub = StatsHub(engine: engine, consumers: [
-            { [weak self] stats in DispatchQueue.main.async { MainActor.assumeIsolated { self?.publish(stats: stats) } } },
-            { [feed = control.feed] stats in feed.publish(stats: stats) },
-        ])
-        try hub.start()
-        statsHub = hub
-        meterFeed.start()
-        outputs.clock = spec
-        outputs.reconcile(state)
-        aux.reconcile(state)
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.pollSnapshot() }
-        }
-        RunLoop.main.add(timer, forMode: .common)   // 拖窗口 / 模态期间也要分发
-        pollTimer = timer
     }
 
-    /// 停：API → 输出封口 → Stats → 输入 → 引擎（排空在途帧）→ 音频引擎 → 推送源 / 命令循环。
+    private func warmUpLocked() async throws {
+        guard stage == .idle else { return }
+        let begin = HostClock.now()
+        await control.start()   // 冷启动 ≈ 0.7 s（第一次连 MIDIServer 0.58 s）：以前排在定 t0 之后，吃掉 300 ms 提前量还起晚 400–500 ms
+        let afterControl = HostClock.now()
+        if let e = control.apiError { notify(e) }
+        if let e = control.midiError { notify(e) }
+        stage = .warm   // 从这里起 stop 就有东西要收（引擎预热失败也一样）
+        try await engine.warmUp()
+        warmUpTimes = ((afterControl - begin).milliseconds, (HostClock.now() - afterControl).milliseconds)
+    }
+
+    /// 起引擎：（没预热先预热）→ 定 t0 → 按初始快照建好输入并注册 → 音频 / 引擎 → start 输入（合成源到 t0 才出第一帧）→ 按快照起输出。
+    /// 定 t0 之后只剩建输入与两个 start（几十 ms，远小于提前量），时钟准时起在 t0 之前（W3-E6）。起到一半被 stop 叫停：在定 t0 之前停下、正常返回
+    /// （isRunning 仍为 false，由排着的 stop 收）；失败：收掉已起的部分再抛。
+    func start(leadMilliseconds: Double = 300) async throws {
+        await acquireLifecycle()
+        defer { releaseLifecycle() }
+        guard stage != .running else { return }
+        do {
+            try await warmUpLocked()
+            // 定 t0 之前最后看一眼：有 stop 在排队（退出 App 时第一个会话还在起）就不起时钟
+            if stopRequested { return }
+            let begin = HostClock.now()
+            t0 = begin + HostDuration(milliseconds: leadMilliseconds)
+            let spec = TickClockSpec(t0: t0, frameRate: format.frameRate)
+            inputs.reconcile(state, timing: programTiming())   // 输入按 t0 建时间线，只能在定 t0 之后
+            let afterInputs = HostClock.now()
+            if let reason = audio.fallbackReason { notify(reason) }
+            let clockSide = try await Self.startClock(audio: audio, engine: engine, spec: spec)
+            if let error = clockSide.audioError { notify(L("notice.audioFailed", "\(error)")) }
+            record(StartReport(controlMs: warmUpTimes.controlMs, warmUpMs: warmUpTimes.warmUpMs, inputsMs: (afterInputs - begin).milliseconds,
+                               audioMs: clockSide.audioMs, engineStartMs: clockSide.engineMs, leadMs: leadMilliseconds,
+                               spentAfterT0Ms: (clockSide.engineCalledAt - begin).milliseconds, clockStartLagMs: engine.clockStartLag.milliseconds))
+            stage = .running
+            inputs.startAll()
+            // 多画面电平表不再挂在这里 1 Hz 喂（G4 检查点的胶水），改由 meterFeed 按 50 ms 的 AudioEngineStatus 喂（W3-E3）
+            let hub = StatsHub(engine: engine, consumers: [
+                { [weak self] stats in DispatchQueue.main.async { MainActor.assumeIsolated { self?.publish(stats: stats) } } },
+                { [feed = control.feed] stats in feed.publish(stats: stats) },
+            ])
+            try hub.start()
+            statsHub = hub
+            meterFeed.start()
+            outputs.clock = spec
+            outputs.reconcile(state)
+            aux.reconcile(state)
+            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.pollSnapshot() }
+            }
+            RunLoop.main.add(timer, forMode: .common)   // 拖窗口 / 模态期间也要分发
+            pollTimer = timer
+        } catch {
+            await teardownLocked()
+            throw error
+        }
+    }
+
+    /// 定 t0 之后、时钟起来之前的两步：音频引擎 start(clock:) → 引擎 start(t0:)。放在同一个非主线程任务里接着做、中间不回主线程——
+    /// 主线程这时可能正忙（启动时建窗口 / 首次布局、测试宿主开跑用例），回一次主线程就可能把引擎的 start 往后拖、吃掉提前量。
+    /// 音频引擎起不来不算错（节目照跑，同原来：带回原因，回主线程后提示）。
+    private struct ClockSideStart: Sendable {
+        var audioError: (any Error)?
+        var audioMs: Double
+        var engineMs: Double
+        /// 调引擎 start 的时刻（起步记录的"定 t0 之后用掉多少"量到这里）。
+        var engineCalledAt: HostTime
+    }
+
+    @concurrent
+    private nonisolated static func startClock(audio: AudioRuntime, engine: Engine, spec: TickClockSpec) async throws -> ClockSideStart {
+        let begin = HostClock.now()
+        var audioError: (any Error)?
+        do { try await audio.start(clock: spec) } catch { audioError = error }
+        let engineCalledAt = HostClock.now()
+        try await engine.start(t0: spec.t0)
+        return ClockSideStart(audioError: audioError, audioMs: (engineCalledAt - begin).milliseconds,
+                              engineMs: (HostClock.now() - engineCalledAt).milliseconds, engineCalledAt: engineCalledAt)
+    }
+
+    /// 记下起步记录并打一行日志（与 headless 起步时打的"t0 距现在 … ⚠️ 起晚了"同一个用途）。
+    private func record(_ r: StartReport) {
+        startReport = r
+        NSLog("节目起步：控制层 %.1f ms、引擎预热 %.1f ms、输入 %.1f ms、音频 %.1f ms、引擎 start %.1f ms；定 t0 之后用掉 %.1f ms（提前量 %.0f ms），时钟起晚 %.1f ms",
+              r.controlMs, r.warmUpMs, r.inputsMs, r.audioMs, r.engineStartMs, r.spentAfterT0Ms, r.leadMs, r.clockStartLagMs)
+    }
+
+    /// 停：API → 输出封口 → Stats → 输入 → 引擎（排空在途帧）→ 音频引擎 → 推送源 / 命令循环。运行中、只预热没起的都能停；
+    /// 预热 / 起进行中来停：先让它在定 t0 之前停下（已经定了 t0 就等它起完），再收。
     func stop() async {
-        guard isRunning else { return }
+        stopRequested = true
+        await acquireLifecycle()
+        defer {
+            stopRequested = false
+            releaseLifecycle()
+        }
+        await teardownLocked()
+    }
+
+    /// 按停的顺序收掉已起的部分（运行中、只预热没起、起到一半失败都走这里；没起的部分每一步都是空操作）。
+    private func teardownLocked() async {
+        guard stage != .idle else { return }
         pollTimer?.invalidate()
         pollTimer = nil
         meterFeed.stop()   // 显式 setMeters(nil)：音频引擎要停了，多画面退回占位
@@ -183,10 +292,23 @@ final class SwitcherSession {
         statsHub?.stop()
         statsHub = nil
         inputs.stopAll()
-        await engine.stop()
+        await engine.stop()   // 只预热没起的引擎也在这里放掉渲染器与状态机线程（Engine.stop 自己认）
         await audio.stop()
         await control.finish()
-        isRunning = false
+        stage = .idle
+    }
+
+    /// 轮到自己才返回（busy 在交接时保持 true）。
+    private func acquireLifecycle() async {
+        guard lifecycleBusy else {
+            lifecycleBusy = true
+            return
+        }
+        await withCheckedContinuation { lifecycleWaiters.append($0) }
+    }
+
+    private func releaseLifecycle() {
+        if lifecycleWaiters.isEmpty { lifecycleBusy = false } else { lifecycleWaiters.removeFirst().resume() }
     }
 
     // MARK: 命令
