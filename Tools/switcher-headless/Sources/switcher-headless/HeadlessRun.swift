@@ -7,6 +7,7 @@ import SwitcherAudio
 import SwitcherAudioIntegration
 import SwitcherOutputs
 import SwitcherNDISend
+import SwitcherStreaming
 import SwitcherControl
 import SwitcherTally
 import VMixCompat
@@ -41,6 +42,8 @@ struct RunOptions: Sendable {
     var ndiSend: String? = nil
     /// --ndi-jitter-frames：节目里 NDI 输入的抖动缓冲深度（W3-A，0–2，默认 1）。
     var ndiJitterFrames: Int = 1
+    /// --stream <地址>（W4-A，可多次）：每个地址一路 W2-D 的 StreamOutput（PGM + Master 音频）。
+    var streamURLs: [String] = []
 }
 
 /// 音频输出：--audio-device null|default|<名字> → 集成层（W2-E AudioEngine）的设备选择。空设备 = W1-D 假时钟，不出声，gate 用。
@@ -72,13 +75,21 @@ final class EncoderStatsSource: @unchecked Sendable {
     /// 019：每路录制器在节目输出表里的编号（PGM 录制器 = 节目里第一个 record 输出，ISO 音轨不是输出表里的项 = 0）；NDI 同理（第一个 ndi 输出）。
     private let outputNumbers: [Int]
     private let ndiOutput: Int
+    /// W4-A --stream 的推流：排在 NDI 之后，第 i 路对节目里第 i 个 stream 输出的编号（没有 = 0）。
+    private let streams: [StreamOutput]
+    private let streamOutputs: [Int]
+    private let lastStreams = Mutex<[(counters: StreamCounters, at: HostTime)?]>([])
 
-    init(recorders: [Recorder], outputNumbers: [Int] = [], ndi: NDISender? = nil, ndiOutput: Int = 0) {
+    init(recorders: [Recorder], outputNumbers: [Int] = [], ndi: NDISender? = nil, ndiOutput: Int = 0,
+         streams: [StreamOutput] = [], streamOutputs: [Int] = []) {
         self.recorders = recorders
         self.outputNumbers = (0..<recorders.count).map { $0 < outputNumbers.count ? outputNumbers[$0] : 0 }
         self.ndi = ndi
         self.ndiOutput = ndiOutput
+        self.streams = streams
+        self.streamOutputs = (0..<streams.count).map { $0 < streamOutputs.count ? streamOutputs[$0] : 0 }
         last.withLock { $0 = Array(repeating: nil, count: recorders.count) }
+        lastStreams.withLock { $0 = Array(repeating: nil, count: streams.count) }
     }
 
     func entries() -> [Stats.EncoderEntry] {
@@ -101,6 +112,19 @@ final class EncoderStatsSource: @unchecked Sendable {
                 return p
             }
             entries.append(ndi.statsEntry(previous: prev?.counters, windowSeconds: prev.map { max((now - $0.at).seconds, 1e-3) } ?? 1, output: ndiOutput))
+        }
+        if !streams.isEmpty {
+            let snapshots = streams.map(\.counters)
+            let previous = lastStreams.withLock { box -> [(counters: StreamCounters, at: HostTime)?] in
+                let p = box
+                box = snapshots.map { ($0, now) }
+                return p
+            }
+            for (i, stream) in streams.enumerated() {
+                let window = previous[i].map { max((now - $0.at).seconds, 1e-3) } ?? 1
+                entries.append(snapshots[i].statsEntry(previous: previous[i]?.counters, windowSeconds: window,
+                                                        encoderSkipped: stream.videoEncoder.counters.skipped, output: streamOutputs[i]))
+            }
         }
         return entries
     }
@@ -178,6 +202,31 @@ final class HeadlessSession: @unchecked Sendable {
             engine.addConsumer(sender)
             ndiSender = sender
         }
+        // 0b. 推流（W4-A --stream）：每个地址一路 StreamOutput（自己的编码器 + 发送队列 + HaishinKit 连接，路与路之间没有共享锁 / 队列，E7 的口径）。
+        //     连接在它自己的 Task 里做、连不上按退避重试，这里不等；编码器会话在算 t0 之前建好（同 NDI 发送端：别吃掉 --lead-ms）。
+        //     第 i 个地址对节目里第 i 个 stream 输出：编码参数取它的、编号进 Stats.encoder[].output（019）；节目里没有就默认参数、编号 0。
+        let showStreamOutputs = show.outputs.filter { $0.kind == .stream }
+        let showHasAudio = initialState.inputs.contains { cfg in
+            switch cfg.source {
+            case .synthetic(let settings): return settings.audio
+            case .file, .audio: return true
+            default: return false
+            }
+        }
+        var streams: [StreamOutput] = []
+        for (i, url) in options.streamURLs.enumerated() {
+            let showOutput = i < showStreamOutputs.count ? showStreamOutputs[i] : nil
+            let video = showOutput?.settings.video ?? VideoEncodeSettings()
+            let cfg = StreamOutput.Configuration(name: "stream\(i + 1)", format: format, video: video,
+                                                 audio: showHasAudio ? (showOutput?.settings.audio ?? AudioEncodeSettings()) : nil, audioChannels: 2,
+                                                 stream: StreamSettings(url: url, streamKey: "",
+                                                                        reconnectMaxSeconds: showOutput?.settings.stream?.reconnectMaxSeconds ?? 30))
+            let stream = try StreamOutput(configuration: cfg, transportFactory: HaishinKitTransportFactory(format: format, video: video))
+            try stream.start()
+            engine.addConsumer(stream)
+            streams.append(stream)
+            print("推流 \(i + 1)：\(stream.destination)（节目输出 \(showOutput.map { "\($0.number)" } ?? "无，编号 0")，\(video.codec) \(video.bitrateBps / 1000) kb/s）")
+        }
         var resolvedNDINames: [Int: String] = [:]
         for cfg in initialState.inputs {
             if case .ndi(let sourceName, _, _) = cfg.source {
@@ -205,6 +254,7 @@ final class HeadlessSession: @unchecked Sendable {
         var otherInputs: [any Input] = []
         var audioInputs: [(number: Int, ring: CAudioRing, settings: InputAudioSettings, source: SyntheticAudioInput)] = []
         var deviceAudioInputs: [(number: Int, ring: CAudioRing)] = []   // 纯音频设备（W2-A2）：环注册进音频引擎；输入对象在 otherInputs 里起停
+        var fileAudioInputs: [(number: Int, ring: CAudioRing, blockFrames: Int)] = []   // 文件输入（W4-A）：同上
         for cfg in initialState.inputs {
             let slot = LockFreeFrameSlot(capacity: 3)
             switch cfg.source {
@@ -238,6 +288,23 @@ final class HeadlessSession: @unchecked Sendable {
                 engine.registerInput(number: cfg.number, slot: slot)
                 otherInputs.append(input)
                 print("NDI 输入 \(cfg.number)：源「\(resolved)」，带宽 \(ndiOptions.bandwidth.rawValue)，抖动缓冲 \(ndiOptions.jitterBufferFrames) 帧")
+            case .camera:
+                // W4-A：内置摄像头 / UVC（W2-A CameraInput）。只接画面：不注入音频环 = 不开设备自带的麦克风（长稳不采环境声、不弹麦克风授权）。
+                // 没授权 / 设备不在：state = error / noSignal，每秒重查，帧槽空着画黑（soak 报告里这路的 fps 看得出来）。
+                let input = try CameraInput(config: cfg, timing: timing, videoSlot: slot, audioRing: nil)
+                engine.registerInput(number: cfg.number, slot: slot)
+                otherInputs.append(input)
+            case .file(let path, let endAction, let rate):
+                // W4-A：文件输入（W2-A FileInput，时钟从属于节目拍点）。相对路径相对节目文件所在目录（同图片）；声音进环、注册进音频引擎，路由按节目。
+                let resolved = path.hasPrefix("/") ? path : options.showURL.deletingLastPathComponent().appendingPathComponent(path).path
+                var fileConfig = cfg
+                fileConfig.source = .file(path: resolved, endAction: endAction, rate: rate)
+                let ring = CAudioRing(channelCount: 2)
+                let fileOptions = FileInput.Options()
+                let input = try FileInput(config: fileConfig, timing: timing, videoSlot: slot, audioRing: ring, options: fileOptions)
+                engine.registerInput(number: cfg.number, slot: slot)
+                otherInputs.append(input)
+                fileAudioInputs.append((cfg.number, ring, fileOptions.audioChunkFrames))
             case .audio:
                 // W2-A2：Core Audio 设备 → 环（IOProc 零分配、泵线程写环）；没有视频——槽注册了也永远挑不到帧、画黑（契约 Input.videoSlot 的口径）。
                 // 声道映射（提案 014）从 case 取；设备不在 = noSignal + 文案，插上会自己好；权限被拒 = error。端到端 A2（回环线）靠它跑。
@@ -248,7 +315,7 @@ final class HeadlessSession: @unchecked Sendable {
                 deviceAudioInputs.append((cfg.number, ring))
                 print("纯音频输入 \(cfg.number)「\(cfg.name)」：Core Audio 设备，环 2 声道")
             default:
-                throw CLIError("headless 只接合成源 / 图片 / NDI / 纯音频设备：输入 \(cfg.number)「\(cfg.name)」是 \(cfg.kind)")
+                throw CLIError("headless 只接合成源 / 图片 / NDI / 纯音频设备 / 摄像头 / 文件：输入 \(cfg.number)「\(cfg.name)」是 \(cfg.kind)")
             }
         }
 
@@ -272,8 +339,17 @@ final class HeadlessSession: @unchecked Sendable {
             hints.producerBlockFrames = 1024   // 设备 IO 块本机 512、走采样率转换约 558；给 1024 稳妥（同 App 的摄像头 / DeckLink，W2-A2 问题单）
             try audioEngine.registerInput(number: entry.number, ring: entry.ring, hints: hints)
         }
-        let hasAudio = !audioInputs.isEmpty || !deviceAudioInputs.isEmpty
+        for entry in fileAudioInputs {
+            var hints = AudioInputHints()
+            hints.producerBlockFrames = entry.blockFrames   // FileInput 每块 256 帧（同 App 的 DefaultInputFactory）
+            try audioEngine.registerInput(number: entry.number, ring: entry.ring, hints: hints)
+        }
+        let hasAudio = !audioInputs.isEmpty || !deviceAudioInputs.isEmpty || !fileAudioInputs.isEmpty
         if let sender = ndiSender, hasAudio { _ = try audioEngine.addConsumer(sender, source: .master) }
+        var streamAudioTokens: [AudioConsumerToken] = []
+        if hasAudio {
+            for stream in streams { streamAudioTokens.append(try audioEngine.addConsumer(stream, source: .master)) }
+        }
 
         // 3. 录制：Recorder 是 PGM 帧的消费者（有界队列 + 自己的编码线程）；Master 块由 AudioEngine 的消费者泵喂给它
         //    （块 PTS = 块首 − 对齐延迟 = 内容采集时刻，与视频拍点同一时基；G2 自建泵没扣混音器年龄，A2 −18 ms 就是这么来的）。
@@ -315,12 +391,14 @@ final class HeadlessSession: @unchecked Sendable {
         var gpu: GPUUtilization?
         var statsPublisher: StatsPublisher?
         if options.statsURL != nil || apiServer != nil {
-            if recorder != nil || ndiSender != nil {
-                // 019：encoder[] 带输出编号——PGM 录制器对节目里第一个 record 输出，NDI 发送对第一个 ndi 输出（都是 --record / --ndi-send 起的，节目里没有就 0）；ISO 音轨 0
+            if recorder != nil || ndiSender != nil || !streams.isEmpty {
+                // 019：encoder[] 带输出编号——PGM 录制器对节目里第一个 record 输出，NDI 发送对第一个 ndi 输出（都是 --record / --ndi-send 起的，节目里没有就 0）；ISO 音轨 0；
+                // 推流（W4-A --stream）排在最后，第 i 路对第 i 个 stream 输出
                 let recordNumber = show.outputs.first { $0.kind == .record }?.number ?? 0
                 let ndiNumber = show.outputs.first { $0.kind == .ndi }?.number ?? 0
                 let source = EncoderStatsSource(recorders: (recorder.map { [$0] } ?? []) + isoRecorders.map(\.0),
-                                                outputNumbers: recorder == nil ? [] : [recordNumber], ndi: ndiSender, ndiOutput: ndiNumber)
+                                                outputNumbers: recorder == nil ? [] : [recordNumber], ndi: ndiSender, ndiOutput: ndiNumber,
+                                                streams: streams, streamOutputs: showStreamOutputs.prefix(streams.count).map(\.number))
                 engine.encoderStatsProvider = { source.entries() }
             }
             engine.audioStatsProvider = { audioEngine.audioCounters }
@@ -383,7 +461,7 @@ final class HeadlessSession: @unchecked Sendable {
             await tallyPublisher?.stop()
             await stateFeed.stop()
             await shutdownEarly(inputs: inputs, others: otherInputs, audioInputs: audioInputs.map(\.source), recorder: recorder, ndi: ndiSender,
-                                audioEngine: audioEngine, writer: writer)
+                                streams: streams, audioEngine: audioEngine, writer: writer)
             return
         }
         try await engine.start(t0: t0, firstTick: .zero, lastTick: lastTick)
@@ -392,11 +470,11 @@ final class HeadlessSession: @unchecked Sendable {
         guard let clock = engine.clock else { throw CLIError("引擎没有时钟") }
         print("""
             switcher-headless \(SwitcherVersion.current)
-              节目：\(show.name)（\(options.showURL.path)）\(format.width)×\(format.height)@\(format.frameRate)，\(inputs.count) 路合成源\(otherInputs.isEmpty ? "" : " + \(otherInputs.count) 路图片 / NDI")，\(audioInputs.count) 路音频
+              节目：\(show.name)（\(options.showURL.path)）\(format.width)×\(format.height)@\(format.frameRate)，\(inputs.count) 路合成源\(otherInputs.isEmpty ? "" : " + \(otherInputs.count) 路其他（图片 / NDI / 摄像头 / 文件 / 纯音频）")，\(audioInputs.count + fileAudioInputs.count + deviceAudioInputs.count) 路音频
               场景：\(options.scriptURL?.path ?? "无")（\(scenario?.events.count ?? 0) 个事件）
               时长：\(totalTicks) 拍（\(String(format: "%.1f", options.durationSeconds)) s）  t0 距现在 \(String(format: "%.0f", leadLeft)) ms\(leadLeft < 0 ? "  ⚠️ 起晚了，开头会跳拍" : "")  合成源提前量 \(String(format: "%.2f", inputLeadMs)) ms
               音频：\(options.audioDevice)（对齐延迟 \(String(format: "%.2f", audioEngine.alignmentDuration.milliseconds)) ms，消费者流\(audioEngine.resamplesToHostClock ? "重采样到 host 时钟" : "不重采样")）  录制：\(options.recordURL?.path ?? "无")\(isoRecorders.isEmpty ? "" : "（+ \(isoRecorders.count) 路 ISO 音轨）")  stats：\(options.statsURL?.path ?? "无")  GPU 占用：\(gpu == nil ? "不可用" : "IOKit")
-              API：\(apiServer.flatMap(\.baseURL).map { "\($0.absoluteString)/api/v1（WS /api/v1/events）\(options.api?.token == nil ? "" : "，token 鉴权开")" } ?? "关")  兼容层：\(options.compat.map { "\($0.host) TCP \($0.tcpPort) / HTTP \($0.httpPort)" } ?? "关")  tally：\(options.tallyPort.map { "0.0.0.0:\($0)" } ?? "关")  NDI 发送：\(options.ndiSend ?? "关")
+              API：\(apiServer.flatMap(\.baseURL).map { "\($0.absoluteString)/api/v1（WS /api/v1/events）\(options.api?.token == nil ? "" : "，token 鉴权开")" } ?? "关")  兼容层：\(options.compat.map { "\($0.host) TCP \($0.tcpPort) / HTTP \($0.httpPort)" } ?? "关")  tally：\(options.tallyPort.map { "0.0.0.0:\($0)" } ?? "关")  NDI 发送：\(options.ndiSend ?? "关")  推流：\(streams.isEmpty ? "关" : streams.map { "\($0.destination)" }.joined(separator: " / "))
               时钟实时策略：\(clock.isRealtime ? "已生效" : "⚠️ 未生效（V3 会超）")
             """)
 
@@ -419,13 +497,23 @@ final class HeadlessSession: @unchecked Sendable {
         //    中断的情况：时钟还在跑，先停引擎（否则末尾几拍每路多 1–2 次 reuse），视频源紧接着停。
         //    然后录制封口（边界 = 最后一拍 + 1：音频恰好裁到最后一帧末尾，再多 writer 会因为音频超前于已结束的视频拒收而死等；
         //    封口期间音频源、泵、设备都还在跑）→ 泵 → 音频设备 → 音频源 → stats 关文件
+        //    W4-A：文件输入的声音在它自己身上，停了它环就空了，而音频引擎要等录制封口、推流排空之后才停——这几秒里混音器把这一路记成欠载
+        //    （soak 冒烟：最后一拍后 1 s 内 +8、停机段 +179，E4 同样）。所以先把文件输入从音频引擎摘掉（3 ms 淡出后 detach），过 50 ms 再停；
+        //    合成源不受影响（先停），没有文件输入时顺序与原来完全相同。
+        func stopOtherInputs() async {
+            if !fileAudioInputs.isEmpty {
+                for entry in fileAudioInputs { audioEngine.unregisterInput(number: entry.number) }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            for input in otherInputs { input.stop() }
+        }
         if interrupted {
             await engine.stop()
             for input in inputs { input.stop() }
-            for input in otherInputs { input.stop() }
+            await stopOtherInputs()
         } else {
             for input in inputs { input.stop() }
-            for input in otherInputs { input.stop() }
+            await stopOtherInputs()
             await engine.stop()
         }
         if let sender = ndiSender {
@@ -466,6 +554,10 @@ final class HeadlessSession: @unchecked Sendable {
         }
         if let token = recorderAudioToken { audioEngine.removeConsumer(token); recorderAudioToken = nil }
         for (_, t) in isoRecorders { audioEngine.removeConsumer(t) }
+        // W4-A 推流收尾：摘视频消费者（引擎已停）和 Master 消费者，再排空发送队列、关连接（每路最多 drain 3 s + linger 1 s + 连接超时）
+        for stream in streams { engine.removeConsumer(stream) }
+        for token in streamAudioTokens { audioEngine.removeConsumer(token) }
+        for stream in streams { await stream.stopAsync() }
         let audioStatus = audioEngine.status
         await audioEngine.stop()
         for entry in audioInputs { entry.source.stop() }
@@ -477,7 +569,7 @@ final class HeadlessSession: @unchecked Sendable {
         // 9. 汇总（stdout；数字来源都是各对象的计数器，正式指标以 stats.jsonl / frameprobe 为准）
         printSummary(clock: clock, inputs: inputs, others: otherInputs, audioInputs: audioInputs.map { (number: $0.number, source: $0.source) },
                      audioStatus: audioStatus, recorder: recorder, recordResult: recordResult, writer: writer, interrupted: interrupted,
-                     ndi: ndiSender, compat: compat, tally: tallyPublisher)
+                     ndi: ndiSender, compat: compat, tally: tallyPublisher, streams: streams)
     }
 
     /// 录制封口，带看门狗：nil = 超时。
@@ -497,9 +589,13 @@ final class HeadlessSession: @unchecked Sendable {
     }
 
     private func shutdownEarly(inputs: [SyntheticVideoInput], others: [any Input], audioInputs: [SyntheticAudioInput], recorder: Recorder?,
-                               ndi: NDISender?, audioEngine: AudioEngine, writer: StatsWriter?) async {
+                               ndi: NDISender?, streams: [StreamOutput], audioEngine: AudioEngine, writer: StatsWriter?) async {
         if let rec = recorder {
             _ = await stopRecorder(rec, atTick: .zero, timeoutSeconds: 10)
+        }
+        for stream in streams {
+            engine.removeConsumer(stream)
+            await stream.stopAsync()
         }
         await audioEngine.stop()
         for a in audioInputs { a.stop() }
@@ -514,7 +610,7 @@ final class HeadlessSession: @unchecked Sendable {
     private func printSummary(clock: ProgramClock, inputs: [SyntheticVideoInput], others: [any Input], audioInputs: [(number: Int, source: SyntheticAudioInput)],
                               audioStatus a: AudioEngineStatus, recorder: Recorder?,
                               recordResult: RecordingResult?, writer: StatsWriter?, interrupted: Bool,
-                              ndi: NDISender?, compat: VMixCompatServer?, tally: TallyPublisher?) {
+                              ndi: NDISender?, compat: VMixCompatServer?, tally: TallyPublisher?, streams: [StreamOutput] = []) {
         let c = engine.counters
         func ms(_ d: HostDuration?) -> String { d.map { String(format: "%.3f", $0.milliseconds) } ?? "—" }
         var lines: [String] = []
@@ -542,6 +638,16 @@ final class HeadlessSession: @unchecked Sendable {
                 detail = "；收 \(c.framesReceived) 帧 / 推 \(c.framesPushed)，SDK 丢 \(c.sdkVideoDropped)，格式不支持 \(c.framesUnsupported)，池耗尽 \(c.framesPoolExhausted)，重连 \(c.reconnects)，抖动均值 / 最大 \(String(format: "%.2f / %.2f", c.jitterMeanMs, c.jitterMaxMs)) ms" + (ndi.lastError.map { "；\($0)" } ?? "")
             } else if let image = input as? ImageInput {
                 detail = "；\(image.imageWidth)×\(image.imageHeight)" + (image.lastError.map { "；\($0)" } ?? "")
+            } else if let camera = input as? CameraInput {
+                let k = camera.counters, t = camera.timestampStats
+                detail = "；设备 \(camera.deviceName ?? camera.uniqueID)，协商 \(camera.negotiated.map { "\($0)" } ?? "—")，收 \(k.framesReceived) 帧 / 推 \(k.framesPushed)，采集丢 \(t.droppedByCapture)，"
+                    + "到达延迟均值 / 最大 \(String(format: "%.2f / %.2f", t.meanDelayMs, t.maxDelayMs)) ms，状态切换 \(k.stateTransitions)（noSignal \(k.noSignalTransitions) / error \(k.errorTransitions)）"
+                    + (camera.lastError.map { "；\($0)" } ?? "")
+            } else if let file = input as? FileInput {
+                let k = file.counters, f = file.fileCountersSnapshot
+                detail = "；\(URL(fileURLWithPath: file.path).lastPathComponent) \(String(format: "%.2f", file.durationSeconds)) s，推 \(k.framesPushed) 帧，跳过 \(k.framesRejected)，"
+                    + "循环 \(f.loops) 圈，解码没跟上 \(f.ticksStarved) 拍，音频块 \(f.audioChunksWritten) / 跳 \(f.audioChunksSkipped)，推帧线程晚醒 \(f.lateWakes)"
+                    + (file.lastError.map { "；\($0)" } ?? "")
             }
             lines.append("  输入 \(input.number)（\(input.kind)）：状态 \(input.state)；帧槽 pushed \(s?.pushed ?? 0) consumed \(s?.consumed ?? 0) reused \(s?.reused ?? 0) dropped \(s?.dropped ?? 0)" + detail + pacing)
         }
@@ -578,6 +684,13 @@ final class HeadlessSession: @unchecked Sendable {
         if let tally {
             let c = tally.counters
             lines.append("  tally 流：\(c)")
+        }
+        for (i, stream) in streams.enumerated() {
+            let c = stream.counters
+            lines.append("  推流 \(i + 1)（\(stream.destination)）：状态 \(c.state)，编码交出 \(c.framesReceived) 帧 / 送出 \(c.framesSent)（关键帧 \(c.keyframesSent)），网络丢 \(c.networkDropped)，"
+                         + "编码 skipped \(stream.videoEncoder.counters.skipped)，音频包 \(c.audioPacketsSent) / 丢 \(c.audioDropped)，\(c.bytesSent / 1_048_576) MB，"
+                         + "连接 \(c.connectAttempts) 次 / 重连 \(c.reconnects) / 断线 \(c.disconnects)"
+                         + (stream.lastExitReasonDescription.isEmpty ? "" : "；最后一次退出发布循环：\(stream.lastExitReasonDescription)"))
         }
         if let ndi {
             let c = ndi.countersSnapshot

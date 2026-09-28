@@ -1,0 +1,15 @@
+{
+  "_说明": "L5 退步规则（scripts/perf/perfjudge.py 的 DEFAULT_RULES 在这里可以逐项覆盖）。better = 哪边好；pct = 相对上一版变坏超过这么多百分比算退步（prompt 70：10）；abs = 绝对变坏超过这么多算退步（§4 E4：VMAF 1 分）；floor = 绝对变坏不到这么多就不算（默认没有，阈值是用户的，铁律 9）；zero_baseline = must：基线为 0 时比例算不出，改按 §4 必须档判。只和同机、同 macOS 大版本的上一版基线比。",
+  "v1_avg_ms": {"better": "lower", "pct": 10},
+  "v1_p99_ms": {"better": "lower", "pct": 10},
+  "v2_ratio": {"better": "lower", "pct": 10, "zero_baseline": "must"},
+  "v3_p99_ms": {"better": "lower", "pct": 10},
+  "cpu_avg_pct": {"better": "lower", "pct": 10},
+  "cpu_p95_pct": {"better": "lower", "pct": 10},
+  "gpu_avg_pct": {"better": "lower", "pct": 10},
+  "gpu_p95_pct": {"better": "lower", "pct": 10},
+  "pm_gpu_active_avg_pct": {"better": "lower", "pct": 10},
+  "pm_gpu_active_p95_pct": {"better": "lower", "pct": 10},
+  "e4_vmaf_mean": {"better": "higher", "pct": 10, "abs": 1.0},
+  "e4_psnr_y_db": {"better": "higher", "pct": 10}
+}

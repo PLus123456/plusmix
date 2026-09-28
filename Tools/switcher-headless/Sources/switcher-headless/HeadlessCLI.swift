@@ -13,9 +13,10 @@ enum HeadlessCLI {
                         [--preview] [--audio-device null|default|<设备名>] [--lead-ms 1000] [--input-lead-ms 8.33] [--stop-timeout 60] [--no-gpu-stats]
                         [--api] [--api-listen 127.0.0.1:8765] [--api-token <token>] [--iso-audio N]
                         [--compat] [--compat-listen 127.0.0.1] [--compat-tcp-port 8099] [--compat-http-port 8088] [--tally-port N]
-                        [--ndi-send <名字>] [--ndi-jitter-frames 1]
-      switcher-headless make-show --out scenarios/m0-show.json [--width 1920 --height 1080] [--preset m0|g3|g4|g4-ndi] [--ndi-name <名字>]
-      switcher-headless make-scenario --out scenarios/m0.json [--minutes 60] [--fps 60] [--inputs 8] [--preset m0|g3|g4]
+                        [--ndi-send <名字>] [--ndi-jitter-frames 1] [--stream <rtmp/srt 地址>]…
+      switcher-headless make-show --out scenarios/m0-show.json [--width 1920 --height 1080] [--preset m0|g3|g4|g4-ndi|soak|perf-e4] [--ndi-name <名字>]
+                        [--camera auto|none|<uniqueID>] [--file <片段路径>]
+      switcher-headless make-scenario --out scenarios/m0.json [--minutes 60] [--fps 60] [--inputs 8] [--preset m0|g3|g4|soak]
       switcher-headless summarize --stats stats.jsonl [--baseline baselines/m0-m5max.json] [--write-baseline out.json]
                         [--v1-avg-ms 2] [--json] [--meta key=value]…
     --duration 是秒；场景文件更短时以场景为准。--audio-device 默认 default（系统默认输出设备，会出声），gate 用 null。
@@ -27,6 +28,12 @@ enum HeadlessCLI {
                 5–8 号开抠像、多画面自定义布局）。--preset g4-ndi：NDI 回环 L1 的两路节目（2 号 = NDI 输入，名字给 --ndi-name，默认 "Switcher G4 loop"）。
     --compat：起 W3-D 的第三方 API 兼容层（默认关；TCP 8099 / HTTP 8088，只听 --compat-listen 的地址）；--tally-port N：起 tally 流（WS /tally、GET /tally）。
     --ndi-send <名字>：把 PGM（+ Master 音频）用 W2-D 的 NDISender 发出去；节目里 ndi 输入的名字不含 "(" 时按本机发送端解析（NDI 回环）。
+    --stream <地址>（W4-A，可给多次）：每个地址一路 W2-D 的 StreamOutput（PGM + Master 音频，HaishinKit 连接）；第 i 个对节目里第 i 个推流输出
+                （编号进 Stats.encoder[].output、编码参数取它的，没有就按默认）。Stats.encoder[] 的顺序：录制、ISO 音轨、NDI 发送、推流。
+    节目里的摄像头 / 文件输入（W4-A）：摄像头只接画面（不开麦克风：长稳里不采环境声、也不弹麦克风授权）；文件路径相对节目文件所在目录，声音进混音器（路由按节目）。
+    --preset soak（W4-A 长稳）：G4 节目 + 10 号摄像头（--camera auto = 内置那台，none = 不要）+ 11 号文件（--file，循环）；1 录制、2 多画面、3 / 4 推流、5 NDI；
+                场景每 30 s 一次转场（Cut / Fade / Wipe / Zoom / Stinger 轮流），每 5 min 翻一路叠加，PGM 只轮 1–8 号（A2 / A3 的闪光配对）。
+    --preset perf-e4（W4-A L5 的 E4）：只有一路文件输入（--file）在 PGM 上，录制；片段放完停在末帧。
     Ctrl-C：停时钟 → 渲染器排空 → 录制封口 → 退出；再按一次立即退出。
     """
 
@@ -36,6 +43,7 @@ enum HeadlessCLI {
         "out", "width", "height", "minutes", "fps", "inputs", "baseline", "write-baseline", "v1-avg-ms", "meta",
         "api-listen", "api-token", "iso-audio", "preset",
         "compat-listen", "compat-tcp-port", "compat-http-port", "tally-port", "ndi-send", "ndi-jitter-frames", "ndi-name",
+        "stream", "camera", "file",
     ]
 
     static func dispatch(_ args: [String]) throws {
@@ -68,7 +76,8 @@ enum HeadlessCLI {
                                  inputLeadMs: try p.double("input-lead-ms"), stopTimeoutSeconds: try p.double("stop-timeout") ?? 60,
                                  api: try apiOptions(p), isoAudio: try p.int("iso-audio") ?? 0,
                                  compat: try compatOptions(p), tallyPort: try p.int("tally-port"),
-                                 ndiSend: p.string("ndi-send"), ndiJitterFrames: try p.int("ndi-jitter-frames") ?? 1)
+                                 ndiSend: p.string("ndi-send"), ndiJitterFrames: try p.int("ndi-jitter-frames") ?? 1,
+                                 streamURLs: p.repeated["stream"] ?? [])
         guard (0...2).contains(options.ndiJitterFrames) else { throw CLIError("--ndi-jitter-frames 只能是 0–2") }
         let session = try HeadlessSession(options: options)
         SignalHandling.install(session)
@@ -132,7 +141,22 @@ enum HeadlessCLI {
             try G4Factory.writeStingerImage(to: png, width: width, height: height)
             print("写入 \(png.path)（Stinger 用的 alpha PNG，\(width)×\(height)）")
         case "g4-ndi": show = G4Factory.ndiLoopShow(senderName: p.string("ndi-name") ?? "Switcher G4 loop", width: width, height: height)
-        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3 / g4 / g4-ndi）")
+        case "soak":
+            // G4 节目依赖旁边的 Stinger PNG（路径相对节目文件），一起写
+            let png = out.deletingLastPathComponent().appendingPathComponent(G4Factory.stingerFileName)
+            try G4Factory.writeStingerImage(to: png, width: width, height: height)
+            let camera = try SoakFactory.resolveCamera(p.string("camera") ?? "auto")
+            let file = p.string("file").map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+            if let file, !FileManager.default.fileExists(atPath: file) { throw CLIError("--file \(file) 不存在（scripts/perf/make-e4-clip.sh 生成）") }
+            show = SoakFactory.show(camera: camera, filePath: file, width: width, height: height)
+            print("摄像头：\(camera.map { "\($0.name)（\($0.uniqueID)）" } ?? "不要")；文件：\(file ?? "不要")；写入 \(png.path)")
+        case "perf-e4":
+            guard let file = p.string("file").map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) else {
+                throw CLIError("--preset perf-e4 需要 --file <测试片段>（scripts/perf/make-e4-clip.sh 生成）")
+            }
+            guard FileManager.default.fileExists(atPath: file) else { throw CLIError("--file \(file) 不存在") }
+            show = SoakFactory.perfE4Show(filePath: file, width: width, height: height)
+        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3 / g4 / g4-ndi / soak / perf-e4）")
         }
         try show.save().write(to: out, options: .atomic)
         print("写入 \(out.path)：\(show.inputs.count) 路输入，\(show.mixer.format.width)×\(show.mixer.format.height)@\(show.mixer.format.frameRate)")
@@ -148,7 +172,8 @@ enum HeadlessCLI {
             scenario = G4Factory.scenario(minutes: try p.int("minutes") ?? 10, fps: try p.double("fps") ?? 60, inputs: try p.int("inputs") ?? 8)
             let windows = G4Factory.compositeWindows(scenario)
             print("非 Cut 转场的中间拍（frameprobe --blank-ticks）：\(windows.count) 段，共 \(windows.reduce(0) { $0 + Int($1.count) }) 拍，例如 \(windows.prefix(3).map { "\($0.lowerBound)-\($0.upperBound)" }.joined(separator: ","))")
-        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3 / g4）")
+        case "soak": scenario = SoakFactory.scenario(minutes: try p.int("minutes") ?? 480, fps: try p.double("fps") ?? 60, inputs: try p.int("inputs") ?? 8)
+        case let other: throw CLIError("不认识的 --preset \(other)（m0 / g3 / g4 / soak）")
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
