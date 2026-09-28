@@ -3,6 +3,7 @@
 // 不用 NSDocument：导播台一次只跑一个节目，多文档模型对不上。
 import Foundation
 import SwitcherContracts
+import SwitcherControl   // UserConfig.directory：LastSession 与 hotkeys.json / midi.json / Diagnostics/ 同一个配置目录
 import SwitcherEngine
 
 @MainActor
@@ -68,6 +69,12 @@ final class ShowDocuments {
     /// 新建：忘掉当前文件。
     func startNew() { currentURL = nil }
 
+    /// 素材（图片 / 视频文件）相对路径的基准目录（W3-E5）：节目文件所在目录（与 headless 同一条规则）；节目没保存过 = 默认录制目录 ~/Movies/PlusMix
+    /// （录制目录的相对路径也挂在那里，OutputRuntime.startRecordings）。
+    var mediaBaseDirectory: URL {
+        currentURL?.deletingLastPathComponent() ?? URL(fileURLWithPath: Self.defaultRecordDirectory, isDirectory: true)
+    }
+
     // MARK: 最近 / 上次
 
     var recentURLs: [URL] {
@@ -91,12 +98,9 @@ final class ShowDocuments {
     }
 
     /// 退出时未保存的节目自动存到这里，下次启动没有"上次文件"时从这里恢复。
-    /// 目录名 "Switcher" 故意没跟 W4-D 改成产品名：hotkeys.json / midi.json / Diagnostics/ 都在 SwitcherControl 的 `UserConfig.directory`
-    /// （~/Library/Application Support/Switcher，包内定义、不归 App 改）下，配置目录要一个整体，等包那边改了一起换（reports/w4-rename.md §3）。
-    static var autosaveURL: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSHomeDirectory())
-        return support.appendingPathComponent("Switcher", isDirectory: true).appendingPathComponent("LastSession.\(fileExtension)")
-    }
+    /// 用户配置目录 `UserConfig.directory`（~/Library/Application Support/PlusMix，W2-C2 起是产品名）：与 hotkeys.json / midi.json / Diagnostics/ 一个整体
+    /// （W3-E5；0.1.0 没发布过，改名前的老目录里的 LastSession 不迁移）。
+    static var autosaveURL: URL { UserConfig.directory.appending(path: "LastSession.\(fileExtension)") }
 
     func autosave(_ show: Show) {
         try? store.save(show, to: Self.autosaveURL)

@@ -27,7 +27,7 @@ final class BottomBarView: NSView {
     let noticeLabel = Theme.label("", size: 11, color: Theme.accent)
     private var state = MixerState()
     private var previousStats: Stats?
-    /// 最近一行 Stats 里每个输出的状态（按 outputs 里带编码器的输出同序）。
+    /// 最近一行 Stats 里每个输出的状态（按 `EncoderEntry.output` 对号，提案 019）。
     private var encoderStates: [Stats.EncoderEntry] = []
     private var format: ProgramFormat = .hd1080p60
     /// 最近一次显示的状态行（测试对照 stats.jsonl 用）。
@@ -99,8 +99,8 @@ final class BottomBarView: NSView {
 
     /// 1 Hz：状态行 + 按钮的实际状态。
     func apply(stats: Stats) {
-        // encoder 的项不带类型：按快照里带编码器的输出同序给（NDI 的原始码率不顶掉录制 / 推流的码率，W3-E3）
-        let kinds = state.outputs.filter { [.record, .stream, .ndi].contains($0.kind) }.map(\.kind)
+        // encoder 的项不带类型：按每项的 output 编号查快照里的 kind（NDI 的原始码率不顶掉录制 / 推流的码率，W3-E3；W3-E5 起按编号对号、不再按顺序）
+        let kinds = Dictionary(state.outputs.map { ($0.number, $0.kind) }, uniquingKeysWith: { first, _ in first })
         let text = StatusLineFormatter.line(current: stats, previous: previousStats, format: format, kinds: kinds)
         statusLabel.stringValue = text
         lastStatusLine = (stats, text)

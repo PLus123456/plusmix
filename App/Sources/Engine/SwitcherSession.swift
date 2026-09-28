@@ -76,8 +76,16 @@ final class SwitcherSession {
     /// 多画面 / 显示视图的纹理来源。
     var displaySource: any DisplayFrameSource { renderer }
 
+    /// 素材（图片 / 视频文件）相对路径的基准目录：节目文件所在目录，没保存过 = 默认录制目录（W3-E5）。另存后 AppController 换成新位置，只影响之后建的输入。
+    var mediaBaseDirectory: URL {
+        get { inputs.mediaBaseDirectory }
+        set { inputs.mediaBaseDirectory = newValue }
+    }
+
+    /// - Parameter mediaBaseDirectory: 素材相对路径的基准目录（nil = 默认录制目录 ~/Movies/PlusMix）。
     init(show: Show, settings: AppSettings = AppSettings(), inputFactory: any InputFactory = DefaultInputFactory(),
-         hotkeyTable: HotkeyTable = HotkeyTable.loadUserTableOrDefault(), midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault()) throws {
+         hotkeyTable: HotkeyTable = HotkeyTable.loadUserTableOrDefault(), midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault(),
+         mediaBaseDirectory: URL? = nil) throws {
         let initial = show.makeState()
         try initial.validate()
         name = show.name
@@ -94,6 +102,7 @@ final class SwitcherSession {
         let audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio)
         self.audio = audio
         let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
+        if let mediaBaseDirectory { inputs.mediaBaseDirectory = mediaBaseDirectory }
         self.inputs = inputs
         outputs = OutputRuntime(engine: engine, audio: audio, inputs: inputs, format: format, showName: show.name)
         outputs.fallbackDirectory = settings.recordFallbackDirectory

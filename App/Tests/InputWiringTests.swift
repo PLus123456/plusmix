@@ -199,6 +199,77 @@ final class InputWiringTests: XCTestCase {
         XCTAssertFalse(form.isObservingAudioDevices, "窗口关掉摘掉设备订阅")
     }
 
+    /// W3-E5 交付 1（reports/issues/W4C-app-relative-media-paths.md）：图片 / 视频文件输入的相对路径按**节目文件所在目录**解析（与 headless
+    /// HeadlessRun 同一条规则：以 / 开头原样，否则挂到节目文件所在目录下），不再相对进程工作目录（Finder / Dock 起的 App 工作目录是 /）；
+    /// 节目没保存过退到默认录制目录 ~/Movies/PlusMix（与录制目录的相对路径同一口径）。只改交给输入对象的路径，MixerState / 节目文件仍存相对路径。
+    /// 节目在临时目录 A、图片在 A/assets/，进程 cwd 在别处（B）：打开后该路 live、fps > 0（修前：占位"图片不存在：assets/…"、fps = 0）。
+    func testW3E5_relativeMediaPathResolvesAgainstShowFile() throws {
+        // 1. 纯规则：相对路径挂到 base 下；文件输入的 endAction / rate 不动；绝对路径与别的来源原样
+        let base = URL(fileURLWithPath: "/tmp/节目目录", isDirectory: true)
+        let image = InputConfig(number: 5, name: "台标", source: .image(path: "assets/logo.png"))
+        XCTAssertEqual(InputRuntime.resolvingMediaPaths(image, against: base).source, .image(path: "/tmp/节目目录/assets/logo.png"))
+        let file = InputConfig(number: 6, name: "片头", source: .file(path: "clips/intro.mov", endAction: .loop, rate: 1.5))
+        XCTAssertEqual(InputRuntime.resolvingMediaPaths(file, against: base).source, .file(path: "/tmp/节目目录/clips/intro.mov", endAction: .loop, rate: 1.5))
+        XCTAssertEqual(InputRuntime.resolvingMediaPaths(file, against: base).number, 6)
+        let absolute = InputConfig(number: 7, name: "绝对", source: .image(path: "/Volumes/素材/a.png"))
+        XCTAssertEqual(InputRuntime.resolvingMediaPaths(absolute, against: base), absolute)
+        let synthetic = AppTest.syntheticConfig(number: 8)
+        XCTAssertEqual(InputRuntime.resolvingMediaPaths(synthetic, against: base), synthetic)
+        // 节目没保存过：退到默认录制目录（OutputRuntime.startRecordings 对相对录制目录也是挂到这里）
+        let suite = "com.plusmix.switcher.tests.mediabase-\(UUID().uuidString)"
+        let docs = ShowDocuments(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(docs.mediaBaseDirectory.standardizedFileURL.path, URL(fileURLWithPath: ShowDocuments.defaultRecordDirectory, isDirectory: true).standardizedFileURL.path)
+
+        // 2. 经 App：节目在 A、图片在 A/assets/、进程 cwd 在 B
+        _ = try AppTest.freshSession()
+        let controller = AppTest.controller
+        let tmp = FileManager.default.temporaryDirectory
+        let dirA = tmp.appendingPathComponent("switcher-relpath-A-\(UUID().uuidString)", isDirectory: true)
+        let dirB = tmp.appendingPathComponent("switcher-relpath-B-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: dirA)
+            try? FileManager.default.removeItem(at: dirB)
+        }
+        try FileManager.default.createDirectory(at: dirA.appendingPathComponent("assets", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dirB, withIntermediateDirectories: true)
+        try Self.writeSolidPNG(to: dirA.appendingPathComponent("assets/logo.png"), width: 640, height: 360, red: 30, green: 180, blue: 220)
+        let previousCwd = FileManager.default.currentDirectoryPath
+        XCTAssertTrue(FileManager.default.changeCurrentDirectoryPath(dirB.path))
+        defer { FileManager.default.changeCurrentDirectoryPath(previousCwd) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: "assets/logo.png"), "cwd 下没有这张图：按 cwd 解析必然建不出来")
+        var show = ShowDocuments.emptyShow(name: "相对路径", recordDirectory: dirA.path)
+        show.inputs = [InputConfig(number: 1, name: "台标", source: .image(path: "assets/logo.png"))]
+        show.mixer.program = 1
+        let url = dirA.appendingPathComponent("相对路径.\(ShowDocuments.fileExtension)")
+        try show.save().write(to: url)
+        let opened = AppTest.expectationBox()
+        Task { await controller.openShow(url: url); opened.value = true }
+        XCTAssertTrue(AppTest.waitUntil(20) { opened.value && controller.session?.isRunning == true }, "节目应能打开：\(String(describing: controller.lastError))")
+        let session = try XCTUnwrap(controller.session)
+        XCTAssertEqual(controller.documents.mediaBaseDirectory.standardizedFileURL.path, dirA.standardizedFileURL.path, "打开后素材目录 = 节目文件所在目录")
+        XCTAssertEqual(session.mediaBaseDirectory.standardizedFileURL.path, dirA.standardizedFileURL.path)
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 10), .live,
+                       "图片应按节目文件所在目录找到，实际 \(String(describing: session.inputs.runtimeState(of: 1)))")
+        XCTAssertTrue(AppTest.waitUntil(8) { (session.stats?.perInput[1]?.fps ?? 0) > 0 }, "该路 fps 应 > 0：\(String(describing: session.stats?.perInput[1]))")
+        var p: (b: Int, g: Int, r: Int) = (0, 0, 0)
+        XCTAssertTrue(AppTest.waitUntil(5) {
+            guard let rb = AppTest.readback(session) else { return false }
+            p = rb.pixel(x: rb.width / 2, y: rb.height / 2)
+            return abs(p.r - 30) <= 12 && abs(p.g - 180) <= 12 && abs(p.b - 220) <= 12
+        }, "PGM 中心应是图片的颜色 (30, 180, 220)，实际 (\(p.r), \(p.g), \(p.b))")
+
+        // 3. 快照 / 节目文件仍存相对路径；另存到别处后文件里还是相对路径（素材要跟着搬，Samples/README.md §2），之后新加的素材按新位置找
+        XCTAssertEqual(session.state.inputs.first?.source, .image(path: "assets/logo.png"), "MixerState 存相对路径")
+        XCTAssertEqual(session.makeShow().inputs.first?.source, .image(path: "assets/logo.png"))
+        let url2 = dirB.appendingPathComponent("另存.\(ShowDocuments.fileExtension)")
+        controller.write(session.makeShow(), to: url2)
+        XCTAssertEqual(try controller.documents.load(from: url2).inputs.first?.source, .image(path: "assets/logo.png"), "节目文件存相对路径")
+        XCTAssertEqual(session.mediaBaseDirectory.standardizedFileURL.path, dirB.standardizedFileURL.path, "另存后素材目录跟到新位置")
+        XCTAssertEqual(session.inputs.runtimeState(of: 1), .live, "另存不重建已在跑的输入")
+        XCTAssertEqual(session.control.bus.counters.rejected, 0)
+    }
+
     /// 纯色 PNG（sRGB）。
     static func writeSolidPNG(to url: URL, width: Int, height: Int, red: UInt8, green: UInt8, blue: UInt8) throws {
         let cs = CGColorSpace(name: CGColorSpace.sRGB)!

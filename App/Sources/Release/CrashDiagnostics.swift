@@ -1,5 +1,5 @@
 // MetricKit 崩溃诊断落盘（W4-B，后续方案 §8.1 最小版）：订阅 MXMetricManager，收到的诊断负载（崩溃 / 卡死 / CPU / 磁盘）按 JSON 原样写到
-// ~/Library/Application Support/Switcher/Diagnostics/<类别>-<时间>.json；启动时把系统攒着的历史负载（pastDiagnosticPayloads）也收进来。
+// ~/Library/Application Support/PlusMix/Diagnostics/<类别>-<时间>.json；启动时把系统攒着的历史负载（pastDiagnosticPayloads）也收进来。
 // 只落本地、不上传；导出走诊断包（DiagnosticBundle），导出前用户在对话框里选是否包含——这就是"用户同意后导出"。
 // 崩溃负载是下次启动时系统才交付的（MetricKit 的机制），所以 App 一起来就订阅。
 import Foundation

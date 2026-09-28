@@ -84,21 +84,77 @@ final class StatusLineTests: XCTestCase {
         XCTAssertEqual(StatusLineFormatter.fields(current: idle, previous: b, format: .hd1080p60).map(\.value).suffix(3), ["—", "—", "512 MB"])
 
         // W3-E3：NDI 发送进了 encoder[]（码率 = UYVY 原始码率）。给了输出类型时先找录制 / 推流，NDI 排在前面也不顶掉它们；
-        // 只有 NDI 在发时才显示 NDI 的；unavailable（没有 SDK）不算在跑
+        // 只有 NDI 在发时才显示 NDI 的；unavailable（没有 SDK）不算在跑。W3-E5 起类型按每项的 output 编号查（[编号: 类型]），见 testW3E5_statusLinePicksEncoderByOutputNumber
         let ndiFirst = Stats(ts: 103, tick: Tick(780), renderMs: 2, missedRender: 3, jitterMs: 0.1, perInput: [:],
-                             encoder: [Stats.EncoderEntry(skipped: 1, bitrate: 1_990_000_000, frames: 60, dropped: 1, state: "publishing"),
-                                       Stats.EncoderEntry(skipped: 2, bitrate: 6_000_000, frames: 60, state: "recording")],
+                             encoder: [Stats.EncoderEntry(output: 1, skipped: 1, bitrate: 1_990_000_000, frames: 60, dropped: 1, state: "publishing"),
+                                       Stats.EncoderEntry(output: 2, skipped: 2, bitrate: 6_000_000, frames: 60, state: "recording")],
                              audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 12.4, gpuPct: 26.6)
-        XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60, kinds: [.ndi, .record]).map(\.value)[6...7], ["2", "6.00 Mb/s"])
+        XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60, kinds: [1: .ndi, 2: .record]).map(\.value)[6...7], ["2", "6.00 Mb/s"])
         XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60).map(\.value)[6...7], ["1", "1990.00 Mb/s"], "不给类型 = 旧行为")
-        XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60, kinds: [.ndi]).map(\.value)[6...7], ["1", "1990.00 Mb/s"],
-                       "类型个数对不上 = 不分类型")
+        XCTAssertEqual(StatusLineFormatter.fields(current: ndiFirst, previous: b, format: .hd1080p60, kinds: [1: .ndi]).map(\.value)[6...7], ["1", "1990.00 Mb/s"],
+                       "表里没有录制 / 推流的编号 = 退到第一个在跑的")
         var onlyNDI = ndiFirst
         onlyNDI.encoder[1].state = "idle"
-        XCTAssertEqual(StatusLineFormatter.fields(current: onlyNDI, previous: b, format: .hd1080p60, kinds: [.ndi, .record]).map(\.value)[6...7], ["1", "1990.00 Mb/s"],
+        XCTAssertEqual(StatusLineFormatter.fields(current: onlyNDI, previous: b, format: .hd1080p60, kinds: [1: .ndi, 2: .record]).map(\.value)[6...7], ["1", "1990.00 Mb/s"],
                        "只有 NDI 在发：显示它")
         onlyNDI.encoder[0].state = "unavailable"
-        XCTAssertEqual(StatusLineFormatter.fields(current: onlyNDI, previous: b, format: .hd1080p60, kinds: [.ndi, .record]).map(\.value)[6...7], ["—", "—"],
+        XCTAssertEqual(StatusLineFormatter.fields(current: onlyNDI, previous: b, format: .hd1080p60, kinds: [1: .ndi, 2: .record]).map(\.value)[6...7], ["—", "—"],
                        "unavailable 不算在跑")
+    }
+
+    /// W3-E5 交付 2：底栏"编码跳帧 / 码率"按 `Stats.encoder[].output` 查 `state.outputs` 的 kind 对号（提案 019），不再按顺序：
+    /// 一行顺序颠倒的 Stats（NDI 的项排最前、录制的在后）也显示录制 / 推流的码率，不是 NDI 的原始码率（按顺序对号会把第 0 项当成输出 1 = 录制）。
+    func testW3E5_statusLinePicksEncoderByOutputNumber() {
+        let previous = Stats(ts: 100, tick: Tick(600), renderMs: 1, missedRender: 0, jitterMs: 0.1, perInput: [:], encoder: [],
+                             audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 10, gpuPct: 20)
+        func stats(_ encoder: [Stats.EncoderEntry]) -> Stats {
+            Stats(ts: 101, tick: Tick(660), renderMs: 1, missedRender: 0, jitterMs: 0.1, perInput: [:], encoder: encoder,
+                  audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 10, gpuPct: 20)
+        }
+        func shown(_ s: Stats, _ kinds: [Int: OutputKind]?) -> [String] {
+            Array(StatusLineFormatter.fields(current: s, previous: previous, format: .hd1080p60, kinds: kinds).map(\.value)[6...7])
+        }
+        // 输出表：1 录制、2 推流、3 NDI
+        let kinds: [Int: OutputKind] = [1: .record, 2: .stream, 3: .ndi]
+        let ndi = Stats.EncoderEntry(output: 3, skipped: 1, bitrate: 1_990_000_000, frames: 60, dropped: 1, state: "publishing")
+        let record = Stats.EncoderEntry(output: 1, skipped: 2, bitrate: 6_000_000, frames: 60, diskFreeMb: 2048, state: "recording")
+        let stream = Stats.EncoderEntry(output: 2, skipped: 4, bitrate: 4_000_000, frames: 60, state: "publishing")
+        var idleStream = stream
+        idleStream.state = "idle"
+        idleStream.bitrate = 0
+        var idleRecord = record
+        idleRecord.state = "idle"
+        idleRecord.bitrate = 0
+
+        // 顺序颠倒 [NDI, 录制, 推流(没开)] → 录制的
+        XCTAssertEqual(StatusLineFormatter.activeEncoder(in: stats([ndi, record, idleStream]), kinds: kinds)?.output, 1)
+        XCTAssertEqual(shown(stats([ndi, record, idleStream]), kinds), ["2", "6.00 Mb/s"])
+        // 录制 / 推流都在跑：Stats 里先出现的那个
+        XCTAssertEqual(shown(stats([ndi, stream, record]), kinds), ["4", "4.00 Mb/s"])
+        XCTAssertEqual(shown(stats([record, ndi, stream]), kinds), ["2", "6.00 Mb/s"])
+        // 只有 NDI 在发：显示它；谁都不在跑：—
+        XCTAssertEqual(shown(stats([ndi, idleRecord, idleStream]), kinds), ["1", "1990.00 Mb/s"])
+        XCTAssertEqual(shown(stats([idleRecord, ndi, idleStream]), kinds), ["1", "1990.00 Mb/s"])
+        XCTAssertEqual(shown(stats([idleRecord, idleStream]), kinds), ["—", "—"])
+        // 不给类型 = 不分类型：第一个在跑的
+        XCTAssertEqual(shown(stats([ndi, record, idleStream]), nil), ["1", "1990.00 Mb/s"])
+        // 表里没有的编号（输出刚删、这行 Stats 还是上一秒的）不算录制 / 推流：有对得上号的录制在跑就显示录制的；都没有才退到第一个在跑的
+        let stale = Stats.EncoderEntry(output: 9, skipped: 7, bitrate: 1_000, state: "recording")
+        XCTAssertEqual(StatusLineFormatter.activeEncoder(in: stats([stale, record]), kinds: kinds)?.output, 1)
+        XCTAssertEqual(StatusLineFormatter.activeEncoder(in: stats([stale, ndi]), kinds: kinds)?.output, 9)
+
+        // 端到端：底栏拿快照 [录制 1, 推流 2, NDI 3] + 顺序颠倒的 Stats → 状态行显示录制的跳帧 / 码率
+        let bar = BottomBarView(frame: NSRect(x: 0, y: 0, width: 1400, height: 44))
+        let state = MixerState(outputs: [
+            OutputState(number: 1, kind: .record, name: "录制", enabled: true),
+            OutputState(number: 2, kind: .stream, name: "推流", enabled: false),
+            OutputState(number: 3, kind: .ndi, name: "NDI", enabled: true),
+        ])
+        bar.apply(state: state)
+        bar.apply(stats: previous)
+        bar.apply(stats: stats([ndi, record, idleStream]))
+        XCTAssertTrue(bar.statusLabel.stringValue.contains("编码跳帧 2  ·  码率 6.00 Mb/s"), "状态行：\(bar.statusLabel.stringValue)")
+        bar.apply(stats: stats([ndi, idleRecord, idleStream]))
+        XCTAssertTrue(bar.statusLabel.stringValue.contains("编码跳帧 1  ·  码率 1990.00 Mb/s"), "只有 NDI 在发：\(bar.statusLabel.stringValue)")
     }
 }
