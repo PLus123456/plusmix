@@ -137,7 +137,7 @@ G4 复核已经确认 W1-B2 的初值 / 上限 / 起流块作废让停顿后的�
 | SwitcherRenderTests 全量（debug） | 82 个 0 失败 0 跳过（第一次整包 1 失败是压力用例的比例断言，已改，见 2.1） | 0 失败 | ✅ |
 | `testV8_*`（Render 参考图） | 所有参考图 **PSNR ∞ dB / SSIM 1.0000**（逐像素一致，与 main 相同） | PSNR ≥ 40 / SSIM ≥ 0.98 | ✅ |
 | `testT1_renderThreadSteadyStateAllocations`（debug） | 600 帧 SwitcherRender 代码直接引发 0 次分配（debug 下 Swift 泛型装箱 10818 次，只打印；release 数字见下） | own = 0 | ✅ |
-| `testT1_renderThreadSteadyStateAllocations`（**release**） | 600 帧内渲染线程 SwitcherRender 代码直接引发 **0** 次、全部 Swift 代码 **0** 次；Metal / CoreVideo 内部 8414 次（每帧 14.02，命令缓冲区 / 编码器对象，与本次改动无关：render 路径只在 .skipped 时多写一个原子环，T1 里 skipped = 0）；纹理表预热期 64 张、输出环退回 0 | own = 0、Swift = 0 | ✅ |
+| `testT1_renderThreadSteadyStateAllocations`（**release**） | 600 帧内渲染线程 SwitcherRender 代码直接引发 **0** 次、全部 Swift 代码 **0** 次；Metal / CoreVideo 内部 8414 次（每帧 14.02，命令缓冲区 / 编码器对象；**main 95757f7 同一用例 release 也是 8414 / 14.02**，逐个相等——render 路径只在 .skipped 时多写一个原子环，T1 里 skipped = 0）；纹理表预热期 64 张、输出环退回 0 | own = 0、Swift = 0 | ✅ |
 | `testW1B_renderPath_zeroAllocationsInSteadyState`（Engine，**release**） | 渲染线程 + GPU 完成线程稳态 ≥ 200 拍 malloc / free = 0（路径含 warmUp 之后的 start、完成线程的归因读环） | 0 | ✅ |
 | `testT3_cpuNeverLeadsGPUByMoreThanTwoFrames` | 提交 1849–1989、跳过 11–151、最大在途 2、完成 = 提交 | 在途 ≤ 2 | ✅ |
 | `testV1_1080p60EightInputsFourOverlays_renderMs` | 平均 2.678 / p50 2.745 / p99 2.990 / max 3.065 ms（debug 宿主；提交→GPU 开始 0.713、GPU 执行 1.588） | 平均 ≤ 6、p99 ≤ 12 | ✅ |
