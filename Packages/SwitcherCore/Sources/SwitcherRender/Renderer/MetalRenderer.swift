@@ -4,8 +4,10 @@
 // - render()：引擎的渲染线程每拍调一次。零分配（Swift 侧；Metal 内部每帧建命令缓冲区 / 编码器对象的分配不可避免，数字见报告）、
 //   不等 drawable、不阻塞：GPU 还压着 maxInflight（默认 2）帧没完成就返回 .skipped。
 // - 完成线程（switcher.render.completion）：按提交顺序 waitUntilCompleted，读 GPU 时间戳，组 RenderedFrame，调 sink。
-//   不用 addCompletedHandler 是因为每帧的闭包 / block 都是堆分配。
-// - prepare 末尾做一次首帧空渲染（warmUpGPU，W1-B3）：命令队列的第一次提交、管线 / 私有纹理的第一次用都在起时钟之前付掉。
+//   不用 addCompletedHandler 是因为每帧的闭包 / block 都是堆分配。W1-B3 起挂 time-constraint 实时策略（RealtimeThread.swift）：
+//   它放行在途计数，晚醒几毫秒就可能让下一拍 .skipped；并且每次 .skipped 按"跳拍时最旧在途帧的 gpuEnd 是否早于跳拍时刻"归因成
+//   GPU 侧晚 / 完成线程晚两类计数（skippedGPULate / skippedCompletionLate），G4 的成串跳拍以后能直接分类而不必从 render_ms 侧推。
+// - prepare 末尾做一次首帧空渲染（warmUpGPU）：命令队列的第一次提交、管线 / 私有纹理的第一次用都在起时钟之前付掉。
 // - 标签线程：见 LabelRenderer。
 // - 显示视图（MetalDisplayView）在主线程从 latestDisplayFrame 拿"最新完成的纹理"，用同一个命令队列 blit，
 //   同队列上 Metal 自动追踪读写冲突，所以三重缓冲 + 在途 ≤ 2 就够，不需要第四重。
@@ -100,10 +102,29 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     private let pending = DispatchSemaphore(value: 0)
     private let finished = DispatchSemaphore(value: 0)
     private let stopping = Atomic<Bool>(false)
-    private var completionThread: Thread?
-    /// prepare 里做过的预热帧数（0 或 1）与预热帧的 gpuStart − 提交 延迟（W1-B3；测试 / 报告看）。
+    private var completionThread: RealtimeThread?
+
+    // MARK: 跳拍归因与预热（W1-B3；诊断量，不进 Stats，铁律 4 的那份数字仍是引擎的 missed_render）
+
+    /// .skipped 里"跳拍时最旧的在途帧 GPU 已完成、只是完成线程还没放行"的次数（CPU 侧：完成线程晚醒）。
+    let skippedCompletionLate = Atomic<UInt64>(0)
+    /// .skipped 里"跳拍时最旧的在途帧 GPU 还没完成"的次数（GPU 侧：GPU 被抢占 / 驱动排队）。
+    let skippedGPULate = Atomic<UInt64>(0)
+    /// 渲染线程记跳拍时刻（host tick）的环，完成线程消费；容量 64（一次突发不会超过它）。
+    private static let skipRingCapacity = 64
+    private let skipTimes: UnsafeMutablePointer<Atomic<Int64>>
+    private let skipWrite = Atomic<Int>(0)
+    /// 完成线程私有的读游标。
+    private var skipRead = 0
+    /// 跳拍时最旧在途帧的年龄（now − submitTime）的窗口最大值，读后清零。
+    private let skipOldestAgeMaxNs = Atomic<Int64>(0)
+    /// 完成线程醒来时刻 − gpuEnd 的窗口最大值（放行延迟），读后清零。
+    private let completionWakeLagMaxNs = Atomic<Int64>(0)
+    /// prepare 里做过的预热帧数（0 或 1）与预热帧的 gpuStart − 提交 延迟。
     private(set) var warmupFrames = 0
     private(set) var warmupGpuStartLatency: HostDuration = .zero
+    /// SWITCHER_RENDER_DIAG=1：完成线程每归因一次跳拍就往 stderr 打一行（打印会分配、会拿锁，只在诊断时开）。
+    private let diagnostics = ProcessInfo.processInfo.environment["SWITCHER_RENDER_DIAG"] == "1"
 
     public init(device: (any MTLDevice)? = nil, options: MetalRendererOptions = MetalRendererOptions()) throws {
         guard let dev = device ?? MTLCreateSystemDefaultDevice() else { throw RenderError.noDevice }
@@ -112,10 +133,14 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         q.label = "switcher.render"
         commandQueue = q
         self.options = options
+        skipTimes = .allocate(capacity: MetalRenderer.skipRingCapacity)
+        for i in 0..<MetalRenderer.skipRingCapacity { (skipTimes + i).initialize(to: Atomic(0)) }
     }
 
     deinit {
         shutdown()
+        skipTimes.deinitialize(count: MetalRenderer.skipRingCapacity)
+        skipTimes.deallocate()
     }
 
     // MARK: - Renderer
@@ -140,6 +165,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         // 标签：输入槽按输入表容量要，LabelSet 封顶 64（多画面最多 64 格）
         let lbl = try LabelRenderer(device: device, inputSlots: max(1, maxInputs),
                                     completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
+        let period = TickClockSpec(t0: .zero, frameRate: format.frameRate).duration(ofTicks: 1)
         // W1-B3 首帧空渲染：不预热时第 0 帧的 gpuStart − 提交 要 13 ms（队列第一次提交、管线 / 私有纹理第一次用），稳态 < 1 ms；在起时钟之前付掉
         try warmUpGPU(resources: res, slot: newSlots[0], table: tbl, ring: rng, format: format)
         stateLock.lock()
@@ -151,20 +177,26 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         labels = lbl
         layoutSequence = .max
         self.format = format
-        frameDuration = TickClockSpec(t0: .zero, frameRate: format.frameRate).duration(ofTicks: 1)
+        frameDuration = period
         stopping.store(false, ordering: .releasing)
         inflight.store(0, ordering: .releasing)
         submitted.store(0, ordering: .releasing)
         completed.store(0, ordering: .releasing)
         latestCompletedSlot.store(-1, ordering: .releasing)
+        skipWrite.store(0, ordering: .releasing)
+        skipRead = 0
         stateLock.unlock()
         lbl.start()
         aux.start()
-        let t = Thread { [self] in completionLoop() }
-        t.name = "switcher.render.completion"
-        t.qualityOfService = .userInteractive
+        // 完成线程：实时策略，参数与节目时钟线程同一套（period = 拍长，computation 1/4 拍，constraint 半拍；实际每拍只做几十微秒的放行 + 派发。
+        // 申报 1/8 拍时内核读回来是 1/4 拍——它有下限，索性与时钟线程一致）
+        let periodTicks = UInt32(clamping: period.ticks)
+        let tc = RealtimeThreadConfig.TimeConstraint(period: periodTicks, computation: max(1, periodTicks / 4), constraint: max(1, periodTicks / 2))
+        let t = RealtimeThread(config: RealtimeThreadConfig(name: "switcher.render.completion", timeConstraint: tc)) { [self] in completionLoop() }
+        do { try t.start() } catch {
+            throw RenderError.resource("完成线程起不来：\(error)")
+        }
         completionThread = t
-        t.start()
     }
 
     /// 首帧空渲染（W1-B3）：空状态、空输入表，真走一遍 encodeFrame（PGM / PVW / 多画面 + NV12）到 slot 与输出环的一个缓冲，同步等 GPU 完成，
@@ -203,6 +235,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         if inflight.load(ordering: .acquiring) >= options.maxInflight {
             skipped.wrappingAdd(1, ordering: .relaxed)
             RenderSignposts.event("skip-inflight")
+            noteSkip()
             return .skipped
         }
         let frameIndex = submitted.load(ordering: .relaxed)
@@ -268,6 +301,49 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         return .submitted
     }
 
+    /// 渲染线程：记下跳拍时刻给完成线程归因；顺便记最旧在途帧的年龄。零分配：预分配环 + 原子量；submitTime 只有渲染线程写。
+    @inline(__always)
+    private func noteSkip() {
+        let now = HostClock.now()
+        let w = skipWrite.load(ordering: .relaxed)
+        skipTimes[w % MetalRenderer.skipRingCapacity].store(Int64(clamping: now.ticks), ordering: .relaxed)
+        skipWrite.store(w &+ 1, ordering: .releasing)
+        let oldest = slots[Int(completed.load(ordering: .acquiring) % UInt64(slots.count))]
+        _ = skipOldestAgeMaxNs.max((now - oldest.submitTime).nanoseconds, ordering: .relaxed)
+    }
+
+    /// 完成线程：把渲染线程记下的、发生在这一帧在途期间的跳拍按这一帧的 gpuEnd 归因（这一帧就是跳拍时最旧的在途帧）。
+    @inline(__always)
+    private func attributeSkips(submitTime: HostTime, gpuEnd: HostTime, wakeTime: HostTime, tick: Tick) {
+        let w = skipWrite.load(ordering: .acquiring)
+        while skipRead < w {
+            let s = skipTimes[skipRead % MetalRenderer.skipRingCapacity].load(ordering: .relaxed)
+            skipRead += 1
+            let cause = MetalRenderer.classifySkip(skipTime: HostTime(ticks: UInt64(max(0, s))), oldestGpuEnd: gpuEnd)
+            switch cause {
+            case .completionLate: skippedCompletionLate.add(1, ordering: .relaxed)
+            case .gpuLate: skippedGPULate.add(1, ordering: .relaxed)
+            }
+            if diagnostics {
+                fputs("render-diag skip while frame tick \(tick.rawValue) in flight: \(cause), skip at +\(String(format: "%.2f", (HostTime(ticks: UInt64(max(0, s))) - submitTime).milliseconds)) ms after its submit, gpuEnd at +\(String(format: "%.2f", (gpuEnd - submitTime).milliseconds)) ms, completion wake lag \(String(format: "%.3f", (wakeTime - gpuEnd).milliseconds)) ms\n", stderr)
+            }
+        }
+    }
+
+    /// 跳拍原因。
+    enum SkipCause: Equatable, CustomStringConvertible {
+        /// 跳拍那一刻最旧的在途帧 GPU 已完成：是完成线程还没放行（CPU 侧调度）。
+        case completionLate
+        /// 跳拍那一刻最旧的在途帧 GPU 还没完成：GPU 侧晚（抢占 / 驱动排队 / 帧太重）。
+        case gpuLate
+        var description: String { self == .gpuLate ? "gpu-late" : "completion-late" }
+    }
+
+    /// 归因规则：最旧在途帧的 gpuEnd ≤ 跳拍时刻 → completionLate，否则 gpuLate。
+    static func classifySkip(skipTime: HostTime, oldestGpuEnd: HostTime) -> SkipCause {
+        oldestGpuEnd <= skipTime ? .completionLate : .gpuLate
+    }
+
     /// 退回池子分配的输出缓冲（环被消费者占满时）：IOSurface 的两个平面包成整数视图，表里按 IOSurfaceID 缓存。
     @inline(__always)
     private func nv12Target(_ pixelBuffer: CVPixelBuffer, table: SurfaceTextureTable, width: Int, height: Int, frame: UInt64) -> CompositorPasses.NV12Target? {
@@ -283,8 +359,9 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         guard completionThread != nil || resources != nil else { return }
         stopping.store(true, ordering: .releasing)
         pending.signal()
-        if completionThread != nil {
+        if let t = completionThread {
             finished.wait()
+            t.join()
             completionThread = nil
         }
         labels?.stop()
@@ -317,10 +394,13 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
                 continue
             }
             cb.waitUntilCompleted()
+            let wakeTime = HostClock.now()
             let gpuStart = HostTime(nanoseconds: UInt64(max(0, cb.gpuStartTime) * 1e9))
             let gpuEnd = HostTime(nanoseconds: UInt64(max(0, cb.gpuEndTime) * 1e9))
             let tick = slot.tick, tickTime = slot.tickTime, submitTime = slot.submitTime
             let previewBuffer = slot.previewBuffer, multiviewBuffer = slot.multiviewBuffer
+            _ = completionWakeLagMaxNs.max((wakeTime - gpuEnd).nanoseconds, ordering: .relaxed)
+            attributeSkips(submitTime: submitTime, gpuEnd: gpuEnd, wakeTime: wakeTime, tick: tick)
             // 先放资源、放行渲染线程，再派发
             slot.releaseFrame()
             latestCompletedSlot.store(slot.index, ordering: .releasing)
@@ -399,6 +479,23 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         stateLock.lock(); defer { stateLock.unlock() }
         return auxRings?.residentBytes ?? 0
     }
+
+    /// 跳拍归因计数（W1-B3）：GPU 侧晚 / 完成线程晚。两者之和 = 因在途满而 .skipped 的次数（完成线程处理完之后）。
+    public var skipAttribution: (gpuLate: UInt64, completionLate: UInt64) {
+        (skippedGPULate.load(ordering: .acquiring), skippedCompletionLate.load(ordering: .acquiring))
+    }
+    /// 完成线程"GPU 完成 → 醒来"的窗口最大延迟，读后清零。
+    public func takeCompletionWakeLagMax() -> HostDuration {
+        HostDuration(nanoseconds: completionWakeLagMaxNs.exchange(0, ordering: .acquiringAndReleasing))
+    }
+    /// 跳拍时最旧在途帧年龄的窗口最大值，读后清零。
+    public func takeSkipOldestAgeMax() -> HostDuration {
+        HostDuration(nanoseconds: skipOldestAgeMaxNs.exchange(0, ordering: .acquiringAndReleasing))
+    }
+    /// 完成线程的实时策略是否生效（prepare 之后有效）。
+    public var completionThreadIsRealtime: Bool { completionThread?.appliedTimeConstraint ?? false }
+    /// 完成线程的 mach 端口（测试读回策略用；prepare 之后有效）。
+    var completionThreadPort: thread_t { completionThread?.machPort ?? 0 }
 
     /// 预热后应为 0：稳态每个 IOSurface 都命中。W3-B2 起输出环的纹理不进这张表（建环时包好），这里只剩输入。
     var textureCreateCount: Int { table?.createCount ?? 0 }

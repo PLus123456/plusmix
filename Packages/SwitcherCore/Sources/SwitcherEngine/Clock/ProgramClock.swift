@@ -133,6 +133,10 @@ public final class ProgramClock: @unchecked Sendable {
     }
     /// 实时策略是否生效（start 之后有效）。
     public var isRealtime: Bool { realtime.load(ordering: .acquiring) }
+    /// 从内核读回时钟线程（= 渲染线程）的 time-constraint 策略（start 之后有效；线程结束后端口可能已失效，返回 nil）。
+    public func readBackTimeConstraint() -> (isDefault: Bool, period: UInt32, computation: UInt32, constraint: UInt32)? {
+        thread?.readBackTimeConstraint()
+    }
     /// 线程是否在跑。
     public var isRunning: Bool { thread != nil && !stopRequested.load(ordering: .acquiring) }
 

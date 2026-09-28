@@ -59,6 +59,8 @@ public final class NativeThread: @unchecked Sendable {
     public private(set) var appliedTimeConstraint = false
     /// 设置实时策略的返回码（KERN_SUCCESS = 0）。
     public private(set) var timeConstraintResult: kern_return_t = KERN_SUCCESS
+    /// 线程的 mach 端口（start 之后有效；测试用 thread_policy_get 读回策略）。
+    public private(set) var machPort: thread_t = 0
     private let ready = DispatchSemaphore(value: 0)
 
     public init(config: NativeThreadConfig, body: @escaping @Sendable () -> Void) {
@@ -95,13 +97,14 @@ public final class NativeThread: @unchecked Sendable {
         var name = config.name
         if name.utf8.count > 63 { name = String(name.utf8.prefix(63))! }
         pthread_setname_np(name)
+        machPort = pthread_mach_thread_np(pthread_self())
         if let tc = config.timeConstraint {
             var policy = thread_time_constraint_policy_data_t(period: tc.period, computation: tc.computation,
                                                               constraint: tc.constraint, preemptible: tc.preemptible ? 1 : 0)
             let count = mach_msg_type_number_t(MemoryLayout<thread_time_constraint_policy_data_t>.size / MemoryLayout<integer_t>.size)
             let kr = withUnsafeMutablePointer(to: &policy) { p in
                 p.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { ip in
-                    thread_policy_set(pthread_mach_thread_np(pthread_self()), thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY), ip, count)
+                    thread_policy_set(machPort, thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY), ip, count)
                 }
             }
             timeConstraintResult = kr
@@ -118,6 +121,22 @@ public final class NativeThread: @unchecked Sendable {
         guard let t = thread, !joined else { return }
         joined = true
         pthread_join(t, nil)
+    }
+
+    /// 读回这条线程的 time-constraint 策略（thread_policy_get，get_default = false）。挂了策略：isDefault = false、参数 = 设置值；
+    /// 普通线程：isDefault = true、内核默认值（探针见 reports/w1-core-3.md §2）。线程没起 / 调用失败为 nil。
+    public func readBackTimeConstraint() -> (isDefault: Bool, period: UInt32, computation: UInt32, constraint: UInt32)? {
+        guard machPort != 0 else { return nil }
+        var policy = thread_time_constraint_policy_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<thread_time_constraint_policy_data_t>.size / MemoryLayout<integer_t>.size)
+        var getDefault: boolean_t = 0
+        let kr = withUnsafeMutablePointer(to: &policy) { p in
+            p.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { ip in
+                thread_policy_get(machPort, thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY), ip, &count, &getDefault)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return nil }
+        return (getDefault != 0, policy.period, policy.computation, policy.constraint)
     }
 
     /// 当前线程就是这条线程。
