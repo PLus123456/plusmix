@@ -24,7 +24,8 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
     - W3-E5 App 相对路径 / 状态行 / LastSession（w3-app-6 = cd72bfe → 合入）：相对路径相对节目文件（用例修前占位 fps 0 → 修后 live）、状态行按 output 对号、LastSession 进 UserConfig 目录、删 MIDINotificationAnchor；App 95 用例 94 过 0 失败 1 跳（摄像头权限这轮由系统对话框给了、那条真跑过）。
     - W1-B3 启动停顿 / 突发跳拍（w1-core-3 = 98ee850 → 合入）：停顿根因在 App 启动顺序（时钟起在 t0 之后 472 ms），引擎加 warmUp() / clockStartLag、渲染器首帧空渲染，App 顺序归 W3-E6（prompt 84）；突发跳拍是系统突发让整个进程非实时线程和 GPU 一起停 100 ms，加完成线程实时策略与 skipped 归因；gate4 w1b3 第二次 19 / 19（V1 1.993、V2 0）、第一次 V2 = 8 一次突发；Core 三包 0 失败、参考图一张没动。
     - W3-E6 App 启动顺序（w3-app-7 = e0960b3 → 合入，Opus）：预热完再定 t0；真 App 冷启动 clockStartLag 491–507 ms / missed 29–30 → 0 / 0；App 99 用例 97 过 0 失败 2 跳。MIDI 冷启动（第一次连 MIDIServer 约 0.6 s）仍在主线程，只是不再拖时钟。
-    - W1-A4 frameprobe 内存（w1-testkit-4，Opus）：进行中。
+    - W1-A4 frameprobe 内存（w1-testkit-4 = 2af7b53 → 合入，Opus）：根因不是缺池而是多声道音频每块 reserveCapacity 的 O(n²) 重拷；10 分钟录像峰值 7.6 GB → 172 MB、1 小时 41 GB → 795 MB，输出逐字节相同；TestKit 71 用例 0 失败。
+    - W4-B2 发布脚本收尾（w4-release-2，Opus）：进行中。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
