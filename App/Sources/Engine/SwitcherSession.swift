@@ -55,6 +55,29 @@ final class SwitcherSession {
     private(set) var isRunning = false
     /// 引擎第 0 拍的时刻（start 时定）。
     private(set) var t0: HostTime = .zero
+    /// 最近一次起好的起步记录（start 成功后有；诊断 / 测试看）。
+    private(set) var startReport: StartReport?
+
+    /// 一次起步的记录（诊断，W3-E6）：各段耗时、定 t0 之后花掉多少提前量、引擎报的时钟起晚。W1-B3 当时靠临时探针才量到这几个数
+    /// （reports/w1-core-3.md §1.1），现在每次起都记下并打一行日志；AppController 另存进程里第一次起好的那份（冷启动只在它身上）。
+    struct StartReport: Equatable, Sendable {
+        /// 控制层 start（推送源 / API / MIDI）。进程里第一次连 MIDIServer 时 ≈ 0.6 s。
+        var controlMs: Double
+        /// 引擎预热（渲染器 prepare + 首帧空渲染、状态机线程、第 0 拍快照）；0 = 没单独预热（在引擎 start 里顺带做了）。
+        var warmUpMs: Double
+        /// 建输入并注册（帧槽 → 引擎、音频环 → 音频引擎）。
+        var inputsMs: Double
+        /// 音频引擎 start(clock:)。
+        var audioMs: Double
+        /// 引擎 start(t0:)。
+        var engineStartMs: Double
+        /// 提前量：t0 = 定 t0 那一刻 + 它。
+        var leadMs: Double
+        /// 定 t0 之后到调引擎 start 之前花掉的时间（超过提前量，时钟就起在 t0 之后）。
+        var spentAfterT0Ms: Double
+        /// 引擎报的时钟起晚（Engine.clockStartLag）；准时为 0。
+        var clockStartLagMs: Double
+    }
 
     private var lastSnapshot: MixerSnapshot?
     private var pollTimer: Timer?
@@ -138,10 +161,13 @@ final class SwitcherSession {
     /// 起引擎：先按初始快照建好输入并注册，再起控制层 / 音频 / 引擎，再 start 输入（合成源到 t0 才出第一帧），最后按快照起输出。
     func start(leadMilliseconds: Double = 300) async throws {
         guard !isRunning else { return }
-        t0 = HostClock.now() + HostDuration(milliseconds: leadMilliseconds)
+        let begin = HostClock.now()
+        t0 = begin + HostDuration(milliseconds: leadMilliseconds)
         let spec = TickClockSpec(t0: t0, frameRate: format.frameRate)
         inputs.reconcile(state, timing: programTiming())
+        let afterInputs = HostClock.now()
         await control.start()
+        let afterControl = HostClock.now()
         if let e = control.apiError { notify(e) }
         if let e = control.midiError { notify(e) }
         if let reason = audio.fallbackReason { notify(reason) }
@@ -150,7 +176,13 @@ final class SwitcherSession {
         } catch {
             notify(L("notice.audioFailed", "\(error)"))
         }
+        let afterAudio = HostClock.now()
         try await engine.start(t0: t0)
+        let afterEngine = HostClock.now()
+        record(StartReport(controlMs: (afterControl - afterInputs).milliseconds, warmUpMs: 0, inputsMs: (afterInputs - begin).milliseconds,
+                           audioMs: (afterAudio - afterControl).milliseconds, engineStartMs: (afterEngine - afterAudio).milliseconds,
+                           leadMs: leadMilliseconds, spentAfterT0Ms: (afterAudio - begin).milliseconds,
+                           clockStartLagMs: engine.clockStartLag.milliseconds))
         isRunning = true
         inputs.startAll()
         // 多画面电平表不再挂在这里 1 Hz 喂（G4 检查点的胶水），改由 meterFeed 按 50 ms 的 AudioEngineStatus 喂（W3-E3）
@@ -169,6 +201,13 @@ final class SwitcherSession {
         }
         RunLoop.main.add(timer, forMode: .common)   // 拖窗口 / 模态期间也要分发
         pollTimer = timer
+    }
+
+    /// 记下起步记录并打一行日志（与 headless 起步时打的"t0 距现在 … ⚠️ 起晚了"同一个用途）。
+    private func record(_ r: StartReport) {
+        startReport = r
+        NSLog("节目起步：控制层 %.1f ms、引擎预热 %.1f ms、输入 %.1f ms、音频 %.1f ms、引擎 start %.1f ms；定 t0 之后用掉 %.1f ms（提前量 %.0f ms），时钟起晚 %.1f ms",
+              r.controlMs, r.warmUpMs, r.inputsMs, r.audioMs, r.engineStartMs, r.spentAfterT0Ms, r.leadMs, r.clockStartLagMs)
     }
 
     /// 停：API → 输出封口 → Stats → 输入 → 引擎（排空在途帧）→ 音频引擎 → 推送源 / 命令循环。

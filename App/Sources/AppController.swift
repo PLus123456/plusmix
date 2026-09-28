@@ -10,6 +10,8 @@ final class AppController {
     private(set) var session: SwitcherSession?
     /// 上一次 replaceSession 抛的错（测试看）。
     private(set) var lastError: (any Error)?
+    /// 进程里第一次起好的会话的起步记录（启动时那个：第一次连 MIDIServer 这类冷启动只在它身上发生；诊断 / 测试看，W3-E6）。
+    private(set) var firstStartReport: SwitcherSession.StartReport?
     /// 是否在测试宿主里跑（不恢复上次、不写"上次文件"、录到临时目录、API 端口由系统分配、快捷键 / MIDI 表在临时目录、固定 zh-Hans）。
     let isTestHost: Bool
     /// UserDefaults（测试宿主用独立 suite）。
@@ -129,6 +131,7 @@ final class AppController {
             windowController.bind(session: s)
             panels.bind(session: s)
             try await s.start()
+            if firstStartReport == nil { firstStartReport = s.startReport }
             if let hotkeyTableError { windowController.bottomBar.showNotice(hotkeyTableError) }
         } catch {
             lastError = error
