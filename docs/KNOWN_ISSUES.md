@@ -25,7 +25,7 @@ S0 / S1 不许出现在已发布版本的表里——下面 0.1.0 候选表里�
 
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
-| S1（发布） | 没有 Apple Developer Program 账号：构建只能 ad-hoc 签名——Gatekeeper 拦（"无法验证开发者"）、公证 / staple / spctl 不通过、虚拟摄像头扩展装不上、Sparkle 不能装更新 | 所有用户 | 右键 → 打开能起；虚拟摄像头 / 自动更新在正式签名前用不了 | reports/w4-release.md §2 BLOCKED 表；docs/release/signing.md | 用户：注册账号 + Team ID + Developer ID 证书 + notarytool 凭据 → `DEVELOPMENT_TEAM=… make archive` → docs/release/checklist-first-signed-run.md。**发布阻塞项** |
+| S1（发布） | 没有 Apple Developer Program 账号：构建只能 ad-hoc 签名——Gatekeeper 拦（"无法验证开发者"）、公证 / staple / spctl 不通过、虚拟摄像头扩展装不上、Sparkle 不能装更新 | 所有用户 | 第一次打开被拦后到 系统设置 › 隐私与安全性 › 底部"仍要打开"（macOS 15 起右键 → 打开对未公证的 App 不再管用）；虚拟摄像头 / 自动更新在正式签名前用不了 | reports/w4-release.md §2 BLOCKED 表；docs/release/signing.md | 用户：注册账号 + Team ID + Developer ID 证书 + notarytool 凭据 → `DEVELOPMENT_TEAM=… make archive` → docs/release/checklist-first-signed-run.md。**发布阻塞项** |
 | S1（发布） | bundle id 仍是占位 `com.example.switcher`（Stream Deck 插件 UUID 是 `com.plusmix.switcher`，两边不一致）；发布后不能改 | 发布身份 | — | docs/release/bundle-id.md | 用户定域名 → 检查点跑 `scripts/release/set-bundle-id.sh <前缀>` 一次提交。**发布阻塞项** |
 | S2 | Sparkle 更新源 / 公钥未配置（`SPARKLE_FEED_URL` / `SPARKLE_PUBLIC_ED_KEY` 为空）：这份构建不会检查更新，偏好设置里写"未配置" | 所有用户 | 手动下载新版本 | docs/release/sparkle.md | 随远程仓库与 bundle id 一起定 |
 | S2 | 依赖钉在 swift-collections 1.6.0（1.7.0 要 Swift 6.4 运行时，macOS 15 / 26 上一起就崩）；本版本只在 macOS 27.0 上验证过，15 / 26.x 没有机器验（BLOCKED-机器） | macOS 15 / 26 用户 | — | docs/release/dependencies.md；reports/issues/W3C2-g5-swift-collections-1.7-dyld-crash.md | 借一台 26.x / 15 机器各起一次 App 与 frameprobe |
