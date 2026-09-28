@@ -71,7 +71,13 @@ final class InputRuntime {
     /// 给某路开一个分支槽（ISO 录制 / Aux）；没有这路或分支用完为 nil。用完 `releaseBranch`。
     func openBranch(input number: Int) -> LockFreeFrameSlot? { entries[number]?.tee.addBranch() }
 
-    func releaseBranch(_ slot: LockFreeFrameSlot, input number: Int) { entries[number]?.tee.removeBranch(slot) }
+    /// 某路还回来一个分支时回调（参数 = 输入编号），在还分支的调用栈上同步调。W3-E4：源是输入 n 的 NDI 发送在分支用完时靠它重新要分支（OutputRuntime）。
+    var onBranchReleased: ((Int) -> Void)?
+
+    func releaseBranch(_ slot: LockFreeFrameSlot, input number: Int) {
+        entries[number]?.tee.removeBranch(slot)
+        onBranchReleased?(number)
+    }
 
     private func remove(_ number: Int) {
         guard let entry = entries.removeValue(forKey: number) else { return }

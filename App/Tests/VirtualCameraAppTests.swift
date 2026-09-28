@@ -79,4 +79,83 @@ final class VirtualCameraAppTests: XCTestCase {
     func testL1_virtualCameraEgress_requiresSignedExtension() throws {
         throw XCTSkip("BLOCKED-签名：没有 Team ID / Apple 签发的证书，扩展无法激活；解锁条件 = DEVELOPMENT_TEAM=<TeamID> make gen 后从 /Applications 运行、菜单「输出 → 虚拟摄像头 → 安装 / 激活扩展」，再用 Tools/frameprobe 对第二个进程（AVCaptureSession 选 Switcher 摄像头）抓的帧解帧号")
     }
+
+
+    /// W3-E4 交付第 1 条（issue W3E3-virtual-camera-source-picker-ignored，用户 2026-09-27 选 2）：虚拟摄像头页去掉"来源"下拉、写明送 PGM
+    /// （设计方案 §2 / §3：PGM 那块 IOSurface 同时交给编码器 / NDI / 虚拟摄像头 / 录制器；VirtualCameraOutput 只发 frame.program）。
+    /// `setVirtualCamera(enabled:)` 只管开关、新建的输出 source = PGM；已存节目里带别的 source（PVW，W3-E3 之前页上能选出来）的虚拟摄像头输出
+    /// 打开后照样起消费者、收 PGM 帧、不报错，页上不动它的 source。
+    func testW3E4_1_virtualCameraPageSendsPGM_noSourcePicker_savedShowWithOtherSourceStillPGM() throws {
+        // 1. 页面本身：没有来源下拉、有"送 PGM"的说明。SwiftUI 的元素进程内 AX 遍历看不到（AccessibilityTests 的注），查源码里 virtualCameraTab 那一段
+        let file = try AppTest.repoRoot().appendingPathComponent("App/Sources/Settings/OutputSettingsPanel.swift")
+        let source = try String(contentsOf: file, encoding: .utf8)
+        let start = try XCTUnwrap(source.range(of: "private var virtualCameraTab: some View {"))
+        let rest = source[start.lowerBound...]
+        let tab = String(rest[..<(rest.range(of: "\n    }\n")?.lowerBound ?? rest.endIndex)])
+        XCTAssertFalse(tab.contains("sourcePicker(") || tab.contains("Picker("), "虚拟摄像头页不该有来源下拉：\n\(tab)")
+        XCTAssertTrue(tab.contains("\"outputSettings.vcam.sourceNote\"") && tab.contains("\"source.program\""), "页上要写明送 PGM：\n\(tab)")
+        let cjk = try NSRegularExpression(pattern: #"[一-鿿　-〿！-～]"#)
+        for lang in L10n.supportedLanguages {
+            let note = L10n.string("outputSettings.vcam.sourceNote", language: lang)
+            XCTAssertTrue(note.contains("PGM"), "\(lang)：\(note)")
+            if lang == "en" { XCTAssertNil(cjk.firstMatch(in: note, range: NSRange(note.startIndex..., in: note)), note) }
+        }
+
+        // 2. 页上开：新建的输出 source = PGM；关 / 开走 setOutputEnabled，不碰设置
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        session.send(.setProgram(input: 1))
+        session.send(.setPreview(input: 2))
+        let since = session.control.bus.recentEntries().last?.sequence ?? 0
+        let page = AppTest.controller.panels.showOutputSettings(tab: .virtualCamera).model
+        page.setVirtualCamera(enabled: true)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.contains { $0.kind == .virtualCamera && $0.enabled } })
+        let number = try XCTUnwrap(page.virtualCameraOutput?.number)
+        XCTAssertEqual(session.state.output(number)?.settings.source, .program, "页上新建的虚拟摄像头输出送 PGM")
+        XCTAssertTrue(AppTest.waitUntil(3) { session.aux.virtualCamera != nil })
+        page.setVirtualCamera(enabled: false)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number)?.enabled == false && session.aux.virtualCamera == nil })
+        let commands = session.control.bus.recentEntries().filter { $0.sequence > since }.map(\.command)
+        XCTAssertFalse(commands.contains { if case .setOutputSettings = $0 { return true } else { return false } }, "开关不改设置：\(commands)")
+        page.removeOutput(number)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number) == nil })
+        AppTest.controller.panels.closeAll()
+
+        // 3. 已存节目里的虚拟摄像头输出带 source = PVW：打开节目 → 照样起消费者、收 PGM 帧（60 fps）、没有错误 / 被拒的命令；页上开关不动它的 source
+        var show = session.makeShow()
+        show.outputs.append(OutputState(number: 9, kind: .virtualCamera, name: "旧写法", enabled: true, settings: OutputSettings(source: .preview)))
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-vcam-source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("PVW 来源.\(ShowDocuments.fileExtension)")
+        try show.save().write(to: url)
+        let controller = AppTest.controller
+        let opened = AppTest.expectationBox()
+        Task { await controller.openShow(url: url); opened.value = true }
+        XCTAssertTrue(AppTest.waitUntil(20) { opened.value && controller.session?.isRunning == true }, "\(String(describing: controller.lastError))")
+        let loaded = try XCTUnwrap(controller.session)
+        XCTAssertNil(controller.lastError)
+        XCTAssertEqual(loaded.state.output(9)?.settings.source, .preview, "文件里的 source 原样带着（页上不改它）")
+        XCTAssertEqual(loaded.state.output(9)?.enabled, true, "文件里来的节目只清录制 / 推流的 enabled，虚拟摄像头照开")
+        XCTAssertTrue(AppTest.waitUntil(5) { loaded.aux.virtualCamera != nil }, "带 PVW 来源的虚拟摄像头输出照样起消费者")
+        let cam = try XCTUnwrap(loaded.aux.virtualCamera)
+        XCTAssertTrue(AppTest.waitUntil(5) { loaded.inputs.runtimeState(of: 1) == .live })
+        let framesBefore = cam.countersSnapshot.framesIn
+        AppTest.pump(seconds: 1.5)
+        let received = cam.countersSnapshot.framesIn - framesBefore
+        XCTAssertGreaterThan(received, 60, "PGM 帧在送进虚拟摄像头（60 fps，1.5 s 应 ≥ 60）")
+        XCTAssertTrue(AppTest.waitUntil(3) { loaded.stats?.display.contains { $0.kind == "virtualCamera" && $0.output == 9 } ?? false },
+                      "Stats.display[] 应有这路：\(String(describing: loaded.stats?.display))")
+        XCTAssertEqual(loaded.control.bus.counters.rejected, 0, "没有命令被拒")
+        let page2 = controller.panels.showOutputSettings(tab: .virtualCamera).model
+        XCTAssertEqual(page2.virtualCameraOutput?.number, 9)
+        page2.setVirtualCamera(enabled: false)
+        XCTAssertTrue(AppTest.waitUntil(3) { loaded.state.output(9)?.enabled == false && loaded.aux.virtualCamera == nil })
+        XCTAssertEqual(loaded.state.output(9)?.settings.source, .preview, "页上开关不改 source")
+        page2.setVirtualCamera(enabled: true)
+        XCTAssertTrue(AppTest.waitUntil(3) { loaded.state.output(9)?.enabled == true && loaded.aux.virtualCamera != nil })
+        XCTAssertEqual(loaded.control.bus.counters.rejected, 0)
+        print("虚拟摄像头（W3-E4）：页上新建 source = PGM；文件里 PVW 来源的输出 1.5 s 收 \(received) 帧，\(loaded.virtualCameraStatusText)")
+        controller.panels.closeAll()
+    }
 }

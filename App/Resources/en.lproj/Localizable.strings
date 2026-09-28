@@ -453,11 +453,13 @@
 "ndi.bandwidth.audioOnly" = "Audio only";
 "ndi.bandwidth.highest" = "Highest (full resolution)";
 "ndi.bandwidth.lowest" = "Lowest (preview stream)";
+"ndi.status.connections" = " · receivers: %ld";
 "ndi.status.disabled" = "Not sending (off)";
 "ndi.status.dropped" = " (%ld dropped in queue)";
+"ndi.status.failed" = "Failed to start: NDI SDK present, but initialize / send_create failed (see the log)";
 "ndi.status.publishing" = "Sending · %ld frames";
 "ndi.status.starting" = "Starting…";
-"ndi.status.unavailable" = "Unavailable (no NDI SDK / initialization failed)";
+"ndi.status.unavailable" = "Unavailable: no NDI SDK (install the NDI SDK for Apple and rebuild)";
 "notice.apiFailed" = "API failed to start (%@): %@";
 "notice.audioDeviceFallback" = "Audio device “%@” unavailable (%@); using the null device";
 "notice.audioFailed" = "Audio engine failed to start: %@";
@@ -465,7 +467,8 @@
 "notice.hotkeyTableUnreadable" = "Shortcut table %@ is unreadable; using defaults: %@";
 "notice.isoBranchUnavailable" = "ISO input %d does not exist or has no free branch (at most %d ISO / Aux per input)";
 "notice.midiFailed" = "MIDI failed to start: %@";
-"notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now";
+"notice.ndiBranchRestored" = "NDI output %d: a branch on input %d became free; reconnected and sending";
+"notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now, recovers automatically when one is freed";
 "notice.ndiFailed" = "NDI output %d failed to start: %@";
 "notice.ndiStarted" = "NDI output %d started: %@";
 "notice.ndiStopped" = "NDI output %d stopped";
@@ -576,6 +579,7 @@
 "outputSettings.vcam.install" = "Install…";
 "outputSettings.vcam.name" = "Virtual Camera";
 "outputSettings.vcam.outputStatus" = "Output status";
+"outputSettings.vcam.sourceNote" = "Always sends PGM (the program picture), the same program frame recording / streaming / NDI get; the source cannot be chosen.";
 "outputSettings.vcam.status" = "Install status";
 "outputSettings.vcam.title" = "Virtual camera";
 "outputSettings.vcam.uninstall" = "Uninstall";

@@ -23,7 +23,7 @@ final class OutputSettingsModel: ObservableObject {
     @Published private(set) var virtualCameraStatus: String = ""
     /// 最近一行 Stats 的 display[]（提案 013：外部显示 / 虚拟摄像头的状态与帧数都读它）。
     @Published private(set) var displayStats: [Stats.DisplayEntry] = []
-    /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；与 outputs 里带编码器的输出同序）。
+    /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；每项带输出编号 `output`，按它对号——提案 019）。
     @Published private(set) var encoderStats: [Stats.EncoderEntry] = []
     var send: ((Command) -> Void)?
     /// 新建录制输出的默认目录。
@@ -217,11 +217,10 @@ final class OutputSettingsModel: ObservableObject {
         return n
     }
 
-    /// 改显示器 / 来源：只写正式字段 `OutputSettings.display`（提案 013）。没经过 Show.load 的内存状态（API 直接 addOutput 的老写法）
-    /// 可能还带过渡键 extra["displayID"] / ["fallbackToMain"]：先按 Show.load 同一套规则搬进正式字段、清掉旧键，再改。
+    /// 改显示器 / 来源：只写正式字段 `OutputSettings.display`（提案 013），只改要改的那一项。状态机里的状态不会带输出的过渡键
+    /// （P4 起 addOutput / setOutputSettings / loadShow 进 reducer 时都先按 Show.load 同一套规则搬迁），这里不用再搬（W3-E4 删了多余的调用）。
     func setExternalDisplay(_ number: Int, screenNumber: UInt32?, source: OutputSource?) {
         updateOutput(number) { s in
-            s = s.migratingLegacyKeys()
             if let screenNumber {
                 var d = s.display ?? DisplayOutputSettings()
                 d.displayID = screenNumber
@@ -234,7 +233,6 @@ final class OutputSettingsModel: ObservableObject {
     /// 显示器不在时退回主屏（true）还是黑着等它回来（false，默认）。
     func setExternalFallback(_ number: Int, on: Bool) {
         updateOutput(number) { s in
-            s = s.migratingLegacyKeys()
             var d = s.display ?? DisplayOutputSettings()
             d.fallbackToMain = on
             s.display = d
@@ -273,7 +271,7 @@ final class OutputSettingsModel: ObservableObject {
 
     /// 一路 NDI 发送的状态行：只读 Stats.encoder 里它那一项（铁律 4）。
     func ndiStatus(output number: Int) -> String {
-        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number, outputs: state.outputs)
+        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number)
         return OutputStatusText.ndi(enabled: state.output(number)?.enabled ?? false, entry: entry)
     }
 
@@ -281,12 +279,14 @@ final class OutputSettingsModel: ObservableObject {
 
     var virtualCameraOutput: OutputState? { state.outputs.first { $0.kind == .virtualCamera } }
 
-    func setVirtualCamera(enabled: Bool, source: OutputSource) {
+    /// 开关（setOutputEnabled）；没有虚拟摄像头输出就加一个 source = PGM 的。来源不可选（W3-E4，issue W3E3-virtual-camera-source-picker-ignored 选 2）：
+    /// VirtualCameraOutput 只发 PGM 帧（设计方案 §2 / §3：PGM 那块 IOSurface 同时交给编码器 / NDI / 虚拟摄像头 / 录制器），
+    /// 已存节目里带别的 source 的虚拟摄像头输出照样当 PGM——这里不动它的 source、也不报错。
+    func setVirtualCamera(enabled: Bool) {
         if let o = virtualCameraOutput {
-            if o.settings.source != source { updateOutput(o.number) { $0.source = source } }
             setOutputEnabled(o.number, on: enabled)
         } else {
-            add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: source)))
+            add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: .program)))
         }
     }
 
@@ -626,10 +626,10 @@ struct OutputSettingsView: View {
 
     private var virtualCameraTab: some View {
         Section(L("outputSettings.vcam.title")) {
-            Toggle(L("outputSettings.vcam.enabled"), isOn: Binding(get: { model.virtualCameraOutput?.enabled ?? false },
-                                                                   set: { model.setVirtualCamera(enabled: $0, source: model.virtualCameraOutput?.settings.source ?? .program) }))
-            sourcePicker(Binding(get: { model.virtualCameraOutput?.settings.source ?? .program },
-                                 set: { model.setVirtualCamera(enabled: model.virtualCameraOutput?.enabled ?? false, source: $0) }))
+            Toggle(L("outputSettings.vcam.enabled"), isOn: Binding(get: { model.virtualCameraOutput?.enabled ?? false }, set: { model.setVirtualCamera(enabled: $0) }))
+            // 来源不可选：固定送 PGM（W3-E4；设计方案 §2 / §3 的数据流）
+            LabeledContent(L("outputSettings.source"), value: L("source.program"))
+            Text(L("outputSettings.vcam.sourceNote")).font(.caption).foregroundStyle(.secondary)
             LabeledContent(L("outputSettings.vcam.outputStatus"), value: model.virtualCameraOutputStatus)
             LabeledContent(L("outputSettings.vcam.status"), value: model.virtualCameraStatus)
             HStack {
