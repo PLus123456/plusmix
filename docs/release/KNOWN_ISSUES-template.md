@@ -8,7 +8,7 @@ S0 / S1 不许出现在已发布版本的表里（发布门槛第 2 条）——
 
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
-| S2 | 首次启动没有 Developer ID 签名的构建，Gatekeeper 拦截 | 用未签名 DMG 的用户 | 右键 → 打开；正式版是公证过的 | docs/release/signing.md | 正式版无此问题 |
+| S2 | 首次启动没有 Developer ID 签名的构建，Gatekeeper 拦截 | 用未签名 DMG 的用户 | 第一次打开被拦后到 系统设置 › 隐私与安全性 › 底部"仍要打开"（macOS 15 起右键 → 打开不再能绕过）；正式版是公证过的 | docs/release/signing.md | 正式版无此问题 |
 | S2 | 没装 NDI 运行库的机器 NDI 输出 / 输入标 unavailable | 从源码编译且没装 NDI SDK 的机器 | 装 SDK 后重编；发布包已带运行库 | reports/w4-release.md | — |
 | S3 | 虚拟摄像头扩展在系统设置里的名字要重新激活扩展后才本地化 | 从旧版本升级 | 停用再启用扩展 | reports/w3-outputs-4.md §5 第 5 条 | — |
 

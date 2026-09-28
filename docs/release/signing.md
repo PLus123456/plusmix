@@ -43,8 +43,13 @@ SUFeedURL / SUPublicEDKey（都非空才 sparkle_configured）、架构、最低
 ## Gatekeeper 与干净机器验证（人工）
 
 1. 另建一个 macOS 用户账户（没装过本 App、没给过 TCC）。
-2. 拷 DMG 过去，双击、拖到 /Applications、首次启动：正式版应无任何拦截；ad-hoc 版会被拦（"无法验证开发者"），右键 → 打开也能起——这是预期，记进报告即可。
-3. 输出 → 虚拟摄像头 → 安装 / 激活扩展 → 系统设置允许（扩展显示名 "PlusMix 虚拟摄像头" / "PlusMix Virtual Camera"）→ FaceTime 里选 "Switcher"（0.1.0 里摄像头设备名仍是代码名）。
+2. 把 `PlusMix-<版本>.dmg` 按"下载"的方式拿过去：从 Release 草稿下载或 AirDrop（会带隔离属性 `com.apple.quarantine`）。在本机直接拷给另一个账户**不带**隔离属性，
+   Gatekeeper 根本不查，测不出拦截——那样就先 `xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" PlusMix-<版本>.dmg` 再挂载。
+   双击、拖到 /Applications、首次启动：正式版（公证 + staple）应无任何拦截；ad-hoc 版会被拦，弹窗只有"完成"和"移到废纸篓"。
+   **macOS 15 起右键 → 打开不再能绕过**：点"完成"，到 系统设置 › 隐私与安全性，拉到底部"安全性"一栏，刚被拦的 PlusMix 旁边点"仍要打开"
+   （尝试打开后大约一小时内才有这个按钮），按提示输登录密码或触控 ID 确认，之后就能正常起。这是预期，记进报告即可。
+3. 输出 → 虚拟摄像头 → 安装 / 激活扩展 → 系统设置允许（扩展显示名 "PlusMix 虚拟摄像头" / "PlusMix Virtual Camera"）→ FaceTime 里选 "PlusMix"
+   （摄像头设备名 = `VirtualCameraConstants.deviceName`，改名合入后 G5 改成了产品名）。
 4. 偏好设置 → 更新 → 检查更新…（docs/release/sparkle.md §5 的本地 appcast）。
 5. 帮助 → 导出诊断包… 出一份，打开看没有密钥。
 

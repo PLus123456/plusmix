@@ -7,7 +7,7 @@
 | `.github/workflows/ci.yml` job `l0-l1` | 每次 push、每个 PR | `pin-deps.sh check` → lint（`scripts/release/ci-ownership.sh`：禁词 / 版本号 / 依赖方向 / 归属 / 自加检查）→ `make gen` → `make test`（六包 swift test、两工具冒烟、App xcodebuild test） | 红 = 提交有问题 |
 | `ci.yml` job `l2` | 每个 PR（l0-l1 过了之后） | `make gate4-run`：10 分钟集成场景（V1–V7、A1–A4、E1–E3、E5、C1–C4） | 红 = PR 不能合 |
 | `.github/workflows/nightly.yml` | 每天 03:00（Asia/Shanghai）、手动 | `make soak-1h`（L4 缩短版）→ `make perf-baseline`（L5，与 baselines/ 比，退步 > 10% 非零） | 红 = 性能退步或长稳失败；两个目标是 W4-A 的，合入前第一步就红并说明 |
-| `.github/workflows/release.yml` | `v*` tag、手动 | 版本号与 tag 一致 → 导入证书 → `make archive`（签名、公证、DMG）→ appcast → GitHub Release 草稿 | 没 secrets 就失败：不出未签名的发布包 |
+| `.github/workflows/release.yml` | `v*` tag、手动 | 版本号与 tag 一致 → 导入证书 → `make archive`（签名、公证、DMG）→ appcast → GitHub Release 草稿；产物名从 project.yml 的 `PRODUCT_NAME` 读（`PlusMix-<版本>.dmg`，与 archive.sh 同一读法） | 没 secrets 就失败：不出未签名的发布包 |
 
 所有跑引擎的步骤都包 `caffeinate -u -i -d -s`（W4-A 第 7 条）。`actionlint` 零告警（`make release-test` 的 R6；`.github/actionlint.yaml` 登记了 runner 标签）。
 

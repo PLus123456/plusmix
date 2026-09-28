@@ -8,7 +8,7 @@
 | ci.md | GitHub Actions self-hosted runner：三个工作流、装 runner、secrets |
 | versioning.md | 版本号与变更日志规范；CHANGELOG-template.md、KNOWN_ISSUES-template.md 是 G5 用的模板 |
 | dependencies.md | 依赖钉版本（swift-collections 1.6.0）与升级流程 |
-| bundle-id.md | 正式 bundle id 待用户定域名；`set-bundle-id.sh` 一键切换（含 Stream Deck 插件 UUID） |
+| bundle-id.md | 正式 bundle id 已定 `com.plusmix.switcher`（用户 2026-09-28 定前缀 com.plusmix，G5 用 `set-bundle-id.sh` 切）；脚本一键切换（含 Stream Deck 插件 UUID） |
 | third-party.md | 随包分发的 NDI 运行库、Sparkle 等的许可证与商标声明 |
 | checklist-first-signed-run.md | 第一次带 Team ID 跑通时要验的清单（虚拟摄像头四步、扩展 CPU、L1、警告） |
 
@@ -41,3 +41,4 @@ make release-verify TARGET=.build/release/0.1.0/PlusMix-0.1.0.dmg VERIFY_FLAGS=-
 W4-B 还动了：根 Makefile 两行 include、App/Info.plist 两个 Sparkle 键、App/Switcher-signed.entitlements 两条硬化运行时权限、App/Sources/Release/ 四个文件与三处挂接、
 App/Tests/ReleaseTests.swift、CameraExtension/Resources/ 两个 InfoPlist.strings、THIRD_PARTY/NDI 与 Sparkle、scripts/xcode-workspace-Package.resolved 的 sparkle 一项——
 都是 prompt 71 点名的交付，逐条列在 reports/w4-release.md §4 请求归属行补记。
+W4-B2（prompt 83，分支 w4-release-2）收尾：R11 改读当前前缀、`scripts/check-links.sh` 把文档链接检查挂进 make lint、release.yml 产物名跟 PRODUCT_NAME、本目录跟 bundle id 裁定与改名。

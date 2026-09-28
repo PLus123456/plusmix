@@ -29,7 +29,7 @@ zip 里（`DiagnosticBundle.write`）：
 | show.switcher.json | 当前节目（`Show.save()` 后过 `ShowRedaction`） | `streamKey` 等键的值 → `<redacted>`；url 查询串里 passphrase / key / token / password / secret / streamid / auth / user / pass / pwd 的值 → `<redacted>`；主机 / 端口 / 路径保留 |
 | config/ | hotkeys.json、midi.json（存在的那些） | — |
 | crashes/ | MetricKit 负载 + 系统崩溃报告 + INDEX.txt | 只在同意时有内容；负载里有二进制路径与调用栈，无节目内容 |
-| log.txt | `log show --last 120m --style compact --info --predicate 'process == "PlusMix" OR process == "<扩展 bundle id>"'` | 只在同意时有；可能含文件路径与设备名（对话框里说了） |
+| log.txt | `log show --last 120m --style compact --info --predicate 'process == "PlusMix" OR process == "com.plusmix.switcher.camera-extension"'`（App 进程名 = 可执行名 = PRODUCT_NAME；扩展进程名 = 它的 bundle id） | 只在同意时有；可能含文件路径与设备名（对话框里说了） |
 
 `ShowRedaction` 在 JSON 层做、不依赖 Show 的字段名（新加的密钥字段只要名字含 key / token / password 之类就会被盖掉——见 `secretKeys`；不含的话在这里加）。
 测试：App/Tests/ReleaseTests.swift R7（整包扫描无密钥）、R8（去密钥规则）、R9（落盘 / 列表 / prune）。
