@@ -46,8 +46,8 @@ struct DiagnosticBundle {
             snap.crashFiles = CrashDiagnostics.shared.store.entries() + systemCrashReports()
             snap.crashSummary = CrashDiagnostics.shared.store.summaryLines()
         }
-        let bundleID = Bundle.main.bundleIdentifier ?? "Switcher"
-        snap.processNames = [Bundle.main.infoDictionary?["CFBundleExecutable"] as? String ?? "Switcher", VirtualCameraConstantsBridge.extensionBundleIdentifier(bundleID)]
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.plusmix.switcher"
+        snap.processNames = [ProductName.executable, VirtualCameraConstantsBridge.extensionBundleIdentifier(bundleID)]
         let opts = options
         return try await Task.detached(priority: .userInitiated) { try write(snap, options: opts, destination: destination) }.value
     }
@@ -145,11 +145,11 @@ struct DiagnosticBundle {
         return keep.prefix(4).joined(separator: "; ")
     }
 
-    /// 系统的崩溃报告（~/Library/Logs/DiagnosticReports/Switcher*.ips / .crash）。
+    /// 系统的崩溃报告（~/Library/Logs/DiagnosticReports/<可执行名>*.ips / .crash；可执行名 = PRODUCT_NAME = PlusMix，W4-D）。
     static func systemCrashReports() -> [URL] {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/DiagnosticReports")
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.lastPathComponent.hasPrefix("Switcher") && ["ips", "crash"].contains($0.pathExtension) }
+        return files.filter { $0.lastPathComponent.hasPrefix(ProductName.executable) && ["ips", "crash"].contains($0.pathExtension) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }.suffix(20).map { $0 }
     }
 
@@ -161,7 +161,7 @@ struct DiagnosticBundle {
             let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyyMMdd-HHmm"; return f.string(from: Date())
         }()
         let staging = fm.temporaryDirectory.appending(path: "switcher-diagnostics-\(UUID().uuidString)", directoryHint: .isDirectory)
-        let root = staging.appending(path: "Switcher-diagnostics-\(stamp)", directoryHint: .isDirectory)
+        let root = staging.appending(path: "\(ProductName.display)-diagnostics-\(stamp)", directoryHint: .isDirectory)   // zip 里的顶层目录用产品名（W4-D）
         defer { try? fm.removeItem(at: staging) }
         try fm.createDirectory(at: root.appending(path: "crashes"), withIntermediateDirectories: true)
         try fm.createDirectory(at: root.appending(path: "config"), withIntermediateDirectories: true)

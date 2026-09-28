@@ -68,7 +68,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         let window = MainWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                 backing: .buffered, defer: false)
-        window.title = "Switcher \(SwitcherVersion.current)"
+        window.title = "\(ProductName.display) \(SwitcherVersion.current)"   // 产品名 PlusMix（W4-D）
         window.minSize = NSSize(width: 1100, height: 700)
         window.backgroundColor = Theme.windowBackground
         window.collectionBehavior.insert(.fullScreenPrimary)
@@ -178,11 +178,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         bottomBar.resetStats()
         mixerPanel.clearMeters()
         guard let session else {
-            window?.title = "Switcher \(SwitcherVersion.current)"
+            window?.title = "\(ProductName.display) \(SwitcherVersion.current)"
             return
         }
         inputStrip.setTextureSize(width: session.format.width, height: session.format.height)
-        window?.title = "Switcher \(SwitcherVersion.current) — \(session.name)"
+        window?.title = "\(ProductName.display) \(SwitcherVersion.current) — \(session.name)"
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
         statsToken = session.observeStats { [weak self] stats in self?.apply(stats: stats) }
         noticeToken = session.observeNotices { [weak self] message in self?.bottomBar.showNotice(message) }

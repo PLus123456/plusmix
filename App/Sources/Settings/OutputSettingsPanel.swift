@@ -351,7 +351,7 @@ struct OutputSettingsView: View {
     @ObservedObject var model: OutputSettingsModel
     @State private var newStreamURL = ""
     @State private var newStreamKey = ""
-    @State private var newNDIName = "Switcher"
+    @State private var newNDIName = "PlusMix"   // App 侧的 NDI 源默认名用产品名（W4-D）；包内默认值不动
     @State private var newExternalScreen: UInt32 = NSScreen.main?.displayNumber ?? 0
     @State private var newExternalSource: OutputSource = .program
 
