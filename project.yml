@@ -59,6 +59,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: PlusMix                # W4-D：产品名（用户 2026-09-28 定）→ PlusMix.app / CFBundleName / 可执行名；target / scheme / 模块仍叫代码名 Switcher
+        PRODUCT_MODULE_NAME: Switcher        # W4-D：Swift 模块名默认跟 PRODUCT_NAME 走，这里钉住代码名（App/Tests 的 @testable import Switcher、-Swift.h 都靠它）
         PRODUCT_BUNDLE_IDENTIFIER: com.plusmix.switcher
         INFOPLIST_FILE: App/Info.plist   # 手写，见文件内注释；不用 XcodeGen 生成（它会把版本写死成 1.0）
         GENERATE_INFOPLIST_FILE: NO
