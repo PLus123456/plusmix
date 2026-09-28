@@ -13,7 +13,7 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 5. **第 6 条**：`make archive-adhoc` + `make release-test`，读 verify.json（spctl 在 ad-hoc 上必 rejected：BLOCKED-账号）。
 6. **1 小时 soak 交叉验证**：`scripts/soak/soak.sh --hours 1 --label g5-1h --powermetrics off --report reports/G5-soak-1h.md`（非交互：不接摄像头）。
 7. **docs/KNOWN_ISSUES.md**（从模板建）、reports/G5.md（§7 模板 + 六条逐条判定 + 阻塞项归属 + 发布说明草稿）、本报告。
-8. 没做的：打 tag、改版本号、快进 main（判定不发；快进由用户定）。
+8. 没做的：打 tag、改版本号（判定不发）。main 的快进用户看完报告后指示做了（§3 第 2 条）。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
@@ -34,14 +34,14 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 ## 3. 没做的和原因
 
 1. **没打 tag、没改版本号**：任何硬性项不过就不发（prompt 80）；版本号仍 0.1.0，`bump-version.sh` 留给真正发布的那次。
-2. **没快进 main**：G4 的先例是用户授权后再快进；这次判定不发，release/0.1 留作分支，用户看完报告决定（合入的四路都是完成态、lint 全绿，快进没有技术障碍）。
+2. **main 的快进**：先按 G4 先例留给用户定；用户 2026-09-28 看完报告指示快进，已 `git -C /Users/plus/plusmix merge --ff-only release/0.1`（main 的 worktree 当时干净）。
 3. **8 小时长稳没重跑**：S2 的根因在 W2-A（文件输入解码线程无自动释放池），修好前重跑只会再红一次；且 8 小时要用户终端（摄像头授权、sudo）。本会话只跑了 1 小时交叉验证。
 4. **L3 人工清单没做**：docs/checklists/G4.md 的 38 + 17 项要 TCC / 硬件 / 人眼，Claude 会话做不了；清单里 0 项有执行记录，报告如实写 BLOCKED-人工。
 5. **E7–E9 没重跑**：要 `sudo scripts/netem.sh serve`；推流实现自 G3 起没变，沿用 G3-net 结果。
 6. **NDI 回环 L1 / 编译矩阵没重跑**：`gate4-ndi.sh` / `gate4-matrix.sh` 会重拼 reports/G4.md；Inputs / NDISend 包自 g4g 起没变，沿用 G4 结果。
 7. **bundle id 没切、Sparkle 更新源没定**：只有用户能定域名；脚本（`set-bundle-id.sh`）备好。
 8. **CHANGELOG.md 没建**：不在 G5 归属里；发布说明草稿在 reports/G5.md §9。
-9. **OWNERSHIP 没改**：W4-A / W4-B 的越界待用户认领；G5 行没有 docs/OWNERSHIP.md（G4 行有），我不动。
+9. **OWNERSHIP 改了两处认领 + 两行新增**（用户 2026-09-28 授权"都认领"）：W4-A 行加 Makefile、W4-B 行加 20 个文件；G5 行补 docs/OWNERSHIP.md 与 docs/plan/prompts/ 的记录；按补充规则 6 加 W2-A3 行（w2-inputs-3）与 prompt 74（泄漏修复，用户指派 agent 直接做）。
 10. **App 的相对路径（W4C 问题单，约 10 行）没修**：G5 行没有 App 胶水额度（`~App/:50` 只在 G2–G4 行），进 KNOWN_ISSUES。
 11. **docs/testing/README.md 的 G5 那行没改**（仍写"待做 / 未生成"）：docs/ 归 W4-C，不在 G5 归属里；下一个动 docs/ 的会话把它改成"2026-09-28 · 不发（S2 泄漏、签名账号）· reports/G5.md"。
 12. **check-links 没挂进 make lint**：scripts/ 不在 G5 归属里；一行 `scripts/check-links.sh` 转调即可，下一个检查点或用户认领后做。
