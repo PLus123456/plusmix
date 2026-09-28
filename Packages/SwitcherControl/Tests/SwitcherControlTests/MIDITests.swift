@@ -40,7 +40,7 @@ final class MIDITests: XCTestCase {
         // 范围检查：通道 1–16、控制器 / 音符 0–127
         XCTAssertThrowsError(try MIDIMapTable.load(from: Data(#"{"version":1,"mappings":[{"trigger":{"cc":{"channel":17,"controller":1}},"action":{"tbar":{}}}]}"#.utf8)))
         XCTAssertThrowsError(try MIDIMapTable.load(from: Data(#"{"version":1,"mappings":[{"trigger":{"note":{"channel":1,"note":128}},"action":{"tbar":{}}}]}"#.utf8)))
-        XCTAssertTrue(MIDIMapTable.defaultFileURL.path.hasSuffix("Switcher/midi.json"))
+        XCTAssertTrue(MIDIMapTable.defaultFileURL.path.hasSuffix("Application Support/PlusMix/midi.json"), MIDIMapTable.defaultFileURL.path)
     }
 
     // MARK: 纯函数映射
@@ -292,6 +292,20 @@ final class MIDITests: XCTestCase {
             controller.stop()
             XCTAssertFalse(controller.isRunning, "第 \(round) 轮")
         }
+    }
+
+    // MARK: W2-C2 产品名跟改
+
+    /// 产品改名 PlusMix 之后包里用户看得到的名字：用户配置目录（~/Library/Application Support/PlusMix，hotkeys.json / midi.json 都在它下面）、
+    /// CoreMIDI 客户端 / 输入口的默认名。0.1.0 没发布过，不做旧目录迁移（reports/issues/W4D-packages-user-visible-code-name-leftovers.md 第 2 条）。
+    func testW2C2_productName_userConfigDirAndMIDIClientName() {
+        XCTAssertEqual(UserConfig.directory.lastPathComponent, "PlusMix")
+        XCTAssertTrue(UserConfig.directory.path.hasSuffix("Library/Application Support/PlusMix"), UserConfig.directory.path)
+        XCTAssertEqual(HotkeyTable.defaultFileURL, UserConfig.directory.appending(path: "hotkeys.json"))
+        XCTAssertEqual(MIDIMapTable.defaultFileURL, UserConfig.directory.appending(path: "midi.json"))
+        let f = BusFixture()
+        defer { f.stop() }
+        XCTAssertEqual(MIDIController(bus: f.bus).clientName, "PlusMix")
     }
 
 }

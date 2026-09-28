@@ -70,6 +70,9 @@ final class APIServerTests: XCTestCase {
         let (status, json) = try await get(s.baseURL.appending(path: "/api/v1/state"))
         XCTAssertEqual(status, 200)
         XCTAssertEqual(json["version"] as? String, SwitcherVersion.current)
+        // W2-C2：响应头里的服务器名是产品名
+        let (_, raw) = try await URLSession.shared.data(from: s.baseURL.appending(path: "/api/v1/state"))
+        XCTAssertEqual((raw as? HTTPURLResponse)?.value(forHTTPHeaderField: "Server"), "PlusMix")
         XCTAssertEqual(json["sequence"] as? Int, 0)
         XCTAssertEqual(json["tick"] as? Int, 0)
         let state = try XCTUnwrap(json["state"] as? [String: Any])
