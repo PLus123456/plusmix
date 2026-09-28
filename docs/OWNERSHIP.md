@@ -66,6 +66,7 @@
 | W1-A4 | frameprobe 内存随录像长度线性涨 | `w1-testkit-4` | `Packages/SwitcherTestKit/` `Tools/frameprobe/` | prompt 82；用户 2026-09-28 指派 agent；从 main 开 |
 | W4-B2 | 发布脚本收尾（R11、check-links 挂 lint、发布文档） | `w4-release-2` | `scripts/release/` `scripts/check-links.sh` `docs/release/` `.github/` `docs/user/` | prompt 83；用户 2026-09-28 指派 agent；从 W4-D 合入后的 main 开；.github/ 只改 release.yml 的产物名（issue W4D-w4-release-github-release-workflow-product-name）；docs/user/ 只改 Application Support 目录名那几行 |
 | W3-E6 | App 启动顺序：control.start / engine.warmUp 挪到定 t0 之前（W1-B3 定位的启动停顿根治） | `w3-app-7` | `App/` | prompt 84；用户 2026-09-28 指派 agent（普通任务）；从 W1-B3 合入后的 main 开 |
+| UIA | 界面对照调研：竞品 28 版实机截图 → 菜单逻辑、功能缺口、目视检查（只写文档，不改代码） | `claude/vmix-28-guide-menu-ui-c83cd1` | `docs/ui-study/` `docs/OWNERSHIP.md` | 用户 2026-09-28 直接指派（没有 prompt 文件，会话里按用户原话做：先研究菜单逻辑、再看缺哪些功能、再做目视检查并记录，可以多派 agent）；从 main（c836cce）开；本文件只改了本行这一条记录（不记下来 check-ownership 就红，检查点合并时请复核这次授权，同 W1-A3 / W3-C2 / W4-D 先例）；另外只写了所有分支都允许的 `reports/<分支名>.md` 与 `reports/issues/` |
 
 ## 补充规则（P0 加的，落地方案里没写明；不同意就改这里）
 
