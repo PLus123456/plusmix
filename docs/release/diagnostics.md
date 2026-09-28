@@ -4,7 +4,7 @@
 
 - `App/Sources/Release/CrashDiagnostics.swift`：App 一起来（非测试宿主）就 `MXMetricManager.shared.add(subscriber)`；系统在**下次启动**交付上次的崩溃 / 卡死 / CPU / 磁盘异常负载，
   启动时也把 `pastDiagnosticPayloads` 收一遍（按结束时间去重）。
-- 落盘：`~/Library/Application Support/Switcher/Diagnostics/<crash|hang|cpu|disk|diagnostic>-yyyyMMdd-HHmmss.json`（`MXDiagnosticPayload.jsonRepresentation()` 原样，
+- 落盘：`~/Library/Application Support/PlusMix/Diagnostics/<crash|hang|cpu|disk|diagnostic>-yyyyMMdd-HHmmss.json`（`MXDiagnosticPayload.jsonRepresentation()` 原样，
   含调用栈的 `callStackTree`，未符号化），只留最近 100 份。**不上传任何东西**（后续方案要求"用户同意后上传"，本期只做落盘 + 同意后导出）。
 - 符号化：负载里有 `binaryUUID` / `offsetIntoBinaryTextSegment`，配 xcarchive 里的 dSYM（`.build/release/<版本>/PlusMix.xcarchive/dSYMs/`）用 `atos -o PlusMix.app.dSYM/Contents/Resources/DWARF/PlusMix -l <加载地址> <地址>`；
   发布时把 xcarchive（含 dSYM）存好，GitHub Release 草稿里附 release-report.md，dSYM 在 runner 的 artifact 里。
