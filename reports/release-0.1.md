@@ -18,7 +18,8 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 
 10. **用户 2026-09-28 下午："改名也派个 agent 做吧，另外查到的那些 bug 依次派个 agent 干了，之后全都合进 main"**：本会话依次派 agent、检查、`--no-ff` 合入 release/0.1、快进 main。记录（合入顺序）：
     - W4-D 改名 PlusMix（w4-rename = bd03b15 → 合入 023e138）：63 文件；agent 自验 App 92 用例 88 过 0 失败 4 跳、archive-adhoc 出 PlusMix.app / PlusMix-0.1.0.dmg、release-test 9 / 10（R11 已知）、check-links 119、lint 全绿；检查点顺手改 VirtualCameraConstants 的 4 个设备 / 流名（2bc4088，VirtualCameraTests 12 / 12），把 release.yml 产物名、Application Support 目录名 / MIDI 客户端名 / serverName、App 侧跟改分别加进 prompt 83 / 78 / 79。
-    - W2-A4（w2-inputs-4）：进行中。
+    - W2-A4 文件输入空拍 / 饿死（w2-inputs-4 = 52cdfee → 合入 8760ce5）：ProRes 1080p60 循环 20 圈空拍 2 → 0，速率 8 十秒 7 圈 → 401 圈、lateWakes 298 万 → 0，fileprobe 466 Mb/s ProRes 300 s starved 128 → 0；Inputs 109 用例 0 失败；lateWakes / framesRejected 口径变了（8 小时数据别直接比）。
+    - W2-D2 推流首秒音频（w2-stream-2）：进行中。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
