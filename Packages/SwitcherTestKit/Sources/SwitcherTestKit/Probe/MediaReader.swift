@@ -56,16 +56,22 @@ public enum MediaReader {
         var readings: [PatternProbe.Reading] = []
         var profiles: [Int: ScanProfile] = [:]
         var index = 0
-        while let sb = output.copyNextSampleBuffer() {
-            guard let pb = CMSampleBufferGetImageBuffer(sb) else { continue }
-            let pts = CMSampleBufferGetPresentationTimeStamp(sb).seconds
-            let reading = PatternProbe.read(pixelBuffer: pb) ?? .unreadable
-            frames.append(ProbeFrame(index: index, ptsSeconds: pts, reading: reading))
-            readings.append(reading)
-            if profileAt?(pts) == true, let p = ScanProfile.measure(pixelBuffer: pb) { profiles[index] = p }
-            index += 1
-            if index % 100 == 0 { progress?(index) }
-        }
+        var more = true
+        repeat {
+            // 每帧一个自动释放池（见 `readAudio` 循环前的说明）
+            more = autoreleasepool { () -> Bool in
+                guard let sb = output.copyNextSampleBuffer() else { return false }
+                guard let pb = CMSampleBufferGetImageBuffer(sb) else { return true }
+                let pts = CMSampleBufferGetPresentationTimeStamp(sb).seconds
+                let reading = PatternProbe.read(pixelBuffer: pb) ?? .unreadable
+                frames.append(ProbeFrame(index: index, ptsSeconds: pts, reading: reading))
+                readings.append(reading)
+                if profileAt?(pts) == true, let p = ScanProfile.measure(pixelBuffer: pb) { profiles[index] = p }
+                index += 1
+                if index % 100 == 0 { progress?(index) }
+                return true
+            }
+        } while more
         if reader.status == .failed { throw ReaderError.readerFailed(reader.error?.localizedDescription ?? "unknown") }
         let info = ProbeVideoInfo(width: Int(size.width), height: Int(size.height), nominalFps: Double(nominal),
                                   durationSeconds: timeRange.duration.seconds, pixelFormat: "bgra")
@@ -88,19 +94,21 @@ public enum MediaReader {
         var readings: [PatternProbe.Reading] = []
         var profiles: [Int: ScanProfile] = [:]
         for (i, name) in names.enumerated() {
-            let data = try Data(contentsOf: url.appendingPathComponent(name))
-            guard data.count == expected else { throw ReaderError.badRawFrame("\(name) 是 \(data.count) 字节，\(width)×\(height) NV12 应为 \(expected)") }
-            let pts = Double(i) / fps
-            var copy = data
-            let (reading, profile) = copy.withUnsafeMutableBytes { raw -> (PatternProbe.Reading, ScanProfile?) in
-                let base = raw.baseAddress!
-                let planes = TestPattern.PixelPlanes.nv12(luma: base, lumaBytesPerRow: width, chroma: base + width * height, chromaBytesPerRow: width)
-                return (PatternProbe.read(planes, width: width, height: height),
-                        profileAt?(pts) == true ? ScanProfile.measure(planes, width: width, height: height) : nil)
+            try autoreleasepool {
+                let data = try Data(contentsOf: url.appendingPathComponent(name))
+                guard data.count == expected else { throw ReaderError.badRawFrame("\(name) 是 \(data.count) 字节，\(width)×\(height) NV12 应为 \(expected)") }
+                let pts = Double(i) / fps
+                var copy = data
+                let (reading, profile) = copy.withUnsafeMutableBytes { raw -> (PatternProbe.Reading, ScanProfile?) in
+                    let base = raw.baseAddress!
+                    let planes = TestPattern.PixelPlanes.nv12(luma: base, lumaBytesPerRow: width, chroma: base + width * height, chromaBytesPerRow: width)
+                    return (PatternProbe.read(planes, width: width, height: height),
+                            profileAt?(pts) == true ? ScanProfile.measure(planes, width: width, height: height) : nil)
+                }
+                frames.append(ProbeFrame(index: i, ptsSeconds: pts, reading: reading))
+                readings.append(reading)
+                if let profile { profiles[i] = profile }
             }
-            frames.append(ProbeFrame(index: i, ptsSeconds: pts, reading: reading))
-            readings.append(reading)
-            if let profile { profiles[i] = profile }
         }
         let info = ProbeVideoInfo(width: width, height: height, nominalFps: fps, durationSeconds: Double(frames.count) / fps, pixelFormat: "nv12")
         return VideoResult(info: info, frames: frames, readings: readings, profiles: profiles)
@@ -117,7 +125,7 @@ public enum MediaReader {
         // 直通读第一个样本：编码类型与 AVFoundation 打算裁掉的 priming 样本数
         var codec = ""
         var trimmed = 0
-        do {
+        try autoreleasepool {
             let pass = try AVAssetReader(asset: asset)
             let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
             pass.add(out)
@@ -145,31 +153,40 @@ public enum MediaReader {
         var samples: [Float] = []
         var sampleRate = 0.0, channels = 1
         var start: Double?
-        while let sb = output.copyNextSampleBuffer() {
-            guard let fd = CMSampleBufferGetFormatDescription(sb), let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee else { continue }
-            sampleRate = asbd.mSampleRate
-            channels = Int(asbd.mChannelsPerFrame)
-            if start == nil {
-                start = CMSampleBufferGetPresentationTimeStamp(sb).seconds
-                samples.reserveCapacity(expectedSampleCount(trackSeconds: trackSeconds, sampleRate: sampleRate))
-            }
-            guard let block = CMSampleBufferGetDataBuffer(sb) else { continue }
-            let length = CMBlockBufferGetDataLength(block)
-            let frameCount = length / (4 * channels)
-            var raw = [Float](repeating: 0, count: frameCount * channels)
-            let status = raw.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
-            guard status == kCMBlockBufferNoErr else { throw ReaderError.readerFailed("CMBlockBufferCopyDataBytes \(status)") }
-            if channels == 1 {
-                samples.append(contentsOf: raw)
-            } else {
-                let scale = 1 / Float(channels)
-                for i in 0..<frameCount {
-                    var s: Float = 0
-                    for c in 0..<channels { s += raw[i * channels + c] }
-                    samples.append(s * scale)
+        // 每块一个自动释放池：整条文件的循环在一个 async 函数里一口气跑完（中间没有挂起点），取样本时 AVFoundation / CoreMedia
+        // 若往调用线程 autorelease 东西，没有这层池就要攒到整个循环结束。macOS 27 上量过，这两个循环每块往调用线程放的是 0 个
+        // （每块一条的 NSKVONotifying_AVAssetReaderTrackOutput 在 AVFoundation 自己的线程上，我们管不着），内存涨是上面
+        // expectedSampleCount 那一条；池留着防别的系统版本 / 以后在循环里查 reader.status 之类（W1-A4，W2-A3 在裸线程上撞过）。
+        var more = true
+        repeat {
+            more = try autoreleasepool { () throws -> Bool in
+                guard let sb = output.copyNextSampleBuffer() else { return false }
+                guard let fd = CMSampleBufferGetFormatDescription(sb), let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee else { return true }
+                sampleRate = asbd.mSampleRate
+                channels = Int(asbd.mChannelsPerFrame)
+                if start == nil {
+                    start = CMSampleBufferGetPresentationTimeStamp(sb).seconds
+                    samples.reserveCapacity(expectedSampleCount(trackSeconds: trackSeconds, sampleRate: sampleRate))
                 }
+                guard let block = CMSampleBufferGetDataBuffer(sb) else { return true }
+                let length = CMBlockBufferGetDataLength(block)
+                let frameCount = length / (4 * channels)
+                var raw = [Float](repeating: 0, count: frameCount * channels)
+                let status = raw.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
+                guard status == kCMBlockBufferNoErr else { throw ReaderError.readerFailed("CMBlockBufferCopyDataBytes \(status)") }
+                if channels == 1 {
+                    samples.append(contentsOf: raw)
+                } else {
+                    let scale = 1 / Float(channels)
+                    for i in 0..<frameCount {
+                        var s: Float = 0
+                        for c in 0..<channels { s += raw[i * channels + c] }
+                        samples.append(s * scale)
+                    }
+                }
+                return true
             }
-        }
+        } while more
         if reader.status == .failed { throw ReaderError.readerFailed(reader.error?.localizedDescription ?? "unknown") }
         let info = ProbeAudioInfo(sampleRate: sampleRate, channels: channels, startSeconds: start ?? 0, sampleCount: samples.count)
         // 直通样本的 trim 是按格式描述的采样率计的；解码输出采样率相同（AAC-LC 48 kHz 就是 48 kHz），不换算
