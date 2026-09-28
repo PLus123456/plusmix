@@ -7,6 +7,8 @@
 #   SPARKLE_PRIVATE_KEY         scripts/release/sparkle-keys.sh export 出来的私钥文件内容
 # Variables：SPARKLE_FEED_URL（appcast 的固定地址）、SPARKLE_PUBLIC_ED_KEY（公钥 base64）
 # 没配 secrets 时本工作流在"导入证书"那步失败——不会退成 ad-hoc 发布（发布包必须签名公证）。
+# 产物名 = project.yml 里 App target 的 PRODUCT_NAME（W4-D 改名后是 PlusMix → PlusMix-<版本>.dmg）：ver 这步用 scripts/release/archive.sh 同一条 sed 读出来，
+# 后面的更新说明 / 上传 / Release 资产与标题都用 steps.ver.outputs.product，改产品名只改 project.yml 一处。
 name: Release
 
 on:
@@ -41,14 +43,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 版本号与 tag 一致
+      - name: 版本号与 tag 一致；产物名
         id: ver
         run: |
           ver=$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\{0,1\}\([0-9][0-9A-Za-z.-]*\)"\{0,1\}.*/\1/p' project.yml | head -1)
           case "$GITHUB_REF_NAME" in
             v*) [ "v$ver" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME 与 project.yml 的 MARKETING_VERSION $ver 不一致（版本号归 G5 改）"; exit 1; } ;;
           esac
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          # 与 archive.sh 同一读法：第一个 PRODUCT_NAME 是 App target 的（扩展的在后面、等于它的 bundle id）
+          product=$(sed -n 's/^[[:space:]]*PRODUCT_NAME:[[:space:]]*"\{0,1\}\([A-Za-z0-9][A-Za-z0-9._-]*\)"\{0,1\}.*/\1/p' project.yml | head -1)
+          [ -n "$product" ] || { echo "::error::读不到 project.yml 的 PRODUCT_NAME（App target）"; exit 1; }
+          { echo "version=$ver"; echo "product=$product"; } >> "$GITHUB_OUTPUT"
 
       - name: 导入 Developer ID 证书到临时钥匙串
         env:
@@ -74,10 +79,12 @@ jobs:
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           VERSION: ${{ steps.ver.outputs.version }}
+          PRODUCT: ${{ steps.ver.outputs.product }}
         run: |
           [ -n "$SPARKLE_PRIVATE_KEY" ] || { echo "::error::没有 SPARKLE_PRIVATE_KEY"; exit 1; }
           dir=".build/release/$VERSION"
-          scripts/release/changelog.sh "$VERSION" > "$dir/Switcher-$VERSION.md" 2>/dev/null || echo "（本版本没有变更日志小节）" > "$dir/Switcher-$VERSION.md"
+          # 更新说明与 DMG 同名（<产品名>-<版本>.md），generate_appcast 才会把它嵌进 appcast
+          scripts/release/changelog.sh "$VERSION" > "$dir/$PRODUCT-$VERSION.md" 2>/dev/null || echo "（本版本没有变更日志小节）" > "$dir/$PRODUCT-$VERSION.md"
           printf '%s' "$SPARKLE_PRIVATE_KEY" | scripts/release/appcast.sh "$dir" --ed-key-file - \
             --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/" --embed-release-notes
 
@@ -93,8 +100,8 @@ jobs:
         with:
           name: release-${{ steps.ver.outputs.version }}-${{ github.run_id }}
           path: |
-            .build/release/${{ steps.ver.outputs.version }}/Switcher-*.dmg
-            .build/release/${{ steps.ver.outputs.version }}/Switcher-*.dmg.sha256
+            .build/release/${{ steps.ver.outputs.version }}/${{ steps.ver.outputs.product }}-*.dmg
+            .build/release/${{ steps.ver.outputs.version }}/${{ steps.ver.outputs.product }}-*.dmg.sha256
             .build/release/${{ steps.ver.outputs.version }}/appcast.xml
             .build/release/${{ steps.ver.outputs.version }}/release-report.md
             .build/release/${{ steps.ver.outputs.version }}/verify.json
@@ -107,7 +114,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.ver.outputs.version }}
+          PRODUCT: ${{ steps.ver.outputs.product }}
         run: |
           dir=".build/release/$VERSION"
-          gh release create "$GITHUB_REF_NAME" --draft --title "Switcher $VERSION" --notes-file "$dir/Switcher-$VERSION.md" \
-            "$dir/Switcher-$VERSION.dmg" "$dir/Switcher-$VERSION.dmg.sha256" "$dir/appcast.xml" "$dir/release-report.md"
+          gh release create "$GITHUB_REF_NAME" --draft --title "$PRODUCT $VERSION" --notes-file "$dir/$PRODUCT-$VERSION.md" \
+            "$dir/$PRODUCT-$VERSION.dmg" "$dir/$PRODUCT-$VERSION.dmg.sha256" "$dir/appcast.xml" "$dir/release-report.md"
