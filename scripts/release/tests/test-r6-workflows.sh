@@ -6,6 +6,11 @@
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 wf="$REPO_ROOT/.github/workflows"
+# 先验断言库本身（W4-B2 探针）：bash 3.2 的 printf 内建往管道是按行写的，旧的 `printf | grep -q` 在前几行命中时 grep 先退出、printf 吃 SIGPIPE，
+# pipefail 下整条管道 141 → assert_contains 误报"找不到"、assert_not_contains 误报通过；W4-D 那次 nightly.yml 的 soak-1h（第 1 行）一次性红就是它。
+# 小文件是竞争（负载高时才撞），内容过管道容量（64 KB）时必现，拿大段内容当回归。
+big=$(printf 'marker-first-line\n'; for i in $(seq 1 2000); do printf 'filler line %04d ..........................................\n' "$i"; done)
+assert_contains "$big" "marker-first-line" "assert_contains 对大段内容（${#big} 字节、命中在第 1 行）不误报"
 for f in ci.yml nightly.yml release.yml; do assert_file "$wf/$f" ".github/workflows/$f"; done
 if command -v actionlint >/dev/null 2>&1; then
   out=$(cd "$REPO_ROOT" && actionlint 2>&1); code=$?
