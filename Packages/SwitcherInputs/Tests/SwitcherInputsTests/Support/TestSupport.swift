@@ -157,3 +157,26 @@ extension XCTestCase {
         return condition()
     }
 }
+
+/// 进程的 phys_footprint（task_vm_info；与 Stats 的 rss_mb、fileprobe 同一口径），MB。取不到返回 -1。
+enum ProcessFootprint {
+    static var megabytes: Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        return kr == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
+    }
+}
+
+/// 最小二乘直线拟合的斜率（y 对 x）；点数 < 2 或 x 全相同时返回 0。
+func linearSlope(_ points: [(x: Double, y: Double)]) -> Double {
+    guard points.count >= 2 else { return 0 }
+    let n = Double(points.count)
+    let mx = points.reduce(0) { $0 + $1.x } / n
+    let my = points.reduce(0) { $0 + $1.y } / n
+    var sxy = 0.0, sxx = 0.0
+    for p in points { sxy += (p.x - mx) * (p.y - my); sxx += (p.x - mx) * (p.x - mx) }
+    return sxx > 0 ? sxy / sxx : 0
+}
