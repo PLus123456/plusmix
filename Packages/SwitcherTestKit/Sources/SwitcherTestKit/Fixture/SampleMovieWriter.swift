@@ -9,7 +9,7 @@ import VideoToolbox
 ///
 /// 画面由两路 `SyntheticVideoInput.Generator`（A：60 fps 灰 64 ID 0；B：30 fps 灰 192 ID 1）按契约挑帧规则
 /// （每拍取 pts ≤ 拍点的最新帧）离线合成，脚本可在指定拍 Cut / Fade；Fade 第 s + k 拍 progress = k / D，
-/// 混合在 NV12 上逐字节线性插值。音轨是 `TestSignal`（click 与闪光共用 t0），AAC / PCM / 无三选一。
+/// 混合在 NV12 上逐字节线性插值。音轨是 `TestSignal`（click 与闪光共用 t0），AAC / PCM / 无三选一，默认单声道（`audioChannels` ≥ 2 时每个声道同一路）。
 /// 视频 PTS = n / fps，音频 PTS = 样本序号 / 48000，两者的零点都是 t0，所以文件里闪光与 click 严格同刻。
 public enum SampleMovieWriter {
     /// 脚本事件。转场的几何与 W3-B 的渲染器一致：Fade = 逐像素混合，Wipe = 擦边位置 = 进度（软边取 50% 点），
@@ -58,6 +58,9 @@ public enum SampleMovieWriter {
         public var bitrate = 2_000_000
         public var keyFrameInterval = 120
         public var audio: AudioMode = .aac(bitrate: 128_000)
+        /// 音轨声道数：1 = 单声道；≥ 2 = 每个声道放同一路 `TestSignal`（交错写）。录制器与推流出来的 AAC 都是立体声，
+        /// frameprobe 读多声道音轨走的是另一条分支（先按声道取平均），W1-A4 的内存用例要的就是这条路。
+        public var audioChannels = 1
         /// 源 A / B。
         public var sourceA = SyntheticSourceSettings(frameRate: .fps60, background: .gray(level: 64), patternID: 0, audio: false)
         public var sourceB = SyntheticSourceSettings(frameRate: .fps30, background: .gray(level: 192), patternID: 1, audio: false)
@@ -419,11 +422,17 @@ public enum SampleMovieWriter {
         var videoBytes = 0
         var audioWritten = 0
         var failure: Error?
+        /// 声道数（`Spec.audioChannels`，至少 1）。
+        let channels: Int
         private var chunk = [Float](repeating: 0, count: 4096)
+        /// 多声道时的交错缓冲（chunk 的每个样本抄到每个声道）。
+        private var interleaved: [Float]
 
         init(url: URL, spec: Spec, seconds: Double) throws {
             writer = try AVAssetWriter(outputURL: url, fileType: .mov)
             self.spec = spec
+            channels = max(1, spec.audioChannels)
+            interleaved = channels > 1 ? [Float](repeating: 0, count: 4096 * channels) : []
             signal = SyntheticTimeline(t0: spec.t0, frameRate: spec.frameRate).audioSignal(driftPpm: 0)
             totalAudioSamples = spec.audio == .none ? 0 : Int(seconds * Double(signal.sampleRate))
         }
@@ -460,9 +469,9 @@ public enum SampleMovieWriter {
             case .none:
                 break
             case .aac(let bitrate):
-                settings = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: signal.sampleRate, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: bitrate]
+                settings = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: signal.sampleRate, AVNumberOfChannelsKey: channels, AVEncoderBitRateKey: bitrate]
             case .pcm16:
-                settings = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: signal.sampleRate, AVNumberOfChannelsKey: 1,
+                settings = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: signal.sampleRate, AVNumberOfChannelsKey: channels,
                             AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false]
             }
             if let settings {
@@ -470,9 +479,10 @@ public enum SampleMovieWriter {
                 ai.expectsMediaDataInRealTime = false
                 writer.add(ai)
                 audioInput = ai
+                let frameBytes = UInt32(4 * channels)
                 var asbd = AudioStreamBasicDescription(mSampleRate: Double(signal.sampleRate), mFormatID: kAudioFormatLinearPCM,
-                                                       mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked, mBytesPerPacket: 4, mFramesPerPacket: 1,
-                                                       mBytesPerFrame: 4, mChannelsPerFrame: 1, mBitsPerChannel: 32, mReserved: 0)
+                                                       mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked, mBytesPerPacket: frameBytes, mFramesPerPacket: 1,
+                                                       mBytesPerFrame: frameBytes, mChannelsPerFrame: UInt32(channels), mBitsPerChannel: 32, mReserved: 0)
                 var format: CMAudioFormatDescription?
                 let fs = CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil,
                                                         extensions: nil, formatDescriptionOut: &format)
@@ -492,12 +502,18 @@ public enum SampleMovieWriter {
                 let n = min(chunk.count, totalAudioSamples - audioWritten)
                 let start = Int64(audioWritten)
                 chunk.withUnsafeMutableBufferPointer { signal.render(into: $0.baseAddress!, frameCount: n, startingAt: start) }
+                if channels > 1 {
+                    for i in 0..<n {
+                        for c in 0..<channels { interleaved[i * channels + c] = chunk[i] }
+                    }
+                }
+                let bytes = n * 4 * channels
                 var block: CMBlockBuffer?
-                let bs = CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: n * 4, blockAllocator: nil, customBlockSource: nil,
-                                                            offsetToData: 0, dataLength: n * 4, flags: 0, blockBufferOut: &block)
+                let bs = CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes, blockAllocator: nil, customBlockSource: nil,
+                                                            offsetToData: 0, dataLength: bytes, flags: 0, blockBufferOut: &block)
                 guard bs == noErr, let block else { throw WriterError.writer("CMBlockBuffer \(bs)") }
-                try chunk.withUnsafeBytes { raw in
-                    let r = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: n * 4)
+                try (channels > 1 ? interleaved : chunk).withUnsafeBytes { raw in
+                    let r = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: bytes)
                     guard r == noErr else { throw WriterError.writer("ReplaceDataBytes \(r)") }
                 }
                 var sample: CMSampleBuffer?
