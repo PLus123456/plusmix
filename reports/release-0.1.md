@@ -24,7 +24,7 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 | L0 / L1 六包 | 703 个用例：0 失败；跳 26 → 补跑 5 条后 **682 过、21 跳、0 失败**（补跑的 E7 / E8 / RTMP / SRT / A4 全过） |
 | App | 90 个：88 过、0 失败、2 跳（摄像头 TCC、扩展签名） |
 | L2 10 分钟 g5 | ✅ 20 项全过（V1 2.067 / 2.481 ms、V2 0、V4 设计外 0、V7 ≤ 0.252 帧、A2 0.000 ms、A4 0.208 ms、C1 50 / 50、C3 / C4 0） |
-| L4 8 小时（W4-A） | S1 ✅、A3 ✅（0.00 ms）、**S2 ❌ 60.8 MB/h**、S3 CPU ❌ 60.1%（用户定不阻塞）；1 小时交叉验证 SOAK1H_SHORT |
+| L4 8 小时（W4-A） | S1 ✅、A3 ✅（0.00 ms）、**S2 ❌ 60.8 MB/h**、S3 CPU ❌ 60.1%（用户定不阻塞）；1 小时交叉验证 ✅（S1 13 / 13 窗口、A3 0.00 ms、CPU 54.6%；S2 参考 87 MB/h 同一根因） |
 | L5 | ✅ 无退步（g5b：V1 1.919 / 2.415 ms、CPU 42.0%、GPU 31.8%、VMAF 91.005，全部等于或好于基线；脚本因 V3 p99 +52 µs、GPU p95 +4 pt 退出 1 = W4-A 已记的误报，第一次 g5 被桌面抢 GPU 不采信） |
 | 第 6 条 | ad-hoc 归档走通、`make release-test` 10 / 10 过；spctl rejected / 公证 / staple / Sparkle 装更新 = **BLOCKED-账号 / 签名** |
 | lint / check-links / pin-deps | 全绿 |
