@@ -1,9 +1,9 @@
 #!/bin/bash
-# 由内向外重签一个 Switcher.app（prompt 71 交付 1）。归档 / 导出后我们往包里加了 libndi.dylib 与许可证、删了主二进制里指向 SDK 目录的 LC_RPATH，
+# 由内向外重签一个 PlusMix.app（prompt 71 交付 1；不写死包名与可执行名）。归档 / 导出后我们往包里加了 libndi.dylib 与许可证、删了主二进制里指向 SDK 目录的 LC_RPATH，
 # 外层封条就失效了，所以最后统一签一遍：先包内的 dylib → Sparkle.framework 里的 XPC / Autoupdate / Updater.app → 框架本体 → 系统扩展 → App 本体。
 # 权限表：--entitlements FILE 给 App；--extension-entitlements FILE 给扩展；不给 = 从现有签名里抽（codesign -d --entitlements --xml），保持不变。
 # Developer ID：--options runtime（硬化运行时，公证要求）+ --timestamp；ad-hoc（-s -）不带这两项（Xcode 对 ad-hoc 也是这么做的）。
-# 用法：sign.sh <Switcher.app> (--identity "Developer ID Application: …" | --adhoc) [--entitlements F] [--extension-entitlements F] [--verbose]
+# 用法：sign.sh <PlusMix.app> (--identity "Developer ID Application: …" | --adhoc) [--entitlements F] [--extension-entitlements F] [--verbose]
 set -uo pipefail
 app=""; identity=""; adhoc=0; ent=""; ext_ent=""; verbose=0
 while [ $# -gt 0 ]; do
@@ -18,7 +18,7 @@ while [ $# -gt 0 ]; do
     *) app=$1; shift ;;
   esac
 done
-[ -d "$app" ] && [ -f "$app/Contents/Info.plist" ] || { echo "用法：sign.sh <Switcher.app> --identity ID | --adhoc" >&2; exit 2; }
+[ -d "$app" ] && [ -f "$app/Contents/Info.plist" ] || { echo "用法：sign.sh <PlusMix.app> --identity ID | --adhoc" >&2; exit 2; }
 if [ "$adhoc" = 1 ]; then sign_id="-"; opts=(); else
   [ -n "$identity" ] || { echo "[sign] 要 --identity 或 --adhoc" >&2; exit 2; }
   sign_id=$identity; opts=(--options runtime --timestamp)

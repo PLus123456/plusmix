@@ -1,7 +1,7 @@
 #!/bin/bash
 # 校验发布产物（prompt 71 交付 1 的 spctl -a -vv 验证脚本）：签名（codesign --deep --strict）、Gatekeeper（spctl --assess）、公证票据（stapler validate）、
 # 系统扩展、随包的 libndi.dylib（且主二进制不再指向 SDK 目录）、Sparkle.framework 与 Info.plist 的两个键、版本号。
-# 用法：verify.sh <Switcher.app | Switcher-x.dmg> [--expect-notarized] [--json 输出.json] [--quiet]
+# 用法：verify.sh <PlusMix.app | PlusMix-x.dmg> [--expect-notarized] [--json 输出.json] [--quiet]（可执行名从 CFBundleExecutable 读，不写死）
 #   退出 0：结构与签名都对（ad-hoc 时 spctl 会 rejected，只记录不算失败）；--expect-notarized 时还要求 spctl accepted + 已 staple。
 #   退出 1：签名验不过 / 缺扩展 / 链接了 libndi 却没随包 / Sparkle 缺 / --expect-notarized 没满足。
 set -uo pipefail
@@ -16,7 +16,7 @@ while [ $# -gt 0 ]; do
     *) target=$1; shift ;;
   esac
 done
-[ -e "$target" ] || { echo "用法：verify.sh <Switcher.app | .dmg> [--expect-notarized] [--json out]" >&2; exit 2; }
+[ -e "$target" ] || { echo "用法：verify.sh <PlusMix.app | .dmg> [--expect-notarized] [--json out]" >&2; exit 2; }
 
 declare -a keys=() vals=()   # 结果表（bash 3.2 没有关联数组）
 set_r() { keys+=("$1"); vals+=("$2"); }

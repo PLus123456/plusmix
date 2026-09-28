@@ -1,6 +1,6 @@
 #!/bin/bash
 # 生成 Sparkle appcast（prompt 71 交付 2）：对一个目录里的 DMG（/ zip）跑 generate_appcast，出 appcast.xml（每项带 EdDSA 签名、版本、最低系统）。
-# 同名 .md / .html 文件当该版本的更新说明（scripts/release/changelog.sh X.Y.Z > Switcher-X.Y.Z.md）。
+# 同名 .md / .html 文件当该版本的更新说明（scripts/release/changelog.sh X.Y.Z > PlusMix-X.Y.Z.md，与 DMG 同名）。
 # 用法：appcast.sh <目录> [--download-url-prefix URL] [--account NAME | --ed-key-file FILE|-] [--out appcast.xml]
 #                  [--release-notes-url-prefix URL] [--embed-release-notes] [--link URL] [--maximum-versions N]
 #        appcast.sh --print-bin-dir       打印 Sparkle 工具目录（测试 / 排障用）
