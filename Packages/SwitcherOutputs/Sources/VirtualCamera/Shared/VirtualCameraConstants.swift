@@ -4,16 +4,16 @@ import Foundation
 /// 虚拟摄像头的标识。
 public enum VirtualCameraConstants {
     /// 设备名（FaceTime / QuickTime 的摄像头列表里显示的名字）。
-    public static let deviceName = "Switcher"
+    public static let deviceName = "PlusMix"
     /// 型号。
-    public static let deviceModel = "Switcher Virtual Camera"
+    public static let deviceModel = "PlusMix Virtual Camera"
     /// 设备 UID（主程序按它找设备）。
     public static let deviceUID = "com.plusmix.switcher.virtual-camera.device"
     /// 给其他 App 读的流（扩展的 source stream）。设备 / 流名是系统里给人看的字，用 ASCII（W3-C3：包里不写中文字面量）。
-    public static let sourceStreamName = "Switcher Program"
+    public static let sourceStreamName = "PlusMix Program"
     public static let sourceStreamUID = "com.plusmix.switcher.virtual-camera.source"
     /// 主程序写进来的流（扩展的 sink stream）。
-    public static let sinkStreamName = "Switcher Program Sink"
+    public static let sinkStreamName = "PlusMix Program Sink"
     public static let sinkStreamUID = "com.plusmix.switcher.virtual-camera.sink"
     /// 扩展的 bundle ID（= 主程序 bundle ID + ".camera-extension"；正式 bundle ID 由 W4-B 定，两处一起改）。
     public static let extensionBundleIdentifier = "com.plusmix.switcher.camera-extension"
