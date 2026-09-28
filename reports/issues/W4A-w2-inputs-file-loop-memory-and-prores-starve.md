@@ -1,4 +1,6 @@
-# W4-A → W2-A：文件输入循环播放时每圈涨约 0.5 MB（30 s 片段 = 60 MB/h，8 小时 S2 过不了）；ProRes 422 HQ 片段循环点每圈空一拍、推帧线程大量晚醒
+# W4-A → W2-A：文件输入循环播放时每圈涨约 0.5 MB（30 s 片段 = 60 MB/h，8 小时 S2 实测 60.8 MB/h 红；根因见 §3：解码线程没有自动释放池，每圈的 AVAssetReader 永远不释放）；ProRes 422 HQ 片段循环点每圈空一拍、推帧线程大量晚醒
+
+**用户 2026-09-28 定：S2 必须修**（"S2 肯定要修"），到检查点安排；修法与验证在 §3 末尾。
 
 归属会话 / 分支：W2-A 输入（`Packages/SwitcherInputs/Sources/SwitcherInputs/File/`；若按下面"怎么排除渲染器"证明 FileInput 自身不涨，则转 W1-C / W3-B 的渲染器）
 发现于：W4-A（`w4-soak`，2026-09-27），`make soak-1h`（`.build/soak/1h/`）与本单里的对照实验（`.build/soak/leakhunt/`、`.build/soak/leakhunt2/`）；headless 提交 af2414f 之后

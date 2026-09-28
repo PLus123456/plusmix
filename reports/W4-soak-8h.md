@@ -2,7 +2,7 @@
 
 **判定：❌ 未通过**（S1 ✅；S2 ❌；S3 ❌（CPU）；A3 ✅）
 
-生成：2026-09-28 08:52。数据：`.build/soak/8h/`。脚本：scripts/soak/soak.sh → scripts/soak/soak_report.py（判定库 soakjudge.py）。
+生成：2026-09-28 09:31。数据：`.build/soak/8h/`。脚本：scripts/soak/soak.sh → scripts/soak/soak_report.py（判定库 soakjudge.py）。
 
 ## 1. 版本 / 机器 / 环境（§7 报告头、§2.8）
 
@@ -47,6 +47,7 @@
 | S2 内存增长 | 60.82 MB/h（预热 30 min 后逐分钟 451 点、拟合 7.50 h，R² 0.955；RSS 995 → 1617 MB，最大 1680）；对照：ps 的 RSS（resident）62.23 MB/h | ≤ 10 MB/h | ≤ 2 MB/h | ❌ | —（没有上一版） |
 | S3 CPU | avg 60.1% / p95 62.7% / max 74.9%（进程级，100 = 一个核；没有 threads.log，不按线程归因） | avg ≤ 60% | ≤ 40% | ❌ | —（没有上一版） |
 | S3 GPU | avg 25.8% / p95 28.0%（IOKit Device Utilization）；powermetrics GPU avg 49.7% / p95 64.8%，GPU 频率均值 340 MHz（最低 338） | avg ≤ 50% | ≤ 35% | ✅ 达目标 | —（没有上一版） |
+| S3 按核（整机、含别的进程；powermetrics 每核 1 − idle − down；信息项） | 18 核合计忙碌 1.54 个核；任一时刻最忙的核均值 26% / p95 27%；P0-Cluster 6 核合计忙 0.31 核、均频 1329 MHz；P1-Cluster 6 核合计忙 0.30 核、均频 1321 MHz；S-Cluster 6 核合计忙 0.93 核、均频 3258 MHz（每核见 §5） | — | — | 信息 | — |
 | A3 A/V 漂移 | +0.00 ms（整秒配对 13499 对、跨 7.94 h，斜率 0.0000 µs/s） | 8 小时 ≤ 16 ms | ≤ 5 ms | ✅ 达目标 | —（没有上一版） |
 | A2（信息项） | 整秒配对最大 0.000 ms、均值 0.000 ms、标准差 0.000 ms | ≤ 16.7 ms | ≤ 5 ms | ✅ | — |
 | V1（信息项） | avg 1.944 ms / p99 2.313 ms / max 2.774 ms | avg ≤ 6, p99 ≤ 12 | avg ≤ 4, p99 ≤ 8 | ✅ | —（没有上一版） |
@@ -81,6 +82,29 @@ MediaMTX 收到的（每分钟采 API）：s1 平均 6.15 Mb/s，运行中没进
 | 9 | Stinger PNG（带 alpha） | 60.00 / 5.97 | 0 | 0 | 2 | 7.8 ms |
 | 10 | 内置摄像头（MacBook Pro的相机） | 30.00 / 0.00 | 1 | 864082 | 1 | 45.3 ms |
 | 11 | 文件（e4-source.mov，循环） | 59.97 / 5.97 | 0 | 764 | 2 | 16.2 ms |
+
+S3 按核（powermetrics 每个核的忙时比 = 1 − idle − down，整机口径、含别的进程；进程的 cpu_pct 是各线程之和、按上面的线程表分摊在这些核上）：
+
+| 核 | 簇 | 忙时比均值 | p95 | 平均频率 |
+|---|---|---|---|---|
+| cpu0 | P0-Cluster | 10.3% | 20.0% | 1338 MHz |
+| cpu1 | P0-Cluster | 7.4% | 14.8% | 1318 MHz |
+| cpu2 | P0-Cluster | 5.4% | 10.6% | 1319 MHz |
+| cpu3 | P0-Cluster | 3.7% | 7.3% | 1325 MHz |
+| cpu4 | P0-Cluster | 2.6% | 5.0% | 1335 MHz |
+| cpu5 | P0-Cluster | 1.9% | 3.6% | 1340 MHz |
+| cpu6 | P1-Cluster | 9.6% | 19.3% | 1310 MHz |
+| cpu7 | P1-Cluster | 7.3% | 14.8% | 1312 MHz |
+| cpu8 | P1-Cluster | 5.3% | 10.6% | 1316 MHz |
+| cpu9 | P1-Cluster | 3.7% | 7.4% | 1321 MHz |
+| cpu10 | P1-Cluster | 2.6% | 5.1% | 1331 MHz |
+| cpu11 | P1-Cluster | 1.9% | 3.7% | 1338 MHz |
+| cpu12 | S-Cluster | 26.1% | 27.3% | 3203 MHz |
+| cpu13 | S-Cluster | 23.4% | 24.8% | 3235 MHz |
+| cpu14 | S-Cluster | 17.6% | 18.7% | 3248 MHz |
+| cpu15 | S-Cluster | 12.0% | 12.8% | 3266 MHz |
+| cpu16 | S-Cluster | 8.9% | 9.7% | 3276 MHz |
+| cpu17 | S-Cluster | 4.6% | 5.6% | 3318 MHz |
 
 ## 6. 异常与截取的日志（事件前后 5 分钟，重叠的并段）
 

@@ -2,7 +2,8 @@
 
 归属会话 / 分支：W2-D 推流与 NDI 发送（`Packages/SwitcherOutputs/Sources/NDISend/`）；阈值 / 标准负载定义归用户（见末尾"等用户定"）
 发现于：W4-A（`w4-soak`，2026-09-28），`make soak`（8 小时，`reports/W4-soak-8h.md`）与带线程采样的 8 分钟对照（`.build/soak/tcpu/threads.log`）
-严重级：S1 的形式（L4 的 S3 是发布门槛，8 小时 CPU 均值 60.1% > 60%），但超线只有 0.1 pt、且最大的一块在 SDK 里
+严重级：S1 的形式（L4 的 S3 是发布门槛，8 小时 CPU 均值 60.1% > 60%），但超线只有 0.1 pt、且最大的一块在 SDK 里。
+**用户 2026-09-28 定：负载很低，单核 60% 不足为惧，S3 这项意义不大**——不阻塞；但要探查"为什么不分到多核"，见 `reports/issues/W4A-g5-cpu-multicore-distribution.md`（到检查点再安排）。
 
 ## 数字
 

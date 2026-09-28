@@ -142,6 +142,7 @@ def _mhz(v):
 
 def powermetrics_summary(samples):
     gpu_active, gpu_freq, gpu_mw, cpu_mw, pressure, clusters = [], [], [], [], {}, {}
+    cores, cluster_of, busy_cores, hottest = {}, {}, [], []
     for s in samples:
         g = s.get("gpu") or {}
         if "idle_ratio" in g:
@@ -158,12 +159,38 @@ def powermetrics_summary(samples):
         tp = s.get("thermal_pressure")
         if tp is not None:
             pressure[str(tp)] = pressure.get(str(tp), 0) + 1
+        total, hot, saw_cpu = 0.0, 0.0, False
         for c in proc.get("clusters") or []:
             if "freq_hz" in c:
                 clusters.setdefault(str(c.get("name", "?")), []).append(_mhz(c["freq_hz"]))
+            for cpu in c.get("cpus") or []:
+                if "idle_ratio" not in cpu:
+                    continue
+                # 每个核的忙时比 = 1 − idle − down：断电（down）的时间不在 idle 里，只用 1 − idle 会把断电 38% 的核算成"忙 40%"
+                # （8 小时那次先这么算错了一回）。整机口径、含别的进程；用来回答"是不是一个核在受累、其它核围观"。
+                busy = max(0.0, 1.0 - float(cpu["idle_ratio"]) - float(cpu.get("down_ratio") or 0)) * 100.0
+                k = int(cpu.get("cpu", len(cores)))
+                entry = cores.setdefault(k, {"busy": [], "freq": []})
+                entry["busy"].append(busy)
+                if "freq_hz" in cpu:
+                    entry["freq"].append(_mhz(cpu["freq_hz"]))
+                cluster_of[k] = str(c.get("name", "?"))
+                total += busy / 100.0
+                hot = max(hot, busy)
+                saw_cpu = True
+        if saw_cpu:
+            busy_cores.append(total)
+            hottest.append(hot)
     out = {"pm_samples": len(samples), "pm_thermal_pressure": pressure,
            "pm_cluster_freq_avg_mhz": {k: sum(v) / len(v) for k, v in clusters.items()},
            "pm_cluster_freq_min_mhz": {k: min(v) for k, v in clusters.items()}}
+    if cores:
+        out["pm_cores"] = [{"cpu": k, "cluster": cluster_of[k], "busy_avg_pct": sum(v["busy"]) / len(v["busy"]),
+                            "busy_p95_pct": percentile(v["busy"], 0.95),
+                            "freq_avg_mhz": (sum(v["freq"]) / len(v["freq"])) if v["freq"] else None} for k, v in sorted(cores.items())]
+        out["pm_busy_cores_avg"] = sum(busy_cores) / len(busy_cores)
+        out["pm_hottest_core_avg_pct"] = sum(hottest) / len(hottest)
+        out["pm_hottest_core_p95_pct"] = percentile(hottest, 0.95)
     if gpu_active:
         out["pm_gpu_active_avg_pct"] = sum(gpu_active) / len(gpu_active)
         out["pm_gpu_active_p95_pct"] = percentile(gpu_active, 0.95)

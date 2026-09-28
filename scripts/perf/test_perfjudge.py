@@ -200,3 +200,34 @@ class E4Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerCoreTests(unittest.TestCase):
+    """S3 按核（powermetrics processor.clusters[].cpus[]）：忙 = 1 − idle − down；整机口径，回答"是不是一个核在受累、其它核围观"。"""
+
+    @staticmethod
+    def sample(cores):
+        # cores: [(cluster, cpu, idle_ratio, down_ratio, freq_hz)]
+        clusters = {}
+        for name, cpu, idle, down, freq in cores:
+            clusters.setdefault(name, []).append({"cpu": cpu, "idle_ratio": idle, "down_ratio": down, "freq_hz": freq})
+        return {"elapsed_ns": 10_000_000_000, "processor": {"clusters": [{"name": n, "freq_hz": 1e9, "cpus": c} for n, c in clusters.items()]}}
+
+    def test_S3_perCoreBusySubtractsPoweredDownTime(self):
+        s = pj.powermetrics_summary([self.sample([("S", 0, 0.70, 0.0, 3.2e9), ("P0", 1, 0.20, 0.70, 1.3e9)])])
+        cores = {c["cpu"]: c for c in s["pm_cores"]}
+        self.assertAlmostEqual(cores[0]["busy_avg_pct"], 30.0)
+        self.assertAlmostEqual(cores[1]["busy_avg_pct"], 10.0)      # 断电 70% 的核不是"忙 80%"
+        self.assertEqual(cores[1]["cluster"], "P0")
+        self.assertAlmostEqual(cores[0]["freq_avg_mhz"], 3200.0)
+        self.assertAlmostEqual(s["pm_busy_cores_avg"], 0.4)
+        self.assertAlmostEqual(s["pm_hottest_core_avg_pct"], 30.0)
+
+    def test_S3_hottestCoreIsPerSampleMaxThenAveraged(self):
+        a = self.sample([("S", 0, 0.5, 0.0, 3e9), ("S", 1, 0.9, 0.0, 3e9)])   # 最忙 50%
+        b = self.sample([("S", 0, 0.9, 0.0, 3e9), ("S", 1, 0.7, 0.0, 3e9)])   # 最忙 30%
+        s = pj.powermetrics_summary([a, b])
+        self.assertAlmostEqual(s["pm_hottest_core_avg_pct"], 40.0)
+        self.assertAlmostEqual(s["pm_hottest_core_p95_pct"], 50.0)
+        self.assertAlmostEqual(s["pm_busy_cores_avg"], (0.6 + 0.4) / 2)
+        self.assertNotIn("pm_cores", pj.powermetrics_summary([{"gpu": {"idle_ratio": 0.5}}]))   # 没有每核数据就没有这几项

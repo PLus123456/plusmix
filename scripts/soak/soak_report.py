@@ -409,6 +409,14 @@ def main():
     thr_txt = f"；按线程见 §5（首尾快照跨 {threads['wall_s'] / 3600:.2f} h，各线程之和 {threads['total_pct']:.1f}%）" if threads else "；没有 threads.log，不按线程归因"
     w(f"| S3 CPU | avg {f(perf['cpu_avg_pct'], 1)}% / p95 {f(perf['cpu_p95_pct'], 1)}% / max {f(perf['cpu_max_pct'], 1)}%（进程级，100 = 一个核{thr_txt}） | avg ≤ 60% | ≤ 40% | {'✅' if s3.get('cpu_pass') else '❌'}{' 达目标' if s3.get('cpu_meets_target') else ''} | {delta('cpu_avg_pct', 1, ' pt')} |")
     w(f"| S3 GPU | avg {f(perf['gpu_avg_pct'], 1)}% / p95 {f(perf['gpu_p95_pct'], 1)}%（IOKit Device Utilization）{pm_txt} | avg ≤ 50% | ≤ 35% | {'✅' if s3.get('gpu_pass') else '❌'}{' 达目标' if s3.get('gpu_meets_target') else ''} | {delta('gpu_avg_pct', 1, ' pt')} |")
+    if pm.get("pm_cores"):
+        # cpu_pct 的 60% = 进程各线程合计 0.6 个核，不是某个核 60%；这一行用 powermetrics 的每核忙时比（整机、含别的进程）直接回答"有没有一个核在受累"
+        by_cluster = {}
+        for c in pm["pm_cores"]:
+            by_cluster.setdefault(c["cluster"], []).append(c)
+        cl_txt = "；".join(f"{name} {len(cs)} 核合计忙 {sum(c['busy_avg_pct'] for c in cs) / 100:.2f} 核、均频 {sum((c['freq_avg_mhz'] or 0) for c in cs) / len(cs):.0f} MHz"
+                          for name, cs in by_cluster.items())
+        w(f"| S3 按核（整机、含别的进程；powermetrics 每核 1 − idle − down；信息项） | {len(pm['pm_cores'])} 核合计忙碌 {pm['pm_busy_cores_avg']:.2f} 个核；任一时刻最忙的核均值 {pm['pm_hottest_core_avg_pct']:.0f}% / p95 {pm['pm_hottest_core_p95_pct']:.0f}%；{cl_txt}（每核见 §5） | — | — | 信息 | — |")
     if a3.get("drift_ms") is not None:
         w(f"| A3 A/V 漂移 | {a3['drift_ms']:+.2f} ms（整秒配对 {a3['pairs']} 对、跨 {a3['span_s'] / 3600:.2f} h，斜率 {a3['slope_ms_per_s'] * 1000:.4f} µs/s{'；' + a3['note'] if a3.get('note') else ''}） | "
           f"8 小时 ≤ 16 ms | ≤ 5 ms | {'✅' if a3['pass'] else '❌'}{' 达目标' if a3.get('meets_target') else ''} | {delta('a3_drift_ms', 2, ' ms')} |")
@@ -460,6 +468,13 @@ def main():
         for r in threads["rows"]:
             w(f"| `{r['name']}` | {r['threads']} | {r['cpu_s']:.0f} | {r['pct']:.1f}% |")
         w(f"| **合计** | | | **{threads['total_pct']:.1f}%** |")
+        w("")
+
+    if pm.get("pm_cores"):
+        w("S3 按核（powermetrics 每个核的忙时比 = 1 − idle − down，整机口径、含别的进程；进程的 cpu_pct 是各线程之和、按上面的线程表分摊在这些核上）：\n")
+        w("| 核 | 簇 | 忙时比均值 | p95 | 平均频率 |\n|---|---|---|---|---|")
+        for c in pm["pm_cores"]:
+            w(f"| cpu{c['cpu']} | {c['cluster']} | {c['busy_avg_pct']:.1f}% | {c['busy_p95_pct']:.1f}% | {f(c['freq_avg_mhz'], 0)} MHz |")
         w("")
 
     w("## 6. 异常与截取的日志（事件前后 5 分钟，重叠的并段）\n")
