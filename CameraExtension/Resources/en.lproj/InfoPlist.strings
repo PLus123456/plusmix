@@ -1,2 +1,2 @@
-/* W4-B：虚拟摄像头扩展在系统设置（登录项与扩展 → 摄像头扩展）里显示的名字。Info.plist 里的默认值是 ASCII（W3-C3 定），这里按语言覆盖。 */
-"CFBundleDisplayName" = "Switcher Virtual Camera";
+/* W4-B：虚拟摄像头扩展在系统设置（登录项与扩展 → 摄像头扩展）里显示的名字。Info.plist 里的默认值是 ASCII（W3-C3 定），这里按语言覆盖。产品名 PlusMix（W4-D）。 */
+"CFBundleDisplayName" = "PlusMix Virtual Camera";
