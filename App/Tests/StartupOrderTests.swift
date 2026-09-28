@@ -124,4 +124,45 @@ final class StartupOrderTests: XCTestCase {
         XCTAssertTrue(session.inputs.entries.isEmpty, "输入一个都不该剩：\(session.inputs.entries.keys.sorted())")
         XCTAssertEqual(session.engine.registeredInputs, [])
     }
+
+    /// 停与起对称：只预热没起的会话（控制层起了、引擎 warmUp 过、没定 t0）也要能停干净——渲染器与状态机线程由 engine.stop 放掉，
+    /// 控制层（API / MIDI / 推送源）停掉；之后再 stop 是空操作。
+    func testW3E6_warmedButNotStartedSession_stopReleasesEngineAndControl() throws {
+        let controller = AppTest.controller
+        var show = controller.documents.emptyShow(name: "w3e6-warm-only")
+        show.inputs = [AppTest.syntheticConfig(number: 1)]
+        let session = try SwitcherSession(show: show, settings: controller.settings, hotkeyTable: controller.hotkeyTable, midiTable: controller.midiTable)
+        final class Outcome { var done = false; var error: (any Error)? }
+        let warmed = Outcome()
+        Task {
+            do { try await session.warmUp() } catch { warmed.error = error }
+            warmed.done = true
+        }
+        XCTAssertTrue(AppTest.waitUntil(15) { warmed.done }, "预热没返回")
+        XCTAssertNil(warmed.error)
+        XCTAssertEqual(session.stage, .warm)
+        XCTAssertFalse(session.isRunning)
+        XCTAssertNotNil(session.renderer.preparedFormat, "预热应 prepare 过渲染器")
+        XCTAssertNotNil(session.renderer.sink, "预热应把引擎挂成渲染器的 sink")
+        XCTAssertTrue(session.control.isRunning, "预热应起控制层")
+        XCTAssertFalse(session.engine.isRunning)
+        XCTAssertNil(session.engine.clock, "预热不起时钟")
+        XCTAssertEqual(session.t0, .zero, "预热不定 t0")
+        XCTAssertTrue(session.inputs.entries.isEmpty, "输入按 t0 建，预热时还不建")
+
+        let stopped = AppTest.expectationBox()
+        Task {
+            await session.stop()
+            await session.stop()   // 再停一次是空操作
+            stopped.value = true
+        }
+        XCTAssertTrue(AppTest.waitUntil(15) { stopped.value }, "stop 没返回")
+        XCTAssertEqual(session.stage, .idle)
+        XCTAssertNil(session.renderer.preparedFormat, "预热过的渲染器要放掉")
+        XCTAssertNil(session.renderer.sink)
+        XCTAssertFalse(session.control.isRunning)
+        XCTAssertFalse(session.control.midi.isRunning)
+        XCTAssertNotEqual(session.control.apiServer?.isRunning, true)
+        XCTAssertFalse(session.audio.engine.isRunning)
+    }
 }
