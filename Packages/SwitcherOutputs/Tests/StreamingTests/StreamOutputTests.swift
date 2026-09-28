@@ -148,6 +148,69 @@ final class StreamOutputTests: XCTestCase {
         XCTAssertEqual(c.disconnects, 0, "慢但在走的连接不能被当成停滞：\(o.lastExitReasonDescription)")
     }
 
+    /// W2-D2（逻辑版，App 的顺序：引擎在跑、用户此刻按下"开始"）：握手 0.35 s 期间到的音视频排队，连上后从第 0 拍（关键帧）起送、
+    /// 送出序列连续、网络丢帧 0、音频丢包 0；音频原点 = 第一帧关键帧时刻 − dtsOffset。
+    func testW2D2_bufferDuringConnect_sendsFromFirstFrameNoDrops() throws {
+        let factory = FakeTransportFactory(behavior: .init(connectDelaySeconds: 0.35))
+        let o = try StreamOutput.makeForTest(name: "w2d2-buf", factory: factory)   // 队列 30 帧 = 0.5 s > 握手
+        try o.start()
+        let fed = try feed(outputs: [o], seconds: 1.5, t0: HostClock.now() + HostDuration(milliseconds: 30))   // 不等 publishing
+        XCTAssertTrue(waitUntil(timeout: 2) { o.counters.framesSent == UInt64(fed.frames) }, "\(o.counters)")
+        o.stop()
+        let c = o.counters
+        let t = factory.transports[0]
+        let v = t.sentVideo
+        XCTAssertEqual(o.state, .stopped)
+        XCTAssertEqual(c.framesReceived, 90)
+        XCTAssertEqual(c.framesSent, 90, "握手期间的帧也要送出：\(c)")
+        XCTAssertEqual(c.networkDropped, 0, "握手期间到的帧不算网络丢帧：\(c)")
+        XCTAssertEqual(c.audioDropped, 0, "握手期间到的音频包不算丢：\(c)")
+        XCTAssertEqual(c.audioPacketsSent, c.audioPacketsReceived, "握手期间的音频包也要送出：\(c)")
+        XCTAssertEqual(v.first?.tick, Tick(0), "从按下开始那一拍起")
+        XCTAssertTrue(v.first?.isKeyframe ?? false)
+        XCTAssertTrue(zip(v.dropFirst(), v).allSatisfy { $0.tick - $1.tick == 1 }, "送出序列连续")
+        XCTAssertGreaterThan(v[0].at, v[0].tickTime + HostDuration(milliseconds: 250), "第 0 拍确实是在握手期间到的（连上后才交出）")
+        let a = t.sentAudioTimes
+        XCTAssertEqual(a.first, v[0].tickTime - v[0].dtsOffset, "音频原点 = 关键帧时刻 − dtsOffset")
+        XCTAssertLessThan(v[0].dtsOffset.milliseconds, 1024.0 / 48)
+    }
+
+    /// W2-D2（逻辑版，headless 的顺序）：音频比视频早 1 s 到（音频引擎先起、视频到 t0 才来）：那 1 s 的包没有画面可配、裁掉不算丢
+    /// （audioDropped 必须为 0，修前 = 47）；两轨从第一个关键帧的同一原点起送。
+    func testW2D2_audioLeadingVideoByOneSecond_notCountedDropped() throws {
+        let factory = FakeTransportFactory(behavior: .init())
+        let o = try StreamOutput.makeForTest(name: "w2d2-lead", factory: factory)
+        try o.start()
+        XCTAssertTrue(waitUntil(timeout: 2) { o.state == .publishing })
+        let t0 = HostClock.now() + HostDuration(milliseconds: 1050)
+        let audio = AudioSource(t0: t0, startSample: -48128)   // 188 块 × 256 = 1.0027 s 提前，正好喂到样本 0
+        while HostClock.now() < t0 - HostDuration(milliseconds: 8) {
+            audio.feed(upTo: HostClock.now(), to: [o])
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        audio.flush(upToSample: 0, to: [o])
+        let source = try FrameSource(t0: t0)
+        for tick in 0..<60 {
+            let tt = source.clock.time(of: Tick(Int64(tick)))
+            mach_wait_until(tt.ticks)
+            o.consume(try source.frame(tick: tick))
+            audio.feed(upTo: tt, to: [o])
+        }
+        XCTAssertTrue(waitUntil(timeout: 2) { factory.transports.first?.sentVideo.count ?? 0 >= 60 })
+        o.stop()
+        let c = o.counters
+        let t = factory.transports[0]
+        let v = t.sentVideo, a = t.sentAudioTimes
+        print("音频提前 1 s：\(c)")
+        XCTAssertEqual(c.audioDropped, 0, "t0 之前的音频没有画面可配，裁掉不算丢：\(c)")
+        XCTAssertEqual(c.networkDropped, 0)
+        XCTAssertEqual(c.framesSent, 60)
+        XCTAssertEqual(v.first?.tick, Tick(0))
+        XCTAssertEqual(a.first, v[0].tickTime - v[0].dtsOffset, "音频原点 = 关键帧时刻 − dtsOffset")
+        XCTAssertLessThan(v[0].dtsOffset.milliseconds, 1024.0 / 48)
+        XCTAssertGreaterThanOrEqual(c.audioPacketsReceived - c.audioPacketsSent, 44, "t0 之前那约 47 包确实没送（没有画面可配）：\(c)")
+    }
+
     /// 起步对齐（RTMP 的 dtsOffset 模式）：视频关键帧的 dtsOffset = 关键帧时刻 − 音频原点包时刻（≥ 0，< 一个包）；原点之前的包不送。
     func testStartAlignment_dtsOffset() throws {
         let factory = FakeTransportFactory(behavior: .init(alignment: .dtsOffset))

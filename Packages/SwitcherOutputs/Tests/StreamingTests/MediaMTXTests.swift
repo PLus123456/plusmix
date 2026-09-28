@@ -11,6 +11,7 @@ final class MediaMTXTests: XCTestCase {
     private var instances: [MediaMTXInstance] = []
     private var outputs: [StreamOutput] = []
     private var impairments: [Impairment] = []
+    private var proxies: [ThrottleProxy] = []
 
     override func setUpWithError() throws {
         try MediaMTXInstance.requireAvailable()
@@ -22,6 +23,8 @@ final class MediaMTXTests: XCTestCase {
         outputs = []
         for i in impairments { i.stop() }
         impairments = []
+        for p in proxies { p.stop() }
+        proxies = []
         for i in instances { i.stop() }
         instances = []
     }
@@ -126,6 +129,127 @@ final class MediaMTXTests: XCTestCase {
         let av = try AVOffsetFFmpeg.measure(file)
         print("A/V（ffmpeg 口径）：mean \(av.meanMs) ms，max |\(av.maxAbsMs)| ms")
         XCTAssertLessThanOrEqual(av.maxAbsMs, 10.7 + 2, "最近包对齐：≤ 半个 AAC 包 10.7 ms")
+    }
+
+    // MARK: W2-D2 推流开始：握手期间 / 第一帧之前的音频
+
+    /// W2-D2（RTMP，App 的顺序：引擎在跑、用户此刻按下"开始"）：start() 之后立刻按拍喂音视频、不等 publishing；上行限速让 RTMP 握手在
+    /// 约 0.5 s（tick ≈ 30）才完成。要求：握手期间到的音视频排队、连上后从第 0 拍（关键帧）起送——网络丢帧 0、音频丢包 0、落盘从帧号 0 起、
+    /// 两轨起点相差不到一个 AAC 包、第 0 拍的闪光就有 click 配对（A/V ≤ 2 ms）。修前：握手期间的帧 / 包直接丢（droppedDisconnected / audioDropped）。
+    func testW2D2_streamStart_noAudioDroppedBeforeFirstVideo() throws {
+        let mtx = try startInstances(1, test: "w2d2-rtmp")[0]
+        let proxy = try ThrottleProxy(listenPort: 31960, targetPort: mtx.rtmpPort)
+        proxies = [proxy]
+        // 上行 3 KB/s：C0+C1（1537 B）在代理里要等 ≈ 0.5 s 才放过去；之后（tick 24 解除限速）握手其余往返和连上后的突发不受限
+        proxy.rateBytesPerSecond = 3000
+        let scene = try StreamScene(leadMs: 60)
+        let o = try scene.makeOutput(name: "w2d2-rtmp", url: "rtmp://127.0.0.1:\(proxy.listenPort)/s1")
+        outputs = [o]
+        let startedAt = HostClock.now()
+        try o.start()
+        var publishingAtTick: Int?
+        let report = try scene.feed(outputs: [o], ticks: 0..<600) { tick, _ in
+            if tick == 24 { proxy.rateBytesPerSecond = nil }
+            if publishingAtTick == nil, o.state == .publishing { publishingAtTick = tick }
+        }
+        o.stop()
+        let c = o.counters
+        print("W2-D2 RTMP：t0 距 start() \(String(format: "%.0f", (scene.clock.time(of: Tick(0)) - startedAt).milliseconds)) ms，连上时 tick \(publishingAtTick.map(String.init) ?? "没连上")；\(c)")
+        XCTAssertEqual(report.framesFed, 600)
+        guard let publishingAtTick else { return XCTFail("10 s 内没连上：\(o.state)") }
+        XCTAssertTrue((6...58).contains(publishingAtTick), "握手应在喂帧开始之后、缓冲（1 s）满之前完成：tick \(publishingAtTick)")
+        XCTAssertEqual(c.framesReceived, 600)
+        XCTAssertEqual(c.framesSent, 600, "握手期间的帧也要送出：\(c)")
+        XCTAssertEqual(c.networkDropped, 0, "握手期间到的帧不算网络丢帧：\(c)")
+        XCTAssertEqual(c.audioDropped, 0, "握手期间到的音频包不算丢：\(c)")
+        XCTAssertEqual(c.audioPacketsSent, c.audioPacketsReceived, "握手期间的音频包也要送出：\(c)")
+        XCTAssertEqual(o.videoEncoder.counters.skipped, 0)
+        let files = mtx.recordings("s1")
+        XCTAssertEqual(files.count, 1, "\(files)")
+        guard let file = files.first else { return }
+        let st = try Frameprobe.stats(file)
+        print("frameprobe stats：\(st)")
+        XCTAssertGreaterThanOrEqual(st.totalFrames, 599, "落盘帧数（MediaMTX 丢最后一帧）")
+        XCTAssertEqual(st.dropGaps, 0)
+        XCTAssertEqual(st.duplicateFrames, 0)
+        XCTAssertEqual(st.undecodable, 0)
+        let frames = try Frameprobe.frames(file, limit: 5)
+        XCTAssertEqual(frames.first?.frameNumber, 0, "落盘从按下开始那一拍（帧号 0）起：\(frames)")
+        let starts = try FFprobe.streamStartTimes(file)
+        print("落盘两轨起点：视频 \(starts.video) s，音频 \(starts.audio) s")
+        XCTAssertLessThanOrEqual(abs(starts.video - starts.audio), 1024.0 / 48000 + 0.001, "两轨从同一时刻起（差不到一个 AAC 包）")
+        let av = try AVOffsetFFmpeg.measure(file)
+        print("A/V（ffmpeg 口径）：mean \(av.meanMs) ms，max |\(av.maxAbsMs)| ms，\(av.pairs.count) 对；第一对 \(av.pairs.first.map { "闪光 \($0.flash) s click \($0.click) s" } ?? "无")")
+        // 第一秒有音频：[0.1, 1.0) s 的 RMS 是那个 −20 dBFS 的正弦（≈ 0.071）；第 0 拍的 click 落在 AAC 解码器前 44 ms 的热身里（原点包之前的两个包不送），
+        // 第一个能配对的闪光是第 60 拍（1.0 s）——文件从第 0 拍起，它就在 1.0 s；修前文件从第 29 拍起，它在 0.516 s
+        print("第一秒音频 RMS \(String(format: "%.3f", av.rmsFirstSecond))")
+        XCTAssertGreaterThan(av.rmsFirstSecond, 0.05, "落盘文件第一秒要有音频（正弦 RMS ≈ 0.071）")
+        XCTAssertGreaterThanOrEqual(av.pairs.count, 9)
+        guard let first = av.pairs.first else { return }
+        XCTAssertEqual(first.flash, 1.0, accuracy: 0.02, "文件从第 0 拍起：第一个能配对的闪光（第 60 拍）在 1.0 s")
+        XCTAssertLessThanOrEqual(abs(first.flash - first.click) * 1000, 2.0, "第一秒末的 click 与画面对齐")
+        XCTAssertLessThanOrEqual(av.maxAbsMs, 2.0, "A/V 偏移 ≤ 2 ms（A2 目标档 5 ms）")
+    }
+
+    /// W2-D2（SRT，headless 的顺序：音频引擎先起、视频到 t0 才来）：start() 之后音频先喂约 1 s（t0 之前的 188 块），视频从 t0 起。
+    /// t0 之前的音频没有画面可配、不能送，但不能算"丢"：audioDropped 必须为 0（修前 = 47，8 小时长稳里的那个数字）；
+    /// 两轨从第一个关键帧的同一原点起送：落盘从帧号 0 起、两轨起点相差 ≤ 半个 AAC 包 + 一个包、第 0 拍闪光有 click 配对。
+    func testW2D2_srtStart_noAudioDroppedBeforeFirstVideo() throws {
+        let mtx = try startInstances(1, test: "w2d2-srt")[0]
+        let scene = try StreamScene(leadMs: 1500)
+        let o = try scene.makeOutput(name: "w2d2-srt", url: mtx.srtURL("srt1"), connectTimeout: 4)
+        outputs = [o]
+        let startedAt = HostClock.now()
+        try o.start()
+        let t0 = scene.clock.time(of: Tick(0))
+        let early = SignalFeeder(signal: scene.signal, startSample: -48128)   // 188 块 × 256 = 1.0027 s，正好喂到样本 0
+        var connectedAt: HostTime?
+        while HostClock.now() < t0 - HostDuration(milliseconds: 8) {
+            early.feed(upTo: HostClock.now(), to: [o])
+            if connectedAt == nil, o.state == .publishing { connectedAt = HostClock.now() }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        early.flush(upToSample: 0, to: [o])
+        guard let connectedAt else {
+            o.stop()
+            let fw = (try? Proc.run("/usr/libexec/ApplicationFirewall/socketfilterfw", ["--getglobalstate"]).stdout).map { String(decoding: $0, as: UTF8.self) } ?? ""
+            if fw.contains("enabled") {
+                throw XCTSkip("BLOCKED-防火墙：SRT 在 t0 前没连上（\(o.state)）且应用防火墙开着；先确认 mediamtx 在放行名单里")
+            }
+            XCTFail("SRT 在 t0（1.5 s）前没连上：\(o.state)")
+            return
+        }
+        let report = try scene.feed(outputs: [o], ticks: 0..<600)
+        o.stop()
+        let c = o.counters
+        print("W2-D2 SRT：连上用了 \(String(format: "%.2f", (connectedAt - startedAt).seconds)) s（t0 前 \(String(format: "%.2f", (t0 - connectedAt).seconds)) s）；t0 之前喂了 48128 样本；\(c)")
+        XCTAssertEqual(report.framesFed, 600)
+        XCTAssertEqual(c.framesSent, 600)
+        XCTAssertEqual(c.networkDropped, 0)
+        XCTAssertEqual(c.audioDropped, 0, "t0 之前的音频没有画面可配，裁掉不算丢：\(c)")
+        XCTAssertEqual(o.videoEncoder.counters.skipped, 0)
+        let files = mtx.recordings("srt1")
+        XCTAssertEqual(files.count, 1, "\(files)")
+        guard let file = files.first else { return }
+        let st = try Frameprobe.stats(file)
+        print("frameprobe stats：\(st)")
+        XCTAssertGreaterThanOrEqual(st.totalFrames, 599)
+        XCTAssertEqual(st.dropGaps, 0)
+        XCTAssertEqual(st.undecodable, 0)
+        let frames = try Frameprobe.frames(file, limit: 5)
+        XCTAssertEqual(frames.first?.frameNumber, 0, "落盘从第 0 拍起：\(frames)")
+        let starts = try FFprobe.streamStartTimes(file)
+        print("落盘两轨起点：视频 \(starts.video) s，音频 \(starts.audio) s")
+        XCTAssertLessThanOrEqual(abs(starts.video - starts.audio), 1024.0 / 48000 * 1.5 + 0.001, "两轨从同一时刻起（最近包对齐：≤ 半个包 + 一个包）")
+        let av = try AVOffsetFFmpeg.measure(file)
+        print("A/V（ffmpeg 口径）：mean \(av.meanMs) ms，max |\(av.maxAbsMs)| ms，\(av.pairs.count) 对；第一对 \(av.pairs.first.map { "闪光 \($0.flash) s click \($0.click) s" } ?? "无")")
+        print("第一秒音频 RMS \(String(format: "%.3f", av.rmsFirstSecond))")
+        XCTAssertGreaterThan(av.rmsFirstSecond, 0.05, "落盘文件第一秒要有音频（正弦 RMS ≈ 0.071）")
+        XCTAssertGreaterThanOrEqual(av.pairs.count, 9)
+        guard let first = av.pairs.first else { return }
+        XCTAssertEqual(first.flash, 1.0, accuracy: 0.02, "文件从第 0 拍起：第一个能配对的闪光（第 60 拍，第 0 拍的 click 在 AAC 热身里）在 1.0 s")
+        XCTAssertLessThanOrEqual(abs(first.flash - first.click) * 1000, 10.7 + 2, "第一秒末的 click 与画面对齐（最近包 ≤ 10.7 ms）")
+        XCTAssertLessThanOrEqual(av.maxAbsMs, 10.7 + 2)
     }
 
     // MARK: E2 / E3 在落盘文件上复跑
