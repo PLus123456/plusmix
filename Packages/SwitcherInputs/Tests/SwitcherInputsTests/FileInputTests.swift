@@ -455,6 +455,34 @@ final class FileInputTests: XCTestCase {
         }
     }
 
+    // MARK: W2-A4：往回定位后音频继续（trim 点要随换代重置）
+
+    /// 推帧线程记着"已经 trim 到哪"，定位不重置它：往回定位后新位置比旧 trim 点小，FIFO 再也不 trim，0.5 s 后塞满、解码线程进不来、
+    /// 音频块一直跳到位置追过旧 trim 点为止（定位回去 1.5 s 就丢 1 s 音频）。播 1.5 s 后定位回第 0 帧再播 1.5 s：一块都不该跳。
+    func testW2A4_seekBackward_audioKeepsFlowing() throws {
+        let timing = makeTiming(.hd1080p60)
+        let slot = LockFreeFrameSlot(capacity: 3)
+        let ring = RecordingAudioRing(channelCount: 2)
+        ring.keepSamplesUpTo = 0
+        let input = try makeInput(timing: timing, slot: slot, endAction: .loop, audioRing: ring)
+        defer { input.stop() }
+        try startAndWaitLive(input)
+        let driver = TickDriver(timing: timing)
+        _ = picks(driver, slot: slot, from: try anchor(of: input), count: 90)   // 1.5 s
+        let before = input.fileCountersSnapshot
+        input.seek(toFrame: 0)
+        let seekTick = try anchor(of: input)
+        let result = picks(driver, slot: slot, from: seekTick, count: 90)
+        let after = input.fileCountersSnapshot
+        input.stop()
+        let numbers = result.compactMap(\.number)
+        XCTAssertEqual(numbers.first, 0, "定位后首帧是 0：\(result.prefix(3))")
+        let written = after.audioChunksWritten - before.audioChunksWritten
+        print("W2A4 往回定位：定位前跳 \(before.audioChunksSkipped) 写 \(before.audioChunksWritten)；定位后 1.5 s 写 \(written) 跳 \(after.audioChunksSkipped - before.audioChunksSkipped)")
+        XCTAssertEqual(after.audioChunksSkipped - before.audioChunksSkipped, 0, "往回定位后跳过了音频块：\(after)")
+        XCTAssertGreaterThanOrEqual(written, 250, "定位后 1.5 s 该写 ≈ 281 块音频：\(after)")
+    }
+
     // MARK: 错误：文件不存在 → error(文案)
 
     func testFile_missingFile_stateIsErrorWithMessage() throws {
