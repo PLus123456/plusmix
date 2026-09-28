@@ -16,6 +16,10 @@ worktree `.claude/worktrees/g5-release-checklist-4c8044`，桌面端起的分支
 8. 没做的：打 tag、改版本号（判定不发）。main 的快进用户看完报告后指示做了（§3 第 2 条）。
 9. **用户 2026-09-28 的后续指示**：(a) OWNERSHIP 认领 W4-A / W4-B 越界；(b) 泄漏修复派 agent 直接做 → W2-A3（prompt 74，分支 w2-inputs-3）当天修完、`--no-ff` 合入 release/0.1（e39dda3）；(c) 产品名定 PlusMix、bundle id 前缀 com.plusmix → `set-bundle-id.sh com.plusmix` 切成 `com.plusmix.switcher`（10 个文件），改名本身写成 prompt 75（W4-D）；合入与切换后的验证：`make gen build`、VirtualCameraTests / FileInputTests、App 全量、`make release-test`（结果见 §2 末行）。
 
+10. **用户 2026-09-28 下午："改名也派个 agent 做吧，另外查到的那些 bug 依次派个 agent 干了，之后全都合进 main"**：本会话依次派 agent、检查、`--no-ff` 合入 release/0.1、快进 main。记录（合入顺序）：
+    - W4-D 改名 PlusMix（w4-rename = bd03b15 → 合入 023e138）：63 文件；agent 自验 App 92 用例 88 过 0 失败 4 跳、archive-adhoc 出 PlusMix.app / PlusMix-0.1.0.dmg、release-test 9 / 10（R11 已知）、check-links 119、lint 全绿；检查点顺手改 VirtualCameraConstants 的 4 个设备 / 流名（2bc4088，VirtualCameraTests 12 / 12），把 release.yml 产物名、Application Support 目录名 / MIDI 客户端名 / serverName、App 侧跟改分别加进 prompt 83 / 78 / 79。
+    - W2-A4（w2-inputs-4）：进行中。
+
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
 全表在 reports/G5.md §5；这里只列结论：
