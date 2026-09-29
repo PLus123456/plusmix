@@ -76,3 +76,39 @@
 - **lint 的漏洞**：scripts/lint-rules.sh 把 `VMixCompat` 当允许的 token，结果它进了界面文案（Localizable.strings:648），lint 没拦住（X62）。建议 lint 扫 .strings 时不放行这个 token（规则归 P0 / 检查点）。
 - **交接落空的模式**：W2-B 写"留给 W3-E"的一批入口，W3-E 的 prompt 没列，就一直没人做（01 §2）。以后检查点写续做 prompt 时，建议对一遍上一轮报告里的"留给 xx"清单。
 - **分区报告之间有撞号和口径不一**：两份报告都把契约提案写成 020；对 T-bar 竖放出处的说法也不一致（竖放是 W2-B 的实现选择，不在落地方案 §7 表里）。以 01a / 04 为准。
+
+## 6. 2026-09-29 续做：把调研落成第五波 prompt、记进落地方案、按实情改文档
+
+用户指派："看 artifacts 和 docs/ui-study，把 artifacts 接着往下做 prompt，把这部分作为记录写进去，之后更新一下软件相关文档。"同一分支继续，仍不改代码。
+
+### 6.1 做了什么
+
+- **prompt 85–104**（docs/plan/prompts/，20 份）：85 是本调研的补记卡；86–90 第五波止血（W5-A 目视与弹出、W5-B 直播安全与界面说谎、W5-C 音频总线效果链接线、W5-D 推流地址鉴权、W5-E 转场中拒收 setPreview / setProgram）；91 G6 检查点（止血合入、0.1.0 重判、lint 加 .strings 禁词）；92–98 骨架改版（底栏三段式、工具条 / 监视器 / 菜单栏、输入条与格子、输出设置页、设置体系与选动作面板、面板改版、防睡眠 / tally / 远程控制 / 提醒 / 统计 / 锁）；99 P5 契约落地四（提案 020 转场槽 + FTB 时长、021 文件播放控制、022 输出统计补字段、023 小口径收口，用户批了才做）；100–103 契约后与文档（转场槽落地含 T-bar 横放、文件播放控制与推流状态面板、每路音频效果格、手册与随包 HTML）；104 G7 检查点。每份都写了分支、只准动、先读、交付、测试 ID、不做、报告；待拍板项一律按 04 的"建议"当默认值写，默认值表在落地方案 §8.5。
+- **docs/OWNERSHIP.md**：UIA 行补上本次续做动的路径与授权说明；新增 W5-A…W5-N、G6、P5、W1-D3、W4-C2、G7 共 19 行。
+- **落地方案**：docs/plan/导播台落地方案.md 加 §8（调研记录、现状缺陷、第五波拆分、顺序与规矩、默认拍板值），Prompt 集改为 §9；页面模板 scripts/prompt-page/template.html 同步加第 8 节、目录与抬头；生成脚本 scripts/gen-prompt-page.py 改成按编号数值排序（三位数不再排错）、按标题识别检查点（G6 / G7 自动算闸门）、认 UIA 卡片、"下一步"文案不再写死 g3。页面重生成并原地更新到原 artifact（第 13 版，72 张卡：51 已合入、1 完成未合并、19 未开始）。
+- **软件文档按实情改**（reports/issues/UIA-w4-docs-manual-vs-implementation.md 的九处，中英两份）：概念.md（效果链未生效、Bus A / B 无出口、耳机只在 ≥ 4 声道设备有声、FTB 时长界面改不了、退出会静默写回原文件）、输出.md（文件格式一律 .mov、磁盘下限只有启动参数 / defaults 键、重连是"一直重试、间隔最长 30 s"、状态在底栏按钮上、NDI® 与商标声明）、故障排查.md（磁盘下限、caffeinate -u -i -d -s）、快捷键.md（App 不起 tally 流）、输入.md（跟随视频开关在调音台、效果链未生效）、README（NDI® 声明）；docs/integrations/tally.md（谁起 TallyServer）、companion.md 与 vmix-compat.md、docs/api/vmix-compat.md（App 里改不了监听地址；External / Fullscreen / AudioAuto 的"不做"理由更新；31 个真名应返 501）；docs/release/third-party.md（关于窗口尚无 credits）；THIRD_PARTY/NDI/NOTICE.md 的包名改 PlusMix.app。
+- **docs/KNOWN_ISSUES.md**：加"界面对照调研查出、尚未修的"一表（S0 五条、S1 八条、影响发布的 S2 与合规项，每条写归属 prompt），头部说明同步。
+- **.gitignore**：加 vmix-28-guide/（竞品截图不入库）。
+
+### 6.2 检查
+
+| 检查 | 结果 |
+|---|---|
+| scripts/check-links.sh | 通过：163 个 Markdown 的相对链接与锚点都能解析 |
+| scripts/check-ownership.sh claude/vmix-28-guide-menu-ui-c83cd1 --include-working-tree | 99 个改动文件都在允许范围内（UIA 行已自记，检查点合并时请复核这次授权） |
+| scripts/lint-rules.sh | 禁词 / 版本号 / Package.swift 约束通过 |
+| scripts/gen-prompt-page.py | 72 张卡；85 = 完成未合并，86–104 = 未开始，91 / 104 识别为闸门 |
+| make lint BRANCH=claude/vmix-28-guide-menu-ui-c83cd1（提交后跑，见 §6.4） | 见下 |
+
+### 6.3 没做的和原因
+
+- 没写契约提案文件：候选内容已在 prompt 99 里写全，编号 020–023 由 P5 建文件并请用户批（铁律 1）。
+- 没改 docs/api.md（`setBusEffects` 那句"enabled = false 的格旁路"）与 docs/CONTRACTS.md:147：前者由 switcher-apidoc 从代码注释生成且有用例钉着，后者是契约文档，都归 P5 / 提案 023。
+- 竞品截图目录仍在用户本机，只加了 .gitignore。
+
+### 6.4 下一步（给用户）
+
+1. 看落地方案 §8.5 的默认拍板值（Q01–Q05、Q66–Q68 最要紧），不同意哪条就改对应 prompt。
+2. 开第五波止血：86 → 87（同一目录，串行）、88、89、90 可并行；然后 91 G6。
+3. 99 P5 开工前要批提案 020–023（P5 第一步会把四份写全再停下来问）。
+4. 页面以后由检查点重生成：`python3 scripts/gen-prompt-page.py --out .build/prompt-page.html`，再用 Artifact 工具发布到 https://claude.ai/artifact/SbCdoSRdmhrkQxuvtMzgUf。
