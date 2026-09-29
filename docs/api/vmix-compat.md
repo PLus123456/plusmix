@@ -13,7 +13,7 @@
 | App | 偏好设置 › 第三方 API 兼容层：勾"启用兼容层（默认关）"，TCP 端口默认 8099（HTTP 8088），"应用并重起引擎"立刻生效 |
 | 无界面引擎 | `switcher-headless run … --compat [--compat-listen 0.0.0.0] [--compat-tcp-port 8099] [--compat-http-port 8088]` |
 
-默认只听 `127.0.0.1`；Companion 在别的机器上时改成 `0.0.0.0`。这个协议本身没有鉴权，开到局域网前想清楚。
+默认只听 `127.0.0.1`；Companion 在别的机器上时改成 `0.0.0.0`。这个协议本身没有鉴权，开到局域网前想清楚。（注：PlusMix App 0.1.0 里改不了监听地址——固定 127.0.0.1、HTTP 端口固定 8088，偏好设置只能改开关与 TCP 端口；"允许局域网"选项归 prompt 98）
 所有经它进来的命令走同一条命令总线（`GET /api/v1/log` 里 `source = "api"`），状态从同一份快照读。
 
 ## Companion 里怎么配
@@ -39,8 +39,8 @@ Connections 加 "vMix" 类型的连接，Target host = PlusMix 所在机器，TC
 | Tally / Status 反馈：Program、Preview、Overlay、Recording、Streaming、FTB | ✅ | 由 XML 轮询 + TALLY / ACTS 订阅驱动；转场进行中 XML 只报旧 PGM（TALLY 订阅正确） |
 | Overlay 5–8、Overlay zoom、Preview overlay | ❌ NotImplemented | PlusMix 只有四个叠加通道、没有"叠加预览"概念 |
 | Transition 2–4、Stinger 2–8、对方的其他转场效果（Slide / Fly / Merge / CubeZoom …） | ❌ NotImplemented | |
-| External / MultiCorder / Fullscreen / SRT output 开关、Snapshot、SetOutput 2–4 | ❌ NotImplemented | 外部输出在 PlusMix 里没有对应的开关命令 |
-| Audio auto（AFV per input）、Bus solo、Send to master、Set gain、Volume fade、声道混音器、音频插件 | ❌ NotImplemented | AFV 在 PlusMix 里是全局开关 + 每路标志，语义不同 |
+| External / MultiCorder / Fullscreen / SRT output 开关、Snapshot、SetOutput 2–4 | ❌ NotImplemented | 外部显示的开关命令 setOutputEnabled 2026-09-23 起已有，映射还没做：要先定 External / Fullscreen 各对应哪种输出、同类有多个时用哪一个（docs/ui-study/02 V14） |
+| Audio auto（AFV per input）、Bus solo、Send to master、Set gain、Volume fade、声道混音器、音频插件 | ❌ NotImplemented | AFV 在 PlusMix 里是全局开关 + 每路标志（每路 afv 只在全局开关打开时生效），映射有损，暂不映射 |
 | Title / List / Replay / PTZ / Browser / Video call / Virtual set / 数据源 / 脚本等整族 | ❌ NotImplemented | 第一版没有这些功能 |
 
 不支持的动作返回明确的错误（HTTP 501 / TCP `FUNCTION ER NotImplemented: …`），Companion 的 Log 里能看到；完全不认识的名字是 UnknownFunction。

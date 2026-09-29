@@ -14,7 +14,7 @@ try await tally.start()                                              // tally.bo
 await tally.stop(); await publisher.stop()
 ```
 
-默认 0.0.0.0:8766（API 端口 + 1）：tally 设备通常在局域网另一台机器上，流是只读的、不收命令，所以不像 API 那样默认只听本机。
+默认 0.0.0.0:8766（API 端口 + 1）：tally 设备通常在局域网另一台机器上，流是只读的、不收命令，所以不像 API 那样默认只听本机。谁起它：0.1.0 里只有 `switcher-headless --tally-port 8766` 会起 TallyServer，PlusMix App 不起（App 的依赖里没有 SwitcherTally；App 内的开关归 prompt 98）。
 
 ## 协议
 

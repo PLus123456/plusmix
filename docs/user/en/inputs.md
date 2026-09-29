@@ -114,8 +114,8 @@ Right-click a thumbnail › Settings…, or Input › Input Settings…:
 | General | name, number |
 | Source | change device / file / source name; "Apply source" rebuilds the input |
 | Crop / transform | four-edge crop (fractions), scale, offset, rotation, flip |
-| Audio | bus routing, gain, mute, solo, pan, delay compensation 0–500 ms, follows video (AFV) |
-| Effects | per-input effect slots (order = processing order) |
+| Audio | bus routing, gain, mute, solo, pan, delay compensation 0–500 ms (the "follows video (AFV)" switch is not here but on the input's mixer strip) |
+| Effects | per-input audio effect slots (order = processing order); editable in 0.1.0 but not applied to the audio yet (prompt 102) |
 | Keyer | key colour, tolerance, softness, spill suppression; applies wherever the input appears (PGM, transitions, overlays, PVW, multiview) |
 
 Out-of-range values are clamped (gain −96…+24 dB, delay 0–500 ms, opposite crops summing to at most 1).

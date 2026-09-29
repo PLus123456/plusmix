@@ -1,7 +1,7 @@
 # PlusMix User Manual
 
 PlusMix (code name Switcher: the modules and command-line tools keep that name) is a multi-camera production switcher that runs natively on Apple Silicon Macs: numbered inputs, Program / Preview monitors,
-Cut / Fade / Wipe / Zoom / Stinger transitions, four overlay channels, four audio buses, and outputs to recording, streaming, NDI,
+Cut / Fade / Wipe / Zoom / Stinger transitions, four overlay channels, four audio buses, and outputs to recording, streaming, NDI® (NDI® is a registered trademark of Vizrt NDI AB),
 a second display, a virtual camera and a multiview. This manual is for operators. How it works inside is in the
 [design spec](../../spec/导播台设计方案.md) (Chinese); how it is verified is in [testing](../../testing/en/README.md).
 

@@ -1,7 +1,7 @@
 # PlusMix 用户手册
 
 PlusMix（代码名 Switcher：模块、命令行工具仍叫这个名字）是一个只跑在 Apple Silicon Mac 上的多机位导播台：编号的输入、PGM / PVW 两个监视器、Cut / Fade / Wipe / Zoom / Stinger 转场、
-四个叠加通道、四条音频总线，输出到录制文件、推流平台、NDI、第二块显示器、虚拟摄像头和多画面。
+四个叠加通道、四条音频总线，输出到录制文件、推流平台、NDI®、第二块显示器、虚拟摄像头和多画面。（NDI® is a registered trademark of Vizrt NDI AB.）
 本手册面向操作的人；想知道它内部怎么工作的看 [设计方案](../spec/导播台设计方案.md)，想验证它有多稳的看 [测试标准](../testing/README.md)。
 
 English version: [en/](en/README.md).

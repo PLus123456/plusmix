@@ -35,3 +35,7 @@ reports/**/*.jsonl
 .idea/
 .vscode/
 *.swp
+
+# ---- 调研资料 ----
+# 竞品截图是作品（设计方案 §0），只留在本机；文档里按图号引用（docs/ui-study/README.md）
+vmix-28-guide/

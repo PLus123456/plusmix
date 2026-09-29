@@ -17,7 +17,7 @@
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | **false** | 总开关。关着时 `VMixCompatServer.start()` 什么都不做，两个端口都不监听（有测试钉着） |
-| `host` | 127.0.0.1 | HTTP 与 TCP 共用；Companion 在别的机器上时改 0.0.0.0 |
+| `host` | 127.0.0.1 | HTTP 与 TCP 共用。库 / headless 可配；**PlusMix App 0.1.0 里固定 127.0.0.1、HTTP 端口固定 8088，偏好设置只能改开关与 TCP 端口**——Companion 在别的机器上时暂时连不上 App 的兼容层（"允许局域网"选项归 prompt 98） |
 | `httpEnabled` / `httpPort` | true / 8088 | HTTP 入口 |
 | `tcpEnabled` / `tcpPort` | true / 8099 | TCP 文本协议入口 |
 | `recordOutput` | nil | StartRecording 等操作哪个录制输出；nil = 编号最小的录制输出 |
@@ -126,10 +126,10 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 `Input=` 的四种写法都认：编号、`0` = 当前 PVW、`-1` = 当前 PGM、XML 里的 `key`、整个标题（区分大小写）。
 
 明确不做（返回 NotImplemented + 文案，`FunctionCatalog.knownUnimplemented` 与前缀族）：对方的其他转场效果（Slide / Fly / Merge / CubeZoom…）、
-Transition2–4、Stinger2–8、OverlayInput5–8、OverlayInputNZoom、PreviewOverlayInputN（没有"叠加预览"）、External / MultiCorder / Fullscreen / SRT 输出
-（本产品的外部输出没有开关命令）、Snapshot、SetOutput2–4、AudioAuto（AFV 在这里是全局的，`setAFV`，语义不同）、BusXSolo、SendToMaster、
+Transition2–4（提案 020 转场槽落地后由 prompt 100 接上）、Stinger2–8、OverlayInput5–8、OverlayInputNZoom、PreviewOverlayInputN（没有"叠加预览"）、External / MultiCorder / Fullscreen / SRT 输出
+（外部显示的开关命令 `setOutputEnabled` 2026-09-23 起已有，映射待定：先要定 External / Fullscreen 各对哪种输出，见 docs/ui-study/02 V14）、Snapshot、SetOutput2–4、AudioAuto（每路 afv 2026-09-23 起已有，但只在全局 AFV 打开时生效，映射有损，暂不映射）、BusXSolo、SendToMaster、
 SetGain（内部只有一个增益）、SetVolumeFade、声道混音器、音频插件、Title / List / Replay / PTZ / Browser / VideoCall / VirtualSet / 数据源 / 脚本等整族。
-完全不认识的名字返回 UnknownFunction。
+完全不认识的名字返回 UnknownFunction。注意：另有 31 个参考软件里真实存在的函数名现在也被当成"不认识"返回 400，按上面的定义应返回 501（docs/ui-study/02 X51，归 W3-D 系）。
 
 ## 7. C5 怎么测
 

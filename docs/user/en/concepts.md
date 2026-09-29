@@ -63,7 +63,7 @@ The Fade / Wipe / Zoom / Stinger buttons select the type and immediately run an 
 "Params…" edits Wipe / Stinger parameters for the next transition. The T-bar uses the selected type: 25 % is a 25 % mix or wipe position;
 pushing to the top commits and returns to 0; releasing midway holds. Cut during a running transition completes it immediately.
 
-FTB has its own duration (defaults to the transition duration); tally does not change while black.
+FTB has its own duration (defaults to the transition duration, both 30 ticks); tally does not change while black. In 0.1.0 the FTB duration cannot be changed from the UI, only in the show file; a right-click menu on FTB comes with proposal 020.
 
 ## Overlay channels
 
@@ -80,8 +80,8 @@ an optional border (for picture-in-picture) and an anchor (zoom animates around 
 ## Audio
 
 - Per input: gain (−96…+24 dB), mute, solo, pan, delay compensation (0–500 ms, for a capture device's own A/V offset), bus routing, audio-follows-video.
-- Four buses with gain / mute / effect chain (parametric EQ, dynamics, peak limiter). Master feeds recording / streaming / NDI;
-  Bus A / B are secondary mixes (foldback etc.); Headphones is the monitor bus.
+- Four buses with gain / mute. The effect chain (parametric EQ, dynamics, peak limiter) can be edited in 0.1.0 but **does not yet affect the audio** (the engine does not read it; see [known issues](../../KNOWN_ISSUES.md); wiring is prompt 88). Master feeds recording / streaming / NDI®;
+  Bus A / B are secondary mixes (foldback etc.) — in 0.1.0 they have no route to a device channel yet and are only visible as meters in the API / stats.jsonl; Headphones is the monitor bus and is only audible on output devices with ≥ 4 channels (on the built-in output or a plain USB headset, solo / PFL / AFL are silent).
 - **AFV (audio follows video)**: with the global switch on, inputs marked "follows video" are only audible on PGM and cross-fade with
   the transition (same start tick, same length). For a presenter microphone or a mixer feed that must always be heard, turn that input's
   "follows video" off.
@@ -96,4 +96,5 @@ Show › New / Open / Save / Save As / Open Recent. The file is readable JSON wi
 - An input's **runtime state** (signal or not) and an output's **runtime numbers** (frames, bitrate) are not in the file; only configuration is.
 - Recording / streaming outputs are always stopped when a file is opened; only a button, shortcut or API call starts them.
 - On quit, an unsaved show is autosaved to `~/Library/Application Support/PlusMix/LastSession.switcher.json` and restored on the next launch.
+- Actual 0.1.0 behaviour: on quit, if the current show was opened from a file, the current state is **written back to that file** without asking; before New / Open nothing is saved or autosaved and unsaved changes are lost. The next version asks "Save / Don't Save / Cancel" in all three places (prompt 87).
 - The shortcut table and MIDI map are **not** in the show file; they live next to it as `hotkeys.json` / `midi.json` ([Shortcuts](shortcuts.md)).

@@ -15,4 +15,4 @@
 不用 NDI 商标做产品名或图标的一部分。SDK 的再分发许可写的是"可以把运行库嵌进你的产品分发"，头文件 / 文档 / 示例不许再分发——所以 SDK 不进仓库，
 CI runner 与打包机各自安装（docs/release/ci.md）。没装 SDK 的机器编出来的包不含 NDI（Stats 标 unavailable，verify.sh 记 links_ndi=false）。
 
-正式发布前问律师的两件事（设计方案 §0 也提了 VMixCompat）：NDI 商标的具体用法（关于窗口的措辞已按 Brand Guidelines 写）、Sparkle / HaishinKit 的署名放在关于窗口还是只放包内文件。
+正式发布前问律师的两件事（设计方案 §0 也提了 VMixCompat）：NDI 商标的具体用法（0.1.0 的关于窗口还是系统标准面板、没有 credits——声明现在只在包内 Licenses/NDI/NOTICE.md 与用户手册里；关于面板的 credits 归 prompt 86）、Sparkle / HaishinKit 的署名放在关于窗口还是只放包内文件。

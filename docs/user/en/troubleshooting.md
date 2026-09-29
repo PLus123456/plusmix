@@ -33,7 +33,7 @@ and the notice in the bottom status line (outputs and system-level events). Both
 | Status line | Behaviour |
 |---|---|
 | "recording n: x MB free" | Warning below 1 GB; still recording |
-| "recording n: x MB free, below the minimum 200 MB" | Only that recording stops; streaming and rendering continue. Change the minimum in Preferences or with `--record-min-free-mb` |
+| "recording n: x MB free, below the minimum 200 MB" | Only that recording stops; streaming and rendering continue. Change the minimum with `--record-min-free-mb` or the `recordMinimumFreeMB` defaults key (no Preferences item in 0.1.0) |
 | "recording n: disk full (…)" / "switched to fallback directory: …" | Full: written fragments are kept; with a fallback directory (`--record-fallback`) recording continues there |
 | "recording n failed to start: …" | Directory not writable / missing, or that ISO input's branches are used up (4 per input) |
 | "recording n failed to finalise: …" | Writing the index at stop failed; the fragmented `.mov` stays playable |
@@ -66,7 +66,7 @@ the `.mov` up to the last 1 s fragment (E6 allows at most 2 s loss).
 
 | Symptom | What to check |
 |---|---|
-| Status line "missed" (missed_render) increasing | Rendering missed ticks. Usual causes: another app saturating the GPU, thermal throttling, a covered multiview window lowering the refresh. On an idle machine it stays 0; for long runs use `caffeinate -d -i` |
+| Status line "missed" (missed_render) increasing | Rendering missed ticks. Usual causes: another app saturating the GPU, thermal throttling, a covered multiview window lowering the refresh. On an idle machine it stays 0; for long runs use `caffeinate -u -i -d -s` (`-i` alone is not enough: when the user is "idle" macOS delays real-time thread wake-ups by 10–18 ms; the app does not yet prevent sleep / App Nap itself, prompt 98) |
 | Audio and video out of sync | Input Settings › Audio › Delay compensation (0–500 ms) for the capture device's own offset; the engine's alignment delay (default 2048 frames = 42.7 ms) is in Preferences › Show audio |
 | Sound stays after cutting away / no sound after cutting in | That input's "follows video": off = always audible, on = only on PGM. The global switch is in the mixer |
 | Headphones ahead of the picture | The monitor point defaults to before the alignment delay (low latency); choose "after delay line" to align with the picture |

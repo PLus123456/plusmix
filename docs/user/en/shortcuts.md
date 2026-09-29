@@ -79,6 +79,6 @@ Devices unplugged and plugged back are picked up again; devices connected while 
 - **Stream Deck**: official-SDK plugin (button = command, button colour = tally); install and button table in [docs/integrations/stream-deck.md](../../integrations/stream-deck.md) (Chinese).
 - **Bitfocus Companion**: via the local API (Generic HTTP / WebSocket modules) in [API examples](../../api/examples.md#3-companion); via the third-party
   compatibility layer with an existing panel configuration in [docs/integrations/companion.md](../../integrations/companion.md).
-- **External tally lights**: a read-only WebSocket / HTTP tally stream, [docs/integrations/tally.md](../../integrations/tally.md).
+- **External tally lights**: a read-only WebSocket / HTTP tally stream, [docs/integrations/tally.md](../../integrations/tally.md). The 0.1.0 app does **not** run this service; only the command-line `switcher-headless` does, with `--tally-port`. In the app use the local API's `GET /api/v1/tally` (an in-app switch is prompt 98).
 - **Scripts / automation**: the local HTTP + WebSocket API, [docs/api/README.md](../../api/README.md). It listens on `127.0.0.1:8765` by default;
   Preferences › Local API changes the address, port and token.

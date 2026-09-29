@@ -20,7 +20,7 @@ Output › Recording Settings…. Default directory `~/Movies/PlusMix`; a relati
 | Item | Notes |
 |---|---|
 | Directory, file name template | `{show}` `{date}` `{time}` `{output}`; default `{show}-{date}-{time}` |
-| Container | `.mov` (default, 1 s fragments: a killed process recovers up to the last fragment) or `.mp4`; "remux to MP4 after stop" keeps the .mov if it fails |
+| File format | Always written as `.mov` first (1 s fragments: a killed process recovers up to the last fragment); for .mp4 enable "remux to MP4 after stop" (the .mov is kept if it fails). The "container .mp4" option on the recording page has no effect in 0.1.0 (the file is still .mov); the next version merges both into one "file format" choice (prompt 87) |
 | Video | H.264 / HEVC / ProRes 422 / 422 HQ / 4444 (hardware), bitrate, keyframe interval, size (default = program) |
 | Audio | AAC (160 kbps default) or PCM; audio = Master bus |
 
@@ -46,7 +46,7 @@ Every second the free space of each recording's volume is checked (external driv
 | Situation | Behaviour |
 |---|---|
 | Free space below 1 GB | Status line warns "recording n: x MB free" |
-| Below the minimum (200 MB by default; Preferences or `--record-min-free-mb`) | **Only that recording stops**; streaming, rendering and other recordings continue |
+| Below the minimum (200 MB by default; `--record-min-free-mb` or the `recordMinimumFreeMB` defaults key — 0.1.0 has no Preferences item for it) | **Only that recording stops**; streaming, rendering and other recordings continue |
 | Volume full / write error | That recording stops and keeps what was written; with a fallback directory (`--record-fallback`) it continues there from the next tick |
 
 Tested with a 50 MB disk image and two 40 Mbps recordings filling it ([test standard](../../testing/en/README.md) S7).
@@ -60,16 +60,18 @@ Output › Streaming Settings…: one output per destination, each with its own 
 | URL | `rtmp://host/app`, `rtmps://host/app`, `srt://host:port?streamid=…&passphrase=…&latency=…`; the scheme selects the protocol |
 | Key | RTMP: appended as the stream name; SRT: becomes `streamid=<key>` when the URL has none |
 | Video / audio | As for recording (platforms usually want H.264 + AAC with a 2 s keyframe interval: 60 frames at 30 fps, 120 at 60 fps) |
-| Reconnect | Exponential back-off after a drop, capped at 30 s by default; the first frame after reconnecting is a keyframe |
+| Reconnect | Exponential back-off after a drop, retrying forever; the wait between attempts is capped at 30 s by default (the "reconnect limit" on the streaming page is that cap); the first frame after reconnecting is a keyframe |
 
 - Destinations are independent: when one loses the network the others drop 0 frames (E7); after a 30 s outage 10 out of 10 reconnects
   succeed within 15 s (E8); the reported "network drops" match real drops within 5 % under bandwidth limits (E9). All of this runs
   automatically against a local MediaMTX with network impairment.
-- The status line shows e.g. "Stream · reconnecting (attempt n)"; in the API `stats.encoder[].state` is idle / connecting / publishing / backoff / stopping / stopped / failed.
+- The bottom-bar stream button shows e.g. "Stream · reconnecting (attempt n)" (in 0.1.0 it reflects the first destination only and n is successful reconnects + 1, not attempts; a destination that failed to start shows "Stream · idle"); in the API `stats.encoder[].state` is idle / connecting / publishing / backoff / stopping / stopped / failed.
 - Try locally first: `mediamtx scripts/mediamtx.yml`, URL `rtmp://127.0.0.1:1935/live`, any key, then `ffplay rtmp://127.0.0.1:1935/live/<key>`
   ([Samples › streaming](../../../Samples/README.md#4-直播先在本机试)). RTMP and SRT are tested end to end in this repository; RTMPS is the same path plus TLS.
 
-## 3. NDI output
+## 3. NDI® output
+
+NDI® is a registered trademark of Vizrt NDI AB.
 
 Output › NDI Output…: one output per sender; the source name is the output's name and appears on the network as **`MACHINE (output name)`**.
 
