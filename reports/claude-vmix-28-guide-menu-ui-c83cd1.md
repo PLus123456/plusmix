@@ -98,7 +98,7 @@
 | scripts/check-ownership.sh claude/vmix-28-guide-menu-ui-c83cd1 --include-working-tree | 99 个改动文件都在允许范围内（UIA 行已自记，检查点合并时请复核这次授权） |
 | scripts/lint-rules.sh | 禁词 / 版本号 / Package.swift 约束通过 |
 | scripts/gen-prompt-page.py | 72 张卡；85 = 完成未合并，86–104 = 未开始，91 / 104 识别为闸门 |
-| make lint BRANCH=claude/vmix-28-guide-menu-ui-c83cd1（提交后跑，见 §6.4） | 见下 |
+| make lint BRANCH=claude/vmix-28-guide-menu-ui-c83cd1（三个提交之后跑） | 全部通过：lint-rules、check-deps（8 个包）、check-ownership（99 个改动文件都在允许范围内）、check-links（163 个 Markdown）、check-rt-symbols |
 
 ### 6.3 没做的和原因
 
