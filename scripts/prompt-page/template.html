@@ -135,14 +135,15 @@ ol.conf li{margin-bottom:4px}
   <a href="#s5">5 会话怎么跑</a>
   <a href="#s6">6 阻塞矩阵</a>
   <a href="#s7">7 待拍板决策</a>
+  <a href="#s8">8 界面改版（UIA 之后）</a>
   <h4>Prompt 库</h4>
   <div id="navlib"></div>
 </nav>
 
 <main>
-<div class="eyebrow">Switcher · 执行版 v0.1</div>
+<div class="eyebrow">PlusMix · 代码名 Switcher · 执行版 v0.1</div>
 <h1>导播台落地方案</h1>
-<p class="lede">把三份规格（设计方案、测试标准、后续方案）和 UI 稿拆成可以直接开工的会话：拆成几块、哪些并行哪些串行、检查点在哪、怎么检查。最后一节是每个会话可以直接复制的 prompt。</p>
+<p class="lede">把三份规格（设计方案、测试标准、后续方案）和 UI 稿拆成可以直接开工的会话：拆成几块、哪些并行哪些串行、检查点在哪、怎么检查。第 8 节是 2026-09-29 界面对照调研之后加的第五波（界面改版）。最后一节是每个会话可以直接复制的 prompt。</p>
 {{STATS}}
 
 <h2 id="s0"><span class="num">0</span>一屏结论</h2>
@@ -308,9 +309,90 @@ ol.conf li{margin-bottom:4px}
 <tr><td class="id">11</td><td>Stream Deck</td><td>官方插件和 Companion 模块二选一做完整</td><td class="id">W3-D</td></tr>
 </table></div>
 
-<h2 id="s8"><span class="num">8</span>Prompt 库</h2>
+<h2 id="s8"><span class="num">8</span>界面对照调研之后：第五波 · 界面改版（2026-09-29 加）</h2>
+<p class="lede">0.1.0 候选（G5，2026-09-28）之后，用户在另一台机器上把竞品 28 版逐项截了 157 张图；会话 UIA（分支 <span class="k">claude/vmix-28-guide-menu-ui-c83cd1</span>）拿它和 PlusMix 逐项对照，只写文档不改代码，产出在仓库 <span class="k">docs/ui-study/</span>（入口 README.md）。本节把结论记在案，并拆成 prompt 85–104。</p>
+<div class="stats">
+  <div class="stat"><b>157</b><span>竞品截图（不入库）</span></div>
+  <div class="stat"><b>130</b><span>改动条目（P0 8）</span></div>
+  <div class="stat"><b>63</b><span>顺带查出的缺陷</span></div>
+  <div class="stat"><b>68</b><span>待拍板</span></div>
+  <div class="stat"><b>14</b><span>问题单 UIA-*</span></div>
+</div>
+<h3>8.1 结论一屏</h3>
+<ul>
+  <li><b>菜单逻辑</b>：参考软件的规则很一致——每个东西就近有齿轮，按钮主体直接干活，右侧小箭头弹快捷菜单，底栏菜单一律朝上开。我们功能大多都有，但入口几乎全在 mac 菜单栏：主窗口缺工具条、缺齿轮、缺小箭头；转场是"一个按钮 = 一种效果"而不是"四个可配置槽"；底栏菜单往窗口外弹。根源之一是 W2-B 写了"留给 W3-E"的一批入口没进 W3-E 的 prompt（docs/ui-study/01 §2）——以后检查点写续做 prompt 时对一遍上一轮报告里的"留给 xx"清单。</li>
+  <li><b>目视</b>：用户点名的两处都找到根因并做过原型实测——转场列没对齐是 <span class="k">NSStackView.alignment = .width</span>（不支持的值，读回 0）；"超出边框"的是底栏"外部输出"菜单（伸出 25 pt，子菜单 228 pt）和"叠加…"弹出层（最多伸出 318 pt、内容被裁）。另记 32 条（03）。</li>
+  <li><b>缺陷 63 条</b>（02 §1）：最重的是音频效果链"界面能调、声音不变"（S1，引擎不读 effects）；一步操作就停掉直播且不确认 5 条（X01–X05）；起不来的推流路让"推流"按钮变成全停；快捷键编辑器把"其他命令"静默存成 Cut；Bus A / B 没有出口、2 声道设备上耳机没声；RTMP 地址里的 user:pass 被丢；转场中改 PVW / PGM 不拦。</li>
+  <li><b>怎么信</b>：9 个分区 agent 逐图读 + 读对应代码，1 个目视 agent 真跑 App 截图量尺寸，5 个核对 agent 逐条挑错（401 条：326 属实、67 改措辞、7 与图不符且都是截图细节，代码结论 0 条不符）。</li>
+</ul>
+<h3>8.2 现状缺陷（与发布有关的部分；全表见 docs/ui-study/02-功能缺口.md §1，已同步进 docs/KNOWN_ISSUES.md）</h3>
+<div class="tbl"><table>
+<tr><th>级别</th><th>编号</th><th>现象</th><th>问题单</th><th>修在</th></tr>
+<tr><td><span class="pill g">S0</span></td><td class="id">X01–X05</td><td>底栏录制 / 推流一按全停不确认；起不来的推流路让主体按钮变成全停；新建 / 打开 / 换节目格式直接停录制推流、丢未保存改动；删除正在推的目的地不确认（Q68 默认 (a)：按 S0，0.1.0 前修）</td><td class="mono">UIA-w3-app-stream-button-state-and-retry、UIA-w3-app-show-switch-and-quit-safety</td><td class="id">87 W5-B</td></tr>
+<tr><td><span class="pill g">S1</span></td><td class="id">X06 X07</td><td>总线与每路音频效果链界面能调、引擎不读；手册 / API 文档按已生效写</td><td class="mono">UIA-w2-audio-effect-chains-not-applied</td><td class="id">87 标"尚未生效" → 88 W5-C 接总线 → 102 W1-D3 每路</td></tr>
+<tr><td><span class="pill g">S1</span></td><td class="id">X08 X09</td><td>Bus A / B 没有任何出口；2 声道设备上耳机总线没声</td><td class="mono">02 §1</td><td class="id">97 W5-K（音频设备页选声道）</td></tr>
+<tr><td><span class="pill g">S1</span></td><td class="id">X10</td><td>快捷键编辑器把"其他命令"静默存成 Cut</td><td class="mono">UIA-w3-app-hotkey-editor-other-command-becomes-cut</td><td class="id">87 止血 → 96 W5-J 选动作面板</td></tr>
+<tr><td><span class="pill g">S1</span></td><td class="id">X11–X13</td><td>底栏状态文字不可信；效果 sheet 开着时快捷键失灵；删除输入不确认、删 PGM 即黑场</td><td class="mono">同上 / UIA-w3-app-misc-logic-bugs</td><td class="id">87、97</td></tr>
+<tr><td><span class="pill b">S2</span></td><td class="id">X14 X15</td><td>录制"容器 .mp4"选了没用；录制 / 推流的 source 被忽略（PVW / 多画面照录 PGM）</td><td class="mono">UIA-w1-outputs-record-container-and-source</td><td class="id">87（界面）、99 P5（container 废弃）、95 W5-I</td></tr>
+<tr><td><span class="pill b">S2</span></td><td class="id">X19</td><td>转场进行中 setPreview / setProgram 不拦，正在切的画面被换掉</td><td class="mono">UIA-w1-core-preview-program-change-mid-transition</td><td class="id">90 W5-E（Q66 默认 (a) 拒收）</td></tr>
+<tr><td><span class="pill b">S2</span></td><td class="id">X20 X21</td><td>外部显示菜单勾不看开关、再点删配置、同屏叠窗；"叠加…"是 transient 浮层，边切边调做不到</td><td class="mono">UIA-w3-app-bottom-bar-popups-overflow-window</td><td class="id">86 W5-A、92 W5-F、97 W5-K</td></tr>
+<tr><td><span class="pill b">S2</span></td><td class="id">X25</td><td>RTMP 地址里的 user:pass@ 被丢，要鉴权的服务器推不上</td><td class="mono">UIA-w2-stream-rtmp-userinfo-dropped</td><td class="id">89 W5-D</td></tr>
+<tr><td><span class="pill b">S2</span></td><td class="id">X30 X32–X34 X53</td><td>手册与实现对不上：退出静默覆盖原文件、App 不起 tally 流、兼容层地址改不了、caffeinate 参数不够、磁盘下限不在偏好设置</td><td class="mono">UIA-w4-docs-manual-vs-implementation</td><td class="id">85 已按实情改手册；实现归 87 / 98 / 103</td></tr>
+<tr><td><span class="pill b">S3 合规</span></td><td class="id">X59 X62</td><td>关于面板没有 NDI® 声明与开源许可入口；偏好设置里出现竞品模块名"VMixCompat"</td><td class="mono">UIA-w3-app-ui-copy-compliance</td><td class="id">86 W5-A；lint 规则归 91 G6</td></tr>
+</table></div>
+<h3>8.3 第五波拆分</h3>
+<p>三批：<b>止血</b>（不改契约、S 为主，0.1.0 候选能收）→ G6 → <b>主窗口骨架与面板改版</b>（不改契约，0.1.x）→ P5 契约落地 → <b>契约批了才能做的</b> → G7。体量口径同第 2 节；"只准动"已落进 docs/OWNERSHIP.md。</p>
+<div class="tbl"><table>
+<tr><th>编号</th><th>会话</th><th>只准动</th><th>依赖</th><th>批次</th><th>验收 / 用例</th><th>体量</th></tr>
+<tr><td class="id">85</td><td>UIA 界面对照调研（已完成，补记）</td><td>docs/ui-study、docs/plan、手册与已知问题的实情修正</td><td>G5</td><td><span class="pill p">记录</span></td><td>check-links、lint</td><td>—</td></tr>
+<tr><td class="id">86</td><td>W5-A 目视与弹出：转场列排版、底栏弹出朝上、分栏与位置、文案合规、关于面板</td><td>App/</td><td>—</td><td><span class="pill w">止血</span></td><td class="mono">testUI_transitionColumnEdgesAligned testUI_bottomBarPopupsStayInsideWindow testL10n_noModuleNameInUserStrings</td><td>M</td></tr>
+<tr><td class="id">87</td><td>W5-B 直播安全与界面说谎：X01–X05、效果链标"尚未生效"、"其他命令"、文件格式、标题</td><td>App/</td><td>86 之后开（同一目录）</td><td><span class="pill w">止血</span></td><td class="mono">testUI_stopRecordAsksConfirmation testUI_streamRetryDoesNotStopHealthyRoutes testHotkeys_otherCommandNotRewrittenToCut</td><td>M</td></tr>
+<tr><td class="id">88</td><td>W5-C 音频总线效果链接线（EQ → 动态 → 限幅装进混音器）</td><td>SwitcherAudio/Integration、BusEffectChain、App/Sources/Engine 两文件</td><td>探针（AUNBandEQ）、Q09 默认 (b)</td><td><span class="pill w">止血</span></td><td class="mono">testA_busEffects_* A7 = 0 check-rt-symbols</td><td>M</td></tr>
+<tr><td class="id">89</td><td>W5-D 推流地址鉴权（user:pass@ 传到连接层）</td><td>SwitcherOutputs/Streaming、ShowRedaction</td><td>探针</td><td><span class="pill w">止血</span></td><td class="mono">testE_streamDestination_keepsUserinfoInConnectURL</td><td>S</td></tr>
+<tr><td class="id">90</td><td>W5-E 转场进行中拒收 setPreview / setProgram</td><td>SwitcherEngine/State、ReducerTests</td><td>Q66 默认 (a)；提案 023 一节</td><td><span class="pill w">止血</span></td><td class="mono">testV6_setPreviewRejectedDuringTransition</td><td>S</td></tr>
+<tr><td class="id">91</td><td>G6 检查点：止血合入、全量测试、KNOWN_ISSUES、0.1.0 重判、lint 加 .strings 禁词</td><td>同 G5 + scripts</td><td>86–90</td><td><span class="pill g">闸门</span></td><td>make test 0 失败、gate4 L2、docs/checklists/G6.md</td><td>M</td></tr>
+<tr><td class="id">92</td><td>W5-F 底栏三段式（⚙ 主体 ▴）、录制 / 推流 / 外部显示 / 多画面 / 添加输入按钮、状态行独立</td><td>App/</td><td>G6；Q03 默认</td><td><span class="pill w">骨架</span></td><td class="mono">testUI_streamMenuListsDestinationsWithState</td><td>M</td></tr>
+<tr><td class="id">93</td><td>W5-G 工具条、监视器齿轮、菜单栏重排</td><td>App/</td><td>92</td><td><span class="pill w">骨架</span></td><td class="mono">testUI_switchMenuShowsHotkeysFromTable testPanels_pvwGearOpensInputSettingsOfPreview</td><td>M</td></tr>
+<tr><td class="id">94</td><td>W5-H 输入条与格子：两行按钮、齿轮、占位格、拖放、分类筛选</td><td>App/</td><td>92；Q06 / Q26 默认</td><td><span class="pill w">骨架</span></td><td class="mono">testUI_inputCellButtonsRespectTransitionGuard</td><td>M</td></tr>
+<tr><td class="id">95</td><td>W5-I 输出设置页：推流预设 / 质量 / 状态 / 鉴权、录制输出列表 / ISO 表、外部显示单选、输出总览</td><td>App/</td><td>G6；Q30 / Q31 默认</td><td><span class="pill w">骨架</span></td><td class="mono">testPanels_streamPresetFillsURLAndKeepsFullURLInShow testPanels_isoTableFollowsRecordFormat</td><td>M</td></tr>
+<tr><td class="id">96</td><td>W5-J 设置体系合窗 + 共用选动作面板 + 控制层动作补齐</td><td>App/、SwitcherControl Hotkeys / MIDI / CommandCatalog</td><td>G6；Q04 默认 (a) 分两步、Q29 / Q51–Q53</td><td><span class="pill w">骨架</span></td><td class="mono">testPanels_settingsWindowOpensRequestedPage testHotkeys_compoundActionEmitsCommandsInOrder</td><td>L</td></tr>
+<tr><td class="id">97</td><td>W5-K 面板改版：添加输入、输入设置（本路画面、取色）、叠加独立窗、音频设置窗与设备声道</td><td>App/</td><td>88（J 区）、Q40 / Q55 / Q58 默认</td><td><span class="pill w">骨架</span></td><td class="mono">testPanels_overlayWindowStaysOpenWhileSwitching testAudio_busChannelMapReachesDevice</td><td>L</td></tr>
+<tr><td class="id">98</td><td>W5-L 其他：防睡眠 / App Nap、App 起只读 tally 流、远程控制页、界面内提醒、统计窗、界面锁</td><td>App/、project.yml（只加 SwitcherTally）</td><td>G6；Q46 / Q47 / Q50 默认</td><td><span class="pill w">骨架</span></td><td class="mono">testApp_engineRunningHoldsActivityAssertion testTally_appServesReadOnlyStream</td><td>M</td></tr>
+<tr><td class="id">99</td><td>P5 契约落地四：提案 020 转场槽 + FTB 时长、021 文件播放控制、022 输出统计补字段、023 小口径收口</td><td>SwitcherContracts、CONTRACTS.md、reducer、CommandBus、填数方</td><td>用户批 020–023</td><td><span class="pill p">串行</span></td><td>契约用例、api.md 重生成、整仓 make test</td><td>M</td></tr>
+<tr><td class="id">100</td><td>W5-M 转场槽落地：转场列（含 T-bar 横放）、快捷键 / MIDI / 兼容层 Transition1–4、Stream Deck</td><td>App/、SwitcherControl Hotkeys / MIDI / VMixCompat、Tools/streamdeck-plugin</td><td>99</td><td><span class="pill w">契约后</span></td><td class="mono">testUI_transitionSlotMenuConfiguresWithoutExecuting testC5_transition2ExecutesSlot</td><td>L</td></tr>
+<tr><td class="id">101</td><td>W5-N 文件播放控制、推流状态面板、录制 / 推流时长</td><td>App/、SwitcherInputs/File</td><td>99</td><td><span class="pill w">契约后</span></td><td class="mono">testUI_fileCellPlayPauseRestart testUI_streamStatusPanelReadsStatsUptime</td><td>M</td></tr>
+<tr><td class="id">102</td><td>W1-D3 每路音频效果格（C 热路径）</td><td>SwitcherAudio/</td><td>88、99（023 effects 口径）</td><td><span class="pill w">契约后</span></td><td class="mono">A7 = 0、check-rt-symbols、每路 EQ 频响差</td><td>L</td></tr>
+<tr><td class="id">103</td><td>W4-C2 手册与实现再对齐、随包 HTML 手册、快捷键表重排</td><td>docs（除 spec / plan）、Samples、App/Resources/Help</td><td>G6 之后随各批更新</td><td><span class="pill w">文档</span></td><td>check-links、帮助菜单能打开</td><td>M</td></tr>
+<tr><td class="id">104</td><td>G7 检查点：骨架与契约后各路合入、L3 目视清单重看、0.1.x 放行</td><td>同 G6</td><td>92–103</td><td><span class="pill g">闸门</span></td><td>make test、gate4、perf-baseline、docs/checklists/G7.md</td><td>M</td></tr>
+</table></div>
+<h3>8.4 顺序与规矩</h3>
+<ul>
+  <li>止血五路（86–90）互不依赖，可并行；86 与 87 都只动 App/、都改 Localizable.strings，建议 87 从 86 合入后的 main 开，或并行后由 G6 解 strings 冲突。</li>
+  <li>骨架七路（92–98）全在 App/：<b>串行开</b>（每个从上一个合入后的 main 开）最省事；要并行就按 92 → 93 / 94 → 95 / 96 / 97 / 98 的依赖排，G7 按同一顺序合并。</li>
+  <li>契约后三路（100–102）等 P5（99）合入 main 后再开；P5 等用户批提案 020–023。文档（103）随每批合入 rebase 一次。</li>
+  <li>每个会话照旧：只动自己目录、先写红测试、报告五段、不 push 不 merge；App 用例写在 App/Tests/，函数名带上表里的 ID。</li>
+  <li>竞品截图在用户本机 <span class="k">vmix-28-guide/</span>（已加进 .gitignore，不入库）；prompt 里"图 NNN"指它；给 App 的文案一律是我们自己的说法（铁律 6）。</li>
+</ul>
+<h3>8.5 待你拍板（prompt 已按下面的默认值写；改了哪条就改对应 prompt）</h3>
+<div class="tbl"><table>
+<tr><th>#</th><th>决策（docs/ui-study/04）</th><th>默认值</th><th>影响</th></tr>
+<tr><td class="id">Q01</td><td>转场按钮模型</td><td>A：四个可配置槽进契约（提案 020）；0.1.0 先做 B 的最小一步——T-bar 上方那行变弹出菜单，只选类型不执行</td><td class="id">86、99、100</td></tr>
+<tr><td class="id">Q02</td><td>效果链做到哪一步</td><td>(a) 先标"尚未生效"，0.1.0 前接总线三格，每路进 0.1.x</td><td class="id">87、88、102</td></tr>
+<tr><td class="id">Q03</td><td>底栏三段式细则</td><td>去掉单独 ISO 按钮；单路起停放 ▴；外部显示主体 = 全部开 / 关（底栏为主，工具条同一控件）；推流主体全起全停 + 停止前确认</td><td class="id">92、93</td></tr>
+<tr><td class="id">Q04</td><td>设置窗合不合</td><td>(a) 合成一个带侧栏的"设置"窗，先理入口再合窗；即时生效，换引擎的项集中"应用并重起引擎"</td><td class="id">96</td></tr>
+<tr><td class="id">Q05</td><td>T-bar 方向</td><td>(a) 横放，随转场槽一起重排</td><td class="id">100</td></tr>
+<tr><td class="id">Q06</td><td>格子上的删除</td><td>(a) 格子上放 ×，在 PGM / PVW / 叠加 / Stinger / ISO 录制中时确认</td><td class="id">87（确认）、94（×）</td></tr>
+<tr><td class="id">Q07–Q14</td><td>契约相关小项</td><td>Q07 跟当前槽；Q08 加 FTB 时长命令并进 020；Q09 总线 EQ 用 AUNBandEQ（先探针）；Q10 effects 只放音频；Q11 文件播放命令进 v1（021）；Q12 container 废弃、界面合成"文件格式"；Q13 uptime / disconnects / last_error 进 Stats（022）；Q14 InputConfig 加可选 color（023）</td><td class="id">88、99、101</td></tr>
+<tr><td class="id">Q26–Q33</td><td>只影响界面的</td><td>格子两行常显；监视器齿轮直开设置、不绑双击；工具条 .unified 一行、正中外部显示▾；默认键 ⌥1–⌥4 执行转场、⌃1–⌃4 叠加（先试系统占用）、录制 / 推流不给默认键；录制码率跟节目格式、推流封顶 1080p / 6 Mb/s；服务预设短表；输入上限 64 + 满了提示；帮助 = 随包 HTML</td><td class="id">92–98、103</td></tr>
+<tr><td class="id">Q66</td><td>转场中改 PVW / PGM</td><td>(a) 拒收（和 autoTransition 同一口径）</td><td class="id">90</td></tr>
+<tr><td class="id">Q67</td><td>退出时写不写回原文件</td><td>(a) 统一成"问"：退出 / 新建 / 打开都弹 保存 / 不保存 / 取消；LastSession 照存</td><td class="id">87</td></tr>
+<tr><td class="id">Q68</td><td>X01–X05 定级</td><td>(a) 按 S0：0.1.0 放行前修</td><td class="id">87、91</td></tr>
+<tr><td class="id">Q36–Q65</td><td>其余 30 条</td><td>全按 04 第 5 节的"倾向"做，只需知会</td><td class="id">各 prompt 已写入</td></tr>
+</table></div>
+
+<h2 id="s9"><span class="num">9</span>Prompt 库</h2>
 <p>每个会话一张卡。"复制 前言 + 本段"会把 00 通用前言拼在前面，直接粘进新会话即可。单独文件在仓库的 docs/plan/prompts/ 目录；本页由 <span class="k">scripts/gen-prompt-page.py</span> 从那里生成，卡片上的状态标签按仓库里分支的状态自动算（{{GENERATED}}）。</p>
-<div class="lib-tools"><button id="openAll">展开全部</button><button id="closeAll">收起全部</button><span class="note">序号是执行顺序；同一个十位数的是同一波次（4x 是 G3 之后的契约落地与续做）。</span></div>
+<div class="lib-tools"><button id="openAll">展开全部</button><button id="closeAll">收起全部</button><span class="note">序号是执行顺序；同一个十位数的是同一波次（4x 是 G3 之后的契约落地与续做；85 起是界面对照调研之后的第五波：86–90 止血、91 G6、92–98 骨架改版、99 契约、100–103 契约后与文档、104 G7，见第 8 节）。</span></div>
 <div id="lib">
 {{LIB}}
 </div>
