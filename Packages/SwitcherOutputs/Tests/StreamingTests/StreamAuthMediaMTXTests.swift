@@ -116,6 +116,7 @@ final class StreamAuthMediaMTXTests: XCTestCase {
     }
 
     /// 服务器 connect 阶段不要鉴权（MediaMTX 不开鉴权）时地址带 user:pass@：第 1 轮就被接受，交给 HaishinKit 的是不带 userinfo 的地址，照常推。
+    /// 推 6 s：MediaMTX 连上之后约 3 s 才认出音视频两轨、开始录（之前的照样从头录进去），推 2 s 就停的话它一个文件都不写。
     func testE_streamAuth_userinfoToServerWithoutConnectAuth_publishes() throws {
         let mtx = try startInstance(test: "auth-none-userinfo", auth: false)
         let scene = try StreamScene()
@@ -123,7 +124,7 @@ final class StreamAuthMediaMTXTests: XCTestCase {
         outputs = [o]
         try o.start()
         XCTAssertTrue(waitUntil(timeout: 10) { o.state == .publishing }, "\(o.state)")
-        try pushAndCheck(o, scene: scene, mtx: mtx, path: "s1", ticks: 120)
+        try pushAndCheck(o, scene: scene, mtx: mtx, path: "s1", ticks: 360)
     }
 
     /// 记下来的 MediaMTX 行为（报告 §1）：开鉴权时只在地址里写 user:pass@ 推不上——它 connect 阶段不要鉴权、publish 时只看查询串；

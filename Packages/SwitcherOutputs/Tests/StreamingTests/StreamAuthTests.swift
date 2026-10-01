@@ -166,6 +166,7 @@ final class StreamAuthTests: XCTestCase {
         let r = StreamURLRedaction.redact(text: text)
         XCTAssertFalse(r.contains("s3cret"), r)
         XCTAssertFalse(r.contains("zzz"), r)
-        XCTAssertTrue(r.contains("rtmp://\(m)@h/app?authmod=adobe&user=pub"), r)
+        XCTAssertTrue(r.contains("rtmp://\(m)@h/app?authmod=adobe&user=\(m)"), "查询串里的 user 也算密钥（与诊断包同一份名单）：\(r)")
+        XCTAssertTrue(r.hasSuffix("srt://h:1?passphrase=\(m)"), r)
     }
 }
