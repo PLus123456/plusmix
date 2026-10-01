@@ -47,10 +47,13 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertEqual(session.state.output(1)?.enabled, true, "取消 = 照录")
         XCTAssertNotNil(session.outputs.recorders[1])
 
-        // 再按、点"停止录制" = 停并封口
+        // 再按、点"停止录制" = 停并封口；点下的那一刻就发 stopRecord（不等 sheet 收起动画，那要晚 ~260 ms）
         bar.recordButton.performClick(nil)
         XCTAssertNotNil(AppTest.waitForConfirmation(.stopRecord))
+        let sentBefore = session.commandsSent
         AppTest.answer(.confirm)
+        XCTAssertNil(ConfirmationCenter.shared.pending(.stopRecord), "点下就回答完了")
+        XCTAssertEqual(session.commandsSent, sentBefore + 1, "点下“停止录制”的那一刻就发了 stopRecord")
         XCTAssertTrue(AppTest.waitUntil(10) { session.state.output(1)?.enabled == false && session.outputs.recorders[1] == nil && session.outputs.lastResults[1] != nil },
                       "确定后停并封口：\(bar.recordButton.title)")
         XCTAssertEqual(ConfirmationCenter.shared.askedCount[.stopRecord] ?? 0, asked + 2)

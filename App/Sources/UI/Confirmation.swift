@@ -2,6 +2,9 @@
 // 删 PGM 上的那一路……都在这里弹 NSAlert sheet。只有界面入口（底栏按钮、菜单、偏好设置、格子右键）走这里；快捷键 / MIDI / API 直接发命令，
 // 一律不问（E11）。测试宿主照样真弹 sheet：测试从 `pending(_:)` 拿到正在问的那一个，用 `respond(_:)` 按按钮回答（按钮的 performClick，
 // 与用户点的是同一条路）。
+// 按钮点下的那一刻就回调，sheet 晚一点再收：NSAlert 自己的 completion 要等收起动画走完，而收起动画（endSheet）把主线程整个占住 ~0.27 s——
+// 期间 Timer、主队列、主线程上的 Task 都不跑（探针见 reports/w5-app-safety.md §5），命令循环送不进总线、快照分发也不跑，运行表定停止边界就晚了 15 帧。
+// 所以先回调（命令发出去），等 dismissDelay（够命令进总线、下一次快照分发让运行表按生效拍定好起止拍）再收 sheet。
 import AppKit
 
 @MainActor
@@ -41,18 +44,27 @@ final class ConfirmationCenter {
         var defaultChoice: Choice?
     }
 
-    /// 正在问的一个。
-    final class Pending {
+    /// 正在问的一个（主线程：AppKit 在主线程上调按钮的 action）。
+    @MainActor
+    final class Pending: NSObject {
         let request: Request
         let alert: NSAlert
         private(set) weak var window: NSWindow?
+        /// 点下按钮时调（按钮下标）。
+        fileprivate var onButton: ((Int) -> Void)?
         init(request: Request, alert: NSAlert, window: NSWindow?) {
             self.request = request
             self.alert = alert
             self.window = window
         }
         var buttonTitles: [String] { request.buttons.map(\.title) }
+
+        /// 按钮的 target（NSAlert 的按钮改指到这里：点下就回调，不等收起动画）。
+        @objc fileprivate func buttonClicked(_ sender: NSButton) { onButton?(sender.tag) }
     }
+
+    /// 点下按钮到收 sheet 之间留的时间（见文件头）。
+    static let dismissDelay: Duration = .milliseconds(120)
 
     private var pendings: [Pending] = []
     /// 每种问过几次（测试看"没问"）。
@@ -81,10 +93,14 @@ final class ConfirmationCenter {
         alert.alertStyle = .warning
         alert.messageText = request.title
         alert.informativeText = request.message
-        for b in request.buttons {
+        let entry = Pending(request: request, alert: alert, window: host)
+        for (i, b) in request.buttons.enumerated() {
             let button = alert.addButton(withTitle: b.title)
             button.hasDestructiveAction = b.destructive
             button.keyEquivalent = ""
+            button.tag = i
+            button.target = entry
+            button.action = #selector(Pending.buttonClicked(_:))
         }
         if let d = request.defaultChoice, let i = request.buttons.firstIndex(where: { $0.choice == d }) {
             alert.buttons[i].keyEquivalent = "\r"
@@ -92,14 +108,26 @@ final class ConfirmationCenter {
         if let i = request.buttons.firstIndex(where: { $0.choice == .cancel }), alert.buttons[i].keyEquivalent.isEmpty {
             alert.buttons[i].keyEquivalent = "\u{1b}"
         }
-        let entry = Pending(request: request, alert: alert, window: host)
         pendings.append(entry)
-        alert.beginSheetModal(for: host) { [weak self] response in
-            MainActor.assumeIsolated {
-                self?.pendings.removeAll { $0 === entry }
-                let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-                completion(request.buttons.indices.contains(index) ? request.buttons[index].choice : .cancel)
+        var answered = false
+        let finish: @MainActor (Choice) -> Void = { [weak self] choice in
+            guard !answered else { return }
+            answered = true
+            self?.pendings.removeAll { $0 === entry }
+            completion(choice)
+        }
+        // 点下按钮：先回调（停 / 换 / 删在这一刻发生），dismissDelay 之后再收 sheet（收起动画占住主线程，见文件头）
+        entry.onButton = { [weak host] i in
+            finish(request.buttons[i].choice)
+            for b in alert.buttons { b.isEnabled = false }   // 回答过了：收起之前再点不算
+            Task { @MainActor in
+                try? await Task.sleep(for: Self.dismissDelay)
+                host?.endSheet(alert.window, returnCode: NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertFirstButtonReturn.rawValue + i))
             }
+        }
+        // sheet 因为别的原因收掉（窗口关了）：当"取消"
+        alert.beginSheetModal(for: host) { _ in
+            MainActor.assumeIsolated { finish(.cancel) }
         }
     }
 

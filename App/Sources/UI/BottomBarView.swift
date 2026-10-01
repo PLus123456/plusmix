@@ -126,9 +126,6 @@ final class BottomBarView: NSView {
         OutputRuntime.encoderEntry(encoderStates, forOutput: number)
     }
 
-    /// 重算两个主体按钮（快照 / Stats 变了，或重试之后）。
-    func refreshButtons() { updateButtons() }
-
     /// 一路在按钮眼里的样子：目标开关（快照）+ Stats.encoder 那一项 + 起不来的原因 / 正在第几次连接（运行表）。
     private func routeStatus(_ o: OutputState) -> OutputRouteStatus {
         let entry = encoderEntry(forOutput: o.number)
