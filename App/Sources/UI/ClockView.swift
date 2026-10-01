@@ -1,10 +1,12 @@
 // 时钟：24 小时制大字 + 12 小时制小字，每秒对齐整秒刷新。
+// W5-A（03-目视检查.md §1.3 第 6 条、V-08）：56 pt 高、1 pt 分隔线色边框、圆角 6、字号 20 / 11（原来 2 pt 白框是整列最"响"的东西）；
+// 12 小时制按界面语言的 hmma 模板排（中文"上午12:13"，英文"12:13 PM"；原来写死 "hh:mm a" 成了"12:13 上午"）。
 import AppKit
 
 @MainActor
 final class ClockView: NSView {
-    private let big = Theme.monoLabel("00:00:00", size: 22, color: .white)
-    private let small = Theme.monoLabel("", size: 12, color: Theme.dimText)
+    private let big = Theme.monoLabel("00:00:00", size: 20, color: .white)
+    private let small = Theme.monoLabel("", size: 11, color: Theme.dimText)
     private var timer: Timer?
     private let f24: DateFormatter = {
         let f = DateFormatter()
@@ -13,7 +15,8 @@ final class ClockView: NSView {
     }()
     private let f12: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "hh:mm a"
+        f.locale = L10n.locale
+        f.setLocalizedDateFormatFromTemplate("hmma")
         return f
     }()
 
@@ -22,18 +25,20 @@ final class ClockView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        layer?.borderColor = NSColor.white.cgColor
-        layer?.borderWidth = 2
+        layer?.borderColor = Theme.divider.cgColor
+        layer?.borderWidth = 1
+        layer?.cornerRadius = 6
         big.alignment = .center
         small.alignment = .center
-        addSubview(big)
-        addSubview(small)
+        let lines = NSStackView(views: [big, small])
+        lines.orientation = .vertical
+        lines.alignment = .centerX
+        lines.spacing = 1
+        lines.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(lines)
         NSLayoutConstraint.activate([
-            big.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            big.centerXAnchor.constraint(equalTo: centerXAnchor),
-            small.topAnchor.constraint(equalTo: big.bottomAnchor, constant: 2),
-            small.centerXAnchor.constraint(equalTo: centerXAnchor),
-            small.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            lines.centerXAnchor.constraint(equalTo: centerXAnchor),
+            lines.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         tick()
         scheduleAligned()
@@ -60,4 +65,6 @@ final class ClockView: NSView {
     }
 
     var displayedTime: String { big.stringValue }
+    /// 12 小时制那一行用的格式（测试看）。
+    var twelveHourFormat: String { f12.dateFormat }
 }

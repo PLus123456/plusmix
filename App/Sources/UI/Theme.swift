@@ -58,9 +58,34 @@ enum Theme {
         return b
     }
 
+    /// 开着 / 按下的高亮：底色换成 color，标题一律白字（FTB / 录制 / 静音的红底原来是黑字，对比 3.0:1，V-05）。
+    /// 每个快照都会调：状态没变就不重设（不每帧新建标题串）。改了 title 的按钮（录制 / 推流）要在改完 title 之后再调。
     static func setHighlighted(_ button: NSButton, _ on: Bool, color: NSColor = Theme.accent) {
-        button.bezelColor = on ? color : nil
+        let bezel: NSColor? = on ? color : nil
+        if button.bezelColor == bezel, hasWhiteTitle(button) == on { return }
+        button.bezelColor = bezel
         button.contentTintColor = on ? .white : nil
+        setTitleColor(button, on ? .white : nil)
+    }
+
+    /// 推按钮的标题色：contentTintColor 管不到推按钮的标题，有颜色时换成带色的 attributedTitle；nil = 回到系统配色（重设 title 就回到默认属性）。
+    static func setTitleColor(_ button: NSButton, _ color: NSColor?) {
+        let title = button.title
+        guard let color else {
+            button.title = title
+            return
+        }
+        let style = NSMutableParagraphStyle()
+        style.alignment = button.alignment
+        style.lineBreakMode = .byTruncatingTail
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: color, .font: button.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize), .paragraphStyle: style,
+        ])
+    }
+
+    private static func hasWhiteTitle(_ button: NSButton) -> Bool {
+        guard button.attributedTitle.length > 0 else { return false }
+        return (button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor) == .white
     }
 }
 

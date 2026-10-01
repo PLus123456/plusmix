@@ -142,6 +142,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         centerSplit.setPosition(window.frame.height - Theme.bottomBarHeight - 230, ofDividerAt: 0)
         outerSplit.setPosition(window.frame.width - Theme.mixerPanelWidth, ofDividerAt: 0)
 
+        transitionPanel.onNotice = { [weak self] message in self?.bottomBar.showNotice(message) }
         bottomBar.onAddInput = { [weak self] in self?.presentAddInput() }
         bottomBar.onOverlayPanel = { [weak self] anchor in self?.presentOverlayPanel(relativeTo: anchor) }
         bottomBar.onExternalMenu = { [weak self] anchor in self?.presentExternalMenu(relativeTo: anchor) }
@@ -166,6 +167,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         self.session = session
         let send: ((Command) -> Void)? = session.map { s in { [weak s] c in s?.send(c) } }
         transitionPanel.send = send
+        if let session { transitionPanel.hotkeyTable = session.control.hotkeyTable }
         inputStrip.send = send
         mixerPanel.send = send
         bottomBar.send = send

@@ -190,6 +190,7 @@ final class AppController {
         hotkeyTable = table
         hotkeyTableError = nil
         session?.control.hotkeys.table = table
+        windowController.transitionPanel.hotkeyTable = table   // 转场列的按钮提示从当前表反查（W5-A）
     }
 
     /// MIDI 映射面板保存后：换给控制器。
