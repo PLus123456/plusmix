@@ -141,10 +141,10 @@ final class StreamAuthTests: XCTestCase {
         try o.start()
         Thread.sleep(forTimeInterval: 2.5)
         XCTAssertNotEqual(o.state, .publishing)
-        let attempts = Int(o.counters.connectAttempts)
         let t0 = Date()
         o.stop()
         XCTAssertLessThan(Date().timeIntervalSince(t0), 2, "stop() 被卡住了")
+        let attempts = Int(o.counters.connectAttempts)      // stop 之后读：两边的数都定了
         XCTAssertGreaterThanOrEqual(attempts, 1)
         XCTAssertLessThanOrEqual(g.attempts.count, 3 * attempts, "每次尝试最多 3 次连接：\(g.attempts.map(\.outcome))")
         XCTAssertFalse(g.attempts.contains { $0.outcome == .accepted })
