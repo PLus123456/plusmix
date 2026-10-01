@@ -1,5 +1,8 @@
 # APIServerTests 的 WS 用例在 Fade 进行中发 setPreview、断言 applied = true：W5-E 拒收规则合入后必红
 
+**状态：已修**（用户 2026-10-01 指定由 W5-E 改，选的是下面建议 (b)）：W5-E 分支上把 :274 / :277 两行断言改成 applied = false、PVW 仍 1，并在 docs/OWNERSHIP.md 的 W5-E 行认领这个文件；
+改完 SwitcherControl 全包 58 个用例 57 过、1 跳（原有人工 C5）、0 红。下面是当时的记录。
+
 归属会话 / 分支：SwitcherControl 测试（W2-C / `w2-control` 写的 `Packages/SwitcherControl/Tests/SwitcherControlTests/APIServerTests.swift`；
 第五波里 `Packages/SwitcherControl/Tests/SwitcherControlTests/` 归 W5-J / `w5-app-settings-actions`，prompt 96）。
 改动只有几行，G6 合 W5-E 时也可以按胶水（`~Packages/*:50`）改；用户批准的话 W5-E 也可以直接改（见 reports/w5-core-transition-guard.md §3）。
