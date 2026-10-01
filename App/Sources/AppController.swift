@@ -1,4 +1,7 @@
 // App 的总管：一个 session（节目跑起来）+ 主窗口 + 节目文件 + 面板（W3-E）。新建 / 打开总是换一个新 session（节目格式可能变，引擎的格式在 init 定死）。
+// W5-B（02 X03 / X04 / X30，01a A3 / F5，04 Q67 (a)）：新建 / 打开 / 退出 / 偏好设置里换引擎之前，录制 / 推流在跑先确认"会停止 n 路录制、m 路推流"；
+// 节目有未保存的改动（documentContent 口径）时问 保存 / 不保存 / 取消，窗口用 isDocumentEdited 标出来；退出不再静默写回已打开的文件，LastSession 照存。
+// 这些问只在界面入口（菜单 / 偏好设置 / 关主窗口）上；newShow / openShow / changeProgramFormat 等直接调用的路径（测试、内部）不问。
 import AppKit
 import SwitcherContracts
 import SwitcherControl
@@ -35,6 +38,13 @@ final class AppController {
     /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
     let updateController: UpdateController
     private var replacing = false
+    /// 未保存判定的基准：上次新建 / 打开 / 保存时的"节目内容"（documentContent）；与当前的不同 = 有未保存的改动（W5-B）。
+    private var documentBaseline: Show?
+    private var documentToken: ObserverToken?
+    /// 节目有没有未保存的改动：窗口用 isDocumentEdited 标出来（关闭按钮上的点），新建 / 打开 / 退出前问保存。口径见 documentContent。
+    private(set) var isDocumentEdited = false {
+        didSet { if oldValue != isDocumentEdited { windowController.window?.isDocumentEdited = isDocumentEdited } }
+    }
 
     /// 测试宿主的 UserDefaults suite。
     static let testDefaultsSuite = "com.plusmix.switcher.tests"
@@ -69,14 +79,17 @@ final class AppController {
             midiTable = MIDIMapTable.loadUserTableOrDefault()
         }
         if isTestHost {
-            let recordDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/records", isDirectory: true).path
-            documents = ShowDocuments(defaults: defaults, recordDirectory: recordDirectory)
+            let tests = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests", isDirectory: true)
+            // LastSession 也放临时目录：测试宿主走退出的整条路（W5-B），不碰用户的 ~/Library/Application Support/PlusMix/LastSession
+            documents = ShowDocuments(defaults: defaults, recordDirectory: tests.appendingPathComponent("records", isDirectory: true).path,
+                                      autosaveURL: tests.appendingPathComponent("LastSession.\(ShowDocuments.fileExtension)"))
             applyTestHostOverrides()
         } else {
             documents = ShowDocuments(defaults: defaults)
         }
         windowController.defaultRecordDirectory = documents.recordDirectory
         windowController.panels = panels
+        windowController.bottomBar.shouldConfirmStop = { [weak self] in self?.settings.confirmBeforeStop ?? true }
     }
 
     private func applyTestHostOverrides() {
@@ -94,6 +107,7 @@ final class AppController {
         windowController.window?.makeKeyAndOrderFront(nil)
         windowController.window?.makeFirstResponder(nil)   // 快捷键直接到窗口；搜索框要点了才有焦点
         var show = documents.emptyShow()
+        var baseline = DocumentBaseline.current
         if let showURL {
             do { show = try documents.load(from: showURL) } catch { presentError(error, context: L("error.open", showURL.lastPathComponent)) }
         } else if !isTestHost {
@@ -102,23 +116,32 @@ final class AppController {
             } else if let auto = documents.loadAutosave() {
                 show = auto
                 documents.startNew()
+                baseline = .empty   // 从 LastSession 恢复的没存成文件：有内容就算未保存
             }
         }
-        await replaceSession(show: show)
+        await replaceSession(show: show, baseline: baseline)
     }
 
-    /// 退出前：自动保存当前状态（未保存过的节目下次能恢复），停引擎。
+    /// 退出（退出前那一问已经过了）：LastSession 照存——崩溃恢复、下次启动没有上次的文件时从它恢复；不再静默写回已打开的节目文件，
+    /// 要不要存由退出前那一问定（W5-B，Q67 (a)，X30）。然后停引擎。
     func shutdown() async {
-        if let session, !isTestHost {
-            documents.autosave(session.makeShow())
-            if let url = documents.currentURL { try? documents.save(session.makeShow(), to: url) }
-        }
+        if let session { documents.autosave(session.makeShow()) }
         await stopSession()
     }
 
     // MARK: session
 
-    func replaceSession(show: Show) async {
+    /// 换 session 时未保存判定的基准怎么定（W5-B）。
+    enum DocumentBaseline {
+        /// 以新 session 起好时的内容为准（新建、打开文件、启动时打开上次的文件）。
+        case current
+        /// 和空节目比（启动时从 LastSession 恢复的、没存成文件的节目：有内容就算未保存）。
+        case empty
+        /// 沿用原来的（同一个节目换引擎：换格式 / 节目音频 / 重起；换了的格式本身就是一处改动）。
+        case keep
+    }
+
+    func replaceSession(show: Show, baseline: DocumentBaseline = .current) async {
         guard !replacing else { return }
         replacing = true
         defer { replacing = false }
@@ -132,22 +155,202 @@ final class AppController {
             panels.bind(session: s)
             try await s.start()
             if firstStartReport == nil { firstStartReport = s.startReport }
+            switch baseline {
+            case .current: documentBaseline = Self.documentContent(s.makeShow())
+            case .empty: documentBaseline = Self.documentContent(Show(name: "", state: documents.emptyShow().makeState()))
+            case .keep: break
+            }
+            documentToken = s.observeState { [weak self] _ in self?.refreshDocumentEdited() }
             if let hotkeyTableError { windowController.bottomBar.showNotice(hotkeyTableError) }
         } catch {
             lastError = error
             session = nil
             windowController.bind(session: nil)
             panels.bind(session: nil)
+            refreshDocumentEdited()
             presentError(error, context: L("error.startEngine"))
         }
     }
 
     private func stopSession() async {
         guard let old = session else { return }
+        documentToken = nil
         windowController.bind(session: nil)
         panels.bind(session: nil)
         session = nil
+        refreshDocumentEdited()
         await old.stop()
+    }
+
+    // MARK: 未保存判定（W5-B）
+
+    /// 未保存判定的口径：比"节目内容"——Show 去掉现场操作与界面摆放之后剩下的部分（报告 §1 有这张表）。
+    /// 不算改动：界面布局（窗口位置 / 面板开关）、节目名（跟文件名走）、录制 / 推流的开关（运行目标，打开文件时本来就清掉）、PGM / PVW 选哪路、
+    /// 转场进度 / T-bar / 起始拍、FTB 开没开与进度、叠加通道开没开 / 放哪路 / 动画进度。
+    /// 算改动：输入表与每路设置（含推子、静音、路由、延迟、效果、抠像）、输出表与设置（含 NDI / 外部显示 / 虚拟摄像头 / 多画面的开关）、
+    /// 转场类型 / 时长 / Wipe / Stinger 参数、FTB 时长、叠加的位置 / 动画 / 边框 / 锚点 / PVW 预览、四总线的增益 / 静音 / 效果、AFV、监听、节目格式、对齐延迟 / 监听点。
+    static func documentContent(_ show: Show) -> Show {
+        var s = ShowDocuments.stoppingOutputs(show)
+        s.name = ""
+        s.layout = ShowLayout()
+        s.mixer.program = MixerState.noInput
+        s.mixer.preview = MixerState.noInput
+        s.mixer.transition.progress = 0
+        s.mixer.transition.source = .auto
+        s.mixer.transition.startTick = nil
+        s.mixer.ftb.on = false
+        s.mixer.ftb.level = 0
+        s.mixer.ftb.startTick = nil
+        for i in s.mixer.overlays.indices {
+            s.mixer.overlays[i].on = false
+            s.mixer.overlays[i].input = nil
+            s.mixer.overlays[i].animProgress = 0
+            s.mixer.overlays[i].startTick = nil
+        }
+        return s
+    }
+
+    private func refreshDocumentEdited() {
+        guard let session, let documentBaseline else {
+            isDocumentEdited = false
+            return
+        }
+        isDocumentEdited = Self.documentContent(session.makeShow()) != documentBaseline
+    }
+
+    // MARK: 换节目 / 换引擎 / 退出前的问（W5-B）
+
+    /// 正在跑的录制 / 推流路数（目标开着的；起不来的也算——换节目 / 换引擎照样会把它们清掉）。
+    var liveOutputCounts: (records: Int, streams: Int) {
+        let outputs = session?.state.outputs.filter(\.enabled) ?? []
+        return (outputs.filter { $0.kind == .record }.count, outputs.filter { $0.kind == .stream }.count)
+    }
+
+    /// "1 路录制、2 路推流"（只列不为零的）。
+    static func liveSummary(records: Int, streams: Int) -> String {
+        var parts: [String] = []
+        if records > 0 { parts.append(L("confirm.part.records", records)) }
+        if streams > 0 { parts.append(L("confirm.part.streams", streams)) }
+        return parts.joined(separator: L("confirm.part.separator"))
+    }
+
+    enum LeaveReason: Equatable {
+        case newShow
+        /// 打开的文件名。
+        case openShow(String)
+        case quit
+    }
+
+    /// 换节目 / 退出之前：录制 / 推流在跑 → 先问"会停止 n 路录制、m 路推流"；节目有未保存的改动 → 问 保存 / 不保存 / 取消。
+    /// 都过了才 proceed；任何一步取消就什么都不做（cancelled）。
+    func confirmLeavingShow(_ reason: LeaveReason, proceed: @escaping @MainActor () -> Void, cancelled: @escaping @MainActor () -> Void = {}) {
+        let live = liveOutputCounts
+        guard live.records + live.streams > 0 else {
+            confirmSavingChanges(reason, proceed: proceed, cancelled: cancelled)
+            return
+        }
+        let summary = Self.liveSummary(records: live.records, streams: live.streams)
+        let title: String, button: String, message: String
+        switch reason {
+        case .newShow: (title, button, message) = (L("confirm.newShow.title", summary), L("confirm.newShow.button"), L("confirm.replace.message"))
+        case .openShow(let name): (title, button, message) = (L("confirm.openShow.title", name, summary), L("confirm.openShow.button"), L("confirm.replace.message"))
+        case .quit: (title, button, message) = (L("confirm.quit.title", summary), L("confirm.quit.button"), L("confirm.quitLive.message"))
+        }
+        let request = ConfirmationCenter.Request(kind: .replaceShow, title: title, message: message,
+                                                 buttons: [.init(title: button, choice: .confirm, destructive: true), .init(title: L("common.cancel"), choice: .cancel)],
+                                                 defaultChoice: nil)
+        ConfirmationCenter.shared.ask(request, in: windowController.window) { [weak self] choice in
+            guard choice == .confirm, let self else { cancelled(); return }
+            // 下一问等这一个 sheet 收起来再弹
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.confirmSavingChanges(reason, proceed: proceed, cancelled: cancelled) } }
+        }
+    }
+
+    private func confirmSavingChanges(_ reason: LeaveReason, proceed: @escaping @MainActor () -> Void, cancelled: @escaping @MainActor () -> Void) {
+        guard isDocumentEdited, let session else {
+            proceed()
+            return
+        }
+        let hasFile = documents.currentURL != nil
+        let request = ConfirmationCenter.Request(
+            kind: .saveChanges, title: L("confirm.save.title", session.name),
+            message: reason == .quit ? L("confirm.save.messageQuit") : L("confirm.save.message"),
+            buttons: [.init(title: hasFile ? L("confirm.save.save") : L("confirm.save.saveAs"), choice: .confirm),
+                      .init(title: L("common.cancel"), choice: .cancel),
+                      .init(title: L("confirm.save.dontSave"), choice: .alternate)],
+            defaultChoice: .confirm)
+        ConfirmationCenter.shared.ask(request, in: windowController.window) { [weak self] choice in
+            switch choice {
+            case .alternate: proceed()
+            case .cancel: cancelled()
+            case .confirm:
+                guard let self else { cancelled(); return }
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.saveBeforeLeaving { saved in saved ? proceed() : cancelled() } } }
+            }
+        }
+    }
+
+    /// 离开前那一问点了"保存"：有文件就写回，没有就弹存储面板；存成了 completion(true)，取消 / 写不进去 completion(false)（什么都不做）。
+    private func saveBeforeLeaving(_ completion: @escaping @MainActor (Bool) -> Void) {
+        guard let session else {
+            completion(false)
+            return
+        }
+        if let url = documents.currentURL {
+            completion(write(session.makeShow(), to: url))
+        } else {
+            saveAs(completion: completion)
+        }
+    }
+
+    /// 节目 › 新建（菜单 / ⌘N）：先过换节目的问。
+    func requestNewShow(completion: (@MainActor () -> Void)? = nil) {
+        confirmLeavingShow(.newShow, proceed: { [weak self] in
+            Task { @MainActor in
+                await self?.newShow()
+                completion?()
+            }
+        })
+    }
+
+    /// 打开一个节目文件（打开… 选完 / 打开最近 / Finder 双击）：先过换节目的问。
+    func requestOpenShow(url: URL, completion: (@MainActor () -> Void)? = nil) {
+        confirmLeavingShow(.openShow(url.lastPathComponent), proceed: { [weak self] in
+            Task { @MainActor in
+                await self?.openShow(url: url)
+                completion?()
+            }
+        })
+    }
+
+    /// 退出之前（菜单退出 / ⌘Q / 关主窗口）：录制 / 推流在跑先确认，有未保存的改动问保存。completion(true) = 可以退了（AppDelegate 接着 shutdown）。
+    func prepareToQuit(_ completion: @escaping @MainActor (Bool) -> Void) {
+        confirmLeavingShow(.quit, proceed: { completion(true) }, cancelled: { completion(false) })
+    }
+
+    enum EngineRestartReason { case format, showAudio, restart }
+
+    /// 偏好设置里会换引擎的三个按钮（节目格式"应用"、节目音频"应用"、"应用并重起引擎"）：录制 / 推流在跑时先确认（F5 / X04），没在跑直接做。
+    /// sheet 挂在偏好设置窗上（window），没有就挂主窗口。
+    func confirmEngineRestart(_ reason: EngineRestartReason, in window: NSWindow?, proceed: @escaping @MainActor () -> Void) {
+        let live = liveOutputCounts
+        guard live.records + live.streams > 0 else {
+            proceed()
+            return
+        }
+        let summary = Self.liveSummary(records: live.records, streams: live.streams)
+        let title = switch reason {
+        case .format: L("confirm.applyFormat.title", summary)
+        case .showAudio: L("confirm.applyShowAudio.title", summary)
+        case .restart: L("confirm.restartEngine.title", summary)
+        }
+        let request = ConfirmationCenter.Request(kind: .restartEngine, title: title, message: L("confirm.restartEngine.message"),
+                                                 buttons: [.init(title: L("confirm.restartEngine.button"), choice: .confirm, destructive: true),
+                                                           .init(title: L("common.cancel"), choice: .cancel)],
+                                                 defaultChoice: nil)
+        ConfirmationCenter.shared.ask(request, in: window ?? windowController.window) { choice in
+            if choice == .confirm { proceed() }
+        }
     }
 
     /// 改节目格式（偏好设置）：引擎的格式在 init 定死，所以换一个 session；输入 / 输出原样带过去，录制 / 推流的目标状态清掉（不自动续录）。
@@ -156,7 +359,7 @@ final class AppController {
         var show = ShowDocuments.stoppingOutputs(session.makeShow())
         show.mixer.format = format
         show.layout = currentLayout()
-        await replaceSession(show: show)
+        await replaceSession(show: show, baseline: .keep)
     }
 
     /// 改节目音频的对齐延迟 / 监听点（提案 007，存在 Show.audio 里）：运行期改要重建延迟线，AudioRuntime 建引擎时才读，所以换一个 session
@@ -167,7 +370,7 @@ final class AppController {
         show.audio.alignmentFrames = max(0, alignmentFrames)
         show.audio.monitorPoint = monitorPoint
         show.layout = currentLayout()
-        await replaceSession(show: show)
+        await replaceSession(show: show, baseline: .keep)
     }
 
     /// 用当前节目重起引擎（偏好设置里 API / 音频设备 / 兼容层改了要立刻生效）。
@@ -175,7 +378,7 @@ final class AppController {
         guard let session else { return }
         var show = ShowDocuments.stoppingOutputs(session.makeShow())
         show.layout = currentLayout()
-        await replaceSession(show: show)
+        await replaceSession(show: show, baseline: .keep)
     }
 
     /// 偏好设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的包内选项（外部输出的主屏层级）同时落到跑着的 session。
@@ -198,13 +401,6 @@ final class AppController {
         session?.control.midi.table = table
     }
 
-    // MARK: 换节目 / 退出前确认（W5-B 桩）
-
-    var isDocumentEdited: Bool { false }
-    func requestNewShow(completion: (() -> Void)? = nil) { Task { await newShow(); completion?() } }
-    func requestOpenShow(url: URL, completion: (() -> Void)? = nil) { Task { await openShow(url: url); completion?() } }
-    func prepareToQuit(_ completion: @escaping @MainActor (Bool) -> Void) { completion(true) }
-
     // MARK: 节目文件
 
     func newShow() async {
@@ -221,7 +417,8 @@ final class AppController {
         }
     }
 
-    func openShowPanel() {
+    /// 节目 › 打开…：先选文件，选完再过换节目的问（W5-B），没选就什么都不问。
+    func openShowPanel(completion: (@MainActor () -> Void)? = nil) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
@@ -230,7 +427,8 @@ final class AppController {
         panel.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 guard let self, response == .OK, let url = panel.url else { return }
-                Task { await self.openShow(url: url) }
+                // 打开面板的 sheet 收起来之后再弹确认
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.requestOpenShow(url: url, completion: completion) } }
             }
         }
     }
@@ -245,21 +443,31 @@ final class AppController {
         }
     }
 
-    func saveAs() {
-        guard let session, let window = windowController.window else { return }
+    /// 另存：弹存储面板；completion(true) = 存成了（离开前那一问点"保存…"时用），取消 / 写不进去 = false。
+    func saveAs(completion: (@MainActor (Bool) -> Void)? = nil) {
+        guard let session, let window = windowController.window else {
+            completion?(false)
+            return
+        }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "\(session.name).\(ShowDocuments.fileExtension)"
         panel.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
-                guard let self, response == .OK, let url = panel.url else { return }
-                self.write(session.makeShow(), to: url)
+                guard let self, response == .OK, let url = panel.url else {
+                    completion?(false)
+                    return
+                }
+                let saved = self.write(session.makeShow(), to: url)
+                completion?(saved)
             }
         }
     }
 
-    /// 直接写到 url（测试 / 另存的落点）。节目名 = 文件名（去掉 .switcher.json）。
-    func write(_ show: Show, to url: URL) {
+    /// 直接写到 url（保存 / 另存 / 测试的落点）。节目名 = 文件名（去掉 .switcher.json）。写成了返回 true：窗口标题换成新名字（产品名，W5-B 修 X42），
+    /// 未保存判定的基准换成刚存的内容。
+    @discardableResult
+    func write(_ show: Show, to url: URL) -> Bool {
         do {
             var s = show
             s.name = Self.showName(for: url)
@@ -268,9 +476,13 @@ final class AppController {
             session?.name = s.name
             session?.layout = s.layout
             session?.mediaBaseDirectory = documents.mediaBaseDirectory   // 另存到别处后，之后加的素材按新位置找（已在跑的路不重建）
-            windowController.window?.title = "Switcher \(SwitcherVersion.current) — \(s.name)"
+            windowController.window?.title = MainWindowController.windowTitle(showName: s.name)
+            documentBaseline = Self.documentContent(s)
+            refreshDocumentEdited()
+            return true
         } catch {
             presentError(error, context: L("error.save", url.lastPathComponent))
+            return false
         }
     }
 

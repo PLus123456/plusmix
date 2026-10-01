@@ -236,7 +236,9 @@ final class LiveSafetyTests: XCTestCase {
         // 临时改两处（加一路、改名）
         session.send(.addInput(config: AppTest.syntheticConfig(number: 2)))
         session.send(.renameInput(input: 1, name: "临时改的"))
-        XCTAssertTrue(AppTest.waitUntil(3) { controller.isDocumentEdited }, "改了就标未保存")
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.inputs.count == 2 && session.state.input(1)?.name == "临时改的" },
+                      "两处改动都进了快照：\(session.state.inputs.map(\.name))，拒收 \(session.control.bus.counters.rejected)")
+        XCTAssertTrue(controller.isDocumentEdited, "改了就标未保存")
 
         // 退出前问；取消 = 不退
         var decision: Bool?
@@ -626,7 +628,7 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertEqual(InputRemovalImpact.impacts(of: 6, in: state), [])
         state.preview = 1
         XCTAssertEqual(InputRemovalImpact.impacts(of: 1, in: state), [.program, .preview])
-        XCTAssertEqual(InputRemovalImpact.preview.text, "它在 PVW 上：删掉后 PVW 变成黑场")
+        XCTAssertEqual(InputRemovalImpact.preview.text, "它在 PVW 上：删掉后 PVW 会变成黑场")
     }
 
     // MARK: 9. 窗口标题（A4 / X42）

@@ -1,5 +1,7 @@
 // MIDI 映射面板（W3-E 交付第 6 条，带 learn）：编辑 W2-C 的 MIDIMapTable（触发 CC / 14-bit CC / Note → T-bar / 输入增益 / 总线增益 / 动作），
 // learn = 让 MIDIController 把下一条消息交给面板填触发（期间不派发），保存到用户配置文件（测试宿主是临时目录）并立刻换表。
+// W5-B（02 X41）：动作 = 命令、而它不在那十来种里的行（"其他命令"）原来下拉显示空白：现在列出"其他命令"并显示 CommandCatalog 的说明 + 参数摘要，
+// 同快捷键编辑器一样给"编辑 JSON…"。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -168,8 +170,34 @@ final class MIDIMappingModel: ObservableObject {
         }
     }
 
-    static func actionChoices(for row: Row) -> [HotkeyEditorModel.ActionKind] { HotkeyEditorModel.ActionKind.allCases.filter { $0 != .other } }
-    func applyJSON(_ id: UUID, _ text: String) -> Bool { false }
+    /// 动作 = 命令 / 开关那一类的行，下拉列哪些：与快捷键编辑器同一条规则（"其他命令"只在这一行本来就是其他命令时列）。
+    static func actionChoices(for row: Row) -> [HotkeyEditorModel.ActionKind] {
+        guard case .action(let a) = row.action else { return HotkeyEditorModel.ActionKind.allCases.filter { $0 != .other } }
+        return HotkeyEditorModel.actionChoices(for: HotkeyEditorModel.Row(keyText: "", action: a, note: ""))
+    }
+
+    /// "编辑 JSON…"上一次解不出来的原因。
+    @Published var jsonError: String?
+
+    /// 编辑框的初始文字（这一行是一条命令就给它的 JSON）。
+    func jsonText(for id: UUID) -> String {
+        guard let row = rows.first(where: { $0.id == id }), case .action(.command(let c)) = row.action else { return "" }
+        return CommandText.json(c)
+    }
+
+    /// 把一条命令的 JSON 写进这一行（动作 = 这条命令）；解不出来记原因、这一行不动。
+    @discardableResult
+    func applyJSON(_ id: UUID, _ text: String) -> Bool {
+        guard rows.contains(where: { $0.id == id }) else { return false }
+        do {
+            setAction(id, .action(.command(try CommandText.parse(text))))
+            jsonError = nil
+            return true
+        } catch {
+            jsonError = "\(error)"
+            return false
+        }
+    }
 
     static func describe(_ action: MIDIAction) -> String {
         switch action {
@@ -185,6 +213,8 @@ final class MIDIMappingModel: ObservableObject {
 
 struct MIDIMappingView: View {
     @ObservedObject var model: MIDIMappingModel
+    /// 正在用"编辑 JSON…"改的那一行。
+    @State private var jsonRow: JSONEditTarget?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -245,6 +275,9 @@ struct MIDIMappingView: View {
             .padding(10)
             Text(L("midi.fileHint", model.fileURL.path)).font(.caption).foregroundStyle(.secondary).padding(.bottom, 6)
         }
+        .sheet(item: $jsonRow) { target in
+            CommandJSONSheet(text: target.text, error: model.jsonError, apply: { text in model.applyJSON(target.id, text) }, close: { jsonRow = nil })
+        }
     }
 
     @ViewBuilder
@@ -268,18 +301,22 @@ struct MIDIMappingView: View {
             Picker(L("hotkeys.actionKind"), selection: Binding(get: { hotkeyRow.kind }, set: { kind in
                 var r = hotkeyRow
                 r.kind = kind
-                model.setAction(row.id, .action(r.action ?? .command(.cut)))
+                if let action = r.action { model.setAction(row.id, .action(action)) }
             })) {
-                ForEach(HotkeyEditorModel.ActionKind.allCases.filter { $0 != .other }) { Text($0.title).tag($0) }
+                ForEach(MIDIMappingModel.actionChoices(for: row)) { Text($0.title).tag($0) }
             }
             .labelsHidden().frame(width: 140)
             if let label = hotkeyRow.kind.argumentLabel {
                 TextField(label, value: Binding(get: { hotkeyRow.argument }, set: { v in
                     var r = hotkeyRow
                     r.argument = v
-                    model.setAction(row.id, .action(r.action ?? .command(.cut)))
+                    if let action = r.action { model.setAction(row.id, .action(action)) }
                 }), format: .number).frame(width: 60)
+            } else if hotkeyRow.kind == .other, let c = hotkeyRow.other {
+                Text(CommandText.summary(c)).font(.caption).lineLimit(1).frame(width: 160, alignment: .leading).help(CommandText.summary(c))
             }
+            Button(L("hotkeys.editJSON")) { jsonRow = JSONEditTarget(id: row.id, text: model.jsonText(for: row.id)) }
+                .controlSize(.small)
         }
     }
 }

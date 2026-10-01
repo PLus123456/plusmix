@@ -3,6 +3,9 @@
 // 全部落在 MixerState.outputs（addOutput / removeOutput / setOutputSettings；非录制 / 推流输出的开关与改名走提案 012 的
 // setOutputEnabled / renameOutput）；ISO = 一路 source = .input(n) 的录制输出（契约："ISO = 同一拍发多条 startRecord"；W3-C 做同拍起步）。
 // 外部显示的显示器与"退回主屏"只写正式字段 OutputSettings.display（提案 013 / 015），显示类输出的状态读 Stats.display[]。
+// W5-B：推流页在推的那一段（目标开着、没起不来）地址 / 密钥 / 编码锁住、"删除目的地"灰掉（X05 / X24，同 ISO 页录着的路）；地址 / 密钥回车或失焦才提交；
+// 起不来的那一段写明原因、不锁（要能改对地址，改对后运行表自动重试），给"重试"与"停用这一路"；录制页"容器"与"停止后转 MP4"合成一个"文件格式"单选，
+// 只写 remuxToMP4、不写 container（照读，04 Q12 (a)）；录着的时候页顶提示"改动从下一次开录起生效"（K6）。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -25,7 +28,14 @@ final class OutputSettingsModel: ObservableObject {
     @Published private(set) var displayStats: [Stats.DisplayEntry] = []
     /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；每项带输出编号 `output`，按它对号——提案 019）。
     @Published private(set) var encoderStats: [Stats.EncoderEntry] = []
+    /// 起不来的录制 / 推流 → 原因；推流正在第几次连接（运行表，refreshRouteDetails 时取；W5-B）。
+    @Published private(set) var failures: [Int: String] = [:]
+    @Published private(set) var attempts: [Int: Int] = [:]
     var send: ((Command) -> Void)?
+    /// 一路起不来的原因 + 推流正在第几次连接（PanelCoordinator 接到 session 的运行表）。
+    var routeDetail: ((Int) -> (failure: String?, attempt: Int?))?
+    /// 重试起不来的那几路（session.retryFailedOutputs）。
+    var onRetry: (([Int]) -> Void)?
     /// 新建录制输出的默认目录。
     let defaultRecordDirectory: String
     /// 节目名（示例文件名用）。
@@ -51,11 +61,27 @@ final class OutputSettingsModel: ObservableObject {
         extensionToken = aux?.observeExtensionStatus { [weak self] s in self?.virtualCameraStatus = OutputStatusText.extensionStatus(s) }
     }
 
-    func apply(state: MixerState) { self.state = state }
+    func apply(state: MixerState) {
+        self.state = state
+        refreshRouteDetails()
+    }
 
     func apply(stats: Stats) {
         if stats.display != displayStats { displayStats = stats.display }
         if stats.encoder != encoderStats { encoderStats = stats.encoder }
+        refreshRouteDetails()
+    }
+
+    /// 重新取一遍录制 / 推流各路起不来的原因与连接次数（快照 / Stats 来的时候，或点了重试之后）。
+    func refreshRouteDetails() {
+        var f: [Int: String] = [:], a: [Int: Int] = [:]
+        for o in state.outputs where o.kind == .record || o.kind == .stream {
+            guard let d = routeDetail?(o.number) else { continue }
+            if let failure = d.failure { f[o.number] = failure }
+            if let attempt = d.attempt { a[o.number] = attempt }
+        }
+        if f != failures { failures = f }
+        if a != attempts { attempts = a }
     }
 
     /// 扩展的 bundle ID（安装器用的那个）。
@@ -75,7 +101,6 @@ final class OutputSettingsModel: ObservableObject {
 
     static let videoCodecs: [VideoCodec] = [.h264, .hevc, .prores422, .prores422HQ, .prores4444]
     static let audioCodecs: [AudioCodec] = [.aac, .pcm]
-    static let containers: [RecordContainer] = [.mov, .mp4]
     static let resolutionPresets: [(title: String, width: Int?, height: Int?)] = [
         (L("outputSettings.resolution.program"), nil, nil), ("1920×1080", 1920, 1080), ("1280×720", 1280, 720), ("3840×2160", 3840, 2160), ("854×480", 854, 480),
     ]
@@ -89,9 +114,9 @@ final class OutputSettingsModel: ObservableObject {
         send?(.setOutputEnabled(output: number, on: on))
     }
 
-    /// 改设置：本地先改（表单立刻响应），再发 setOutputSettings。
+    /// 改设置：本地先改（表单立刻响应），再发 setOutputSettings。在推的推流目的地锁着，不改（W5-B）。
     func updateOutput(_ number: Int, _ body: (inout OutputSettings) -> Void) {
-        guard let i = state.outputs.firstIndex(where: { $0.number == number }) else { return }
+        guard !isStreamLocked(number), let i = state.outputs.firstIndex(where: { $0.number == number }) else { return }
         var settings = state.outputs[i].settings
         body(&settings)
         guard settings != state.outputs[i].settings else { return }
@@ -99,7 +124,9 @@ final class OutputSettingsModel: ObservableObject {
         send?(.setOutputSettings(output: number, settings: settings))
     }
 
+    /// 删掉一个输出；在推的推流目的地锁着，不删（W5-B，X05：原来一点就断流）。
     func removeOutput(_ number: Int) {
+        guard !isStreamLocked(number) else { return }
         state.outputs.removeAll { $0.number == number }
         send?(.removeOutput(output: number))
     }
@@ -142,6 +169,33 @@ final class OutputSettingsModel: ObservableObject {
     /// 录制表单的绑定（读当前录制输出，没有就默认值）。
     func recordBinding<T>(_ keyPath: WritableKeyPath<OutputSettings, T>, default defaultValue: T) -> Binding<T> {
         Binding(get: { self.recordOutput?.settings[keyPath: keyPath] ?? defaultValue }, set: { v in self.updateRecord { $0[keyPath: keyPath] = v } })
+    }
+
+    /// 录制的"文件格式"（K5 / X14，04 Q12 (a)）："容器"与"停止后转 MP4"合成一个单选，只写 remuxToMP4。
+    /// RecordSettings.container 运行时从来不读（文件一律 .mov），这里照读不写；旧节目文件里写着 .mp4 的，页上说一句它不起作用。
+    enum RecordFileFormat: String, CaseIterable, Identifiable {
+        /// .mov，边录边存片段（崩溃可恢复）。
+        case mov
+        /// .mov，停止后转封装成 .mp4（失败保留 .mov）。
+        case movThenMP4
+        var id: String { rawValue }
+        var title: String { L("outputSettings.record.fileFormat.\(rawValue)") }
+    }
+
+    var recordFileFormat: RecordFileFormat {
+        get { recordOutput?.settings.record?.remuxToMP4 == true ? .movThenMP4 : .mov }
+        set { updateRecord { $0.record?.remuxToMP4 = newValue == .movThenMP4 } }
+    }
+
+    /// 节目文件里 container 写着 .mp4、又没开"停止后转 .mp4"：照读不写，提示它不起作用（开了转 .mp4 就不用说了）。
+    var recordLegacyContainerNote: String? {
+        guard let record = recordOutput?.settings.record, record.container == .mp4, !record.remuxToMP4 else { return nil }
+        return L("outputSettings.record.legacyContainerNote")
+    }
+
+    /// 录着的时候：改动从下一次开录起生效（K6；运行中的录制器不跟着改）。
+    var recordLiveNote: String? {
+        state.outputs.contains { $0.kind == .record && $0.enabled } ? L("outputSettings.record.liveNote") : nil
     }
 
     /// 示例文件名。
@@ -203,22 +257,42 @@ final class OutputSettingsModel: ObservableObject {
         Binding(get: { self.state.output(number)?.settings[keyPath: keyPath] ?? defaultValue }, set: { v in self.updateOutput(number) { $0[keyPath: keyPath] = v } })
     }
 
-    func isStreamLocked(_ number: Int) -> Bool { false }
-    func commitStreamAddress(_ number: Int, url: String, key: String) { updateOutput(number) { $0.stream?.url = url; $0.stream?.streamKey = key } }
-    func streamLockNote(_ number: Int) -> String? { nil }
-    func streamStatus(output number: Int) -> String { "" }
-    func disableStream(_ number: Int) {}
-    var recordLiveNote: String? { nil }
-    enum RecordFileFormat: String, CaseIterable, Identifiable {
-        case mov, movThenMP4
-        var id: String { rawValue }
-        var title: String { rawValue }
+    /// 在推的推流目的地（目标开着、没起不来）：地址 / 密钥 / 编码锁住、不能删（W5-B，L12 / X05 / X24）。起不来的那一路不锁——要能把地址改对。
+    func isStreamLocked(_ number: Int) -> Bool {
+        guard let o = state.output(number), o.kind == .stream else { return false }
+        return o.enabled && failures[number] == nil
     }
-    var recordFileFormat: RecordFileFormat {
-        get { .mov }
-        set {}
+
+    /// 锁着时那一段的说明；没锁为 nil。
+    func streamLockNote(_ number: Int) -> String? { isStreamLocked(number) ? L("outputSettings.stream.lockedNote") : nil }
+
+    /// 地址 / 密钥（回车或失焦时提交，不再每按一个键发一次 setOutputSettings；W5-B，L12）。
+    func commitStreamAddress(_ number: Int, url: String, key: String) {
+        updateOutput(number) { s in
+            var stream = s.stream ?? StreamSettings(url: "")
+            stream.url = url
+            stream.streamKey = key
+            s.stream = stream
+        }
     }
-    var recordLegacyContainerNote: String? { nil }
+
+    /// 推流页那一段的状态行：起不来写原因；其余与底栏同一套文字（Stats.encoder 的 state + 正在第几次连接）。
+    func streamStatus(output number: Int) -> String {
+        guard let o = state.output(number) else { return "" }
+        if o.enabled, let failure = failures[number] { return L("outputSettings.stream.statusFailed", failure) }
+        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number)
+        let route = OutputRouteStatus(number: number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0, attempt: attempts[number])
+        return OutputButtonSummary.routeState(route, kind: .stream).text
+    }
+
+    /// 重试起不来的这一路。
+    func retryStream(_ number: Int) {
+        onRetry?([number])
+        refreshRouteDetails()
+    }
+
+    /// 停用这一路（目标关掉：起不来的那一路不再算在跑，底栏主体又能停其余的）。
+    func disableStream(_ number: Int) { send?(.stopStream(output: number)) }
 
     // MARK: 外部显示
 
@@ -430,34 +504,41 @@ struct OutputSettingsView: View {
     private var recordAudio: Binding<AudioEncodeSettings> {
         model.recordBinding(\.audio, default: nil).map(get: { $0 ?? AudioEncodeSettings() }, set: { Optional($0) })
     }
-    private func video(of number: Int) -> Binding<VideoEncodeSettings> {
+    static func video(of number: Int, in model: OutputSettingsModel) -> Binding<VideoEncodeSettings> {
         model.outputBinding(number, \.video, default: nil).map(get: { $0 ?? VideoEncodeSettings() }, set: { Optional($0) })
     }
-    private func audio(of number: Int) -> Binding<AudioEncodeSettings> {
+    static func audio(of number: Int, in model: OutputSettingsModel) -> Binding<AudioEncodeSettings> {
         model.outputBinding(number, \.audio, default: nil).map(get: { $0 ?? AudioEncodeSettings() }, set: { Optional($0) })
     }
-    private func stream(of number: Int) -> Binding<StreamSettings> {
+    static func stream(of number: Int, in model: OutputSettingsModel) -> Binding<StreamSettings> {
         model.outputBinding(number, \.stream, default: nil).map(get: { $0 ?? StreamSettings(url: "") }, set: { Optional($0) })
     }
 
     private var recordTab: some View {
         Group {
+            if let note = model.recordLiveNote {
+                Section { Text(note).foregroundStyle(.orange) }
+            }
             Section(L("outputSettings.record.format")) {
                 Picker(L("outputSettings.codec"), selection: recordVideo.codec) {
                     ForEach(OutputSettingsModel.videoCodecs, id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
                 }
-                Picker(L("outputSettings.record.container"), selection: recordSettingsBinding.container) {
-                    ForEach(OutputSettingsModel.containers, id: \.self) { Text($0 == .mov ? ".mov" : ".mp4").tag($0) }
+                // 文件格式（W5-B，K5）：原来的"容器"与"停止后转 MP4"合成一个单选，只写 remuxToMP4
+                Picker(L("outputSettings.record.fileFormat"), selection: Binding(get: { model.recordFileFormat }, set: { model.recordFileFormat = $0 })) {
+                    ForEach(OutputSettingsModel.RecordFileFormat.allCases) { Text($0.title).tag($0) }
                 }
-                resolutionPicker(recordVideo)
-                bitrateField(recordVideo)
+                if let note = model.recordLegacyContainerNote {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
+                Self.resolutionPicker(recordVideo)
+                Self.bitrateField(recordVideo)
                 Stepper(value: recordVideo.keyframeIntervalFrames, in: 1...600, step: 1) {
                     Text(L("outputSettings.keyframeInterval", model.recordOutput?.settings.video?.keyframeIntervalFrames ?? 120))
                 }
                 Picker(L("outputSettings.audioCodec"), selection: recordAudio.codec) {
                     ForEach(OutputSettingsModel.audioCodecs, id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
                 }
-                audioBitrateField(recordAudio)
+                Self.audioBitrateField(recordAudio)
             }
             Section(L("outputSettings.record.file")) {
                 HStack {
@@ -469,7 +550,6 @@ struct OutputSettingsView: View {
                 Stepper(value: recordSettingsBinding.fragmentIntervalSeconds, in: 0.5...10, step: 0.5) {
                     Text(L("outputSettings.record.fragmentInterval", model.recordOutput?.settings.record?.fragmentIntervalSeconds ?? 1))
                 }
-                Toggle(L("outputSettings.record.remux"), isOn: recordSettingsBinding.remuxToMP4)
                 Text(L("outputSettings.record.hint")).font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -480,7 +560,7 @@ struct OutputSettingsView: View {
         return model.recordBinding(\.record, default: nil).map(get: { $0 ?? fallback }, set: { Optional($0) })
     }
 
-    private func resolutionPicker(_ video: Binding<VideoEncodeSettings>) -> some View {
+    static func resolutionPicker(_ video: Binding<VideoEncodeSettings>) -> some View {
         let v = video.wrappedValue
         let index = OutputSettingsModel.resolutionPresets.firstIndex { $0.width == v.width && $0.height == v.height } ?? 0
         return Picker(L("outputSettings.resolution"), selection: Binding(get: { index }, set: { i in
@@ -494,7 +574,7 @@ struct OutputSettingsView: View {
         }
     }
 
-    private func bitrateField(_ video: Binding<VideoEncodeSettings>) -> some View {
+    static func bitrateField(_ video: Binding<VideoEncodeSettings>) -> some View {
         TextField(L("outputSettings.bitrateKbps"), value: Binding(get: { video.wrappedValue.bitrateBps / 1000 }, set: { kbps in
             var nv = video.wrappedValue
             nv.bitrateBps = max(100, kbps) * 1000
@@ -502,7 +582,7 @@ struct OutputSettingsView: View {
         }), format: .number)
     }
 
-    private func audioBitrateField(_ audio: Binding<AudioEncodeSettings>) -> some View {
+    static func audioBitrateField(_ audio: Binding<AudioEncodeSettings>) -> some View {
         TextField(L("outputSettings.audioBitrateKbps"), value: Binding(get: { audio.wrappedValue.bitrateBps / 1000 }, set: { kbps in
             var na = audio.wrappedValue
             na.bitrateBps = max(32, kbps) * 1000
@@ -541,23 +621,7 @@ struct OutputSettingsView: View {
     private var streamTab: some View {
         Group {
             ForEach(model.streamOutputs) { output in
-                Section(L("outputSettings.stream.section", output.number, output.name)) {
-                    TextField(L("outputSettings.stream.url"), text: stream(of: output.number).url)
-                    SecureField(L("outputSettings.stream.key"), text: stream(of: output.number).streamKey)
-                    Stepper(value: stream(of: output.number).reconnectMaxSeconds, in: 1...300, step: 1) {
-                        Text(L("outputSettings.stream.reconnect", output.settings.stream?.reconnectMaxSeconds ?? 30))
-                    }
-                    Picker(L("outputSettings.codec"), selection: video(of: output.number).codec) {
-                        ForEach([VideoCodec.h264, .hevc], id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
-                    }
-                    resolutionPicker(video(of: output.number))
-                    bitrateField(video(of: output.number))
-                    Stepper(value: video(of: output.number).keyframeIntervalFrames, in: 1...600) {
-                        Text(L("outputSettings.keyframeInterval", output.settings.video?.keyframeIntervalFrames ?? 120))
-                    }
-                    audioBitrateField(audio(of: output.number))
-                    Button(L("outputSettings.stream.remove")) { model.removeOutput(output.number) }
-                }
+                StreamDestinationSection(model: model, output: output)
             }
             Section(L("outputSettings.stream.add")) {
                 TextField(L("outputSettings.stream.url"), text: $newStreamURL, prompt: Text(L("outputSettings.stream.urlPrompt")))
@@ -658,6 +722,76 @@ struct OutputSettingsView: View {
             Text(L("outputSettings.vcam.hint")).font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { if model.queriesSystemExtensions { model.refreshVirtualCameraStatus() } }
+    }
+}
+
+/// 推流页的一个目的地（W5-B）。在推的（目标开着、没起不来）地址 / 密钥 / 编码锁住并注明"停止后可改"，"删除目的地"灰掉（L12 / X05 / X24）；
+/// 地址 / 密钥是草稿，回车或离开输入框才提交（原来每按一个键发一次 setOutputSettings）；起不来的写明原因、不锁，给"重试"与"停用这一路"（L13）。
+struct StreamDestinationSection: View {
+    @ObservedObject var model: OutputSettingsModel
+    let output: OutputState
+    @State private var draftURL: String
+    @State private var draftKey: String
+    @FocusState private var focus: Field?
+    enum Field: Hashable { case url, key }
+
+    init(model: OutputSettingsModel, output: OutputState) {
+        self.model = model
+        self.output = output
+        _draftURL = State(initialValue: output.settings.stream?.url ?? "")
+        _draftKey = State(initialValue: output.settings.stream?.streamKey ?? "")
+    }
+
+    private var number: Int { output.number }
+    private var locked: Bool { model.isStreamLocked(number) }
+    private var savedURL: String { output.settings.stream?.url ?? "" }
+    private var savedKey: String { output.settings.stream?.streamKey ?? "" }
+
+    private func commit() {
+        let url = draftURL.trimmingCharacters(in: .whitespaces)
+        guard !locked, url != savedURL || draftKey != savedKey else { return }
+        model.commitStreamAddress(number, url: url, key: draftKey)
+    }
+
+    var body: some View {
+        Section(L("outputSettings.stream.section", number, output.name)) {
+            LabeledContent(L("outputSettings.stream.status"), value: model.streamStatus(output: number))
+            if output.enabled, model.failures[number] != nil {
+                Text(L("outputSettings.stream.failedHint")).font(.caption).foregroundStyle(.red)
+                HStack {
+                    Button(L("outputSettings.stream.retry")) { model.retryStream(number) }
+                    Button(L("outputSettings.stream.disable")) { model.disableStream(number) }
+                }
+            }
+            if let note = model.streamLockNote(number) {
+                Text(note).font(.caption).foregroundStyle(.orange)
+            }
+            TextField(L("outputSettings.stream.url"), text: $draftURL)
+                .focused($focus, equals: .url).onSubmit(commit).disabled(locked)
+            SecureField(L("outputSettings.stream.key"), text: $draftKey)
+                .focused($focus, equals: .key).onSubmit(commit).disabled(locked)
+            Group {
+                Stepper(value: OutputSettingsView.stream(of: number, in: model).reconnectMaxSeconds, in: 1...300, step: 1) {
+                    Text(L("outputSettings.stream.reconnect", output.settings.stream?.reconnectMaxSeconds ?? 30))
+                }
+                Picker(L("outputSettings.codec"), selection: OutputSettingsView.video(of: number, in: model).codec) {
+                    ForEach([VideoCodec.h264, .hevc], id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
+                }
+                OutputSettingsView.resolutionPicker(OutputSettingsView.video(of: number, in: model))
+                OutputSettingsView.bitrateField(OutputSettingsView.video(of: number, in: model))
+                Stepper(value: OutputSettingsView.video(of: number, in: model).keyframeIntervalFrames, in: 1...600) {
+                    Text(L("outputSettings.keyframeInterval", output.settings.video?.keyframeIntervalFrames ?? 120))
+                }
+                OutputSettingsView.audioBitrateField(OutputSettingsView.audio(of: number, in: model))
+            }
+            .disabled(locked)
+            Button(L("outputSettings.stream.remove")) { model.removeOutput(number) }
+                .disabled(locked)
+        }
+        // 离开输入框 = 提交；别处（API / 另一个窗口）改了地址、而这一格没在编辑：草稿跟上
+        .onChange(of: focus) { old, new in if old != nil, old != new { commit() } }
+        .onChange(of: savedURL) { _, v in if focus != .url { draftURL = v } }
+        .onChange(of: savedKey) { _, v in if focus != .key { draftKey = v } }
     }
 }
 

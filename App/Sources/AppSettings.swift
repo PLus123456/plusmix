@@ -11,7 +11,7 @@
 // W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）；
 // W3-E2 加 overlaysInPreview（PVW 预览全部叠加 = MetalRendererOptions.overlaysInPreview，渲染器选项在 init 定死，换 session 生效）；
 // W3-E3 加 externalOutputBehindInterface（外部输出在主屏上不盖住主界面 = ExternalDisplayManager.mainScreenLayering，包内选项、运行时可改，
-// 不进 OutputSettings.display——那是节目文件里的输出设置，这个是本机偏好）。命令行参数优先于 UserDefaults。
+// 不进 OutputSettings.display——那是节目文件里的输出设置，这个是本机偏好）；W5-B 加 confirmBeforeStop（底栏停录制 / 推流前先确认，默认开）。命令行参数优先于 UserDefaults。
 import Foundation
 import SwitcherControl
 import SwitcherExternal
@@ -123,6 +123,7 @@ struct AppSettings: Equatable, Sendable {
         }
         if defaults.object(forKey: Keys.overlaysInPreview) != nil { s.overlaysInPreview = defaults.bool(forKey: Keys.overlaysInPreview) }
         if defaults.object(forKey: Keys.externalBehindInterface) != nil { s.externalBehindInterface = defaults.bool(forKey: Keys.externalBehindInterface) }
+        if defaults.object(forKey: Keys.confirmBeforeStop) != nil { s.confirmBeforeStop = defaults.bool(forKey: Keys.confirmBeforeStop) }
 
         func value(after flag: String) -> String? {
             guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
@@ -153,5 +154,6 @@ struct AppSettings: Equatable, Sendable {
         defaults.set(compatLayerPort, forKey: Keys.compatLayerPort)
         defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview)
         defaults.set(externalBehindInterface, forKey: Keys.externalBehindInterface)
+        defaults.set(confirmBeforeStop, forKey: Keys.confirmBeforeStop)
     }
 }

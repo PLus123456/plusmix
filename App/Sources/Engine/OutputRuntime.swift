@@ -21,6 +21,9 @@
 //   start（NDIlib_initialize、send_create、Metal 转换器编译）/ stop（等发送线程退出、销毁实例）都放后台线程做，不卡主线程；
 //   起 / 停的过程中快照又变了，做完按最新快照再对一次。Stats.encoder 那一项由 sender 的 statsEntry 填（publishing / idle / unavailable / failed，019 起带接收方数）。
 //   源是输入 n、那一路分支用完了（与 ISO / Aux 共用每路 4 个）：sender 照跑、没画面、提示一次、记着在等；InputRuntime 还分支时回调 → 重新要分支、接上、再提示一次（W3-E4）。
+// 起不来的录制 / 推流（W5-B，02 X02 / 01a L13）：原因记在 failed 表（人话，底栏提示与推流页那一段照着写），Stats.encoder 里那一项报 failed（原来报 idle）；
+//   enabled 仍为真时设置变了（地址 / 目录改对）reconcile 自动重试；底栏主体按钮有起不来的推流路时调 retry 只重试它们，正常的路不动。
+//   推流起的时候提示"连接中"，Stats 第一次报 publishing 才提示"已开始"（X37）。
 import Foundation
 import Synchronization
 import SwitcherContracts
@@ -60,6 +63,9 @@ final class OutputRuntime {
         case recordingDiskLow(output: Int, freeMB: Double)
         /// 磁盘满 / 低于下限，切到备用目录继续录。
         case recordingSwitchedToFallback(output: Int, url: URL)
+        /// 推流起来了、正在连（还没连上，X37）。
+        case streamConnecting(output: Int)
+        /// 推流连上了（Stats 第一次报 publishing）。
         case streamStarted(output: Int)
         case streamStopped(output: Int)
         case streamFailed(output: Int, message: String)
@@ -99,6 +105,8 @@ final class OutputRuntime {
         let stream: StreamOutput
         var audioToken: AudioConsumerToken?
         var stopping = false
+        /// 已经提示过"已开始"（第一次报 publishing）。
+        var announced = false
         init(output: OutputState, stream: StreamOutput) {
             self.output = output
             self.stream = stream
@@ -173,8 +181,10 @@ final class OutputRuntime {
     private var finishedNDI: [Int: NDISender] = [:]
     /// 起不来的 NDI 输出当时的设置：设置变了（改名 / 换源 / 换分组）就再试，没变不反复试。
     private var ndiFailedKeys: [Int: NDIKey] = [:]
-    /// 起不来的输出（enabled 仍为 true）：不反复重试，等它被关掉再清。
+    /// 起不来的输出（enabled 仍为 true）→ 原因（给人看的一句）：不自己反复重试；被关掉、设置改了（reconcile）或底栏点重试（retry）时清。
     private(set) var failed: [Int: String] = [:]
+    /// 起不来时那一路的设置：enabled 仍为真、设置变了（地址 / 目录改对）就自动重试一次（W5-B，L13）。
+    private var failedSettings: [Int: OutputSettings] = [:]
     private(set) var lastResults: [Int: RecordingResult] = [:]
     /// 每路最近一次的磁盘事件（测试 / 面板看）。
     private(set) var diskEvents: [Int: RecordingDiskMonitor.Event] = [:]
@@ -222,15 +232,16 @@ final class OutputRuntime {
         for (n, _) in failed where wanted[n]?.enabled != true {
             failed.removeValue(forKey: n)
             ndiFailedKeys.removeValue(forKey: n)
+            failedSettings.removeValue(forKey: n)
         }
         var toStart: [OutputState] = []
         for output in state.outputs {
             switch output.kind {
             case .record:
-                if output.enabled, recorders[output.number] == nil, failed[output.number] == nil { toStart.append(output) }
+                if output.enabled, recorders[output.number] == nil, failed[output.number] == nil || retryAfterSettingsChange(output) { toStart.append(output) }
                 else if !output.enabled, let e = recorders[output.number], !e.stopping { toStop.append(output.number) }
             case .stream:
-                if output.enabled, streams[output.number] == nil, failed[output.number] == nil { startStream(output) }
+                if output.enabled, streams[output.number] == nil, failed[output.number] == nil || retryAfterSettingsChange(output) { startStream(output) }
                 else if !output.enabled, let e = streams[output.number], !e.stopping { stopStream(output.number) }
             case .ndi:
                 reconcileNDI(output)
@@ -241,6 +252,88 @@ final class OutputRuntime {
         if !toStop.isEmpty { stopRecordings(toStop) }
         if !toStart.isEmpty { startRecordings(toStart) }
         rebuildStats()
+    }
+
+    /// 起不来的一路设置变了（推流页把地址改对、录制目录改了）：清掉 failed，这一次 reconcile 就重试（W5-B，L13）。设置没变返回 false（不反复试）。
+    private func retryAfterSettingsChange(_ output: OutputState) -> Bool {
+        let n = output.number
+        guard failed[n] != nil, let s = failedSettings[n], s != output.settings else { return false }
+        clearFailure(n)
+        return true
+    }
+
+    private func clearFailure(_ n: Int) {
+        failed.removeValue(forKey: n)
+        failedSettings.removeValue(forKey: n)
+    }
+
+    /// 记一路起不来：原因 + 当时的设置（设置变了自动重试），提示一次。
+    private func recordFailure(_ output: OutputState, _ message: String) {
+        failed[output.number] = message
+        failedSettings[output.number] = output.settings
+    }
+
+    /// 重试起不来的那几路（底栏推流主体按钮、推流页"重试"；W5-B，X02）：只动 enabled 仍为真、起不来（或推流放弃了）的路，正常在跑的不碰。
+    func retry(_ numbers: [Int]) {
+        var records: [OutputState] = []
+        for n in numbers {
+            guard let output = lastOutputs.first(where: { $0.number == n }), output.enabled else { continue }
+            switch output.kind {
+            case .stream:
+                if failed[n] != nil, streams[n] == nil {
+                    clearFailure(n)
+                    startStream(output)
+                } else if let e = streams[n], !e.stopping, case .failed = e.stream.state {
+                    stopStream(n)   // 重连放弃了的那一路：停掉，停完按 enabled 再起（stopStream 的收尾会起）
+                }
+            case .record:
+                if failed[n] != nil, recorders[n] == nil {
+                    clearFailure(n)
+                    records.append(output)
+                }
+            default:
+                break
+            }
+        }
+        if !records.isEmpty { startRecordings(records) }
+        rebuildStats()
+    }
+
+    /// 一路起不来的原因（没有为 nil）：底栏提示、推流页那一段照着写，底栏主体按钮按它决定"重试"还是"停"。
+    /// 起不来的（failed 表）之外，推流的重连放弃了（StreamOutput 停在 failed；App 里不给重连上限，正常不会出现）也算。
+    func failureReason(output number: Int) -> String? {
+        if let reason = failed[number] { return reason }
+        if let e = streams[number], !e.stopping, case .failed(let why) = e.stream.state { return L("notice.streamGaveUp", number, why) }
+        return nil
+    }
+
+    /// 推流正在 / 即将进行第几次连接（从 1 起；在推 / 没在跑为 nil）。Stats.encoder 里只有成功重连次数，没有尝试次数（见报告 §4），底栏按钮从这里读。
+    func streamConnectAttempt(output number: Int) -> Int? {
+        guard let e = streams[number] else { return nil }
+        switch e.stream.state {
+        case .connecting(let attempt): return attempt
+        case .backoff(let failures, _): return failures + 1
+        default: return nil
+        }
+    }
+
+    /// 每行 Stats（主线程）：推流第一次报 publishing 时提示"已开始"（X37：start() 之后先提示"连接中"，连上才算开始）。
+    func noteStats(_ stats: Stats) {
+        for (n, e) in streams where !e.announced && !e.stopping {
+            guard Self.encoderEntry(in: stats, forOutput: n)?.state == "publishing" else { continue }
+            e.announced = true
+            onEvent?(.streamStarted(output: n))
+        }
+    }
+
+    /// 推流建不起来的原因：地址的错查表成人话，其余原样。
+    nonisolated static func streamErrorText(_ error: any Error) -> String {
+        switch error as? StreamDestination.Error {
+        case .unsupportedScheme(let scheme)?: L("stream.error.unsupportedScheme", scheme)
+        case .invalidURL(let url)?: L("stream.error.invalidURL", url)
+        case .missingHost?: L("stream.error.missingHost")
+        case nil: "\(error)"
+        }
     }
 
     /// 停掉全部（换节目 / 退出）：录制封口等到完成（每个最多 10 s）。先忘掉快照里的目标状态，封口完成后才不会按"仍 enabled"再起一次。
@@ -295,6 +388,7 @@ final class OutputRuntime {
             var hasAudio = audio != nil
             if let n = output.settings.source.inputNumber {
                 guard let b = inputs?.openBranch(input: n) else {
+                    failedSettings[output.number] = output.settings
                     fail(output: output.number, L("notice.isoBranchUnavailable", n, InputFrameTee.maxBranches))
                     continue
                 }
@@ -338,7 +432,8 @@ final class OutputRuntime {
             let number = output.number
             if let message = errors.lock.withLock({ errors.byNumber[number] }) {
                 if let branch, let n = output.settings.source.inputNumber { inputs?.releaseBranch(branch, input: n) }
-                finishedRecorders[number] = rec   // Stats 里报 failed
+                finishedRecorders[number] = rec
+                failedSettings[number] = output.settings
                 fail(output: number, L("notice.recordingFailed", number, message))
                 continue
             }
@@ -511,9 +606,9 @@ final class OutputRuntime {
 
     private func startStream(_ output: OutputState) {
         let settings = output.settings
-        guard let streamSettings = settings.stream, !streamSettings.url.isEmpty else {
+        guard let streamSettings = settings.stream, !streamSettings.url.trimmingCharacters(in: .whitespaces).isEmpty else {
             let message = L("notice.streamNoURL", output.number)
-            failed[output.number] = message
+            recordFailure(output, message)
             onEvent?(.streamFailed(output: output.number, message: message))
             return
         }
@@ -525,9 +620,9 @@ final class OutputRuntime {
             stream = try StreamOutput(configuration: cfg, transportFactory: HaishinKitTransportFactory(format: format, video: video))
             try stream.start()
         } catch {
-            let message = L("notice.streamFailed", output.number, "\(error)")
+            let message = L("notice.streamFailed", output.number, Self.streamErrorText(error))
             NSLog("%@", message)
-            failed[output.number] = message
+            recordFailure(output, message)
             onEvent?(.streamFailed(output: output.number, message: message))
             return
         }
@@ -538,7 +633,7 @@ final class OutputRuntime {
         }
         streams[output.number] = entry
         finishedStreams.removeValue(forKey: output.number)
-        onEvent?(.streamStarted(output: output.number))
+        onEvent?(.streamConnecting(output: output.number))
     }
 
     private func stopStream(_ number: Int) {
@@ -714,8 +809,6 @@ final class OutputRuntime {
         rebuildStats()
     }
 
-    func failureReason(output number: Int) -> String? { failed[number] }
-
     // MARK: Stats
 
     /// 某个输出在 Stats.encoder 里的项：按 `EncoderEntry.output` 对号（提案 019）。019 之前靠"与 outputs 里带编码器的输出同序"，
@@ -735,11 +828,14 @@ final class OutputRuntime {
             let n = output.number
             switch output.kind {
             case .record:
+                let directory = output.settings.record?.directory ?? ShowDocuments.defaultRecordDirectory
                 if let e = recorders[n] { sources.append((n, .recorder(e.recorder))) }
+                else if failed[n] != nil, output.enabled { sources.append((n, .failed(directory: directory))) }   // 起不来：报 failed（W5-B，原来报 idle / 录制器的 idle）
                 else if let r = finishedRecorders[n] { sources.append((n, .recorder(r))) }
-                else { sources.append((n, .idleRecord(directory: output.settings.record?.directory ?? ShowDocuments.defaultRecordDirectory))) }
+                else { sources.append((n, .idleRecord(directory: directory))) }
             case .stream:
                 if let e = streams[n] { sources.append((n, .stream(e.stream))) }
+                else if failed[n] != nil, output.enabled { sources.append((n, .failed(directory: nil))) }   // 起不来：报 failed（原来报 idle，按钮显示"推流 · idle"）
                 else if let s = finishedStreams[n] { sources.append((n, .stream(s))) }
                 else { sources.append((n, .idle)) }
             case .ndi:
@@ -778,6 +874,8 @@ final class EncoderStatsSource: @unchecked Sendable {
         case ndi(NDISender)
         case idleRecord(directory: String)
         case idle
+        /// 起不来的录制 / 推流（enabled 仍为真）：state = failed；录制带目录（报所在卷的剩余）。
+        case failed(directory: String?)
     }
 
     private struct Slot {
@@ -838,6 +936,9 @@ final class EncoderStatsSource: @unchecked Sendable {
                     out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, diskFreeMb: Double(free) / 1_048_576, state: "idle"))
                 case .idle:
                     out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, state: "idle"))
+                case .failed(let directory):
+                    let free = directory.map { Double(DiskGuard.freeBytes(for: URL(fileURLWithPath: $0, isDirectory: true))) / 1_048_576 } ?? 0
+                    out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, diskFreeMb: free, state: "failed"))
                 }
                 list[i].at = now
             }

@@ -1,5 +1,5 @@
 // 输入设置窗（W3-E 交付第 2 条）：裁切 / 变换、延迟补偿（0–500 ms）、音频路由（四总线）、增益 / 静音 / 独听 / 声像、抠像参数、
-// 效果链、来源。模型只发 setInputSettings / renameInput / setInputSource，快照回来再刷新表单。
+// 效果链（W5-B 起叫"音频效果"，引擎还不读它：页顶横幅写"效果尚未作用到声音"）、来源。模型只发 setInputSettings / renameInput / setInputSource，快照回来再刷新表单。
 // W3-E2：来源一节可编辑（提案 012 的 setInputSource：编号 / 名字 / 设置 / PGM / PVW / 叠加引用全保留，运行表按新来源重建这一路），
 // 表单复用 Add Input 的 InputSourceFormView；摘要显示 DeckLink 接口、NDI 带宽 / 抖动缓冲（提案 008）与声道映射（提案 014）。
 import AppKit
@@ -84,7 +84,8 @@ final class InputSettingsModel: ObservableObject {
         Binding(get: { Double(self.settings.audio.delayMs) }, set: { v in self.update { $0.audio.delayMs = Int(v.rounded()) } })
     }
 
-    var effectsBanner: String? { nil }
+    /// "音频效果"页顶部的横幅：音频引擎还不读每路效果链（W5-B，X07；102 接上后 AudioEffectsSupport 翻了就没了）。
+    var effectsBanner: String? { AudioEffectsSupport.banner(applied: AudioEffectsSupport.inputEffectsApplied) }
 
     var effectsBinding: Binding<EffectChainEditor> {
         Binding(get: { EffectChainEditor(slots: self.settings.effects) }, set: { e in self.update { $0.effects = e.slots } })
@@ -207,7 +208,14 @@ struct InputSettingsView: View {
         case .geometry: geometry
         case .audio: audio
         case .keyer: keyer
-        case .effects: EffectChainView(editor: model.effectsBinding)
+        case .effects:
+            if let banner = model.effectsBanner {
+                Section {
+                    Text(banner).font(.headline).foregroundStyle(.orange)
+                    Text(L("effects.notEffectiveHelp")).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            EffectChainView(editor: model.effectsBinding)
         case .source: source
         }
     }
