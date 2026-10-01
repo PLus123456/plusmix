@@ -115,6 +115,8 @@ final class OverlayPanelModel: ObservableObject {
 
 struct OverlayPanelView: View {
     @ObservedObject var model: OverlayPanelModel
+    /// 表单要的宽度（标签 + 控件放得下）；高度跟着弹出层走、内容可滚动（W5-A：原来固定 400×640，被弹出层压成 320×320、左边被裁）。
+    static let idealWidth: CGFloat = 400
 
     var body: some View {
         Form {
@@ -165,7 +167,7 @@ struct OverlayPanelView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400, height: 640)
+        .frame(minWidth: Self.idealWidth, idealWidth: Self.idealWidth, maxWidth: .infinity, minHeight: 200, idealHeight: 640, maxHeight: .infinity)
     }
 
     private func borderColorBinding(_ channel: Int) -> Binding<Color> {
@@ -189,7 +191,7 @@ struct OverlayPanelView: View {
     }
 }
 
-/// 弹出面板的控制器（NSPopover 用）。
+/// 弹出面板的控制器（NSPopover 用）：尺寸由弹出方给 preferredContentSize（BottomBarPopup.overlayPanelSize），宿主视图不按 SwiftUI 的内容尺寸自己定大小。
 @MainActor
 final class OverlayPanelController: NSViewController {
     let model: OverlayPanelModel
@@ -207,7 +209,8 @@ final class OverlayPanelController: NSViewController {
 
     override func loadView() {
         let host = NSHostingView(rootView: OverlayPanelView(model: model))
-        host.sizingOptions = [.intrinsicContentSize]
+        host.sizingOptions = []
+        host.frame = NSRect(origin: .zero, size: preferredContentSize == .zero ? NSSize(width: OverlayPanelView.idealWidth, height: 640) : preferredContentSize)
         view = host
     }
 

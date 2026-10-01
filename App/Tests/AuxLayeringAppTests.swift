@@ -18,19 +18,20 @@ final class AuxLayeringAppTests: XCTestCase {
         let note = L("aux.rawPictureNote")
         XCTAssertEqual(note, "Aux = 原始画面（抠像 / 裁切 / 变换不生效）")
 
+        // W5-A 起菜单拍平：第一块显示器那一段（段标题 = 显示器）
         let menu = try XCTUnwrap(wc.externalOutputMenu())
-        let sub = try XCTUnwrap(menu.items.first?.submenu)
-        XCTAssertEqual(sub.items.filter { $0.action != nil }.map(\.title), ["PGM", "PVW", "多画面", "输入 1 合成 1", "输入 2 合成 2"], "能选的源不变")
-        let header = try XCTUnwrap(sub.items.first { $0.title == note }, "输入那一组前面应有说明：\(sub.items.map(\.title))")
-        XCTAssertNil(header.action, "说明行不能点")
-        let headerIndex = sub.index(of: header)
-        let inputIndices = sub.items.indices.filter { sub.items[$0].title.hasPrefix("输入 ") }
+        let sub = try XCTUnwrap(AppTest.menuSections(menu).first)
+        XCTAssertEqual(sub.filter { $0.action != nil }.map(\.title), ["PGM", "PVW", "多画面", "输入 1 合成 1", "输入 2 合成 2"], "能选的源不变")
+        let headerIndex = try XCTUnwrap(sub.firstIndex { $0.title == note }, "输入那一组前面应有说明：\(sub.map(\.title))")
+        XCTAssertNil(sub[headerIndex].action, "说明行不能点")
+        XCTAssertTrue(sub[headerIndex].isSectionHeader, "说明是段内的小标题")
+        let inputIndices = sub.indices.filter { sub[$0].title.hasPrefix("输入 ") }
         XCTAssertEqual(inputIndices.count, 2)
         XCTAssertTrue(inputIndices.allSatisfy { $0 > headerIndex }, "说明在输入项前面")
-        for i in inputIndices { XCTAssertEqual(sub.items[i].toolTip, note, "输入项的提示") }
-        for item in sub.items where ["PGM", "PVW", "多画面"].contains(item.title) { XCTAssertNil(item.toolTip, "PGM / PVW / 多画面不是 Aux") }
-        // 选 PVW 的那一项位置没变（旧用例按下标点）
-        XCTAssertEqual(sub.items[1].title, "PVW")
+        for i in inputIndices { XCTAssertEqual(sub[i].toolTip, note, "输入项的提示") }
+        for item in sub where ["PGM", "PVW", "多画面"].contains(item.title) { XCTAssertNil(item.toolTip, "PGM / PVW / 多画面不是 Aux") }
+        // 能选的源顺序没变（PVW 是第二个）
+        XCTAssertEqual(sub.filter { $0.action != nil }[1].title, "PVW")
 
         let page = AppTest.controller.panels.showOutputSettings(tab: .external).model
         XCTAssertEqual(page.sourceNote(for: .input(number: 1)), note)

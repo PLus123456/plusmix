@@ -247,13 +247,13 @@
 "error.open" = "Open %@";
 "error.save" = "Save %@";
 "error.startEngine" = "Start engine";
-"externalMenu.close" = "Close %d %@";
 "externalMenu.closeAll" = "Close All External Outputs";
-"externalMenu.closeWithStatus" = "Close %d %@ (%@)";
 "externalMenu.display" = "%@ (%d×%d %d Hz)";
 "externalMenu.displayMain" = "%@ (%d×%d %d Hz, main)";
 "externalMenu.noDisplays" = "(No displays)";
 "externalMenu.outputName" = "%@ · %@";
+"externalMenu.remove" = "Remove %d %@";
+"externalMenu.removeWithStatus" = "Remove %d %@ (%@)";
 "feedback.ignored" = "Command ignored: %@ (state unchanged)";
 "feedback.rejected" = "Command rejected: %@ — %@";
 "hotkeys.action.autoTransition" = "Auto transition";

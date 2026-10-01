@@ -34,6 +34,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private var meterToken: ObserverToken?
     private var overlayPopover: NSPopover?
     private var externalMenuBuilder: ExternalOutputMenuBuilder?
+    /// 最近一次从底栏弹出的菜单（模态；测试开着时量位置、量完 cancelTracking）。
+    private(set) var activeBottomMenu: NSMenu?
     private(set) var multiviewWindow: MultiviewWindowController?
     /// 新 ISO 路的默认录制目录（AppController 按测试宿主 / 正常设）。
     var defaultRecordDirectory: String = ShowDocuments.defaultRecordDirectory
@@ -277,10 +279,12 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         }
         let controller = OverlayPanelController(state: session.state)
         controller.send = { [weak session] c in session?.send(c) }
+        // 内容尺寸 400 × min(640, 窗口内容高 − 120)：原来没设，NSPopover 把 400×640 的表单压进 320×320，每行标签头一两个字被裁（X63）
+        controller.preferredContentSize = BottomBarPopup.overlayPanelSize(windowContentHeight: window?.contentLayoutRect.height ?? 900)
         let popover = NSPopover()
         popover.contentViewController = controller
         popover.behavior = .transient
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        BottomBarPopup.show(popover, from: anchor)   // 朝上开（原来 .maxY 在翻转坐标的按钮上是下沿，往窗口外弹）
         overlayPopover = popover
         overlayPanelController = controller
     }
@@ -294,9 +298,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         return builder.makeMenu()
     }
 
+    /// 底栏"外部输出"：菜单朝上开、整块在窗口里（原来从按钮下沿往下挂，伸出窗口下沿，X50）。
     func presentExternalMenu(relativeTo anchor: NSView) {
         guard let menu = externalOutputMenu() else { return }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height), in: anchor)
+        activeBottomMenu = menu
+        BottomBarPopup.popUp(menu, from: anchor)
     }
 
     /// 多画面独立窗口开 / 关。

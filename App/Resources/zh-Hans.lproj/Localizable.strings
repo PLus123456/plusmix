@@ -247,13 +247,13 @@
 "error.open" = "打开 %@";
 "error.save" = "保存 %@";
 "error.startEngine" = "起引擎";
-"externalMenu.close" = "关闭 %d %@";
 "externalMenu.closeAll" = "关闭全部外部输出";
-"externalMenu.closeWithStatus" = "关闭 %d %@（%@）";
 "externalMenu.display" = "%@（%d×%d %d Hz）";
 "externalMenu.displayMain" = "%@（%d×%d %d Hz，主屏）";
 "externalMenu.noDisplays" = "（没有显示器）";
 "externalMenu.outputName" = "%@ · %@";
+"externalMenu.remove" = "删除 %d %@";
+"externalMenu.removeWithStatus" = "删除 %d %@（%@）";
 "feedback.ignored" = "命令被忽略：%@（状态没变）";
 "feedback.rejected" = "命令被拒：%@ — %@";
 "hotkeys.action.autoTransition" = "按已选转场执行";
