@@ -98,7 +98,9 @@ effects 没变（推子 / 静音也会带来 `.buses`）就什么都不做；变
 
 ### 1.4 App（交付 3）
 
-- `App/Sources/Engine/AudioEffectsSupport.swift`（87 若还没合入就本会话建，prompt 88 允许）：`busChainsApplied = true`、`inputChainsApplied = false`。87 的标签代码读这两个常量；87 与本文件会在 G6 撞同名新文件，取本会话的值。
+- `App/Sources/Engine/AudioEffectsSupport.swift`（87 没合入，本会话按 prompt 自己建同名文件）：`busEffectsApplied = true`、`inputEffectsApplied = false`。
+  常量名照 87 实际落地的（分支 w5-app-safety = f8dad87：`busEffectsApplied` / `inputEffectsApplied` + `banner(applied:)`），不用 prompt 写的 `busChainsApplied`——
+  那是 87 落地之前的叫法，照抄的话 G6 合并后 87 的界面代码和本会话的测试会一边编不过。87 的 `banner` 用的本地化键只在它的 Localizable.strings 里，这里不带。
 - `EffectEditorRanges`（AudioEffectParams.swift）：滑块范围 ⊆ 引擎钳位范围（AudioEffectsTests 逐条钉住）；`EffectChainEditor(slots:)` 读老节目 / API 写进来的值时先钳进界面范围，界面值 = AU 值。
 - **EQ 增益没收到 ±20**：prompt 的"增益 ±20"是单段 ParametricEQ 的范围；EQ 换成 AUNBandEQ 后 AU 是 −96…+24，界面原来的 ±24 已在里面。段数上限仍 3（≤ 16）。
 - **压缩"阈值 + 比例 + 输出增益"简单模式没做**（Q61）：探针量出 AUDynamicsProcessor 没有固定比例，2:1–4:1 在最合适的 headroom 下仍差 1.6–2.0 dB（下表），按 prompt"换算不准就写提案加 ratio 键，不要硬凑"
@@ -169,7 +171,7 @@ App：`make gen && make test-app XCB_FLAGS="-quiet -only-testing:SwitcherTests/A
 | A2 回归：`scripts/gate4.sh --minutes 10 --label w5c-10min`（= `make gate4-run` 去掉写基线；G4 场景本身不带效果） | 整秒闪光 303 对：均值 **−0.001 ms**、σ 0.022、最大 0.375 ms；A3 0.36 ms / 8 h；A4 click 极差 0.208 ms；A1 0 | 与基线均值差 ≤ 1 ms（g4 基线那一轮 −0.001 ms；G5 final2 +0.000 ms） | ✅（差 0.000） |
 | A2 回归（开着效果）：G4 场景 + Master 三格 832 帧（`.build/gate4/w5c-fx/`，5 分钟，同一套 headless + `frameprobe av`） | 整秒闪光 45 对：均值 **0.000 ms**、σ 0、最大 0.000；A4（PGM + 4 个 ISO 音轨）click 极差 0.208 ms；A1 0；录制器音频漂移 −0.003 ms、硬校正 0 | 同上 | ✅ |
 | SwitcherAudio 全包 `swift test` | SwitcherAudioTests 72（跳过 2）+ IntegrationTests 56（跳过 4），**0 失败**（2.3） | 全绿 | ✅ |
-| App `AudioEffectsTests` | 4 / 4 通过（xcresult 计数；同跑 MixerPanelTests 3 / 3） | 绿 | ✅ |
+| App `AudioEffectsTests` | 4 / 4 通过（xcresult 计数；对齐 87 的常量名之后与 MixerPanelTests 3 个、LocalizationTests 7 个一起复跑 14 / 14） | 绿 | ✅ |
 
 gate4 那一轮的 V1 / V2 / V4 / V5 / S2 是红的，**都不是音频、也不是本会话的改动**：V1 p99 31.4 ms、V2 85 帧集中在 17:15:37–45 这 9 s（每帧渲染 32 ms、GPU 0%），
 同一时刻 `load.log` 里是另一个会话的 App 测试（SWBBuildService 92%、xctest、PlusMix 74%、两个 frameprobe）；V4 / V5 是同一段掉帧的后果。
@@ -191,7 +193,7 @@ S2 的 RSS 861 → 883 MB（+22 MB / 10 分钟）与 G5 final2（858 → 879，+
 | `testBusEffects_threeEQBandsShareOneSlot` | 200 Hz −6 / 1 kHz +12 / 5 kHz +6（q 4）装在一格：三个频率各 ±0.3 dB 内 | ✅ |
 | `testBusEffects_planGroupsConsecutiveEQsAndAssignsSlots` | 分组、17 段拆两格、缺键默认值、七种放格情形 | ✅ |
 | EffectChainTests（W1-D 4 个 + 新 10 个：NBandEQ 三段一格、q ↔ 半增益带宽、初始化后再挂、Reset 清前瞻、钳位表、探针回归 4 个、A7 改参数） | 全过 | ✅ |
-| App `testAudioEffects_*` ×4 | 总线已接 / 每路未接；12 个界面范围 ⊆ 引擎钳位；EQ 段数 3 ≤ 16；超范围老值读进来就钳 | ✅ |
+| App `testAudioEffects_*` ×4 | 总线已接 / 每路未接（常量名照 87）；12 个界面范围 ⊆ 引擎钳位；EQ 段数 3 ≤ 16；超范围老值读进来就钳 | ✅ |
 
 ### 2.3 收尾全量
 
@@ -208,7 +210,7 @@ S2 的 RSS 861 → 883 MB（+22 MB / 10 分钟）与 G5 final2（858 → 879，+
 | 压缩简单模式"阈值 + 比例 + 输出增益" | AUDynamicsProcessor 没有固定比例，换算最大偏差 1.6–2.0 dB（§1.4）。按 prompt 不硬凑，写了 **提案 024，待用户定**（三个选项：加 ratio 键 + 自写压缩器、新 id compressor、不改契约只把文案写实）。界面维持原来六个参数 |
 | prompt 写的"enabled = false 用 AU bypass 属性" | 用的是 C 混音器的格开关（§1.2）：设属性不能和 render 并发，C 开关由实时线程在块边界自己应用；输出同样逐样本 = 输入、延迟同样消失（探针对照过） |
 | 手册 / API 文档 / KNOWN_ISSUES 改回"已生效" | prompt 交付 4：归 103，改法写在 §1.6 |
-| 87 的"尚未生效"标签代码 | 归 87（只动 App/）；本会话按 prompt 只建了常量文件 `AudioEffectsSupport.swift`（87 没合入），87 合入前 App 里没有地方读它 |
+| 87 的"尚未生效"标签代码 | 归 87（只动 App/，已在 w5-app-safety 做完、未合并）；本会话只建了常量文件 `AudioEffectsSupport.swift`，87 合入前本分支的 App 里只有测试读它 |
 | 每路效果格、图示 EQ / 噪声门等新键、界面形态改版 | prompt 不做项：102、提案 023 之后另提、97 |
 | 扬声器 / 耳机实时监听的效果链延迟 | 监听没有 PTS，补不了；开了压缩 / 限幅晚 5–35 ms，写进手册（§1.6） |
 | 真设备 A2（开着效果） | 用例 `testA2_busEffects_latencyCompensated_realDevice` 要 `SW_AUDIO_REAL_DEVICE=1`，本机跑过一次，数字见 §2 |
@@ -241,5 +243,8 @@ S2 的 RSS 861 → 883 MB（+22 MB / 10 分钟）与 G5 final2（858 → 879，+
    不连续检测在拼接之后做；补的静音段对 −20 dBFS 的测试信号是 0.1 的跳变，低于 A1 的 0.5 阈值，但对很响的节目会是一下"咔"——开关压缩 / 限幅本来就有这一下（AU 前瞻里的内容要么重放、要么丢）。
 7. **`scripts/gate4.sh` 写死 `reports/G4-run-<label>.md` 与 `reports/G4.md`**，`make gate4-run` 还会 `--write-baseline baselines/g4-m5max.json`：检查点以外别用 make 目标跑。
    本会话用 `scripts/gate4.sh --label w5c-10min`（不写基线）跑完恢复了 G4.md、删了 G4-run-w5c-10min.md，数据留在 `.build/gate4/w5c-10min/`；开着效果的那一轮用 scratchpad 里的精简脚本，数据在 `.build/gate4/w5c-fx/`。
-8. **87 与本会话都新建 `App/Sources/Engine/AudioEffectsSupport.swift`**：G6 合并时撞同名新文件，取 `busChainsApplied = true` 的版本，常量名以 87 实际用到的为准对一下。
+8. **87 与本会话都新建 `App/Sources/Engine/AudioEffectsSupport.swift`**：G6 合并时撞同名新文件（add / add）。解法：取 87 的文件（带 `banner(applied:)`），只把 `busEffectsApplied` 改成 true；
+   常量名两边已经对齐，本会话的 `AudioEffectsTests` 用的就是 87 的名字。
+   **87 的 `HonestUITests.testUI_effectChainMarkedNotEffectiveUntilSupported` 要跟着翻**（它自己写着"88 接上时翻"）：`XCTAssertFalse(busEffectsApplied)` 改 True；
+   给 Master 加一格限幅之后 `busEffectsButtonTitle(.master)` 期望 "效果 (1)"、`busEffectsBanner` 期望 nil；输入设置那一半（inputEffectsApplied、"音频效果"页的横幅）不变。
 9. harness 给的分支是 `claude/w5-audio-bus-effects-32d90a`，OWNERSHIP 按 `w5-audio-bus-effects` 找：收尾时建了同名本地分支指同一提交，检查点合并用哪个都行。
