@@ -148,7 +148,8 @@ T-bar 那一行最初写"T-bar · Fade ▾"被截成"T-bar · Fad…"，就是�
 - **NSSlider 带刻度在 macOS 27 照样填强调色**，`trackFillColor` 只是换色（左段仍比右段亮）；要"不填充"得自绘轨道（`PanSliderCell`）。现有 `AppTest.isOwnRepresentable` 只认原生 NSSlider / NSSliderCell，换了 cell 的滑块那一层由 NSSlider 本身的标签检查覆盖。
 - **两块屏的排布今天变了**：内建屏变成主屏（menu bar 在它上面）、LG 在它上方，用户真 App 的主窗口存档在内建屏上；内建屏被别的 App 的窗口铺满时，测试宿主的主窗口 / 外部显示窗口 / 多画面窗口都被盖住，显示类用例出帧为 0（干净的 main 同样红）。显示类用例红了先看屏幕状态再单独复跑。屏上还挂着别的 App 的系统授权对话框（不是本 App 的，没碰）。
 - **并行会话同时跑 App 测试**会共用 `com.plusmix.switcher` / `com.plusmix.switcher.tests` 两个 defaults 域和屏幕；全量前 `pgrep -f "Xcode.app/Contents/Developer/usr/bin/xcodebuild"` 看一眼，`lsof -a -p <pid> -d cwd` 能看出是哪个 worktree 的。
-- **测试宿主的主窗口只读存档**：`MainWindowController.placeWindow(…, saving: false)`；输入设置窗的 `InputSettings-<n>` 存档还是会写进正式 App 的域（同老行为），用例跑完自己删了。
+- **测试宿主的主窗口只读存档**：`MainWindowController.placeWindow(…, saving: false)`；输入设置窗的 `InputSettings-<n>` 存档还是会写进正式 App 的域（同老行为：全量里开过输入设置窗的用例都会写，本会话自己的用例跑完删了自己的）。
+  合入之前的老代码跑测试仍会写回主窗口存档：今天用户真 App 的 `NSWindow Frame SwitcherMainWindow` 已被改成内建屏居中（`144 136 1440 932`，原来在 LG 上），87 号与本会话的 main 对照跑都是老代码。
 - **新 worktree 跑全量前先 `swift build -c release --package-path Tools/frameprobe`**，不然 ISO A4 和推流那两条按 BLOCKED-工具跳过。
 - **`AppTest.addSynthetics` 最多 5 路**（6 路灰度溢出崩溃）；要 6 路以上用 `addSyntheticInputs`。
 - **调音台 339 不是 340**：分隔条 1 pt 算在了调音台里（`setPosition(宽 − 340)` 与 `constrainMaxCoordinate` 都没减分隔条），老代码就是 339，原型实测也是 339；用例判据写的是 ≥ 340 − 1。92 号重排底栏时可以顺手减掉分隔条。
