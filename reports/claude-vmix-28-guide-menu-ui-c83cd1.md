@@ -112,3 +112,11 @@
 2. 开第五波止血：86 → 87（同一目录，串行）、88、89、90 可并行；然后 91 G6。
 3. 99 P5 开工前要批提案 020–023（P5 第一步会把四份写全再停下来问）。
 4. 页面以后由检查点重生成：`python3 scripts/gen-prompt-page.py --out .build/prompt-page.html`，再用 Artifact 工具发布到 https://claude.ai/artifact/SbCdoSRdmhrkQxuvtMzgUf。
+
+## 7. 2026-10-01 合入 main（用户直接指示）
+
+- 用户："你合并一下吧"。按铁律 7，合并本该由检查点会话做；这次是用户直接指示，同 G5 时"main 由用户指示快进"的先例。
+- 方式：main（c836cce）是本分支的祖先、落后 0 个提交，直接**快进**到本提交：没有合并提交、没有冲突，也没有 push。
+- 快进前在分支头 d955498 跑 `make lint BRANCH=claude/vmix-28-guide-menu-ui-c83cd1`，全部通过：lint-rules、check-deps（8 个包）、check-ownership（99 个改动文件都在允许范围内）、check-links（163 个 Markdown）、check-rt-symbols。
+- 本分支没有改产品代码（没有 Swift、Packages/、App/、Tools/、project.yml、Makefile 的改动），所以没跑 make test。
+- 合入后，第五波 prompt 86–90 写的"从 main 开"指的就是含本调研的 main。UIA 那一行的归属授权（docs/OWNERSHIP.md）没经检查点复核，下一个检查点（G6，prompt 91）合并时请一并复核。
