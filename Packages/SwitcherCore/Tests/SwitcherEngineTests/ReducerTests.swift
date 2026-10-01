@@ -57,6 +57,159 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(s.tally(ofInput: 1), Tally(program: false, preview: true))
     }
 
+    // MARK: V6 转场进行中拒收 setPreview / setProgram（W5-E，Q66 (a)，用户 2026-09-29 定）
+    //
+    // 渲染器转场中按当前的 program 画底、按当前的 preview 画切进来的画面，所以中途改这两路就是 PGM 上的跳变。
+    // 与 fade / setTransition / setTransitionParams / autoTransition 同一口径：`transition.isActive` 时原样返回（回执 applied = false）。
+    // isActive = progress > 0 || startTick != nil：auto 转场从应用命令那一拍（progress 0、startTick 已记）到对调前一拍；T-bar 推杆在 (0, 1)。
+
+    /// Fade 30 拍进行到第 10 拍发 setPreview(3)：状态一个字段不动、回执 applied = false、快照 PVW 仍是 2；转场按开始时的两路走完，PGM = 2。
+    func testV6_setPreviewRejectedDuringTransition() async {
+        let start = Tick(100)
+        let s1 = reducer.reduce(Self.baseState(), .fade(durationTicks: 30), at: start)
+        // 起始拍到对调前一拍，每一拍都拒（黑场 0 也拒）
+        for k in 0..<30 {
+            let sk = reducer.advance(s1, to: start + k)
+            XCTAssertTrue(sk.transition.isActive, "第 s + \(k) 拍")
+            XCTAssertEqual(reducer.reduce(sk, .setPreview(input: 3), at: start + k), sk, "第 s + \(k) 拍 setPreview 原样返回")
+            XCTAssertEqual(reducer.reduce(sk, .setPreview(input: 0), at: start + k), sk, "第 s + \(k) 拍 setPreview 黑场原样返回")
+        }
+        let mid = reducer.advance(s1, to: start + 10)
+        let rejected = reducer.reduce(mid, .setPreview(input: 3), at: start + 10)
+        XCTAssertEqual(rejected.preview, 2)
+        let done = reducer.advance(rejected, to: start + 30)
+        XCTAssertEqual(done.program, 2, "切进来的仍是开始时的 2 号")
+        XCTAssertEqual(done.preview, 1)
+        XCTAssertFalse(done.transition.isActive)
+        // Wipe / Zoom / Stinger 同一规则
+        for type in [TransitionType.wipe, .zoom, .stinger] {
+            let auto = reducer.reduce(reducer.reduce(Self.baseState(), .setTransition(type: type, durationTicks: 20), at: Tick(0)), .autoTransition, at: Tick(10))
+            let m = reducer.advance(auto, to: Tick(15))
+            XCTAssertEqual(reducer.reduce(m, .setPreview(input: 4), at: Tick(15)), m, "\(type) 进行中 setPreview 原样返回")
+            XCTAssertEqual(reducer.advance(m, to: Tick(30)).program, 2, "\(type) 走完 PGM = 2")
+        }
+
+        // 状态机：回执 applied = false（API 客户端收到"被拒"），快照 PVW 仍是 2，转场结束 PGM = 2
+        let sm = StateMachine(initialState: Self.baseState())
+        sm.start()
+        defer { sm.stop() }
+        await sm.schedule(.fade(durationTicks: 30), at: start)
+        await sm.prepare(upTo: start + 10)
+        guard case .applied(let receipt) = await sm.submit(IssuedCommand(sequence: 1, issuedAt: .now(), command: .setPreview(input: 3))) else {
+            return XCTFail("setPreview 应走到 reducer（结构合法）")
+        }
+        XCTAssertFalse(receipt.applied, "转场进行中 setPreview 被拒")
+        XCTAssertEqual(receipt.appliedTick, start + 10)
+        let snap = sm.publisher.latest!
+        XCTAssertEqual(snap.sequence, 1, "被拒也发布快照：sequence 确认已处理")
+        XCTAssertEqual(snap.state.preview, 2, "快照 PVW 仍是 2")
+        XCTAssertEqual(snap.state.transition.progress, 10.0 / 30.0)
+        await sm.prepare(upTo: start + 30)
+        let end = await sm.state
+        XCTAssertEqual(end.program, 2)
+        XCTAssertEqual(end.preview, 1)
+        XCTAssertFalse(end.transition.isActive)
+    }
+
+    /// Shift + 点 / Shift + 数字（setProgram）同样被拒：切出去的底图不换，转场结束后 PVW 拿到的是开始时的 1 号。
+    func testV6_setProgramRejectedDuringTransition() async {
+        let start = Tick(100)
+        let s1 = reducer.reduce(Self.baseState(), .fade(durationTicks: 30), at: start)
+        for k in 0..<30 {
+            let sk = reducer.advance(s1, to: start + k)
+            XCTAssertEqual(reducer.reduce(sk, .setProgram(input: 3), at: start + k), sk, "第 s + \(k) 拍 setProgram 原样返回")
+            XCTAssertEqual(reducer.reduce(sk, .setProgram(input: 0), at: start + k), sk, "第 s + \(k) 拍 setProgram 黑场原样返回")
+        }
+        let mid = reducer.reduce(reducer.advance(s1, to: start + 10), .setProgram(input: 3), at: start + 10)
+        XCTAssertEqual(mid.program, 1)
+        let done = reducer.advance(mid, to: start + 30)
+        XCTAssertEqual(done.program, 2)
+        XCTAssertEqual(done.preview, 1, "切出去的仍是开始时的 1 号，不是 3 号")
+        for type in [TransitionType.wipe, .zoom, .stinger] {
+            let auto = reducer.reduce(reducer.reduce(Self.baseState(), .setTransition(type: type, durationTicks: 20), at: Tick(0)), .autoTransition, at: Tick(10))
+            let m = reducer.advance(auto, to: Tick(15))
+            XCTAssertEqual(reducer.reduce(m, .setProgram(input: 4), at: Tick(15)), m, "\(type) 进行中 setProgram 原样返回")
+        }
+
+        let sm = StateMachine(initialState: Self.baseState())
+        sm.start()
+        defer { sm.stop() }
+        await sm.schedule(.fade(durationTicks: 30), at: start)
+        await sm.prepare(upTo: start + 10)
+        guard case .applied(let receipt) = await sm.submit(IssuedCommand(sequence: 1, issuedAt: .now(), command: .setProgram(input: 3))) else {
+            return XCTFail("setProgram 应走到 reducer（结构合法）")
+        }
+        XCTAssertFalse(receipt.applied, "转场进行中 setProgram 被拒")
+        XCTAssertEqual(sm.publisher.latest!.state.program, 1, "快照 PGM 底图仍是 1")
+        await sm.prepare(upTo: start + 30)
+        let end = await sm.state
+        XCTAssertEqual(end.program, 2)
+        XCTAssertEqual(end.preview, 1)
+    }
+
+    /// 转场一结束就照常收：对调那一拍（状态机每拍先 advance 再应用该拍的命令）、Cut 打断之后、T-bar 推到底提交之后。
+    func testV6_setPreviewAcceptedAfterTransitionCompletes() async {
+        let start = Tick(100)
+        let s1 = reducer.reduce(Self.baseState(), .fade(durationTicks: 30), at: start)
+        let done = reducer.advance(s1, to: start + 30)
+        XCTAssertFalse(done.transition.isActive)
+        var expected = done
+        expected.preview = 3
+        XCTAssertEqual(reducer.reduce(done, .setPreview(input: 3), at: start + 30), expected, "对调那一拍就收，只动 preview")
+        expected = done
+        expected.program = 4
+        XCTAssertEqual(reducer.reduce(done, .setProgram(input: 4), at: start + 30), expected, "对调那一拍就收，只动 program")
+        // Cut 打断进行中的转场（立即对调）之后
+        let cut = reducer.reduce(reducer.advance(s1, to: start + 10), .cut, at: start + 10)
+        XCTAssertEqual(reducer.reduce(cut, .setPreview(input: 3), at: start + 10).preview, 3)
+        // T-bar 推到底提交之后
+        let committed = reducer.reduce(reducer.reduce(Self.baseState(), .tbar(progress: 0.6), at: Tick(1)), .tbar(progress: 1), at: Tick(2))
+        XCTAssertFalse(committed.transition.isActive)
+        XCTAssertEqual(reducer.reduce(committed, .setPreview(input: 3), at: Tick(3)).preview, 3)
+        XCTAssertEqual(reducer.reduce(committed, .setProgram(input: 4), at: Tick(3)).program, 4)
+
+        // 状态机：同一个 Fade，对调前一拍排的 setPreview(4) 被拒，对调那一拍排的 setPreview(3) 生效
+        let sm = StateMachine(initialState: Self.baseState())
+        sm.start()
+        defer { sm.stop() }
+        await sm.schedule(.fade(durationTicks: 30), at: start)
+        await sm.schedule(.setPreview(input: 4), at: start + 29)
+        await sm.schedule(.setPreview(input: 3), at: start + 30)
+        await sm.prepare(upTo: start + 29)
+        XCTAssertEqual(sm.publisher.latest!.state.preview, 2, "对调前一拍还在转场：被拒")
+        await sm.prepare(upTo: start + 30)
+        let end = await sm.state
+        XCTAssertEqual(end.program, 2)
+        XCTAssertEqual(end.preview, 3, "对调那一拍已空闲：生效")
+        guard case .applied(let receipt) = await sm.submit(IssuedCommand(sequence: 1, issuedAt: .now(), command: .setProgram(input: 4))) else {
+            return XCTFail("setProgram 应走到 reducer")
+        }
+        XCTAssertTrue(receipt.applied, "空闲时 setProgram 照常生效")
+    }
+
+    /// T-bar 推到一半算转场进行中：现有 isActive 的 `progress > 0` 已经包含推杆在 (0, 1) 的情况（契约 isActive 不用改）；
+    /// 拉回 0 = 取消（progress 0、无 startTick）不再算，照常收。T-bar 接管进行中的 auto 转场后也一样拒。
+    func testV6_tbarPartialCountsAsActive() {
+        let s0 = Self.baseState()
+        for p in [1.0 / 127.0, 0.25, 0.5, 0.99] {
+            let bar = reducer.reduce(s0, .tbar(progress: p), at: Tick(5))
+            XCTAssertTrue(bar.transition.isActive, "T-bar \(p)")
+            XCTAssertNil(bar.transition.startTick, "T-bar 没有起始拍，只靠 progress > 0 算进行中")
+            XCTAssertEqual(reducer.reduce(bar, .setPreview(input: 3), at: Tick(6)), bar, "T-bar \(p) 时 setPreview 原样返回")
+            XCTAssertEqual(reducer.reduce(bar, .setProgram(input: 3), at: Tick(6)), bar, "T-bar \(p) 时 setProgram 原样返回")
+        }
+        let taken = reducer.reduce(reducer.advance(reducer.reduce(s0, .fade(durationTicks: 30), at: Tick(10)), to: Tick(20)), .tbar(progress: 0.7), at: Tick(20))
+        XCTAssertEqual(reducer.reduce(taken, .setPreview(input: 3), at: Tick(21)), taken, "T-bar 接管 auto 转场后 setPreview 原样返回")
+        XCTAssertEqual(reducer.reduce(taken, .setProgram(input: 3), at: Tick(21)), taken, "T-bar 接管 auto 转场后 setProgram 原样返回")
+        // 拉回 0：取消，照常收
+        let back = reducer.reduce(reducer.reduce(s0, .tbar(progress: 0.5), at: Tick(5)), .tbar(progress: 0), at: Tick(6))
+        XCTAssertFalse(back.transition.isActive)
+        XCTAssertEqual(back.program, 1)
+        XCTAssertEqual(back.preview, 2)
+        XCTAssertEqual(reducer.reduce(back, .setPreview(input: 3), at: Tick(7)).preview, 3)
+        XCTAssertEqual(reducer.reduce(back, .setProgram(input: 4), at: Tick(7)).program, 4)
+    }
+
     // MARK: V7 转场进度
 
     func testV7_fade30_progressIsKOver30_thenSwapAtTick30() {
@@ -248,6 +401,8 @@ final class ReducerTests: XCTestCase {
             Row("setPreview 不存在", .setPreview(input: 9)) { _ in },
             Row("setProgram", .setProgram(input: 4)) { $0.program = 4 },
             Row("setProgram 不存在", .setProgram(input: -1)) { _ in },
+            Row("setPreview auto 转场进行中拒绝（W5-E）", before: { $0.transition.startTick = Tick(40); $0.transition.progress = 2.0 / 30.0 }, .setPreview(input: 3)) { _ in },
+            Row("setProgram T-bar 推到一半拒绝（W5-E）", before: { $0.transition.progress = 0.4; $0.transition.source = .tbar }, .setProgram(input: 4)) { _ in },
             Row("tbar", .tbar(progress: 0.3)) { $0.transition.progress = 0.3; $0.transition.source = .tbar },
             Row("ftb on", .ftb(on: true)) { $0.ftb.on = true; $0.ftb.startTick = tick },
             Row("ftb off 已经是 off", .ftb(on: false)) { _ in },
