@@ -24,6 +24,10 @@ final class PreferencesModel: ObservableObject {
     static let formatPresets: [ProgramFormat] = [.hd1080p60, .hd1080p5994, .hd1080p30, .hd720p60, .uhd2160p30]
     static let frameRates: [FrameRate] = [.fps24, .fps25, .fps2997, .fps30, .fps50, .fps5994, .fps60]
     static let resolutions: [(Int, Int)] = [(1920, 1080), (1280, 720), (3840, 2160)]
+    /// 分辨率的写法"1920×1080"（Text 里直接插数字会按本地数字格式加千分位，成了"1,920×1,080"，V-12）。
+    static func resolutionTitle(width: Int, height: Int) -> String { "\(width)×\(height)" }
+    /// 端口这类整数输入框的格式：不加千分位（"8098"，不是"8,098"，V-12）。
+    static let plainInteger = IntegerFormatStyle<Int>.number.grouping(.never)
 
     @Published var formatWidth: Int
     @Published var formatHeight: Int
@@ -175,10 +179,10 @@ struct PreferencesView: View {
                     let parts = v.split(separator: "x").compactMap { Int($0) }
                     if parts.count == 2 { model.formatWidth = parts[0]; model.formatHeight = parts[1] }
                 })) {
-                    ForEach(PreferencesModel.resolutions, id: \.0) { r in Text("\(r.0)×\(r.1)").tag("\(r.0)x\(r.1)") }
+                    ForEach(PreferencesModel.resolutions, id: \.0) { r in Text(verbatim: PreferencesModel.resolutionTitle(width: r.0, height: r.1)).tag("\(r.0)x\(r.1)") }
                 }
                 Picker(L("prefs.format.frameRate"), selection: $model.frameRate) {
-                    ForEach(PreferencesModel.frameRates, id: \.self) { Text("\($0)").tag($0) }
+                    ForEach(PreferencesModel.frameRates, id: \.self) { Text(verbatim: "\($0)").tag($0) }
                 }
                 Button(L("prefs.format.apply")) { model.applyProgramFormat() }
                 Text(L("prefs.format.hint")).font(.caption).foregroundStyle(.secondary)
@@ -186,7 +190,7 @@ struct PreferencesView: View {
             Section(L("prefs.api.title")) {
                 Toggle(L("prefs.api.enabled"), isOn: $model.apiEnabled)
                 TextField(L("prefs.api.host"), text: $model.apiHost)
-                TextField(L("prefs.api.port"), value: $model.apiPort, format: .number)
+                TextField(L("prefs.api.port"), value: $model.apiPort, format: PreferencesModel.plainInteger)
                 SecureField(L("prefs.api.token"), text: $model.apiToken)
                 Text(L("prefs.api.hint")).font(.caption).foregroundStyle(.secondary)
             }
@@ -216,7 +220,7 @@ struct PreferencesView: View {
             }
             Section(L("prefs.compat.title")) {
                 Toggle(L("prefs.compat.enabled"), isOn: $model.compatLayerEnabled)
-                TextField(L("prefs.compat.port"), value: $model.compatLayerPort, format: .number)
+                TextField(L("prefs.compat.port"), value: $model.compatLayerPort, format: PreferencesModel.plainInteger)
                 Text(PreferencesModel.compatLegalNotice).font(.caption).foregroundStyle(.secondary)
                 Text(L("prefs.compat.pending")).font(.caption).foregroundStyle(.secondary)
             }

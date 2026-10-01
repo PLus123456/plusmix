@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let main = NSMenu()
 
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: L("menu.about"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: L("menu.about"), action: #selector(showAbout(_:)), keyEquivalent: "")   // 带 credits（W5-A：版本、许可、NDI® 声明）
         appMenu.addItem(withTitle: L("menu.checkForUpdates"), action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L("menu.preferences"), action: #selector(showPreferences), keyEquivalent: ",")
@@ -218,6 +218,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.panels.showOutputSettings(tab: tab)
     }
     @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
+
+    /// 关于面板：系统标准面板 + credits（AboutPanel）。
+    @objc func showAbout(_ sender: Any?) { AboutPanel.show() }
 
     // MARK: 更新与诊断（W4-B）
 
