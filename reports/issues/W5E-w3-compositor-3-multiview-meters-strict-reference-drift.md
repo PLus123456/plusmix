@@ -15,7 +15,13 @@
 
 复现步骤：`swift test --package-path Packages/SwitcherCore --filter SwitcherRenderTests.MultiviewMetersTests`（任何 25af61f 之后的树）。
 
-严重级：S3（产品渲染没变，是参考图跟系统字形 / 栅格化又差了一点；但 `make test` 因此红，G6 判全量时会撞上）。
+严重级：S3（只差名字标签的字形，产品渲染逻辑没变；但 `make test` 因此红，G6 判全量时会撞上）。
 
-猜测原因：9-27 之后系统又更新过（多画面标签是中文，参考图对字形栅格化敏感——macOS 26 → 27 那次就是这样，PSNR 58–60）。
-建议：用户定是在当前系统上 `scripts/gen-references.sh` 重生成这几张（会再次让别的系统版本上逐像素不同），还是把这两处"逐像素相同"改成与 `V8ReferenceTests.compare` 同一套 PSNR 判法。
+差在哪（拿 `.build/render-test-output/` 的实际输出与 `Tests/References/` 逐像素比，scratchpad 里的纯 Python PNG 比对）：
+- v8-multiview-meters 与不画表的占位图 v8-multiview-custom **差得一模一样**：2214 个像素、最大通道差 118、包围盒 x 39–1487 / y 723–1068，集中在几个格子底部——电平表不是原因；
+- 其余多画面图同样只差一小块：v8-multiview-3x3 2537 像素、v8-fixed-multiview 1734 像素（包围盒 y 770–793，一条窄带）、v8-multiview-pgmpvw2x2 1717 像素——都在名字标签的位置。
+- 9-28 G5 在 release/0.1 上跑 SwitcherCore 时这组还是绿的（Render 代码与今天的 main 相同：9-27 重生成之后 main 上动 SwitcherRender 的只有 W1-B3 两个提交，G5 那次已经包含）；
+  系统版本号也没变（9-25 升 macOS 27 时记的是 26A428，今天 `sw_vers` 还是 26A428）。
+
+猜测原因：名字标签的中文字形又变了（`LabelRenderer` 走 CoreText 系统回退字体，见 macOS 26 → 27 那次：差异全在中文标签、PSNR 58–60）——系统版本号没变，可能是字体资源单独更新过，没查实。
+建议：用户定是在当前系统上 `scripts/gen-references.sh` 重生成这几张（换一次字体资源就会再红一次），还是把这两处"逐像素相同"改成与 `V8ReferenceTests.compare` 同一套 PSNR 判法，或者随包钉一个标签字体。
