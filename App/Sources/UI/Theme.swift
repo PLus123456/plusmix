@@ -7,13 +7,17 @@ enum Theme {
     static let panelBackground = NSColor(white: 0.15, alpha: 1)
     static let cellBackground = NSColor(white: 0.19, alpha: 1)
     static let divider = NSColor(white: 0.25, alpha: 1)
+    /// 自绘滑块的轨道（声像滑块）。
+    static let sliderTrack = NSColor(white: 0.36, alpha: 1)
     static let text = NSColor(white: 0.9, alpha: 1)
     static let dimText = NSColor(white: 0.6, alpha: 1)
 
     /// Tally：PGM 红。
     static let tallyProgram = NSColor(red: 0.85, green: 0.12, blue: 0.12, alpha: 1)
-    /// Tally：PVW 绿。
-    static let tallyPreview = NSColor(red: 0.12, green: 0.62, blue: 0.22, alpha: 1)
+    /// Tally：PVW 绿。标题条上压白字，调暗到对比度 ≥ 4.5:1（原来 0.12 / 0.62 / 0.22 只有 3.5:1，03-目视检查.md V-06）。
+    static let tallyPreview = NSColor(red: 0.10, green: 0.52, blue: 0.18, alpha: 1)
+    /// 电平表的绿段（不压字，保持原来的亮度）。
+    static let meterGreen = NSColor(red: 0.12, green: 0.62, blue: 0.22, alpha: 1)
     /// 都不在。
     static let tallyOff = NSColor(white: 0.28, alpha: 1)
     /// 按钮按下 / 开着的高亮。
