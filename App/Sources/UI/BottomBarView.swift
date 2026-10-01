@@ -33,6 +33,7 @@ final class BottomBarView: NSView {
     /// 最近一次显示的状态行（测试对照 stats.jsonl 用）。
     private(set) var lastStatusLine: (stats: Stats, text: String)?
     private var noticeTimer: Timer?
+    var streamSummary: OutputButtonSummary { OutputButtonSummary(title: streamButton.title, toolTip: streamButton.toolTip, severity: .off) }
     /// 提示保留多久。
     static let noticeSeconds: TimeInterval = 4
 

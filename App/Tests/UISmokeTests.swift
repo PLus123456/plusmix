@@ -113,6 +113,8 @@ final class UISmokeTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == true }, "录制按钮应发 startRecord")
         XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.recordButton.title == "● 录制中" }, "Stats 报 recording 后应显示录制中：\(wc.bottomBar.recordButton.title)")
         wc.bottomBar.recordButton.performClick(nil)
+        XCTAssertNotNil(AppTest.waitForConfirmation(.stopRecord), "停止前先确认（W5-B）")
+        AppTest.answer(.confirm)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == false })
         XCTAssertTrue(AppTest.waitUntil(10) { wc.bottomBar.recordButton.title == "录制" && session.outputs.lastResults[1] != nil },
                       "封口后按钮应回「录制」：\(wc.bottomBar.recordButton.title)")

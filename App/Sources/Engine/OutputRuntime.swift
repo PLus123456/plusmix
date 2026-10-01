@@ -714,6 +714,8 @@ final class OutputRuntime {
         rebuildStats()
     }
 
+    func failureReason(output number: Int) -> String? { failed[number] }
+
     // MARK: Stats
 
     /// 某个输出在 Stats.encoder 里的项：按 `EncoderEntry.output` 对号（提案 019）。019 之前靠"与 outputs 里带编码器的输出同序"，

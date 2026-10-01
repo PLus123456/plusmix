@@ -198,6 +198,13 @@ final class AppController {
         session?.control.midi.table = table
     }
 
+    // MARK: 换节目 / 退出前确认（W5-B 桩）
+
+    var isDocumentEdited: Bool { false }
+    func requestNewShow(completion: (() -> Void)? = nil) { Task { await newShow(); completion?() } }
+    func requestOpenShow(url: URL, completion: (() -> Void)? = nil) { Task { await openShow(url: url); completion?() } }
+    func prepareToQuit(_ completion: @escaping @MainActor (Bool) -> Void) { completion(true) }
+
     // MARK: 节目文件
 
     func newShow() async {

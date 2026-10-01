@@ -102,6 +102,8 @@ final class ShowDocuments {
     /// （W3-E5；0.1.0 没发布过，改名前的老目录里的 LastSession 不迁移）。
     static var autosaveURL: URL { UserConfig.directory.appending(path: "LastSession.\(fileExtension)") }
 
+    var autosaveURL: URL { Self.autosaveURL }
+
     func autosave(_ show: Show) {
         try? store.save(show, to: Self.autosaveURL)
     }

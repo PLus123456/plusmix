@@ -203,6 +203,23 @@ final class OutputSettingsModel: ObservableObject {
         Binding(get: { self.state.output(number)?.settings[keyPath: keyPath] ?? defaultValue }, set: { v in self.updateOutput(number) { $0[keyPath: keyPath] = v } })
     }
 
+    func isStreamLocked(_ number: Int) -> Bool { false }
+    func commitStreamAddress(_ number: Int, url: String, key: String) { updateOutput(number) { $0.stream?.url = url; $0.stream?.streamKey = key } }
+    func streamLockNote(_ number: Int) -> String? { nil }
+    func streamStatus(output number: Int) -> String { "" }
+    func disableStream(_ number: Int) {}
+    var recordLiveNote: String? { nil }
+    enum RecordFileFormat: String, CaseIterable, Identifiable {
+        case mov, movThenMP4
+        var id: String { rawValue }
+        var title: String { rawValue }
+    }
+    var recordFileFormat: RecordFileFormat {
+        get { .mov }
+        set {}
+    }
+    var recordLegacyContainerNote: String? { nil }
+
     // MARK: 外部显示
 
     var externalOutputs: [OutputState] { state.outputs.filter { $0.kind == .externalDisplay } }

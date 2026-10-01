@@ -43,6 +43,7 @@ final class PreferencesModel: ObservableObject {
     @Published var alignmentFrames: Int
     @Published var monitorPoint: SwitcherContracts.MonitorPoint
     @Published var language: String
+    @Published var confirmBeforeStop = true
     @Published private(set) var status = ""
     let audioDeviceChoices: [AudioDeviceChoice]
     let languageChoices: [LanguageChoice]

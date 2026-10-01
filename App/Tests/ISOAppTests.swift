@@ -52,6 +52,8 @@ final class ISOAppTests: XCTestCase {
         print("ISO 起：起始拍 \(starts)，rec.start 批耗时 \(String(format: "%.1f", session.outputs.lastStartCost.milliseconds)) ms")
         AppTest.pump(seconds: 8)
         wc.bottomBar.recordButton.performClick(nil)
+        XCTAssertEqual(AppTest.waitForConfirmation(.stopRecord)?.request.title, "确定停止录制（3 路）？", "停止前先确认（W5-B），写明路数")
+        AppTest.answer(.confirm)
         XCTAssertTrue(AppTest.waitUntil(20) { session.outputs.recorders.isEmpty && session.outputs.lastResults.count == 3 }, "三路都应封口：\(session.outputs.lastResults.keys.sorted())")
         let results = records.map { session.outputs.lastResults[$0.number]! }
         let stops = Set(results.map(\.stopTick))

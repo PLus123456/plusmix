@@ -168,6 +168,9 @@ final class MIDIMappingModel: ObservableObject {
         }
     }
 
+    static func actionChoices(for row: Row) -> [HotkeyEditorModel.ActionKind] { HotkeyEditorModel.ActionKind.allCases.filter { $0 != .other } }
+    func applyJSON(_ id: UUID, _ text: String) -> Bool { false }
+
     static func describe(_ action: MIDIAction) -> String {
         switch action {
         case .tbar: L("midi.action.tbar")
@@ -265,7 +268,7 @@ struct MIDIMappingView: View {
             Picker(L("hotkeys.actionKind"), selection: Binding(get: { hotkeyRow.kind }, set: { kind in
                 var r = hotkeyRow
                 r.kind = kind
-                model.setAction(row.id, .action(r.action))
+                model.setAction(row.id, .action(r.action ?? .command(.cut)))
             })) {
                 ForEach(HotkeyEditorModel.ActionKind.allCases.filter { $0 != .other }) { Text($0.title).tag($0) }
             }
@@ -274,7 +277,7 @@ struct MIDIMappingView: View {
                 TextField(label, value: Binding(get: { hotkeyRow.argument }, set: { v in
                     var r = hotkeyRow
                     r.argument = v
-                    model.setAction(row.id, .action(r.action))
+                    model.setAction(row.id, .action(r.action ?? .command(.cut)))
                 }), format: .number).frame(width: 60)
             }
         }

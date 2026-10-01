@@ -305,6 +305,9 @@ final class AddInputFormModel: ObservableObject {
     @Published private(set) var screenListStatus = ""
     @Published private(set) var ndiStatus = ""
     let freeNumbers: [Int]
+    var isFull: Bool { false }
+    var canAdd: Bool { true }
+    var fullMessage: String { "" }
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
     private var audioInfos: [String: AudioInputDeviceInfo] = [:]

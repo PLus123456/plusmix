@@ -274,6 +274,31 @@ final class ShortcutAndShowTests: XCTestCase {
         }
     }
 
+    /// W5-B（X22）：16 个编号用满时"添加"置灰并写明"本节目的输入已满（16 路）"；确定不加、面板不关（原来面板照关、命令被拒、只在底栏闪 4 秒）。
+    func testUI_addInputFullShowDisablesAdd() throws {
+        var state = MixerState()
+        state.inputs = (1...16).map { AppTest.syntheticConfig(number: $0) }
+        let form = AddInputFormModel(state: state, maxInputs: 16)
+        defer { form.close() }
+        XCTAssertTrue(form.isFull)
+        XCTAssertFalse(form.canAdd)
+        XCTAssertEqual(form.fullMessage, "本节目的输入已满（16 路）")
+        var added: [InputConfig] = []
+        let sheet = AddInputSheetController(state: state, maxInputs: 16) { added.append($0) }
+        sheet.confirmForTesting()
+        XCTAssertEqual(added, [], "满了：确定不加")
+        XCTAssertTrue(sheet.form.isFull)
+        sheet.cancelForTesting()
+        // 空出一个号：照常
+        state.inputs.removeLast()
+        let ok = AddInputFormModel(state: state, maxInputs: 16)
+        defer { ok.close() }
+        XCTAssertFalse(ok.isFull)
+        XCTAssertTrue(ok.canAdd)
+        XCTAssertEqual(ok.model.number, 16)
+        XCTAssertEqual(L10n.string("addInput.full", language: "en", 16), "This show already has the maximum of 16 inputs")
+    }
+
     /// 声道映射（提案 014）的表单口径：前两路 / 选两路（左、右）/ 单声道一路；摘要"第 5、6 路"。
     func testAddInput_channelMapChoices() {
         XCTAssertEqual(ChannelMapChoice(channels: []).mode, .firstTwo)

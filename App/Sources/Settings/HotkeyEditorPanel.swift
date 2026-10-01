@@ -61,7 +61,7 @@ final class HotkeyEditorModel: ObservableObject {
             }
         }
 
-        var action: ControlAction {
+        var action: ControlAction? {
             switch kind {
             case .setPreview: .command(.setPreview(input: argument))
             case .setProgram: .command(.setProgram(input: argument))
@@ -100,8 +100,13 @@ final class HotkeyEditorModel: ObservableObject {
 
     /// 同一组合键绑了多次（认不出的键不算）。
     var conflicts: [HotkeyTable.Conflict] {
-        HotkeyTable(bindings: rows.compactMap { r in KeyCombo(r.keyText).map { HotkeyBinding(key: $0, action: r.action, note: r.note.isEmpty ? nil : r.note) } }).conflicts()
+        HotkeyTable(bindings: rows.compactMap { r in KeyCombo(r.keyText).map { HotkeyBinding(key: $0, action: r.action ?? .command(.cut), note: r.note.isEmpty ? nil : r.note) } }).conflicts()
     }
+
+    static func actionChoices(for row: Row) -> [ActionKind] { ActionKind.allCases }
+    @Published var jsonError: String?
+    func jsonText(for id: UUID) -> String { "" }
+    func applyJSON(_ id: UUID, _ text: String) -> Bool { false }
 
     func addRow(key: String = "", action: ControlAction = .command(.cut)) {
         rows.append(Row(keyText: key, action: action, note: ""))
@@ -127,7 +132,7 @@ final class HotkeyEditorModel: ObservableObject {
         var bindings: [HotkeyBinding] = []
         for r in rows {
             guard let combo = KeyCombo(r.keyText) else { throw EditorError.invalidKey(r.keyText) }
-            bindings.append(HotkeyBinding(key: combo, action: r.action, note: r.note.isEmpty ? nil : r.note))
+            bindings.append(HotkeyBinding(key: combo, action: r.action ?? .command(.cut), note: r.note.isEmpty ? nil : r.note))
         }
         return HotkeyTable(bindings: bindings)
     }

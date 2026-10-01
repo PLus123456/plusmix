@@ -84,6 +84,8 @@ final class InputSettingsModel: ObservableObject {
         Binding(get: { Double(self.settings.audio.delayMs) }, set: { v in self.update { $0.audio.delayMs = Int(v.rounded()) } })
     }
 
+    var effectsBanner: String? { nil }
+
     var effectsBinding: Binding<EffectChainEditor> {
         Binding(get: { EffectChainEditor(slots: self.settings.effects) }, set: { e in self.update { $0.effects = e.slots } })
     }

@@ -144,6 +144,10 @@ final class MixerModel: ObservableObject {
         send?(.setMonitorMode(mode: mode))
     }
 
+    static func busEffectsButtonTitle(count: Int, applied: Bool = AudioEffectsSupport.busEffectsApplied) -> String { L("mixer.effects", count) }
+    func busEffectsButtonTitle(_ bus: Bus) -> String { Self.busEffectsButtonTitle(count: busState(bus).effects.count) }
+    var busEffectsBanner: String? { nil }
+
     /// 总线效果链（提案 012 的 setBusEffects）。
     func setBusEffects(_ bus: Bus, _ effects: [EffectSlot]) {
         guard let i = state.audio.buses.firstIndex(where: { $0.bus == bus }), state.audio.buses[i].effects != effects else { return }

@@ -54,6 +54,7 @@ struct AppSettings: Equatable, Sendable {
         static let compatLayerPort = "compatLayerPort"
         static let overlaysInPreview = "overlaysInPreview"
         static let externalBehindInterface = "externalOutputBehindInterface"
+        static let confirmBeforeStop = "confirmBeforeStop"
     }
 
     var audioDevice: AudioDevice = .systemDefault
@@ -74,6 +75,8 @@ struct AppSettings: Equatable, Sendable {
     var overlaysInPreview = false
     /// 外部输出开在主屏（带菜单栏的那块）上时垫在主界面下面（默认关 = 盖住，W3-C 起的行为）。
     var externalBehindInterface = false
+    /// 底栏停录制 / 停推流之前先确认（W5-B，默认开；快捷键 / MIDI / API 一律不问）。
+    var confirmBeforeStop = true
 
     /// 外部显示管理器的主屏层级（ExternalDisplayManager.mainScreenLayering）。
     var externalMainScreenLayering: ExternalDisplayWindow.MainScreenLayering { externalBehindInterface ? .behindInterface : .front }

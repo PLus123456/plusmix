@@ -46,8 +46,9 @@ enum AppTest {
         return controller.session!
     }
 
-    /// 换一个空节目（每个测试从干净状态开始）。
+    /// 换一个空节目（每个测试从干净状态开始）。上一条用例没答完的确认框先收掉（W5-B）。
     static func freshSession() throws -> SwitcherSession {
+        dismissConfirmations()
         _ = try runningSession()
         let done = expectationBox()
         Task { await controller.newShow(); done.value = true }
@@ -266,6 +267,39 @@ enum AppTest {
         let name = String(describing: type(of: view))
         print(String(repeating: "  ", count: depth) + "\(name) \(view.frame) hidden=\(view.isHidden)")
         for sub in view.subviews { dumpFrames(sub, depth: depth + 1) }
+    }
+}
+
+// MARK: - W5-B：确认框（ConfirmationCenter）与推流目的地
+
+extension AppTest {
+    /// 等某一种确认框弹出来（sheet 已挂到窗口上），返回它；超时为 nil。
+    @discardableResult
+    static func waitForConfirmation(_ kind: ConfirmationCenter.Kind, timeout: Double = 3) -> ConfirmationCenter.Pending? {
+        var found: ConfirmationCenter.Pending?
+        guard waitUntil(timeout, { found = ConfirmationCenter.shared.pending(kind); return found != nil }), let p = found else { return nil }
+        waitUntil(2) { p.window?.attachedSheet === p.alert.window }
+        return p
+    }
+
+    /// 按正在问的那一个上的按钮（confirm = 停 / 换 / 删 / 保存，alternate = 不保存，cancel = 取消）。
+    static func answer(_ choice: ConfirmationCenter.Choice, kind: ConfirmationCenter.Kind? = nil) {
+        ConfirmationCenter.shared.respond(choice, kind: kind)
+    }
+
+    /// 收掉所有没答完的确认框（用例开头 / 收尾；上一条失败时留下的 sheet 不挡下一条）。
+    static func dismissConfirmations() {
+        ConfirmationCenter.shared.dismissAll()
+        waitUntil(2) { ConfirmationCenter.shared.pending() == nil }
+    }
+
+    /// 一定连不上的 RTMP 地址（本机 1 号端口没人听）：StreamOutput 照样起、一直连接中 / 退避——"在跑的路"，不依赖 MediaMTX。
+    static func closedRTMP(_ path: String) -> String { "rtmp://127.0.0.1:1/live/\(path)" }
+
+    /// 一个推流目的地（关着）。
+    static func streamOutput(number: Int, url: String, name: String? = nil) -> OutputState {
+        OutputState(number: number, kind: .stream, name: name ?? "推流 \(number)", enabled: false,
+                    settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: StreamSettings(url: url, streamKey: "k")))
     }
 }
 

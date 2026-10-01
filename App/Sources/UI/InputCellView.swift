@@ -210,7 +210,9 @@ final class InputCellView: NSView {
         }
     }
 
-    @objc private func removePressed() { send?(.removeInput(input: number)) }
+    @objc private func removePressed() { requestRemoval() }
+
+    func requestRemoval() { send?(.removeInput(input: number)) }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
