@@ -273,3 +273,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return L("menu.output.virtualCamera.status", OutputStatusText.extensionStatus(s.aux.installer.status), s.virtualCameraStatusText)
     }
 }
+
+// 窗口菜单（和输出菜单）里"调音台 / 多画面"是开关：按可见性打勾（W5-A / V-31）。其它项照旧按"有响应者就能点"。
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(toggleMixer):
+            menuItem.state = controller.windowController.isMixerPanelVisible ? .on : .off
+        case #selector(toggleMultiview):
+            menuItem.state = controller.windowController.isMultiviewWindowVisible ? .on : .off
+        default:
+            break
+        }
+        return true
+    }
+}

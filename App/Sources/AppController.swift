@@ -129,6 +129,7 @@ final class AppController {
                                         mediaBaseDirectory: documents.mediaBaseDirectory)
             session = s
             windowController.bind(session: s)
+            windowController.applyLayout(show.layout)   // 节目里记的界面布局（调音台 / 多画面窗口 / 主窗口位置，W5-A / X47）
             panels.bind(session: s)
             try await s.start()
             if firstStartReport == nil { firstStartReport = s.startReport }

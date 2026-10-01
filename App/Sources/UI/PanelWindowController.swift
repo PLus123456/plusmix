@@ -18,6 +18,8 @@ final class PanelWindow: NSWindow {
 class PanelWindowController: NSWindowController, NSWindowDelegate {
     /// 窗口关掉时（用户点关闭或 close()）。
     var onClose: (() -> Void)?
+    /// 打开时按存档名找到了存过的位置（没有就是居中摆的；输入设置窗据此错开，W5-A / X44）。
+    let restoredSavedFrame: Bool
 
     init<Content: View>(title: String, size: NSSize, autosaveName: String, content: Content, minSize: NSSize? = nil) {
         let window = PanelWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable, .miniaturizable],
@@ -28,7 +30,8 @@ class PanelWindowController: NSWindowController, NSWindowDelegate {
         let host = NSHostingView(rootView: content)
         host.sizingOptions = []
         window.contentView = host
-        window.center()
+        restoredSavedFrame = window.setFrameUsingName(autosaveName)
+        if !restoredSavedFrame { window.center() }
         window.setFrameAutosaveName(autosaveName)
         super.init(window: window)
         window.delegate = self
