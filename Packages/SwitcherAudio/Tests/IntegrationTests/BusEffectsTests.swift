@@ -44,7 +44,7 @@ final class BusEffectsTests: XCTestCase {
         return 2 * (re * re + im * im).squareRoot() / Double(x.count)
     }
 
-    func setEffects(_ rig: EngineRig, _ bus: Bus = .master, _ effects: [EffectSlot]) async {
+    func setEffects(_ rig: EngineRig, _ effects: [EffectSlot], bus: Bus = .master) async {
         _ = await rig.sm.apply(.setBusEffects(bus: bus, effects: effects))
     }
 
@@ -89,7 +89,7 @@ final class BusEffectsTests: XCTestCase {
         _ = await rig.sm.apply(.setInputSettings(input: 1, settings: s))
         let master = try rig.capture(.master), busA = try rig.capture(.bus(.busA))
         await rig.run(seconds: 1)
-        await setEffects(rig, .busA, [Self.eq(1000, q: 2, gainDb: -12)])
+        await setEffects(rig, [Self.eq(1000, q: 2, gainDb: -12)], bus: .busA)
         await rig.run(seconds: 1)
         let m0 = master.left.count, a0 = busA.left.count
         await rig.run(seconds: 1)

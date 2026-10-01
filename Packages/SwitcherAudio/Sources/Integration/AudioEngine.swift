@@ -17,7 +17,9 @@ import SwitcherAudio
 //      T-bar 跟推杆；FTB 同步淡出 Master。**所有跟视频对齐的音频动作都在混音时间 = 拍点 + 对齐延迟 处应用**：混音块 T 里流过的
 //      内容是 T − 对齐延迟 时刻采集的（PTS 也是它），要让录制文件 / 扬声器里的音频转场与画面同一时刻，增益变化就得晚对齐延迟这么多
 //      （离线用例第一版没加这个偏移，音频淡变在文件里领先画面 42.7 ms）。
-//   4. 每路参数 / 总线 / 监听方式：从状态快照 diff 落到混音命令。
+//   4. 每路参数 / 总线 / 监听方式：从状态快照 diff 落到混音命令。总线效果链（W5-C）：`BusState.effects` → 每条总线三个 AU 格
+//      （BusEffectsController：EQ = AUNBandEQ 最多 16 段 / 压缩 / 限幅，链顺序 = 处理顺序，enabled = false 旁路，拓扑只在格数 / id 变时换，
+//      换格时那一格等实时线程确认关格后才换、短暂旁路），效果链延迟在泵里补到总线来源的 PTS 上（见 BusEffects.swift、ConsumerPump）。
 //   5. 消费者：Master / 总线 / ISO 块经泵线程送录制 / 编码；真设备时重采样到 host 时钟（A3）。ISO（AudioTapSource.input）取
 //      推子后、AFV 前（W1-D2），AFV 门控不进 ISO 音轨；.inputProgram 才是含 AFV 的节目信号。
 //   6. Stats.audio 与状态快照（表、对齐、AFV、设备）。
@@ -60,6 +62,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
 
     private let output: OutputChoice
     private let pump: ConsumerPump
+    /// 总线效果链（W5-C）。
+    private let effects: BusEffectsController
     private let timebase: MachTimebase
     private let lock = NSLock()
     private var slots: [Int: SlotRecord] = [:]
@@ -128,8 +132,10 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         case .on: resample = true
         case .off: resample = false
         }
-        pump = ConsumerPump(mixer: mixer, alignment: alignmentDuration, resample: resample, detectDiscontinuities: cfg.detectDiscontinuities,
-                            period: cfg.pumpPeriod, tapCapacity: cfg.tapCapacityBlocks, timebase: timebase)
+        let latency = EffectLatencyTimeline()
+        pump = ConsumerPump(mixer: mixer, alignment: alignmentDuration, latency: latency, resample: resample,
+                            detectDiscontinuities: cfg.detectDiscontinuities, period: cfg.pumpPeriod, tapCapacity: cfg.tapCapacityBlocks, timebase: timebase)
+        effects = BusEffectsController(mixer: mixer, timeline: latency)
         mixer.setMonitorPoint(cfg.monitorPoint)
     }
 
@@ -213,8 +219,17 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
 
     public func removeConsumer(_ token: AudioConsumerToken) { pump.remove(token) }
 
-    /// 某块 Master 的 PTS：块首样本 host time − 对齐延迟。
-    public func programPTS(forBlockHostTime t: HostTime) -> HostTime { t - alignmentDuration }
+    /// 某块 Master 的 PTS：块首样本 host time − 对齐延迟 − Master 效果链现在的延迟（W5-C）。
+    public func programPTS(forBlockHostTime t: HostTime) -> HostTime {
+        t - alignmentDuration - HostDuration(ticks: Int64((Double(effects.latencyFrames(.master)) * mixer.hostTicksPerFrame).rounded()))
+    }
+
+    // MARK: 总线效果链（W5-C）
+
+    /// 一条总线效果链的现场（三格装了什么、开没开、延迟、换格记录）。任意线程。
+    public func effectsStatus(_ bus: Bus) -> AudioEngineStatus.BusEffects { effects.status(bus) }
+    /// 效果链记过的日志（钳了的参数、没装上的格），每条只记一次。任意线程。
+    public var effectNotes: [String] { effects.notes }
 
     // MARK: 生命周期
 
@@ -319,6 +334,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             return out
         }
         for e in events { handle(e, now: now) }
+        effects.step()
         applyDeferredGates(now: now)
         maintainAlignment()
         stepFadeToBlack(now: now)
@@ -486,6 +502,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             mixer.setBusGain(bs.bus, linear: linear)
             mixer.setBusMuted(bs.bus, bs.muted)
         }
+        effects.apply(b)
     }
 
     // MARK: 对齐维护
@@ -631,7 +648,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             let s = busStates.first { $0.bus == b } ?? BusState(bus: b)
             return AudioEngineStatus.BusStatus(bus: b, peakDb: m.peak.map(dB), rmsDb: m.rmsDb, truePeakDb: m.truePeak.map(dB), peakHoldDb: m.peakMax.map(dB),
                                                momentaryLUFS: m.momentaryLUFS, shortTermLUFS: m.shortTermLUFS, integratedLUFS: m.integratedLUFS,
-                                               loudnessRangeLU: m.loudnessRangeLU, gainDb: s.gainDb, muted: s.muted)
+                                               loudnessRangeLU: m.loudnessRangeLU, gainDb: s.gainDb, muted: s.muted, effects: effects.status(b))
         }
         let device: AudioEngineStatus.DeviceStatus
         switch output {
@@ -648,7 +665,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let consumers = pump.statuses.map {
             AudioEngineStatus.ConsumerStatus(source: "\($0.source)", consumers: $0.consumers, blocks: $0.blocksPopped, frames: $0.framesDelivered,
                                              tapDropped: $0.tapDropped, devicePpm: $0.resampler?.devicePpm, resampleRatio: $0.resampler?.ratio,
-                                             resamplerStarved: $0.resampler?.starvedPulls ?? 0)
+                                             resamplerStarved: $0.resampler?.starvedPulls ?? 0, latencyFrames: $0.latencyFrames,
+                                             latencyFramesDropped: $0.latencyFramesDropped, latencyFramesInserted: $0.latencyFramesInserted)
         }
         let status = AudioEngineStatus(
             device: device, alignmentFrames: configuration.alignmentFrames, alignmentMs: alignmentDuration.milliseconds(timebase: timebase),

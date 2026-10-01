@@ -185,6 +185,30 @@ final class EffectChainTests: XCTestCase {
         XCTAssertEqual(T.peak(clean), 0, "Reset 之后前瞻缓冲是零")
     }
 
+    /// A7（W5-C）：运行中改参数——EQ 各段、压缩阈值、限幅起音（= 前瞻长度，AU 在 render 里换前瞻缓冲的长度）——AU 在我们的实时区里
+    /// 重算系数 / 换前瞻时不许分配。守卫 + malloc 钩子下跑 2000 块、每块都改一次（推子 / 滑块拖动的最坏情况）。
+    func testA7_paramChangesWhileRendering_noAllocationInRealtime() throws {
+        RealtimeGuard.installMallocProbe()
+        RealtimeGuard.reset()
+        defer { RealtimeGuard.removeMallocProbe() }
+        let rig = makeRig(hz: 997, dbfs: -6)
+        try rig.mixer.installStandardEffects()
+        for e in BusEffect.allCases { rig.mixer.setEffectEnabled(.master, e, true) }
+        let eq = rig.mixer.effectUnit(.master, .parametricEQ)!
+        let dyn = rig.mixer.effectUnit(.master, .dynamicsProcessor)!
+        let lim = rig.mixer.effectUnit(.master, .peakLimiter)!
+        var k = 0
+        rig.run(blocks: 2000) { _ in
+            k += 1
+            eq.setEQBand(k % 3, centerHz: Float(200 + (k % 50) * 100), q: Float(0.5 + Double(k % 10) * 0.5), gainDb: Float(k % 25 - 12), enabled: k % 7 != 0)
+            dyn.setDynamics(thresholdDb: Float(-(k % 40)), headroomDb: Float(1 + k % 10))
+            lim.setLimiter(attack: Float(0.001 + Double(k % 30) * 0.001), decay: 0.024, preGainDb: Float(k % 12))
+        }
+        XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
+        XCTAssertEqual(RealtimeGuard.allocationsInRealtime, 0, "改参数后 AU 在实时区里不分配")
+        XCTAssertEqual(rig.mixer.stats.underruns, 0)
+    }
+
     // MARK: - 钳位表（界面 / 契约值 → 送进 AU 的值）
 
     func testEffects_clampTable() {
