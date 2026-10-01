@@ -77,6 +77,10 @@ final class StreamDestinationTests: XCTestCase {
         XCTAssertEqual(d2.connectURLWithoutCredentials, "rtmp://h:1936/live?token=t&x=1")
         XCTAssertEqual(d2.streamName, "name")
         XCTAssertEqual(d2.port, 1936)
+        // 查询串一个字节不变（原来解码再编码会把 %26 变成 &，参数就拆错了）
+        let d2b = try StreamDestination(settings: StreamSettings(url: "rtmp://u:p@h/app/name?token=a%26b&x=1"))
+        XCTAssertEqual(d2b.connectURL, "rtmp://u:p@h/app?token=a%26b&x=1")
+        XCTAssertEqual(d2b.connectURLWithoutCredentials, "rtmp://h/app?token=a%26b&x=1")
 
         // RTMPS 同
         let d3 = try StreamDestination(settings: StreamSettings(url: "rtmps://u:p@a.b/live/abc"))
