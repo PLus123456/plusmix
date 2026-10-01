@@ -109,6 +109,9 @@ final class ConfirmationCenter {
             alert.buttons[i].keyEquivalent = "\u{1b}"
         }
         pendings.append(entry)
+        // 窗口最小化了 / App 在后台（从程序坞退出、注销时）：sheet 没人看得见，退出就一直等着——先还原窗口、叫到前台
+        if host.isMiniaturized { host.deminiaturize(nil) }
+        if !NSApp.isActive { NSApp.activate() }
         var answered = false
         let finish: @MainActor (Choice) -> Void = { [weak self] choice in
             guard !answered else { return }
