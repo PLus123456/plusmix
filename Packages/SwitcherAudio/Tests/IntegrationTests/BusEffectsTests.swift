@@ -296,6 +296,38 @@ final class BusEffectsTests: XCTestCase {
         await rig.shutdown()
     }
 
+    /// A2 真设备（要 SW_AUDIO_REAL_DEVICE=1；系统默认输出，扬声器静音、Master 照常送消费者）：消费者流经 HostClockResampler（设备时钟 → host 时钟），
+    /// 拼接在重采样之前做，PTS 连续进重采样器。前 10 s 不开效果、中间 10 s 三格（832 帧）、后 10 s 关掉：三段的 click 都在同一条时间线上（≤ 1 ms），A1 = 0。
+    func testA2_busEffects_latencyCompensated_realDevice() async throws {
+        guard IT.env["SW_AUDIO_REAL_DEVICE"] == "1" else { throw XCTSkip("真设备用例要 SW_AUDIO_REAL_DEVICE=1（系统默认输出设备；扬声器静音）") }
+        guard AudioHAL.defaultOutputDevice() != nil else { throw XCTSkip("BLOCKED-硬件：没有默认输出设备") }
+        let rig = try await RealtimeFXRig(afv: false, output: .systemDefault)
+        try rig.addSource(number: 1)
+        let analyzer = StreamAnalyzer(name: "fx-a2-real", t0: rig.t0)
+        try rig.engine.addConsumer(analyzer, source: .master)
+        await rig.drive(until: 31, schedule: [(10.5, Self.clickSafeChain), (20.5, [])])
+        let st = rig.engine.status
+        let s = analyzer.summary
+        let early = analyzer.clickOffsetsMs.filter { $0.second <= 10 }.map(\.offsetMs)
+        let middle = analyzer.clickOffsetsMs.filter { $0.second >= 12 && $0.second <= 20 }.map(\.offsetMs)
+        let late = analyzer.clickOffsetsMs.filter { $0.second >= 22 }.map(\.offsetMs)
+        func mean(_ a: [Double]) -> Double { a.isEmpty ? .nan : a.reduce(0, +) / Double(a.count) }
+        print("""
+            [W5-C] A2 真设备「\(rig.engine.outputDevice?.info.name ?? "?")」：不开效果 \(String(format: "%.3f", mean(early))) ms、三格（832 帧）\(String(format: "%.3f", mean(middle))) ms、\
+            关掉 \(String(format: "%.3f", mean(late))) ms；全部 click \(s.count) 个 最大 |\(String(format: "%.3f", s.maxAbsMs))|；设备 ppm \(st.consumers.first?.devicePpm.map { String(format: "%.2f", $0) } ?? "—")；\
+            dropouts \(st.counters.dropouts) underruns \(st.counters.underruns) 不连续 \(analyzer.discontinuities) PTS 断点 \(analyzer.gaps)；泵丢 \(st.consumers.map(\.latencyFramesDropped)) 补 \(st.consumers.map(\.latencyFramesInserted))
+            """)
+        XCTAssertGreaterThanOrEqual(early.count, 8); XCTAssertGreaterThanOrEqual(middle.count, 7); XCTAssertGreaterThanOrEqual(late.count, 7)
+        XCTAssertLessThanOrEqual(abs(mean(middle) - mean(early)), 1, "开效果前后 A2 均值差 ≤ 1 ms")
+        XCTAssertLessThanOrEqual(abs(mean(late) - mean(early)), 1)
+        XCTAssertLessThanOrEqual(abs(s.meanMs), 5, "A2 目标档")
+        XCTAssertEqual(st.counters.dropouts, 0)
+        XCTAssertEqual(st.counters.underruns, 0)
+        XCTAssertEqual(analyzer.discontinuities, 0, "\(analyzer.recentDiscontinuities.prefix(5))")
+        XCTAssertEqual(analyzer.gaps, 0)
+        await rig.shutdown()
+    }
+
     // MARK: - 钳位、不认识的格、超出三格
 
     /// 超出 AU 范围的参数钳位（AU 自己不钳：起音 0.05 s 照收、延迟变 2400 帧），每个键只记一次日志；改别的东西重发同一条链不再记。
@@ -433,7 +465,7 @@ final class BusEffectsTests: XCTestCase {
     }
 }
 
-/// 空设备（W1-D 假设备时钟：time-constraint 线程按块 render）上的引擎 + 实时合成源；按墙钟驱动状态机并在指定时刻改 Master 的效果链。
+/// 空设备（W1-D 假设备时钟：time-constraint 线程按块 render；或真设备）上的引擎 + 实时合成源；按墙钟驱动状态机并在指定时刻改 Master 的效果链。
 final class RealtimeFXRig {
     let sm: StateMachine
     let engine: AudioEngine
@@ -441,11 +473,12 @@ final class RealtimeFXRig {
     let t0: HostTime
     var sources: [Int: RealtimeSource] = [:]
 
-    init(afv: Bool) async throws {
+    init(afv: Bool, output: AudioEngineConfiguration.Output = .null) async throws {
         sm = StateMachine(initialState: States.fourInputs(afv: afv))
         sm.start()
         var cfg = AudioEngineConfiguration()
-        cfg.output = .null
+        cfg.output = output
+        cfg.outputChannelMap = BusChannelMap(master: nil)      // 真设备时扬声器静音
         engine = try AudioEngine(stateMachine: sm, configuration: cfg)
         t0 = HostClock.now() + HostDuration(milliseconds: 300)
         clock = TickClockSpec(t0: t0, frameRate: .fps60)

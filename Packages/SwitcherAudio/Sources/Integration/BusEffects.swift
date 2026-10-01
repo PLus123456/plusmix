@@ -255,8 +255,6 @@ final class BusEffectsController: @unchecked Sendable {
     private var racks: [BusEffectRack]
     private var logged: Set<String> = []
     private var noteList: [String] = []
-    /// 测试 / 诊断：记日志的同时回调一下（nil = 只 NSLog）。
-    var log: ((String) -> Void)?
 
     init(mixer: AudioMixer, timeline: EffectLatencyTimeline) {
         self.mixer = mixer
@@ -427,7 +425,6 @@ final class BusEffectsController: @unchecked Sendable {
             noteList.append(line)
             if noteList.count > 200 { noteList.removeFirst(noteList.count - 200) }
             NSLog("音频效果：%@", line)
-            log?(line)
         }
     }
 
