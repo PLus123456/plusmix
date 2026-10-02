@@ -18,6 +18,11 @@ enum L10n {
         set { overrideBox.withLock { $0 = newValue } }
     }
 
+    /// 界面语言对应的 Locale（日期 / 时间的格式跟界面语言走，W5-A 时钟）：覆盖语言 → 主 bundle 实际选中的本地化。
+    static var locale: Locale {
+        Locale(identifier: languageOverride ?? Bundle.main.preferredLocalizations.first ?? "en")
+    }
+
     /// 某种语言的 lproj bundle；没有就 nil。
     static func bundle(language: String) -> Bundle? {
         bundles.withLock { cache in

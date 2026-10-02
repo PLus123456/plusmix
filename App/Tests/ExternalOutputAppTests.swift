@@ -84,19 +84,22 @@ final class ExternalOutputAppTests: XCTestCase {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 1)
         let wc = AppTest.controller.windowController
+        // W5-A 起菜单拍平：每块显示器一段（段标题 = 显示器），没有子菜单；勾 = 开着；再点 = 关（不删）；删除是最后一段单独一项
         let menu = try XCTUnwrap(wc.externalOutputMenu())
-        XCTAssertEqual(menu.items.count, NSScreen.screens.count, "每块显示器一项（没有外部输出时没有关闭项）")
-        let sub = try XCTUnwrap(menu.items.first?.submenu)
+        XCTAssertEqual(AppTest.menuSections(menu).count, NSScreen.screens.count, "每块显示器一段（没有外部输出时没有删除段）")
+        let sub = try XCTUnwrap(AppTest.menuSections(menu).first)
         // 能选的源（有动作的项）；输入那一组前面另有一行"Aux = 原始画面"的说明（W3-E3 交付第 2 条，AuxLayeringAppTests 看它）
-        XCTAssertEqual(sub.items.filter { $0.action != nil }.map(\.title), ["PGM", "PVW", "多画面", "输入 1 合成 1"])
-        XCTAssertTrue(sub.items.allSatisfy { $0.state == .off })
-        // 选 PVW → 加输出；菜单重建后打勾；再选 → 删
-        sub.performActionForItem(at: 1)
+        XCTAssertEqual(sub.filter { $0.action != nil }.map(\.title), ["PGM", "PVW", "多画面", "输入 1 合成 1"])
+        XCTAssertTrue(sub.allSatisfy { $0.state == .off })
+        // 选 PVW → 加输出；菜单重建后打勾
+        let pvw = try XCTUnwrap(sub.first { $0.title == "PVW" })
+        menu.performActionForItem(at: menu.index(of: pvw))
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.contains { $0.kind == .externalDisplay } })
         let menu2 = try XCTUnwrap(wc.externalOutputMenu())
-        let sub2 = try XCTUnwrap(menu2.items.first?.submenu)
-        XCTAssertEqual(sub2.items[1].state, .on)
-        XCTAssertEqual(menu2.items.count, NSScreen.screens.count + 3, "多了分隔线 + 关闭 x + 关闭全部")
+        let sub2 = try XCTUnwrap(AppTest.menuSections(menu2).first)
+        XCTAssertEqual(sub2.first { $0.title == "PVW" }?.state, .on)
+        XCTAssertEqual(AppTest.menuSections(menu2).count, NSScreen.screens.count + 1, "多了一段：删除 x + 全部关闭")
+        XCTAssertEqual(AppTest.menuSections(menu2).last?.count, 2)
         XCTAssertEqual(ExternalDisplaySpec(settings: session.state.outputs.first { $0.kind == .externalDisplay }!.settings).displayID, ExternalDisplays.id(of: screen))
         // "关闭 n …（状态）"那一项的状态与帧数只读 Stats.display[]（提案 013）
         let number = try XCTUnwrap(session.state.outputs.first { $0.kind == .externalDisplay }?.number)
@@ -104,13 +107,18 @@ final class ExternalOutputAppTests: XCTestCase {
                       "Stats.display[] 应有这路外部显示：\(String(describing: session.stats?.display))")
         let menu3 = try XCTUnwrap(wc.externalOutputMenu())   // 同一轮主线程里建菜单、再取同一行 Stats（中间不泵事件，session.stats 不会变）
         let entry = try XCTUnwrap(session.stats?.display.first { $0.kind == "externalDisplay" && $0.output == number })
-        let closeItem = try XCTUnwrap(menu3.items.first { $0.action != nil && $0.title.hasPrefix("关闭 \(number) ") }, menu3.items.map(\.title).description)
-        XCTAssertTrue(closeItem.title.contains(OutputStatusText.display(entry)), "\(closeItem.title) / \(OutputStatusText.display(entry))")
-        XCTAssertTrue(closeItem.title.contains("显示中"), closeItem.title)
-        // 菜单项的 target 是最近一次建的 builder（MainWindowController 只留最后一个），所以用 menu3 的子菜单去点
-        let sub3 = try XCTUnwrap(menu3.items.first?.submenu)
-        XCTAssertEqual(sub3.items[1].state, .on)
-        sub3.performActionForItem(at: 1)
+        let removeItem = try XCTUnwrap(menu3.items.first { $0.action != nil && $0.title.hasPrefix("删除 \(number) ") }, menu3.items.map(\.title).description)
+        XCTAssertTrue(removeItem.title.contains(OutputStatusText.display(entry)), "\(removeItem.title) / \(OutputStatusText.display(entry))")
+        XCTAssertTrue(removeItem.title.contains("显示中"), removeItem.title)
+        // 菜单项的 target 是最近一次建的 builder（MainWindowController 只留最后一个），所以用 menu3 去点：再点 PVW = 关（配置留着），删除项 = 删
+        let sub3 = try XCTUnwrap(AppTest.menuSections(menu3).first)
+        let pvw3 = try XCTUnwrap(sub3.first { $0.title == "PVW" })
+        XCTAssertEqual(pvw3.state, .on)
+        menu3.performActionForItem(at: menu3.index(of: pvw3))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number)?.enabled == false }, "再点 = 关，不删")
+        let menu4 = try XCTUnwrap(wc.externalOutputMenu())
+        let remove4 = try XCTUnwrap(menu4.items.first { $0.title.hasPrefix("删除 \(number) ") })
+        menu4.performActionForItem(at: menu4.index(of: remove4))
         XCTAssertTrue(AppTest.waitUntil(3) { !session.state.outputs.contains { $0.kind == .externalDisplay } })
     }
 

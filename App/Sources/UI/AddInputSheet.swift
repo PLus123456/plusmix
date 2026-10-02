@@ -379,7 +379,10 @@ final class AddInputFormModel: ObservableObject {
     func audioDeviceDetail(for uid: String) -> String {
         let info = uid.isEmpty ? audioInfos.values.first(where: \.isDefaultInput) : audioInfos[uid]
         guard let d = info else { return uid.isEmpty ? "" : L("addInput.audio.missing", uid) }
-        let base = L("addInput.audio.detail", d.name, d.inputChannels, d.supports48k ? "48 kHz" : L("addInput.audio.no48k"), d.transportType)
+        // 两行：名字（连接方式）/ 声道与采样率；连接方式是 CoreAudio 的四字码（"bltn"），翻成人话，不认识的不写（V-14 / V-16）
+        let rate = d.supports48k ? "48 kHz" : L("addInput.audio.no48k")
+        let base = AudioTransportName.title(fourCC: d.transportType).map { L("addInput.audio.detail", d.name, $0, d.inputChannels, rate) }
+            ?? L("addInput.audio.detailNoTransport", d.name, d.inputChannels, rate)
         return uid.isEmpty ? L("addInput.audio.followsDefault", base) : base
     }
 
@@ -616,7 +619,7 @@ struct InputSourceFormView: View {
     private var fileForm: some View {
         Section(L("addInput.file.title")) {
             HStack {
-                TextField(L("addInput.file.path"), text: $form.model.filePath)
+                TextField(L("addInput.file.path"), text: $form.model.filePath, prompt: Text(L("addInput.path.none")))   // 空着时有占位（V-17）
                 Button(L("common.browse")) { browse(image: false) }
             }
             Picker(L("addInput.file.endAction"), selection: $form.model.fileEndAction) {
@@ -630,7 +633,7 @@ struct InputSourceFormView: View {
     private var imageForm: some View {
         Section(L("addInput.image.title")) {
             HStack {
-                TextField(L("addInput.image.path"), text: $form.model.imagePath)
+                TextField(L("addInput.image.path"), text: $form.model.imagePath, prompt: Text(L("addInput.path.none")))
                 Button(L("common.browse")) { browse(image: true) }
             }
             Text(L("addInput.image.hint")).font(.caption).foregroundStyle(.secondary)

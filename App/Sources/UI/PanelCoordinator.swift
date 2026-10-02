@@ -69,6 +69,10 @@ final class PanelCoordinator: NSObject {
         model.send = { [weak session] c in session?.send(c) }
         let w = InputSettingsWindowController(model: model)
         w.onClose = { [weak self] in self?.inputSettingsWindows.removeValue(forKey: number) }
+        // 这一路没存过位置（居中摆的）、又已经开着别的输入设置窗：错开放在最近那个的右下，不叠在一起（X44）
+        if !w.restoredSavedFrame, let last = inputSettingsWindows.values.compactMap(\.window).filter(\.isVisible).max(by: { $0.orderedIndex > $1.orderedIndex }) {
+            w.window?.setFrameTopLeftPoint(NSPoint(x: last.frame.minX + 24, y: last.frame.maxY - 24))
+        }
         inputSettingsWindows[number] = w
         w.present()
         return w

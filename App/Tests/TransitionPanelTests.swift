@@ -40,7 +40,7 @@ final class TransitionPanelTests: XCTestCase {
         let run = try runToCompletion(session, from: 1, to: 2)
         XCTAssertEqual(run.end - run.start, 24, "Wipe 应恰在起始拍 + 24 对调")
         XCTAssertEqual(session.state.transition.type, .wipe, "类型留在状态里")
-        XCTAssertTrue(AppTest.waitUntil(1) { panel.tbarTypeText == "T-bar：Wipe" }, panel.tbarTypeText)
+        XCTAssertTrue(AppTest.waitUntil(1) { panel.tbarTypeText == "Wipe ▾" }, panel.tbarTypeText)
 
         // T-bar 对当前类型生效：推到一半 = 按 Wipe 的 tbar 转场（类型不变），推到顶提交
         panel.tbar.simulateDrag(to: 0.5)

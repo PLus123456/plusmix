@@ -7,13 +7,17 @@ enum Theme {
     static let panelBackground = NSColor(white: 0.15, alpha: 1)
     static let cellBackground = NSColor(white: 0.19, alpha: 1)
     static let divider = NSColor(white: 0.25, alpha: 1)
+    /// 自绘滑块的轨道（声像滑块）。
+    static let sliderTrack = NSColor(white: 0.36, alpha: 1)
     static let text = NSColor(white: 0.9, alpha: 1)
     static let dimText = NSColor(white: 0.6, alpha: 1)
 
     /// Tally：PGM 红。
     static let tallyProgram = NSColor(red: 0.85, green: 0.12, blue: 0.12, alpha: 1)
-    /// Tally：PVW 绿。
-    static let tallyPreview = NSColor(red: 0.12, green: 0.62, blue: 0.22, alpha: 1)
+    /// Tally：PVW 绿。标题条上压白字，调暗到对比度 ≥ 4.5:1（原来 0.12 / 0.62 / 0.22 只有 3.5:1，03-目视检查.md V-06）。
+    static let tallyPreview = NSColor(red: 0.10, green: 0.52, blue: 0.18, alpha: 1)
+    /// 电平表的绿段（不压字，保持原来的亮度）。
+    static let meterGreen = NSColor(red: 0.12, green: 0.62, blue: 0.22, alpha: 1)
     /// 都不在。
     static let tallyOff = NSColor(white: 0.28, alpha: 1)
     /// 按钮按下 / 开着的高亮。
@@ -58,9 +62,34 @@ enum Theme {
         return b
     }
 
+    /// 开着 / 按下的高亮：底色换成 color，标题一律白字（FTB / 录制 / 静音的红底原来是黑字，对比 3.0:1，V-05）。
+    /// 每个快照都会调：状态没变就不重设（不每帧新建标题串）。改了 title 的按钮（录制 / 推流）要在改完 title 之后再调。
     static func setHighlighted(_ button: NSButton, _ on: Bool, color: NSColor = Theme.accent) {
-        button.bezelColor = on ? color : nil
+        let bezel: NSColor? = on ? color : nil
+        if button.bezelColor == bezel, hasWhiteTitle(button) == on { return }
+        button.bezelColor = bezel
         button.contentTintColor = on ? .white : nil
+        setTitleColor(button, on ? .white : nil)
+    }
+
+    /// 推按钮的标题色：contentTintColor 管不到推按钮的标题，有颜色时换成带色的 attributedTitle；nil = 回到系统配色（重设 title 就回到默认属性）。
+    static func setTitleColor(_ button: NSButton, _ color: NSColor?) {
+        let title = button.title
+        guard let color else {
+            button.title = title
+            return
+        }
+        let style = NSMutableParagraphStyle()
+        style.alignment = button.alignment
+        style.lineBreakMode = .byTruncatingTail
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: color, .font: button.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize), .paragraphStyle: style,
+        ])
+    }
+
+    private static func hasWhiteTitle(_ button: NSButton) -> Bool {
+        guard button.attributedTitle.length > 0 else { return false }
+        return (button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor) == .white
     }
 }
 

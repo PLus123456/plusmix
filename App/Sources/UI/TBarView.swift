@@ -43,11 +43,15 @@ final class TBarView: NSView {
         return NSRect(x: bounds.midX - 3, y: inset, width: 6, height: max(1, bounds.height - 2 * inset))
     }
 
+    /// 把手与列里的按钮同宽（W5-A：原来左右各缩 6，比按钮窄 12）。
     private var handleRect: NSRect {
         let track = trackRect
         let y = track.minY + CGFloat(progress) * track.height
-        return NSRect(x: 6, y: y - Self.handleHeight / 2, width: bounds.width - 12, height: Self.handleHeight)
+        return NSRect(x: 0, y: y - Self.handleHeight / 2, width: bounds.width, height: Self.handleHeight)
     }
+
+    /// 把手的位置（测试量左右边）。
+    var handleFrame: NSRect { handleRect }
 
     private func progress(forY y: CGFloat) -> Double {
         let track = trackRect

@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let main = NSMenu()
 
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: L("menu.about"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: L("menu.about"), action: #selector(showAbout(_:)), keyEquivalent: "")   // 带 credits（W5-A：版本、许可、NDI® 声明）
         appMenu.addItem(withTitle: L("menu.checkForUpdates"), action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L("menu.preferences"), action: #selector(showPreferences), keyEquivalent: ",")
@@ -219,6 +219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
 
+    /// 关于面板：系统标准面板 + credits（AboutPanel）。
+    @objc func showAbout(_ sender: Any?) { AboutPanel.show() }
+
     // MARK: 更新与诊断（W4-B）
 
     /// 检查更新：配置了 Sparkle 就交给它（自己的窗口）；开发 / ad-hoc 构建没有更新源，弹一句说明。
@@ -271,5 +274,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var virtualCameraStatusLine: String? {
         guard let s = controller.session else { return nil }
         return L("menu.output.virtualCamera.status", OutputStatusText.extensionStatus(s.aux.installer.status), s.virtualCameraStatusText)
+    }
+}
+
+// 窗口菜单（和输出菜单）里"调音台 / 多画面"是开关：按可见性打勾（W5-A / V-31）。其它项照旧按"有响应者就能点"。
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(toggleMixer):
+            menuItem.state = controller.windowController.isMixerPanelVisible ? .on : .off
+        case #selector(toggleMultiview):
+            menuItem.state = controller.windowController.isMultiviewWindowVisible ? .on : .off
+        default:
+            break
+        }
+        return true
     }
 }

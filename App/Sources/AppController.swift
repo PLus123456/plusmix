@@ -129,6 +129,7 @@ final class AppController {
                                         mediaBaseDirectory: documents.mediaBaseDirectory)
             session = s
             windowController.bind(session: s)
+            windowController.applyLayout(show.layout)   // 节目里记的界面布局（调音台 / 多画面窗口 / 主窗口位置，W5-A / X47）
             panels.bind(session: s)
             try await s.start()
             if firstStartReport == nil { firstStartReport = s.startReport }
@@ -190,6 +191,7 @@ final class AppController {
         hotkeyTable = table
         hotkeyTableError = nil
         session?.control.hotkeys.table = table
+        windowController.transitionPanel.hotkeyTable = table   // 转场列的按钮提示从当前表反查（W5-A）
     }
 
     /// MIDI 映射面板保存后：换给控制器。

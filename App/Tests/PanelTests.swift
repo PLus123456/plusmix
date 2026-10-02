@@ -428,9 +428,9 @@ final class PanelTests: XCTestCase {
         let controller = AppTest.controller
         let panels = controller.panels
         let menu = try XCTUnwrap(controller.windowController.externalOutputMenu())
-        XCTAssertGreaterThanOrEqual(menu.items.count, 1, "每块屏一个子菜单")
-        let screenMenu = try XCTUnwrap(menu.items.first?.submenu)
-        XCTAssertGreaterThanOrEqual(screenMenu.items.count, 3 + 1, "PGM / PVW / 多画面 + 每路输入")
+        XCTAssertGreaterThanOrEqual(AppTest.menuSections(menu).count, 1, "每块屏一段（W5-A 起拍平，不用子菜单）")
+        let screenSection = try XCTUnwrap(AppTest.menuSections(menu).first)
+        XCTAssertGreaterThanOrEqual(screenSection.filter { $0.action != nil }.count, 3 + 1, "PGM / PVW / 多画面 + 每路输入")
         guard let screen = NSScreen.main?.displayNumber else { throw XCTSkip("没有主屏") }
         let number = panels.showOutputSettings(tab: .external).model.addExternalDisplay(screenNumber: screen, source: .input(number: 1))
         XCTAssertTrue(AppTest.waitUntil(3) { session.aux.external.windows[number] != nil }, "应开一个外部显示窗口")

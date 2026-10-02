@@ -34,6 +34,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     private var meterToken: ObserverToken?
     private var overlayPopover: NSPopover?
     private var externalMenuBuilder: ExternalOutputMenuBuilder?
+    /// 最近一次从底栏弹出的菜单（模态；测试开着时量位置、量完 cancelTracking）。
+    private(set) var activeBottomMenu: NSMenu?
+    /// 上半区（双监 + 转场列）的最小高 = 转场列的最小高（W5-A 起 ≤ 409）。
+    private lazy var monitorsMinimumHeight: CGFloat = max(300, transitionPanel.fittingSize.height)
     private(set) var multiviewWindow: MultiviewWindowController?
     /// 新 ISO 路的默认录制目录（AppController 按测试宿主 / 正常设）。
     var defaultRecordDirectory: String = ShowDocuments.defaultRecordDirectory
@@ -64,6 +68,16 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         maxSnapshotsPerSecond = 0
     }
 
+    /// 主窗口位置的存档名（正式 App；老存档照用）。
+    static let autosaveName = "SwitcherMainWindow"
+
+    /// 先按存档摆（位置 + 大小），没有存档才居中，再挂上存档名（W5-A / X45：原来挂了存档名又调 center()，只记住了大小，每次启动都回正中）。
+    /// saving = false：只读存档、不挂存档名（之后改窗口不写回）。
+    static func placeWindow(_ window: NSWindow, autosaveName: String, saving: Bool = true) {
+        if !window.setFrameUsingName(autosaveName) { window.center() }
+        if saving { window.setFrameAutosaveName(autosaveName) }
+    }
+
     init() {
         let window = MainWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -73,11 +87,12 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         window.backgroundColor = Theme.windowBackground
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
-        window.setFrameAutosaveName("SwitcherMainWindow")
+        // 测试宿主的 bundle id 和正式 App 相同（同一个 defaults 域）：照读用户真 App 的存档（窗口落在用户平时看得见的那块屏上），
+        // 但不挂存档名，用例改窗口大小不会写回去
+        Self.placeWindow(window, autosaveName: Self.autosaveName, saving: !AppDelegate.isTestHost)
         super.init(window: window)
         buildLayout()
         window.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
-        window.center()
         // 主窗口被遮住 / 最小化 / 到别的 Space（监视器的 display link 随之暂停）和露出来：断开 PGM 监视器的连续呈现，这段记 undelivered（提案 018）
         occlusionObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.programLedger?.breakRun(countingUndelivered: true) }
@@ -142,6 +157,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         centerSplit.setPosition(window.frame.height - Theme.bottomBarHeight - 230, ofDividerAt: 0)
         outerSplit.setPosition(window.frame.width - Theme.mixerPanelWidth, ofDividerAt: 0)
 
+        transitionPanel.onNotice = { [weak self] message in self?.bottomBar.showNotice(message) }
         bottomBar.onAddInput = { [weak self] in self?.presentAddInput() }
         bottomBar.onOverlayPanel = { [weak self] anchor in self?.presentOverlayPanel(relativeTo: anchor) }
         bottomBar.onExternalMenu = { [weak self] anchor in self?.presentExternalMenu(relativeTo: anchor) }
@@ -166,6 +182,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         self.session = session
         let send: ((Command) -> Void)? = session.map { s in { [weak s] c in s?.send(c) } }
         transitionPanel.send = send
+        if let session { transitionPanel.hotkeyTable = session.control.hotkeyTable }
         inputStrip.send = send
         mixerPanel.send = send
         bottomBar.send = send
@@ -275,10 +292,12 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         }
         let controller = OverlayPanelController(state: session.state)
         controller.send = { [weak session] c in session?.send(c) }
+        // 内容尺寸 400 × min(640, 窗口内容高 − 120)：原来没设，NSPopover 把 400×640 的表单压进 320×320，每行标签头一两个字被裁（X63）
+        controller.preferredContentSize = BottomBarPopup.overlayPanelSize(windowContentHeight: window?.contentLayoutRect.height ?? 900)
         let popover = NSPopover()
         popover.contentViewController = controller
         popover.behavior = .transient
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        BottomBarPopup.show(popover, from: anchor)   // 朝上开（原来 .maxY 在翻转坐标的按钮上是下沿，往窗口外弹）
         overlayPopover = popover
         overlayPanelController = controller
     }
@@ -292,9 +311,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         return builder.makeMenu()
     }
 
+    /// 底栏"外部输出"：菜单朝上开、整块在窗口里（原来从按钮下沿往下挂，伸出窗口下沿，X50）。
     func presentExternalMenu(relativeTo anchor: NSView) {
         guard let menu = externalOutputMenu() else { return }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height), in: anchor)
+        activeBottomMenu = menu
+        BottomBarPopup.popUp(menu, from: anchor)
     }
 
     /// 多画面独立窗口开 / 关。
@@ -321,6 +342,23 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
 
     var isMixerPanelVisible: Bool { !outerSplit.isSubviewCollapsed(mixerPanel) }
 
+    /// 打开节目时按 Show.layout 恢复界面（W5-A / X47：这几个键原来只写不读）：调音台显隐、多画面窗口开关、主窗口位置。
+    /// 没有的键不动；mainWindowFrame 落在现在的屏幕外（别的机器存的、那块屏拔了）就不用，大小不小于主窗口的最小尺寸。
+    func applyLayout(_ layout: ShowLayout) {
+        if case .bool(let visible)? = layout.values["mixerPanelVisible"], visible != isMixerPanelVisible { toggleMixerPanel() }
+        if case .bool(let visible)? = layout.values["multiviewWindowVisible"], visible != isMultiviewWindowVisible { toggleMultiviewWindow() }
+        if case .string(let text)? = layout.values["mainWindowFrame"], let window {
+            var frame = NSRectFromString(text)
+            frame.size.width = max(frame.width, window.minSize.width)
+            frame.size.height = max(frame.height, window.minSize.height)
+            let onScreen = NSScreen.screens.contains { screen in
+                let visible = screen.visibleFrame.intersection(frame)
+                return visible.width >= 200 && visible.height >= 100
+            }
+            if onScreen, frame != window.frame { window.setFrame(frame, display: true) }
+        }
+    }
+
     // MARK: NSSplitViewDelegate
 
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
@@ -328,7 +366,13 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
     }
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        splitView === centerSplit ? 300 : 700
+        splitView === centerSplit ? monitorsMinimumHeight : 700
+    }
+
+    /// 窗口缩放时输入条和调音台保持原来的尺寸，差额都给上半区 / 中列（W5-A / X61：原来按比例缩，1100×700 时输入条只剩 133–143、调音台 216–259，
+    /// 头行和格子按钮被切，日志里一串约束冲突）。拖分隔条不受影响。
+    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
+        view !== inputStrip && view !== mixerPanel
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {

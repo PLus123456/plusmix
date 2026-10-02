@@ -299,9 +299,12 @@ final class InputSettingsWindowController: PanelWindowController {
 
     init(model: InputSettingsModel) {
         self.model = model
+        // 存档名带编号（W5-A / X44：原来所有输入共用一个，同时开几路都跳到同一个存档位置、叠在一起）
         super.init(title: L("inputSettings.windowTitle", model.number, model.config.name), size: NSSize(width: 640, height: 520),
-                   autosaveName: "InputSettings", content: InputSettingsView(model: model))
+                   autosaveName: Self.autosaveName(input: model.number), content: InputSettingsView(model: model))
     }
+
+    static func autosaveName(input number: Int) -> String { "InputSettings-\(number)" }
 
     func apply(state: MixerState) {
         model.apply(state: state)

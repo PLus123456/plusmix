@@ -254,6 +254,7 @@ struct MixerView: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 4)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)   // 内容贴顶（V-03：原来垂直居中，上下各空约 250 pt）
         .sheet(item: $effectsBus) { bus in
             BusEffectsSheet(model: model, bus: bus)
         }
@@ -299,8 +300,8 @@ struct MixerInputStrip: View {
             }
             .frame(height: 170)
             Text(MixerModel.gainText(audio.gainDb)).font(.system(size: 10, design: .monospaced))
-            Slider(value: Binding(get: { audio.pan }, set: { model.setPan(input.number, value: $0) }), in: -1...1) { Text(L("mixer.pan", input.number)) }
-                .labelsHidden().controlSize(.mini).frame(width: 80)
+            PanSlider(value: audio.pan, label: L("mixer.pan", input.number)) { model.setPan(input.number, value: $0) }
+                .frame(width: 80, height: 16)
                 .help(L("mixer.panHelp", audio.pan))
             HStack(spacing: 2) {
                 Toggle(L("mixer.mute"), isOn: Binding(get: { audio.muted }, set: { model.setMute(input.number, on: $0) }))
@@ -413,7 +414,7 @@ struct MeterBar: View {
     static func segmentColor(at fraction: Double) -> Color {
         if fraction >= redFrom { return Color(nsColor: Theme.recording) }
         if fraction >= yellowFrom { return Color(nsColor: .systemYellow) }
-        return Color(nsColor: Theme.tallyPreview)
+        return Color(nsColor: Theme.meterGreen)
     }
 
     var body: some View {
@@ -485,5 +486,59 @@ struct VerticalFader: NSViewRepresentable {
             dragging = NSApp.currentEvent?.type == .leftMouseDragged || NSApp.currentEvent?.type == .leftMouseDown
             onChange(s.doubleValue)
         }
+    }
+}
+
+/// 声像滑块（V-27）：中点有刻度、轨道不填充。系统滑块从最小值往把手填强调色，pan = 0 时显示半条蓝，像是偏了一半；带刻度也照填（探针确认）、
+/// trackFillColor 只是换色，所以自己画轨道（PanSliderCell），把手仍是系统的。
+struct PanSlider: NSViewRepresentable {
+    var value: Double
+    var label: String
+    var onChange: (Double) -> Void
+
+    func makeNSView(context: Context) -> NSSlider {
+        let s = NSSlider()
+        s.cell = PanSliderCell()
+        s.minValue = -1
+        s.maxValue = 1
+        s.doubleValue = value
+        s.isContinuous = true
+        s.controlSize = .mini
+        s.target = context.coordinator
+        s.action = #selector(Coordinator.changed(_:))
+        s.setAccessibilityLabel(label)
+        s.cell?.setAccessibilityLabel(label)
+        return s
+    }
+
+    func updateNSView(_ s: NSSlider, context: Context) {
+        context.coordinator.onChange = onChange
+        s.setAccessibilityLabel(label)
+        s.cell?.setAccessibilityLabel(label)
+        if !context.coordinator.dragging, abs(s.doubleValue - value) > 0.005 { s.doubleValue = value }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onChange: onChange) }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onChange: (Double) -> Void
+        var dragging = false
+        init(onChange: @escaping (Double) -> Void) { self.onChange = onChange }
+        @objc func changed(_ s: NSSlider) {
+            dragging = NSApp.currentEvent?.type == .leftMouseDragged || NSApp.currentEvent?.type == .leftMouseDown
+            onChange(s.doubleValue)
+        }
+    }
+}
+
+/// 声像滑块的轨道：一条同色细轨 + 中点一道刻度（把手在 0 时正好盖住它）。
+final class PanSliderCell: NSSliderCell {
+    override func drawBar(inside rect: NSRect, flipped: Bool) {
+        let track = NSRect(x: rect.minX, y: rect.midY - 1.5, width: rect.width, height: 3)
+        Theme.sliderTrack.setFill()
+        NSBezierPath(roundedRect: track, xRadius: 1.5, yRadius: 1.5).fill()
+        Theme.text.setFill()
+        NSRect(x: rect.midX.rounded() - 0.5, y: rect.midY - 5, width: 1, height: 10).fill()
     }
 }
