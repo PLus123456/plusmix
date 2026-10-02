@@ -95,7 +95,9 @@ collect_committed() {
       while IFS= read -r line; do
         [ -z "$line" ] && continue
         path=${line#*	}; path=${path#*	}
-        if git cat-file -e "$tree:$path" 2>/dev/null && git show "$tree:$path" 2>/dev/null | grep -q '^<<<<<<< '; then
+        # 用 grep -c 读完整个文件再判：set -o pipefail 下 grep -q 一命中就退出，git show 可能被 SIGPIPE 打断（退出 141）、整条管道算失败，
+        # 同样带冲突标记的两份 Localizable.strings 一份被认成冲突解决、另一份被算进胶水额度（G6 合 W5-B 时撞上，看文件大小 / 时序随机）
+        if git cat-file -e "$tree:$path" 2>/dev/null && [ "$(git show "$tree:$path" 2>/dev/null | grep -c '^<<<<<<< ')" -gt 0 ]; then
           # collect_committed 在命令替换的子 shell 里跑，数组传不出来，写临时文件
           printf '%s(%s) @%s\n' "$path" "$(printf '%s' "$line" | awk -F'\t' '{printf "+%s/-%s", $1, $2}')" "${c:0:7}" >> "$conflict_file"
         else
