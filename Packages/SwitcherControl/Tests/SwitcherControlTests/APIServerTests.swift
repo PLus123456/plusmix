@@ -261,7 +261,7 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual(st["type"] as? String, "stats")
         XCTAssertEqual((st["stats"] as? [String: Any])?["tick"] as? Int, 20)
 
-        // 走 WS 发命令
+        // 走 WS 发命令：Fade 还在进行（第 40 拍才对调），setPreview 被 reducer 拒（W5-E，Q66 (a)）——回执 applied = false，快照照推、PVW 仍是 1
         try await ws.send(#"{"id":7,"command":{"setPreview":{"input":4}}}"#)
         var seenReceipt = false, seenSnapshot = false
         for _ in 0..<2 {
@@ -271,10 +271,10 @@ final class APIServerTests: XCTestCase {
                 seenReceipt = true
                 XCTAssertEqual(m["id"] as? Int, 7)
                 XCTAssertEqual(m["sequence"] as? Int, 2)
-                XCTAssertEqual(m["applied"] as? Bool, true)
+                XCTAssertEqual(m["applied"] as? Bool, false, "转场进行中 setPreview 被拒")
             case "snapshot":
                 seenSnapshot = true
-                XCTAssertEqual((m["state"] as? [String: Any])?["preview"] as? Int, 4)
+                XCTAssertEqual((m["state"] as? [String: Any])?["preview"] as? Int, 1, "被拒的命令不改 PVW")
             default: XCTFail("\(m)")
             }
         }

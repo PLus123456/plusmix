@@ -11,6 +11,11 @@ import SwitcherContracts
 //
 // 进度口径（契约）：auto 转场第 s 拍应用，第 s + k 拍 progress = k / durationTicks；k ≥ durationTicks 时对调 program /
 // preview 并回到空闲。Cut 是原子换号，没有中间态。T-bar：progress = 推杆位置，≥ 1 提交。
+//
+// 转场进行中（`TransitionState.isActive` = progress > 0 || startTick != nil：auto 从应用命令那一拍到对调前一拍，T-bar 推杆在 (0, 1)，
+// 拉回 0 = 取消、不算）拒收 fade / setTransition / setTransitionParams / autoTransition / setPreview / setProgram，原样返回（回执 applied = false）；
+// cut（立即完成）与 tbar（接管）照收。setPreview / setProgram 是 W5-E 按 Q66 (a) 加的：渲染器转场中按当前的 program 画底、按当前的
+// preview 画切进来的画面，中途换掉就是 PGM 上的跳变。
 
 /// `MixerReducing` 的实现。
 public struct MixerReducer: MixerReducing {
@@ -98,10 +103,10 @@ public struct MixerReducer: MixerReducing {
             guard !s.transition.isActive else { return state }
             Self.startAuto(&s, at: tick)
         case .setPreview(let input):
-            guard Self.isValidReference(input, in: s) else { return state }
+            guard !s.transition.isActive, Self.isValidReference(input, in: s) else { return state }
             s.preview = input
         case .setProgram(let input):
-            guard Self.isValidReference(input, in: s) else { return state }
+            guard !s.transition.isActive, Self.isValidReference(input, in: s) else { return state }
             s.program = input
         case .tbar(let progress):
             let p = min(max(progress, 0), 1)
