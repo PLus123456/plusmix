@@ -11,13 +11,16 @@
 #
 # 用法：scripts/gate4.sh [--minutes 10] [--label 10min] [--baseline baselines/g3-m5max.json] [--write-baseline baselines/g4-m5max.json]
 #                        [--out-dir .build/gate4/<label>] [--no-build] [--skip-run] [--no-api] [--port 8765] [--c1-start 150] [--c1-phase 0.7] [--iso-audio 4]
-#                        [--waive '指标名=理由'] [--legacy-blank-ticks]
+#                        [--waive '指标名=理由'] [--legacy-blank-ticks] [--checkpoint G4]
 # 采集数据留在 out-dir，不入库；报告里写路径。
+# --checkpoint（G6 加，默认 G4 = 老行为）：运行报告写 reports/<检查点>-run-<label>.md、基线 meta 的 checkpoint 跟着写；
+#   只有 G4 才把运行报告拼进 reports/G4.md（G4-notes.md + 全部 G4-run-*.md 是 G4 的报告形态），别的检查点拼出来的整份放在 out-dir 里不入库——
+#   G5 / W5-C / W5-E 都撞过"跑一次 gate4 就改了 reports/G4.md 和 g4 基线、要手工还原"（reports/issues/W1B3-g5-ownership-run-report-file.md、各报告 §5）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PATH="/opt/homebrew/bin:$PATH"
 
-minutes=10; label=""; baseline=""; write_baseline=""; out_dir=""; do_build=1; do_run=1; do_api=1; port=8765; c1_start=150; c1_phase=0.7; iso_audio=4; waives=(); legacy_blank=0
+minutes=10; label=""; baseline=""; write_baseline=""; out_dir=""; do_build=1; do_run=1; do_api=1; port=8765; c1_start=150; c1_phase=0.7; iso_audio=4; waives=(); legacy_blank=0; checkpoint="G4"
 while [ $# -gt 0 ]; do
   case "$1" in
     --minutes) minutes="$2"; shift 2 ;;
@@ -34,7 +37,8 @@ while [ $# -gt 0 ]; do
     --iso-audio) iso_audio="$2"; shift 2 ;;
     --waive) waives+=(--waive "$2"); shift 2 ;;
     --legacy-blank-ticks) legacy_blank=1; shift ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    --checkpoint) checkpoint="$2"; shift 2 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "不认识的参数：$1" >&2; exit 2 ;;
   esac
 done
@@ -67,7 +71,7 @@ if [ "$do_run" = 1 ]; then
   echo "power=$(pmset -g batt | head -1 | sed "s/.*'//;s/'.*//")"
   echo "thermal=$(pmset -g therm 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g')"
   echo "load_before=$(uptime | sed 's/.*load averages: //')"
-  echo "top_processes_before=$(ps -eo pcpu,comm | sort -rn | head -4 | tail -3 | awk '{printf "%s%%%s; ", $1, $2}' | sed 's|/.*/||g')"
+  echo "top_processes_before=$(ps -eo pcpu,comm | tail -n +2 | sort -rn | head -3 | awk '{printf "%s%%%s; ", $1, $2}' | sed 's|/.*/||g')"
 } > "$env_file"
 fi
 step "环境：$(grep -E '^(cpu|macos|power|load_before)=' "$env_file" | tr '\n' ' ')"
@@ -136,7 +140,8 @@ if [ "$do_run" = 1 ]; then
   load_log="$out_dir/load.log"; : > "$load_log"
   ( while true; do
       l=$(uptime | sed 's/.*averages: //' | cut -d' ' -f1)
-      t=$(ps -eo pcpu,comm | sort -rn | head -5 | tail -4 | awk '{n=split($2,a,"/"); printf "%s%%%s; ", $1, a[n]}')
+      # 先 tail -n +2 去掉表头再排：以前 sort -rn 把 "%CPU" 当 0 排到末尾，tail -4 跳掉的是最忙的那个进程（W5-E 报告 §5 第 4 条）
+      t=$(ps -eo pcpu,comm | tail -n +2 | sort -rn | head -4 | awk '{n=split($2,a,"/"); printf "%s%%%s; ", $1, a[n]}')
       echo "$(date +%T) load $l top: $t" >> "$load_log"; sleep 5
     done ) &
   sampler_pid=$!
@@ -224,7 +229,7 @@ sum_args=(summarize --stats "$stats" --v1-avg-ms 2)
 "$headless" "${sum_args[@]}" --json > "$out_dir/summary.json"
 if [ -n "$write_baseline" ]; then
   "$headless" summarize --stats "$stats" --write-baseline "$write_baseline" \
-    --meta checkpoint=G4 --meta machine=m5max --meta "commit=$(git rev-parse --short HEAD)" --meta "scenario=$script" \
+    --meta "checkpoint=$checkpoint" --meta machine=m5max --meta "commit=$(git rev-parse --short HEAD)" --meta "scenario=$script" \
     --meta "show=$show" --meta "label=$label" --meta "macos=$(sw_vers -productVersion)" \
     --meta "power=$(grep '^power=' "$env_file" | cut -d= -f2-)" >/dev/null
   green "基线：$write_baseline"
@@ -238,13 +243,21 @@ if [ -s "$session" ]; then
 fi
 
 # ---- 6. 报告 ----
-step "生成 reports/G4-run-$label.md 并拼 reports/G4.md"
+run_report="reports/$checkpoint-run-$label.md"
+if [ "$checkpoint" = G4 ]; then
+  report=reports/G4.md; notes=reports/G4-notes.md
+  step "生成 $run_report 并拼 $report"
+else
+  # 别的检查点：运行报告入库，拼出来的整份只留在 out-dir（它们的报告是 reports/<检查点>.md 手写的五段 / §7 模板，不是 notes + run 的形态）
+  report="$out_dir/$checkpoint-assembled.md"; notes="reports/$checkpoint-notes.md"
+  step "生成 $run_report（拼好的整份只放 $report，不入库；判定口径与 G4 相同）"
+fi
 python3 scripts/gate3-report.py --checkpoint G4 --out-dir "$out_dir" --label "$label" --minutes "$minutes" --show "$show" --script "$script" \
-  --baseline "$baseline" --blank-ticks "$blank_ticks" --run-report "reports/G4-run-$label.md" --notes reports/G4-notes.md --report reports/G4.md ${waives[@]+"${waives[@]}"}
+  --baseline "$baseline" --blank-ticks "$blank_ticks" --run-report "$run_report" --notes "$notes" --report "$report" ${waives[@]+"${waives[@]}"}
 rc=$?
 if [ "$rc" = 0 ]; then
-  green "G4 自动项全部满足：$out_dir → reports/G4-run-$label.md → reports/G4.md（NDI 回环 L1：scripts/gate4-ndi.sh；编译矩阵：scripts/gate4-matrix.sh）"
+  green "$checkpoint 自动项全部满足（G4 口径）：$out_dir → $run_report → $report（NDI 回环 L1：scripts/gate4-ndi.sh；编译矩阵：scripts/gate4-matrix.sh）"
 else
-  red "G4 有指标未过（看 reports/G4-run-$label.md 的判定表）：$out_dir"
+  red "$checkpoint 有指标未过（看 $run_report 的判定表）：$out_dir"
 fi
 exit $rc

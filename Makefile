@@ -149,17 +149,21 @@ gate3-report:
 # make gate4-ndi    NDI 回环 L1（headless --ndi-send → NDIInput，60 s，reports/G4-ndi.md）；make gate4-matrix 编译矩阵三种配置（reports/G4-matrix.md）
 # make gate4-report 只用已有产物重拼 reports/G4.md（改了 G4-notes.md 或跑完 gate4-ndi / gate4-matrix 之后用）
 # E7–E9 沿用 G3（reports/G3-net.md，W3 五路没动推流）；C5 真 Companion 与 V8 / V9 的人工部分在 docs/checklists/G4.md。数据留在 .build/gate4/<label>/（不入库）。
+# 后面的检查点复用这条流水线时别改 G4 的入库文件：make gate4-run GATE4_CHECKPOINT=G6 GATE4_PREVIOUS=baselines/g4-m5max.json GATE4_BASELINE=baselines/g6-m5max.json GATE4_LABEL=g6
+#   → 运行报告 reports/G6-run-g6.md、基线 baselines/g6-m5max.json，reports/G4.md 与 g4 基线不动（G6 加；scripts/gate4.sh --checkpoint）
 GATE4_BASELINE ?= baselines/g4-m5max.json
 GATE4_PREVIOUS ?= baselines/g3-m5max.json
+GATE4_CHECKPOINT ?= G4
+GATE4_LABEL ?= 10min
 .PHONY: gate4 gate4-run gate4-1h gate4-ndi gate4-matrix gate4-report
 gate4: test-packages test-tools
-	scripts/gate4.sh --minutes 10 --label 10min --baseline $(GATE4_PREVIOUS) --write-baseline $(GATE4_BASELINE)
+	scripts/gate4.sh --minutes 10 --label $(GATE4_LABEL) --checkpoint $(GATE4_CHECKPOINT) --baseline $(GATE4_PREVIOUS) --write-baseline $(GATE4_BASELINE)
 
 gate4-run:
-	scripts/gate4.sh --minutes 10 --label 10min --baseline $(GATE4_PREVIOUS) --write-baseline $(GATE4_BASELINE)
+	scripts/gate4.sh --minutes 10 --label $(GATE4_LABEL) --checkpoint $(GATE4_CHECKPOINT) --baseline $(GATE4_PREVIOUS) --write-baseline $(GATE4_BASELINE)
 
 gate4-1h:
-	scripts/gate4.sh --minutes 60 --label 1h --baseline $(GATE4_BASELINE)
+	scripts/gate4.sh --minutes 60 --label 1h --checkpoint $(GATE4_CHECKPOINT) --baseline $(GATE4_BASELINE)
 
 gate4-ndi:
 	scripts/gate4-ndi.sh
