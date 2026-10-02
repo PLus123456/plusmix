@@ -110,6 +110,31 @@ final class ReleaseTests: XCTestCase {
         XCTAssertEqual(plainBack.outputs[0].settings.stream?.streamKey, "")
     }
 
+    /// W5-D：url 里的 user:pass@ 与密钥同样打码（整段换成标记，转义过的、没转义的 @ 都算），主机端口路径保留；
+    ///     去过密钥的节目仍是合法 Show，账号密码一个字都不出现。
+    func testRelease_redactionHidesURLUserinfo() throws {
+        let m = ShowRedaction.redactedMarker
+        XCTAssertEqual(ShowRedaction.redactURL("rtmp://u:p@live.example.com:1935/app"), "rtmp://\(m)@live.example.com:1935/app")
+        XCTAssertEqual(ShowRedaction.redactURL("rtmps://me%40example.com:p%40ss%3Aw@h/app?token=t&x=1"), "rtmps://\(m)@h/app?token=\(m)&x=1")
+        XCTAssertEqual(ShowRedaction.redactURL("rtmp://u:p@ss@h/app"), "rtmp://\(m)@h/app", "没转义的 @：按最后一个 @ 分")
+        XCTAssertEqual(ShowRedaction.redactURL("rtmp://only-user@h/app"), "rtmp://\(m)@h/app")
+        XCTAssertEqual(ShowRedaction.redactURL("rtmp://h/app"), "rtmp://h/app", "没有 userinfo 的不动")
+
+        let user = "Pub-User-5d1e", password = "Pw-Secret-8c3a"
+        let show = Show(name: "n", state: MixerState(outputs: [
+            OutputState(number: 1, kind: .stream, name: "s", enabled: false,
+                        settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
+                                                 stream: StreamSettings(url: "rtmp://\(user):\(password)@ingest.example.com:1936/live", streamKey: "k1"))),
+        ]))
+        let redacted = try ShowRedaction.redact(showData: try show.save())
+        let text = String(decoding: redacted, as: UTF8.self)
+        XCTAssertFalse(text.contains(user), "用户名泄露了")
+        XCTAssertFalse(text.contains(password), "密码泄露了")
+        let back = try Show.load(from: redacted)
+        XCTAssertEqual(back.outputs[0].settings.stream?.url, "rtmp://\(m)@ingest.example.com:1936/live")
+        XCTAssertEqual(back.outputs[0].settings.stream?.streamKey, m)
+    }
+
     /// R9：MetricKit 崩溃诊断落盘：store 按时间命名写 JSON、列表按时间排序、prune 只留最近 N 份；订阅者起得来（测试宿主里 MXMetricManager 也能 add）。
     func testR9_crashDiagnosticsStoreWritesListsAndPrunes() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/crash-\(UUID().uuidString)", isDirectory: true)

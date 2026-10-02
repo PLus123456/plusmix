@@ -18,6 +18,8 @@ import SwitcherOutputs
 //   2. 音视频各自以"第一个样本"为时间 0（RTMPTimestamp / TSWriter 都是）：RTMP 用 DTS + CTS 把视频原点搬到音频原点包上（精确到 1 ms）；
 //      TS 只能挑最近的包（≤ 10.7 ms），且第一个音频包会被它当格式热身丢掉（expectedMedias 齐了才写），所以要一个 preroll 包。
 //   3. AudioSpecificConfig 从 ASBD.mFormatFlags 取 AAC object type：flags 必须是 AAC_LC(2)，W1-E 的格式描述里是 0，这里自己造。
+//   4. 它的 RTMP 鉴权（connect 地址带 user:pass@ 时自动走）不能用（W5-D 探针）：交给它的地址永远不带 userinfo，Adobe 鉴权的前两轮由 RTMPAdobeAuth 做。
+// 错误文字进日志 / 状态之前都过 StreamURLRedaction（HaishinKit 的错误里可能带整个地址：unsupportedCommand、SRT 的 unsupportedUri）。
 
 /// 存 HaishinKit 每秒一次的网络上报（NetworkMonitorEvent），供 StreamOutput 读。不调 setVideoSettings（我们不让它改码率）。
 final actor QueueReporter: StreamBitRateStrategy {
@@ -88,12 +90,14 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
     private var stream: RTMPStream?
     private let audioFormat: AVAudioFormat?
     private let metadata: AMFObject
+    private let connectTimeout: Int
 
     init(destination: StreamDestination, audioFormat: AVAudioFormat?, metadata: AMFObject, connectTimeout: Int) {
         self.destination = destination
         protocolName = destination.scheme.rawValue
         self.audioFormat = audioFormat
         self.metadata = metadata
+        self.connectTimeout = connectTimeout
         connection = RTMPConnection(timeout: connectTimeout)
     }
 
@@ -105,15 +109,30 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         await s.setBitRateStrategy(reporter)
         for _ in 0..<5 { await Task.yield() }          // 让 init 里的 addStream Task 先跑
         try? await Task.sleep(for: .milliseconds(10))
+        // 地址里写了 user:pass@：Adobe 鉴权的前两轮自己做，拿到第三轮的参数；交给 HaishinKit 的地址不带 userinfo（它自带的鉴权见 RTMPAdobeAuth）
+        var target = destination.connectURLWithoutCredentials
+        if let credentials = destination.credentials {
+            do {
+                target = try await RTMPAdobeAuth.authorize(connectURL: target, credentials: credentials, timeoutSeconds: Double(connectTimeout))
+            } catch let e as RTMPAdobeAuth.Failure {
+                switch e {
+                case .badCredentials, .unsupported:
+                    throw StreamTransportError.connectFailed(e.description)
+                case .rejected, .protocolError, .timedOut:
+                    // 服务器不是 Adobe 那套、或者我们的最小客户端没看懂：退回改之前的做法，把不带 userinfo 的地址交给 HaishinKit（账号这时用不上）
+                    break
+                }
+            }
+        }
         do {
-            let r = try await connection.connect(destination.connectURL)
+            let r = try await connection.connect(target)
             guard r.status?.code == RTMPConnection.Code.connectSuccess.rawValue else {
                 throw StreamTransportError.connectFailed(r.status?.code ?? "connect 无状态")
             }
         } catch let e as StreamTransportError {
             throw e
         } catch {
-            throw StreamTransportError.connectFailed("\(error)")
+            throw StreamTransportError.connectFailed(Self.describe(error))
         }
         do {
             let r = try await s.publish(destination.streamName)
@@ -123,7 +142,7 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         } catch let e as StreamTransportError {
             throw e
         } catch {
-            throw StreamTransportError.connectFailed("publish: \(error)")
+            throw StreamTransportError.connectFailed("publish: \(Self.describe(error))")
         }
         // 它自己发的 onMetaData 对压缩输入只有 duration；补一份带尺寸 / 码率 / 编码的
         try? await s.send("@setDataFrame", arguments: "onMetaData", metadata)
@@ -152,6 +171,16 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         if let stream { _ = try? await stream.close() }
         stream = nil
         try? await connection.close()
+    }
+
+    /// HaishinKit 的错误 → 日志里看得懂的一句：服务器拒绝时给它的 code / description（鉴权失败单独点明），其余原样；地址一律打码。
+    static func describe(_ error: any Error) -> String {
+        if case RTMPConnection.Error.requestFailed(let response) = error, let status = response.status {
+            let reason = RTMPAdobeAuth.parameters(inDescription: status.description)["reason"]
+            let prefix = reason == "authfailed" || reason == "nosuchuser" ? "鉴权失败（用户名或密码不对）：" : ""
+            return StreamURLRedaction.redact(text: "\(prefix)\(status.code) \(status.description)")
+        }
+        return StreamURLRedaction.redact(text: "\(error)")
     }
 }
 
@@ -183,7 +212,7 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
         do {
             try await connection.connect(URL(string: destination.connectURL))
         } catch {
-            throw StreamTransportError.connectFailed("\(error)")
+            throw StreamTransportError.connectFailed(StreamURLRedaction.redact(text: "\(error)"))
         }
         guard await connection.connected else { throw StreamTransportError.connectFailed("SRT 未连接") }
         let s = SRTStream(connection: connection)

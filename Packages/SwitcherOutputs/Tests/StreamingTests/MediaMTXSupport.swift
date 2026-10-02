@@ -177,13 +177,19 @@ final class MediaMTXInstance {
     private let process = Process()
     private let log: FileHandle
 
-    init(rtmpPort: Int, srtPort: Int, apiPort: Int, recordDir: URL) throws {
+    /// `extraConfig`：接在 scripts/mediamtx.yml 后面的顶层 YAML（比如鉴权的 authMethod / authInternalUsers），合成的配置写进录制目录。
+    init(rtmpPort: Int, srtPort: Int, apiPort: Int, recordDir: URL, extraConfig: String? = nil) throws {
         self.rtmpPort = rtmpPort
         self.srtPort = srtPort
         self.apiPort = apiPort
         self.recordDir = recordDir
         try FileManager.default.createDirectory(at: recordDir, withIntermediateDirectories: true)
-        let config = try StreamTestPaths.repoRoot().appendingPathComponent("scripts/mediamtx.yml")
+        var config = try StreamTestPaths.repoRoot().appendingPathComponent("scripts/mediamtx.yml")
+        if let extraConfig {
+            let merged = recordDir.appendingPathComponent("mediamtx-\(rtmpPort).yml")
+            try (try String(contentsOf: config, encoding: .utf8) + "\n" + extraConfig + "\n").write(to: merged, atomically: true, encoding: .utf8)
+            config = merged
+        }
         let logURL = recordDir.appendingPathComponent("mediamtx-\(rtmpPort).log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         log = try FileHandle(forWritingTo: logURL)
