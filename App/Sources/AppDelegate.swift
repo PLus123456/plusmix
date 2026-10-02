@@ -1,5 +1,6 @@
 // Switcher App —— AppKit 主程序（W2-B：显示路径 + 主界面骨架；W2-B2：接上输入 / 命令 / API / 音频 / 录制 / 推流 / Stats；W3-E：设置面板与窗口）。
-// 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：自动保存 → 停引擎。
+// 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：先问（录制 / 推流在跑、有未保存的改动，W5-B）→ LastSession 照存 → 停引擎。
+// 新建 / 打开 / 打开最近 / Finder 双击打开同样先问（AppController.requestNewShow / requestOpenShow）。
 // 菜单：App 菜单（标题是产品名 PlusMix，W4-D：关于 / 检查更新 / 偏好设置）、节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加 / 设置）、切换（Cut / Fade / FTB / 快捷键编辑器 / MIDI 映射）、
 // 输出（W3-E：录制 / ISO / 推流 / 外部输出 / NDI / 虚拟摄像头设置页；W3-C：外部输出子菜单、多画面窗口、虚拟摄像头的安装 / 卸载 / 启用）、
 // 窗口（调音台 / 多画面）、帮助（W4-B：导出诊断包 / 打开诊断文件夹；App 菜单加"检查更新…"）。文案全部走 L10n（W3-C 那几项 W3-E2 补齐；包里返回中文的状态在 App 侧查表，OutputStatusText）。启动参数与设置见 AppSettings。
@@ -16,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// "输出"菜单（menuNeedsUpdate 按对象认，标题已本地化）。
     private var outputMenu: NSMenu?
     private var settings = AppSettings()
+    /// 退出那一问已经过了、正在收尾（再来一次 terminate 不再问）。
+    private var quitting = false
 
     /// 自动更新（W4-B）；AppController 持有，这里只是入口。
     var updateController: UpdateController { controller.updateController }
@@ -44,10 +47,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// 退出（菜单 / ⌘Q / 关主窗口）：录制 / 推流在跑先确认，有未保存的改动问 保存 / 不保存 / 取消（W5-B，Q67 (a)）；过了才 shutdown。
+    /// 取消 = 不退。等回答期间 AppKit 在 modal panel 模式下跑 run loop，sheet 照常弹。
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Task { @MainActor in
-            await controller.shutdown()
-            sender.reply(toApplicationShouldTerminate: true)
+        guard !quitting else { return .terminateLater }
+        controller.prepareToQuit { [weak self] ok in
+            // 回答可能是同步给的（什么都不用问）：挪到下一轮，先让 applicationShouldTerminate 返回 .terminateLater
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    guard ok else {
+                        sender.reply(toApplicationShouldTerminate: false)
+                        return
+                    }
+                    self.quitting = true
+                    Task { @MainActor in
+                        await self.controller.shutdown()
+                        sender.reply(toApplicationShouldTerminate: true)
+                    }
+                }
+            }
         }
         return .terminateLater
     }
@@ -55,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
-        Task { await controller.openShow(url: URL(fileURLWithPath: filename)) }
+        controller.requestOpenShow(url: URL(fileURLWithPath: filename)) { [weak self] in self?.rebuildRecentMenu() }
         return true
     }
 
@@ -184,11 +203,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func newShow() { Task { await controller.newShow(); rebuildRecentMenu() } }
-    @objc private func openShow() { controller.openShowPanel() }
+    // 新建 / 打开都先过换节目的问（录制 / 推流在跑、未保存的改动；W5-B）
+    @objc private func newShow() { controller.requestNewShow { [weak self] in self?.rebuildRecentMenu() } }
+    @objc private func openShow() { controller.openShowPanel { [weak self] in self?.rebuildRecentMenu() } }
     @objc private func openRecent(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
-        Task { await controller.openShow(url: url); rebuildRecentMenu() }
+        controller.requestOpenShow(url: url) { [weak self] in self?.rebuildRecentMenu() }
     }
     @objc private func clearRecents() { controller.documents.clearRecents(); rebuildRecentMenu() }
     @objc private func saveShow() { controller.save(); rebuildRecentMenu() }

@@ -1,5 +1,6 @@
 // 面板与窗口的总管（W3-E）：输入设置窗（每路一个）、输出设置窗、偏好设置、快捷键编辑器、MIDI 映射。
-// 换 session 时设置类窗口关掉（模型绑的是旧 session 的状态）。多画面窗口 / 外部显示窗口是 W3-C 的（G4 合并时以 W3-C 的运行表为准）：
+// 换 session 时设置类窗口关掉（模型绑的是旧 session 的状态）；偏好设置窗例外（W5-B，X04）：它的设置是本机的，节目格式 / 节目音频几项按新 session 重读一遍，
+// 换格式之后窗口还在原处，不用再找。多画面窗口 / 外部显示窗口是 W3-C 的（G4 合并时以 W3-C 的运行表为准）：
 // 多画面 = MainWindowController.multiviewWindow，外部显示窗口 = AuxOutputRuntime.external 跟着快照里的 externalDisplay 输出开关
 // （设置面板 / 菜单加输出 → 开窗口；用户关窗口 → removeOutput）；这里只留 showMultiview 转调。
 import AppKit
@@ -35,14 +36,13 @@ final class PanelCoordinator: NSObject {
         inputSettingsWindows.removeAll()
         outputSettingsWindow?.close()
         outputSettingsWindow = nil
-        preferencesWindow?.close()
-        preferencesWindow = nil
         hotkeyWindow?.close()
         hotkeyWindow = nil
         midiWindow?.close()
         midiWindow = nil
         self.session = session
         guard let session else { state = MixerState(); return }
+        preferencesWindow?.model.rebind()
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
         // 输出设置页的显示类输出状态读 Stats.display[]（提案 013），1 Hz
         statsToken = session.observeStats { [weak self] stats in self?.outputSettingsWindow?.model.apply(stats: stats) }
@@ -90,6 +90,10 @@ final class PanelCoordinator: NSObject {
                                         reserveBytes: session?.outputs.minimumFreeBytes ?? 0, aux: session?.aux)
         if let stats = session?.stats { model.apply(stats: stats) }
         model.send = { [weak self] c in self?.session?.send(c) }
+        // 起不来的原因 / 推流正在第几次连接 / 重试（W5-B：推流页那一段写明原因，起不来的路不锁、可以重试或停用）
+        model.routeDetail = { [weak self] n in (self?.session?.outputs.failureReason(output: n), self?.session?.outputs.streamConnectAttempt(output: n)) }
+        model.onRetry = { [weak self] numbers in self?.session?.retryFailedOutputs(numbers) }
+        model.refreshRouteDetails()
         let w = OutputSettingsWindowController(model: model)
         w.onClose = { [weak self] in self?.outputSettingsWindow = nil }
         outputSettingsWindow = w

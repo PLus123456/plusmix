@@ -316,6 +316,10 @@ final class SwitcherSession {
     /// UI 唯一的写入口（→ CommandBus，来源 ui）。
     func send(_ command: Command) { control.send(command) }
 
+    /// 重试起不来的录制 / 推流（底栏推流主体按钮、推流页"重试"；W5-B）。这几路的目标开关本来就是开着的（快照里 enabled 为真），
+    /// 是运行表没把它们起来，所以不是一条命令，直接叫运行表再试；正常在跑的路不碰。
+    func retryFailedOutputs(_ numbers: [Int]) { outputs.retry(numbers) }
+
     // MARK: 快照分发（≤ 60 Hz）
 
     private func pollSnapshot() {
@@ -350,6 +354,7 @@ final class SwitcherSession {
 
     private func publish(stats: Stats) {
         self.stats = stats
+        outputs.noteStats(stats)   // 推流第一次报 publishing → "已开始"（W5-B，X37）
         for observer in statsObservers { observer.block(stats) }
     }
 
@@ -392,6 +397,7 @@ final class SwitcherSession {
         case .recordingFailed(_, let message): notify(message)
         case .recordingDiskLow(let n, let mb): notify(L("notice.recordingDiskLow", n, Int(mb)))
         case .recordingSwitchedToFallback(let n, let url): notify(L("notice.recordingFallback", n, url.lastPathComponent))
+        case .streamConnecting(let n): notify(L("notice.streamConnecting", n))
         case .streamStarted(let n): notify(L("notice.streamStarted", n))
         case .streamStopped(let n): notify(L("notice.streamStopped", n))
         case .streamFailed(_, let message): notify(message)

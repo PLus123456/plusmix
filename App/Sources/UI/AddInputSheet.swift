@@ -4,6 +4,7 @@
 // W3-E2：DeckLink 页列设备（DeckLinkDevices）、选输入接口（卡支持的）与内嵌音频取哪两路；NDI 页发现源、选带宽模式 / 抖动缓冲 0–2 帧（提案 008）；
 // 纯音频页用 SwitcherInputs.AudioInputDevices 列设备（第一项"系统默认输入" = 空串 uid，插拔时刷新），设备声道 > 2 时选取哪几路（提案 014）。
 // 每种类型的参数页抽成 InputSourceFormView，输入设置窗的"来源"一节复用它（setInputSource，提案 012）。
+// W5-B（02 X22）：编号用满时"添加"置灰并写明"本节目的输入已满（n 路）"，确定不加、面板不关（原来面板照关、命令被拒、只在底栏闪 4 秒）。
 import AppKit
 import AVFoundation
 import SwiftUI
@@ -305,6 +306,12 @@ final class AddInputFormModel: ObservableObject {
     @Published private(set) var screenListStatus = ""
     @Published private(set) var ndiStatus = ""
     let freeNumbers: [Int]
+    /// 这个节目最多几路（引擎的 maxInputs）。
+    let maxInputs: Int
+    /// 编号用满了（添加输入时没有空号；输入设置窗的"来源"一节永远有自己那个号）。
+    var isFull: Bool { freeNumbers.isEmpty }
+    var canAdd: Bool { !isFull }
+    var fullMessage: String { L("addInput.full", maxInputs) }
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
     private var audioInfos: [String: AudioInputDeviceInfo] = [:]
@@ -317,7 +324,7 @@ final class AddInputFormModel: ObservableObject {
         var m = AddInputModel()
         m.number = AddInputModel.nextFreeNumber(in: state, maxInputs: maxInputs)
         let used = Set(state.inputs.map(\.number))
-        self.init(model: m, freeNumbers: (1...max(1, maxInputs)).filter { !used.contains($0) })
+        self.init(model: m, freeNumbers: (1...max(1, maxInputs)).filter { !used.contains($0) }, maxInputs: maxInputs)
         model.cameraUniqueID = cameras.first?.id
         model.displayID = AddInputModel.displays().first?.id
     }
@@ -327,14 +334,15 @@ final class AddInputFormModel: ObservableObject {
         var m = AddInputModel(source: config.source)
         m.number = config.number
         m.name = config.name
-        self.init(model: m, freeNumbers: [config.number])
+        self.init(model: m, freeNumbers: [config.number], maxInputs: max(config.number, 1))
         if model.cameraUniqueID == nil { model.cameraUniqueID = cameras.first?.id }
         if model.displayID == nil { model.displayID = AddInputModel.displays().first?.id }
     }
 
-    private init(model: AddInputModel, freeNumbers: [Int]) {
+    private init(model: AddInputModel, freeNumbers: [Int], maxInputs: Int) {
         self.model = model
         self.freeNumbers = freeNumbers
+        self.maxInputs = maxInputs
         cameras = AddInputModel.cameras().map { AddInputChoice(id: $0.id, title: $0.name) }
         displays = AddInputModel.displays().map { AddInputChoice(id: String($0.id), title: $0.name) }
         reloadAudioDevices()
@@ -715,12 +723,14 @@ struct AddInputView: View {
                     ForEach(form.freeNumbers, id: \.self) { Text(verbatim: "\($0)").tag($0) }
                 }
                 .frame(width: 130)
+                .disabled(form.isFull)
                 TextField(L("addInput.name"), text: $form.model.name, prompt: Text(form.model.defaultName))
                     .frame(width: 200)
-                Text(form.errorMessage).foregroundStyle(.red).lineLimit(1)
+                Text(form.isFull ? form.fullMessage : form.errorMessage).foregroundStyle(.red).lineLimit(1)
                 Spacer()
                 Button(L("common.cancel")) { form.onCancel?() }.keyboardShortcut(.cancelAction)
                 Button(L("addInput.add")) { form.onConfirm?() }.keyboardShortcut(.defaultAction)
+                    .disabled(!form.canAdd)
             }
             .padding(12)
         }
@@ -757,7 +767,7 @@ final class AddInputSheetController: NSWindowController {
     required init?(coder: NSCoder) { fatalError() }
 
     private func confirm() {
-        guard let config = form.makeConfig() else { return }
+        guard form.canAdd, let config = form.makeConfig() else { return }   // 满了：不加、面板不关（上面写着"已满"）
         onConfirm(config)
         close(returnCode: .OK)
     }

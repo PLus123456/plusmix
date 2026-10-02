@@ -1,9 +1,10 @@
 // 底栏：添加输入 / 录制 / 推流 / 外部输出 / 多画面 / 叠加 按钮 + 状态行（1 Hz，全部读 Stats）+ 提示（命令被忽略、录制起停、重连……）。
-// 录制 / 推流按钮只发 startRecord / stopRecord / startStream / stopStream；文案 = 快照里输出的 enabled（目标）× Stats.encoder[i].state（实际）：
-//   录制：目标关 → "录制"；目标开、实际 recording → "● 录制中"；目标开、实际还没到（idle / stopping / failed）→ "录制 · <state>"。
-//   推流：目标关 → "推流"；publishing → "● 推流中"；connecting / backoff → "推流 · 重连中（第 n 次）"（n = Stats.encoder[i].reconnects）。
+// 录制 / 推流按钮只发 startRecord / stopRecord / startStream / stopStream；文案 = 快照里输出的 enabled（目标）× Stats.encoder[i].state（实际）× 起不来的原因，
+// 按最差的那一路汇总、state 查本地化表（W5-B，OutputButtonSummary：X11 / K11 / L4）。
 // W3-C：外部输出按钮弹显示器 × 源的菜单（ExternalOutputMenuBuilder），多画面按钮开独立窗口，ISO… 按钮打开输出设置的 ISO 页（W3-E2：ISO 只留一个入口）；录制按钮对全部录制输出
 // （PGM + ISO 路）一起发 startRecord / stopRecord（同一拍起停），推流按钮起停全部目的地。文案走 L10n（W3-E）。
+// W5-B（02 X01 / X02）：停之前先弹确认（偏好设置里可关，默认开；开始不问；快捷键 / MIDI / API 不走这里，一律不问）；
+// 推流有起不来的路时点主体 = 只重试那几路，正常在推的不停（单路起停在 92 的 ▴ 里做）。
 import AppKit
 import SwitcherContracts
 
@@ -15,6 +16,12 @@ final class BottomBarView: NSView {
     var onExternalMenu: ((NSView) -> Void)?
     var onMultiview: (() -> Void)?
     var onISOSettings: (() -> Void)?
+    /// 停录制 / 停推流之前要不要先问（AppController 读偏好设置；W5-B）。
+    var shouldConfirmStop: () -> Bool = { true }
+    /// 一路起不来的原因 + 推流正在第几次连接（session 的运行表；W5-B）。
+    var routeDetail: ((Int) -> (failure: String?, attempt: Int?))?
+    /// 重试起不来的那几路（session.retryFailedOutputs）。
+    var onRetryOutputs: (([Int]) -> Void)?
 
     let addInputButton: NSButton
     let recordButton: NSButton
@@ -33,6 +40,9 @@ final class BottomBarView: NSView {
     /// 最近一次显示的状态行（测试对照 stats.jsonl 用）。
     private(set) var lastStatusLine: (stats: Stats, text: String)?
     private var noticeTimer: Timer?
+    /// 最近一次给两个主体按钮算的汇总（测试看严重程度）。
+    private(set) var recordSummary = OutputButtonSummary(title: L("bottom.record"), toolTip: nil, severity: .off)
+    private(set) var streamSummary = OutputButtonSummary(title: L("bottom.stream"), toolTip: nil, severity: .off)
     /// 提示保留多久。
     static let noticeSeconds: TimeInterval = 4
 
@@ -116,53 +126,40 @@ final class BottomBarView: NSView {
         OutputRuntime.encoderEntry(encoderStates, forOutput: number)
     }
 
+    /// 一路在按钮眼里的样子：目标开关（快照）+ Stats.encoder 那一项 + 起不来的原因 / 正在第几次连接（运行表）。
+    private func routeStatus(_ o: OutputState) -> OutputRouteStatus {
+        let entry = encoderEntry(forOutput: o.number)
+        let detail = routeDetail?(o.number)
+        return OutputRouteStatus(number: o.number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0,
+                                 attempt: detail?.attempt, failure: detail?.failure)
+    }
+
+    private func show(_ summary: OutputButtonSummary, on button: NSButton) {
+        button.title = summary.title
+        button.toolTip = summary.toolTip
+        Theme.setHighlighted(button, summary.highlighted, color: summary.color)
+    }
+
     private func updateButtons() {
-        // 录制：全部录制输出（PGM + ISO 路）一起看；文案按第一个 enabled 的（没有就第一个）
+        // 录制：全部录制输出（PGM + ISO 路）一起看，按最差的那一路汇总
         let records = state.outputs.filter { $0.kind == .record }
-        if let record = records.first(where: \.enabled) ?? records.first {
-            let actual = encoderEntry(forOutput: record.number)?.state ?? "idle"
-            let enabledCount = records.filter(\.enabled).count
-            switch (record.enabled, actual) {
-            case (true, "recording"):
-                // PGM + ISO 几路一起在录时带路数（W3-C）；文案键是 W3-E 的 L10n 表（G4 合并时加 bottom.recordingMany / recordStateMany）
-                recordButton.title = enabledCount > 1 ? L("bottom.recordingMany", enabledCount) : L("bottom.recording")
-                recordButton.toolTip = nil
-            case (true, let s):
-                recordButton.title = enabledCount > 1 ? L("bottom.recordStateMany", s, enabledCount) : L("bottom.recordState", s)
-                recordButton.toolTip = L("bottom.recordStateTip", s)
-            default:
-                recordButton.title = L("bottom.record")
-                recordButton.toolTip = nil
-            }
-            Theme.setHighlighted(recordButton, record.enabled, color: Theme.recording)
+        if !records.isEmpty {
+            recordSummary = OutputButtonSummary.record(records.map(routeStatus))
+            show(recordSummary, on: recordButton)
         } else {
-            recordButton.title = L("bottom.record")
-            recordButton.toolTip = L("bottom.noRecordOutputTip")
-            Theme.setHighlighted(recordButton, false, color: Theme.recording)
+            recordSummary = OutputButtonSummary(title: L("bottom.record"), toolTip: L("bottom.noRecordOutputTip"), severity: .off)
+            show(recordSummary, on: recordButton)
         }
-        // 推流：所有推流目的地；文案按第一个（多目的地时状态最差的那个）
+        // 推流：所有推流目的地，按最差的那一路汇总（"● 推流中 2/3"、"推流 · 1 路异常"）；提示逐路列状态与原因
         let streams = state.outputs.filter { $0.kind == .stream }
-        if let stream = streams.first {
-            let entry = encoderEntry(forOutput: stream.number)
-            let actual = entry?.state ?? "idle"
-            switch (stream.enabled, actual) {
-            case (true, "publishing"):
-                streamButton.title = streams.count > 1 ? L("bottom.streamingMany", streams.count) : L("bottom.streaming")
-            case (true, "connecting"), (true, "backoff"):
-                streamButton.title = L("bottom.streamReconnecting", (entry?.reconnects ?? 0) + 1)
-            case (true, let s):
-                streamButton.title = L("bottom.streamState", s)
-            default:
-                streamButton.title = L("bottom.stream")
-            }
+        if !streams.isEmpty {
+            streamSummary = OutputButtonSummary.stream(streams.map(routeStatus))
+            show(streamSummary, on: streamButton)
             streamButton.isEnabled = true
-            streamButton.toolTip = streams.map { $0.settings.stream?.url ?? "" }.joined(separator: "\n")
-            Theme.setHighlighted(streamButton, streams.contains { $0.enabled }, color: Theme.recording)
         } else {
-            streamButton.title = L("bottom.stream")
+            streamSummary = OutputButtonSummary(title: L("bottom.stream"), toolTip: L("bottom.noStreamOutputTip"), severity: .off)
+            show(streamSummary, on: streamButton)
             streamButton.isEnabled = false
-            streamButton.toolTip = L("bottom.noStreamOutputTip")
-            Theme.setHighlighted(streamButton, false, color: Theme.recording)
         }
     }
 
@@ -195,11 +192,15 @@ final class BottomBarView: NSView {
     @objc private func recordPressed() {
         let records = state.outputs.filter { $0.kind == .record }
         if !records.isEmpty {
-            // 有任何一路在录就全停，否则全起（同一拍发多条 = ISO 共用起点）
-            if records.contains(where: \.enabled) {
-                for r in records where r.enabled { send?(.stopRecord(output: r.number)) }
-            } else {
+            // 有任何一路在录就全停（先确认），否则全起（同一拍发多条 = ISO 共用起点；开始不问）
+            let running = records.filter(\.enabled)
+            if running.isEmpty {
                 for r in records { send?(.startRecord(output: r.number)) }
+            } else {
+                confirmStop(.stopRecord, routes: running) { [weak self] in
+                    guard let self else { return }
+                    for r in self.state.outputs where r.kind == .record && r.enabled { self.send?(.stopRecord(output: r.number)) }
+                }
             }
         } else {
             // 节目里没有录制输出：先加一个再开
@@ -212,14 +213,43 @@ final class BottomBarView: NSView {
         }
     }
 
-    /// 有在跑的就全停，否则全起（多目的地一起）。
+    /// 主体只作用于在跑的路（W5-B，02 X02）：都没开 → 全起；开着的里有起不来的 → 只重试那几路，正常在推的不动、也不问；
+    /// 否则 → 停全部开着的（先确认）。单路起停在 92 的 ▴ 里做。
     @objc private func streamPressed() {
         let streams = state.outputs.filter { $0.kind == .stream }
         guard !streams.isEmpty else { return }
-        if streams.contains(where: \.enabled) {
-            for s in streams where s.enabled { send?(.stopStream(output: s.number)) }
-        } else {
+        let running = streams.filter(\.enabled)
+        if running.isEmpty {
             for s in streams { send?(.startStream(output: s.number)) }
+            return
+        }
+        // 起不来的路按运行表认（不看 1 Hz 的 Stats：刚自动重试好的路，上一行 Stats 里可能还是 failed）
+        let failed = running.filter { routeDetail?($0.number).failure != nil }
+        if !failed.isEmpty {
+            onRetryOutputs?(failed.map(\.number))
+            updateButtons()
+            return
+        }
+        confirmStop(.stopStream, routes: running) { [weak self] in
+            guard let self else { return }
+            for s in self.state.outputs where s.kind == .stream && s.enabled { self.send?(.stopStream(output: s.number)) }
+        }
+    }
+
+    /// 停之前问一声（偏好设置里关了 / 没挂在窗口上就直接停）。确认时按当时的快照停（问的过程中 API 停了几路也不会多发）。
+    private func confirmStop(_ kind: ConfirmationCenter.Kind, routes: [OutputState], perform: @escaping @MainActor () -> Void) {
+        guard shouldConfirmStop(), let window else { perform(); return }
+        let names = routes.map { o in
+            let s = OutputButtonSummary.routeState(routeStatus(o), kind: kind == .stopRecord ? .record : .stream).text
+            return L("bottom.tip.line", o.name, s)
+        }.joined(separator: L("confirm.part.separator"))
+        let title = kind == .stopRecord ? L("confirm.stopRecord.title", routes.count) : L("confirm.stopStream.title", routes.count)
+        let button = kind == .stopRecord ? L("confirm.stopRecord.button") : L("confirm.stopStream.button")
+        let request = ConfirmationCenter.Request(kind: kind, title: title, message: L("confirm.stop.message", names),
+                                                 buttons: [.init(title: button, choice: .confirm, destructive: true), .init(title: L("common.cancel"), choice: .cancel)],
+                                                 defaultChoice: nil)
+        ConfirmationCenter.shared.ask(request, in: window) { choice in
+            if choice == .confirm { perform() }
         }
     }
 

@@ -1,5 +1,6 @@
 // W2-B2 接缝 5：录制按钮 → Recorder（W1-E）。录 5 s：ffprobe 无错、两轨、视频时长 = 起止拍差（精确）、起止拍差 = 按钮间隔 ± 1 帧
 // （起点 = 按下后第 3 拍、终点 = 按下后第 3 拍，两头相互抵消），两轨时长差 ≤ 20 ms（E5 口径），停止后按钮回"录制"。
+// W5-B 起停止前先确认：停 = 按钮 + 确认框上点"停止录制"，"按钮间隔"量的是两条命令发出之间（开始按下 → 点停止录制）。
 import AppKit
 import XCTest
 import SwitcherContracts
@@ -22,8 +23,11 @@ final class RecordingTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.recordButton.title == "● 录制中" }, "应显示录制中：\(wc.bottomBar.recordButton.title)")
         XCTAssertNotNil(session.outputs.recorders[1], "录制器应在跑")
         while Date().timeIntervalSince(clickStart) < 5 { AppTest.pump(seconds: 0.005) }
-        let clickStop = Date()
+        // 停先弹确认（W5-B，停止前确认默认开）；按钮间隔量到点"停止录制"那一刻——stopRecord 在那时才发
         wc.bottomBar.recordButton.performClick(nil)
+        XCTAssertNotNil(AppTest.waitForConfirmation(.stopRecord), "停止前应弹确认")
+        let clickStop = Date()
+        AppTest.answer(.confirm)
         XCTAssertTrue(AppTest.waitUntil(15) { wc.bottomBar.recordButton.title == "录制" && session.outputs.lastResults[1] != nil },
                       "封口后按钮应回「录制」：\(wc.bottomBar.recordButton.title)")
         let result = try XCTUnwrap(session.outputs.lastResults[1])

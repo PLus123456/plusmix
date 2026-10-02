@@ -18,7 +18,7 @@ final class MainWindow: NSWindow {
 }
 
 @MainActor
-final class MainWindowController: NSWindowController, NSSplitViewDelegate {
+final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWindowDelegate {
     let previewMonitor = MonitorView(target: .preview)
     let programMonitor = MonitorView(target: .program)
     let transitionPanel = TransitionPanelView(frame: .zero)
@@ -82,7 +82,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         let window = MainWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                 backing: .buffered, defer: false)
-        window.title = "\(ProductName.display) \(SwitcherVersion.current)"   // 产品名 PlusMix（W4-D）
+        window.title = Self.windowTitle(showName: nil)   // 产品名 PlusMix（W4-D）
         window.minSize = NSSize(width: 1100, height: 700)
         window.backgroundColor = Theme.windowBackground
         window.collectionBehavior.insert(.fullScreenPrimary)
@@ -91,6 +91,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         // 但不挂存档名，用例改窗口大小不会写回去
         Self.placeWindow(window, autosaveName: Self.autosaveName, saving: !AppDelegate.isTestHost)
         super.init(window: window)
+        window.delegate = self
         buildLayout()
         window.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
         // 主窗口被遮住 / 最小化 / 到别的 Space（监视器的 display link 随之暂停）和露出来：断开 PGM 监视器的连续呈现，这段记 undelivered（提案 018）
@@ -104,6 +105,20 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
 
     deinit {
         if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+    }
+
+    /// 主窗口标题："PlusMix 0.1.0 — 节目名"：产品名，保存 / 另存之后也是它（W5-B 修 X42：保存后曾被写成代码名）；没有节目只写产品名 + 版本。
+    /// 未保存的改动不写进标题，用 window.isDocumentEdited 标（关闭按钮上的点，AppController 按"节目内容"判定）。
+    static func windowTitle(showName: String?) -> String {
+        let base = "\(ProductName.display) \(SwitcherVersion.current)"
+        guard let showName else { return base }
+        return "\(base) — \(showName)"
+    }
+
+    /// 关主窗口 = 退出（applicationShouldTerminateAfterLastWindowClosed）：走退出那一问（录制 / 推流在跑、未保存），窗口先不关（W5-B，与菜单"退出"同一口径）。
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        NSApp.terminate(nil)
+        return false
     }
 
     private func buildLayout() {
@@ -194,12 +209,15 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate {
         multiviewWindow?.source = source
         bottomBar.resetStats()
         mixerPanel.clearMeters()
+        // 底栏主体按钮：起不来的原因 / 推流正在第几次连接（运行表）、重试起不来的那几路（W5-B）
+        bottomBar.routeDetail = session.map { s in { [weak s] n in (s?.outputs.failureReason(output: n), s?.outputs.streamConnectAttempt(output: n)) } }
+        bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }
         guard let session else {
-            window?.title = "\(ProductName.display) \(SwitcherVersion.current)"
+            window?.title = Self.windowTitle(showName: nil)
             return
         }
         inputStrip.setTextureSize(width: session.format.width, height: session.format.height)
-        window?.title = "\(ProductName.display) \(SwitcherVersion.current) — \(session.name)"
+        window?.title = Self.windowTitle(showName: session.name)
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
         statsToken = session.observeStats { [weak self] stats in self?.apply(stats: stats) }
         noticeToken = session.observeNotices { [weak self] message in self?.bottomBar.showNotice(message) }

@@ -19,10 +19,13 @@ final class ShowDocuments {
     let recordDirectory: String
     /// 当前节目对应的文件；未保存过为 nil。
     private(set) var currentURL: URL?
+    /// 退出时自动存到哪（默认 `ShowDocuments.autosaveURL`；测试宿主指到临时目录，W5-B 起测试宿主也走退出的整条路）。
+    let autosaveURL: URL
 
-    init(defaults: UserDefaults = .standard, recordDirectory: String = ShowDocuments.defaultRecordDirectory) {
+    init(defaults: UserDefaults = .standard, recordDirectory: String = ShowDocuments.defaultRecordDirectory, autosaveURL: URL = ShowDocuments.autosaveURL) {
         self.defaults = defaults
         self.recordDirectory = recordDirectory
+        self.autosaveURL = autosaveURL
     }
 
     /// 默认录制目录：~/Movies/PlusMix（目录名是产品名，W4-D；0.1.0 之前叫 ~/Movies/Switcher，没发布过所以不迁移）。
@@ -103,10 +106,10 @@ final class ShowDocuments {
     static var autosaveURL: URL { UserConfig.directory.appending(path: "LastSession.\(fileExtension)") }
 
     func autosave(_ show: Show) {
-        try? store.save(show, to: Self.autosaveURL)
+        try? store.save(show, to: autosaveURL)
     }
 
     func loadAutosave() -> Show? {
-        (try? store.load(from: Self.autosaveURL)).map(Self.stoppingOutputs)
+        (try? store.load(from: autosaveURL)).map(Self.stoppingOutputs)
     }
 }

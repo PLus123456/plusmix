@@ -5,6 +5,7 @@
 // W3-E3：50 ms 的定时器挪到 session（AudioMeterFeed），同一份快照同时喂多画面电平表；条子画"RMS 实心条 + 峰值细线"（提案 017）。
 // 监听方式 / 总线效果链走提案 012 的 setMonitorMode / setBusEffects（P3 落地）；每路"跟随视频"= InputAudioSettings.afv（用户 2026-09-22 批），
 // 走 setInputSettings，门控显示读 AudioEngineStatus.afvGain（afv = false 的路引擎恒给 1 = 0 dB）。
+// W5-B（X06）：音频引擎还不读总线效果链（AudioEffectsSupport）：总线条的"效果"不亮计数、效果 sheet 顶部写"效果尚未作用到声音（本版本）"。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -143,6 +144,14 @@ final class MixerModel: ObservableObject {
         state.audio.monitorMode = mode
         send?(.setMonitorMode(mode: mode))
     }
+
+    /// 总线条"效果"按钮的字：效果真的作用到声音之后才带计数"效果 (n)"，没接上时不亮计数（W5-B，X06）。
+    static func busEffectsButtonTitle(count: Int, applied: Bool = AudioEffectsSupport.busEffectsApplied) -> String {
+        applied ? L("mixer.effects", count) : L("mixer.effectsInactive")
+    }
+    func busEffectsButtonTitle(_ bus: Bus) -> String { Self.busEffectsButtonTitle(count: busState(bus).effects.count) }
+    /// 总线效果 sheet 顶部的横幅（没接上时）。
+    var busEffectsBanner: String? { AudioEffectsSupport.banner(applied: AudioEffectsSupport.busEffectsApplied) }
 
     /// 总线效果链（提案 012 的 setBusEffects）。
     func setBusEffects(_ bus: Bus, _ effects: [EffectSlot]) {
@@ -353,7 +362,10 @@ struct MixerBusStrip: View {
                 .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).help(L("mixer.lufsHelp"))
             Toggle(L("mixer.mute"), isOn: Binding(get: { s.muted }, set: { model.setBusMute(bus, on: $0) }))
                 .toggleStyle(.button).controlSize(.mini)
-            Button(L("mixer.effects", s.effects.count)) { onEffects() }.controlSize(.mini)
+            Button(model.busEffectsButtonTitle(bus)) { onEffects() }.controlSize(.mini)
+                .accessibilityLabel(L("mixer.busEffectsTitle", L("bus.\(bus.name)")))
+                .foregroundStyle(model.busEffectsBanner == nil ? HierarchicalShapeStyle.primary : .secondary)
+                .help(model.busEffectsBanner.map { $0 + "\n" + L("effects.notEffectiveHelp") } ?? "")
         }
         .frame(width: 92)
         .padding(4)
@@ -370,6 +382,12 @@ struct BusEffectsSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
+                if let banner = model.busEffectsBanner {
+                    Section {
+                        Text(banner).font(.headline).foregroundStyle(.orange)
+                        Text(L("effects.notEffectiveHelp")).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 EffectChainView(editor: Binding(get: { EffectChainEditor(slots: model.busState(bus).effects) }, set: { model.setBusEffects(bus, $0.slots) }))
                 Text(L("mixer.busEffectsHint")).font(.caption).foregroundStyle(.secondary)
             }

@@ -10,6 +10,8 @@ final class InputCellView: NSView {
     var send: ((Command) -> Void)?
     /// 右键"设置…"。
     var onOpenSettings: ((Int) -> Void)?
+    /// 删这一路会碰到的地方（InputStripView 按快照填；空 = 直接删，W5-B）。
+    var removalImpacts: [InputRemovalImpact] = []
     let display = MetalDisplayView(frame: .zero)
     private let titleBar = PanelView(color: Theme.tallyOff)
     private let numberLabel = Theme.monoLabel("", size: 12, color: .white)
@@ -180,11 +182,12 @@ final class InputCellView: NSView {
         return "\(config.number)" == q || config.name.localizedCaseInsensitiveContains(q)
     }
 
-    /// 右键：重命名 / 删除（稿子里每格的 Close；完整的输入设置在 W3-E）。
+    /// 右键：设置 / 重命名 / 删除（稿子里每格的 Close；完整的输入设置在 W3-E）。"删除"和前两项之间隔一条线（W5-B，D9）。
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
         menu.addItem(withTitle: L("cell.menu.settings"), action: #selector(settingsPressed), keyEquivalent: "").target = self
         menu.addItem(withTitle: L("cell.menu.rename"), action: #selector(renamePressed), keyEquivalent: "").target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: L("cell.menu.remove", number), action: #selector(removePressed), keyEquivalent: "").target = self
         return menu
     }
@@ -210,7 +213,25 @@ final class InputCellView: NSView {
         }
     }
 
-    @objc private func removePressed() { send?(.removeInput(input: number)) }
+    @objc private func removePressed() { requestRemoval() }
+
+    /// 删这一路（右键"删除输入 n"）：在 PGM / PVW / 叠加 / Stinger / ISO 录制上时先确认、写明后果；其余直接删（W5-B，D9 / X13）。
+    func requestRemoval() {
+        guard !removalImpacts.isEmpty, let window else {
+            send?(.removeInput(input: number))
+            return
+        }
+        let message = (removalImpacts.map(\.text) + [L("confirm.removeInput.noUndo")]).joined(separator: "\n")
+        let request = ConfirmationCenter.Request(kind: .removeInput, title: L("confirm.removeInput.title", number, config.name), message: message,
+                                                 buttons: [.init(title: L("confirm.removeInput.button"), choice: .confirm, destructive: true),
+                                                           .init(title: L("common.cancel"), choice: .cancel)],
+                                                 defaultChoice: nil)
+        let number = number
+        let send = send
+        ConfirmationCenter.shared.ask(request, in: window) { choice in
+            if choice == .confirm { send?(.removeInput(input: number)) }
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)

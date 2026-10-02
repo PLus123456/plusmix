@@ -11,7 +11,7 @@
 // W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）；
 // W3-E2 加 overlaysInPreview（PVW 预览全部叠加 = MetalRendererOptions.overlaysInPreview，渲染器选项在 init 定死，换 session 生效）；
 // W3-E3 加 externalOutputBehindInterface（外部输出在主屏上不盖住主界面 = ExternalDisplayManager.mainScreenLayering，包内选项、运行时可改，
-// 不进 OutputSettings.display——那是节目文件里的输出设置，这个是本机偏好）。命令行参数优先于 UserDefaults。
+// 不进 OutputSettings.display——那是节目文件里的输出设置，这个是本机偏好）；W5-B 加 confirmBeforeStop（底栏停录制 / 推流前先确认，默认开）。命令行参数优先于 UserDefaults。
 import Foundation
 import SwitcherControl
 import SwitcherExternal
@@ -54,6 +54,7 @@ struct AppSettings: Equatable, Sendable {
         static let compatLayerPort = "compatLayerPort"
         static let overlaysInPreview = "overlaysInPreview"
         static let externalBehindInterface = "externalOutputBehindInterface"
+        static let confirmBeforeStop = "confirmBeforeStop"
     }
 
     var audioDevice: AudioDevice = .systemDefault
@@ -74,6 +75,8 @@ struct AppSettings: Equatable, Sendable {
     var overlaysInPreview = false
     /// 外部输出开在主屏（带菜单栏的那块）上时垫在主界面下面（默认关 = 盖住，W3-C 起的行为）。
     var externalBehindInterface = false
+    /// 底栏停录制 / 停推流之前先确认（W5-B，默认开；快捷键 / MIDI / API 一律不问）。
+    var confirmBeforeStop = true
 
     /// 外部显示管理器的主屏层级（ExternalDisplayManager.mainScreenLayering）。
     var externalMainScreenLayering: ExternalDisplayWindow.MainScreenLayering { externalBehindInterface ? .behindInterface : .front }
@@ -120,6 +123,7 @@ struct AppSettings: Equatable, Sendable {
         }
         if defaults.object(forKey: Keys.overlaysInPreview) != nil { s.overlaysInPreview = defaults.bool(forKey: Keys.overlaysInPreview) }
         if defaults.object(forKey: Keys.externalBehindInterface) != nil { s.externalBehindInterface = defaults.bool(forKey: Keys.externalBehindInterface) }
+        if defaults.object(forKey: Keys.confirmBeforeStop) != nil { s.confirmBeforeStop = defaults.bool(forKey: Keys.confirmBeforeStop) }
 
         func value(after flag: String) -> String? {
             guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
@@ -150,5 +154,6 @@ struct AppSettings: Equatable, Sendable {
         defaults.set(compatLayerPort, forKey: Keys.compatLayerPort)
         defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview)
         defaults.set(externalBehindInterface, forKey: Keys.externalBehindInterface)
+        defaults.set(confirmBeforeStop, forKey: Keys.confirmBeforeStop)
     }
 }

@@ -112,6 +112,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         for config in state.inputs {
             cells[config.number]?.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays,
                                         runtime: runtimeState?(config.number))
+            cells[config.number]?.removalImpacts = InputRemovalImpact.impacts(of: config.number, in: state)   // 删之前要不要问（W5-B）
         }
         relayoutThumbnails()
         applySearch()
