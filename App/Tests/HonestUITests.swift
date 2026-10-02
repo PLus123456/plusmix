@@ -11,7 +11,7 @@ final class HonestUITests: XCTestCase {
     // MARK: 6. 效果链标"尚未生效"
 
     func testUI_effectChainMarkedNotEffectiveUntilSupported() throws {
-        XCTAssertFalse(AudioEffectsSupport.busEffectsApplied, "总线效果还没接（88 接上时翻）")
+        XCTAssertTrue(AudioEffectsSupport.busEffectsApplied, "总线效果 W5-C（88）已接进混音器；G6 合并时翻（W5-C 报告 §5 第 8 条）")
         XCTAssertFalse(AudioEffectsSupport.inputEffectsApplied, "每路效果还没接（102 接上时翻）")
         // 总线条"效果 (n)"：没接上时计数不亮
         XCTAssertEqual(MixerModel.busEffectsButtonTitle(count: 2, applied: false), "效果")
@@ -23,8 +23,8 @@ final class HonestUITests: XCTestCase {
         let mixer = AppTest.controller.windowController.mixerPanel.model
         mixer.setBusEffects(.master, [AudioEffectParams.peakLimiter(attackSeconds: 0.012, decaySeconds: 0.024, preGainDb: 6)])
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.count == 1 }, "设置照样存进快照 / 节目文件")
-        XCTAssertEqual(mixer.busEffectsButtonTitle(.master), "效果", "有一格也不亮计数")
-        XCTAssertEqual(mixer.busEffectsBanner, "效果尚未作用到声音（本版本）", "总线效果 sheet 顶部的横幅")
+        XCTAssertEqual(mixer.busEffectsButtonTitle(.master), "效果 (1)", "总线已接：计数照常亮")
+        XCTAssertNil(mixer.busEffectsBanner, "总线已接：sheet 顶部不再有横幅；每路那一半（下面）仍标")
 
         // 输入设置："效果链"改名"音频效果"，那一页顶部同样的横幅
         try AppTest.addSynthetics(session, count: 1)

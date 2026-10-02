@@ -53,6 +53,30 @@ public struct AudioEngineStatus: Sendable {
         public var loudnessRangeLU: Double
         public var gainDb: Double
         public var muted: Bool
+        /// 效果链（W5-C）。
+        public var effects: BusEffects
+    }
+    /// 一条总线效果链的现场（W5-C）：三格各装了什么、开没开、延迟、换格记录。
+    public struct BusEffects: Hashable, Sendable {
+        /// 已打开的 AU 的延迟之和（帧）：这条总线消费者流的 PTS 再减去它（泵），A/V 对齐不因开效果而漂。
+        public var latencyFrames: Int
+        /// 三格（处理顺序 0 → 1 → 2）各挂着的 AU 种类，nil = 空格。
+        public var slots: [EffectKind?]
+        /// 三格的开关（已推给混音器的）。
+        public var enabled: [Bool]
+        /// 契约链里没装上的格数（认不出的 id、超出三格）。
+        public var ignored: Int
+        /// 准备好了、等实时线程确认关格之后才换进去 / 拆掉的格数。
+        public var pendingSwaps: Int
+        /// 累计：装进空格、换掉别的种类、拆掉。
+        public var installs: Int
+        public var swaps: Int
+        public var removals: Int
+        /// 最近一次换格那一格最多旁路了几块（上界 = 关格命令入队到开格命令入队之间混音器渲染的块数 + 1：两条命令都在入队后的下一块开头应用）。
+        public var lastBypassBlocks: Int?
+
+        public static let empty = BusEffects(latencyFrames: 0, slots: [nil, nil, nil], enabled: [false, false, false], ignored: 0, pendingSwaps: 0,
+                                             installs: 0, swaps: 0, removals: 0, lastBypassBlocks: nil)
     }
     /// 输出设备。
     public struct DeviceStatus: Hashable, Sendable {
@@ -76,6 +100,11 @@ public struct AudioEngineStatus: Sendable {
         public var devicePpm: Double?
         public var resampleRatio: Double?
         public var resamplerStarved: UInt64
+        /// 当前按多少帧效果链延迟补 PTS（总线来源；输入来源恒 0）。W5-C。
+        public var latencyFrames: Int
+        /// 效果链延迟变大时丢掉的帧（AU 前瞻垫进来的那一段）/ 变小时补的静音帧，累计。W5-C。
+        public var latencyFramesDropped: UInt64
+        public var latencyFramesInserted: UInt64
     }
 
     public var device: DeviceStatus

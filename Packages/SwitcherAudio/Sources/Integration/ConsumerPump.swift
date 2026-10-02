@@ -8,6 +8,11 @@ import SwitcherAudio
 //
 // 每块：PTS = 块首样本 host time − 对齐延迟（= 内容被采集的时刻，与视频拍点同一时基）；真设备时经 HostClockResampler
 // 把设备时钟重采样到 host 时钟（PTS 按计数连续）；Master 流顺便做波形不连续检测（A1 第三项）。
+// 总线来源（Master / A / B / 耳机）再减去这条总线效果链的延迟（W5-C：已打开的 AU 的前瞻之和，EffectLatencyTimeline 按块序号查）：
+// 块里的内容比没开效果时晚这么多采集，PTS 跟着往前挪，A/V 对齐不因开效果漂。延迟变了的那一块按差值拼接，让消费者看到的 PTS 仍连续：
+//   变大 Δ：丢掉接下来的 Δ 帧——正是 AU 刚打开时前瞻缓冲垫出来的那一段（打开前 Reset 过，是零）；
+//   变小 Δ：先补 Δ 帧静音——关掉 / 缩短前瞻时那 Δ 帧内容还在 AU 的缓冲里，丢了，用静音占住时间轴。
+// 输入来源（ISO / 节目信号）不经总线效果，不补。
 final class ConsumerPump: @unchecked Sendable {
     struct SourceStatus: Hashable, Sendable {
         var source: AudioTapSource
@@ -17,6 +22,9 @@ final class ConsumerPump: @unchecked Sendable {
         var tapDropped: UInt64
         var resampler: HostClockResampler.Snapshot?
         var discontinuities: UInt64
+        var latencyFrames: Int
+        var latencyFramesDropped: UInt64
+        var latencyFramesInserted: UInt64
     }
 
     private final class Source {
@@ -27,11 +35,28 @@ final class ConsumerPump: @unchecked Sendable {
         var detector: DiscontinuityDetector?
         var blocksPopped: UInt64 = 0
         var framesDelivered: UInt64 = 0
-        init(key: AudioTapSource, tap: AudioBlockTap) { self.key = key; self.tap = tap }
+        /// 总线来源的总线（效果链延迟按它查）；输入来源 nil。
+        let bus: Bus?
+        /// 上一块用的效果链延迟（帧）；nil = 还没出过块。
+        var appliedLatency: Int?
+        /// 还要丢的帧（延迟变大时）。
+        var pendingDrop = 0
+        var droppedFrames: UInt64 = 0
+        var insertedFrames: UInt64 = 0
+        init(key: AudioTapSource, tap: AudioBlockTap) {
+            self.key = key; self.tap = tap
+            switch key {
+            case .master: bus = .master
+            case .bus(let b): bus = b
+            case .input, .inputProgram: bus = nil
+            }
+        }
     }
 
     private let mixer: AudioMixer
     private let alignment: HostDuration
+    private let latency: EffectLatencyTimeline
+    private let ticksPerFrame: Double
     let resample: Bool
     private let detectDiscontinuities: Bool
     private let period: HostDuration
@@ -49,13 +74,20 @@ final class ConsumerPump: @unchecked Sendable {
     private let storage: UnsafeMutablePointer<Float>
     private let mutablePlanes: UnsafeMutablePointer<UnsafeMutablePointer<Float>?>
     private let constPlanes: UnsafeMutablePointer<UnsafePointer<Float>>
+    /// 丢掉块头若干帧后，余下部分的平面指针。
+    private let offsetPlanes: UnsafeMutablePointer<UnsafePointer<Float>>
+    /// 补静音用：maxFrames 个零，每个声道都指向它。
+    private let silence: UnsafeMutablePointer<Float>
+    private let silencePlanes: UnsafeMutablePointer<UnsafePointer<Float>>
     /// 到目前为止检出的不连续（所有来源之和）。
     private let discontinuityTotal = Atomic<UInt64>(0)
 
-    init(mixer: AudioMixer, alignment: HostDuration, resample: Bool, detectDiscontinuities: Bool, period: HostDuration,
+    init(mixer: AudioMixer, alignment: HostDuration, latency: EffectLatencyTimeline, resample: Bool, detectDiscontinuities: Bool, period: HostDuration,
          tapCapacity: Int, timebase: MachTimebase) {
         self.mixer = mixer
         self.alignment = alignment
+        self.latency = latency
+        ticksPerFrame = mixer.hostTicksPerFrame
         self.resample = resample
         self.detectDiscontinuities = detectDiscontinuities
         self.period = period
@@ -67,9 +99,15 @@ final class ConsumerPump: @unchecked Sendable {
         storage.initialize(repeating: 0, count: channels * maxFrames)
         mutablePlanes = .allocate(capacity: channels)
         constPlanes = .allocate(capacity: channels)
+        offsetPlanes = .allocate(capacity: channels)
+        silence = .allocate(capacity: maxFrames)
+        silence.initialize(repeating: 0, count: maxFrames)
+        silencePlanes = .allocate(capacity: channels)
         for c in 0..<channels {
             mutablePlanes[c] = storage + c * maxFrames
             constPlanes[c] = UnsafePointer(storage + c * maxFrames)
+            offsetPlanes[c] = UnsafePointer(storage + c * maxFrames)
+            silencePlanes[c] = UnsafePointer(silence)
         }
     }
 
@@ -81,6 +119,9 @@ final class ConsumerPump: @unchecked Sendable {
         lock.unlock()
         mutablePlanes.deallocate()
         constPlanes.deallocate()
+        offsetPlanes.deallocate()
+        silencePlanes.deallocate()
+        silence.deallocate()
         storage.deallocate()
     }
 
@@ -142,7 +183,8 @@ final class ConsumerPump: @unchecked Sendable {
         return sources.values.map {
             SourceStatus(source: $0.key, consumers: $0.consumers.map { $0.consumer.consumerName }, blocksPopped: $0.blocksPopped,
                          framesDelivered: $0.framesDelivered, tapDropped: $0.tap.dropped, resampler: $0.resampler?.snapshot,
-                         discontinuities: $0.detector?.count ?? 0)
+                         discontinuities: $0.detector?.count ?? 0, latencyFrames: $0.appliedLatency ?? 0,
+                         latencyFramesDropped: $0.droppedFrames, latencyFramesInserted: $0.insertedFrames)
         }.sorted { "\($0.source)" < "\($1.source)" }
     }
 
@@ -188,17 +230,65 @@ final class ConsumerPump: @unchecked Sendable {
             while let block = src.tap.pop(into: UnsafePointer(mutablePlanes)) {
                 moved += 1
                 src.blocksPopped += 1
-                let pts = block.hostTime - alignment
-                if let r = src.resampler {
-                    r.push(planes: constPlanes, frameCount: block.frames, hostTime: pts) { planes, n, t in
-                        deliver(src, planes: planes, frames: n, hostTime: t)
+                let lat = src.bus.map { latency.frames($0, atBlock: block.sequence) } ?? 0
+                var pts = block.hostTime - alignment - duration(frames: lat)
+                if let applied = src.appliedLatency, applied != lat {
+                    if lat > applied {
+                        src.pendingDrop += lat - applied
+                    } else {
+                        // 先抵掉还没丢完的，剩下的补静音：补在这一块之前，PTS 接上一块的末尾
+                        var insert = applied - lat
+                        let cancel = min(insert, src.pendingDrop)
+                        src.pendingDrop -= cancel
+                        insert -= cancel
+                        if insert > 0 { pushSilence(src, frames: insert, before: pts) }
                     }
+                }
+                src.appliedLatency = lat
+                var offset = 0
+                if src.pendingDrop > 0 {
+                    offset = min(src.pendingDrop, block.frames)
+                    src.pendingDrop -= offset
+                    src.droppedFrames += UInt64(offset)
+                    pts = pts + duration(frames: offset)
+                }
+                let n = block.frames - offset
+                guard n > 0 else { continue }
+                if offset == 0 {
+                    push(src, planes: constPlanes, frames: n, hostTime: pts)
                 } else {
-                    deliver(src, planes: constPlanes, frames: block.frames, hostTime: pts)
+                    for c in 0..<channels { offsetPlanes[c] = UnsafePointer(storage + c * maxFrames + offset) }
+                    push(src, planes: offsetPlanes, frames: n, hostTime: pts)
                 }
             }
         }
         return moved
+    }
+
+    private func duration(frames: Int) -> HostDuration { HostDuration(ticks: Int64((Double(frames) * ticksPerFrame).rounded())) }
+
+    /// 交给重采样器（真设备）或直接交给消费者。
+    private func push(_ src: Source, planes: UnsafePointer<UnsafePointer<Float>>, frames: Int, hostTime: HostTime) {
+        if let r = src.resampler {
+            r.push(planes: planes, frameCount: frames, hostTime: hostTime) { p, n, t in
+                deliver(src, planes: p, frames: n, hostTime: t)
+            }
+        } else {
+            deliver(src, planes: planes, frames: frames, hostTime: hostTime)
+        }
+    }
+
+    /// 在 PTS = before 的那一块之前补 frames 帧静音（PTS 从 before − frames 起）。
+    private func pushSilence(_ src: Source, frames: Int, before: HostTime) {
+        var left = frames
+        var t = before - duration(frames: frames)
+        while left > 0 {
+            let n = min(left, maxFrames)
+            push(src, planes: silencePlanes, frames: n, hostTime: t)
+            t = t + duration(frames: n)
+            left -= n
+        }
+        src.insertedFrames += UInt64(frames)
     }
 
     private func deliver(_ src: Source, planes: UnsafePointer<UnsafePointer<Float>>, frames: Int, hostTime: HostTime) {
