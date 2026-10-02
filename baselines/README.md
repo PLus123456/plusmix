@@ -13,6 +13,7 @@
 | `m0-m5max.json` | G2 | scenarios/m0-show.json（8 路纯灰底合成源） | — |
 | `g3-m5max.json` | G3 | scenarios/g3-show.json（当时还是灰底；Overlay 1 关着，多画面默认布局） | 与 m0 同负载口径，V1 可比 |
 | `g4-m5max.json` | G4 | scenarios/g4-show.json（噪声底纹 ±24、5–8 号抠像、Overlay 1–4 轮流开、多画面自定义布局、五种转场） | **与 g3 不可比**：底纹和负载都变了（G3 交接第 2 条、W3-B 报告 §5 第 1 条）。W4-A 的 L5"无退步"从 g4 起算 |
+| `g6-m5max.json` | G6（`make gate4-run GATE4_CHECKPOINT=G6 GATE4_PREVIOUS=baselines/g4-m5max.json GATE4_BASELINE=baselines/g6-m5max.json GATE4_LABEL=g6`） | 同 g4（scenarios/g4-show.json + g4.json，第五波止血五路合入后的树 3e7cdae，macOS 27.0） | 与 g4 同场景可比（V1 p99 −0.148 ms、CPU −1.5 个百分点）；g4 是 26.6.2 上的、本机已升 27，跨大版本只作参考 |
 | `perf-m5max-macos27.json` | W4-A L5（`make perf-baseline`） | scenarios/g4-show.json + g4.json 的前 5 分钟（`--record --iso-audio 4`，不起 API）+ E4 片段（`scripts/perf/make-e4-clip.sh`，sha256 记在 `e4.source_sha256`） | **只与同机、同 macOS 大版本比**（prompt 70 第 7 条）：g4-m5max.json 是 26.6.2 上的，只作参考列；`summary` 段与 G2–G4 同结构，另加 `perf`（V1–V3、S3 的 avg / p95）与 `e4`（VMAF / PSNR-Y / SSIM，分段） |
 | `soak8h-<机器>-macos<N>.json`、`soak1h-…` | W4-A L4（`make soak` / `make soak-1h`） | headless `--preset soak`（G4 节目 + 摄像头 + 文件；录制 + 2 路推流 + NDI） | 同标签、同机、同大版本比；存 §7 报告"与上一版本的差"用的几项（V1–V3、S2 斜率、S3、A3），第一次通过时自动写，之后要 `--write-baseline` |
 
