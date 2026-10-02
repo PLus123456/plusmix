@@ -7,6 +7,9 @@
 #      这个 token 本身允许出现；除此之外任何形式（字符串、注释、其他标识符）都不行。
 #      例外 2（提案 011，用户 2026-09-19 批）：兼容层里对方协议规定的字面量（XML 根元素名），客户端靠它识别文档，没法改名。
 #      只放行 Packages/SwitcherControl/Sources/VMixCompat/ 下、同一行带 `lint:allow-protocol-literal` 标记的行；标记出现在别的目录不算数。
+#      例外 1 不适用于用户可见文案（G6 / prompt 91 第 3 条，UIA 报告 §5"lint 的漏洞"）：扫描树里任何 `*.lproj/*.strings`
+#      （今天是 App/Resources/*.lproj/*.strings 与 CameraExtension/Resources/*.lproj/*.strings）连模块名 token 也不许出现——
+#      界面字串给用户看，模块名在那里就是竞品名。代码里的模块名照旧放行。
 #   2. 版本号一致：project.yml 的 MARKETING_VERSION == SwitcherContracts/Version.swift 的 SwitcherVersion.current。
 #   3. 包骨架约束：每个 Package.swift 必须是 tools-version 6.0、swiftLanguageModes [.v6]、平台 macOS 15。
 set -uo pipefail
@@ -29,9 +32,16 @@ raw_hits=$( { grep "${grep_common[@]}" -i 'vmix' "${scan_roots[@]}" 2>/dev/null 
 # 例外 2：VMixCompat 目录下带标记的行（提案 011）。在抹掉 token 之前过滤，因为路径里也有这个 token。
 raw_hits=$(printf '%s\n' "$raw_hits" | grep -v -E '^Packages/SwitcherControl/Sources/VMixCompat/[^:]*:[0-9]+:.*lint:allow-protocol-literal' || true)
 hits=$(printf '%s\n' "$raw_hits" | sed "s/${allowed_token}//g" | grep -i 'vmix' || true)
+# 用户可见文案（*.lproj/*.strings）里不抹 token：模块名出现在界面字串里也算禁词（prompt 91 第 3 条；W5-A 的 testL10n_noModuleNameInUserStrings 是同一检查的用例版）。
+strings_files=$(find "${scan_roots[@]}" -path '*.lproj/*.strings' -not -path '*/.build/*' -not -path '*/DerivedData/*' 2>/dev/null | sort)
+strings_hits=""
+if [ -n "$strings_files" ]; then
+  # shellcheck disable=SC2086
+  strings_hits=$( { grep -In -i 'vmix' $strings_files 2>/dev/null || true; } )
+fi
 hits2=$( { grep "${grep_common[@]}" -w 'OBS' "${scan_roots[@]}" 2>/dev/null || true; } )
 hits3=$( { grep "${grep_common[@]}" -i -E 'obs[-_ ]?studio|obsproject' "${scan_roots[@]}" 2>/dev/null || true; } )
-all_hits=$(printf '%s\n%s\n%s\n' "$hits" "$hits2" "$hits3" | sed '/^$/d' | sort -u)
+all_hits=$(printf '%s\n%s\n%s\n%s\n' "$hits" "$strings_hits" "$hits2" "$hits3" | sed '/^$/d' | sort -u)
 if [ -n "$all_hits" ]; then
   red "[lint-rules] 禁词：以下位置出现了竞品名（铁律 6）。改文案 / 改名，或写提案问我。"
   printf '%s\n' "$all_hits" | sed 's/^/    /'
