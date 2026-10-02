@@ -12,3 +12,4 @@
 
 不做：规格（docs/spec）与计划（docs/plan）。
 报告 reports/w4-docs-2.md（五段）：哪些说法改回了"已生效"、随包手册的大小与生成时间。不 push、不 merge。
+G6 追加（2026-10-02）：第五波止血之后要改的清单——W5-B：reports/w5-app-safety.md §5 第 9 条（"效果链"→"音频效果"、退出口径"先问、不再静默写回"、录制"文件格式"单选、"重试间隔最长 n s（一直重试）"）；W5-C：§1.6（总线效果已生效、一格 16 段界面给 3 段、开了压缩 / 限制器晚 5–35 ms 且已补进录制 / 推流 / NDI 的对齐、扬声器 / 耳机监听会晚；docs/api.md setBusEffects 一节；每路仍未生效）；W5-D：§5 第 3 条（user:pass@ 是 Adobe 鉴权、MediaMTX 等要查询串、SRT passphrase 字符限制）；W5-E：§3 第 6 条（docs/user/概念.md:46、:61、故障排查.md:80 与 en、docs/api/README.md:46、examples.md:138 加上"转场进行中 PVW / PGM 也被拒"）；docs/api.md 若写了"起不来报 idle"改成 failed（W5-B §4 第 2 条）。
