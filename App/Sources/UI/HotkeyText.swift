@@ -58,14 +58,9 @@ enum HotkeyText {
         return parts.joined(separator: L("key.listSeparator"))
     }
 
-    /// 一条绑定的动作写成人话（快捷键一览）："PVW 选输入（输入 2）""叠加开关（通道 3）"；其他命令用命令目录的说明（CommandText）。
-    static func describe(_ action: ControlAction) -> String {
-        let row = HotkeyEditorModel.Row(keyText: "", action: action, note: "")
-        guard row.kind != .other else { return row.other.map(CommandText.summary) ?? L("hotkeys.action.other") }
-        if row.kind == .fade { return L("hotkeyList.fade", row.argument) }
-        guard let label = row.kind.argumentLabel else { return row.kind.title }
-        return L("hotkeyList.actionWithArgument", row.kind.title, label, row.argument)
-    }
+    /// 一条绑定的动作写成人话（快捷键一览）："选进 PVW · 输入 2""叠加开关 · 通道 3"——与快捷键页行上的摘要同一套（ActionText，W5-J）；
+    /// 整条替换类用命令目录的说明（CommandText）。
+    static func describe(_ action: ControlAction) -> String { ActionText.summary(action) }
 }
 
 /// 快捷键表里"这条绑定是不是这个动作"（W5-G：转场列按钮提示、"切换"菜单右列、快捷键一览都按它反查，口径一处定）。

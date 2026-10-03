@@ -1,7 +1,8 @@
-// 快捷键编辑器（W3-E 交付第 6 条）：编辑 W2-C 的 HotkeyTable（组合键 → 动作 + 备注），录键、冲突检查、恢复默认表，
-// 保存到用户配置文件（~/Library/Application Support/PlusMix/hotkeys.json；测试宿主是临时目录）并立刻换给 HotkeyDispatcher。
-// W5-B（01a N4，02 X10 / X41）："其他命令"只在这一行本来就是其他命令时才列出（原来任何一行都能选、行里没东西可填，保存时悄悄存成 Cut）；
-// 显示改用 CommandCatalog 的说明 + 参数摘要（CommandText）；"编辑 JSON…"填一条命令、解得出来才写进这一行；保存前查"其他命令"有没有命令。
+// 快捷键页（W3-E 交付第 6 条的编辑器；W5-J 起是设置窗"本机 › 快捷键"一页）：编辑 W2-C 的 HotkeyTable（组合键 → 动作 + 备注），录键、冲突检查、
+// 恢复默认表，保存到用户配置文件（~/Library/Application Support/PlusMix/hotkeys.json；测试宿主是临时目录）并立刻换给 HotkeyDispatcher。
+// W5-B（01a N4，02 X10）："其他命令"不再悄悄存成 Cut。W5-J（01a N1 / N5，04 Q51–Q53）：每行的动作位置是"选动作"按钮（一句话摘要，点开共用的
+// ActionPicker），整条替换类在面板的"高级：手写 JSON"里；表上加搜索、复制行、每行"启用"勾；新加的行没有动作，存之前要选（不兜底成任何命令）。
+// 表要整张校验（冲突、键）才能存，所以这一页保留"保存"：有未存的改动时关窗或切页先问 保存 / 放弃 / 取消（SettingsModel，X29）。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -9,92 +10,32 @@ import SwitcherControl
 
 @MainActor
 final class HotkeyEditorModel: ObservableObject {
-    /// 动作种类（可绑定的动作；带参数的用 argument）。
-    enum ActionKind: String, CaseIterable, Identifiable {
-        case setPreview, setProgram, cut, autoTransition, fade, toggleFTB, toggleOverlay, toggleMute, toggleRecord, toggleStream, toggleAFV, other
-        var id: String { rawValue }
-        var title: String { L("hotkeys.action.\(rawValue)") }
-        /// 参数的意思（nil = 没有参数）。
-        var argumentLabel: String? {
-            switch self {
-            case .setPreview, .setProgram, .toggleMute: L("hotkeys.arg.input")
-            case .fade: L("hotkeys.arg.ticks")
-            case .toggleOverlay: L("hotkeys.arg.channel")
-            case .toggleRecord, .toggleStream: L("hotkeys.arg.output")
-            default: nil
-            }
-        }
-    }
-
     struct Row: Identifiable, Hashable {
         let id: UUID
         var keyText: String
-        var kind: ActionKind
-        var argument: Int
-        /// kind == .other 时保留原命令。
-        var other: Command?
-        /// 这十来种以外、又不是一条命令的动作（W5-J 的开关 / 组合动作，合窗前的过渡：原样保留，不丢）。
-        var extra: ControlAction?
+        /// 这一行绑的动作；nil = 还没选（存不了）。
+        var action: ControlAction?
         var note: String
+        /// 启用（停用的行留在表里，不派发、不参与冲突检查）。
+        var enabled: Bool
 
-        init(keyText: String, action: ControlAction, note: String) {
+        init(keyText: String, action: ControlAction?, note: String, enabled: Bool = true) {
             id = UUID()
             self.keyText = keyText
+            self.action = action
             self.note = note
-            kind = .other
-            argument = 0
-            other = nil
-            extra = nil
-            set(action: action)
-        }
-
-        mutating func set(action: ControlAction) {
-            other = nil
-            extra = nil
-            switch action {
-            case .command(.setPreview(let n)): kind = .setPreview; argument = n
-            case .command(.setProgram(let n)): kind = .setProgram; argument = n
-            case .command(.cut): kind = .cut
-            case .command(.autoTransition): kind = .autoTransition
-            case .command(.fade(let d)): kind = .fade; argument = d
-            case .command(let c): kind = .other; other = c
-            case .toggleFTB: kind = .toggleFTB
-            case .toggleOverlay(let ch): kind = .toggleOverlay; argument = ch
-            case .toggleMute(.number(let n)): kind = .toggleMute; argument = n
-            case .toggleRecord(let o): kind = .toggleRecord; argument = o
-            case .toggleStream(let o): kind = .toggleStream; argument = o
-            case .toggleAFV: kind = .toggleAFV
-            default: kind = .other; extra = action
-            }
-        }
-
-        /// 这一行绑的动作；"其他命令"却没有命令时为 nil（不兜底成 Cut，保存时报错）。
-        var action: ControlAction? {
-            switch kind {
-            case .setPreview: .command(.setPreview(input: argument))
-            case .setProgram: .command(.setProgram(input: argument))
-            case .cut: .command(.cut)
-            case .autoTransition: .command(.autoTransition)
-            case .fade: .command(.fade(durationTicks: argument))
-            case .toggleFTB: .toggleFTB
-            case .toggleOverlay: .toggleOverlay(channel: argument)
-            case .toggleMute: .toggleMute(input: .number(argument))
-            case .toggleRecord: .toggleRecord(output: argument)
-            case .toggleStream: .toggleStream(output: argument)
-            case .toggleAFV: .toggleAFV
-            case .other: other.map { .command($0) } ?? extra
-            }
+            self.enabled = enabled
         }
     }
 
     enum EditorError: Error, CustomStringConvertible {
         case invalidKey(String)
-        /// 第 n 行（从 1 起）是"其他命令"却没有命令。
-        case otherWithoutCommand(row: Int)
+        /// 第 n 行（从 1 起）还没选动作。
+        case missingAction(row: Int)
         var description: String {
             switch self {
             case .invalidKey(let k): L("hotkeys.error.invalidKey", k)
-            case .otherWithoutCommand(let row): L("hotkeys.error.otherWithoutCommand", row)
+            case .missingAction(let row): L("hotkeys.error.missingAction", row)
             }
         }
     }
@@ -102,44 +43,73 @@ final class HotkeyEditorModel: ObservableObject {
     @Published var rows: [Row]
     @Published var errorMessage: String?
     @Published private(set) var recordingRow: UUID?
+    /// 表上的搜索框（键 / 动作摘要 / 备注）。
+    @Published var search = ""
     let fileURL: URL
     /// 保存后换给派发器（AppController.applyHotkeyTable）。
     var apply: ((HotkeyTable) throws -> Void)?
+    /// 快照（行上的摘要写输入名、选动作面板的下拉与预览）。
+    var state: () -> MixerState? = { nil }
+    /// 选动作面板"最近用过"存在哪（本机）。
+    var defaults: UserDefaults = .standard
+    /// 上次存（或读进来）的表：有没有未存的改动按它比。
+    private(set) var savedTable: HotkeyTable
 
     init(table: HotkeyTable, fileURL: URL) {
-        rows = table.bindings.map { Row(keyText: $0.key.description, action: $0.action, note: $0.note ?? "") }
+        rows = Self.rows(of: table)
+        savedTable = table
         self.fileURL = fileURL
     }
 
-    /// 同一组合键绑了多次（认不出的键不算）。
+    private static func rows(of table: HotkeyTable) -> [Row] {
+        table.bindings.map { Row(keyText: $0.key.description, action: $0.action, note: $0.note ?? "", enabled: $0.enabled) }
+    }
+
+    /// 有没存的改动（表跟上次存的不一样，或者有行还没填好）。
+    var isDirty: Bool { (try? table()) != savedTable }
+
+    /// 同一组合键绑了多次（只看启用的、认得出的键）。
     var conflicts: [HotkeyTable.Conflict] {
         HotkeyTable(bindings: rows.compactMap { r in
             guard let combo = KeyCombo(r.keyText), let action = r.action else { return nil }
-            return HotkeyBinding(key: combo, action: action, note: r.note.isEmpty ? nil : r.note)
+            return HotkeyBinding(key: combo, action: action, note: r.note.isEmpty ? nil : r.note, enabled: r.enabled)
         }).conflicts()
     }
 
-    /// 这一行的动作下拉列哪些："其他命令"只在这一行本来就是其他命令（手里有一条命令）时才列（X10）。
-    static func actionChoices(for row: Row) -> [ActionKind] {
-        ActionKind.allCases.filter { $0 != .other || row.other != nil }
+    /// 搜索框筛过的行（键、动作摘要、备注里含这个词）。
+    var visibleRows: [Row] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return rows }
+        return rows.filter { r in
+            [r.keyText, KeyCombo(r.keyText).map(HotkeyText.display) ?? "", summary(of: r), r.note].contains { $0.lowercased().contains(q) }
+        }
+    }
+
+    /// 行上动作按钮的字。
+    func summary(of row: Row) -> String {
+        row.action.map { ActionText.summary($0, state: state()) } ?? L("hotkeys.pickAction")
+    }
+
+    /// 这一行的选动作面板（定位到现在的动作）。
+    func picker(for id: UUID) -> ActionPickerModel {
+        ActionPickerModel(context: .hotkey, current: rows.first { $0.id == id }?.action, state: state, defaults: defaults)
     }
 
     /// "编辑 JSON…"上一次解不出来的原因（解出来了清掉）。
     @Published var jsonError: String?
 
-    /// 编辑框里的初始文字：这一行是一条命令就给它的 JSON，其余（FTB 开关之类不是命令的动作）为空。
+    /// 编辑框里的初始文字：这一行是一条命令就给它的 JSON，其余为空。
     func jsonText(for id: UUID) -> String {
         guard let row = rows.first(where: { $0.id == id }), case .command(let c)? = row.action else { return "" }
         return CommandText.json(c)
     }
 
-    /// 把一条命令的 JSON 写进这一行：解得出来才写（认得出的命令回到对应的动作，其余成为"其他命令"），解不出来记原因、这一行不动。
+    /// 把一条命令的 JSON 写进这一行：解得出来才写，解不出来记原因、这一行不动。
     @discardableResult
     func applyJSON(_ id: UUID, _ text: String) -> Bool {
         guard let i = rows.firstIndex(where: { $0.id == id }) else { return false }
         do {
-            let command = try CommandText.parse(text)
-            rows[i].set(action: .command(command))
+            rows[i].action = .command(try CommandText.parse(text))
             jsonError = nil
             return true
         } catch {
@@ -148,8 +118,18 @@ final class HotkeyEditorModel: ObservableObject {
         }
     }
 
-    func addRow(key: String = "", action: ControlAction = .command(.cut)) {
+    /// 加一行（默认没有动作：要在选动作面板里选，W5-J）。
+    func addRow(key: String = "", action: ControlAction? = nil) {
         rows.append(Row(keyText: key, action: action, note: ""))
+    }
+
+    /// 复制一行（键空着，免得和原来那行冲突；动作、备注、启用照抄）。
+    @discardableResult
+    func duplicateRow(_ id: UUID) -> UUID? {
+        guard let i = rows.firstIndex(where: { $0.id == id }) else { return nil }
+        let copy = Row(keyText: "", action: rows[i].action, note: rows[i].note, enabled: rows[i].enabled)
+        rows.insert(copy, at: i + 1)
+        return copy.id
     }
 
     func removeRow(_ id: UUID) {
@@ -157,9 +137,9 @@ final class HotkeyEditorModel: ObservableObject {
         if recordingRow == id { recordingRow = nil }
     }
 
-    func setAction(_ id: UUID, _ action: ControlAction) {
+    func setAction(_ id: UUID, _ action: ControlAction?) {
         guard let i = rows.firstIndex(where: { $0.id == id }) else { return }
-        rows[i].set(action: action)
+        rows[i].action = action
     }
 
     func setKey(_ id: UUID, _ text: String) {
@@ -167,18 +147,28 @@ final class HotkeyEditorModel: ObservableObject {
         rows[i].keyText = text
     }
 
-    /// 行 → 表；键认不出就抛。
+    func setEnabled(_ id: UUID, _ on: Bool) {
+        guard let i = rows.firstIndex(where: { $0.id == id }) else { return }
+        rows[i].enabled = on
+    }
+
+    func setNote(_ id: UUID, _ note: String) {
+        guard let i = rows.firstIndex(where: { $0.id == id }) else { return }
+        rows[i].note = note
+    }
+
+    /// 行 → 表；键认不出、动作没选就抛。
     func table() throws -> HotkeyTable {
         var bindings: [HotkeyBinding] = []
         for (i, r) in rows.enumerated() {
             guard let combo = KeyCombo(r.keyText) else { throw EditorError.invalidKey(r.keyText) }
-            guard let action = r.action else { throw EditorError.otherWithoutCommand(row: i + 1) }
-            bindings.append(HotkeyBinding(key: combo, action: action, note: r.note.isEmpty ? nil : r.note))
+            guard let action = r.action else { throw EditorError.missingAction(row: i + 1) }
+            bindings.append(HotkeyBinding(key: combo, action: action, note: r.note.isEmpty ? nil : r.note, enabled: r.enabled))
         }
         return HotkeyTable(bindings: bindings)
     }
 
-    /// 存文件 + 换表；有冲突 / 键不合法 / 写不进去返回 false，原因在 errorMessage。
+    /// 存文件 + 换表；有冲突 / 键不合法 / 动作没选 / 写不进去返回 false，原因在 errorMessage。
     @discardableResult
     func save() -> Bool {
         do {
@@ -187,6 +177,7 @@ final class HotkeyEditorModel: ObservableObject {
             guard c.isEmpty else { throw HotkeyTableError.conflicts(c) }
             try t.save(to: fileURL)
             try apply?(t)
+            savedTable = t
             errorMessage = nil
             return true
         } catch {
@@ -195,8 +186,22 @@ final class HotkeyEditorModel: ObservableObject {
         }
     }
 
+    /// 放弃改动：回到上次存的表。
+    func revert() {
+        rows = Self.rows(of: savedTable)
+        errorMessage = nil
+        jsonError = nil
+        recordingRow = nil
+    }
+
+    /// 表在别处换了（导入设置 / 恢复默认）：读进来当作"已存"。
+    func reload(from table: HotkeyTable) {
+        savedTable = table
+        revert()
+    }
+
     func resetToDefault() {
-        rows = HotkeyTable.default.bindings.map { Row(keyText: $0.key.description, action: $0.action, note: $0.note ?? "") }
+        rows = Self.rows(of: .default)
         errorMessage = nil
     }
 
@@ -210,19 +215,18 @@ final class HotkeyEditorModel: ObservableObject {
         recordingRow = nil
     }
 
-    /// 给人看的动作描述（其他命令 = CommandCatalog 的说明 + 参数摘要，W5-B）。
-    static func describe(_ action: ControlAction) -> String {
-        let row = Row(keyText: "", action: action, note: "")
-        if row.kind == .other, let c = row.other { return CommandText.summary(c) }
-        if let label = row.kind.argumentLabel { return "\(row.kind.title) \(label) \(row.argument)" }
-        return row.kind.title
-    }
+    /// 给人看的动作描述（不带快照：输入只写编号）。
+    static func describe(_ action: ControlAction) -> String { ActionText.summary(action) }
 
     /// 每种动作一个样本（测试来回转换用）。
     static let sampleActions: [ControlAction] = [
         .command(.setPreview(input: 3)), .command(.setProgram(input: 4)), .command(.cut), .command(.autoTransition), .command(.fade(durationTicks: 45)),
         .toggleFTB, .toggleOverlay(channel: 2), .toggleMute(input: 5), .toggleRecord(output: 1), .toggleStream(output: 2), .toggleAFV,
-        .command(.setTransition(type: .wipe, durationTicks: 30)),
+        .command(.setTransition(type: .wipe, durationTicks: 30)), .fadeMs(durationMs: 1000), .previewAndTransition(input: .preview),
+        .overlayInput(channel: 1, input: 2), .overlaysOff, .outputSwitch(output: 3, mode: .toggle), .outputKindSwitch(kind: .externalDisplay, mode: .on),
+        .recordAll(mode: .toggle), .recordISO(mode: .on), .streamAll(mode: .off), .inputAFV(input: 1, mode: .toggle),
+        .busRoute(input: 1, bus: .busA, mode: .on), .solo(input: .program, mode: .toggle), .busMuteSwitch(bus: .master, mode: .toggle),
+        .ui(name: UIAction.toggleMixer.rawValue), .command(.setInputSettings(input: 1, settings: InputSettings())),
     ]
 }
 
@@ -233,29 +237,32 @@ struct HotkeyEditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                TextField(L("hotkeys.search"), text: $model.search).textFieldStyle(.roundedBorder).frame(maxWidth: 260)
+                    .accessibilityLabel(L("hotkeys.search"))
+                Spacer()
+                Text(L("hotkeys.systemKeysHint")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            .padding(10)
             List {
-                ForEach($model.rows) { $row in
+                ForEach(model.visibleRows) { row in
                     HStack(spacing: 6) {
-                        TextField(L("hotkeys.key"), text: $row.keyText).frame(width: 120)
+                        Toggle(L("hotkeys.enabled"), isOn: Binding(get: { row.enabled }, set: { model.setEnabled(row.id, $0) }))
+                            .labelsHidden().toggleStyle(.checkbox).help(L("hotkeys.enabled"))
+                        TextField(L("hotkeys.key"), text: Binding(get: { row.keyText }, set: { model.setKey(row.id, $0) })).frame(width: 110)
                         Button(model.recordingRow == row.id ? L("hotkeys.recording") : L("hotkeys.record")) {
                             if model.recordingRow == row.id { model.cancelRecording() } else { model.beginRecording(row.id) }
                         }
                         .controlSize(.small)
-                        Picker(L("hotkeys.actionKind"), selection: $row.kind) {
-                            ForEach(HotkeyEditorModel.actionChoices(for: row)) { Text($0.title).tag($0) }
-                        }
-                        .labelsHidden().frame(width: 150)
-                        if let label = row.kind.argumentLabel {
-                            TextField(label, value: $row.argument, format: .number).frame(width: 60)
-                        } else if row.kind == .other, let c = row.other {
-                            Text(CommandText.summary(c)).font(.caption).lineLimit(1).frame(width: 160, alignment: .leading)
-                                .help(CommandText.summary(c))
-                        }
-                        Button(L("hotkeys.editJSON")) { jsonRow = JSONEditTarget(id: row.id, text: model.jsonText(for: row.id)) }
-                            .controlSize(.small)
-                        TextField(L("hotkeys.note"), text: $row.note)
+                        ActionButton(summary: model.summary(of: row), context: .hotkey, makeModel: { model.picker(for: row.id) },
+                                     onPick: { picker in if let a = picker.builtAction { model.setAction(row.id, a) } })
+                            .frame(minWidth: 180)
+                        TextField(L("hotkeys.note"), text: Binding(get: { row.note }, set: { model.setNote(row.id, $0) })).frame(width: 140)
+                        Button(L("hotkeys.editJSON")) { jsonRow = JSONEditTarget(id: row.id, text: model.jsonText(for: row.id)) }.controlSize(.small)
+                        Button(L("hotkeys.duplicate")) { model.duplicateRow(row.id) }.controlSize(.small)
                         Button(L("common.remove")) { model.removeRow(row.id) }.controlSize(.small)
                     }
+                    .opacity(row.enabled ? 1 : 0.55)
                 }
             }
             Divider()
@@ -265,7 +272,7 @@ struct HotkeyEditorView: View {
                 Spacer()
                 Text(model.errorMessage ?? (model.conflicts.isEmpty ? "" : L("hotkeys.conflicts", model.conflicts.count)))
                     .foregroundStyle(.red).lineLimit(1)
-                Button(L("common.save")) { model.save() }.keyboardShortcut(.defaultAction)
+                Button(L("common.save")) { model.save() }.disabled(!model.isDirty)
             }
             .padding(10)
             Text(L("hotkeys.fileHint", model.fileURL.path)).font(.caption).foregroundStyle(.secondary).padding(.bottom, 6)
@@ -282,7 +289,7 @@ struct JSONEditTarget: Identifiable {
     let text: String
 }
 
-/// 一条命令的 JSON 编辑框（快捷键编辑器 / MIDI 映射共用；W5-B）：多行框、"应用"时校验，解不出来显示原因、不关。
+/// 一条命令的 JSON 编辑框（快捷键 / MIDI 映射共用；W5-B）：多行框、"应用"时校验，解不出来显示原因、不关。
 struct CommandJSONSheet: View {
     @State var text: String
     let error: String?
@@ -318,24 +325,5 @@ struct CommandJSONSheet: View {
         }
         .padding(14)
         .frame(width: 480, height: 320)
-    }
-}
-
-@MainActor
-final class HotkeyEditorWindowController: PanelWindowController {
-    let model: HotkeyEditorModel
-
-    init(model: HotkeyEditorModel) {
-        self.model = model
-        super.init(title: L("hotkeys.windowTitle"), size: NSSize(width: 760, height: 520), autosaveName: "HotkeyEditor", content: HotkeyEditorView(model: model))
-        (window as? PanelWindow)?.keyHandler = { [weak self] event in self?.handleRecordingKey(event) ?? false }
-    }
-
-    /// 录键中：把按键写进那一行并吃掉事件。
-    @discardableResult
-    func handleRecordingKey(_ event: NSEvent) -> Bool {
-        guard model.recordingRow != nil, event.type == .keyDown, !event.isARepeat, let combo = KeyCombo(event: event) else { return false }
-        model.recorded(combo)
-        return true
     }
 }

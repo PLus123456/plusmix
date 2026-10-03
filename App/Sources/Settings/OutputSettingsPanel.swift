@@ -450,6 +450,8 @@ final class OutputSettingsModel: ObservableObject {
 
 struct OutputSettingsView: View {
     @ObservedObject var model: OutputSettingsModel
+    /// 自己带一列页签（W5-J 合窗后设置窗的侧栏列这几页，嵌进去时不再要这一列）。
+    var showsTabList = true
     @State private var newStreamURL = ""
     @State private var newStreamKey = ""
     @State private var newNDIName = "PlusMix"   // App 侧的 NDI 源默认名用产品名（W4-D）；包内默认值不动
@@ -459,12 +461,16 @@ struct OutputSettingsView: View {
     @FocusState private var addDestinationFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            List(OutputSettingsModel.Tab.allCases, selection: tabSelection) { t in Text(t.title).tag(t) }
-                .listStyle(.sidebar)
-                .frame(width: 150)
-                .accessibilityLabel(L("outputSettings.tabList"))
-            Divider()
+        if showsTabList {
+            HStack(spacing: 0) {
+                List(OutputSettingsModel.Tab.allCases, selection: tabSelection) { t in Text(t.title).tag(t) }
+                    .listStyle(.sidebar)
+                    .frame(width: 150)
+                    .accessibilityLabel(L("outputSettings.tabList"))
+                Divider()
+                Form { tabBody }.formStyle(.grouped)
+            }
+        } else {
             Form { tabBody }.formStyle(.grouped)
         }
     }
@@ -874,14 +880,4 @@ extension Binding {
     }
 }
 
-@MainActor
-final class OutputSettingsWindowController: PanelWindowController {
-    let model: OutputSettingsModel
-
-    init(model: OutputSettingsModel) {
-        self.model = model
-        super.init(title: L("outputSettings.windowTitle"), size: NSSize(width: 720, height: 560), autosaveName: "OutputSettings", content: OutputSettingsView(model: model))
-    }
-
-    func apply(state: MixerState) { model.apply(state: state) }
-}
+// 输出设置窗（W3-E）在 W5-J 合进设置窗：这里只剩页面本身（OutputSettingsView），窗与句柄见 SettingsWindow.swift。

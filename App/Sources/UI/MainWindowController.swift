@@ -249,6 +249,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }
         mainToolbar.setSessionAvailable(session != nil)   // 没有 session 时节目组以外置灰（W5-G）
         refreshToolbarStatus()
+        session?.control.onUIAction = { [weak self] name in self?.perform(uiAction: name) }   // 快捷键 / MIDI 绑的界面动作（W5-J / Q53）
         guard let session else {
             window?.title = Self.windowTitle(showName: nil)
             return
@@ -450,6 +451,18 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     }
 
     /// 多画面独立窗口开 / 关（底栏主体开着时高亮；点窗口的关闭按钮也会告诉底栏，E3）。
+    /// 快捷键 / MIDI 音符绑的界面动作（W5-J / Q53，UIAction）：显示 / 隐藏调音台、多画面窗口开关、多画面窗口全屏。认不出的名字（手写的表）状态行提示。
+    func perform(uiAction name: String) {
+        switch UIAction(rawValue: name) {
+        case .toggleMixer?: toggleMixerPanel()
+        case .toggleMultiviewWindow?: toggleMultiviewWindow()
+        case .fullscreenMultiview?:
+            if !isMultiviewWindowVisible { toggleMultiviewWindow() }
+            multiviewWindow?.window?.toggleFullScreen(nil)
+        case nil: bottomBar.showNotice(L("notice.unknownUIAction", name))
+        }
+    }
+
     func toggleMultiviewWindow() {
         if multiviewWindow == nil {
             let w = MultiviewWindowController(source: session?.displaySource)

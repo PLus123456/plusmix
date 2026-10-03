@@ -42,70 +42,82 @@ final class HonestUITests: XCTestCase {
     }
 
     // MARK: 7. "其他命令"止血
+    // W5-J（01a N4"N1 落地后并进高级组"）：平铺下拉连同"其他命令"那一项换成了共用的选动作面板，这条用例按新界面改写，判据逐条对应：
+    // 不在面板默认列表里的命令（整条替换类）走"高级：手写 JSON"、显示用命令目录的说明；新加的行没有动作就存不了、绝不兜底成 Cut；
+    // 打开面板看一眼再关不丢命令；"编辑 JSON…"校验过才写；认得出的命令显示成对应的动作；原样存回。
 
     func testHotkeys_otherCommandNotRewrittenToCut() throws {
         let other = Command.setTransition(type: .wipe, durationTicks: 30)
+        let advanced = Command.setInputSettings(input: 1, settings: InputSettings(audio: InputAudioSettings(gainDb: -3)))
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-w5b-hotkeys-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("hotkeys.json")
         let table = HotkeyTable(bindings: [HotkeyBinding(key: KeyCombo(key: "g"), action: .command(other), note: "Wipe"),
-                                           HotkeyBinding(key: KeyCombo(key: "h"), action: .command(.cut))])
+                                           HotkeyBinding(key: KeyCombo(key: "h"), action: .command(.cut)),
+                                           HotkeyBinding(key: KeyCombo(key: "i"), action: .command(advanced))])
         let model = HotkeyEditorModel(table: table, fileURL: url)
-        XCTAssertEqual(model.rows[0].kind, .other)
+        XCTAssertEqual(model.rows[0].action, .command(other), "读进来的命令原样在这一行")
 
-        // 只在这一行本来就是其他命令时才列出"其他命令"（新加的行、普通的行都不列）
-        XCTAssertTrue(HotkeyEditorModel.actionChoices(for: model.rows[0]).contains(.other))
-        XCTAssertFalse(HotkeyEditorModel.actionChoices(for: model.rows[1]).contains(.other))
-        model.addRow(key: "j")
-        XCTAssertFalse(HotkeyEditorModel.actionChoices(for: model.rows[2]).contains(.other))
-
-        // 显示：CommandCatalog 的说明 + 参数摘要，不是 Swift 枚举原文
+        // 显示：人话，不是 Swift 枚举原文；整条替换类（面板默认不列）用命令目录的说明 + 参数摘要
         let text = HotkeyEditorModel.describe(.command(other))
-        XCTAssertTrue(text.contains(CommandCatalog.entry(for: .setTransition).summary), text)
-        XCTAssertTrue(text.contains("wipe") && text.contains("30"), text)
+        XCTAssertTrue(text.contains("Wipe") && text.contains("0.5"), text)
         XCTAssertFalse(text.contains("setTransition(type:"), text)
+        let advancedText = HotkeyEditorModel.describe(.command(advanced))
+        XCTAssertTrue(advancedText.contains(CommandCatalog.entry(for: .setInputSettings).summary), advancedText)
+        XCTAssertFalse(advancedText.contains("setInputSettings(input:"), advancedText)
+        XCTAssertEqual(model.summary(of: model.rows[2]), advancedText, "行上的按钮写的就是这句")
 
-        // 改成别的动作再改回来：命令还在
-        model.rows[0].kind = .cut
-        model.rows[0].kind = .other
+        // 打开面板看一眼再关：命令还在；面板定位到这一行现在的动作，原样拼得回来（整条替换类落在"高级：手写 JSON"上）
+        let picker = model.picker(for: model.rows[0].id)
+        XCTAssertEqual(picker.selectedID, "command.setTransition")
+        XCTAssertEqual(picker.builtAction, .command(other))
         XCTAssertEqual(model.rows[0].action, .command(other))
+        let advancedPicker = model.picker(for: model.rows[2].id)
+        XCTAssertEqual(advancedPicker.selectedID, "json")
+        XCTAssertEqual(advancedPicker.builtAction, .command(advanced))
 
-        // 一行是"其他命令"却没有命令：存不了、报错，绝不悄悄存成 Cut（X10）
-        model.rows[2].kind = .other
-        XCTAssertNil(model.rows[2].action, "没有命令就没有动作，不兜底成 Cut")
+        // 新加的行没有动作：面板里不选就拼不出动作；存不了、报错，绝不悄悄存成 Cut（X10）
+        model.addRow(key: "j")
+        XCTAssertNil(model.rows[3].action, "没有选就没有动作，不兜底成 Cut")
+        XCTAssertNil(model.picker(for: model.rows[3].id).builtAction)
         XCTAssertFalse(model.save())
-        XCTAssertEqual(model.errorMessage, "第 3 行选了“其他命令”但没有命令：点“编辑 JSON…”填一条")
+        XCTAssertEqual(model.errorMessage, "第 4 行还没选动作：点动作按钮选一个")
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "存不了就不写文件")
+        // 面板的"高级：手写 JSON"：解不出来的 JSON 拼不出动作
+        let blank = model.picker(for: model.rows[3].id)
+        blank.select("json")
+        blank.jsonText = #"{"nope":{}}"#
+        XCTAssertNil(blank.builtAction)
+        XCTAssertNotNil(blank.jsonError)
 
         // "编辑 JSON…"：校验过才写进这一行
-        XCTAssertFalse(model.applyJSON(model.rows[2].id, #"{"nope":{}}"#))
+        XCTAssertFalse(model.applyJSON(model.rows[3].id, #"{"nope":{}}"#))
         XCTAssertNotNil(model.jsonError)
-        XCTAssertFalse(model.applyJSON(model.rows[2].id, "不是 JSON"))
-        XCTAssertNil(model.rows[2].action, "解不出来：这一行不动")
-        XCTAssertTrue(model.applyJSON(model.rows[2].id, #"{"setPreview":{"input":4}}"#))
+        XCTAssertFalse(model.applyJSON(model.rows[3].id, "不是 JSON"))
+        XCTAssertNil(model.rows[3].action, "解不出来：这一行不动")
+        XCTAssertTrue(model.applyJSON(model.rows[3].id, #"{"setPreview":{"input":4}}"#))
         XCTAssertNil(model.jsonError)
-        XCTAssertEqual(model.rows[2].kind, .setPreview, "认得出的命令回到对应的动作")
-        XCTAssertEqual(model.rows[2].action, .command(.setPreview(input: 4)))
-        XCTAssertTrue(model.applyJSON(model.rows[2].id, #"{"setAFV":{"on":true}}"#))
-        XCTAssertEqual(model.rows[2].kind, .other)
-        XCTAssertTrue(HotkeyEditorModel.actionChoices(for: model.rows[2]).contains(.other), "这一行现在本来就是其他命令了")
+        XCTAssertEqual(model.rows[3].action, .command(.setPreview(input: 4)))
+        XCTAssertEqual(model.picker(for: model.rows[3].id).selectedID, "command.setPreview", "认得出的命令回到对应的动作")
+        XCTAssertTrue(model.applyJSON(model.rows[3].id, #"{"setAFV":{"on":true}}"#))
+        XCTAssertEqual(model.rows[3].action, .command(.setAFV(on: true)))
         XCTAssertEqual(model.jsonText(for: model.rows[0].id).replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "\n", with: ""),
                        #"{"setTransition":{"durationTicks":30,"type":"wipe"}}"#, "编辑框里是这一行命令的 JSON")
         XCTAssertTrue(model.save(), model.errorMessage ?? "")
         let saved = try HotkeyTable.load(from: url)
         XCTAssertEqual(saved.action(for: KeyCombo(key: "g")), .command(other), "其他命令原样存回，不变成 Cut")
         XCTAssertEqual(saved.action(for: KeyCombo(key: "h")), .command(.cut))
+        XCTAssertEqual(saved.action(for: KeyCombo(key: "i")), .command(advanced))
         XCTAssertEqual(saved.action(for: KeyCombo(key: "j")), .command(.setAFV(on: true)))
 
-        // MIDI 映射面板：这类行的动作下拉不再空白，显示同一句说明
+        // MIDI 映射面板：这类行显示同一句说明、面板定位到同一项
         let midiRow = MIDIMappingModel.Row(trigger: .note(channel: 1, note: 60), action: .action(.command(other)), note: "")
-        XCTAssertTrue(MIDIMappingModel.actionChoices(for: midiRow).contains(.other))
-        XCTAssertFalse(MIDIMappingModel.actionChoices(for: MIDIMappingModel.Row(trigger: nil, action: .action(.command(.cut)), note: "")).contains(.other))
-        XCTAssertEqual(MIDIMappingModel.describe(midiRow.action), text)
+        XCTAssertEqual(MIDIMappingModel.describe(try XCTUnwrap(midiRow.action)), text)
         let midiModel = MIDIMappingModel(table: MIDIMapTable(mappings: [MIDIMapping(trigger: .note(channel: 1, note: 60), action: .action(.command(other)))]),
                                          controller: MIDIController(bus: CommandBus(stateMachine: SwitcherSession.detachedStateMachine()), table: MIDIMapTable(mappings: [])),
                                          fileURL: dir.appendingPathComponent("midi.json"))
         defer { midiModel.stopRefreshing() }
+        XCTAssertEqual(midiModel.picker(for: midiModel.rows[0].id).selectedID, "command.setTransition")
         XCTAssertTrue(midiModel.applyJSON(midiModel.rows[0].id, #"{"setTransition":{"type":"zoom","durationTicks":12}}"#))
         XCTAssertEqual(midiModel.rows[0].action, .action(.command(.setTransition(type: .zoom, durationTicks: 12))))
     }
