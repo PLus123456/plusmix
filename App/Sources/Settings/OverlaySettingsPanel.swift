@@ -67,7 +67,21 @@ final class OverlaySettingsModel: ObservableObject {
         self.channel = min(max(channel, 1), MixerState.overlayCount)
     }
 
-    func apply(state: MixerState) { self.state = state }
+    /// 快照来了：只在这扇窗显示的东西变了才换（叠加的设置 / 开关 / 输入、输入表、节目格式）。淡入淡出期间 animProgress 每拍都变，不为它重画。
+    func apply(state: MixerState) {
+        guard Self.relevant(state) != Self.relevant(self.state) else { return }
+        self.state = state
+    }
+
+    private static func relevant(_ s: MixerState) -> [AnyHashable] {
+        let overlays = s.overlays.map { o -> OverlayState in
+            var o = o
+            o.animProgress = 0
+            o.startTick = nil
+            return o
+        }
+        return [AnyHashable(overlays), AnyHashable(s.inputs.map { [AnyHashable($0.number), AnyHashable($0.name)] }), AnyHashable(s.format)]
+    }
 
     func overlay(_ channel: Int) -> OverlayState { state.overlays[channel - 1] }
 

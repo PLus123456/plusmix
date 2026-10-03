@@ -47,6 +47,7 @@ final class PanelCoordinator: NSObject {
         midiWindow = nil
         overlaySettingsWindow?.close()   // 叠加 / 音频设置窗的模型绑的是旧 session（W5-K）
         overlaySettingsWindow = nil
+        lastOverlayChannel = 1           // 换了节目从 Overlay 1 开始
         for (_, w) in audioSettingsWindows { w.close() }
         audioSettingsWindows.removeAll()
         self.session = session
@@ -197,7 +198,7 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
-    /// 叠加设置窗上次停在哪一路（关了再从底栏开，还是那一路）。
+    /// 叠加设置窗上次停在哪一路（关了再从底栏开，还是那一路；换节目回到 1）。
     private var lastOverlayChannel = 1
 
     /// 音频设置窗（J2 / J3）：每条总线 / 每路输入一个，同一条再点 = 置前（page 给了就切到那一页）。表读调音台同一份 50 ms 读数。

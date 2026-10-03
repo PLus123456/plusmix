@@ -670,8 +670,13 @@ final class AddInputFormModel: ObservableObject {
         }
         guard ndiTimer == nil else { return }
         loadNDISources()
-        let timer = Timer(timeInterval: ndiRefreshInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.loadNDISources() }
+        let timer = Timer(timeInterval: ndiRefreshInterval, repeats: true) { [weak self] timer in
+            let alive = MainActor.assumeIsolated { () -> Bool in
+                guard let self else { return false }
+                self.loadNDISources()
+                return true
+            }
+            if !alive { timer.invalidate() }   // 表单没 close 就没了：定时器自己停
         }
         RunLoop.main.add(timer, forMode: .common)
         ndiTimer = timer

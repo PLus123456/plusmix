@@ -85,7 +85,7 @@ final class InputSettingsModel: ObservableObject {
         if others != otherInputs { otherInputs = others }
         guard let c = state.input(number) else { return }
         let oldSource = config.source
-        config = c
+        if c != config { config = c }   // 快照每拍都来（转场中），没变不重画
         // 来源被别处换了（API / 另一个窗口）且表单没被动过：表单跟着换；动过的留着（用户还没点应用）
         if c.source != oldSource, let form = sourceForm, (try? form.model.makeSource()) == oldSource {
             var m = AddInputModel(source: c.source)

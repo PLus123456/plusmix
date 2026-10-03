@@ -65,7 +65,16 @@ final class AudioSettingsModel: ObservableObject {
         }
     }
 
+    /// 这扇窗用得到的那部分快照（总线 / 这一路的设置）：转场 / 叠加动画期间快照每拍都变，没变的不重画（主窗口每帧重设控件会拖慢点击，W5-F 的坑）。
+    private static func relevant(_ s: MixerState, _ strip: AudioStrip) -> [AnyHashable] {
+        switch strip {
+        case .bus: [AnyHashable(s.audio.buses)]
+        case .input(let n): [AnyHashable(s.input(n)), AnyHashable(s.audio.buses)]
+        }
+    }
+
     func apply(state: MixerState) {
+        guard Self.relevant(state, strip) != Self.relevant(self.state, strip) else { return }
         self.state = state
         let incoming = Self.slots(of: strip, in: state)
         if let p = pendingSlots {

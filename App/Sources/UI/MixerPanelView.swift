@@ -100,7 +100,11 @@ final class MixerModel: ObservableObject {
 
     var inputNumbers: [Int] { state.inputs.map(\.number) }
 
-    func apply(state: MixerState) { self.state = state }
+    /// 快照来了：调音台只用输入表与音频状态，转场进度 / 叠加动画这些每拍都变的字段不触发重画（W5-K；主窗口每帧重画会拖慢点击，W5-F 的坑）。
+    func apply(state: MixerState) {
+        guard state.inputs != self.state.inputs || state.audio != self.state.audio else { return }
+        self.state = state
+    }
 
     func apply(stats: Stats) {
         let a = stats.audio
