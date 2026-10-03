@@ -9,6 +9,7 @@
 // W5-K（97）："音频设备"页 = AudioOutputSettingsSection（设备 + 每条总线选声道对，AudioOutputSettingsModel），G7 合并时从偏好设置长表单搬进本机 › 音频设备；
 // 模型改了（选设备 / 声道 / 借 Master）按即时生效提交（bindAudioOutput）。
 import AppKit
+import Combine   // bindAudioOutput：订阅 W5-K 音频设备模型的改动（G7 合并时加）
 import Metal
 import SwiftUI
 import SwitcherContracts
