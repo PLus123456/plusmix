@@ -21,6 +21,8 @@ final class PanelCoordinator: NSObject {
     private(set) var overlaySettingsWindow: OverlaySettingsWindowController?
     /// 音频设置窗（每条一个，W5-K）。
     private(set) var audioSettingsWindows: [AudioStrip: AudioSettingsWindowController] = [:]
+    /// 统计窗（W5-L，底栏"统计"）。
+    private(set) var statsWindow: StatsWindowController?
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
     private var session: SwitcherSession?
@@ -52,8 +54,12 @@ final class PanelCoordinator: NSObject {
         state = session.state
         settingsWindow?.model.rebind()
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
-        // 输出设置页的显示类输出状态读 Stats.display[]（提案 013），1 Hz
-        statsToken = session.observeStats { [weak self] stats in self?.settingsWindow?.model.outputs.apply(stats: stats) }
+        // 输出设置页的显示类输出状态读 Stats.display[]（提案 013），1 Hz；统计窗（W5-L）读同一行，换 session 不关、接着读新的
+        statsToken = session.observeStats { [weak self] stats in
+            guard let self else { return }
+            self.settingsWindow?.model.outputs.apply(stats: stats)
+            self.statsWindow?.model.apply(stats: stats, state: self.state)
+        }
     }
 
     private func apply(state: MixerState) {
@@ -279,6 +285,23 @@ final class PanelCoordinator: NSObject {
         w.present()
         return w
     }
+
+    /// 统计窗（只读；已开就置前）。
+    @discardableResult
+    func showStats() -> StatsWindowController {
+        if let w = statsWindow {
+            w.present()
+            return w
+        }
+        let model = StatsWindowModel()
+        if let stats = session?.stats { model.apply(stats: stats, state: state) }
+        let w = StatsWindowController(model: model)
+        w.onClose = { [weak self] in self?.statsWindow = nil }
+        statsWindow = w
+        w.present()
+        return w
+    }
+
     // MARK: 多画面（W3-C 的窗口；窗口菜单 / 底栏走 MainWindowController.toggleMultiviewWindow）
 
     /// 显示多画面窗口（已显示就不动）。
@@ -296,6 +319,8 @@ final class PanelCoordinator: NSObject {
         overlaySettingsWindow = nil
         for (_, w) in audioSettingsWindows { w.close() }
         audioSettingsWindows.removeAll()
+        statsWindow?.close()
+        statsWindow = nil
         if controller.windowController.isMultiviewWindowVisible { controller.windowController.toggleMultiviewWindow() }
     }
 }

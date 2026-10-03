@@ -22,7 +22,10 @@ final class AppController {
     /// 起 session 用的设置（AppDelegate 启动时按参数 / UserDefaults 填；偏好设置面板改后写回同一组键；测试宿主固定：API 端口 0（系统分配）、
     /// 音频空设备（SWITCHER_TEST_AUDIO=default 可改成真设备，跑 xcodebuild test 时会出声）。
     var settings = AppSettings() {
-        didSet { if isTestHost { applyTestHostOverrides() } }
+        didSet {
+            if isTestHost { applyTestHostOverrides() }
+            applyRuntimeSettings(previous: oldValue)
+        }
     }
     /// 快捷键表：用户表 ~/Library/Application Support/PlusMix/hotkeys.json，没有就默认表；测试宿主固定默认表（文件在临时目录）。
     private(set) var hotkeyTable: HotkeyTable
@@ -41,6 +44,8 @@ final class AppController {
     let stripPreferences: InputStripPreferences
     /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
     let updateController: UpdateController
+    /// 引擎运行时拿着的"别睡"（W5-L，P1）：系统睡眠 + App Nap 一条、显示器休眠一条，按设置"性能与电源"的两个开关。
+    let engineActivity = EngineActivity()
     private var replacing = false
     /// 未保存判定的基准：上次新建 / 打开 / 保存时的"节目内容"（documentContent）；与当前的不同 = 有未保存的改动（W5-B）。
     private var documentBaseline: Show?
@@ -112,7 +117,37 @@ final class AppController {
         var s = settings
         s.apiPort = 0
         s.audioDevice = ProcessInfo.processInfo.environment["SWITCHER_TEST_AUDIO"].map { AppSettings.AudioDevice(spec: $0) } ?? .null
+        // 测试宿主不在局域网上监听（W5-L）：本机防火墙开着时，听 0.0.0.0 会弹"允许传入连接"框，无人值守的测试会卡在那里；
+        // 设置里存的照存（远程控制页 / Tally 页的用例核对的是存下来的值），只是跑起来一律听本机、tally 端口由系统分配
+        s.apiHost = "127.0.0.1"
+        s.compatLayerHost = "127.0.0.1"
+        s.tallyHost = "127.0.0.1"
+        s.tallyPort = 0
         if s != settings { settings = s }
+    }
+
+    /// 运行时就能生效的几项（W5-L）：两条"别睡"、主窗口提醒的设置、tally 流（开关 / 端口变了就让跑着的 session 起 / 停 / 换端口）。
+    /// API / 兼容层 / 音频设备照旧下次起引擎生效（"应用并重起引擎"）。
+    private func applyRuntimeSettings(previous: AppSettings) {
+        refreshEngineActivity()
+        windowController.reminderSettings = settings.reminders
+        if settings.tallyConfiguration != previous.tallyConfiguration { applyTallySettings() }
+    }
+
+    /// 引擎在跑 + 设置"性能与电源"的两个开关 → 拿 / 放两条"别睡"（起好引擎、停了引擎、改了开关都调）。
+    private func refreshEngineActivity() {
+        engineActivity.update(engineRunning: session?.isRunning == true, preventSleep: settings.preventSleepWhileRunning,
+                              preventDisplaySleep: settings.preventDisplaySleepWhileRunning)
+    }
+
+    /// 跑着的 session 按当前设置起 / 停 / 换 tally 流（设置 › Tally 即时生效）；起不来在状态行提示。
+    private func applyTallySettings() {
+        guard let session else { return }
+        let configuration = settings.tallyConfiguration
+        Task { @MainActor [weak self] in
+            await session.control.setTally(configuration)
+            if configuration != nil, let error = session.control.tallyError { self?.windowController.bottomBar.showNotice(error) }
+        }
     }
 
     // MARK: 启动 / 退出
@@ -171,6 +206,7 @@ final class AppController {
             windowController.applyLayout(show.layout)   // 节目里记的界面布局（调音台 / 多画面窗口 / 主窗口位置，W5-A / X47）
             panels.bind(session: s)
             try await s.start()
+            refreshEngineActivity()   // 引擎起来了：拿上两条"别睡"（W5-L）
             if firstStartReport == nil { firstStartReport = s.startReport }
             switch baseline {
             case .current: documentBaseline = Self.documentContent(s.makeShow())
@@ -185,6 +221,7 @@ final class AppController {
             windowController.bind(session: nil)
             panels.bind(session: nil)
             refreshDocumentEdited()
+            refreshEngineActivity()
             presentError(error, context: L("error.startEngine"))
         }
     }
@@ -197,6 +234,7 @@ final class AppController {
         session = nil
         refreshDocumentEdited()
         await old.stop()
+        refreshEngineActivity()   // 引擎停了：两条"别睡"都放掉（W5-L）
     }
 
     // MARK: 未保存判定（W5-B）
@@ -421,6 +459,15 @@ final class AppController {
         show.audio.monitorPoint = monitorPoint
         show.layout = currentLayout()
         await replaceSession(show: show, baseline: .keep)
+    }
+
+    /// 即时生效的几节（性能与电源 / Tally / 提醒，W5-L）：改内存里的设置、只写这一节自己的键（save），马上落到跑着的 session（settings 的 didSet）。
+    /// 不像"应用"那样整份写回：那会把启动参数带进来的值（--api-token、--no-api……）顺手存成本机设置。
+    func updateSettings(_ change: (inout AppSettings) -> Void, saving save: (AppSettings, UserDefaults) -> Void) {
+        var s = settings
+        change(&s)
+        save(s, defaults)
+        settings = s
     }
 
     /// 设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的同时落到跑着的 session：外部输出的主屏层级、

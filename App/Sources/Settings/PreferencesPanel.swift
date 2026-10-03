@@ -8,6 +8,7 @@
 // API 的监听地址"仅本机 / 允许局域网"是 98 的远程控制页；这里的"高级"页先能填 host:port。
 // W5-K（97）："音频设备"页 = AudioOutputSettingsSection（设备 + 每条总线选声道对，AudioOutputSettingsModel），G7 合并时从偏好设置长表单搬进本机 › 音频设备；
 // 模型改了（选设备 / 声道 / 借 Master）按即时生效提交（bindAudioOutput）。
+// W5-L（98）：远程控制页 = RemoteControlSection（API / 兼容层"仅本机 / 允许局域网" + 可访问地址）、Tally / 性能与电源 / 提醒三节各自即时生效、只写自己的键（AppController.updateSettings(_:saving:)），G7 合并时挂进 96 的对应页。
 import AppKit
 import Combine   // bindAudioOutput：订阅 W5-K 音频设备模型的改动（G7 合并时加）
 import Metal
@@ -63,6 +64,12 @@ final class PreferencesModel: ObservableObject {
     @Published var compatLayerPort: Int { didSet { syncCompatListenText(); commit() } }
     /// 兼容层的监听地址（HTTP 与 TCP 共用，W5-J 起可填；默认只听本机）。
     @Published var compatLayerHost: String { didSet { syncCompatListenText(); commit() } }
+    /// 兼容层的 HTTP 端口（W5-L 远程控制页；原来写死 8088）。
+    @Published var compatLayerHTTPPort: Int { didSet { commit() } }
+    /// 设置"性能与电源" / "Tally" / "提醒"三节（W5-L）：各自即时生效、只写自己的键，不经这里的 commit。
+    let power: PowerSettingsModel
+    let tally: TallySettingsModel
+    let reminders: ReminderSettingsModel
     /// PVW 预览全部叠加（渲染器总开关，换 session 生效）。
     @Published var overlaysInPreview: Bool { didSet { commit() } }
     /// 外部输出在主屏上不盖住主界面（ExternalDisplayManager.mainScreenLayering，即时生效）。
@@ -123,6 +130,10 @@ final class PreferencesModel: ObservableObject {
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
         compatLayerHost = s.compatLayerHost
+        compatLayerHTTPPort = s.compatLayerHTTPPort
+        power = PowerSettingsModel(controller: controller)
+        tally = TallySettingsModel(controller: controller)
+        reminders = ReminderSettingsModel(controller: controller)
         overlaysInPreview = s.overlaysInPreview
         externalBehindInterface = s.externalBehindInterface
         confirmBeforeStop = s.confirmBeforeStop
@@ -156,6 +167,45 @@ final class PreferencesModel: ObservableObject {
 
     /// 分辨率不在预设里（页上"自定义"选中、两个框可改）。
     var isCustomResolution: Bool { !Self.resolutions.contains { $0 == (formatWidth, formatHeight) } }
+
+    // MARK: 远程控制（W5-L，P3 / X33）
+
+    /// 本地 API：仅本机 / 允许局域网（写进 apiHost）。
+    var apiScope: ListenScope {
+        get { ListenScope(host: apiHost) }
+        set { apiHost = newValue.host(replacing: apiHost) }
+    }
+
+    /// 兼容层：仅本机 / 允许局域网（写进 compatLayerHost）。
+    var compatScope: ListenScope {
+        get { ListenScope(host: compatLayerHost) }
+        set { compatLayerHost = newValue.host(replacing: compatLayerHost) }
+    }
+
+    /// 别的机器（或本机）该连的 API 地址：http://<地址>:<端口>；允许局域网又找不到局域网地址时为空串。
+    /// 端口 0（系统分配，测试宿主）显示跑着的那个实际端口。
+    var apiAddress: String {
+        guard let host = NetworkAddresses.reachableHosts(listenHost: apiHost).first else { return "" }
+        return "http://\(host):\(displayedAPIPort)"
+    }
+    /// 其余局域网地址（多块网卡时）。
+    var apiOtherAddresses: [String] {
+        NetworkAddresses.reachableHosts(listenHost: apiHost).dropFirst().map { "http://\($0):\(displayedAPIPort)" }
+    }
+    private var displayedAPIPort: Int { apiPort == 0 ? (controller.session?.control.apiServer?.boundPort ?? 0) : apiPort }
+    /// 允许局域网又没设 token 时的黄字提醒。
+    var apiWarning: String? {
+        apiEnabled && apiScope == .lan && apiToken.trimmingCharacters(in: .whitespaces).isEmpty ? L("prefs.remote.noTokenWarning") : nil
+    }
+    /// 兼容层的 HTTP 地址（…/api）与 TCP 地址（地址:端口）。
+    var compatHTTPAddress: String {
+        NetworkAddresses.reachableHosts(listenHost: compatLayerHost).first.map { "http://\($0):\(compatLayerHTTPPort)/api" } ?? ""
+    }
+    var compatTCPAddress: String {
+        NetworkAddresses.reachableHosts(listenHost: compatLayerHost).first.map { "\($0):\(compatLayerPort)" } ?? ""
+    }
+    /// 兼容层允许局域网时的提醒（它没有鉴权）。
+    var compatWarning: String? { compatLayerEnabled && compatScope == .lan ? L("prefs.remote.compatLANWarning") : nil }
 
     func selectFormatPreset(_ f: ProgramFormat) {
         formatWidth = f.width
@@ -198,6 +248,7 @@ final class PreferencesModel: ObservableObject {
         s.compatLayerPort = max(1, min(65535, compatLayerPort))
         let compatHost = compatLayerHost.trimmingCharacters(in: .whitespaces)
         s.compatLayerHost = compatHost.isEmpty ? "127.0.0.1" : compatHost
+        s.compatLayerHTTPPort = max(1, min(65535, compatLayerHTTPPort))
         s.overlaysInPreview = overlaysInPreview
         s.externalBehindInterface = externalBehindInterface
         s.confirmBeforeStop = confirmBeforeStop
@@ -292,7 +343,7 @@ final class PreferencesModel: ObservableObject {
         }
         let compatHost = compatLayerHost.trimmingCharacters(in: .whitespaces)
         if compatLayerEnabled != running.compatLayerEnabled
-            || (compatLayerEnabled && (compatLayerPort != running.compatLayerPort || (compatHost.isEmpty ? "127.0.0.1" : compatHost) != running.compatLayerHost)) {
+            || (compatLayerEnabled && (compatLayerPort != running.compatLayerPort || compatLayerHTTPPort != running.compatLayerHTTPPort || (compatHost.isEmpty ? "127.0.0.1" : compatHost) != running.compatLayerHost)) {
             items.append(.compat)
         }
         if overlaysInPreview != running.overlaysInPreview { items.append(.overlaysInPreview) }
@@ -356,6 +407,7 @@ final class PreferencesModel: ObservableObject {
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
         compatLayerHost = s.compatLayerHost
+        compatLayerHTTPPort = s.compatLayerHTTPPort
         overlaysInPreview = s.overlaysInPreview
         externalBehindInterface = s.externalBehindInterface
         confirmBeforeStop = s.confirmBeforeStop
@@ -503,6 +555,7 @@ struct GeneralPage: View {
 
     var body: some View {
         Form {
+            ReminderSettingsSection(model: model.reminders)   // 主窗口提醒条（W5-L，N02 / Q50）
             Section(L("prefs.confirm.title")) {
                 Toggle(L("prefs.confirm.stop"), isOn: $model.confirmBeforeStop)
                 Text(L("prefs.confirm.hint")).font(.caption).foregroundStyle(.secondary)
@@ -541,24 +594,16 @@ struct AudioDevicePage: View {
     }
 }
 
-/// 本机 › 远程控制：本地 API 与第三方 API 兼容层的开关、令牌（监听地址在"高级"页，98 改成"仅本机 / 允许局域网"）。
+/// 本机 › 远程控制：98（W5-L）的 RemoteControlSection（本地 API / 兼容层各"仅本机 / 允许局域网"、端口、令牌、可访问地址与提醒）；自由填 host:port 仍在"高级"页。
 struct RemoteControlPage: View {
     @ObservedObject var model: PreferencesModel
     let openAdvanced: () -> Void
 
     var body: some View {
         Form {
-            Section(L("prefs.api.title")) {
-                HStack { Toggle(L("prefs.api.enabled"), isOn: $model.apiEnabled); RestartTag() }
-                LabeledContent(L("settings.remote.listening"), value: "\(model.apiHost):\(model.apiPort)")
-                SecureField(L("prefs.api.token"), text: $model.apiToken)
-                Text(L("prefs.api.hint")).font(.caption).foregroundStyle(.secondary)
-            }
-            Section(L("prefs.compat.title")) {
-                HStack { Toggle(L("prefs.compat.enabled"), isOn: $model.compatLayerEnabled); RestartTag() }
-                LabeledContent(L("settings.remote.listening"), value: "\(model.compatLayerHost):\(model.compatLayerPort)")
-                Text(PreferencesModel.compatLegalNotice).font(.caption).foregroundStyle(.secondary)
-                Text(L("prefs.compat.pending")).font(.caption).foregroundStyle(.secondary)
+            RemoteControlSection(model: model)
+            Section {
+                HStack { Text(L("settings.pending.api")); Spacer(); RestartTag() }
             }
             Section {
                 Button(L("settings.remote.editListen")) { openAdvanced() }
@@ -568,32 +613,31 @@ struct RemoteControlPage: View {
     }
 }
 
-/// 本机 › Tally（只读 tally 流的开关是 98 的事；这一页照实写现在能怎么接）。
+/// 本机 › Tally：98（W5-L）的只读 tally 流一节（开关、端口、地址、连接数），即时生效。
 struct TallyPage: View {
+    @ObservedObject var model: PreferencesModel
+
     var body: some View {
         Form {
-            Section {
-                Text(L("settings.tally.notYet")).fixedSize(horizontal: false, vertical: true)
-                Text(L("settings.tally.howNow")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+            TallySettingsSection(model: model.tally)
         }
         .formStyle(.grouped)
     }
 }
 
-/// 本机 › 性能与电源（防睡眠 / App Nap 的开关是 98 的事；这一页先列这台机器的信息）。
+/// 本机 › 性能与电源：98（W5-L）的防睡眠 / App Nap 两个开关与现状行（即时生效）+ 这台机器的只读信息。
 struct PerformancePage: View {
+    @ObservedObject var model: PreferencesModel
+
     var body: some View {
         Form {
+            PowerSettingsSection(model: model.power)
             Section(L("settings.performance.machine")) {
                 LabeledContent(L("settings.performance.model"), value: MachineInfo.model)
                 LabeledContent(L("settings.performance.chip"), value: MachineInfo.chip)
                 LabeledContent(L("settings.performance.gpu"), value: MachineInfo.gpu)
                 LabeledContent(L("settings.performance.memory"), value: MachineInfo.memory)
                 LabeledContent(L("settings.performance.system"), value: MachineInfo.system)
-            }
-            Section {
-                Text(L("settings.performance.notYet")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)

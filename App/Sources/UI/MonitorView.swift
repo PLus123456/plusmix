@@ -4,6 +4,7 @@
 // 已经在出它的那块再点 = 关，同外部显示路由菜单的口径）。单击、双击都不绑动作（直播中快点容易误触，Q27 2-(i)）。
 // PGM 标题条右侧画开着的叠加通道小徽标"通道号 · 输入名"（读快照的 overlays，是标题条上的控件、不画进画面）。参考 PVW 标题条上另两个图标不放（Q27 3-(i)）。
 // 快照每帧都来：标题条上的文字 / 徽标 / 齿轮的灰不灰都是没变就不动（W5-F 报告 §5 第 10 条：每帧重设会拖慢点按钮）。
+// W5-L（N02）：FTB 开着时 PGM 标题条上"PGM · FTB"垫一块黑底并慢闪（图层的透明度动画，渲染服务器做，不占主线程），一眼看出"节目是黑的"。
 import AppKit
 import SwitcherContracts
 import SwitcherRender
@@ -16,6 +17,9 @@ final class MonitorView: NSView {
     private let numberLabel = Theme.monoLabel("—", size: 14, color: .white)
     private let nameLabel = Theme.label("", size: 13, weight: .semibold, color: .white)
     private let roleLabel = Theme.label("", size: 11, weight: .bold, color: .white)
+    /// FTB 色块（垫在角色标签后面，FTB 开着时显示并闪，W5-L）。
+    private let ftbBlock = PanelView(color: .black)
+    static let ftbBlinkKey = "plusmix.ftbBlink"
     /// 标题条右端的齿轮：打开这一路的输入设置（黑场时灰）。
     let gearButton: NSButton
     /// PGM 标题条上的叠加徽标（四个，没开的藏着；PVW 不用）。
@@ -80,7 +84,10 @@ final class MonitorView: NSView {
         titleBar.addSubview(numberLabel)
         titleBar.addSubview(nameLabel)
         titleBar.addSubview(badgeStack)
+        titleBar.addSubview(ftbBlock)
         titleBar.addSubview(roleLabel)
+        ftbBlock.isHidden = true
+        ftbBlock.layer?.cornerRadius = 3
         titleBar.addSubview(gearButton)
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         NSLayoutConstraint.activate([
@@ -101,6 +108,10 @@ final class MonitorView: NSView {
             badgeStack.centerYAnchor.constraint(equalTo: titleBar.centerYAnchor),
             roleLabel.trailingAnchor.constraint(equalTo: gearButton.leadingAnchor, constant: -6),
             roleLabel.centerYAnchor.constraint(equalTo: titleBar.centerYAnchor),
+            ftbBlock.leadingAnchor.constraint(equalTo: roleLabel.leadingAnchor, constant: -5),
+            ftbBlock.trailingAnchor.constraint(equalTo: roleLabel.trailingAnchor, constant: 5),
+            ftbBlock.topAnchor.constraint(equalTo: titleBar.topAnchor, constant: 4),
+            ftbBlock.bottomAnchor.constraint(equalTo: titleBar.bottomAnchor, constant: -4),
             gearButton.trailingAnchor.constraint(equalTo: titleBar.trailingAnchor, constant: -6),
             gearButton.centerYAnchor.constraint(equalTo: titleBar.centerYAnchor),
             gearButton.widthAnchor.constraint(equalToConstant: 18),
@@ -135,6 +146,7 @@ final class MonitorView: NSView {
         }
         let ftb = target == .program && state.ftb.on
         if ftb != (roleLabel.stringValue != roleName) { roleLabel.stringValue = ftb ? "PGM · FTB" : roleName }
+        if ftb != isFTBIndicatorShown { setFTBIndicator(ftb) }
         if target == .program { applyBadges(state) }
     }
 
@@ -161,6 +173,23 @@ final class MonitorView: NSView {
             } else {
                 badge.isHidden = true
             }
+        }
+    }
+
+    /// FTB 色块：显示并慢闪 / 藏起来（只在开关变化时调）。
+    private func setFTBIndicator(_ on: Bool) {
+        ftbBlock.isHidden = !on
+        guard let layer = ftbBlock.layer else { return }
+        if on {
+            let blink = CABasicAnimation(keyPath: "opacity")
+            blink.fromValue = 1
+            blink.toValue = 0.25
+            blink.duration = 0.6
+            blink.autoreverses = true
+            blink.repeatCount = .infinity
+            layer.add(blink, forKey: Self.ftbBlinkKey)
+        } else {
+            layer.removeAnimation(forKey: Self.ftbBlinkKey)
         }
     }
 
@@ -194,6 +223,8 @@ final class MonitorView: NSView {
     var displayedNumber: String { numberLabel.stringValue }
     var displayedName: String { nameLabel.stringValue }
     var roleText: String { roleLabel.stringValue }
+    /// PGM 标题条上的 FTB 色块亮着没有（W5-L，N02）。
+    var isFTBIndicatorShown: Bool { !ftbBlock.isHidden }
     /// 正在显示的叠加徽标文字（按通道顺序）。
     var overlayBadgeTexts: [String] { shownBadges }
     var overlayBadgeViews: [NSView] { badges.filter { !$0.isHidden } }

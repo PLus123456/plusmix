@@ -54,7 +54,10 @@ final class BottomBarSplitTests: XCTestCase {
         XCTAssertEqual(xs, xs.sorted(), "左组从左到右排：\(xs)")
         let overlay = AppTest.alignmentFrame(bar.overlayButton, in: bar)
         XCTAssertGreaterThan(overlay.minX, left.map { AppTest.alignmentFrame($0, in: bar).maxX }.max() ?? 0, "叠加在右组")
-        XCTAssertLessThanOrEqual(bar.bounds.maxX - overlay.maxX, 16, "叠加贴右边（右组）")
+        // W5-L（98）：右组 = 叠加 ｜ 统计 ｜ 锁（锁在最右）；整组贴右边
+        let stats = AppTest.alignmentFrame(bar.statsButton, in: bar), lock = AppTest.alignmentFrame(bar.lockButton, in: bar)
+        XCTAssertTrue(overlay.maxX <= stats.minX && stats.maxX <= lock.minX, "右组从左到右：叠加 / 统计 / 锁")
+        XCTAssertLessThanOrEqual(bar.bounds.maxX - lock.maxX, 16, "右组贴右边")
 
         // 三段各自可隐藏：添加输入 = 主体 + ▴；录制 / 推流 = ⚙ + 主体 + ▴；外部显示 / 多画面 = ⚙ + 主体
         func segments(_ b: SplitBarButton) -> [Bool] { [b.showsGear, b.showsBody, b.showsMenu] }
@@ -541,7 +544,7 @@ final class BottomBarSplitTests: XCTestCase {
             XCTAssertEqual(row.minX, 0, accuracy: 0.5, "\(label) 全宽：左")
             XCTAssertEqual(row.width, content.bounds.width, accuracy: 0.5, "\(label) 全宽：右")
             // 按钮都在状态行上面，不共一行
-            for b in bar.leftGroup.map({ $0 as NSView }) + [bar.overlayButton] {
+            for b in bar.leftGroup.map({ $0 as NSView }) + [bar.overlayButton, bar.statsButton, bar.lockButton] {
                 let f = content.convert(b.alignmentRect(forFrame: b.frame), from: b.superview)
                 XCTAssertGreaterThanOrEqual(f.minY, row.maxY, "\(label) 按钮在状态行上面")
             }

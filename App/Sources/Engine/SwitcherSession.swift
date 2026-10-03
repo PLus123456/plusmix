@@ -11,7 +11,7 @@
 //   预热（与节目时钟无关）：控制层（推送源、API、MIDI；进程里第一次连 MIDIServer ≈ 0.6 s）→ 引擎 warmUp（渲染器 prepare + 首帧空渲染、状态机线程、第 0 拍快照）。
 //   起：（没预热就先预热）→ 定 t0 = now + 提前量 → 输入建好并注册（帧槽 → 引擎，音频环 → 音频引擎；输入按 t0 建时间线）
 //      → 音频引擎 start(clock:) → 引擎 start(t0:)（这两步在同一个非主线程任务里接着做）→ 输入 start → Stats 采样 → 输出按快照起（录制 / 推流）。
-//   停：API → 输出封口（录制到拍边界）→ Stats → 输入 → 引擎 → 音频引擎 → 推送源。只预热没起的、起到一半失败的也走同一条（没起的部分是空操作）；
+//   停：tally 流（W5-L）→ API → 输出封口（录制到拍边界）→ Stats → 输入 → 引擎 → 音频引擎 → 推送源。只预热没起的、起到一半失败的也走同一条（没起的部分是空操作）；
 //      预热 / 起进行中来停，等它在定 t0 之前的检查点停下再收。
 import AppKit
 import SwitcherContracts
@@ -62,6 +62,9 @@ final class SwitcherSession {
     private(set) var t0: HostTime = .zero
     /// 最近一次起好的起步记录（start 成功后有；诊断 / 测试看）。
     private(set) var startReport: StartReport?
+    /// 停机走过的几步（W5-L：tally → API → 引擎；测试看顺序）。
+    enum StopStep: Equatable { case tally, api, engine }
+    private(set) var stopSequence: [StopStep] = []
 
     /// 一次起步的记录（诊断，W3-E6）：各段耗时、定 t0 之后花掉多少提前量、引擎报的时钟起晚。W1-B3 当时靠临时探针才量到这几个数
     /// （reports/w1-core-3.md §1.1），现在每次起都记下并打一行日志；AppController 另存进程里第一次起好的那份（冷启动只在它身上）。
@@ -154,7 +157,7 @@ final class SwitcherSession {
         aux.external.mainScreenLayering = settings.externalMainScreenLayering
         aux.external.windowTitle = L("aux.external.windowTitle")   // W3-C3：包里的默认标题是 ASCII
         control = ControlRuntime(stateMachine: stateMachine, engine: engine, api: settings.apiConfiguration, hotkeyTable: hotkeyTable, midiTable: midiTable,
-                                 compat: settings.compatConfiguration)
+                                 compat: settings.compatConfiguration, tally: settings.tallyConfiguration)
         meterFeed = AudioMeterFeed(status: { audio.status }, sink: { meters, at in renderer.setMeters(meters, at: at) })
         lastSnapshot = stateMachine.publisher.latest
         let audioEngine = audio.engine
@@ -188,6 +191,7 @@ final class SwitcherSession {
         let afterControl = HostClock.now()
         if let e = control.apiError { notify(e) }
         if let e = control.midiError { notify(e) }
+        if let e = control.tallyError { notify(e) }
         stage = .warm   // 从这里起 stop 就有东西要收（引擎预热失败也一样）
         try await engine.warmUp()
         warmUpTimes = ((afterControl - begin).milliseconds, (HostClock.now() - afterControl).milliseconds)
@@ -268,7 +272,7 @@ final class SwitcherSession {
               r.controlMs, r.warmUpMs, r.inputsMs, r.audioMs, r.engineStartMs, r.spentAfterT0Ms, r.leadMs, r.clockStartLagMs)
     }
 
-    /// 停：API → 输出封口 → Stats → 输入 → 引擎（排空在途帧）→ 音频引擎 → 推送源 / 命令循环。运行中、只预热没起的都能停；
+    /// 停：tally → API → 输出封口 → Stats → 输入 → 引擎（排空在途帧）→ 音频引擎 → 推送源 / 命令循环。运行中、只预热没起的都能停；
     /// 预热 / 起进行中来停：先让它在定 t0 之前停下（已经定了 t0 就等它起完），再收。
     func stop() async {
         stopRequested = true
@@ -286,13 +290,17 @@ final class SwitcherSession {
         pollTimer?.invalidate()
         pollTimer = nil
         meterFeed.stop()   // 显式 setMeters(nil)：音频引擎要停了，多画面退回占位
+        await control.stopTally()   // W5-L：只读 tally 流最先断
+        stopSequence.append(.tally)
         await control.stopAPI()
+        stopSequence.append(.api)
         await outputs.stopAll()
         aux.stopAll()
         statsHub?.stop()
         statsHub = nil
         inputs.stopAll()
         await engine.stop()   // 只预热没起的引擎也在这里放掉渲染器与状态机线程（Engine.stop 自己认）
+        stopSequence.append(.engine)
         await audio.stop()
         await control.finish()
         stage = .idle

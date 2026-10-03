@@ -1,4 +1,5 @@
-// 底栏（W5-F 起两行）：上一行是输出按钮，左组 添加输入 ▴ ｜ ⚙ 录制 ▴ ｜ ⚙ 外部显示 ｜ ⚙ 推流 ▴ ｜ ⚙ 多画面，右组 叠加（W5-K 起开独立的叠加设置窗）；
+// 底栏（W5-F 起两行）：上一行是输出按钮，左组 添加输入 ▴ ｜ ⚙ 录制 ▴ ｜ ⚙ 外部显示 ｜ ⚙ 推流 ▴ ｜ ⚙ 多画面，右组 叠加（W5-K 起开独立的叠加设置窗）｜ 统计 ｜ 锁（W5-L：
+// "统计"开只读统计窗（E5），最右的锁 = 锁定界面（E8：锁着时主窗口的鼠标点击不生效，按钮金色高亮；拦点击在 MainWindow.sendEvent）；
 // 下一行是状态行（StatusBarView：窗口最底一行、全宽，左边 1 Hz 读 Stats，右端提示文字 / 本机信息，E9）。
 // 每个输出都是分体按钮（SplitBarButton，docs/ui-study/01-菜单逻辑.md §1 规则 1）：⚙ = 这件事的设置，主体 = 执行 / 开关，▴ = 快捷菜单（朝上开，BottomBarPopup）。
 // - 录制（K1 / K2 / K3）：⚙ 菜单"录制设置… / ISO 分路录制…"（单独的"ISO…"按钮去掉）；主体照旧 PGM + ISO 同一拍一起起停（有意保留，测试标准 A4 的前提）；
@@ -51,6 +52,16 @@ final class BottomBarView: NSView {
     let multiview = SplitBarButton(name: L("bottom.multiview"), title: L("bottom.multiview"))
     /// 右组：叠加（W5-K 起开独立的叠加设置窗，不再是弹出层）。
     let overlayButton = Theme.button(L("bottom.overlay"), target: nil, action: nil)
+    /// 右组："统计"开只读统计窗（W5-L，E5）。
+    let statsButton = Theme.button(L("bottom.stats"), target: nil, action: nil)
+    /// 底栏最右：锁定界面（W5-L，E8）。
+    let lockButton = Theme.button("", target: nil, action: nil)
+    /// 点"统计"。
+    var onStats: (() -> Void)?
+    /// 点锁（MainWindowController 翻主窗口的锁）。
+    var onToggleLock: (() -> Void)?
+    /// 锁按钮现在是不是高亮（= 锁着）。
+    private(set) var isLockHighlighted = false
     /// 左组，从左到右（E2）。
     var leftGroup: [SplitBarButton] { [addInput, record, external, stream, multiview] }
     /// 状态行：窗口最底一行、全宽（E9）。
@@ -105,14 +116,28 @@ final class BottomBarView: NSView {
         overlayButton.target = self
         overlayButton.action = #selector(overlayPressed)
         overlayButton.refusesFirstResponder = true
+        statsButton.target = self
+        statsButton.action = #selector(statsPressed)
+        statsButton.refusesFirstResponder = true
+        statsButton.toolTip = L("bottom.statsTip")
+        lockButton.target = self
+        lockButton.action = #selector(lockPressed)
+        lockButton.refusesFirstResponder = true
+        lockButton.imagePosition = .imageOnly
+        lockButton.setContentHuggingPriority(.required, for: .horizontal)
+        setLocked(false)
 
         let left = NSStackView(views: leftGroup)
         left.orientation = .horizontal
         left.spacing = 10
         left.translatesAutoresizingMaskIntoConstraints = false
+        let right = NSStackView(views: [overlayButton, statsButton, lockButton])
+        right.orientation = .horizontal
+        right.spacing = 8
+        right.translatesAutoresizingMaskIntoConstraints = false
         buttonRow.translatesAutoresizingMaskIntoConstraints = false
         buttonRow.addSubview(left)
-        buttonRow.addSubview(overlayButton)
+        buttonRow.addSubview(right)
         addSubview(buttonRow)
         addSubview(statusBar)
         NSLayoutConstraint.activate([
@@ -123,9 +148,9 @@ final class BottomBarView: NSView {
             buttonRow.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             left.leadingAnchor.constraint(equalTo: buttonRow.leadingAnchor, constant: 8),
             left.centerYAnchor.constraint(equalTo: buttonRow.centerYAnchor),
-            overlayButton.trailingAnchor.constraint(equalTo: buttonRow.trailingAnchor, constant: -8),
-            overlayButton.centerYAnchor.constraint(equalTo: buttonRow.centerYAnchor),
-            overlayButton.leadingAnchor.constraint(greaterThanOrEqualTo: left.trailingAnchor, constant: 16),
+            right.trailingAnchor.constraint(equalTo: buttonRow.trailingAnchor, constant: -8),
+            right.centerYAnchor.constraint(equalTo: buttonRow.centerYAnchor),
+            right.leadingAnchor.constraint(greaterThanOrEqualTo: left.trailingAnchor, constant: 16),
             statusBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: trailingAnchor),
             statusBar.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -407,6 +432,22 @@ final class BottomBarView: NSView {
     }
 
     @objc private func overlayPressed() { onOverlayPanel?(overlayButton) }
+    @objc private func statsPressed() { onStats?() }
+    @objc private func lockPressed() { onToggleLock?() }
+
+    /// 锁按钮跟着锁的状态：锁着 = 闭合的锁 +"已锁定"、金色高亮；开着 = 只有打开的锁。图标 / 字 / 提示 / 辅助功能名一起换。
+    /// 另写"已锁定"是因为窗口不在前台时系统不画按钮的底色（金色只在前台看得到，目视核对截到的），字和闭合的锁前后台都在。
+    func setLocked(_ locked: Bool) {
+        isLockHighlighted = locked
+        let label = locked ? L("lock.unlock") : L("lock.lock")
+        let symbol = locked ? "lock.fill" : "lock.open"
+        lockButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        lockButton.title = locked ? L("lock.lockedTitle") : ""
+        lockButton.imagePosition = locked ? .imageLeading : .imageOnly
+        lockButton.setAccessibilityLabel(label)
+        lockButton.toolTip = locked ? L("lock.unlockTip") : L("lock.lockTip")
+        Theme.setHighlighted(lockButton, locked, color: Theme.lockActive)   // 改完标题再调（它按当前标题换白字）
+    }
 }
 
 /// 推流 ▴ 里一个目的地那一项（纯函数，测试直接喂）：标题"名字 · 状态 · 码率"（码率只在推流中时写），勾 = 在推，点了做什么，提示（起不来的原因 + 打过码的地址）。

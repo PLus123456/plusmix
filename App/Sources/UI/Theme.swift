@@ -24,6 +24,11 @@ enum Theme {
     static let accent = NSColor(red: 0.24, green: 0.52, blue: 0.95, alpha: 1)
     static let ftbActive = NSColor(red: 0.6, green: 0.1, blue: 0.1, alpha: 1)
     static let recording = NSColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1)
+    /// 提醒条（W5-L）：琥珀底黑字（对比 ≥ 4.5:1）。
+    static let reminderBackground = NSColor(red: 0.96, green: 0.70, blue: 0.16, alpha: 1)
+    static let reminderText = NSColor(white: 0.08, alpha: 1)
+    /// 界面锁着时锁按钮的底色（金色，W5-L / E8）。
+    static let lockActive = NSColor(red: 0.85, green: 0.62, blue: 0.10, alpha: 1)
 
     static let monitorTitleHeight: CGFloat = 26
     /// 格子宽（"中"档；W5-H 起有小 / 中 / 大三档，见 ThumbnailSize）。

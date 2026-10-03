@@ -21,6 +21,9 @@ final class ReleaseTests: XCTestCase {
                                                                                                     streamKey: secretKey)))))
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.outputs.contains { $0.number == number } }, "推流输出没加上")
         var settings = AppTest.controller.settings
+        // token 只在这条里用：用完还原内存里的设置（W5-L 查到：不还原的话，排在后面、要连 API 的用例起的引擎都要 token，一律 401）
+        let originalSettings = settings
+        defer { AppTest.controller.settings = originalSettings }
         settings.apiToken = secretToken
         AppTest.controller.settings = settings
         AppTest.waitUntil(3) { session.stats != nil }

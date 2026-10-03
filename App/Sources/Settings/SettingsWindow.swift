@@ -282,10 +282,10 @@ struct SettingsView: View {
         case .general: GeneralPage(model: model.preferences)
         case .audioDevice: AudioDevicePage(model: model.preferences)
         case .remoteControl: RemoteControlPage(model: model.preferences, openAdvanced: { model.select(.advanced) })
-        case .tally: TallyPage()
+        case .tally: TallyPage(model: model.preferences)
         case .hotkeys: HotkeyEditorView(model: model.hotkeys)
         case .midi: MIDIMappingView(model: model.midi)
-        case .performance: PerformancePage()
+        case .performance: PerformancePage(model: model.preferences)
         case .updates: UpdatesPage(model: model.preferences)
         case .advanced: AdvancedPage(model: model.preferences)
         }
