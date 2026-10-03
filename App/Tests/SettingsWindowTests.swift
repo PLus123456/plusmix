@@ -119,7 +119,7 @@ final class SettingsWindowTests: XCTestCase {
         let settings = try XCTUnwrap(panels.settingsWindow)
         XCTAssertEqual(settings.window?.title, "设置")
         XCTAssertEqual(settings.model.sidebar.map(\.group), [.show, .machine])
-        XCTAssertEqual(settings.model.sidebar[0].pages.map(\.title), ["节目格式", "录制", "ISO 分路", "推流", "外部显示", "NDI® 发送", "虚拟摄像头", "多画面布局", "节目音频"])
+        XCTAssertEqual(settings.model.sidebar[0].pages.map(\.title), ["节目格式", "输出总览", "录制", "ISO 分路", "推流", "外部显示", "NDI® 发送", "虚拟摄像头", "多画面布局", "节目音频"])   // "输出总览"是 W5-I 的页（G7 合并时补进期望）
         XCTAssertEqual(settings.model.sidebar[1].pages.map(\.title), ["常规", "音频设备", "远程控制", "Tally", "快捷键", "MIDI", "性能与电源", "更新与诊断", "高级"])
         XCTAssertEqual(SettingsPage.Group.show.title, "本节目")
         XCTAssertEqual(SettingsPage.Group.machine.title, "本机")
