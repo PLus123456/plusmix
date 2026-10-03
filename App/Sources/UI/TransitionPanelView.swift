@@ -1,11 +1,12 @@
 // 中列：转场按钮（Cut / Fade / Wipe / Zoom / Stinger / FTB）、时长（0.5 / 1 / 2 s + 自定义…）、Overlay 1–4 开关、T-bar 用哪种转场 + 参数…、T-bar、时钟。
 // Wipe / Zoom / Stinger 在 W3-B 合入后（G4）接通：点 = setTransition(type, 当前时长) + autoTransition；类型留在状态里，T-bar 与回车按它推。
 // 时长改的是唯一的 durationTicks，五种转场都用它（Cut 没有中间态）。参数经 TransitionParamsModel 发 setTransitionParams（提案 016，见那里的说明）。
-// FTB 是开关；Overlay 开关：通道已指定输入 → 只改 on；没指定 → 用当前 PVW 那一路打开（W5-A / C6，原来开了也没画面）；关的时候不清空通道设置。
+// FTB 是开关；Overlay 开关：通道已指定输入 → 只改 on；没指定 → 用当前 PVW 那一路打开（W5-A / C6，原来开了也没画面）；关的时候不清空通道设置
+// （W5-G：这条口径抽成 OverlayToggle，菜单栏"切换 › Overlay ▸"共用；按钮提示的反查口径抽成 HotkeyMatch，"切换"菜单右列共用）。
 // 所有动作只发 Command，显示只读快照。
 // W5-A（prompt 86）排版按 docs/ui-study/03-目视检查.md §1.3：每行宽 = 列宽 − 16、左对齐（原来的 alignment = .width 是 NSStackView 不支持的值，读回 0，等于没对齐）；
 // 两档控件（主操作 regular 24 pt / 13 pt 字，次要控件 small 20 pt / 11 pt 字）；组内 4、组间 8、组标题到控件 2；列最小高 483 → ≤ 409。
-// "最小步"（04-待拍板 Q01 默认：B 的最小一步，不改契约）：T-bar 上方那行是菜单，选 = 只发 setTransition（不执行）；类型被改了（点 Fade / 菜单 切换 › Fade
+// "最小步"（04-待拍板 Q01 默认：B 的最小一步，不改契约）：T-bar 上方那行是菜单，选 = 只发 setTransition（不执行）；类型被改了（点 Fade / 菜单 切换 › 类型
 // 也会改）那一行高亮一阵；时长分段加"自定义…"；按钮提示从当前快捷键表反查（原来 Fade 写死"回车"，默认表里回车其实是"按已选转场"）。
 import AppKit
 import SwiftUI
@@ -204,7 +205,7 @@ final class TransitionPanelView: NSView {
         shownType = type
     }
 
-    /// 类型被改了：那一行高亮一阵（点 Fade、菜单 切换 › Fade、API 改的都算），提醒 T-bar 和回车已经换了转场。
+    /// 类型被改了：那一行高亮一阵（点 Fade、菜单 切换 › 类型、API 改的都算），提醒 T-bar 和回车已经换了转场。
     private func highlightTbarType() {
         isTbarTypeHighlighted = true
         Theme.setHighlighted(tbarTypeButton, true)
@@ -363,30 +364,18 @@ final class TransitionPanelView: NSView {
     // MARK: 提示（从快捷键表反查）
 
     private func refreshTooltips() {
-        func isCut(_ a: ControlAction) -> Bool { if case .command(.cut) = a { return true }; return false }
-        func isFade(_ a: ControlAction) -> Bool { if case .command(.fade) = a { return true }; return false }
-        func isFTB(_ a: ControlAction) -> Bool {
-            if case .toggleFTB = a { return true }
-            if case .command(.ftb) = a { return true }
-            return false
-        }
-        func isAuto(_ a: ControlAction) -> Bool { if case .command(.autoTransition) = a { return true }; return false }
-        cutButton.toolTip = tip(L("transition.tip.cut"), matching: isCut)
-        fadeButton.toolTip = tip(L("transition.tip.fade"), matching: isFade)
+        cutButton.toolTip = tip(L("transition.tip.cut"), matching: HotkeyMatch.cut)
+        fadeButton.toolTip = tip(L("transition.tip.fade"), matching: HotkeyMatch.fade)
         for (button, name) in [(wipeButton, "Wipe"), (zoomButton, "Zoom"), (stingerButton, "Stinger")] {
             button.toolTip = tip(L("transition.tip.auto", name, name), matching: { _ in false })
         }
-        ftbButton.toolTip = tip(L("transition.tip.ftb"), matching: isFTB)
-        let autoKeys = HotkeyText.keys(in: hotkeyTable, matching: isAuto)
+        ftbButton.toolTip = tip(L("transition.tip.ftb"), matching: HotkeyMatch.ftb)
+        let autoKeys = HotkeyText.keys(in: hotkeyTable, matching: HotkeyMatch.auto)
         tbarTypeButton.toolTip = autoKeys.map { L("transition.tip.tbarTypeKeys", L("transition.tip.tbarType"), $0) } ?? L("transition.tip.tbarType")
         for (i, b) in overlayButtons.enumerated() {
             let channel = i + 1
             let description = state.overlays[i].input.map { L("transition.overlayInput", channel, $0) } ?? L("transition.overlayNoInput", channel, channel)
-            b.toolTip = tip(description) { a in
-                if case .toggleOverlay(let ch) = a { return ch == channel }
-                if case .command(.overlay(let ch, _, _)) = a { return ch == channel }
-                return false
-            }
+            b.toolTip = tip(description, matching: HotkeyMatch.overlay(channel))
         }
     }
 
@@ -429,20 +418,28 @@ final class TransitionPanelView: NSView {
         paramsPopover = popover
     }
 
-    /// Overlay n：开着 → 关（通道设置不清空）；关着、通道已指定输入 → 开；没指定 → 用当前 PVW 那一路开（C6）；PVW 也是黑场 → 不开、提示。
+    /// Overlay n（菜单栏"切换 › Overlay ▸"同一口径，OverlayToggle）。
     @objc private func overlayPressed(_ sender: NSButton) {
-        let channel = sender.tag
-        guard channel >= 1, channel <= MixerState.overlayCount else { return }
+        switch OverlayToggle.command(channel: sender.tag, in: state) {
+        case .send(let command)?: send?(command)
+        case .needsPreview?: onNotice?(L("transition.overlayNeedsPreview", sender.tag, sender.tag))
+        case nil: break
+        }
+    }
+}
+
+/// Overlay n 开关按下去发什么（转场列按钮与菜单栏"切换 › Overlay ▸"共用，C6）：开着 → 关（通道设置不清空）；关着、通道已指定输入 → 开；
+/// 没指定 → 用当前 PVW 那一路开；PVW 也是黑场 → 不开（needsPreview，调用方提示）。通道号不对为 nil。
+enum OverlayToggle: Equatable {
+    case send(Command)
+    case needsPreview
+
+    static func command(channel: Int, in state: MixerState) -> OverlayToggle? {
+        guard channel >= 1, channel <= MixerState.overlayCount else { return nil }
         let overlay = state.overlays[channel - 1]
-        if overlay.on || overlay.input != nil {
-            send?(.overlay(channel: channel, on: !overlay.on, input: nil))
-            return
-        }
+        if overlay.on || overlay.input != nil { return .send(.overlay(channel: channel, on: !overlay.on, input: nil)) }
         let preview = state.preview
-        guard preview != MixerState.noInput, state.input(preview) != nil else {
-            onNotice?(L("transition.overlayNeedsPreview", channel, channel))
-            return
-        }
-        send?(.overlay(channel: channel, on: true, input: preview))
+        guard preview != MixerState.noInput, state.input(preview) != nil else { return .needsPreview }
+        return .send(.overlay(channel: channel, on: true, input: preview))
     }
 }

@@ -37,6 +37,12 @@ extension AppTest {
         return window.frame
     }
 
+    /// 主窗口能缩到的最小尺寸（W5-G：工具条那一行算在窗口外框里，最小窗口从 1100×700 变成"内容区仍是原来 1100×700 时那么大"的外框，
+    /// macOS 27 上 1100×720；测"最小窗口时布局还在"的用例用它，不再写死 700——setFrame 不受 minSize 约束，写死就会量到用户拖不到的尺寸）。
+    static var minimumMainWindowSize: NSSize {
+        controller.windowController.window?.minSize ?? NSSize(width: 1100, height: 700)
+    }
+
     /// 加 n 路合成源并等它们 live（AppTest.addSynthetics 的灰度是 UInt8(64 + 32 × n)，6 路时溢出崩溃；这里灰度按路数摊开，最多 16 路）。
     static func addSyntheticInputs(_ session: SwitcherSession, count: Int) throws {
         for n in 1...count { session.send(.addInput(config: syntheticConfig(number: n, gray: UInt8(48 + (200 * n) / max(count, 1))))) }

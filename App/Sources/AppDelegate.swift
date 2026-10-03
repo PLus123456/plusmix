@@ -1,27 +1,39 @@
 // Switcher App —— AppKit 主程序（W2-B：显示路径 + 主界面骨架；W2-B2：接上输入 / 命令 / API / 音频 / 录制 / 推流 / Stats；W3-E：设置面板与窗口）。
 // 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：先问（录制 / 推流在跑、有未保存的改动，W5-B）→ LastSession 照存 → 停引擎。
-// 新建 / 打开 / 打开最近 / Finder 双击打开同样先问（AppController.requestNewShow / requestOpenShow）。
-// 菜单：App 菜单（标题是产品名 PlusMix，W4-D：关于 / 检查更新 / 偏好设置）、节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加 / 设置）、切换（Cut / Fade / FTB / 快捷键编辑器 / MIDI 映射）、
-// 输出（W3-E：录制 / ISO / 推流 / 外部显示 / NDI / 虚拟摄像头设置页；W3-C：外部显示子菜单、多画面窗口、虚拟摄像头的安装 / 卸载 / 启用；
-// W5-F：推流 ▸ = 底栏推流 ▴ 同一份菜单，输入 › 按类型添加 ▸ = 底栏添加输入 ▴ 同一份菜单，"外部输出"统一叫"外部显示"）、
-// 窗口（调音台 / 多画面）、帮助（W4-B：导出诊断包 / 打开诊断文件夹；App 菜单加"检查更新…"）。文案全部走 L10n（W3-C 那几项 W3-E2 补齐；包里返回中文的状态在 App 侧查表，OutputStatusText）。启动参数与设置见 AppSettings。
+// 新建 / 打开 / 打开最近 / 打开上次退出时的节目 / Finder 双击打开同样先问（AppController.requestNewShow / requestOpenShow / requestOpenLastSession）。
+// 菜单栏（W5-G 按 docs/ui-study/01-菜单逻辑.md §5 重排，规则 5：主窗口里放了的每个动作菜单栏里都还在）：
+//   PlusMix   关于 / 检查更新… / ─ / 设置… ⌘, / 快捷键… / MIDI 映射… / ─ / 隐藏 / ─ / 退出（Q48："偏好设置…"改"设置…"；F3：快捷键 / MIDI 映射从"切换"挪来）
+//   节目      新建 / 打开… / 打开最近 ▸（同名带上级目录名，V-24）/ 打开上次退出时的节目 / ─ / 保存 / 另存为…
+//   编辑      （不变）
+//   输入      添加输入… ⌘I / 按类型添加 ▸ / 输入 N「名字」设置… ⇧⌘I（标题写出是 PVW 上哪一路，PVW 空时灰，O4）
+//   切换      SwitchMenuController（O1：Cut / 执行当前转场 / 五种类型 / FTB / Overlay ▸，右列的键只显示）
+//   输出      录制 ▸ / 推流 ▸ / 外部显示 ▸ / 全部外部显示开·关 / 多画面窗口 / 虚拟摄像头 ▸ / ─ / 七个输出设置页（▸ 的几个和底栏 ▴ / ⚙ 同一份菜单）
+//   窗口      最小化 / 缩放 / ─ / 调音台 / 多画面
+//   帮助      PlusMix 使用手册 / 快捷键一览 / ─ / 导出诊断包… / 打开诊断文件夹（O3；工具条"?"弹同一份）
+// 菜单项一律 nil target、动作在这里：工具条（MainToolbar）的按钮挂的是同一个 selector，所以两处点下去是同一段代码，灰不灰也在 validateMenuItem 里一处定。
+// 文案全部走 L10n（包里返回中文的状态在 App 侧查表，OutputStatusText）。启动参数与设置见 AppSettings。
 import AppKit
 import SwitcherContracts
 import SwitcherControl
+import SwitcherExternal
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private(set) var controller: AppController!
     private var recentMenu: NSMenu?
     private var externalMenuItem: NSMenuItem?
-    /// "输出 › 推流 ▸"（打开"输出"菜单时按底栏推流 ▴ 重建，W5-F）。
+    /// "输出 › 录制 ▸ / 推流 ▸"（打开"输出"菜单时按底栏录制 ▴ / 推流 ▴ 重建，W5-F / W5-G）。
+    private var recordMenuItem: NSMenuItem?
     private var streamMenuItem: NSMenuItem?
-    /// "输入"菜单与"按类型添加 ▸"（打开时按底栏添加输入 ▴ 重建，W5-F）。
+    /// "输入"菜单、"按类型添加 ▸"（= 底栏添加输入 ▴，W5-F）与"输入 N「名字」设置…"（W5-G）。
     private var inputMenu: NSMenu?
     private var addByTypeItem: NSMenuItem?
+    private var inputSettingsItem: NSMenuItem?
     private var virtualCameraStatusItem: NSMenuItem?
     /// "输出"菜单（menuNeedsUpdate 按对象认，标题已本地化）。
     private var outputMenu: NSMenu?
+    /// "切换"菜单（W5-G：自己是 delegate，不认任何键）。
+    private(set) var switchMenu: SwitchMenuController?
     private var settings = AppSettings()
     /// 退出那一问已经过了、正在收尾（再来一次 terminate 不再问）。
     private var quitting = false
@@ -80,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
-        controller.requestOpenShow(url: URL(fileURLWithPath: filename)) { [weak self] in self?.rebuildRecentMenu() }
+        controller.requestOpenShow(url: URL(fileURLWithPath: filename))
         return true
     }
 
@@ -93,7 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appMenu.addItem(withTitle: L("menu.about"), action: #selector(showAbout(_:)), keyEquivalent: "")   // 带 credits（W5-A：版本、许可、NDI® 声明）
         appMenu.addItem(withTitle: L("menu.checkForUpdates"), action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: L("menu.preferences"), action: #selector(showPreferences), keyEquivalent: ",")
+        appMenu.addItem(withTitle: L("menu.settings"), action: #selector(showPreferences(_:)), keyEquivalent: ",")
+        appMenu.addItem(SettingsMenu.hotkeysItem())   // 96 合窗后改成设置窗的页
+        appMenu.addItem(SettingsMenu.midiItem())
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
@@ -101,14 +115,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         main.addItem(submenu(appMenu, title: ProductName.display))   // 产品名 PlusMix（W4-D），不是代码名
 
         let show = NSMenu(title: L("menu.show"))
-        show.addItem(withTitle: L("menu.show.new"), action: #selector(newShow), keyEquivalent: "n")
-        show.addItem(withTitle: L("menu.show.open"), action: #selector(openShow), keyEquivalent: "o")
+        show.addItem(withTitle: L("menu.show.new"), action: #selector(newShow(_:)), keyEquivalent: "n")
+        show.addItem(withTitle: L("menu.show.open"), action: #selector(openShow(_:)), keyEquivalent: "o")
         let recent = NSMenu(title: L("menu.show.openRecent"))
+        recent.delegate = self
         recentMenu = recent
         show.addItem(submenu(recent, title: L("menu.show.openRecent")))
+        show.addItem(ShowMenu.lastSessionItem())
         show.addItem(.separator())
-        show.addItem(withTitle: L("menu.show.save"), action: #selector(saveShow), keyEquivalent: "s")
-        let saveAs = show.addItem(withTitle: L("menu.show.saveAs"), action: #selector(saveShowAs), keyEquivalent: "S")
+        show.addItem(withTitle: L("menu.show.save"), action: #selector(saveShow(_:)), keyEquivalent: "s")
+        let saveAs = show.addItem(withTitle: L("menu.show.saveAs"), action: #selector(saveShowAs(_:)), keyEquivalent: "S")
         saveAs.keyEquivalentModifierMask = [.command, .shift]
         main.addItem(submenu(show, title: L("menu.show")))
 
@@ -130,29 +146,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         byType.submenu = NSMenu(title: L("menu.input.addByType"))
         input.addItem(byType)
         addByTypeItem = byType
-        input.addItem(withTitle: L("menu.input.settings"), action: #selector(inputSettings), keyEquivalent: "I")
+        inputSettingsItem = input.addItem(withTitle: L("menu.input.settings"), action: #selector(inputSettings(_:)), keyEquivalent: "I")
         main.addItem(submenu(input, title: L("menu.input")))
 
-        let transition = NSMenu(title: L("menu.transition"))
-        transition.addItem(withTitle: "Cut", action: #selector(cut), keyEquivalent: "")
-        transition.addItem(withTitle: "Fade", action: #selector(fade), keyEquivalent: "")
-        transition.addItem(withTitle: "FTB", action: #selector(ftb), keyEquivalent: "")
-        transition.addItem(.separator())
-        transition.addItem(withTitle: L("menu.transition.hotkeys"), action: #selector(showHotkeys), keyEquivalent: "")
-        transition.addItem(withTitle: L("menu.transition.midi"), action: #selector(showMIDI), keyEquivalent: "")
-        main.addItem(submenu(transition, title: L("menu.transition")))
+        let switching = SwitchMenuController()
+        switching.state = { [weak self] in self?.controller.session?.state }
+        switching.hotkeyTable = { [weak self] in self?.controller.hotkeyTable ?? .default }
+        switchMenu = switching
+        main.addItem(submenu(switching.menu, title: L("menu.transition")))
 
-        // 输出菜单：W3-E 的六个设置页入口 + W3-C 的外部输出子菜单 / 多画面窗口 / 虚拟摄像头（G4 合并：以 W3-C 的运行表为准、保留 W3-E 的面板）
+        // 输出菜单：录制 / 推流 / 外部显示的现场操作（和底栏 ▴ / ⚙ 同一份菜单）在上，设置页在下（W5-G 按 01 §5 重排）
         let output = NSMenu(title: L("menu.output"))
         output.delegate = self
         outputMenu = output
-        for (title, tab) in [(L("menu.output.record"), OutputSettingsModel.Tab.record), (L("menu.output.iso"), .iso), (L("menu.output.stream"), .stream),
-                             (L("menu.output.external"), .external), (L("menu.output.ndi"), .ndi), (L("menu.output.virtualCamera"), .virtualCamera),
-                             (L("menu.output.multiview"), .multiview)] {
-            let item = output.addItem(withTitle: title, action: #selector(outputSettings(_:)), keyEquivalent: "")
-            item.representedObject = tab.rawValue
-        }
-        output.addItem(.separator())
+        let record = NSMenuItem(title: L("menu.output.recordSubmenu"), action: nil, keyEquivalent: "")
+        record.submenu = NSMenu(title: L("menu.output.recordSubmenu"))
+        output.addItem(record)
+        recordMenuItem = record
         let stream = NSMenuItem(title: L("menu.output.streamSubmenu"), action: nil, keyEquivalent: "")
         stream.submenu = NSMenu(title: L("menu.output.streamSubmenu"))
         output.addItem(stream)
@@ -161,8 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         external.submenu = NSMenu(title: L("bottom.external"))
         output.addItem(external)
         externalMenuItem = external
+        output.addItem(withTitle: L("menu.output.externalOn"), action: #selector(toggleExternalDisplays(_:)), keyEquivalent: "")   // 标题在 validateMenuItem 里跟状态
         output.addItem(withTitle: L("menu.window.multiview"), action: #selector(toggleMultiview), keyEquivalent: "")
-        output.addItem(.separator())
         let camera = NSMenu(title: L("menu.output.virtualCamera.title"))
         camera.addItem(withTitle: L("menu.output.virtualCamera.toggle"), action: #selector(toggleVirtualCamera), keyEquivalent: "")
         camera.addItem(.separator())
@@ -174,6 +184,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status.isEnabled = false
         virtualCameraStatusItem = status
         output.addItem(submenu(camera, title: L("menu.output.virtualCamera.title")))
+        output.addItem(.separator())
+        for page in SettingsMenu.outputPages { output.addItem(SettingsMenu.outputPageItem(key: page.key, tab: page.tab)) }
         main.addItem(submenu(output, title: L("menu.output")))
 
         let windowMenu = NSMenu(title: L("menu.window"))
@@ -185,10 +197,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         main.addItem(submenu(windowMenu, title: L("menu.window")))
         NSApp.windowsMenu = windowMenu
 
-        // W4-B：帮助菜单（诊断包导出、诊断文件夹）
-        let help = NSMenu(title: L("menu.help"))
-        help.addItem(withTitle: L("menu.help.exportDiagnostics"), action: #selector(exportDiagnostics(_:)), keyEquivalent: "")
-        help.addItem(withTitle: L("menu.help.showDiagnosticsFolder"), action: #selector(showDiagnosticsFolder(_:)), keyEquivalent: "")
+        // 帮助（W4-B 的诊断两项 + W5-G 的使用手册 / 快捷键一览；工具条"?"弹同一份）
+        let help = HelpMenu.make()
         main.addItem(submenu(help, title: L("menu.help")))
         NSApp.helpMenu = help
 
@@ -204,53 +214,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rebuildRecentMenu() {
         guard let recentMenu else { return }
-        recentMenu.removeAllItems()
-        let urls = controller.documents.recentURLs
-        for url in urls {
-            let item = recentMenu.addItem(withTitle: url.lastPathComponent, action: #selector(openRecent(_:)), keyEquivalent: "")
-            item.representedObject = url
-            item.toolTip = url.path
-        }
-        if urls.isEmpty {
-            recentMenu.addItem(withTitle: L("menu.show.noRecent"), action: nil, keyEquivalent: "").isEnabled = false
-        } else {
-            recentMenu.addItem(.separator())
-            recentMenu.addItem(withTitle: L("menu.show.clearRecent"), action: #selector(clearRecents), keyEquivalent: "")
-        }
+        ShowMenu.fillRecentMenu(recentMenu, urls: controller.documents.recentURLs)
     }
 
-    // 新建 / 打开都先过换节目的问（录制 / 推流在跑、未保存的改动；W5-B）
-    @objc private func newShow() { controller.requestNewShow { [weak self] in self?.rebuildRecentMenu() } }
-    @objc private func openShow() { controller.openShowPanel { [weak self] in self?.rebuildRecentMenu() } }
-    @objc private func openRecent(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else { return }
-        controller.requestOpenShow(url: url) { [weak self] in self?.rebuildRecentMenu() }
+    // MARK: 节目（新建 / 打开都先过换节目的问，W5-B；工具条"节目"组挂的是同几个 selector）
+
+    @objc func newShow(_ sender: Any?) { controller.requestNewShow() }
+    @objc func openShow(_ sender: Any?) { controller.openShowPanel() }
+    @objc func openRecent(_ sender: Any?) {
+        guard let url = (sender as? NSMenuItem)?.representedObject as? URL else { return }
+        controller.requestOpenShow(url: url)
     }
-    @objc private func clearRecents() { controller.documents.clearRecents(); rebuildRecentMenu() }
-    @objc private func saveShow() { controller.save(); rebuildRecentMenu() }
-    @objc private func saveShowAs() { controller.saveAs() }
+    @objc func clearRecents(_ sender: Any?) {
+        controller.documents.clearRecents()
+        rebuildRecentMenu()
+    }
+    /// 打开上次退出时的节目（退出时自动存的 LastSession；A2）。
+    @objc func openLastSession(_ sender: Any?) { controller.requestOpenLastSession() }
+    @objc func saveShow(_ sender: Any?) { controller.save() }
+    @objc func saveShowAs(_ sender: Any?) { controller.saveAs() }
+
+    // MARK: 输入
+
     @objc private func addInput() { controller.windowController.presentAddInput() }
-    /// 输入设置：PVW 上那一路，没有就第一路。
-    @objc private func inputSettings() {
-        guard let s = controller.session else { return }
-        let number = s.state.preview != MixerState.noInput ? s.state.preview : (s.state.inputs.first?.number ?? 0)
-        guard number != MixerState.noInput else { return }
-        controller.panels.showInputSettings(input: number)
+
+    /// "输入 N「名字」设置…"的对象：PVW 上那一路（PVW 空 / 那一路不在 = nil，菜单项灰；原来悄悄换成第一路，O4）。
+    private var inputSettingsTarget: InputConfig? {
+        guard let s = controller.session, s.state.preview != MixerState.noInput else { return nil }
+        return s.state.input(s.state.preview)
     }
-    @objc private func cut() { controller.session?.send(.cut) }
-    @objc private func fade() {
-        guard let s = controller.session else { return }
-        s.send(.fade(durationTicks: s.state.transition.durationTicks))
+
+    /// 输入设置：PVW 上那一路（和 PVW 标题条的齿轮同一个对象，B1）。
+    @objc func inputSettings(_ sender: Any?) {
+        guard let input = inputSettingsTarget else { return }
+        controller.panels.showInputSettings(input: input.number)
     }
-    @objc private func ftb() {
+
+    // MARK: 切换（O1；只发命令，开关看快照）
+
+    @objc func transitionCut(_ sender: Any?) { controller.session?.send(.cut) }
+    /// 执行当前转场：按状态里的类型与时长（= 回车的默认绑定）。
+    @objc func transitionAuto(_ sender: Any?) { controller.session?.send(.autoTransition) }
+    /// 选 T-bar 和回车用哪种：只发 setTransition（时长不变、不执行；转场进行中状态机会拒，菜单项那时是灰的）。
+    @objc func pickTransitionType(_ sender: Any?) {
+        guard let s = controller.session, !s.state.transition.isActive,
+              let raw = (sender as? NSMenuItem)?.representedObject as? String, let type = TransitionType(rawValue: raw) else { return }
+        s.send(.setTransition(type: type, durationTicks: s.state.transition.durationTicks))
+    }
+    @objc func transitionFTB(_ sender: Any?) {
         guard let s = controller.session else { return }
         s.send(.ftb(on: !s.state.ftb.on))
     }
-    @objc private func showHotkeys() { controller.panels.showHotkeyEditor() }
-    @objc private func showMIDI() { controller.panels.showMIDIMapping() }
-    @objc private func showPreferences() { controller.panels.showPreferences() }
-    @objc private func outputSettings(_ sender: NSMenuItem) {
-        let tab = (sender.representedObject as? String).flatMap(OutputSettingsModel.Tab.init(rawValue:)) ?? .record
+    /// Overlay n：与转场列 Overlay 按钮同一口径（OverlayToggle：空通道用 PVW 那一路开；PVW 也是黑场时状态行提示）。
+    @objc func transitionOverlay(_ sender: Any?) {
+        guard let s = controller.session, let channel = (sender as? NSMenuItem)?.tag else { return }
+        switch OverlayToggle.command(channel: channel, in: s.state) {
+        case .send(let command)?: s.send(command)
+        case .needsPreview?: controller.windowController.bottomBar.showNotice(L("transition.overlayNeedsPreview", channel, channel))
+        case nil: break
+        }
+    }
+
+    // MARK: 设置（App 菜单"设置…"下与工具条"设置▾"）
+
+    @objc func showHotkeys(_ sender: Any?) { controller.panels.showHotkeyEditor() }
+    @objc func showMIDI(_ sender: Any?) { controller.panels.showMIDIMapping() }
+    @objc func showPreferences(_ sender: Any?) { controller.panels.showPreferences() }
+    @objc func outputSettings(_ sender: Any?) {
+        let tab = ((sender as? NSMenuItem)?.representedObject as? String).flatMap(OutputSettingsModel.Tab.init(rawValue:)) ?? .record
         controller.panels.showOutputSettings(tab: tab)
     }
     @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
@@ -258,7 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 关于面板：系统标准面板 + credits（AboutPanel）。
     @objc func showAbout(_ sender: Any?) { AboutPanel.show() }
 
-    // MARK: 更新与诊断（W4-B）
+    // MARK: 更新与诊断（W4-B）、帮助（W5-G）
 
     /// 检查更新：配置了 Sparkle 就交给它（自己的窗口）；开发 / ad-hoc 构建没有更新源，弹一句说明。
     @objc func checkForUpdates(_ sender: Any?) {
@@ -274,10 +305,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func exportDiagnostics(_ sender: Any?) { DiagnosticsExport.present(controller: controller) }
     @objc func showDiagnosticsFolder(_ sender: Any?) { DiagnosticsExport.revealFolder() }
+    /// PlusMix 使用手册（随包 HTML，生成归 103；不在包里时菜单项灰着）。
+    @objc func showManual(_ sender: Any?) { HelpBook.openManual() }
+    /// 快捷键一览：按当前表生成一页 HTML（临时文件）再打开。
+    @objc func showHotkeyList(_ sender: Any?) { HelpBook.openHotkeyList(table: controller.hotkeyTable) }
 
     // MARK: 输出（W3-C）
 
     @objc private func toggleMultiview() { controller.windowController.toggleMultiviewWindow() }
+
+    /// 外部显示全部开 / 关（= 底栏与工具条的外部显示主体，M1）。一路都没配、也没有第二块屏：从点的那个控件弹路由菜单（工具条主体向下开；
+    /// 菜单栏里这一项那时是灰的）。
+    @objc func toggleExternalDisplays(_ sender: Any?) {
+        let wc = controller.windowController
+        guard controller.session != nil, !wc.toggleExternalDisplays() else { return }
+        guard let button = sender as? NSButton, let split = SplitBarButton.containing(button), let menu = wc.externalOutputMenu() else { return }
+        split.popUp(menu, from: button)
+    }
 
     /// 有虚拟摄像头输出就翻它的 enabled（提案 012 的 setOutputEnabled：来源等设置留着，运行表看到的是开关而不是删了重加），没有就加一个开着的。
     @objc private func toggleVirtualCamera() {
@@ -295,14 +339,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func uninstallExtension() { controller.session?.aux.installer.deactivate() }
     @objc private func refreshExtension() { controller.session?.aux.installer.refresh() }
 
-    /// 打开"输出"菜单时重建推流子菜单（= 底栏推流 ▴）、外部显示子菜单（每块屏单选，按当前快照打勾）和虚拟摄像头状态行；
-    /// 打开"输入"菜单时重建"按类型添加"（= 底栏添加输入 ▴）。NSMenuDelegate 在类声明上。
+    /// 打开"输出"菜单时重建录制 / 推流子菜单（= 底栏录制 ▴ / 推流 ▴）、外部显示子菜单（每块屏单选，按当前快照打勾）和虚拟摄像头状态行；
+    /// 打开"输入"菜单时重建"按类型添加"（= 底栏添加输入 ▴）、把"输入设置…"写成"输入 N「名字」设置…"；打开"打开最近"时按最近列表重建。
+    /// NSMenuDelegate 在类声明上（"切换"菜单另有自己的 delegate）。
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === recentMenu {
+            rebuildRecentMenu()
+            return
+        }
         if menu === inputMenu {
             addByTypeItem?.submenu = controller.windowController.addInputMenu() ?? NSMenu(title: L("menu.input.addByType"))
+            inputSettingsItem?.title = inputSettingsTarget.map { L("menu.input.settingsNamed", $0.number, $0.name) } ?? L("menu.input.settings")
             return
         }
         guard menu === outputMenu else { return }
+        recordMenuItem?.submenu = controller.windowController.bottomBar.recordMenu()
         streamMenuItem?.submenu = controller.windowController.bottomBar.streamMenu()
         if let item = externalMenuItem {
             item.submenu = controller.windowController.externalOutputMenu() ?? NSMenu(title: L("bottom.external"))
@@ -319,17 +370,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
-// 窗口菜单（和输出菜单）里"调音台 / 多画面"是开关：按可见性打勾（W5-A / V-31）。其它项照旧按"有响应者就能点"。
+// 菜单项灰不灰（工具条按钮挂的是同样的 selector，但按钮不走这里：MainToolbar.setSessionAvailable）。
+// 窗口菜单（和输出菜单）里"调音台 / 多画面"是开关：按可见性打勾（W5-A / V-31）。其它项没写的照旧按"有响应者就能点"。
 extension AppDelegate: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        let session = controller.session
         switch menuItem.action {
         case #selector(toggleMixer):
             menuItem.state = controller.windowController.isMixerPanelVisible ? .on : .off
         case #selector(toggleMultiview):
             menuItem.state = controller.windowController.isMultiviewWindowVisible ? .on : .off
+        case #selector(inputSettings(_:)):
+            return inputSettingsTarget != nil
+        case #selector(openLastSession(_:)):
+            return controller.documents.hasAutosave
+        case #selector(clearRecents(_:)):
+            return !controller.documents.recentURLs.isEmpty
+        case #selector(transitionCut(_:)), #selector(transitionAuto(_:)), #selector(transitionFTB(_:)), #selector(transitionOverlay(_:)):
+            return session != nil
+        case #selector(pickTransitionType(_:)):
+            return session.map { !$0.state.transition.isActive } ?? false
+        case #selector(toggleExternalDisplays(_:)):
+            let (title, enabled) = externalToggleTitle(session?.state)
+            if menuItem.title != title { menuItem.title = title }
+            return enabled
+        case #selector(showManual(_:)):
+            let available = HelpBook.manualURL() != nil
+            let title = HelpMenu.manualTitle(available: available)
+            if menuItem.title != title { menuItem.title = title }
+            return available
         default:
             break
         }
         return true
+    }
+
+    /// "全部外部显示开 / 关"那一项：有开着的 → 关闭全部；都关着 → 打开全部；一路都没配 → 有第二块屏时"在副屏上显示 PGM"，没有就灰。
+    private func externalToggleTitle(_ state: MixerState?) -> (String, Bool) {
+        guard let state else { return (L("menu.output.externalOn"), false) }
+        let outputs = state.outputs.filter { $0.kind == .externalDisplay }
+        if outputs.contains(where: \.enabled) { return (L("externalMenu.closeAll"), true) }
+        if !outputs.isEmpty { return (L("menu.output.externalOn"), true) }
+        if ExternalDisplays.all().contains(where: { !$0.isMain }) { return (L("menu.output.externalCreate"), true) }
+        return (L("menu.output.externalOn"), false)
     }
 }

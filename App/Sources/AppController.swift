@@ -94,6 +94,8 @@ final class AppController {
         windowController.panels = panels
         windowController.addInputHistory = addInputHistory
         windowController.bottomBar.shouldConfirmStop = { [weak self] in self?.settings.confirmBeforeStop ?? true }
+        // 工具条"打开▾"：与"节目 › 打开最近"同一份最近列表（W5-G，A2）
+        windowController.mainToolbar.openMenuProvider = { [weak self] in ShowMenu.openMenu(urls: self?.documents.recentURLs ?? []) }
     }
 
     private func applyTestHostOverrides() {
@@ -323,6 +325,20 @@ final class AppController {
         confirmLeavingShow(.openShow(url.lastPathComponent), proceed: { [weak self] in
             Task { @MainActor in
                 await self?.openShow(url: url)
+                completion?()
+            }
+        })
+    }
+
+    /// 节目 › 打开上次退出时的节目（工具条"打开▾"同一项，W5-G / A2）：打开退出时自动存的那份（LastSession），先过换节目的问。
+    /// 和启动时从 LastSession 恢复同一口径：它不是一个文件（保存时要另存），有内容就算未保存。没有这份就什么都不做（菜单项那时是灰的）。
+    func requestOpenLastSession(completion: (@MainActor () -> Void)? = nil) {
+        guard documents.hasAutosave else { return }
+        confirmLeavingShow(.openShow(L("menu.show.lastSessionName")), proceed: { [weak self] in
+            Task { @MainActor in
+                guard let self, let show = self.documents.loadAutosave() else { return }
+                self.documents.startNew()
+                await self.replaceSession(show: show, baseline: .empty)
                 completion?()
             }
         })
