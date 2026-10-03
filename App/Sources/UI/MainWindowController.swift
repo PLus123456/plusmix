@@ -2,6 +2,8 @@
 // （W5-F：底栏按钮是"⚙ ｜ 主体 ｜ ▴"分体按钮，状态行独立成窗口最底一行；底栏的菜单 / 面板入口都从这里接到 session、面板总管与添加输入的本机记忆）。
 // W5-G：标题栏那一行是工具条（MainToolbar，`.unified`）；监视器标题条的齿轮 / 右键接到面板总管与外部显示路由。工具条那一行算在窗口外框里：
 // 最小窗口按"内容区仍是原来 1100×700 时那么大"定（macOS 27 上外框 1100×720），转场列 / 输入条 / 底栏在最小窗口里的保证不变。
+// W5-H：输入条的占位格 / 拖放 / 分类 / 缩略图三档接到这里（分类存 Show.layout，见 InputCategories；缩略图大小存本机）；输入条最小高跟格子算，
+// 最小窗口在大档放不下时跟着长高（中 / 小档仍是 W5-G 定的内容区 668）。
 // 绑定：所有子视图只拿 `send`（发 Command）和快照 / Stats 观察者；换 session 时 `bind(session:)` 重挂一遍。
 import AppKit
 import SwitcherContracts
@@ -25,8 +27,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     let previewMonitor = MonitorView(target: .preview)
     let programMonitor = MonitorView(target: .program)
     let transitionPanel = TransitionPanelView(frame: .zero)
-    let inputStrip = InputStripView(frame: .zero)
-    let mixerPanel = MixerPanelView(frame: .zero)
+    // 分隔视图里这两块开始时给个像样的 frame：NSSplitView 按当时的 frame 生成自动尺寸约束，0 高 / 0 宽会和它们自己的最小高 / 宽撞，
+    // 启动时日志里一串约束冲突（W5-G 报告 §5 第 9 条，W5-H 修）
+    let inputStrip = InputStripView(frame: NSRect(x: 0, y: 0, width: 1100, height: Theme.inputStripInitialHeight))
+    let mixerPanel = MixerPanelView(frame: NSRect(x: 0, y: 0, width: Theme.mixerPanelWidth, height: 600))
     let bottomBar = BottomBarView(frame: .zero)
     /// 顶部工具条（W5-G）。
     let mainToolbar: MainToolbar
@@ -54,6 +58,14 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     weak var panels: PanelCoordinator?
     /// 添加输入的本机记忆（上次的类型、最近添加的来源；AppController 挂上来，W5-F）。
     var addInputHistory: AddInputHistory?
+    /// 输入条的本机偏好（缩略图大小；AppController 挂上来，W5-H）。
+    var stripPreferences: InputStripPreferences? {
+        didSet { if let stripPreferences { applyThumbnailSize(stripPreferences.thumbnailSize) } }
+    }
+    /// 节目内容在快照以外变了（分类存在 Show.layout 里，W5-H）：AppController 重算未保存。
+    var onDocumentContentChanged: (() -> Void)?
+    /// 输入条最小高的约束（跟格子大小变，W5-H）。
+    private var inputStripMinimumConstraint: NSLayoutConstraint?
     /// 收到的快照次数（测试看 ≤ 60 Hz 合并）。
     private(set) var snapshotsReceived: UInt64 = 0
     private var snapshotWindowStart = Date()
@@ -182,14 +194,21 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
             bottomBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             bottomBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             bottomBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            inputStrip.heightAnchor.constraint(greaterThanOrEqualToConstant: Theme.inputStripMinimumHeight),
             mixerPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: Theme.mixerPanelWidth),
             monitors.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
         ])
+        // 999 不是 required：输入条的 frame 由分隔视图直接设（自动尺寸约束是 required），换缩略图大小那一下两条 required 会在日志里撞；
+        // 真正守最小高的是分隔条的 constrainMaxCoordinate、最小窗口与 updateInputStripMinimum
+        let stripMinimum = inputStrip.heightAnchor.constraint(greaterThanOrEqualToConstant: inputStrip.minimumHeight)
+        stripMinimum.priority = NSLayoutConstraint.Priority(999)
+        stripMinimum.isActive = true
+        inputStripMinimumConstraint = stripMinimum
         window.layoutIfNeeded()
         // 输入条开始时 197 高（W5-A 原型实测的值）。原来写成"窗口外框高 − 底栏 − 230"，230 里暗含了 32 pt 的标题栏；W5-G 加了工具条之后
         // 那一行是 52 pt，输入条就少了 20、被下面的最大坐标夹到 189（全量第一遍 MainWindowLayoutTests 红出来的）。改按内容区算，和标题栏多高无关。
-        centerSplit.setPosition(content.bounds.height - Theme.bottomBarHeight - Theme.inputStripInitialHeight - centerSplit.dividerThickness, ofDividerAt: 0)
+        // W5-H：格子多了一行按钮、缩略图框按裁切比例变矮，"中"档贴着格子的高仍是 197（inputStripPreferredHeight）
+        centerSplit.setPosition(content.bounds.height - Theme.bottomBarHeight - max(Theme.inputStripInitialHeight, inputStripPreferredHeight) - centerSplit.dividerThickness,
+                                ofDividerAt: 0)
         // 分隔条 1 pt 不算在调音台里（W5-A 量出 339，G6 追加 ③）
         outerSplit.setPosition(window.frame.width - Theme.mixerPanelWidth - outerSplit.dividerThickness, ofDividerAt: 0)
 
@@ -213,6 +232,17 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         bottomBar.onAddStreamDestination = { [weak self] in self?.panels?.showStreamAddDestination() }
         bottomBar.willPopUpMenu = { [weak self] menu in self?.activeBottomMenu = menu }
         inputStrip.onOpenSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
+        // 输入条（W5-H）：换来源… 直达输入设置的"来源"一节；占位格 = 添加输入主体；拖文件直接加；分类写回 Show.layout；三档存本机
+        inputStrip.onChangeSource = { [weak self] number in self?.panels?.showInputSettings(input: number)?.model.section = .source }
+        inputStrip.onAddInput = { [weak self] in self?.presentAddInput() }
+        inputStrip.onDropFiles = { [weak self] result in self?.addInputs(from: result) }
+        inputStrip.onNotice = { [weak self] message in self?.bottomBar.showNotice(message) }
+        inputStrip.onCategoriesChange = { [weak self] categories in self?.storeCategories(categories) }
+        inputStrip.onRenameCategory = { [weak self] color in self?.presentRenameCategory(color) }
+        inputStrip.onClearCategoryName = { [weak self] color in self?.renameCategory(color, to: "") }
+        inputStrip.onThumbnailSizeChange = { [weak self] size in self?.setThumbnailSize(size) }
+        inputStrip.onMinimumHeightChange = { [weak self] in self?.updateInputStripMinimum() }
+        inputStrip.setMixerVisible(isMixerPanelVisible)
         mixerPanel.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
         mixerPanel.onMeters = { [weak self] levels in self?.inputStrip.applyAudioLevels(levels) }   // 纯音频输入格子的电平表
     }
@@ -234,6 +264,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         transitionPanel.send = send
         if let session { transitionPanel.hotkeyTable = session.control.hotkeyTable }
         inputStrip.send = send
+        // 分类先换成新节目的（快照观察者一挂上就会回调一次：先挂会把旧节目的分类按新输入表清理后写进新节目）
+        inputStrip.categories = session.map { InputCategories(layout: $0.layout.values) } ?? InputCategories()
         mixerPanel.send = send
         bottomBar.send = send
         inputStrip.runtimeState = session.map { s in { [weak s] n in s?.inputs.runtimeState(of: n) } }
@@ -462,6 +494,131 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
 
     var isMultiviewWindowVisible: Bool { multiviewWindow?.isShowing ?? false }
 
+    // MARK: 输入条（W5-H）
+
+    /// 视频 / 图片文件直接加一路（拖到输入条 / 占位格，G13）：编号依次取空号、名字用文件名、不弹面板；视频 = 文件输入（循环、1 倍速，同添加面板默认），
+    /// 图片 = 图片输入。不认得的文件跳过、状态行说一句；号用满了停下并提示。返回发出去的配置。
+    @discardableResult
+    func addInputs(from drop: MediaFileDrop.Result) -> [InputConfig] {
+        guard let session else { return [] }
+        var used = Set(session.state.inputs.map(\.number))
+        var added: [InputConfig] = []
+        for file in drop.accepted {
+            guard let number = (1...max(1, session.engine.maxInputs)).first(where: { !used.contains($0) }) else {
+                bottomBar.showNotice(L("addInput.full", session.engine.maxInputs))
+                return added
+            }
+            var model = AddInputModel()
+            model.number = number
+            switch file.kind {
+            case .video:
+                model.kind = .file
+                model.filePath = file.url.path
+            case .image:
+                model.kind = .image
+                model.imagePath = file.url.path
+            }
+            guard let config = try? model.makeConfig() else { continue }
+            used.insert(number)
+            session.send(.addInput(config: config))
+            addInputHistory?.noteAdded(config)
+            added.append(config)
+        }
+        if !drop.skipped.isEmpty {
+            bottomBar.showNotice(L("strip.drop.skipped", drop.skipped.count, drop.skipped.map(\.lastPathComponent).joined(separator: L("list.separator"))))
+        }
+        return added
+    }
+
+    /// 分类数据写回 Show.layout（键见 InputCategories），算节目内容。
+    private func storeCategories(_ categories: InputCategories) {
+        guard let session else { return }
+        var values = session.layout.values
+        categories.write(into: &values)
+        guard values != session.layout.values else { return }
+        session.layout = ShowLayout(values: values)
+        onDocumentContentChanged?()
+    }
+
+    /// 分类改名（空 = 清除名字，回到"红色"这样的叫法）。
+    func renameCategory(_ color: InputCategories.Color, to name: String) {
+        var categories = inputStrip.categories
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        categories.names[color] = trimmed.isEmpty ? nil : trimmed
+        inputStrip.categories = categories
+        storeCategories(categories)
+    }
+
+    /// 分类标签右键"改名…"：sheet 里一个文本框（空着 = 清除名字）。
+    func presentRenameCategory(_ color: InputCategories.Color) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = L("category.renameTitle", color.defaultTitle)
+        alert.informativeText = L("category.renameInfo")
+        let field = NSTextField(string: inputStrip.categories.names[color] ?? "")
+        field.placeholderString = color.defaultTitle
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        field.setAccessibilityLabel(L("category.renameField"))
+        alert.accessoryView = field
+        alert.addButton(withTitle: L("common.ok"))
+        alert.addButton(withTitle: L("common.cancel"))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                guard response == .alertFirstButtonReturn else { return }
+                self?.renameCategory(color, to: field.stringValue)
+            }
+        }
+    }
+
+    /// 缩略图三档（输入条右键 / 窗口 › 输入缩略图 ▸）：存本机，马上生效，输入条贴回格子的高。
+    func setThumbnailSize(_ size: ThumbnailSize) {
+        stripPreferences?.thumbnailSize = size
+        applyThumbnailSize(size)
+    }
+
+    private func applyThumbnailSize(_ size: ThumbnailSize) {
+        inputStrip.thumbnailSize = size
+        fitInputStrip()
+    }
+
+    /// 输入条贴着格子的高：最小高 + 2（"中"档 = 197，W5-A 定的初始高）。
+    private var inputStripPreferredHeight: CGFloat { inputStrip.minimumHeight + 2 }
+
+    /// 分隔条挪到"输入条 = 贴着格子的高"（换缩略图大小时：大档换回中档不留一截空，最小窗口里上半区也不被挤）。拖分隔条得到的高度留到下次换大小。
+    private func fitInputStrip() {
+        guard let content = window?.contentView else { return }
+        content.layoutSubtreeIfNeeded()
+        guard centerSplit.frame.height > 0, abs(inputStrip.frame.height - inputStripPreferredHeight) > 0.5 else { return }
+        centerSplit.setPosition(max(monitorsMinimumHeight, centerSplit.frame.height - inputStripPreferredHeight - centerSplit.dividerThickness), ofDividerAt: 0)
+    }
+    private var protectingMonitorsHeight = false
+
+    /// 输入条最小高跟格子变（三档 / 裁切比例）：约束、分隔条、最小窗口一起跟上。中 / 小档在 W5-G 定的最小内容区（668）里放得下，
+    /// 大档放不下时最小窗口跟着长高（窗口现在比它矮就长高到它）；输入条比新的最小高矮时分隔条往上挪。
+    private func updateInputStripMinimum() {
+        let minimum = inputStrip.minimumHeight
+        guard let window, let content = window.contentView else {
+            inputStripMinimumConstraint?.constant = minimum
+            return
+        }
+        var size = Self.minimumContentSize
+        size.height = max(size.height, ceil(monitorsMinimumHeight + centerSplit.dividerThickness + minimum + Theme.bottomBarHeight))
+        if window.contentMinSize != size { window.contentMinSize = size }
+        if content.bounds.height < size.height {
+            var frame = window.frame
+            let grow = size.height - content.bounds.height
+            frame.origin.y -= grow
+            frame.size.height += grow
+            window.setFrame(frame, display: true)
+            content.layoutSubtreeIfNeeded()
+        }
+        // 先挪分隔条、再改约束：反过来那一次布局里格子已经变高、输入条还是原来的高
+        if inputStrip.frame.height < minimum - 0.5, centerSplit.frame.height > 0 {
+            centerSplit.setPosition(centerSplit.frame.height - minimum - centerSplit.dividerThickness, ofDividerAt: 0)
+        }
+        inputStripMinimumConstraint?.constant = minimum
+    }
+
     /// 收起 / 展开调音台。
     func toggleMixerPanel() {
         let collapsed = outerSplit.isSubviewCollapsed(mixerPanel)
@@ -470,6 +627,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         } else {
             outerSplit.setPosition(outerSplit.frame.width, ofDividerAt: 0)
         }
+        inputStrip.setMixerVisible(isMixerPanelVisible)
     }
 
     var isMixerPanelVisible: Bool { !outerSplit.isSubviewCollapsed(mixerPanel) }
@@ -509,9 +667,26 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         // 分隔条 1 pt 不算在输入条里（和调音台那边 G6 追加 ③ 同一个口径；原来拖到底输入条是 189）
-        splitView === centerSplit ? splitView.frame.height - Theme.inputStripMinimumHeight - splitView.dividerThickness
+        splitView === centerSplit ? splitView.frame.height - inputStrip.minimumHeight - splitView.dividerThickness
                                   : splitView.frame.width - Theme.mixerPanelWidth - splitView.dividerThickness
     }
 
     func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool { false }
+
+    /// 拖分隔条把调音台收起 / 拉出来：输入条右端的"调音台"开关跟着亮灭（W5-H）。
+    /// 窗口缩小时输入条保持原高（差额给上半区）；上半区因此放不下转场列、而输入条又比它的最小高高（拖高过、大档换回中档）时，
+    /// 先让输入条退回最小高——转场列不被压扁（V-32 那类），输入条最下一行按钮仍点得到。
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard let split = notification.object as? NSSplitView else { return }
+        if split === outerSplit {
+            inputStrip.setMixerVisible(isMixerPanelVisible)
+            return
+        }
+        guard split === centerSplit, !protectingMonitorsHeight, let upper = centerSplit.arrangedSubviews.first else { return }
+        let slack = inputStrip.frame.height - inputStrip.minimumHeight
+        guard upper.frame.height < monitorsMinimumHeight - 0.5, slack > 0.5 else { return }
+        protectingMonitorsHeight = true
+        centerSplit.setPosition(min(monitorsMinimumHeight, centerSplit.frame.height - inputStrip.minimumHeight - centerSplit.dividerThickness), ofDividerAt: 0)
+        protectingMonitorsHeight = false
+    }
 }

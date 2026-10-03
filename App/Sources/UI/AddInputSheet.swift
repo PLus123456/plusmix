@@ -48,8 +48,13 @@ struct AddInputModel {
     }
     enum ModelError: Error, CustomStringConvertible {
         case missing(String)
+        /// 多选了 need 张图片，空号只剩 free 个。
+        case notEnoughNumbers(need: Int, free: Int)
         var description: String {
-            switch self { case .missing(let what): L("addInput.error.missing", what) }
+            switch self {
+            case .missing(let what): L("addInput.error.missing", what)
+            case .notEnoughNumbers(let need, let free): L("addInput.error.notEnoughNumbers", need, free)
+            }
         }
     }
 
@@ -88,6 +93,22 @@ struct AddInputModel {
     var fileEndAction: FileEndAction = .loop
     var fileRate: Double = 1
     var imagePath: String = ""
+    /// 图片页一次多选时第一张以外的那几张（W5-H，01a G14）：每张加一路，编号依次取空号、名字用文件名。改了路径框就清掉。
+    var extraImagePaths: [String] = []
+    /// 图片页的浏览面板允许多选（G14：做字幕 / 台标常一次加好几张）。
+    static let imagePanelAllowsMultipleSelection = true
+
+    /// 浏览面板选完：第一张进路径框，其余的记下来。
+    mutating func setImagePaths(_ paths: [String]) {
+        imagePath = paths.first ?? ""
+        extraImagePaths = Array(paths.dropFirst())
+    }
+
+    /// 这次是不是一次加好几张图片（名字框不用，按文件名）。
+    var isMultiImage: Bool { kind == .image && !extraImagePaths.isEmpty }
+
+    /// 多选时路径框下面那行："已选 3 张：每张加一路，名字用文件名"；不是多选为空串。
+    var imageSelectionSummary: String { isMultiImage ? L("addInput.image.multi", extraImagePaths.count + 1) : "" }
     // NDI（提案 008）
     var ndiSourceName = ""
     var ndiBandwidth: NDIBandwidth = .highest
@@ -220,6 +241,17 @@ struct AddInputModel {
         let source = try makeSource()
         let finalName = name.trimmingCharacters(in: .whitespaces).isEmpty ? defaultName : name
         return InputConfig(number: number, name: finalName, source: source)
+    }
+
+    /// 添加面板确定时加哪几路：一般就是 makeConfig 那一路；图片多选 = 每张一路，第一张用选的编号，其余依次取 freeNumbers 里没用的，名字都用文件名。
+    /// 空号不够全加就一路都不加（报错，面板不关）。
+    func makeConfigs(freeNumbers: [Int]) throws -> [InputConfig] {
+        guard isMultiImage else { return [try makeConfig()] }
+        let paths = [imagePath] + extraImagePaths
+        guard !imagePath.isEmpty else { throw ModelError.missing(L("addInput.field.imagePath")) }
+        let numbers = [number] + freeNumbers.filter { $0 != number }
+        guard numbers.count >= paths.count else { throw ModelError.notEnoughNumbers(need: paths.count, free: numbers.count) }
+        return zip(numbers, paths).map { n, path in InputConfig(number: n, name: (path as NSString).lastPathComponent, source: .image(path: path)) }
     }
 
     /// 空闲编号（1…maxInputs 里最小的没用的）。
@@ -461,6 +493,17 @@ final class AddInputFormModel: ObservableObject {
             return nil
         }
     }
+
+    /// 添加面板确定：一路或图片多选的好几路（AddInputModel.makeConfigs）；失败把原因写进 errorMessage。
+    func makeConfigs() -> [InputConfig]? {
+        do {
+            errorMessage = ""
+            return try model.makeConfigs(freeNumbers: freeNumbers)
+        } catch {
+            errorMessage = "\(error)"
+            return nil
+        }
+    }
 }
 
 /// 声道映射的三段式选择（提案 014）。channelCount = 源的声道数（纯音频设备报的；DeckLink 给 16）。
@@ -641,8 +684,13 @@ struct InputSourceFormView: View {
     private var imageForm: some View {
         Section(L("addInput.image.title")) {
             HStack {
-                TextField(L("addInput.image.path"), text: $form.model.imagePath, prompt: Text(L("addInput.path.none")))
+                // 手改路径框 = 回到单张（多选的其余几张清掉）
+                TextField(L("addInput.image.path"), text: Binding(get: { form.model.imagePath }, set: { form.model.imagePath = $0; form.model.extraImagePaths = [] }),
+                          prompt: Text(L("addInput.path.none")))
                 Button(L("common.browse")) { browse(image: true) }
+            }
+            if form.model.isMultiImage {
+                Text(form.model.imageSelectionSummary).font(.caption)
             }
             Text(L("addInput.image.hint")).font(.caption).foregroundStyle(.secondary)
         }
@@ -693,9 +741,9 @@ struct InputSourceFormView: View {
     private func browse(image: Bool) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = image ? [.image] : [.movie, .video, .mpeg4Movie, .quickTimeMovie]
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = image && AddInputModel.imagePanelAllowsMultipleSelection   // 图片可以一次选好几张，每张一路（G14）
         if panel.runModal() == .OK, let url = panel.url {
-            if image { form.model.imagePath = url.path } else { form.model.filePath = url.path }
+            if image { form.model.setImagePaths(panel.urls.map(\.path)) } else { form.model.filePath = url.path }
         }
     }
 }
@@ -724,8 +772,9 @@ struct AddInputView: View {
                 }
                 .frame(width: 130)
                 .disabled(form.isFull)
-                TextField(L("addInput.name"), text: $form.model.name, prompt: Text(form.model.defaultName))
+                TextField(L("addInput.name"), text: $form.model.name, prompt: Text(form.model.isMultiImage ? L("addInput.name.byFile") : form.model.defaultName))
                     .frame(width: 200)
+                    .disabled(form.model.isMultiImage)
                 Text(form.isFull ? form.fullMessage : form.errorMessage).foregroundStyle(.red).lineLimit(1)
                 Spacer()
                 Button(L("common.cancel")) { form.onCancel?() }.keyboardShortcut(.cancelAction)
@@ -769,8 +818,8 @@ final class AddInputSheetController: NSWindowController {
     required init?(coder: NSCoder) { fatalError() }
 
     private func confirm() {
-        guard form.canAdd, let config = form.makeConfig() else { return }   // 满了：不加、面板不关（上面写着"已满"）
-        onConfirm(config)
+        guard form.canAdd, let configs = form.makeConfigs() else { return }   // 满了 / 空号不够：不加、面板不关（下面写着原因）
+        for config in configs { onConfirm(config) }   // 图片多选 = 每张一路（G14）
         close(returnCode: .OK)
     }
 

@@ -26,12 +26,14 @@ enum Theme {
     static let recording = NSColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1)
 
     static let monitorTitleHeight: CGFloat = 26
+    /// 格子宽（"中"档；W5-H 起有小 / 中 / 大三档，见 ThumbnailSize）。
     static let thumbnailWidth: CGFloat = 200
     static let thumbnailHeight: CGFloat = 112.5   // 16:9
+    /// 某一档的格子宽（W5-H，01a D11）。
+    static func thumbnailWidth(for size: ThumbnailSize) -> CGFloat { size.width }
     static let transitionColumnWidth: CGFloat = 150
     static let mixerPanelWidth: CGFloat = 340
-    /// 输入条最矮多高（格子按钮点得到，W5-A / X61）与开始时多高（W5-A 原型实测）。
-    static let inputStripMinimumHeight: CGFloat = 190
+    /// 输入条开始时多高（W5-A 原型实测）。最矮多高 W5-H 起按格子算（InputStripView.minimumHeight："中"档 195，格子两行按钮点得到）。
     static let inputStripInitialHeight: CGFloat = 197
     /// 底栏总高 = 按钮行 + 状态行（W5-F 起状态行独立成窗口最底一行，总高不变）。
     static let bottomBarHeight: CGFloat = 58

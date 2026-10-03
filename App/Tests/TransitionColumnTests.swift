@@ -251,7 +251,10 @@ final class TransitionColumnTests: XCTestCase {
         session.send(.ftb(on: false))
         XCTAssertTrue(AppTest.waitUntil(3) { wc.transitionPanel.ftbButton.bezelColor == nil })
         XCTAssertNotEqual(titleColor(wc.transitionPanel.ftbButton), .white, "关掉后回到系统配色")
-        let cell = try XCTUnwrap(wc.inputStrip.cells[2])
+        // W5-H 起没有声音的输入静音灰着（D7）：加一路带音频的合成源来点
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 3, audio: true)))
+        XCTAssertTrue(AppTest.waitUntil(5) { wc.inputStrip.cells[3]?.muteButton.isEnabled == true })
+        let cell = try XCTUnwrap(wc.inputStrip.cells[3])
         cell.muteButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { cell.muteButton.bezelColor == Theme.recording })
         XCTAssertEqual(titleColor(cell.muteButton), .white, "静音：白字")

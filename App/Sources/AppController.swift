@@ -37,6 +37,8 @@ final class AppController {
     lazy var panels = PanelCoordinator(controller: self)
     /// 添加输入的本机记忆：上次的类型、最近添加的来源（W5-F，底栏"添加输入 ▴"与菜单栏"按类型添加"）。
     let addInputHistory: AddInputHistory
+    /// 输入条的本机偏好（W5-H）。
+    let stripPreferences: InputStripPreferences
     /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
     let updateController: UpdateController
     private var replacing = false
@@ -58,6 +60,7 @@ final class AppController {
         defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
         updateController = UpdateController(defaults: defaults, isTestHost: isTestHost)
         addInputHistory = AddInputHistory(defaults: defaults)
+        stripPreferences = InputStripPreferences(defaults: defaults)
         if isTestHost {
             L10n.languageOverride = "zh-Hans"
             let configDir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/config", isDirectory: true)
@@ -93,6 +96,8 @@ final class AppController {
         windowController.defaultRecordDirectory = documents.recordDirectory
         windowController.panels = panels
         windowController.addInputHistory = addInputHistory
+        windowController.stripPreferences = stripPreferences   // 缩略图大小（W5-H）
+        windowController.onDocumentContentChanged = { [weak self] in self?.refreshDocumentEdited() }   // 分类存在 Show.layout 里（W5-H）
         windowController.bottomBar.shouldConfirmStop = { [weak self] in self?.settings.confirmBeforeStop ?? true }
         // 工具条"打开▾"：与"节目 › 打开最近"同一份最近列表（W5-G，A2）
         windowController.mainToolbar.openMenuProvider = { [weak self] in ShowMenu.openMenu(urls: self?.documents.recentURLs ?? []) }
@@ -192,14 +197,14 @@ final class AppController {
     // MARK: 未保存判定（W5-B）
 
     /// 未保存判定的口径：比"节目内容"——Show 去掉现场操作与界面摆放之后剩下的部分（报告 §1 有这张表）。
-    /// 不算改动：界面布局（窗口位置 / 面板开关）、节目名（跟文件名走）、录制 / 推流的开关（运行目标，打开文件时本来就清掉）、PGM / PVW 选哪路、
+    /// 不算改动：界面布局（窗口位置 / 面板开关；W5-H 起 layout 里的输入分类两个键除外——它们是节目内容，023 后进 InputConfig）、节目名（跟文件名走）、录制 / 推流的开关（运行目标，打开文件时本来就清掉）、PGM / PVW 选哪路、
     /// 转场进度 / T-bar / 起始拍、FTB 开没开与进度、叠加通道开没开 / 放哪路 / 动画进度。
     /// 算改动：输入表与每路设置（含推子、静音、路由、延迟、效果、抠像）、输出表与设置（含 NDI / 外部显示 / 虚拟摄像头 / 多画面的开关）、
     /// 转场类型 / 时长 / Wipe / Stinger 参数、FTB 时长、叠加的位置 / 动画 / 边框 / 锚点 / PVW 预览、四总线的增益 / 静音 / 效果、AFV、监听、节目格式、对齐延迟 / 监听点。
     static func documentContent(_ show: Show) -> Show {
         var s = ShowDocuments.stoppingOutputs(show)
         s.name = ""
-        s.layout = ShowLayout()
+        s.layout = ShowLayout(values: show.layout.values.filter { InputCategories.Keys.all.contains($0.key) })
         s.mixer.program = MixerState.noInput
         s.mixer.preview = MixerState.noInput
         s.mixer.transition.progress = 0
