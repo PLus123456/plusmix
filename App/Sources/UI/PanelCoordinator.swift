@@ -72,6 +72,9 @@ final class PanelCoordinator: NSObject {
         let model = InputSettingsModel(config: config)
         model.send = { [weak session] c in session?.send(c) }
         let w = InputSettingsWindowController(model: model)
+        w.attach(source: session.displaySource, format: session.format)   // 本路画面：多画面纹理裁这一格（W5-K / H3）
+        w.apply(state: state.input(number) != nil ? state : session.state)
+        forwardHotkeys(w)
         w.onClose = { [weak self] in self?.inputSettingsWindows.removeValue(forKey: number) }
         // 这一路没存过位置（居中摆的）、又已经开着别的输入设置窗：错开放在最近那个的右下，不叠在一起（X44）
         if !w.restoredSavedFrame, let last = inputSettingsWindows.values.compactMap(\.window).filter(\.isVisible).max(by: { $0.orderedIndex > $1.orderedIndex }) {
@@ -155,6 +158,11 @@ final class PanelCoordinator: NSObject {
         midiWindow = w
         w.present()
         return w
+    }
+
+    /// 设置类窗口在前时，没被文本框吃掉的按键照样走快捷键表（02 X12：原来只有主窗口是 key 时才派发，输入设置 / 叠加 / 音频设置窗在前按空格不切）。
+    private func forwardHotkeys(_ w: PanelWindowController) {
+        (w.window as? PanelWindow)?.keyHandler = { [weak self] event in self?.session?.control.handleKey(event) ?? false }
     }
 
     // MARK: 叠加设置窗 / 音频设置窗（W5-K）

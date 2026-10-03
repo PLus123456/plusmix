@@ -442,15 +442,16 @@ final class PanelsRevampTests: XCTestCase {
         let controller = AppTest.controller
         defer { controller.panels.closeAll() }
         let w = try XCTUnwrap(controller.panels.showInputSettings(input: 1))
-        XCTAssertFalse(w.model.settings.audio.afv)
+        XCTAssertTrue(w.model.settings.audio.afv, "契约默认跟随视频")
         let toggle = w.model.followVideoBinding
-        XCTAssertFalse(toggle.wrappedValue)
-        toggle.wrappedValue = true
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.audio.afv == true }, "开关写进 InputAudioSettings.afv")
-        XCTAssertTrue(AppTest.waitUntil(3) { controller.windowController.mixerPanel.model.state.input(1)?.settings.audio.afv == true }, "调音台条子读同一份")
+        XCTAssertTrue(toggle.wrappedValue)
         toggle.wrappedValue = false
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.audio.afv == false })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.audio.afv == false }, "开关写进 InputAudioSettings.afv")
+        XCTAssertTrue(AppTest.waitUntil(3) { controller.windowController.mixerPanel.model.state.input(1)?.settings.audio.afv == false }, "调音台条子读同一份")
         XCTAssertFalse(w.model.followVideoBinding.wrappedValue)
+        toggle.wrappedValue = true
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.audio.afv == true })
+        XCTAssertTrue(w.model.followVideoBinding.wrappedValue)
         // 文案：开关叫"跟随视频（AFV）"，"延迟补偿"改叫"音频延迟补偿"（免得和按帧的视频延迟混）
         XCTAssertEqual(L10n.string("inputSettings.audio.afv", language: "zh-Hans"), "跟随视频（AFV）")
         XCTAssertTrue(L("inputSettings.audio.delay", 120).hasPrefix("音频延迟补偿"), L("inputSettings.audio.delay", 120))
