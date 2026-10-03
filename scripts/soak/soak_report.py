@@ -244,12 +244,13 @@ def main():
     perf = pj.perf_metrics(lines)
     pm = pj.powermetrics_summary(pm_all) if pm_all else {}
     a3 = sj.a3_from_probe(probe, a.hours)
-    s3 = sj.s3_verdict(perf)
-    # S3 按线程：soak.sh 每分钟一份 thread-cpu 快照；只取运行段内的首尾两份（停机段的线程已经在退）
+    # S3 按线程：soak.sh 每分钟一份 thread-cpu 快照；只取运行段内的首尾两份（停机段的线程已经在退）。
+    # 2026-10-03 起 S3 的 CPU 判定不含 NDI SDK 线程（ndis:*），所以先算线程归因再判（测试标准 §3 / §4 S3）
     threads = None
     if os.path.exists(os.path.join(od, "threads.log")):
         threads = sj.thread_cpu_breakdown(sj.parse_thread_log(open(os.path.join(od, "threads.log"), encoding="utf-8", errors="replace").read()),
                                           t_start=t0, t_end=tlast)
+    s3 = sj.s3_verdict(perf, threads)
 
     # 输出 / 输入
     enc_first, enc_last = lines[0].get("encoder") or [], lines[-1].get("encoder") or []
@@ -407,7 +408,8 @@ def main():
     pm_txt = (f"；powermetrics GPU avg {f(pm.get('pm_gpu_active_avg_pct'), 1)}% / p95 {f(pm.get('pm_gpu_active_p95_pct'), 1)}%，GPU 频率均值 {f(pm.get('pm_gpu_freq_avg_mhz'), 0)} MHz（最低 {f(pm.get('pm_gpu_freq_min_mhz'), 0)}）"
               if pm and "pm_gpu_active_avg_pct" in pm else "；powermetrics 未采（无 sudo）")
     thr_txt = f"；按线程见 §5（首尾快照跨 {threads['wall_s'] / 3600:.2f} h，各线程之和 {threads['total_pct']:.1f}%）" if threads else "；没有 threads.log，不按线程归因"
-    w(f"| S3 CPU | avg {f(perf['cpu_avg_pct'], 1)}% / p95 {f(perf['cpu_p95_pct'], 1)}% / max {f(perf['cpu_max_pct'], 1)}%（进程级，100 = 一个核{thr_txt}） | avg ≤ 60% | ≤ 40% | {'✅' if s3.get('cpu_pass') else '❌'}{' 达目标' if s3.get('cpu_meets_target') else ''} | {delta('cpu_avg_pct', 1, ' pt')} |")
+    w(f"| S3 CPU（判定口径：{s3.get('cpu_basis', '')}） | avg {f(s3.get('cpu_judged_pct'), 1)}%{('；' + s3['note']) if s3.get('note') else ''} | avg ≤ 60% | ≤ 40% | {'✅' if s3.get('cpu_pass') else '❌'}{' 达目标' if s3.get('cpu_meets_target') else ''} | — |")
+    w(f"| S3 CPU（含 NDI SDK 线程的整进程值，信息项） | avg {f(perf['cpu_avg_pct'], 1)}% / p95 {f(perf['cpu_p95_pct'], 1)}% / max {f(perf['cpu_max_pct'], 1)}%（进程级，100 = 一个核{thr_txt}） | avg ≤ 60% | ≤ 40% | {'信息' if True else ''}{' 达目标' if s3.get('cpu_meets_target') else ''} | {delta('cpu_avg_pct', 1, ' pt')} |")
     w(f"| S3 GPU | avg {f(perf['gpu_avg_pct'], 1)}% / p95 {f(perf['gpu_p95_pct'], 1)}%（IOKit Device Utilization）{pm_txt} | avg ≤ 50% | ≤ 35% | {'✅' if s3.get('gpu_pass') else '❌'}{' 达目标' if s3.get('gpu_meets_target') else ''} | {delta('gpu_avg_pct', 1, ' pt')} |")
     if pm.get("pm_cores"):
         # cpu_pct 的 60% = 进程各线程合计 0.6 个核，不是某个核 60%；这一行用 powermetrics 的每核忙时比（整机、含别的进程）直接回答"有没有一个核在受累"

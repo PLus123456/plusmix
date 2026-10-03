@@ -264,6 +264,25 @@ class S3Tests(unittest.TestCase):
     def test_S3_missingCountersIsNotJudged(self):
         self.assertIsNone(sj.s3_verdict({})["pass"])
 
+    def testS3_cpuJudgedWithoutNDISDKThreads(self):
+        """2026-10-03 口径：CPU 判定扣掉 ndis:* 线程；整进程值保留作信息；没有线程快照按整进程判并写明。"""
+        perf = {"cpu_avg_pct": 60.1, "cpu_p95_pct": 62.7, "gpu_avg_pct": 25.8, "gpu_p95_pct": 28.0}   # 2026-09-28 的 8 小时
+        threads = {"ndi_pct": 25.1}   # ndis:async 18.9 + ndis:lowQ 6.2
+        s3 = sj.s3_verdict(perf, threads)
+        self.assertTrue(s3["cpu_pass"]); self.assertTrue(s3["pass"])
+        self.assertAlmostEqual(s3["cpu_judged_pct"], 35.0, places=6)
+        self.assertEqual(s3["cpu_avg_pct"], 60.1)
+        self.assertTrue(s3["cpu_meets_target"])
+        self.assertIn("不含 NDI", s3["cpu_basis"])
+        s3_plain = sj.s3_verdict(perf)
+        self.assertFalse(s3_plain["cpu_pass"]); self.assertIn("没有 threads.log", s3_plain["note"])
+        # 线程归因里 ndi_pct 按全部分组算、不受 top 截断影响
+        snaps = [{"ts": 0.0, "pid": 1, "threads": {1: (0, 0, "ndis:async"), 2: (0, 0, "ndis:lowQ"), 3: (0, 0, "switcher.program-clock")}},
+                 {"ts": 100.0, "pid": 1, "threads": {1: (10_000_000, 0, "ndis:async"), 2: (5_000_000, 0, "ndis:lowQ"), 3: (2_000_000, 0, "switcher.program-clock")}}]
+        bd = sj.thread_cpu_breakdown(snaps, top=1)
+        self.assertAlmostEqual(bd["ndi_pct"], 15.0, places=6)
+        self.assertEqual(len(bd["rows"]), 1)
+
     def test_S3_overallVerdictFailsWhenOnlyS3Fails(self):
         s1 = {"pass": True}; s2_ok = {"verdict": "pass"}; a3_ok = {"pass": True}
         s3_bad = sj.s3_verdict({"cpu_avg_pct": 60.1, "cpu_p95_pct": 62.7, "gpu_avg_pct": 25.8, "gpu_p95_pct": 28.0})

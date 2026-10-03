@@ -261,17 +261,28 @@ def a3_from_probe(probe, hours):
             "pass_a2": av.get("passA2"), "note": "" if full else f"只跑了 {span / 3600:.2f} h：斜率 × 8 h 外推"}
 
 
-def s3_verdict(perf):
+NDI_THREAD_PREFIX = "ndis:"   # NDI SDK 自己起的线程名前缀（ndis:async / ndis:lowQ …）；SDK 的无名线程分不出来，算在我们这边
+
+
+def s3_verdict(perf, threads=None):
     """§4 S3：CPU 平均 ≤ 60%、GPU 平均 ≤ 50%（必须）；≤ 40% / ≤ 35%（目标）。perf 是 perfjudge.perf_metrics 的结果（运行段）。
-    L4 长稳 = S1、S2、S3、A3（§5），S3 不过整次不过——第一次 8 小时（2026-09-28）CPU 60.1% 时总判定漏了它，报告顶行只列 S1 / S2 / A3。"""
+    L4 长稳 = S1、S2、S3、A3（§5），S3 不过整次不过——第一次 8 小时（2026-09-28）CPU 60.1% 时总判定漏了它，报告顶行只列 S1 / S2 / A3。
+    2026-10-03 口径修订（用户裁定，测试标准 §3 / §4 S3）：CPU 的判定值 = 进程 cpu_pct 减去 NDI SDK 线程（ndis:* 前缀）的占比；
+    threads 是 thread_cpu_breakdown 的结果（带 ndi_pct），没有线程快照时按整进程值判（偏严）并在 note 里写明。整进程值仍保留作信息。"""
     cpu, gpu = perf.get("cpu_avg_pct"), perf.get("gpu_avg_pct")
     if cpu is None or gpu is None:
         return {"pass": None, "cpu_pass": None, "gpu_pass": None, "meets_target": False, "note": "stats 里没有 cpu_pct / gpu_pct"}
-    cpu_pass, gpu_pass = cpu <= S3_CPU_MUST, gpu <= S3_GPU_MUST
+    ndi_pct = (threads or {}).get("ndi_pct")
+    if ndi_pct is None:
+        cpu_judged, basis, note = cpu, "整进程（没有线程快照，不扣 NDI SDK 线程，偏严）", "没有 threads.log：CPU 按整进程判，没扣 NDI SDK 线程"
+    else:
+        cpu_judged, basis, note = max(0.0, cpu - ndi_pct), f"不含 NDI SDK 线程（扣掉 ndis:* {ndi_pct:.1f} 个百分点）", ""
+    cpu_pass, gpu_pass = cpu_judged <= S3_CPU_MUST, gpu <= S3_GPU_MUST
     return {"pass": cpu_pass and gpu_pass, "cpu_pass": cpu_pass, "gpu_pass": gpu_pass,
             "cpu_avg_pct": cpu, "cpu_p95_pct": perf.get("cpu_p95_pct"), "gpu_avg_pct": gpu, "gpu_p95_pct": perf.get("gpu_p95_pct"),
-            "cpu_meets_target": cpu <= S3_CPU_TARGET, "gpu_meets_target": gpu <= S3_GPU_TARGET,
-            "meets_target": cpu <= S3_CPU_TARGET and gpu <= S3_GPU_TARGET, "note": ""}
+            "cpu_judged_pct": cpu_judged, "ndi_pct": ndi_pct, "cpu_basis": basis,
+            "cpu_meets_target": cpu_judged <= S3_CPU_TARGET, "gpu_meets_target": gpu <= S3_GPU_TARGET,
+            "meets_target": cpu_judged <= S3_CPU_TARGET and gpu <= S3_GPU_TARGET, "note": note}
 
 
 def overall_verdict(s1, s2, s3, a3):
@@ -332,7 +343,8 @@ def thread_cpu_breakdown(snaps, t_start=None, t_end=None, top=20):
     for g in rows:
         g["pct"] = g["cpu_s"] / wall * 100.0
     total = sum(g["pct"] for g in rows)
-    return {"wall_s": wall, "first_ts": first["ts"], "last_ts": last["ts"], "total_pct": total, "rows": rows[:top], "groups": len(rows)}
+    ndi_pct = sum(g["pct"] for g in rows if g["name"].startswith(NDI_THREAD_PREFIX))   # S3 判定要扣掉的那部分（§3 S3，2026-10-03）
+    return {"wall_s": wall, "first_ts": first["ts"], "last_ts": last["ts"], "total_pct": total, "ndi_pct": ndi_pct, "rows": rows[:top], "groups": len(rows)}
 
 
 def combine_segment_probes(segments, a2_threshold_ms=1000.0 / 60):
