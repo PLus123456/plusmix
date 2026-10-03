@@ -23,8 +23,9 @@
 ## 3. 防睡眠 / App Nap（X34）
 
 - `docs/user/故障排查.md:68`、`docs/user/en/troubleshooting.md:69`："App 自己还不会阻止睡眠 / App Nap，prompt 98 加"——98 起引擎在跑时 App 自己拿两条电源断言
-  （设置"性能与电源"：阻止系统睡眠与 App Nap、阻止显示器休眠，默认都开）。**还要不要让用户另跑 `caffeinate -u -i -d -s`，看 reports/w5-app-misc.md §2 的空闲复测结论再写**
-  （ProcessInfo 的选项里没有 caffeinate `-u` 那条"声明用户在用"的 UserIsActive 断言）。
+  （设置"性能与电源"：阻止系统睡眠与 App Nap、阻止显示器休眠，默认都开）。建议改成：平常用 App 不用再跑 caffeinate；**无人值守、要合盖或锁屏的长跑仍用 `caffeinate -u -i -d -s`**——
+  App 挡不住合盖 / 手动锁屏，ProcessInfo 也给不了 caffeinate `-u` 那条"声明用户在用"的 UserIsActive 断言；reports/w5-app-misc.md §2.2 的复测在"用户空闲但显示器亮着、没锁屏"时
+  有没有断言都没有拖慢，G4 记的拖慢条件（合盖 + 显示器睡 + 会话锁）这次没有复现。
 
 ## 4. 新界面（手册新增）
 
