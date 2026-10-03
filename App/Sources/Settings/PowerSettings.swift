@@ -27,7 +27,7 @@ final class PowerSettingsModel: ObservableObject {
         self.controller = controller
         preventSleep = controller.settings.preventSleepWhileRunning
         preventDisplaySleep = controller.settings.preventDisplaySleepWhileRunning
-        machineRows = MachineInfo.rows
+        machineRows = PowerMachineInfo.rows
     }
 
     /// 即时生效：只写这两个键，AppController 按引擎在不在跑拿 / 放。
@@ -48,8 +48,8 @@ final class PowerSettingsModel: ObservableObject {
     }
 }
 
-/// 本机信息（只读，启动时取一次）。
-enum MachineInfo {
+/// 本机信息（只读，启动时取一次）。G7 合并时改名：96（W5-J）的 PreferencesPanel 里也有一个 MachineInfo，两边同名。
+enum PowerMachineInfo {
     @MainActor
     static let rows: [PowerSettingsModel.MachineRow] = {
         var model = sysctlString("hw.model") ?? "Mac"

@@ -631,14 +631,7 @@ struct PerformancePage: View {
 
     var body: some View {
         Form {
-            PowerSettingsSection(model: model.power)
-            Section(L("settings.performance.machine")) {
-                LabeledContent(L("settings.performance.model"), value: MachineInfo.model)
-                LabeledContent(L("settings.performance.chip"), value: MachineInfo.chip)
-                LabeledContent(L("settings.performance.gpu"), value: MachineInfo.gpu)
-                LabeledContent(L("settings.performance.memory"), value: MachineInfo.memory)
-                LabeledContent(L("settings.performance.system"), value: MachineInfo.system)
-            }
+            PowerSettingsSection(model: model.power)   // 98 的这一节自带机型 / 芯片 / 内存 / GPU / 系统几行，96 原来那一节不再重复列
         }
         .formStyle(.grouped)
     }
