@@ -19,13 +19,54 @@ final class MainWindow: NSWindow {
         super.keyDown(with: event)
     }
 
-    /// 界面锁（W5-L，E8）：锁着时这个窗口里的鼠标点击不生效（锁按钮除外）。
+    /// 界面锁（W5-L，01a E8 / 04 Q43）：锁着时这个窗口里的鼠标点击不生效——内容区（监视器、转场列、输入条、调音台、底栏）和工具条上的按钮都拦，
+    /// 锁按钮本身除外；标题栏（拖窗口、红绿灯）不拦。键盘不拦（快捷键照常），菜单栏 / MIDI / API 不经过这里，独立窗口是别的窗口，都不受影响。
     var isInterfaceLocked = false
+    /// 锁着也能点的视图（锁按钮）。
+    weak var lockExemptView: NSView?
+    /// 拦下一次点击（按下）时回调：状态行提示怎么解锁。
+    var onBlockedClick: (() -> Void)?
     /// 被锁拦下的鼠标事件数（测试看）。
     private(set) var blockedMouseEvents = 0
 
+    /// 锁拦的鼠标事件：按下 / 抬起 / 拖动（左右中键）与滚轮。移动 / 进出（悬停提示）不拦。
+    private static let lockedTypes: Set<NSEvent.EventType> = [
+        .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+        .otherMouseDown, .otherMouseUp, .otherMouseDragged, .scrollWheel,
+    ]
+
     /// 锁着时这个事件该不该拦。
-    func blocksForLock(_ event: NSEvent) -> Bool { false }
+    func blocksForLock(_ event: NSEvent) -> Bool {
+        guard isInterfaceLocked, Self.lockedTypes.contains(event.type), let content = contentView else { return false }
+        // 整个窗口的视图树（含标题栏 / 工具条）：hitTest 的坐标是根视图父坐标系 = 窗口坐标
+        let root = content.superview ?? content
+        guard let hit = root.hitTest(event.locationInWindow) else { return false }
+        if let exempt = lockExemptView, hit === exempt || hit.isDescendant(of: exempt) { return false }
+        if hit.isDescendant(of: content) { return true }
+        // 标题栏那一行：工具条上的控件拦，红绿灯和空白处（拖窗口）不拦
+        let windowButtons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        if windowButtons.compactMap({ standardWindowButton($0) }).contains(where: { hit === $0 || hit.isDescendant(of: $0) }) { return false }
+        return Self.isControl(hit)
+    }
+
+    /// 视图本身或它的上级是控件（工具条按钮里点到的可能是按钮里的图像 / 文字子视图）。
+    private static func isControl(_ view: NSView) -> Bool {
+        var v: NSView? = view
+        while let current = v {
+            if current is NSControl { return true }
+            v = current.superview
+        }
+        return false
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        if blocksForLock(event) {
+            blockedMouseEvents += 1
+            if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) { onBlockedClick?() }
+            return
+        }
+        super.sendEvent(event)
+    }
 }
 
 @MainActor
@@ -79,9 +120,21 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     var isInterfaceLocked: Bool { (window as? MainWindow)?.isInterfaceLocked ?? false }
     /// 现在显示的提醒（W5-L，N02）。
     private(set) var activeReminders: [Reminder] = []
+    /// 提醒的设置（AppController 按本机设置给；改了马上重算）。
+    var reminderSettings = ReminderSettings() {
+        didSet { if oldValue != reminderSettings { refreshReminders() } }
+    }
+    private var reminderTracker = ReminderTracker()
+    /// 每秒重算一次提醒（FTB 满 10 秒、Master 低满 30 秒这类"时间到了"不会再来新快照）。
+    private var reminderTimer: Timer?
+    private var shownReminderTexts: [String] = []
 
-    /// 锁 / 解锁界面（底栏最右的锁按钮）。
-    func setInterfaceLocked(_ locked: Bool) {}
+    /// 锁 / 解锁界面（底栏最右的锁按钮；锁着时按钮高亮）。
+    func setInterfaceLocked(_ locked: Bool) {
+        guard let window = window as? MainWindow else { return }
+        window.isInterfaceLocked = locked
+        bottomBar.setLocked(locked)
+    }
 
     /// 测试用：清零快照分发的计数，让一条用例只量自己（UISmokeTests 的"每秒最多 60 次"，用户 2026-09-24 选的做法 (a)；
     /// 计数原来跨用例累计、以事件为锚的 1 s 窗口偶发数到 61，W3-E2 报告 §5 第 13 条）。
@@ -128,6 +181,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         window.delegate = self
         buildLayout()
         window.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
+        // 界面锁（W5-L）：锁按钮本身不拦；拦下点击时状态行说怎么解锁
+        window.lockExemptView = bottomBar.lockButton
+        window.onBlockedClick = { [weak self] in self?.bottomBar.showNotice(L("lock.blockedNotice")) }
         // 主窗口被遮住 / 最小化 / 到别的 Space（监视器的 display link 随之暂停）和露出来：断开 PGM 监视器的连续呈现，这段记 undelivered（提案 018）
         occlusionObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.programLedger?.breakRun(countingUndelivered: true) }
@@ -228,6 +284,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         bottomBar.onOutputSettings = { [weak self] tab in self?.panels?.showOutputSettings(tab: tab) }
         bottomBar.onAddStreamDestination = { [weak self] in self?.panels?.showStreamAddDestination() }
         bottomBar.willPopUpMenu = { [weak self] menu in self?.activeBottomMenu = menu }
+        bottomBar.onStats = { [weak self] in self?.panels?.showStats() }
+        bottomBar.onToggleLock = { [weak self] in
+            guard let self else { return }
+            self.setInterfaceLocked(!self.isInterfaceLocked)
+        }
         inputStrip.onOpenSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
         mixerPanel.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
         mixerPanel.onMeters = { [weak self] levels in self?.inputStrip.applyAudioLevels(levels) }   // 纯音频输入格子的电平表
@@ -265,6 +326,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }
         mainToolbar.setSessionAvailable(session != nil)   // 没有 session 时节目组以外置灰（W5-G）
         refreshToolbarStatus()
+        bindReminders(running: session != nil)
         guard let session else {
             window?.title = Self.windowTitle(showName: nil)
             return
@@ -329,12 +391,46 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         mainToolbar.apply(state: state)
         refreshToolbarStatus()
         overlayPanelController?.apply(state: state)
+        reminderTracker.update(state: state, now: Self.now)
+        refreshReminders()
     }
 
     private func apply(stats: Stats) {
         bottomBar.apply(stats: stats)
         refreshToolbarStatus()
         mixerPanel.apply(stats: stats)
+        reminderTracker.update(stats: stats, now: Self.now)
+        refreshReminders()
+    }
+
+    // MARK: 提醒（W5-L，N02）
+
+    /// 单调时钟（秒）。
+    private static var now: Double { ProcessInfo.processInfo.systemUptime }
+
+    /// 换 session：引擎起了从头计时、每秒重算；没有 session 收起提醒。
+    private func bindReminders(running: Bool) {
+        reminderTimer?.invalidate()
+        reminderTimer = nil
+        if running {
+            reminderTracker.engineStarted(at: Self.now)
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.refreshReminders() } }
+            RunLoop.main.add(timer, forMode: .common)
+            reminderTimer = timer
+        } else {
+            reminderTracker.engineStopped()
+        }
+        refreshReminders()
+    }
+
+    /// 算一遍该显示哪几条；字变了才动状态行（快照每帧都来）。
+    private func refreshReminders() {
+        let active = reminderTracker.active(now: Self.now, settings: reminderSettings)
+        activeReminders = active
+        let texts = active.map { $0.text(settings: reminderSettings) }
+        guard texts != shownReminderTexts else { return }
+        shownReminderTexts = texts
+        bottomBar.statusBar.showReminders(texts)
     }
 
     /// 工具条右组的录制 / 推流状态与外部显示主体的提示：读底栏刚算好的同一份汇总（铁律 4，不另算）。没变就不动。

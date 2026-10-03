@@ -4,10 +4,10 @@ import SwiftUI
 
 @MainActor
 final class ReminderSettingsModel: ObservableObject {
-    @Published var notLiveEnabled: Bool
-    @Published var notLiveMinutes: Int
-    @Published var ftbEnabled: Bool
-    @Published var lowAudioEnabled: Bool
+    @Published var notLiveEnabled: Bool { didSet { if notLiveEnabled != oldValue { commit() } } }
+    @Published var notLiveMinutes: Int { didSet { if notLiveMinutes != oldValue { commit() } } }
+    @Published var ftbEnabled: Bool { didSet { if ftbEnabled != oldValue { commit() } } }
+    @Published var lowAudioEnabled: Bool { didSet { if lowAudioEnabled != oldValue { commit() } } }
     private unowned let controller: AppController
 
     init(controller: AppController) {
@@ -17,5 +17,30 @@ final class ReminderSettingsModel: ObservableObject {
         notLiveMinutes = r.notLiveMinutes
         ftbEnabled = r.ftbEnabled
         lowAudioEnabled = r.lowAudioEnabled
+    }
+
+    /// 即时生效：写本机设置，主窗口的提醒马上按新设置算。
+    private func commit() {
+        var s = controller.settings
+        s.reminders = ReminderSettings(notLiveEnabled: notLiveEnabled, notLiveMinutes: ReminderSettings.clampMinutes(notLiveMinutes),
+                                       ftbEnabled: ftbEnabled, lowAudioEnabled: lowAudioEnabled)
+        controller.updateSettings(s)
+    }
+}
+
+struct ReminderSettingsSection: View {
+    @ObservedObject var model: ReminderSettingsModel
+
+    var body: some View {
+        Section(L("prefs.reminder.title")) {
+            Toggle(L("prefs.reminder.notLive"), isOn: $model.notLiveEnabled)
+            Stepper(value: $model.notLiveMinutes, in: ReminderSettings.notLiveMinutesRange) {
+                Text(L("prefs.reminder.notLiveMinutes", model.notLiveMinutes))
+            }
+            .disabled(!model.notLiveEnabled)
+            Toggle(L("prefs.reminder.ftb", Int(ReminderTracker.ftbSeconds)), isOn: $model.ftbEnabled)
+            Toggle(L("prefs.reminder.lowAudio", Int(ReminderTracker.lowAudioSeconds), Int(ReminderTracker.lowAudioThresholdDb)), isOn: $model.lowAudioEnabled)
+            Text(L("prefs.reminder.hint")).font(.caption).foregroundStyle(.secondary)
+        }
     }
 }

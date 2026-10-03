@@ -23,8 +23,22 @@ final class EngineActivity {
     var holdsSystemActivity: Bool { systemToken != nil }
     var holdsDisplayActivity: Bool { displayToken != nil }
 
-    /// 按"引擎在不在跑 × 两个开关"拿 / 放（幂等）。
-    func update(engineRunning: Bool, preventSleep: Bool, preventDisplaySleep: Bool) {}
+    /// 按"引擎在不在跑 × 两个开关"拿 / 放（幂等；两条互不牵连）。
+    func update(engineRunning: Bool, preventSleep: Bool, preventDisplaySleep: Bool) {
+        systemToken = Self.reconcile(systemToken, want: engineRunning && preventSleep, options: Self.systemOptions, reason: Self.systemReason)
+        displayToken = Self.reconcile(displayToken, want: engineRunning && preventDisplaySleep, options: Self.displayOptions, reason: Self.displayReason)
+    }
+
+    private static func reconcile(_ token: (any NSObjectProtocol)?, want: Bool, options: ProcessInfo.ActivityOptions,
+                                  reason: String) -> (any NSObjectProtocol)? {
+        switch (token, want) {
+        case (nil, true): return ProcessInfo.processInfo.beginActivity(options: options, reason: reason)
+        case (let held?, false):
+            ProcessInfo.processInfo.endActivity(held)
+            return nil
+        default: return token
+        }
+    }
 
     /// 一条电源断言（类型 + 名字）。
     struct PowerAssertion: Equatable, Sendable, CustomStringConvertible {

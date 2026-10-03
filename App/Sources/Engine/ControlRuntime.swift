@@ -2,6 +2,8 @@
 // （HTTP / WS，默认 127.0.0.1:8765）+ HotkeyDispatcher（用户表 ~/Library/Application Support/PlusMix/hotkeys.json，没有就默认表）
 // + MIDIController（映射编辑是 W3-E；这里只起来）+ 第三方 API 兼容层（W3-D VMixCompat，偏好设置开关，默认关；G4 接线）。
 // 起停顺序（reports/w2-control.md §5 第 1 条）：feed.start → api.start（先于引擎，客户端第 0 拍前就能连上）；停：api → 引擎 → feed。
+// W5-L：只读 tally 流（SwitcherTally，设置 › Tally 打开时才有）与 headless --tally-port 同一套接法——TallyPublisher 挂状态机的快照观察者、
+// TallyServer 起 WS /tally + GET /tally；起在 API / 兼容层之后，停在最前面（tally → API → 引擎）。运行中开关 / 换端口走 setTally，不用重起引擎。
 import AppKit
 import SwitcherContracts
 import SwitcherEngine
@@ -43,6 +45,14 @@ final class ControlRuntime {
     private(set) var tallyServer: TallyServer?
     /// tally 流起不来的原因（端口被占等）。
     private(set) var tallyError: String?
+    /// 想要的 tally 配置（nil = 关）：start 时按它起，setTally 运行中改。
+    private(set) var tallyConfiguration: TallyServerConfiguration?
+    /// start 之后、stopTally 之前才让 tally 起来。
+    private var tallyAllowed = false
+    /// tally 的起停串行做（开关连点时后一次等前一次做完再对齐）。
+    private var tallyQueue: Task<Void, Never>?
+    private let stateMachine: StateMachine
+    private let clockSpec: @Sendable () -> TickClockSpec?
     /// API 起不来的原因（端口被占等）；起来了为 nil。
     private(set) var apiError: String?
     /// 兼容层起不来的原因。
@@ -63,11 +73,15 @@ final class ControlRuntime {
     static var midiColdStartForTesting: TimeInterval?
 
     init(stateMachine: StateMachine, engine: Engine, api: APIServerConfiguration?, hotkeyTable: HotkeyTable, midiTable: MIDIMapTable = MIDIMapTable.loadUserTableOrDefault(),
-         compat: VMixCompatConfiguration? = nil) {
+         compat: VMixCompatConfiguration? = nil, tally: TallyServerConfiguration? = nil) {
         let bus = CommandBus(stateMachine: stateMachine)
-        let feed = StateFeed(stateMachine: stateMachine) { [weak engine] in engine?.clock?.spec }
+        let clockSpec: @Sendable () -> TickClockSpec? = { [weak engine] in engine?.clock?.spec }
+        let feed = StateFeed(stateMachine: stateMachine, clock: clockSpec)
         self.bus = bus
         self.feed = feed
+        self.stateMachine = stateMachine
+        self.clockSpec = clockSpec
+        tallyConfiguration = tally
         apiServer = api.map { APIServer(bus: bus, feed: feed, configuration: $0) }
         self.compat = compat.map { VMixCompatServer(bus: bus, feed: feed, configuration: $0) }
         hotkeys = HotkeyDispatcher(bus: bus, table: hotkeyTable)
@@ -106,13 +120,71 @@ final class ControlRuntime {
             midiError = L("notice.midiFailed", "\(error)")
             NSLog("%@", midiError!)
         }
+        tallyAllowed = true
+        await reconcileTally()
     }
 
-    /// 先停 API（不再收命令、关掉 WS）；引擎停了之后再 `finish()` 停推送源。
+    /// 停 tally 流（停机第一步：只读流先断，客户端看到连接关掉）。
+    func stopTally() async {
+        tallyAllowed = false
+        await reconcileTally()
+    }
+
+    /// 先停 API（不再收命令、关掉 WS）；引擎停了之后再 `finish()` 停推送源。tally 流若还开着先停它。
     func stopAPI() async {
+        await stopTally()
         await apiServer?.stop()
         await compat?.stop()
         midi.stop()
+    }
+
+    // MARK: tally 流（W5-L）
+
+    /// 运行中改 tally 配置（nil = 关）：起 / 停 / 换端口，不用重起引擎。还没 start 的只记下来，start 时按它起。
+    func setTally(_ configuration: TallyServerConfiguration?) async {
+        tallyConfiguration = configuration
+        await reconcileTally()
+    }
+
+    /// 把 tally 服务对齐到"想要的配置 × 现在能不能起"（串行）。
+    private func reconcileTally() async {
+        let previous = tallyQueue
+        let task = Task { @MainActor [weak self] in
+            await previous?.value
+            await self?.applyTallyState()
+        }
+        tallyQueue = task
+        await task.value
+    }
+
+    private func applyTallyState() async {
+        let desired = tallyAllowed ? tallyConfiguration : nil
+        if let server = tallyServer, server.configuration == desired { return }
+        if let server = tallyServer {
+            tallyServer = nil
+            await server.stop()
+        }
+        if let publisher = tallyPublisher {
+            tallyPublisher = nil
+            await publisher.stop()
+        }
+        guard let desired else {
+            tallyError = nil
+            return
+        }
+        let publisher = TallyPublisher(stateMachine: stateMachine, clock: clockSpec)
+        await publisher.start()
+        let server = TallyServer(publisher: publisher, configuration: desired)
+        do {
+            try await server.start()
+            tallyPublisher = publisher
+            tallyServer = server
+            tallyError = nil
+        } catch {
+            await publisher.stop()
+            tallyError = L("notice.tallyFailed", "\(desired.host):\(desired.port)", "\(error)")
+            NSLog("%@", tallyError ?? "")
+        }
     }
 
     /// 引擎停了之后：停推送源、结束命令循环。

@@ -382,9 +382,10 @@ final class StatsWindowTests: XCTestCase {
         session.send(.addInput(config: AppTest.syntheticConfig(number: 1, frameRate: .fps30)))
         XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 10), .live)
         session.send(.setProgram(input: 1))
-        // 一路连不上的推流（一直在连 / 退避）：Stats.encoder 里有它那一项，按 output 对号
-        session.send(.addOutput(config: AppTest.streamOutput(number: 1, url: AppTest.closedRTMP("w5l-stats"), name: "推流 · 测试")))
-        session.send(.startStream(output: 1))
+        // 一路连不上的推流（一直在连 / 退避）：Stats.encoder 里有它那一项，按 output 对号（空节目里已有 1 号录制输出，取空号）
+        let streamNumber = (session.state.outputs.map(\.number).max() ?? 0) + 1
+        session.send(.addOutput(config: AppTest.streamOutput(number: streamNumber, url: AppTest.closedRTMP("w5l-stats"), name: "推流 · 测试")))
+        session.send(.startStream(output: streamNumber))
 
         XCTAssertEqual(wc.bottomBar.statsButton.title, "统计")
         wc.bottomBar.statsButton.performClick(nil)
@@ -400,8 +401,8 @@ final class StatsWindowTests: XCTestCase {
         XCTAssertNotNil(model.render)
         XCTAssertTrue(model.displayRows.contains { $0.kind == "monitor" }, "显示：PGM 监视器那一项：\(model.displayRows)")
         XCTAssertNotNil(model.audio)
-        XCTAssertTrue(AppTest.waitUntil(5) { model.outputRows.contains { $0.number == 1 } }, "推流那一路：\(model.outputRows)")
-        let stream = try XCTUnwrap(model.outputRows.first { $0.number == 1 })
+        XCTAssertTrue(AppTest.waitUntil(5) { model.outputRows.contains { $0.number == streamNumber } }, "推流那一路：\(model.outputRows)")
+        let stream = try XCTUnwrap(model.outputRows.first { $0.number == streamNumber })
         XCTAssertEqual(stream.name, "推流 · 测试", "按 EncoderEntry.output 对上名字")
         XCTAssertEqual(stream.kind, .stream)
         XCTAssertEqual(stream.source, L("source.program"))
@@ -424,7 +425,7 @@ final class StatsWindowTests: XCTestCase {
         // 再点一次 = 同一个窗
         wc.bottomBar.statsButton.performClick(nil)
         XCTAssertTrue(controller.panels.statsWindow === w)
-        session.send(.stopStream(output: 1))
+        session.send(.stopStream(output: streamNumber))
     }
 
     /// 基线相减的口径（纯逻辑）：累计量减基线；速率量（fps / 码率 / 渲染 ms）原样；重置之后才出现的输入 / 输出基线按 0；

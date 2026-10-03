@@ -1,6 +1,7 @@
 // 状态行（W5-F，01a E9 / 03 V-22 / 04 Q45）：窗口最底一行、全宽，原来塞在底栏按钮下面（上下留白 6 / 24 / 10 / 14 / 4 不对称、左沿差 2 pt）。
 // 左边是 Stats 算出来的那一行（StatusLineFormatter，铁律 4：和 stats.jsonl 同一秒逐字一致）；右端是提示文字（命令被忽略、录制起停、重连……几秒后清掉），
 // 平时显示本机信息"芯片 · 内存"（纯本机、启动时取一次，不进 Stats，Q45）。左右各留 10 pt，两段文字都上下居中；顶上一条 1 pt 分隔线。
+// W5-L（N02）：提示文字左边是提醒条（琥珀底黑字，有提醒才出现：没在录 / 推、FTB 开着、Master 过低），窄窗口时先截提示、再截状态那一行、最后才截提醒。
 import AppKit
 import Darwin
 
@@ -43,13 +44,24 @@ final class StatusBarView: NSView {
         statusLabel.lineBreakMode = .byTruncatingTail
         noticeLabel.lineBreakMode = .byTruncatingTail
         noticeLabel.alignment = .right
-        // 窄窗口时先截提示 / 本机信息，状态那一行（Stats）尽量完整
+        // 窄窗口时先截提示 / 本机信息，状态那一行（Stats）尽量完整；提醒条比状态行还优先（只在出问题时出现）
         noticeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         noticeLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        reminderLabel.lineBreakMode = .byTruncatingTail
+        reminderLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(rawValue: NSLayoutConstraint.Priority.defaultHigh.rawValue + 1), for: .horizontal)
+        reminderLabel.setAccessibilityLabel(L("reminder.a11y"))
+        reminderView.layer?.cornerRadius = 3
+        reminderView.addSubview(reminderLabel)
+        reminderView.isHidden = true
+        // 提醒条与提示一组靠右：藏起来的提醒条不占位（NSStackView 默认 detachesHiddenViews）
+        let right = NSStackView(views: [reminderView, noticeLabel])
+        right.orientation = .horizontal
+        right.spacing = 10
+        right.translatesAutoresizingMaskIntoConstraints = false
         addSubview(divider)
         addSubview(statusLabel)
-        addSubview(noticeLabel)
+        addSubview(right)
         NSLayoutConstraint.activate([
             divider.topAnchor.constraint(equalTo: topAnchor),
             divider.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -57,11 +69,25 @@ final class StatusBarView: NSView {
             divider.heightAnchor.constraint(equalToConstant: 1),
             statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            noticeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.padding),
-            noticeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            noticeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 16),
+            right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.padding),
+            right.centerYAnchor.constraint(equalTo: centerYAnchor),
+            right.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 16),
+            reminderLabel.leadingAnchor.constraint(equalTo: reminderView.leadingAnchor, constant: 6),
+            reminderLabel.trailingAnchor.constraint(equalTo: reminderView.trailingAnchor, constant: -6),
+            reminderLabel.centerYAnchor.constraint(equalTo: reminderView.centerYAnchor),
+            reminderView.heightAnchor.constraint(equalToConstant: Theme.statusBarHeight - 5),
         ])
         showNotice("")
+    }
+
+    /// 提醒条：给几句就显示几句（"⚠︎ 甲 · 乙"），空数组 = 藏起来。没变不动（每秒都会调）。
+    func showReminders(_ texts: [String]) {
+        let text = texts.isEmpty ? "" : L("reminder.prefix") + texts.joined(separator: L("reminder.separator"))
+        if reminderView.isHidden != texts.isEmpty { reminderView.isHidden = texts.isEmpty }
+        if reminderLabel.stringValue != text {
+            reminderLabel.stringValue = text
+            reminderView.toolTip = text.isEmpty ? nil : text
+        }
     }
 
     @available(*, unavailable)

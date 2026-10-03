@@ -46,8 +46,12 @@ final class PanelCoordinator: NSObject {
         guard let session else { state = MixerState(); return }
         preferencesWindow?.model.rebind()
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
-        // 输出设置页的显示类输出状态读 Stats.display[]（提案 013），1 Hz
-        statsToken = session.observeStats { [weak self] stats in self?.outputSettingsWindow?.model.apply(stats: stats) }
+        // 输出设置页的显示类输出状态读 Stats.display[]（提案 013），1 Hz；统计窗（W5-L）读同一行，换 session 不关、接着读新的
+        statsToken = session.observeStats { [weak self] stats in
+            guard let self else { return }
+            self.outputSettingsWindow?.model.apply(stats: stats)
+            self.statsWindow?.model.apply(stats: stats, state: self.state)
+        }
     }
 
     private func apply(state: MixerState) {
@@ -162,7 +166,9 @@ final class PanelCoordinator: NSObject {
             w.present()
             return w
         }
-        let w = StatsWindowController(model: StatsWindowModel())
+        let model = StatsWindowModel()
+        if let stats = session?.stats { model.apply(stats: stats, state: state) }
+        let w = StatsWindowController(model: model)
         w.onClose = { [weak self] in self?.statsWindow = nil }
         statsWindow = w
         w.present()
@@ -188,6 +194,8 @@ final class PanelCoordinator: NSObject {
         hotkeyWindow = nil
         midiWindow?.close()
         midiWindow = nil
+        statsWindow?.close()
+        statsWindow = nil
         if controller.windowController.isMultiviewWindowVisible { controller.windowController.toggleMultiviewWindow() }
     }
 }

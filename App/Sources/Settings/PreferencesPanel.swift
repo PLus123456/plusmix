@@ -1,6 +1,8 @@
 // 偏好设置（W3-E 交付第 7 条）：节目分辨率 / 帧率（在 Show 里，改了要换 session）、API 端口 / token、音频输出设备、PVW 预览全部叠加（W3-E2）、
 // 外部输出在主屏上不盖住主界面（W3-E3）、第三方 API 兼容层（VMixCompat）开关（带法律提示）、语言、更新（W4-B 接 Sparkle，这里只留位置）、
 // 操作确认（W5-B：底栏停录制 / 推流前先确认，默认开）。
+// W5-L 加四节，各写在自己的文件里（96 合窗时整节挂进对应的页）：远程控制（API 与兼容层"仅本机 / 允许局域网" + 可访问地址，代替自由填监听地址；
+// 走"应用"）、Tally（只读 tally 流）、性能与电源（防睡眠 / App Nap）、提醒（主窗口提醒条）——后三节即时生效，不经"应用"。
 // W5-B（02 X04 / 01a F5）：节目格式"应用"、节目音频"应用"、"应用并重起引擎"在录制 / 推流在跑时先确认（sheet 挂在本窗口上）；换完引擎这个窗口不关，
 // 只把格式 / 节目音频几项重新读一遍新 session（rebind）。
 // API / 音频 / 兼容层用 W2-B2 的同一组 UserDefaults 键（AppSettings.Keys），下次起 session 生效；"应用并重启引擎"立刻生效。
@@ -137,16 +139,29 @@ final class PreferencesModel: ObservableObject {
     }
 
     /// 别的机器（或本机）该连的 API 地址：http://<地址>:<端口>；允许局域网又找不到局域网地址时为空串。
-    var apiAddress: String { "" }
+    /// 端口 0（系统分配，测试宿主）显示跑着的那个实际端口。
+    var apiAddress: String {
+        guard let host = NetworkAddresses.reachableHosts(listenHost: apiHost).first else { return "" }
+        return "http://\(host):\(displayedAPIPort)"
+    }
     /// 其余局域网地址（多块网卡时）。
-    var apiOtherAddresses: [String] { [] }
+    var apiOtherAddresses: [String] {
+        NetworkAddresses.reachableHosts(listenHost: apiHost).dropFirst().map { "http://\($0):\(displayedAPIPort)" }
+    }
+    private var displayedAPIPort: Int { apiPort == 0 ? (controller.session?.control.apiServer?.boundPort ?? 0) : apiPort }
     /// 允许局域网又没设 token 时的黄字提醒。
-    var apiWarning: String? { nil }
+    var apiWarning: String? {
+        apiEnabled && apiScope == .lan && apiToken.trimmingCharacters(in: .whitespaces).isEmpty ? L("prefs.remote.noTokenWarning") : nil
+    }
     /// 兼容层的 HTTP 地址（…/api）与 TCP 地址（地址:端口）。
-    var compatHTTPAddress: String { "" }
-    var compatTCPAddress: String { "" }
+    var compatHTTPAddress: String {
+        NetworkAddresses.reachableHosts(listenHost: compatLayerHost).first.map { "http://\($0):\(compatLayerHTTPPort)/api" } ?? ""
+    }
+    var compatTCPAddress: String {
+        NetworkAddresses.reachableHosts(listenHost: compatLayerHost).first.map { "\($0):\(compatLayerPort)" } ?? ""
+    }
     /// 兼容层允许局域网时的提醒（它没有鉴权）。
-    var compatWarning: String? { nil }
+    var compatWarning: String? { compatLayerEnabled && compatScope == .lan ? L("prefs.remote.compatLANWarning") : nil }
 
     func selectFormatPreset(_ f: ProgramFormat) {
         formatWidth = f.width
@@ -170,6 +185,8 @@ final class PreferencesModel: ObservableObject {
         s.audioDevice = audioDevice
         s.compatLayerEnabled = compatLayerEnabled
         s.compatLayerPort = max(1, min(65535, compatLayerPort))
+        s.compatLayerHost = compatLayerHost.trimmingCharacters(in: .whitespaces).isEmpty ? "127.0.0.1" : compatLayerHost.trimmingCharacters(in: .whitespaces)
+        s.compatLayerHTTPPort = max(1, min(65535, compatLayerHTTPPort))
         s.overlaysInPreview = overlaysInPreview
         s.externalBehindInterface = externalBehindInterface
         s.confirmBeforeStop = confirmBeforeStop
@@ -243,6 +260,7 @@ struct PreferencesView: View {
                 Toggle(L("prefs.confirm.stop"), isOn: $model.confirmBeforeStop)
                 Text(L("prefs.confirm.hint")).font(.caption).foregroundStyle(.secondary)
             }
+            ReminderSettingsSection(model: model.reminders)
             Section(L("prefs.format.title")) {
                 Picker(L("prefs.format.resolution"), selection: Binding(get: { "\(model.formatWidth)x\(model.formatHeight)" }, set: { v in
                     let parts = v.split(separator: "x").compactMap { Int($0) }
@@ -256,13 +274,8 @@ struct PreferencesView: View {
                 Button(L("prefs.format.apply")) { model.applyProgramFormat() }
                 Text(L("prefs.format.hint")).font(.caption).foregroundStyle(.secondary)
             }
-            Section(L("prefs.api.title")) {
-                Toggle(L("prefs.api.enabled"), isOn: $model.apiEnabled)
-                TextField(L("prefs.api.host"), text: $model.apiHost)
-                TextField(L("prefs.api.port"), value: $model.apiPort, format: PreferencesModel.plainInteger)
-                SecureField(L("prefs.api.token"), text: $model.apiToken)
-                Text(L("prefs.api.hint")).font(.caption).foregroundStyle(.secondary)
-            }
+            RemoteControlSection(model: model)
+            TallySettingsSection(model: model.tally)
             Section(L("prefs.audio.title")) {
                 Picker(L("prefs.audio.device"), selection: Binding(get: { model.audioDeviceID }, set: { model.audioDeviceID = $0 })) {
                     ForEach(model.audioDeviceChoices) { Text($0.title).tag($0.id) }
@@ -287,12 +300,7 @@ struct PreferencesView: View {
                 Toggle(L("prefs.external.behindInterface"), isOn: $model.externalBehindInterface)
                 Text(L("prefs.external.hint")).font(.caption).foregroundStyle(.secondary)
             }
-            Section(L("prefs.compat.title")) {
-                Toggle(L("prefs.compat.enabled"), isOn: $model.compatLayerEnabled)
-                TextField(L("prefs.compat.port"), value: $model.compatLayerPort, format: PreferencesModel.plainInteger)
-                Text(PreferencesModel.compatLegalNotice).font(.caption).foregroundStyle(.secondary)
-                Text(L("prefs.compat.pending")).font(.caption).foregroundStyle(.secondary)
-            }
+            PowerSettingsSection(model: model.power)
             Section(L("prefs.language.title")) {
                 Picker(L("prefs.language.picker"), selection: $model.language) {
                     ForEach(model.languageChoices) { Text($0.title).tag($0.id) }
