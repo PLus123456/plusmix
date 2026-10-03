@@ -1,4 +1,4 @@
-// 底栏（W5-F 起两行）：上一行是输出按钮，左组 添加输入 ▴ ｜ ⚙ 录制 ▴ ｜ ⚙ 外部显示 ｜ ⚙ 推流 ▴ ｜ ⚙ 多画面，右组 叠加（97 之前仍是弹出层）；
+// 底栏（W5-F 起两行）：上一行是输出按钮，左组 添加输入 ▴ ｜ ⚙ 录制 ▴ ｜ ⚙ 外部显示 ｜ ⚙ 推流 ▴ ｜ ⚙ 多画面，右组 叠加（W5-K 起开独立的叠加设置窗）；
 // 下一行是状态行（StatusBarView：窗口最底一行、全宽，左边 1 Hz 读 Stats，右端提示文字 / 本机信息，E9）。
 // 每个输出都是分体按钮（SplitBarButton，docs/ui-study/01-菜单逻辑.md §1 规则 1）：⚙ = 这件事的设置，主体 = 执行 / 开关，▴ = 快捷菜单（朝上开，BottomBarPopup）。
 // - 录制（K1 / K2 / K3）：⚙ 菜单"录制设置… / ISO 分路录制…"（单独的"ISO…"按钮去掉）；主体照旧 PGM + ISO 同一拍一起起停（有意保留，测试标准 A4 的前提）；
@@ -49,7 +49,7 @@ final class BottomBarView: NSView {
     let external = SplitBarButton(name: L("bottom.external"), title: L("bottom.external"))
     let stream = SplitBarButton(name: L("bottom.stream"), title: L("bottom.stream"))
     let multiview = SplitBarButton(name: L("bottom.multiview"), title: L("bottom.multiview"))
-    /// 右组：叠加（97 之前仍是弹出层）。
+    /// 右组：叠加（W5-K 起开独立的叠加设置窗，不再是弹出层）。
     let overlayButton = Theme.button(L("bottom.overlay"), target: nil, action: nil)
     /// 左组，从左到右（E2）。
     var leftGroup: [SplitBarButton] { [addInput, record, external, stream, multiview] }

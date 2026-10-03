@@ -2,7 +2,7 @@
 // 勾按 enabled 打、点 = setOutputEnabled 开关、删除单独一项（UIA-w3-app-misc-logic-bugs 第 1 条）。
 // 量法：菜单真弹出来，开着时用 CGWindowList 取本进程弹出菜单窗口的边界（只要窗口边界，不要屏幕录制权限），和窗口服务器给的主窗口边界比（同一个来源：
 // 测试宿主不在前台时 setFrame 之后两边会差一拍，见 AppTest.windowServerFrame）；菜单没真弹出来时退到按帮助函数算的位置（BottomBarPopup.menuFrameInScreen，
-// 与 popUp 用的是同一个定位点）和 window.frame 比，并打印出来是哪一种。叠加弹出层是本进程的 NSPopover 窗口，直接读 frame。
+// 与 popUp 用的是同一个定位点）和 window.frame 比，并打印出来是哪一种。叠加 W5-K 起是独立的叠加设置窗（不是弹出层），只查它不挂在主窗口上。
 import AppKit
 import XCTest
 import SwitcherContracts
@@ -44,25 +44,15 @@ final class BottomBarPopupTests: XCTestCase {
             XCTAssertTrue(menu.items.allSatisfy { $0.submenu == nil }, "[\(label)] 底栏菜单不用子菜单（子菜单方向由系统定、会往下伸）")
             XCTAssertGreaterThanOrEqual(menuFrame.minY, buttonTop - 1, "[\(label)] 菜单朝上开：底边不低于按钮上沿（不盖住按钮）")
 
-            // 叠加…弹出层
-            wc.presentOverlayPanel(relativeTo: wc.bottomBar.overlayButton)
-            XCTAssertTrue(AppTest.waitUntil(2) { wc.overlayPanelController?.view.window?.isVisible == true }, "[\(label)] 叠加面板应弹出")
-            AppTest.pump(seconds: 0.4)
-            let controller = try XCTUnwrap(wc.overlayPanelController)
-            let popoverFrame = try XCTUnwrap(controller.view.window?.frame)
-            let contentHeight = window.contentLayoutRect.height
-            let expected = NSSize(width: 400, height: min(640, contentHeight - 120))
-            print("[\(label)] 叠加弹出层 \(popoverFrame)；内容 \(controller.view.frame.size)，应为 \(expected)")
-            XCTAssertTrue(frame.insetBy(dx: -0.5, dy: -0.5).contains(popoverFrame), "[\(label)] 叠加弹出层 \(popoverFrame) 应整块在主窗口 \(frame) 里")
-            XCTAssertGreaterThanOrEqual(popoverFrame.minY, wc.bottomBar.overlayButton.window!.convertToScreen(wc.bottomBar.overlayButton.convert(wc.bottomBar.overlayButton.bounds, to: nil)).maxY - 1,
-                                        "[\(label)] 弹出层朝上开")
-            // 每行标签完整：内容区就是表单要的 400 宽（原来被压成 320×320，左边头一两个字被裁）
-            XCTAssertEqual(controller.view.frame.width, expected.width, accuracy: 0.5, "[\(label)] 叠加表单宽度")
-            XCTAssertEqual(controller.view.frame.height, expected.height, accuracy: 0.5, "[\(label)] 叠加表单高度 = min(640, 窗口内容高 − 120)")
-            let ideal = OverlayPanelView.idealWidth
-            XCTAssertLessThanOrEqual(ideal, controller.view.frame.width + 0.5, "[\(label)] 表单要的宽度放得下")
-            wc.presentOverlayPanel(relativeTo: wc.bottomBar.overlayButton)   // 再点一次 = 关
-            XCTAssertTrue(AppTest.waitUntil(2) { wc.overlayPanelController?.view.window?.isVisible != true })
+            // 叠加…：W5-K 起不再是弹出层，开的是独立的叠加设置窗（I1 / X21：浮层点一下格子的 1–4 就关，边切边调做不到）——
+            // 不挂在主窗口上（不是子窗口、不是 sheet），底栏没有要"朝上开、整块在窗口里"的弹出物了
+            wc.bottomBar.overlayButton.performClick(nil)
+            let overlay = try XCTUnwrap(AppTest.controller.panels.overlaySettingsWindow, "[\(label)] 叠加按钮应打开叠加设置窗")
+            XCTAssertTrue(AppTest.waitUntil(2) { overlay.window?.isVisible == true }, "[\(label)] 叠加设置窗应显示")
+            XCTAssertNil(overlay.window?.parent, "[\(label)] 叠加设置窗是独立窗口，不是主窗口的子窗口")
+            XCTAssertNil(window.attachedSheet, "[\(label)] 不是 sheet")
+            overlay.close()
+            XCTAssertTrue(AppTest.waitUntil(2) { AppTest.controller.panels.overlaySettingsWindow == nil })
         }
     }
 

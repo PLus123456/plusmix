@@ -12,6 +12,10 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     var onOpenSettings: ((Int) -> Void)? {
         didSet { for c in cells.values { c.onOpenSettings = onOpenSettings } }
     }
+    /// 格子 Overlay k 的右键"叠加设置…"（W5-K）。
+    var onOverlaySettings: ((Int) -> Void)? {
+        didSet { for c in cells.values { c.onOverlaySettings = onOverlaySettings } }
+    }
     let searchField = NSSearchField()
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
@@ -100,6 +104,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
                 cell = InputCellView(config: config)
                 cell.send = send
                 cell.onOpenSettings = onOpenSettings
+                cell.onOverlaySettings = onOverlaySettings
                 cell.display.source = displaySource
                 cells[config.number] = cell
             }

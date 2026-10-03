@@ -10,6 +10,8 @@ final class InputCellView: NSView {
     var send: ((Command) -> Void)?
     /// 右键"设置…"。
     var onOpenSettings: ((Int) -> Void)?
+    /// 底行 Overlay k 小按钮的右键"叠加设置…"（W5-K / I1：直达第 k 路）。
+    var onOverlaySettings: ((Int) -> Void)?
     /// 删这一路会碰到的地方（InputStripView 按快照填；空 = 直接删，W5-B）。
     var removalImpacts: [InputRemovalImpact] = []
     let display = MetalDisplayView(frame: .zero)
@@ -55,6 +57,7 @@ final class InputCellView: NSView {
         for b in overlayButtons {
             b.target = self
             b.action = #selector(overlayPressed(_:))
+            b.menu = OverlaySettingsMenu.make(channel: b.tag, target: self, action: #selector(overlaySettingsPressed(_:)))
         }
         muteButton.target = self
         muteButton.action = #selector(mutePressed)
@@ -261,6 +264,8 @@ final class InputCellView: NSView {
         guard channel >= 1, channel <= overlayButtons.count else { return nil }
         return overlayButtons[channel - 1].bezelColor != nil
     }
+
+    @objc private func overlaySettingsPressed(_ sender: NSMenuItem) { onOverlaySettings?(sender.tag) }
 
     @objc private func mutePressed() {
         send?(.mute(input: number, on: !config.settings.audio.muted))

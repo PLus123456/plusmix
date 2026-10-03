@@ -275,6 +275,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// 叠加设置窗（W5-K / I1；底栏"叠加…"、转场列 / 格子的右键同一个窗）。
+    @objc func showOverlaySettings(_ sender: Any?) { controller.panels.showOverlaySettings(channel: nil) }
+
     // MARK: 设置（App 菜单"设置…"下与工具条"设置▾"）
 
     @objc func showHotkeys(_ sender: Any?) { controller.panels.showHotkeyEditor() }
@@ -386,7 +389,7 @@ extension AppDelegate: NSMenuItemValidation {
             return controller.documents.hasAutosave
         case #selector(clearRecents(_:)):
             return !controller.documents.recentURLs.isEmpty
-        case #selector(transitionCut(_:)), #selector(transitionAuto(_:)), #selector(transitionFTB(_:)), #selector(transitionOverlay(_:)):
+        case #selector(transitionCut(_:)), #selector(transitionAuto(_:)), #selector(transitionFTB(_:)), #selector(transitionOverlay(_:)), #selector(showOverlaySettings(_:)):
             return session != nil
         case #selector(pickTransitionType(_:)):
             return session.map { !$0.state.transition.isActive } ?? false

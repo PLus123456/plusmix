@@ -297,8 +297,10 @@ final class PanelsRevampTests: XCTestCase {
         // 点主窗口（主窗口变 key）、按快捷键切换：窗还开着
         wc.window?.makeKeyAndOrderFront(nil)
         session.send(.setPreview(input: 1))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.preview == 1 })
+        let programBefore = session.state.program
         AppTest.press(" ")
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.program == 1 })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.program == 1 }, "空格 = Cut：PGM \(programBefore) → \(session.state.program)，PVW \(session.state.preview)，拒收 \(session.control.bus.counters.rejected)，first responder \(String(describing: wc.window?.firstResponder))")
         AppTest.pump(seconds: 0.2)
         XCTAssertTrue(overlayWindow.isVisible, "切换不关叠加设置窗")
         XCTAssertTrue(panels.showOverlaySettings(channel: nil) === w, "只有一个叠加设置窗")

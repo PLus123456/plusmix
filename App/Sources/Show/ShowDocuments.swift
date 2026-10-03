@@ -35,11 +35,14 @@ final class ShowDocuments {
     }
 
     /// 空节目：没有输入，带一个默认录制输出（录到 recordDirectory，默认 ~/Movies/PlusMix），PGM / PVW 都是黑场。
+    /// 四个叠加通道默认淡入淡出 0.5 s（W5-K / I3），按节目帧率换成拍（契约里存拍、默认是切入；不动契约默认值，只在 App 新建节目时写）。
     static func emptyShow(name: String = L("show.untitled"), recordDirectory: String = ShowDocuments.defaultRecordDirectory) -> Show {
         let record = OutputState(number: 1, kind: .record, name: L("show.defaultRecordName"), enabled: false,
                                  settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
                                                           record: RecordSettings(directory: recordDirectory)))
-        let state = MixerState(outputs: [record])
+        var state = MixerState(outputs: [record])
+        let ticks = Int((OverlaySettingsModel.defaultFadeSeconds * state.format.frameRate.approximateFramesPerSecond).rounded())
+        for i in state.overlays.indices { state.overlays[i].animation = OverlayAnimation(kind: .fade, durationTicks: ticks) }
         return Show(name: name, state: state)
     }
 

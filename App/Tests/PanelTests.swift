@@ -181,9 +181,9 @@ final class PanelTests: XCTestCase {
             }, verify: { session.state.transition.stinger == StingerParams(input: 2, cutAtTick: 12) && session.state.transition.wipe.direction == .topToBottom },
                describe: { "\(session.state.transition)" }))
 
-        cases.append(Case(name: "叠加面板：通道 1 → 输入 2、右下 1/4、淡入 15 拍", change: {
-                wc.presentOverlayPanel(relativeTo: wc.bottomBar.overlayButton)
-                let m = try XCTUnwrap(wc.overlayPanelController?.model, "叠加面板应打开")
+        cases.append(Case(name: "叠加设置窗：通道 1 → 输入 2、右下 1/4、淡入 15 拍", change: {
+                wc.bottomBar.overlayButton.performClick(nil)   // W5-K：底栏"叠加…"开叠加设置独立窗（原来是浮层）
+                let m = try XCTUnwrap(panels.overlaySettingsWindow?.model, "叠加设置窗应打开")
                 m.setInput(channel: 1, input: 2)
                 m.setPreset(channel: 1, .bottomRight)
                 m.setAnimation(channel: 1, kind: .fade, durationTicks: 15)
@@ -192,20 +192,20 @@ final class PanelTests: XCTestCase {
                 return o.input == 2 && o.rect == .bottomRightQuarter && o.animation == OverlayAnimation(kind: .fade, durationTicks: 15)
             }, describe: { "\(session.state.overlays[0])" }))
         // W3-E2 / 提案 010：每通道 PVW 预览、边框、锚点、滑入方向（前三项走 setOverlayDecoration，滑入方向走 setOverlay）
-        cases.append(Case(name: "叠加面板：通道 1 PVW 预览", change: {
-                let m = try XCTUnwrap(wc.overlayPanelController?.model, "叠加面板应还开着")
+        cases.append(Case(name: "叠加设置窗：通道 1 PVW 预览", change: {
+                let m = try XCTUnwrap(panels.overlaySettingsWindow?.model, "叠加设置窗应还开着")
                 m.setPreviewOn(channel: 1, on: true)
             }, verify: { session.state.overlays[0].previewOn && !session.state.overlays[1].previewOn && session.state.overlays[0].input == 2 },
                describe: { "\(session.state.overlays[0])" }))
-        cases.append(Case(name: "叠加面板：通道 1 边框（宽 0.01、红）", change: {
-                let m = try XCTUnwrap(wc.overlayPanelController?.model)
+        cases.append(Case(name: "叠加设置窗：通道 1 边框（宽 0.01、红）", change: {
+                let m = try XCTUnwrap(panels.overlaySettingsWindow?.model)
                 m.setBorderEnabled(channel: 1, on: true)
                 m.setBorderWidth(channel: 1, 0.01)
                 m.setBorderColor(channel: 1, RGB8(red: 255, green: 0, blue: 0))
             }, verify: { session.state.overlays[0].border == OverlayBorder(width: 0.01, color: RGB8(red: 255, green: 0, blue: 0)) && session.state.overlays[0].previewOn },
                describe: { "\(String(describing: session.state.overlays[0].border))" }))
-        cases.append(Case(name: "叠加面板：通道 2 锚点右下 + 从左滑入", change: {
-                let m = try XCTUnwrap(wc.overlayPanelController?.model)
+        cases.append(Case(name: "叠加设置窗：通道 2 锚点右下 + 从左滑入", change: {
+                let m = try XCTUnwrap(panels.overlaySettingsWindow?.model)
                 m.setAnchor(channel: 2, .bottomRight)
                 m.setAnimation(channel: 2, kind: .slide, durationTicks: 20)
                 m.setSlideFrom(channel: 2, .left)

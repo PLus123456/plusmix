@@ -288,7 +288,8 @@ final class ToolbarMenuTests: XCTestCase {
         let ftb = try item(menu, "FTB")
         let overlay = try XCTUnwrap(try item(menu, "Overlay").submenu)
         refresh(overlay)
-        XCTAssertEqual(rows(overlay), ["Overlay 1（未指定，开 = 用 PVW）", "Overlay 2（未指定，开 = 用 PVW）", "Overlay 3（未指定，开 = 用 PVW）", "Overlay 4（未指定，开 = 用 PVW）"])
+        XCTAssertEqual(rows(overlay), ["Overlay 1（未指定，开 = 用 PVW）", "Overlay 2（未指定，开 = 用 PVW）", "Overlay 3（未指定，开 = 用 PVW）", "Overlay 4（未指定，开 = 用 PVW）",
+                                       "—", "叠加设置…"], "W5-K：叠加设置窗在菜单栏也有入口（规则 5）")
         // 一个 keyEquivalent 都不设（HotkeyDispatcher 是唯一的触发口），子菜单也一样
         func allItems(_ m: NSMenu) -> [NSMenuItem] { m.items + m.items.compactMap(\.submenu).flatMap(allItems) }
         for i in allItems(menu) where !i.isSeparatorItem {
