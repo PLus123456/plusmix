@@ -187,7 +187,7 @@ struct RecordOutputSection: View {
             OutputSettingsView.resolutionPicker(video)
             OutputSettingsView.bitrateField(video)
             Stepper(value: video.keyframeIntervalFrames, in: 1...600, step: 1) {
-                Text(KeyframeInterval.text(frames: output.settings.video?.keyframeIntervalFrames ?? VideoEncodeSettings().keyframeIntervalFrames, rate: model.format.frameRate))
+                Text(L("outputSettings.keyframe.label", model.keyframeText(number)))
             }
             Picker(L("outputSettings.audioCodec"), selection: audio.codec) {
                 ForEach(OutputSettingsModel.audioCodecs, id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
@@ -238,6 +238,7 @@ struct ISOPage: View {
                     ForEach(rows) { row in
                         GridRow {
                             Toggle(L("outputSettings.iso.column.record"), isOn: Binding(get: { row.checked }, set: { model.setISORow(row.id, on: $0) }))
+                                .toggleStyle(.checkbox)
                                 .labelsHidden()
                                 .accessibilityLabel(row.title)
                                 .disabled(row.locked)
