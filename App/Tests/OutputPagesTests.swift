@@ -262,11 +262,11 @@ final class OutputPagesTests: XCTestCase {
         page.setISORow("pgm", on: false)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(master.number).map(OutputLinkage.isArmed) == false })
         XCTAssertEqual(page.isoRows.first?.checked, false)
-        wc.bottomBar.recordButton.performClick(nil)
+        wc.bottomBar.record.bodyButton.performClick(nil)   // 92 的分体控件：主体是 record.bodyButton（G7 合并时接）
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders.count == 2 }, "只起 ISO 两路：\(session.outputs.recorders.keys.sorted())")
         XCTAssertEqual(Set(session.outputs.recorders.keys), [iso1, iso2])
         XCTAssertEqual(session.state.output(master.number)?.enabled, false, "PGM 没录")
-        wc.bottomBar.recordButton.performClick(nil)
+        wc.bottomBar.record.bodyButton.performClick(nil)   // 92 的分体控件：主体是 record.bodyButton（G7 合并时接）
         if AppTest.waitForConfirmation(.stopRecord) != nil { AppTest.answer(.confirm) }
         XCTAssertTrue(AppTest.waitUntil(15) { session.outputs.recorders.isEmpty && !session.state.outputs.contains { $0.kind == .record && $0.enabled } })
         page.setISORow("pgm", on: true)
@@ -333,11 +333,11 @@ final class OutputPagesTests: XCTestCase {
         page.setRecordArmed(n, on: false)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(n).map(OutputLinkage.isArmed) == false })
         XCTAssertTrue(page.recordPlanLine.contains("1 路"), page.recordPlanLine)
-        wc.bottomBar.recordButton.performClick(nil)
+        wc.bottomBar.record.bodyButton.performClick(nil)   // 92 的分体控件：主体是 record.bodyButton（G7 合并时接）
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders.count == 1 }, "\(session.outputs.recorders.keys.sorted())")
         XCTAssertNotNil(session.outputs.recorders[master.number])
         XCTAssertNotNil(page.recordLiveNote)
-        wc.bottomBar.recordButton.performClick(nil)
+        wc.bottomBar.record.bodyButton.performClick(nil)   // 92 的分体控件：主体是 record.bodyButton（G7 合并时接）
         if AppTest.waitForConfirmation(.stopRecord) != nil { AppTest.answer(.confirm) }
         XCTAssertTrue(AppTest.waitUntil(15) { session.outputs.recorders.isEmpty && session.state.output(master.number)?.enabled == false })
 
