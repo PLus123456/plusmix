@@ -44,8 +44,6 @@ final class InputRuntime {
     private var imageWatchers: [Int: ImageFileWatcher] = [:]
     /// 正在监视的图片文件（已解析成绝对路径，按编号排；测试看）。
     var watchedImagePaths: [String] { imageWatchers.keys.sorted().compactMap { imageWatchers[$0]?.path } }
-    /// 图片文件改了、重新读过几次（按编号；测试 / 诊断看）。
-    private(set) var imageReloads: [Int: Int] = [:]
 
     /// 某路的运行状态（没有为 nil）。
     func runtimeState(of number: Int) -> InputState? { entries[number]?.input.state }
@@ -108,7 +106,6 @@ final class InputRuntime {
         guard started, let input = entries[number]?.input as? ImageInput else { return }
         input.stop()
         startInput(input)
-        imageReloads[number, default: 0] += 1
     }
 
     /// 图片 / 视频文件输入的相对路径挂到 base 下，与 headless 同一条规则（HeadlessRun 第 1 步：以 / 开头原样，否则 `showURL 所在目录/path`）；

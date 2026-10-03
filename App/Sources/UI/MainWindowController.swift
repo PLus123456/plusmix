@@ -27,8 +27,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     let previewMonitor = MonitorView(target: .preview)
     let programMonitor = MonitorView(target: .program)
     let transitionPanel = TransitionPanelView(frame: .zero)
-    let inputStrip = InputStripView(frame: .zero)
-    let mixerPanel = MixerPanelView(frame: .zero)
+    // 分隔视图里这两块开始时给个像样的 frame：NSSplitView 按当时的 frame 生成自动尺寸约束，0 高 / 0 宽会和它们自己的最小高 / 宽撞，
+    // 启动时日志里一串约束冲突（W5-G 报告 §5 第 9 条，W5-H 修）
+    let inputStrip = InputStripView(frame: NSRect(x: 0, y: 0, width: 1100, height: Theme.inputStripInitialHeight))
+    let mixerPanel = MixerPanelView(frame: NSRect(x: 0, y: 0, width: Theme.mixerPanelWidth, height: 600))
     let bottomBar = BottomBarView(frame: .zero)
     /// 顶部工具条（W5-G）。
     let mainToolbar: MainToolbar
@@ -58,7 +60,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     var addInputHistory: AddInputHistory?
     /// 输入条的本机偏好（缩略图大小；AppController 挂上来，W5-H）。
     var stripPreferences: InputStripPreferences? {
-        didSet { if let stripPreferences { inputStrip.thumbnailSize = stripPreferences.thumbnailSize } }
+        didSet { if let stripPreferences { applyThumbnailSize(stripPreferences.thumbnailSize) } }
     }
     /// 节目内容在快照以外变了（分类存在 Show.layout 里，W5-H）：AppController 重算未保存。
     var onDocumentContentChanged: (() -> Void)?
@@ -195,14 +197,17 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
             mixerPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: Theme.mixerPanelWidth),
             monitors.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
         ])
+        // 999 不是 required：输入条的 frame 由分隔视图直接设（自动尺寸约束是 required），换缩略图大小那一下两条 required 会在日志里撞；
+        // 真正守最小高的是分隔条的 constrainMaxCoordinate、最小窗口与 updateInputStripMinimum
         let stripMinimum = inputStrip.heightAnchor.constraint(greaterThanOrEqualToConstant: inputStrip.minimumHeight)
+        stripMinimum.priority = NSLayoutConstraint.Priority(999)
         stripMinimum.isActive = true
         inputStripMinimumConstraint = stripMinimum
         window.layoutIfNeeded()
         // 输入条开始时 197 高（W5-A 原型实测的值）。原来写成"窗口外框高 − 底栏 − 230"，230 里暗含了 32 pt 的标题栏；W5-G 加了工具条之后
         // 那一行是 52 pt，输入条就少了 20、被下面的最大坐标夹到 189（全量第一遍 MainWindowLayoutTests 红出来的）。改按内容区算，和标题栏多高无关。
-        // W5-H：格子多了一行按钮、缩略图框按裁切比例变矮，"中"档的最小高仍 ≤ 197；大档开始时就按它的最小高
-        centerSplit.setPosition(content.bounds.height - Theme.bottomBarHeight - max(Theme.inputStripInitialHeight, inputStrip.minimumHeight) - centerSplit.dividerThickness,
+        // W5-H：格子多了一行按钮、缩略图框按裁切比例变矮，"中"档贴着格子的高仍是 197（inputStripPreferredHeight）
+        centerSplit.setPosition(content.bounds.height - Theme.bottomBarHeight - max(Theme.inputStripInitialHeight, inputStripPreferredHeight) - centerSplit.dividerThickness,
                                 ofDividerAt: 0)
         // 分隔条 1 pt 不算在调音台里（W5-A 量出 339，G6 追加 ③）
         outerSplit.setPosition(window.frame.width - Theme.mixerPanelWidth - outerSplit.dividerThickness, ofDividerAt: 0)
@@ -565,18 +570,37 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         }
     }
 
-    /// 缩略图三档（输入条右键 / 窗口 › 输入缩略图 ▸）：存本机，马上生效。
+    /// 缩略图三档（输入条右键 / 窗口 › 输入缩略图 ▸）：存本机，马上生效，输入条贴回格子的高。
     func setThumbnailSize(_ size: ThumbnailSize) {
         stripPreferences?.thumbnailSize = size
-        inputStrip.thumbnailSize = size
+        applyThumbnailSize(size)
     }
+
+    private func applyThumbnailSize(_ size: ThumbnailSize) {
+        inputStrip.thumbnailSize = size
+        fitInputStrip()
+    }
+
+    /// 输入条贴着格子的高：最小高 + 2（"中"档 = 197，W5-A 定的初始高）。
+    private var inputStripPreferredHeight: CGFloat { inputStrip.minimumHeight + 2 }
+
+    /// 分隔条挪到"输入条 = 贴着格子的高"（换缩略图大小时：大档换回中档不留一截空，最小窗口里上半区也不被挤）。拖分隔条得到的高度留到下次换大小。
+    private func fitInputStrip() {
+        guard let content = window?.contentView else { return }
+        content.layoutSubtreeIfNeeded()
+        guard centerSplit.frame.height > 0, abs(inputStrip.frame.height - inputStripPreferredHeight) > 0.5 else { return }
+        centerSplit.setPosition(max(monitorsMinimumHeight, centerSplit.frame.height - inputStripPreferredHeight - centerSplit.dividerThickness), ofDividerAt: 0)
+    }
+    private var protectingMonitorsHeight = false
 
     /// 输入条最小高跟格子变（三档 / 裁切比例）：约束、分隔条、最小窗口一起跟上。中 / 小档在 W5-G 定的最小内容区（668）里放得下，
     /// 大档放不下时最小窗口跟着长高（窗口现在比它矮就长高到它）；输入条比新的最小高矮时分隔条往上挪。
     private func updateInputStripMinimum() {
         let minimum = inputStrip.minimumHeight
-        inputStripMinimumConstraint?.constant = minimum
-        guard let window, let content = window.contentView else { return }
+        guard let window, let content = window.contentView else {
+            inputStripMinimumConstraint?.constant = minimum
+            return
+        }
         var size = Self.minimumContentSize
         size.height = max(size.height, ceil(monitorsMinimumHeight + centerSplit.dividerThickness + minimum + Theme.bottomBarHeight))
         if window.contentMinSize != size { window.contentMinSize = size }
@@ -586,11 +610,13 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
             frame.origin.y -= grow
             frame.size.height += grow
             window.setFrame(frame, display: true)
+            content.layoutSubtreeIfNeeded()
         }
-        content.layoutSubtreeIfNeeded()
+        // 先挪分隔条、再改约束：反过来那一次布局里格子已经变高、输入条还是原来的高
         if inputStrip.frame.height < minimum - 0.5, centerSplit.frame.height > 0 {
             centerSplit.setPosition(centerSplit.frame.height - minimum - centerSplit.dividerThickness, ofDividerAt: 0)
         }
+        inputStripMinimumConstraint?.constant = minimum
     }
 
     /// 收起 / 展开调音台。
@@ -648,8 +674,19 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool { false }
 
     /// 拖分隔条把调音台收起 / 拉出来：输入条右端的"调音台"开关跟着亮灭（W5-H）。
+    /// 窗口缩小时输入条保持原高（差额给上半区）；上半区因此放不下转场列、而输入条又比它的最小高高（拖高过、大档换回中档）时，
+    /// 先让输入条退回最小高——转场列不被压扁（V-32 那类），输入条最下一行按钮仍点得到。
     func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard (notification.object as? NSSplitView) === outerSplit else { return }
-        inputStrip.setMixerVisible(isMixerPanelVisible)
+        guard let split = notification.object as? NSSplitView else { return }
+        if split === outerSplit {
+            inputStrip.setMixerVisible(isMixerPanelVisible)
+            return
+        }
+        guard split === centerSplit, !protectingMonitorsHeight, let upper = centerSplit.arrangedSubviews.first else { return }
+        let slack = inputStrip.frame.height - inputStrip.minimumHeight
+        guard upper.frame.height < monitorsMinimumHeight - 0.5, slack > 0.5 else { return }
+        protectingMonitorsHeight = true
+        centerSplit.setPosition(min(monitorsMinimumHeight, centerSplit.frame.height - inputStrip.minimumHeight - centerSplit.dividerThickness), ofDividerAt: 0)
+        protectingMonitorsHeight = false
     }
 }

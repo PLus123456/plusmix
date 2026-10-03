@@ -463,12 +463,34 @@ final class InputStripTests: XCTestCase {
         AppTest.setMainWindowSize(AppTest.minimumMainWindowSize)
         XCTAssertGreaterThanOrEqual(strip.frame.height, strip.minimumHeight - 0.5, "大档在最小窗口：输入条 \(strip.frame.height) ≥ \(strip.minimumHeight)")
         XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingSize.height - 1)
+        // 大档换回中档：输入条贴回格子的高（197），最小窗口回到 W5-G 定的内容区 668
+        wc.setThumbnailSize(.medium)
+        AppTest.pump(seconds: 0.1)
+        XCTAssertEqual(strip.frame.height, strip.minimumHeight + 2, accuracy: 0.5, "换回中档不留一截空")
+        XCTAssertEqual(wc.window?.contentMinSize.height ?? 0, MainWindowController.minimumContentSize.height, accuracy: 0.5)
+        wc.setThumbnailSize(.large)
         // 菜单栏兜底：窗口 › 输入缩略图 ▸ 同一份
         let windowMenu = try XCTUnwrap(NSApp.mainMenu?.items.first { $0.submenu?.title == "窗口" }?.submenu)
         let sizes = try XCTUnwrap(windowMenu.items.first { $0.title == "输入缩略图" }?.submenu)
         AppTest.delegate.menuNeedsUpdate(sizes)
         XCTAssertEqual(sizes.items.map(\.title), ["小", "中", "大"])
         XCTAssertEqual(sizes.items.map(\.state), [.off, .off, .on])
+    }
+
+    /// 输入条被拖高之后把窗口缩到最小：输入条先退回最小高，上半区仍放得下转场列（原来差额全给上半区，转场列会被压扁）。
+    func testUI_stripGivesBackHeightWhenWindowShrinks() throws {
+        let session = try AppTest.freshSession()
+        defer { AppTest.setMainWindowSize(NSSize(width: 1440, height: 900)); wc.setThumbnailSize(.medium) }
+        try AppTest.addSynthetics(session, count: 2)
+        AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
+        let split = try XCTUnwrap(strip.superview as? NSSplitView)
+        split.setPosition(split.frame.height - 300 - split.dividerThickness, ofDividerAt: 0)
+        AppTest.pump(seconds: 0.1)
+        XCTAssertEqual(strip.frame.height, 300, accuracy: 1, "拖到 300 高")
+        AppTest.setMainWindowSize(AppTest.minimumMainWindowSize)
+        print("拖高后缩到最小窗口：输入条 \(strip.frame.height)（最小 \(strip.minimumHeight)），上半区 \(wc.transitionPanel.frame.height)")
+        XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingSize.height - 0.5, "上半区放得下转场列")
+        XCTAssertGreaterThanOrEqual(strip.frame.height, strip.minimumHeight - 0.5, "输入条不低于最小高")
     }
 
     // MARK: 补 G14：添加面板的图片页可以多选，每张一路

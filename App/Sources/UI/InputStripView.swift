@@ -153,10 +153,13 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
             stack.topAnchor.constraint(equalTo: document.topAnchor),
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
             stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
             document.heightAnchor.constraint(equalTo: scrollView.contentView.heightAnchor),
         ])
+        // 格子底下不钉死：输入条一时比格子矮（换缩略图大小、分隔条还没挪的那一下）时格子伸出去被裁，而不是和 required 约束撞
+        let stackBottom = stack.bottomAnchor.constraint(equalTo: document.bottomAnchor)
+        stackBottom.priority = .defaultHigh
+        stackBottom.isActive = true
         registerForDraggedTypes([.fileURL])
         relayoutThumbnails()
         applySizes()
