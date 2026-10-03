@@ -20,31 +20,32 @@ final class StreamWiringTests: XCTestCase {
         session.send(.addInput(config: AppTest.syntheticConfig(number: 1, audio: true)))
         session.send(.setProgram(input: 1))
         XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
-        XCTAssertFalse(wc.bottomBar.streamButton.isEnabled, "没有推流输出时置灰")
+        XCTAssertTrue(wc.bottomBar.stream.bodyButton.isEnabled, "没有推流输出时也不灰：点了打开推流页添加（W5-F / L1，原来置灰）")
         let output = OutputState(number: 2, kind: .stream, name: "推流", enabled: false,
                                  settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
                                                           stream: StreamSettings(url: mtx.rtmpURL("s1"))))
         session.send(.addOutput(config: output))
-        XCTAssertTrue(AppTest.waitUntil(2) { wc.bottomBar.streamButton.isEnabled }, "加了推流输出后按钮可用")
+        XCTAssertTrue(AppTest.waitUntil(2) { wc.bottomBar.stream.bodyButton.isEnabled && wc.bottomBar.streamDestinations.map(\.number) == [2] },
+                      "加了推流输出后按钮可用（W5-F / L1 起没有目的地时也可用：等底栏看到这个目的地）")
         AppTest.pump(seconds: 1.2)
 
         var notices: [String] = []
         let token = session.observeNotices { notices.append($0) }
         defer { token.invalidate() }
-        wc.bottomBar.streamButton.performClick(nil)
+        wc.bottomBar.stream.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.first { $0.kind == .stream }?.enabled == true }, "按钮应发 startStream")
-        XCTAssertTrue(AppTest.waitUntil(12) { wc.bottomBar.streamButton.title == "● 推流中" }, "应连上并显示推流中：\(wc.bottomBar.streamButton.title)")
+        XCTAssertTrue(AppTest.waitUntil(12) { wc.bottomBar.stream.bodyButton.title == "● 推流中" }, "应连上并显示推流中：\(wc.bottomBar.stream.bodyButton.title)")
         // W5-B（X37）：起的时候提示"连接中"，连上（Stats 报 publishing）之后才提示"已开始"
         XCTAssertTrue(AppTest.waitUntil(3) { notices.contains("推流 2 已开始") }, "\(notices)")
         XCTAssertEqual(notices.filter { $0.hasPrefix("推流 2") }.prefix(2), ["推流 2 连接中…", "推流 2 已开始"])
         AppTest.pump(seconds: 10)
         let entry = wc.bottomBar.encoderEntry(forOutput: 2)
         print("推流 10 s 时 Stats.encoder：\(String(describing: entry))")
-        wc.bottomBar.streamButton.performClick(nil)
+        wc.bottomBar.stream.bodyButton.performClick(nil)
         XCTAssertEqual(AppTest.waitForConfirmation(.stopStream)?.request.title, "确定停止推流（1 路）？", "停止前先确认（W5-B）")
         AppTest.answer(.confirm)
-        XCTAssertTrue(AppTest.waitUntil(15) { wc.bottomBar.streamButton.title == "推流" && session.outputs.streams[2] == nil },
-                      "停止后按钮应回「推流」：\(wc.bottomBar.streamButton.title)")
+        XCTAssertTrue(AppTest.waitUntil(15) { wc.bottomBar.stream.bodyButton.title == "推流" && session.outputs.streams[2] == nil },
+                      "停止后按钮应回「推流」：\(wc.bottomBar.stream.bodyButton.title)")
         let stopped = wc.bottomBar.encoderEntry(forOutput: 2)
         XCTAssertEqual(entry?.state, "publishing")
         XCTAssertGreaterThanOrEqual(entry?.frames ?? 0, 500, "10 s 应送出约 600 帧")

@@ -326,11 +326,12 @@ final class OutputRuntime {
         }
     }
 
-    /// 推流建不起来的原因：地址的错查表成人话，其余原样。
+    /// 推流建不起来的原因：地址的错查表成人话，其余原样。原因会写进底栏提示、推流 ▴ 菜单和推流页，带地址的那一种先打码
+    /// （user:pass@ / passphrase / streamid 等，W5-F，G6 追加 ①）。
     nonisolated static func streamErrorText(_ error: any Error) -> String {
         switch error as? StreamDestination.Error {
         case .unsupportedScheme(let scheme)?: L("stream.error.unsupportedScheme", scheme)
-        case .invalidURL(let url)?: L("stream.error.invalidURL", url)
+        case .invalidURL(let url)?: L("stream.error.invalidURL", StreamURLRedaction.redact(url: url))
         case .missingHost?: L("stream.error.missingHost")
         case nil: "\(error)"
         }

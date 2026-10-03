@@ -28,6 +28,9 @@ final class OutputSettingsModel: ObservableObject {
     @Published private(set) var displayStats: [Stats.DisplayEntry] = []
     /// 最近一行 Stats 的 encoder[]（NDI 发送的状态与帧数读它；每项带输出编号 `output`，按它对号——提案 019）。
     @Published private(set) var encoderStats: [Stats.EncoderEntry] = []
+    /// 推流页"添加目的地"的地址框要拿焦点（W5-F，L1：没有目的地时点底栏推流主体）；视图拿到就清掉。requests 是累计次数（测试看）。
+    @Published var pendingAddDestinationFocus = false
+    private(set) var addDestinationFocusRequests = 0
     /// 起不来的录制 / 推流 → 原因；推流正在第几次连接（运行表，refreshRouteDetails 时取；W5-B）。
     @Published private(set) var failures: [Int: String] = [:]
     @Published private(set) var attempts: [Int: Int] = [:]
@@ -245,6 +248,13 @@ final class OutputSettingsModel: ObservableObject {
 
     var streamOutputs: [OutputState] { state.outputs.filter { $0.kind == .stream } }
 
+    /// 切到推流页、让"添加目的地"的地址框拿焦点。
+    func requestAddDestinationFocus() {
+        tab = .stream
+        addDestinationFocusRequests += 1
+        pendingAddDestinationFocus = true
+    }
+
     @discardableResult
     func addStream(url: String, key: String) -> Int {
         let n = nextOutputNumber()
@@ -445,6 +455,8 @@ struct OutputSettingsView: View {
     @State private var newNDIName = "PlusMix"   // App 侧的 NDI 源默认名用产品名（W4-D）；包内默认值不动
     @State private var newExternalScreen: UInt32 = NSScreen.main?.displayNumber ?? 0
     @State private var newExternalSource: OutputSource = .program
+    /// "添加目的地"的地址框（W5-F：没有目的地时点底栏推流主体，焦点放这里）。
+    @FocusState private var addDestinationFocused: Bool
 
     var body: some View {
         HStack(spacing: 0) {
@@ -625,6 +637,7 @@ struct OutputSettingsView: View {
             }
             Section(L("outputSettings.stream.add")) {
                 TextField(L("outputSettings.stream.url"), text: $newStreamURL, prompt: Text(L("outputSettings.stream.urlPrompt")))
+                    .focused($addDestinationFocused)
                 SecureField(L("outputSettings.stream.key"), text: $newStreamKey)
                 Button(L("outputSettings.stream.addButton")) {
                     guard !newStreamURL.trimmingCharacters(in: .whitespaces).isEmpty else { return }
@@ -635,6 +648,15 @@ struct OutputSettingsView: View {
                 Text(L("outputSettings.stream.hint")).font(.caption).foregroundStyle(.secondary)
             }
         }
+        .onAppear(perform: takeAddDestinationFocus)
+        .onChange(of: model.pendingAddDestinationFocus) { _, _ in takeAddDestinationFocus() }
+    }
+
+    /// 有人要求就把焦点给"添加目的地"的地址框（等这一轮布局完再给，刚出来的表单里设焦点会落空）。
+    private func takeAddDestinationFocus() {
+        guard model.pendingAddDestinationFocus else { return }
+        model.pendingAddDestinationFocus = false
+        DispatchQueue.main.async { addDestinationFocused = true }
     }
 
     // MARK: 外部显示

@@ -24,8 +24,8 @@ final class BottomBarPopupTests: XCTestCase {
             let frame = AppTest.setMainWindowSize(size)
             let label = "\(Int(size.width))×\(Int(size.height))"
 
-            // 外部输出菜单
-            let anchor = wc.bottomBar.externalButton
+            // 外部显示菜单（W5-F 起挂在"⚙ 外部显示"的齿轮上，主体 = 全部开 / 关）
+            let anchor = wc.bottomBar.external.gearButton
             var computed = NSRect.zero
             let real = AppTest.measurePoppedMenu(open: {
                 wc.presentExternalMenu(relativeTo: anchor)
@@ -80,7 +80,7 @@ final class BottomBarPopupTests: XCTestCase {
         }
         let menu = try XCTUnwrap(wc.externalOutputMenu())
         let sections = AppTest.menuSections(menu)
-        XCTAssertEqual(sections.count, NSScreen.screens.count, "每块显示器一段（没有外部输出时没有删除段）：\(menu.items.map(\.title))")
+        XCTAssertEqual(sections.count, NSScreen.screens.count + 1, "每块显示器一段 + 末尾设置段（W5-F / M3；没有外部输出时没有删除段）：\(menu.items.map(\.title))")
         for (section, display) in zip(sections, ExternalDisplays.all()) {
             XCTAssertTrue(section[0].isSectionHeader, "段首是显示器的段标题：\(section[0].title)")
             XCTAssertTrue(section[0].title.hasPrefix(display.name), "\(section[0].title) / \(display.name)")
@@ -104,23 +104,24 @@ final class BottomBarPopupTests: XCTestCase {
         XCTAssertEqual(first.first { $0.title == "PVW" }?.state, .on)
         XCTAssertTrue(AppTest.waitUntil(3) { session.aux.external.windows[output.number] != nil }, "开着 = 有外部窗口")
 
-        // 再点 PVW = 关掉（不删配置）：勾去掉、窗口关、输出还在
-        try pick("PVW")
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(output.number)?.enabled == false }, "点有勾的 = setOutputEnabled(false)")
+        // "关闭" = 关掉（不删配置）：勾去掉、窗口关、输出还在（W5-F / M2 起每块屏单选，原来是再点 PVW）
+        try pick("关闭")
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(output.number)?.enabled == false }, "点“关闭” = setOutputEnabled(false)")
         XCTAssertNotNil(session.state.output(output.number), "配置留着")
         XCTAssertTrue(AppTest.waitUntil(3) { session.aux.external.windows[output.number] == nil }, "关掉 = 外部窗口收起")
         first = try firstDisplaySection()
-        XCTAssertEqual(first.first { $0.title == "PVW" }?.state, .off, "勾按 enabled 打")
+        XCTAssertEqual(first.first { $0.title.hasPrefix("PVW") }?.state, .off, "勾按 enabled 打")
+        XCTAssertEqual(first.first { $0.title.hasPrefix("PVW") }?.title, "PVW（已关）", "关着的那一路标（已关）")
 
-        // 再点 = 重新打开同一路（不新增输出）
-        try pick("PVW")
+        // 再点 PVW = 重新打开同一路（不新增输出）
+        try pick("PVW（已关）")
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(output.number)?.enabled == true })
         XCTAssertEqual(session.state.outputs.filter { $0.kind == .externalDisplay }.count, 1, "同一个输出，不新增")
 
-        // 删除是单独一项（最后一段）；状态与帧数只读 Stats.display[]
+        // 删除是单独一项（倒数第二段；最后一段是"外部显示设置… / NDI® 发送设置…"，W5-F / M3）；状态与帧数只读 Stats.display[]
         XCTAssertTrue(AppTest.waitUntil(3) { session.stats?.display.contains { $0.kind == "externalDisplay" && $0.output == output.number } ?? false })
         let menu2 = try XCTUnwrap(wc.externalOutputMenu())
-        let tail = try XCTUnwrap(AppTest.menuSections(menu2).last)
+        let tail = try XCTUnwrap(AppTest.menuSections(menu2).dropLast().last)
         let entry = try XCTUnwrap(session.stats?.display.first { $0.kind == "externalDisplay" && $0.output == output.number })
         let remove = try XCTUnwrap(tail.first { $0.title.hasPrefix("删除 \(output.number) ") }, tail.map(\.title).description)
         XCTAssertTrue(remove.title.contains(OutputStatusText.display(entry)), "\(remove.title) / \(OutputStatusText.display(entry))")
@@ -129,7 +130,7 @@ final class BottomBarPopupTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(output.number)?.enabled == false }, "全部关闭 = 全部 setOutputEnabled(false)")
         XCTAssertNotNil(session.state.output(output.number), "全部关闭只关不删")
         let menu3 = try XCTUnwrap(wc.externalOutputMenu())
-        let tail3 = try XCTUnwrap(AppTest.menuSections(menu3).last)
+        let tail3 = try XCTUnwrap(AppTest.menuSections(menu3).dropLast().last)
         XCTAssertNil(tail3.first { $0.title == L("externalMenu.closeAll") }, "没有开着的路时不列\"全部关闭\"")
         let remove3 = try XCTUnwrap(tail3.first { $0.title.hasPrefix("删除 \(output.number) ") })
         menu3.performActionForItem(at: menu3.index(of: remove3))

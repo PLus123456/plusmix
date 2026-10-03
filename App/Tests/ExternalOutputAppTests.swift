@@ -71,7 +71,7 @@ final class ExternalOutputAppTests: XCTestCase {
         XCTAssertEqual(saved.kind, .externalDisplay)
         XCTAssertEqual(ExternalDisplaySpec(settings: saved.settings).displayID, displayID)
         XCTAssertEqual(ExternalDisplaySpec(settings: saved.settings).source, .input(number: 2))
-        XCTAssertTrue(session.lastNotice?.contains("外部输出") ?? false, "状态行应提示过外部输出状态：\(session.lastNotice ?? "")")
+        XCTAssertTrue(session.lastNotice?.contains("外部显示") ?? false, "状态行应提示过外部显示状态（W5-F / M4 起统一叫外部显示）：\(session.lastNotice ?? "")")
         session.send(.removeOutput(output: output.number))
         XCTAssertTrue(AppTest.waitUntil(3) { session.aux.external.windows.isEmpty }, "删输出应关窗口")
         XCTAssertFalse(external.isShowing)
@@ -84,9 +84,10 @@ final class ExternalOutputAppTests: XCTestCase {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 1)
         let wc = AppTest.controller.windowController
-        // W5-A 起菜单拍平：每块显示器一段（段标题 = 显示器），没有子菜单；勾 = 开着；再点 = 关（不删）；删除是最后一段单独一项
+        // W5-A 起菜单拍平：每块显示器一段（段标题 = 显示器），没有子菜单；勾 = 开着；删除是倒数第二段单独一项。
+        // W5-F（M2 / M3）：每块屏单选，这块屏有配置时最上一项"关闭"（关，不删）；最后一段是"外部显示设置… / NDI® 发送设置…"
         let menu = try XCTUnwrap(wc.externalOutputMenu())
-        XCTAssertEqual(AppTest.menuSections(menu).count, NSScreen.screens.count, "每块显示器一段（没有外部输出时没有删除段）")
+        XCTAssertEqual(AppTest.menuSections(menu).count, NSScreen.screens.count + 1, "每块显示器一段 + 末尾设置段（没有外部输出时没有删除段）")
         let sub = try XCTUnwrap(AppTest.menuSections(menu).first)
         // 能选的源（有动作的项）；输入那一组前面另有一行"Aux = 原始画面"的说明（W3-E3 交付第 2 条，AuxLayeringAppTests 看它）
         XCTAssertEqual(sub.filter { $0.action != nil }.map(\.title), ["PGM", "PVW", "多画面", "输入 1 合成 1"])
@@ -98,8 +99,9 @@ final class ExternalOutputAppTests: XCTestCase {
         let menu2 = try XCTUnwrap(wc.externalOutputMenu())
         let sub2 = try XCTUnwrap(AppTest.menuSections(menu2).first)
         XCTAssertEqual(sub2.first { $0.title == "PVW" }?.state, .on)
-        XCTAssertEqual(AppTest.menuSections(menu2).count, NSScreen.screens.count + 1, "多了一段：删除 x + 全部关闭")
-        XCTAssertEqual(AppTest.menuSections(menu2).last?.count, 2)
+        XCTAssertEqual(AppTest.menuSections(menu2).count, NSScreen.screens.count + 2, "多了一段：删除 x + 全部关闭")
+        let sections2 = AppTest.menuSections(menu2)
+        XCTAssertEqual(sections2[sections2.count - 2].count, 2, "删除段：删除 x + 全部关闭（最后一段是设置）")
         XCTAssertEqual(ExternalDisplaySpec(settings: session.state.outputs.first { $0.kind == .externalDisplay }!.settings).displayID, ExternalDisplays.id(of: screen))
         // "关闭 n …（状态）"那一项的状态与帧数只读 Stats.display[]（提案 013）
         let number = try XCTUnwrap(session.state.outputs.first { $0.kind == .externalDisplay }?.number)
@@ -110,12 +112,14 @@ final class ExternalOutputAppTests: XCTestCase {
         let removeItem = try XCTUnwrap(menu3.items.first { $0.action != nil && $0.title.hasPrefix("删除 \(number) ") }, menu3.items.map(\.title).description)
         XCTAssertTrue(removeItem.title.contains(OutputStatusText.display(entry)), "\(removeItem.title) / \(OutputStatusText.display(entry))")
         XCTAssertTrue(removeItem.title.contains("显示中"), removeItem.title)
-        // 菜单项的 target 是最近一次建的 builder（MainWindowController 只留最后一个），所以用 menu3 去点：再点 PVW = 关（配置留着），删除项 = 删
+        // 菜单项的 target 是最近一次建的 builder（MainWindowController 只留最后一个），所以用 menu3 去点："关闭" = 关（配置留着；W5-F 起单选，
+        // 原来是再点 PVW），删除项 = 删
         let sub3 = try XCTUnwrap(AppTest.menuSections(menu3).first)
         let pvw3 = try XCTUnwrap(sub3.first { $0.title == "PVW" })
         XCTAssertEqual(pvw3.state, .on)
-        menu3.performActionForItem(at: menu3.index(of: pvw3))
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number)?.enabled == false }, "再点 = 关，不删")
+        let off3 = try XCTUnwrap(sub3.first { $0.title == "关闭" }, sub3.map(\.title).description)
+        menu3.performActionForItem(at: menu3.index(of: off3))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number)?.enabled == false }, "关闭 = 关，不删")
         let menu4 = try XCTUnwrap(wc.externalOutputMenu())
         let remove4 = try XCTUnwrap(menu4.items.first { $0.title.hasPrefix("删除 \(number) ") })
         menu4.performActionForItem(at: menu4.index(of: remove4))
@@ -127,7 +131,7 @@ final class ExternalOutputAppTests: XCTestCase {
         try AppTest.addSynthetics(session, count: 2)
         let wc = AppTest.controller.windowController
         XCTAssertFalse(wc.isMultiviewWindowVisible)
-        wc.bottomBar.multiviewButton.performClick(nil)
+        wc.bottomBar.multiview.bodyButton.performClick(nil)
         XCTAssertTrue(wc.isMultiviewWindowVisible)
         let mv = try XCTUnwrap(wc.multiviewWindow)
         XCTAssertEqual(mv.displayView.target, .multiview)

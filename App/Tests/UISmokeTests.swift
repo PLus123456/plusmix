@@ -108,25 +108,26 @@ final class UISmokeTests: XCTestCase {
 
         // 12. 录制 / 推流按钮：录制按钮发 startRecord → Recorder 真起来（Stats.encoder[i].state = recording → "● 录制中"）→ stopRecord →
         //     封口后按钮回"录制"、文件落在测试宿主的临时录制目录；推流没有输出就置灰
-        XCTAssertTrue(wc.bottomBar.recordButton.isEnabled)
-        wc.bottomBar.recordButton.performClick(nil)
+        XCTAssertTrue(wc.bottomBar.record.bodyButton.isEnabled)
+        wc.bottomBar.record.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == true }, "录制按钮应发 startRecord")
-        XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.recordButton.title == "● 录制中" }, "Stats 报 recording 后应显示录制中：\(wc.bottomBar.recordButton.title)")
-        wc.bottomBar.recordButton.performClick(nil)
+        XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.record.bodyButton.title == "● 录制中" }, "Stats 报 recording 后应显示录制中：\(wc.bottomBar.record.bodyButton.title)")
+        wc.bottomBar.record.bodyButton.performClick(nil)
         XCTAssertNotNil(AppTest.waitForConfirmation(.stopRecord), "停止前先确认（W5-B）")
         AppTest.answer(.confirm)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == false })
-        XCTAssertTrue(AppTest.waitUntil(10) { wc.bottomBar.recordButton.title == "录制" && session.outputs.lastResults[1] != nil },
-                      "封口后按钮应回「录制」：\(wc.bottomBar.recordButton.title)")
+        XCTAssertTrue(AppTest.waitUntil(10) { wc.bottomBar.record.bodyButton.title == "录制" && session.outputs.lastResults[1] != nil },
+                      "封口后按钮应回「录制」：\(wc.bottomBar.record.bodyButton.title)")
         if let r = session.outputs.lastResults[1] {
             print("冒烟录制：\(r.url.path)，\(r.videoFrames) 帧 / \(r.audioFrames) 样本")
             XCTAssertTrue(FileManager.default.fileExists(atPath: r.url.path))
             XCTAssertTrue(r.url.path.hasPrefix(AppTest.controller.documents.recordDirectory), "测试宿主录到临时目录，不碰 ~/Movies")
         }
-        XCTAssertFalse(wc.bottomBar.streamButton.isEnabled, "空节目没有推流输出")
-        XCTAssertTrue(wc.bottomBar.externalButton.isEnabled, "外部输出（W3-C 接上了）")
-        XCTAssertTrue(wc.bottomBar.multiviewButton.isEnabled, "多画面窗口（W3-C 接上了）")
-        XCTAssertTrue(wc.bottomBar.isoButton.isEnabled, "ISO 入口（打开输出设置的 ISO 页，W3-E2）")
+        XCTAssertTrue(wc.bottomBar.stream.bodyButton.isEnabled, "空节目没有推流输出：主体也不灰，点了打开推流页添加（W5-F / L1，原来置灰）")
+        XCTAssertTrue(wc.bottomBar.external.bodyButton.isEnabled, "外部显示（W3-C 接上了；W5-F 起主体 = 全部开 / 关）")
+        XCTAssertTrue(wc.bottomBar.multiview.bodyButton.isEnabled, "多画面窗口（W3-C 接上了）")
+        XCTAssertTrue(wc.bottomBar.recordGearMenu().items.contains { $0.title == "ISO 分路录制…" && $0.isEnabled },
+                      "ISO 入口（打开输出设置的 ISO 页，W3-E2；W5-F / K2 起在录制 ⚙ 的菜单里，不再有单独的按钮）")
 
         // 13. 调音台收起 / 展开
         XCTAssertTrue(wc.isMixerPanelVisible)

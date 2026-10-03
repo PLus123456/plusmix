@@ -43,15 +43,15 @@ final class ISOAppTests: XCTestCase {
         AppTest.pump(seconds: 1.5)
 
         // 录制按钮 → 三条 startRecord 同一拍起
-        wc.bottomBar.recordButton.performClick(nil)
+        wc.bottomBar.record.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders.count == 3 }, "三路录制器都应起来：\(session.outputs.recorders.keys.sorted())")
         let starts = Set(session.outputs.recorders.values.map { $0.start.tick })
         XCTAssertEqual(starts.count, 1, "同一起始拍：\(session.outputs.recorders.mapValues { $0.start.tick })")
-        XCTAssertTrue(AppTest.waitUntil(5) { wc.bottomBar.recordButton.title.hasPrefix("● 录制中") }, wc.bottomBar.recordButton.title)
-        XCTAssertEqual(wc.bottomBar.recordButton.title, "● 录制中（3 路）")
+        XCTAssertTrue(AppTest.waitUntil(5) { wc.bottomBar.record.bodyButton.title.hasPrefix("● 录制中") }, wc.bottomBar.record.bodyButton.title)
+        XCTAssertEqual(wc.bottomBar.record.bodyButton.title, "● 录制中（3 路）")
         print("ISO 起：起始拍 \(starts)，rec.start 批耗时 \(String(format: "%.1f", session.outputs.lastStartCost.milliseconds)) ms")
         AppTest.pump(seconds: 8)
-        wc.bottomBar.recordButton.performClick(nil)
+        wc.bottomBar.record.bodyButton.performClick(nil)
         XCTAssertEqual(AppTest.waitForConfirmation(.stopRecord)?.request.title, "确定停止录制（3 路）？", "停止前先确认（W5-B），写明路数")
         AppTest.answer(.confirm)
         XCTAssertTrue(AppTest.waitUntil(20) { session.outputs.recorders.isEmpty && session.outputs.lastResults.count == 3 }, "三路都应封口：\(session.outputs.lastResults.keys.sorted())")
@@ -104,9 +104,11 @@ final class ISOAppTests: XCTestCase {
         session.send(.setOutputSettings(output: pgm.number, settings: settings))
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.output(pgm.number)?.settings.video?.bitrateBps == 4_000_000 })
 
-        // 底栏 ISO… = 打开输出设置的 ISO 页（不再有弹出面板）
-        wc.bottomBar.isoButton.performClick(nil)
-        let window = try XCTUnwrap(controller.panels.outputSettingsWindow, "底栏 ISO… 应打开输出设置窗")
+        // 底栏"⚙ 录制"菜单里的"ISO 分路录制…" = 打开输出设置的 ISO 页（不再有弹出面板；W5-F / K2 起不再有单独的"ISO…"按钮）
+        let gear = wc.bottomBar.recordGearMenu()
+        let isoItem = try XCTUnwrap(gear.items.first { $0.title == "ISO 分路录制…" }, gear.items.map(\.title).description)
+        gear.performActionForItem(at: gear.index(of: isoItem))
+        let window = try XCTUnwrap(controller.panels.outputSettingsWindow, "录制 ⚙ › ISO 分路录制… 应打开输出设置窗")
         XCTAssertEqual(window.model.tab, .iso)
         XCTAssertTrue(window.window?.isVisible ?? false)
         let model = window.model

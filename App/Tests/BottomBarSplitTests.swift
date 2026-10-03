@@ -186,12 +186,17 @@ final class BottomBarSplitTests: XCTestCase {
         XCTAssertFalse(try item(empty, "全部停止").isEnabled)
         controller.panels.closeAll()
 
-        // 端到端：主平台推到本机 MediaMTX（在推），备用的地址不认（起不来，地址里带账号密码）
+        // 端到端：主平台推到本机 MediaMTX（在推；scripts/mediamtx.yml 只开了 s1–s3 这几个路径、不带推流码），备用的地址不认（起不来，地址里带账号密码）
         try MediaMTXHarness.requireAvailable()
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-w5f-stream-\(UUID().uuidString)", isDirectory: true)
         let mtx = try MediaMTXHarness(rtmpPort: 24937, srtPort: 28897, apiPort: 29997, recordDir: dir)
         defer { mtx.stop(); try? FileManager.default.removeItem(at: dir) }
-        session.send(.addOutput(config: AppTest.streamOutput(number: 2, url: mtx.rtmpURL("w5f"), name: "主平台")))
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 1, audio: true)))
+        session.send(.setProgram(input: 1))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
+        session.send(.addOutput(config: OutputState(number: 2, kind: .stream, name: "主平台", enabled: false,
+                                                    settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
+                                                                             stream: StreamSettings(url: mtx.rtmpURL("s2"))))))
         session.send(.addOutput(config: AppTest.streamOutput(number: 3, url: "foo://alice:hunter2@example.com/live", name: "备用")))
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.filter { $0.kind == .stream }.count == 2 })
         let start = bar.streamMenu()
@@ -564,7 +569,7 @@ final class BottomBarSplitTests: XCTestCase {
         L10n.languageOverride = "en"
         let enLabels = StatusLineFormatter.fields(current: a, previous: nil, format: .hd1080p5994).map(\.label)
         L10n.languageOverride = "zh-Hans"
-        XCTAssertEqual(enLabels, ["Program", "FPS", "Render", "GPU", "CPU", "Missed", "Encoder skipped", "Bitrate", "Disk"])
+        XCTAssertEqual(enLabels, ["Program", "FPS", "Render", "GPU", "CPU", "Dropped", "Enc. skipped", "Bitrate", "Disk"])
 
         // 右端：平时是本机信息（机型 · 内存，不进 Stats）；有提示时显示提示，过几秒回到本机信息
         let machine = StatusBarView.machineInfo

@@ -30,7 +30,10 @@ enum Theme {
     static let thumbnailHeight: CGFloat = 112.5   // 16:9
     static let transitionColumnWidth: CGFloat = 150
     static let mixerPanelWidth: CGFloat = 340
+    /// 底栏总高 = 按钮行 + 状态行（W5-F 起状态行独立成窗口最底一行，总高不变）。
     static let bottomBarHeight: CGFloat = 58
+    /// 状态行高（窗口最底一行）。
+    static let statusBarHeight: CGFloat = 20
 
     static func label(_ text: String, size: CGFloat = 12, weight: NSFont.Weight = .regular, color: NSColor = Theme.text) -> NSTextField {
         let l = NSTextField(labelWithString: text)

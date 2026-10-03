@@ -2,7 +2,8 @@
 // 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：先问（录制 / 推流在跑、有未保存的改动，W5-B）→ LastSession 照存 → 停引擎。
 // 新建 / 打开 / 打开最近 / Finder 双击打开同样先问（AppController.requestNewShow / requestOpenShow）。
 // 菜单：App 菜单（标题是产品名 PlusMix，W4-D：关于 / 检查更新 / 偏好设置）、节目（新建 / 打开 / 最近 / 保存 / 另存）、输入（添加 / 设置）、切换（Cut / Fade / FTB / 快捷键编辑器 / MIDI 映射）、
-// 输出（W3-E：录制 / ISO / 推流 / 外部输出 / NDI / 虚拟摄像头设置页；W3-C：外部输出子菜单、多画面窗口、虚拟摄像头的安装 / 卸载 / 启用）、
+// 输出（W3-E：录制 / ISO / 推流 / 外部显示 / NDI / 虚拟摄像头设置页；W3-C：外部显示子菜单、多画面窗口、虚拟摄像头的安装 / 卸载 / 启用；
+// W5-F：推流 ▸ = 底栏推流 ▴ 同一份菜单，输入 › 按类型添加 ▸ = 底栏添加输入 ▴ 同一份菜单，"外部输出"统一叫"外部显示"）、
 // 窗口（调音台 / 多画面）、帮助（W4-B：导出诊断包 / 打开诊断文件夹；App 菜单加"检查更新…"）。文案全部走 L10n（W3-C 那几项 W3-E2 补齐；包里返回中文的状态在 App 侧查表，OutputStatusText）。启动参数与设置见 AppSettings。
 import AppKit
 import SwitcherContracts
@@ -13,6 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private(set) var controller: AppController!
     private var recentMenu: NSMenu?
     private var externalMenuItem: NSMenuItem?
+    /// "输出 › 推流 ▸"（打开"输出"菜单时按底栏推流 ▴ 重建，W5-F）。
+    private var streamMenuItem: NSMenuItem?
+    /// "输入"菜单与"按类型添加 ▸"（打开时按底栏添加输入 ▴ 重建，W5-F）。
+    private var inputMenu: NSMenu?
+    private var addByTypeItem: NSMenuItem?
     private var virtualCameraStatusItem: NSMenuItem?
     /// "输出"菜单（menuNeedsUpdate 按对象认，标题已本地化）。
     private var outputMenu: NSMenu?
@@ -117,7 +123,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         main.addItem(submenu(edit, title: L("menu.edit")))
 
         let input = NSMenu(title: L("menu.input"))
+        input.delegate = self
+        inputMenu = input
         input.addItem(withTitle: L("menu.input.add"), action: #selector(addInput), keyEquivalent: "i")
+        let byType = NSMenuItem(title: L("menu.input.addByType"), action: nil, keyEquivalent: "")
+        byType.submenu = NSMenu(title: L("menu.input.addByType"))
+        input.addItem(byType)
+        addByTypeItem = byType
         input.addItem(withTitle: L("menu.input.settings"), action: #selector(inputSettings), keyEquivalent: "I")
         main.addItem(submenu(input, title: L("menu.input")))
 
@@ -141,6 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.representedObject = tab.rawValue
         }
         output.addItem(.separator())
+        let stream = NSMenuItem(title: L("menu.output.streamSubmenu"), action: nil, keyEquivalent: "")
+        stream.submenu = NSMenu(title: L("menu.output.streamSubmenu"))
+        output.addItem(stream)
+        streamMenuItem = stream
         let external = NSMenuItem(title: L("bottom.external"), action: nil, keyEquivalent: "")
         external.submenu = NSMenu(title: L("bottom.external"))
         output.addItem(external)
@@ -279,9 +295,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func uninstallExtension() { controller.session?.aux.installer.deactivate() }
     @objc private func refreshExtension() { controller.session?.aux.installer.refresh() }
 
-    /// 打开"输出"菜单时重建外部输出子菜单（显示器 × 源，按当前快照打勾）和虚拟摄像头状态行（NSMenuDelegate 在类声明上）。
+    /// 打开"输出"菜单时重建推流子菜单（= 底栏推流 ▴）、外部显示子菜单（每块屏单选，按当前快照打勾）和虚拟摄像头状态行；
+    /// 打开"输入"菜单时重建"按类型添加"（= 底栏添加输入 ▴）。NSMenuDelegate 在类声明上。
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === inputMenu {
+            addByTypeItem?.submenu = controller.windowController.addInputMenu() ?? NSMenu(title: L("menu.input.addByType"))
+            return
+        }
         guard menu === outputMenu else { return }
+        streamMenuItem?.submenu = controller.windowController.bottomBar.streamMenu()
         if let item = externalMenuItem {
             item.submenu = controller.windowController.externalOutputMenu() ?? NSMenu(title: L("bottom.external"))
         }

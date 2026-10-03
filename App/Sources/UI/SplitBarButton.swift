@@ -3,7 +3,6 @@
 // 三个按钮都 refusesFirstResponder（01a C9）：空格 / 回车永远落到主窗口的快捷键表，不会被某个按钮吃掉（探针结论见 reports/w5-app-bottom-bar.md §5）。
 // ⚙ / ▴ 只有图标（SF Symbols 的通用齿轮与上箭头），辅助功能名与提示写全"录制设置 / 录制菜单"。
 import AppKit
-import SwitcherContracts
 
 @MainActor
 final class SplitBarButton: NSView {
@@ -130,23 +129,3 @@ extension NSMenuItem {
     }
 }
 
-// —— 红灯轮的签名（实现前）——
-struct StreamMenuRow: Equatable {
-    enum Click: Equatable { case start, stop, retry }
-    var number: Int
-    var title: String
-    var check: NSControl.StateValue
-    var click: Click
-    var toolTip: String?
-    static func rows(state: MixerState, encoder: [Stats.EncoderEntry], detail: (Int) -> (failure: String?, attempt: Int?)) -> [StreamMenuRow] { [] }
-}
-@MainActor enum StatusBarView { static var machineInfo: String { "" } }
-extension StatusLineFormatter { static func formatText(_ f: ProgramFormat) -> String { "\(f.width)×\(f.height) \(f.frameRate)" } }
-@MainActor final class AddInputHistory {
-    private(set) var recentSources: [InputSource] = []
-    func reset() {}
-    func noteAdded(_ config: InputConfig) {}
-}
-extension AppController { var addInputHistory: AddInputHistory { AddInputHistory() } }
-extension MainWindowController { func addInputMenu() -> NSMenu? { NSMenu() } }
-extension OutputSettingsModel { var addDestinationFocusRequests: Int { 0 } }

@@ -19,6 +19,8 @@ final class MultiviewWindowController: NSWindowController {
     /// 关着（还没开过、按了开关 / 关闭按钮）。最小化不算关：那是开着但暂停呈现（记 undelivered）。
     /// 不用 isVisible 判：最小化的窗口 isVisible 也是 false，遮挡通知与最小化通知的先后又不定。
     private var closed = true
+    /// 开 / 关变了（底栏"多画面"主体按它高亮，W5-F / E3；点窗口自己的关闭按钮也算）。
+    var onOpenChange: ((Bool) -> Void)?
     nonisolated(unsafe) private var windowObservers: [any NSObjectProtocol] = []
 
     init(source: (any DisplayFrameSource)?) {
@@ -80,6 +82,7 @@ final class MultiviewWindowController: NSWindowController {
         closed = false
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        onOpenChange?(true)
     }
 
     var isShowing: Bool { window?.isVisible ?? false }
@@ -100,6 +103,7 @@ final class MultiviewWindowController: NSWindowController {
     private func markClosed() {
         closed = true
         ledger?.breakRun()
+        onOpenChange?(false)
     }
 
     /// 遮挡变化：开着的窗口被遮住 / 最小化 / 又露出来 = 暂停呈现的边界，这段记 undelivered；关着不记。
