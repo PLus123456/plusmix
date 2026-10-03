@@ -30,11 +30,17 @@ final class MultiviewMetersTests: XCTestCase {
         return (0..<t.cellCount).map { (t.cells[$0], t.cells[$0].rect.insetBy(t.border)) }
     }
 
-    /// 与参考图逐字节比（PNG 无损，"PSNR ∞"就是逐字节相等）。只读，不会在生成模式下改写参考图。
+    /// 与参考图比：PSNR ≥ 40 dB 或 SSIM ≥ 0.98，与 `V8ReferenceTests.compare` 同一套判法。只读，不会在生成模式下改写参考图。
+    /// 原来是逐字节相等（"PSNR ∞"）：2026-10-01 起系统字体资源变了一次，名字标签差几个像素（PSNR ≈ 51 dB）就红，与渲染逻辑无关
+    /// （reports/issues/W5E-w3-compositor-3-multiview-meters-strict-reference-drift.md）；用户 2026-10-03 定改成 PSNR 判法，G6 改。
     func assertEqualsReference(_ name: String, _ bm: Bitmap, file: StaticString = #filePath, line: UInt = #line) throws {
         let url = RepoPaths.references.appendingPathComponent("\(name).png")
         guard let ref = PNG.read(url) else { throw XCTSkip("没有参考图 \(url.path)") }
-        XCTAssertTrue(bm.bgra == Bitmap(ref).bgra, "应与 \(name).png 逐像素相同", file: file, line: line)
+        let refBitmap = Bitmap(ref)
+        let psnr = ImageMetrics.psnr(bm, refBitmap), ssim = ImageMetrics.ssim(bm, refBitmap)
+        XCTAssertTrue(psnr >= V8ReferenceTests.psnrThreshold || ssim >= V8ReferenceTests.ssimThreshold,
+                      "应与 \(name).png 一致：PSNR \(psnr.isInfinite ? "∞" : String(format: "%.2f", psnr)) dB / SSIM \(String(format: "%.4f", ssim))（≥ 40 dB 或 ≥ 0.98）",
+                      file: file, line: line)
     }
 
     /// 电平表里一个取样点：channel 0 = L、1 = R；fraction = 从表下端往上的比例（0 = −60 dBFS，1 = 0 dBFS）。

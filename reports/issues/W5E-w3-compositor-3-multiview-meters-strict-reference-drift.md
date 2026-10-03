@@ -1,3 +1,5 @@
+**状态：已解（G6，2026-10-03）**——用户裁定改成 PSNR 判法：`MultiviewMetersTests.assertEqualsReference` 改用与 `V8ReferenceTests.compare` 同一套 PSNR ≥ 40 dB 或 SSIM ≥ 0.98 的判法，参考图没动；两条用例在 26A428 上转绿（reports/G6.md §7.1）。下面是当时的记录。
+
 # MultiviewMetersTests 两条"逐像素相同"在本机红：2026-09-27 重生成的多画面参考图与现在的渲染差 PSNR ≈ 51 dB（main 上同样红，与 W5-E 无关）
 
 归属会话 / 分支：多画面电平表用例（W3-B2 / `w3-compositor-3` 写的 `Packages/SwitcherCore/Tests/SwitcherRenderTests/MultiviewMetersTests.swift`）；
