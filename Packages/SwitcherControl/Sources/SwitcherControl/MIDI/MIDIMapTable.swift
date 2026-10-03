@@ -94,10 +94,31 @@ public struct MIDIMapping: Hashable, Codable, Sendable {
     public var trigger: MIDITrigger
     public var action: MIDIAction
     public var note: String?
-    public init(trigger: MIDITrigger, action: MIDIAction, note: String? = nil) {
+    /// 启用（W5-J，01a N5）：停用的映射留在表里，不派发、不参与冲突检查。JSON 只在停用时写 "enabled": false，旧文件没有这个键 = 启用。
+    public var enabled: Bool
+    public init(trigger: MIDITrigger, action: MIDIAction, note: String? = nil, enabled: Bool = true) {
         self.trigger = trigger
         self.action = action
         self.note = note
+        self.enabled = enabled
+    }
+
+    private enum CodingKeys: String, CodingKey { case trigger, action, note, enabled }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        trigger = try c.decode(MIDITrigger.self, forKey: .trigger)
+        action = try c.decode(MIDIAction.self, forKey: .action)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(trigger, forKey: .trigger)
+        try c.encode(action, forKey: .action)
+        try c.encodeIfPresent(note, forKey: .note)
+        if !enabled { try c.encode(false, forKey: .enabled) }
     }
 }
 
@@ -136,13 +157,15 @@ public struct MIDIMapTable: Hashable, Codable, Sendable {
         public var mappings: [Int]
     }
 
+    /// 同一触发映射了多次的地方（只看启用的）。
     public func conflicts() -> [Conflict] {
         var seen: [MIDITrigger: [Int]] = [:]
-        for (i, m) in mappings.enumerated() { seen[m.trigger, default: []].append(i) }
+        for (i, m) in mappings.enumerated() where m.enabled { seen[m.trigger, default: []].append(i) }
         return seen.filter { $0.value.count > 1 }.map { Conflict(trigger: $0.key, mappings: $0.value) }.sorted { $0.mappings[0] < $1.mappings[0] }
     }
 
-    public func mapping(for trigger: MIDITrigger) -> MIDIMapping? { mappings.first { $0.trigger == trigger } }
+    /// 某个触发的映射（第一条启用的）。
+    public func mapping(for trigger: MIDITrigger) -> MIDIMapping? { mappings.first { $0.enabled && $0.trigger == trigger } }
 
     public func jsonData() throws -> Data { try APIJSON.prettyEncoder.encode(self) }
 

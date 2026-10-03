@@ -38,7 +38,15 @@ public final class HotkeyDispatcher: Sendable {
     public func command(for combo: KeyCombo) -> Command? {
         guard let action = table.action(for: combo) else { return nil }
         guard let state = bus.stateMachine.publisher.latest?.state else { return nil }
-        return action.resolve(in: state)
+        return action.resolve(in: state).first
+    }
+
+    /// 界面动作（ControlAction.ui）交给谁（App 设；红灯轮：只有签名）。
+    public func setUIActionHandler(_ handler: (@Sendable (String) -> Void)?) {}
+
+    /// 同步版、组合动作的每一条回执（红灯轮：只有签名）。
+    public func handleAllAndWait(_ combo: KeyCombo) async throws -> [CommandReceipt] {
+        try await handleAndWait(combo).map { [$0] } ?? []
     }
 
     /// 有绑定就异步投递并返回 true；没绑定返回 false（让事件继续传）。

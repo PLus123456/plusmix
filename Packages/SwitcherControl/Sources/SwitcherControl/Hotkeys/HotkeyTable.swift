@@ -11,10 +11,31 @@ public struct HotkeyBinding: Hashable, Codable, Sendable {
     public var action: ControlAction
     /// 给人看的备注。
     public var note: String?
-    public init(key: KeyCombo, action: ControlAction, note: String? = nil) {
+    /// 启用（W5-J，01a N5：表里每行一个勾）。停用的行留在表里，不派发、不参与冲突检查。JSON 只在停用时写 "enabled": false，旧文件没有这个键 = 启用。
+    public var enabled: Bool
+    public init(key: KeyCombo, action: ControlAction, note: String? = nil, enabled: Bool = true) {
         self.key = key
         self.action = action
         self.note = note
+        self.enabled = enabled
+    }
+
+    private enum CodingKeys: String, CodingKey { case key, action, note, enabled }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(KeyCombo.self, forKey: .key)
+        action = try c.decode(ControlAction.self, forKey: .action)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(key, forKey: .key)
+        try c.encode(action, forKey: .action)
+        try c.encodeIfPresent(note, forKey: .note)
+        if !enabled { try c.encode(false, forKey: .enabled) }
     }
 }
 
@@ -69,16 +90,16 @@ public struct HotkeyTable: Hashable, Codable, Sendable {
         return HotkeyTable(bindings: b)
     }()
 
-    /// 同一组合键绑了多次的地方。
+    /// 同一组合键绑了多次的地方（只看启用的行）。
     public func conflicts() -> [Conflict] {
         var seen: [KeyCombo: [Int]] = [:]
-        for (i, b) in bindings.enumerated() { seen[b.key, default: []].append(i) }
+        for (i, b) in bindings.enumerated() where b.enabled { seen[b.key, default: []].append(i) }
         return seen.filter { $0.value.count > 1 }.map { Conflict(key: $0.key, bindings: $0.value) }.sorted { $0.bindings[0] < $1.bindings[0] }
     }
 
-    /// 某个组合键的动作（第一条匹配）。
+    /// 某个组合键的动作（第一条启用的匹配）。
     public func action(for combo: KeyCombo) -> ControlAction? {
-        bindings.first { $0.key == combo }?.action
+        bindings.first { $0.enabled && $0.key == combo }?.action
     }
 
     // MARK: JSON
