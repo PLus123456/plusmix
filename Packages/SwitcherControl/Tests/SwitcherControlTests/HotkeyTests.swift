@@ -57,7 +57,7 @@ final class HotkeyTests: XCTestCase {
         XCTAssertEqual(t.action(for: KeyCombo("return")!), .command(.autoTransition))
         XCTAssertEqual(t.action(for: KeyCombo("f")!), .toggleFTB)
         XCTAssertNil(t.action(for: KeyCombo("cmd+q")!))
-        XCTAssertEqual(t.bindings.count, 10 + 10 + 3)
+        XCTAssertEqual(t.bindings.count, 10 + 10 + 3 + 4 + 4, "W5-J 按 04 Q29 补了 ⌥1–⌥4（执行转场）与 ⌃1–⌃4（叠加开关），见 ControlActionTests")
     }
 
     func testHotkey_tableJSONRoundTripAndUserFile() throws {
@@ -117,25 +117,26 @@ final class HotkeyTests: XCTestCase {
     // MARK: 动作解析
 
     func testHotkey_toggleActionsResolveAgainstState() {
+        // W5-J 起 resolve 返回命令数组（组合动作按顺序逐条进总线）：单条动作 = 一个元素，解析不出 = 空数组
         var s = TestStates.base()
-        XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), .ftb(on: true))
+        XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), [.ftb(on: true)])
         s.ftb.on = true
-        XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), .ftb(on: false))
-        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), .overlay(channel: 2, on: true, input: nil))
+        XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), [.ftb(on: false)])
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: true, input: nil)])
         s.overlays[1].on = true
-        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), .overlay(channel: 2, on: false, input: nil))
-        XCTAssertNil(ControlAction.toggleOverlay(channel: 9).resolve(in: s))
-        XCTAssertEqual(ControlAction.toggleMute(input: 1).resolve(in: s), .mute(input: 1, on: true))
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: false, input: nil)])
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 9).resolve(in: s), [])
+        XCTAssertEqual(ControlAction.toggleMute(input: 1).resolve(in: s), [.mute(input: 1, on: true)])
         s.inputs[0].settings.audio.muted = true
-        XCTAssertEqual(ControlAction.toggleMute(input: 1).resolve(in: s), .mute(input: 1, on: false))
-        XCTAssertNil(ControlAction.toggleMute(input: 42).resolve(in: s))
-        XCTAssertEqual(ControlAction.toggleRecord(output: 1).resolve(in: s), .startRecord(output: 1))
+        XCTAssertEqual(ControlAction.toggleMute(input: 1).resolve(in: s), [.mute(input: 1, on: false)])
+        XCTAssertEqual(ControlAction.toggleMute(input: 42).resolve(in: s), [])
+        XCTAssertEqual(ControlAction.toggleRecord(output: 1).resolve(in: s), [.startRecord(output: 1)])
         s.outputs[0].enabled = true
-        XCTAssertEqual(ControlAction.toggleRecord(output: 1).resolve(in: s), .stopRecord(output: 1))
-        XCTAssertEqual(ControlAction.toggleStream(output: 2).resolve(in: s), .startStream(output: 2))
-        XCTAssertNil(ControlAction.toggleStream(output: 1).resolve(in: s), "1 号不是推流输出")
-        XCTAssertEqual(ControlAction.toggleAFV.resolve(in: s), .setAFV(on: true))
-        XCTAssertEqual(ControlAction.command(.cut).resolve(in: s), .cut)
+        XCTAssertEqual(ControlAction.toggleRecord(output: 1).resolve(in: s), [.stopRecord(output: 1)])
+        XCTAssertEqual(ControlAction.toggleStream(output: 2).resolve(in: s), [.startStream(output: 2)])
+        XCTAssertEqual(ControlAction.toggleStream(output: 1).resolve(in: s), [], "1 号不是推流输出")
+        XCTAssertEqual(ControlAction.toggleAFV.resolve(in: s), [.setAFV(on: true)])
+        XCTAssertEqual(ControlAction.command(.cut).resolve(in: s), [.cut])
     }
 
     // MARK: 派发

@@ -22,6 +22,10 @@ final class ConfirmationCenter {
         case saveChanges
         /// 删的那一路在 PGM / PVW / 叠加 / Stinger / ISO 录制上。
         case removeInput
+        /// 设置窗里快捷键 / MIDI 表有没存的改动：关窗或切页前 保存 / 放弃 / 取消（W5-J，X29）。
+        case unsavedSettings
+        /// 导入设置 / 恢复默认会覆盖本机设置与快捷键 / MIDI 表（W5-J，F6）。
+        case resetSettings
     }
 
     /// 被点的按钮：confirm = 做（停、换、删、保存）；alternate = 另一种做法（"不保存"）；cancel = 什么都不做。

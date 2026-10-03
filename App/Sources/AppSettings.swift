@@ -55,6 +55,8 @@ struct AppSettings: Equatable, Sendable {
         static let overlaysInPreview = "overlaysInPreview"
         static let externalBehindInterface = "externalOutputBehindInterface"
         static let confirmBeforeStop = "confirmBeforeStop"
+        /// 兼容层的监听地址（W5-J 设置 › 高级；HTTP 与 TCP 共用）。
+        static let compatLayerHost = "compatLayerHost"
     }
 
     var audioDevice: AudioDevice = .systemDefault
@@ -65,6 +67,8 @@ struct AppSettings: Equatable, Sendable {
     /// 第三方 API 兼容层（VMixCompat）开关与 TCP 端口；默认关（设计方案 §9.3、落地方案 §2 第 7 条）。
     var compatLayerEnabled = false
     var compatLayerPort = AppSettings.defaultCompatLayerPort
+    /// 兼容层的监听地址（默认只听本机；98 的远程控制页做"仅本机 / 允许局域网"）。
+    var compatLayerHost = "127.0.0.1"
     var showURL: URL?
     var statsURL: URL?
     /// 磁盘满时的备用录制目录（nil = 只停录制）。
@@ -91,11 +95,12 @@ struct AppSettings: Equatable, Sendable {
     static let defaultCompatLayerPort = 8099
 
     /// API 配置；关掉时 nil。
-    /// 第三方 API 兼容层（W3-D VMixCompat）的配置；开关关着 = nil（不监听任何端口）。TCP 端口来自偏好设置，HTTP 端口用默认（8088），只听本机。
+    /// 第三方 API 兼容层（W3-D VMixCompat）的配置；开关关着 = nil（不监听任何端口）。TCP 端口与监听地址来自设置，HTTP 端口用默认（8088）。
     var compatConfiguration: VMixCompatConfiguration? {
         guard compatLayerEnabled else { return nil }
         var c = VMixCompatConfiguration()
         c.enabled = true
+        c.host = compatLayerHost
         c.tcpPort = compatLayerPort
         return c
     }
@@ -121,6 +126,7 @@ struct AppSettings: Equatable, Sendable {
         if defaults.object(forKey: Keys.compatLayerPort) != nil, defaults.integer(forKey: Keys.compatLayerPort) > 0 {
             s.compatLayerPort = defaults.integer(forKey: Keys.compatLayerPort)
         }
+        if let host = defaults.string(forKey: Keys.compatLayerHost), !host.isEmpty { s.compatLayerHost = host }
         if defaults.object(forKey: Keys.overlaysInPreview) != nil { s.overlaysInPreview = defaults.bool(forKey: Keys.overlaysInPreview) }
         if defaults.object(forKey: Keys.externalBehindInterface) != nil { s.externalBehindInterface = defaults.bool(forKey: Keys.externalBehindInterface) }
         if defaults.object(forKey: Keys.confirmBeforeStop) != nil { s.confirmBeforeStop = defaults.bool(forKey: Keys.confirmBeforeStop) }
@@ -144,7 +150,7 @@ struct AppSettings: Equatable, Sendable {
         return s
     }
 
-    /// 偏好设置面板：把可持久化的项写回 UserDefaults（同一组键；showURL / statsURL 是启动参数，不存）。
+    /// 设置窗：把可持久化的项写回 UserDefaults（同一组键；showURL / statsURL 是启动参数，不存）。W5-J 起也写录制下限 / 备用目录 / 兼容层地址（高级页）。
     func save(to defaults: UserDefaults) {
         defaults.set(audioDevice.spec, forKey: Keys.audioDevice)
         defaults.set(apiEnabled, forKey: Keys.apiEnabled)
@@ -155,5 +161,12 @@ struct AppSettings: Equatable, Sendable {
         defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview)
         defaults.set(externalBehindInterface, forKey: Keys.externalBehindInterface)
         defaults.set(confirmBeforeStop, forKey: Keys.confirmBeforeStop)
+        defaults.set(compatLayerHost, forKey: Keys.compatLayerHost)
+        defaults.set(recordMinimumFreeMB, forKey: Keys.recordMinimumFreeMB)
+        if let recordFallbackDirectory, !recordFallbackDirectory.isEmpty {
+            defaults.set(recordFallbackDirectory, forKey: Keys.recordFallbackDirectory)
+        } else {
+            defaults.removeObject(forKey: Keys.recordFallbackDirectory)
+        }
     }
 }

@@ -2,7 +2,8 @@
 // 启动：建主窗口 → 恢复上次节目（测试宿主用空节目）→ 起引擎。退出：先问（录制 / 推流在跑、有未保存的改动，W5-B）→ LastSession 照存 → 停引擎。
 // 新建 / 打开 / 打开最近 / 打开上次退出时的节目 / Finder 双击打开同样先问（AppController.requestNewShow / requestOpenShow / requestOpenLastSession）。
 // 菜单栏（W5-G 按 docs/ui-study/01-菜单逻辑.md §5 重排，规则 5：主窗口里放了的每个动作菜单栏里都还在）：
-//   PlusMix   关于 / 检查更新… / ─ / 设置… ⌘, / 快捷键… / MIDI 映射… / ─ / 隐藏 / ─ / 退出（Q48："偏好设置…"改"设置…"；F3：快捷键 / MIDI 映射从"切换"挪来）
+//   PlusMix   关于 / 检查更新… / ─ / 设置… ⌘, / 快捷键… / MIDI 映射… / 所有设置页 ▸ / ─ / 隐藏 / ─ / 退出
+//             （Q48："偏好设置…"改"设置…"；F3：快捷键 / MIDI 映射从"切换"挪来；W5-J：都打开同一个设置窗的那一页，"所有设置页"= 工具条设置▾ 的页）
 //   节目      新建 / 打开… / 打开最近 ▸（同名带上级目录名，V-24）/ 打开上次退出时的节目 / ─ / 保存 / 另存为…
 //   编辑      （不变）
 //   输入      添加输入… ⌘I / 按类型添加 ▸ / 输入 N「名字」设置… ⇧⌘I（标题写出是 PVW 上哪一路，PVW 空时灰，O4）
@@ -108,8 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appMenu.addItem(withTitle: L("menu.checkForUpdates"), action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L("menu.settings"), action: #selector(showPreferences(_:)), keyEquivalent: ",")
-        appMenu.addItem(SettingsMenu.hotkeysItem())   // 96 合窗后改成设置窗的页
+        appMenu.addItem(SettingsMenu.hotkeysItem())   // 设置窗的快捷键页 / MIDI 页（W5-J）
         appMenu.addItem(SettingsMenu.midiItem())
+        appMenu.addItem(SettingsMenu.pagesSubmenuItem())
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: L("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
@@ -283,14 +285,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // MARK: 设置（App 菜单"设置…"下与工具条"设置▾"）
+    // MARK: 设置（App 菜单"设置…"下与工具条"设置▾"；W5-J：一律走 showSettings(page:)）
 
-    @objc func showHotkeys(_ sender: Any?) { controller.panels.showHotkeyEditor() }
-    @objc func showMIDI(_ sender: Any?) { controller.panels.showMIDIMapping() }
-    @objc func showPreferences(_ sender: Any?) { controller.panels.showPreferences() }
+    @objc func showHotkeys(_ sender: Any?) { controller.panels.showSettings(page: .hotkeys) }
+    @objc func showMIDI(_ sender: Any?) { controller.panels.showSettings(page: .midi) }
+    /// ⌘, / 工具条"设置"主体：回到上次那一页（没开过 = 常规）。
+    @objc func showPreferences(_ sender: Any?) { controller.panels.showSettings() }
     @objc func outputSettings(_ sender: Any?) {
         let tab = ((sender as? NSMenuItem)?.representedObject as? String).flatMap(OutputSettingsModel.Tab.init(rawValue:)) ?? .record
-        controller.panels.showOutputSettings(tab: tab)
+        controller.panels.showSettings(page: .output(tab))
+    }
+    /// 设置窗的某一页（representedObject = SettingsPage.id）。
+    @objc func showSettingsPage(_ sender: Any?) {
+        guard let id = (sender as? NSMenuItem)?.representedObject as? String, let page = SettingsPage(id: id) else { return }
+        controller.panels.showSettings(page: page)
     }
     /// 窗口 › 调音台 / 输入条右端"调音台"开关（同一个 selector，W5-H D2）。
     @objc func toggleMixer(_ sender: Any?) { controller.windowController.toggleMixerPanel() }

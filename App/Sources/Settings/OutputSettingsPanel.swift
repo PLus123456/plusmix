@@ -478,23 +478,33 @@ final class OutputSettingsModel: ObservableObject {
 
 struct OutputSettingsView: View {
     @ObservedObject var model: OutputSettingsModel
+    /// 自己带一列页签（W5-J 合窗后设置窗的侧栏列这几页，嵌进去时不再要这一列）。
+    var showsTabList = true
     @State private var newNDIName = "PlusMix"   // App 侧的 NDI 源默认名用产品名（W4-D）；包内默认值不动
 
     var body: some View {
-        HStack(spacing: 0) {
-            List(OutputSettingsModel.Tab.allCases, selection: tabSelection) { t in Text(t.title).tag(t) }
-                .listStyle(.sidebar)
-                .frame(width: 150)
-                .accessibilityLabel(L("outputSettings.tabList"))
-            Divider()
-            // 总览里点了某一路：切到它的页、滚到它那一节（F8）
-            ScrollViewReader { proxy in
-                Form { tabBody }.formStyle(.grouped)
-                    .onChange(of: model.focusedOutput) { _, n in
-                        guard let n else { return }
-                        DispatchQueue.main.async { withAnimation { proxy.scrollTo(n, anchor: .top) } }
-                    }
+        if showsTabList {
+            HStack(spacing: 0) {
+                List(OutputSettingsModel.Tab.allCases, selection: tabSelection) { t in Text(t.title).tag(t) }
+                    .listStyle(.sidebar)
+                    .frame(width: 150)
+                    .accessibilityLabel(L("outputSettings.tabList"))
+                Divider()
+                scrollingForm
             }
+        } else {
+            scrollingForm
+        }
+    }
+
+    /// 表单；总览里点了某一路：切到它的页、滚到它那一节（F8，W5-I）。带页签列与嵌进设置窗（W5-J）两种摆法共用。
+    private var scrollingForm: some View {
+        ScrollViewReader { proxy in
+            Form { tabBody }.formStyle(.grouped)
+                .onChange(of: model.focusedOutput) { _, n in
+                    guard let n else { return }
+                    DispatchQueue.main.async { withAnimation { proxy.scrollTo(n, anchor: .top) } }
+                }
         }
     }
 
@@ -662,14 +672,4 @@ extension Binding {
     }
 }
 
-@MainActor
-final class OutputSettingsWindowController: PanelWindowController {
-    let model: OutputSettingsModel
-
-    init(model: OutputSettingsModel) {
-        self.model = model
-        super.init(title: L("outputSettings.windowTitle"), size: NSSize(width: 720, height: 560), autosaveName: "OutputSettings", content: OutputSettingsView(model: model))
-    }
-
-    func apply(state: MixerState) { model.apply(state: state) }
-}
+// 输出设置窗（W3-E）在 W5-J 合进设置窗：这里只剩页面本身（OutputSettingsView），窗与句柄见 SettingsWindow.swift。

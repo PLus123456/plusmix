@@ -407,11 +407,25 @@ final class AppController {
         await replaceSession(show: show, baseline: .keep)
     }
 
-    /// 偏好设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的包内选项（外部输出的主屏层级）同时落到跑着的 session。
+    /// 设置窗"应用并重起引擎"（W5-J，F4）：节目格式、节目音频按给的，本机的项读 settings，一次换一个 session（输入 / 输出原样带过去，录制 / 推流的目标状态清掉）。
+    func restartSession(format: ProgramFormat, alignmentFrames: Int, monitorPoint: MonitorPoint) async {
+        guard let session else { return }
+        var show = ShowDocuments.stoppingOutputs(session.makeShow())
+        show.mixer.format = format
+        show.audio.alignmentFrames = max(0, alignmentFrames)
+        show.audio.monitorPoint = monitorPoint
+        show.layout = currentLayout()
+        await replaceSession(show: show, baseline: .keep)
+    }
+
+    /// 设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的同时落到跑着的 session：外部输出的主屏层级、
+    /// 录制磁盘下限（下一次开录起用，在录的路照旧）与备用目录（W5-J 高级页）。
     func updateSettings(_ s: AppSettings) {
         s.save(to: defaults)
         settings = s
         session?.aux.external.mainScreenLayering = settings.externalMainScreenLayering
+        session?.outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
+        session?.outputs.fallbackDirectory = settings.recordFallbackDirectory
     }
 
     /// 快捷键编辑器保存后：换给派发器，下次起 session 也用它。

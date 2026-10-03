@@ -49,6 +49,8 @@ final class ControlRuntime {
     private var commandTask: Task<Void, Never>?
     /// 回执反馈（主线程）。
     var onFeedback: ((CommandFeedback) -> Void)?
+    /// 快捷键 / MIDI 音符绑的界面动作（ControlAction.ui，W5-J / Q53：只在 App 里派发、不进总线）：主线程上交给主窗口。
+    var onUIAction: ((String) -> Void)?
     /// 已发出的 UI 命令数（测试看）。
     private(set) var commandsSent: UInt64 = 0
     /// 测试用（W3-E6）：MIDI 起之前在调用线程（主线程）上同步卡住这么久，模拟进程里第一次连 MIDIServer 的冷启动。
@@ -66,6 +68,12 @@ final class ControlRuntime {
         self.compat = compat.map { VMixCompatServer(bus: bus, feed: feed, configuration: $0) }
         hotkeys = HotkeyDispatcher(bus: bus, table: hotkeyTable)
         midi = MIDIController(bus: bus, table: midiTable)
+        // 界面动作：派发器在调 handle 的线程上（键盘在主线程）、MIDI 在 CoreMIDI 线程上调——一律回主线程再交给 onUIAction
+        let ui: @Sendable (String) -> Void = { [weak self] name in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onUIAction?(name) } }
+        }
+        hotkeys.setUIActionHandler(ui)
+        midi.setUIActionHandler(ui)
     }
 
     /// 起：命令循环 → 推送源 → API → MIDI。API / MIDI 起不来不算错（记原因，节目照跑）。

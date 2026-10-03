@@ -12,6 +12,7 @@ import SwitcherContracts
 //   - 虚拟源（MIDISourceCreateWithProtocol）对本进程也是普通的源，会触发 msgObjectAdded → 热插拔路径就是测试路径。
 // 派发：接收线程只解析、决定命令，然后放进一个 AsyncStream；一条常驻 Task 顺序 submit——保证 CC 的顺序不乱（tbar 不能倒退）。
 // learn：设了 learn 回调后的下一条 CC / Note 交给回调、不派发。
+// W5-J：音符绑的组合动作按顺序几条一起入队（同一条派发 Task 顺序 submit，前一条被拒就丢掉同一组后面的）；绑的是界面动作就交给 App 设的 handler、不进总线。
 
 /// 一个 MIDI 源。
 public struct MIDISourceInfo: Hashable, Sendable {
@@ -54,8 +55,10 @@ public final class MIDIController: @unchecked Sendable {
     private var client = MIDIClientRef()
     private var port = MIDIPortRef()
     private let started = Atomic<Bool>(false)
-    /// 顺序派发：CoreMIDI 接收线程 yield，一条常驻 Task 顺序 submit。
-    private let pipeline = Mutex<(queue: AsyncStream<Command>.Continuation, task: Task<Void, Never>)?>(nil)
+    /// 顺序派发：CoreMIDI 接收线程 yield，一条常驻 Task 顺序 submit。一个元素 = 一条消息解析出的那一组命令（组合动作）。
+    private let pipeline = Mutex<(queue: AsyncStream<[Command]>.Continuation, task: Task<Void, Never>)?>(nil)
+    /// 界面动作（ControlAction.ui）交给谁（App 设，在 CoreMIDI 接收线程上调——要回主线程自己转）。
+    private let uiHandler = Mutex<(@Sendable (String) -> Void)?>(nil)
     /// 测试挂钩：每条解析出的消息（learn 之前）。
     public var onMessage: (@Sendable (MIDIMessage) -> Void)?
 
@@ -88,14 +91,17 @@ public final class MIDIController: @unchecked Sendable {
     /// 在宿主线程上建客户端和输入口、连上现有的源；起顺序派发的 Task。
     public func start() throws {
         guard !started.exchange(true, ordering: .acquiringAndReleasing) else { return }
-        let (stream, continuation) = AsyncStream<Command>.makeStream(bufferingPolicy: .bufferingNewest(1024))
+        let (stream, continuation) = AsyncStream<[Command]>.makeStream(bufferingPolicy: .bufferingNewest(1024))
         let task = Task { [self] in
-            for await command in stream {
-                do {
-                    _ = try await self.bus.submit(command, source: .midi)
-                    self.commandsCount.add(1, ordering: .relaxed)
-                } catch {
-                    self.rejected.add(1, ordering: .relaxed)
+            for await group in stream {
+                for command in group {
+                    do {
+                        _ = try await self.bus.submit(command, source: .midi)
+                        self.commandsCount.add(1, ordering: .relaxed)
+                    } catch {
+                        self.rejected.add(1, ordering: .relaxed)
+                        break   // 组合动作：前一条被拒，后面的不发
+                    }
                 }
             }
         }
@@ -124,6 +130,13 @@ public final class MIDIController: @unchecked Sendable {
     public func cancelLearn() { learnHandler.withLock { $0 = nil } }
 
     public var isLearning: Bool { learnHandler.withLock { $0 != nil } }
+
+    // MARK: 界面动作
+
+    /// 音符绑的界面动作（ControlAction.ui）交给谁：App 设；在 CoreMIDI 接收线程上调。nil = 不做事（计入 ignored）。
+    public func setUIActionHandler(_ handler: (@Sendable (String) -> Void)?) {
+        uiHandler.withLock { $0 = handler }
+    }
 
     // MARK: 宿主线程
 
@@ -231,11 +244,16 @@ public final class MIDIController: @unchecked Sendable {
             handler(message)
             return
         }
+        if let name = mapper.withLock({ $0.uiAction(for: message) }) {
+            if let handler = uiHandler.withLock({ $0 }) { handler(name) } else { ignored.add(1, ordering: .relaxed) }
+            return
+        }
         guard let state = bus.stateMachine.publisher.latest?.state else { return }
-        guard let command = mapper.withLock({ $0.command(for: message, state: state) }) else {
+        let commands = mapper.withLock { $0.commands(for: message, state: state) }
+        guard !commands.isEmpty else {
             ignored.add(1, ordering: .relaxed)
             return
         }
-        pipeline.withLock { _ = $0?.queue.yield(command) }
+        pipeline.withLock { _ = $0?.queue.yield(commands) }
     }
 }

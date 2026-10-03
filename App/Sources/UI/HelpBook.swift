@@ -46,11 +46,12 @@ enum HelpBook {
     }
 }
 
-/// 快捷键一览（一页静态 HTML，没有脚本）：表头 + 每条绑定一行（按键 / 动作 / 备注），顺序 = 表里的顺序；文字走本地化表，深浅色跟系统。
+/// 快捷键一览（一页静态 HTML，没有脚本）：表头 + 每条启用的绑定一行（按键 / 动作 / 备注），顺序 = 表里的顺序；文字走本地化表，深浅色跟系统。
+/// 停用的行（W5-J 每行的"启用"勾）按下去没反应，不列。
 @MainActor
 enum HotkeyListPage {
     static func html(table: HotkeyTable) -> String {
-        let rows = table.bindings.map { b in
+        let rows = table.bindings.filter(\.enabled).map { b in
             "<tr><td><kbd>\(escape(HotkeyText.display(b.key)))</kbd></td><td>\(escape(HotkeyText.describe(b.action)))</td><td>\(escape(b.note ?? ""))</td></tr>"
         }
         let lang = HelpBook.language

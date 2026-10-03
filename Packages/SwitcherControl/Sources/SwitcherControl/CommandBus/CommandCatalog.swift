@@ -4,6 +4,8 @@ import SwitcherContracts
 // 命令目录：Command 的 34 个 case 各一条说明和一个样例。docs/api.md 由它生成（switcher-apidoc），
 // HTTP API 的 GET /api/v1/commands 也返回它。`CommandKind(of:)` 是穷举 switch：契约加 case 这里编译就红，
 // 目录不会悄悄落后（CommandCatalogTests 再钉一遍：每个 kind 都有样例、样例的 JSON 顶层键就是 case 名）。
+// W5-J（01a N1 / N3，04 Q51）：每条命令加类型化参数描述（CommandField：参数名 = JSON 键、类型、可不可空），App 的"选动作"面板按它生成表单；
+// 只是描述，不加命令。`CommandKind.operatorFacing`（同样是穷举 switch）= 面板默认列不列：整条替换 / 增删类只放"高级：手写 JSON"。
 
 /// Command 的 case 名（= JSON 顶层键）。
 public enum CommandKind: String, CaseIterable, Sendable, Codable {
@@ -67,12 +69,124 @@ public struct CommandDoc: Sendable {
     public var parameters: [(name: String, note: String)]
     /// 样例。
     public var example: Command
+    /// 类型化参数描述（与 parameters 同名同序；选动作面板按它生成表单，N3）。
+    public var fields: [CommandField] { CommandCatalog.fields(for: kind) }
+}
+
+/// 参数的类型（W5-J，N3）：选动作面板按它出控件——输入 = "编号 · 名字"下拉、时长按秒、通道 1–4 分段、输出按类型过滤、总线四选一、开 / 关 / 切换三段……
+public enum CommandFieldType: Hashable, Sendable {
+    /// 输入编号（"编号 · 名字"下拉）；allowsBlack = 0 表示黑场。
+    case input(allowsBlack: Bool)
+    /// 输入：编号，或按下时才定的"当前 PVW / 当前 PGM"（只出现在快捷键 / MIDI 动作里，见 InputRef）。
+    case inputRef
+    /// 叠加通道 1–4（分段）。
+    case overlayChannel
+    /// 输出编号（下拉，只列这几类输出；空 = 任何一类）。
+    case output(kinds: [OutputKind])
+    /// 输出的类别（只能选这几类）。
+    case outputKind(kinds: [OutputKind])
+    /// 总线（0 = master, 1 = busA, 2 = busB, 3 = headphones，四选一）。
+    case bus
+    /// 开 / 关。
+    case onOff
+    /// 开 / 关 / 切换（SwitchMode）。
+    case switchMode
+    /// 时长，拍（界面按秒填，按节目帧率换算）。
+    case durationTicks
+    /// 时长，毫秒（界面按秒填；按下时按当前帧率换拍，Q52）。
+    case durationMs
+    /// 转场类型：cut / fade / wipe / zoom / stinger。
+    case transitionType
+    /// 0–1 的比例（T-bar 位置）。
+    case fraction
+    /// 分贝（界面限定在这个范围；超出的命令由状态机钳住）。
+    case decibels(min: Double, max: Double)
+    /// 一行字（名字）。
+    case text
+    /// 几个固定取值（rawValue）。
+    case choice([String])
+    /// 结构体整体（InputSettings / OutputSettings / Show / 效果链……）：只能手写 JSON；值是类型名。
+    case json(String)
+}
+
+/// 一个参数的描述。
+public struct CommandField: Hashable, Sendable {
+    /// JSON 键。
+    public var name: String
+    public var type: CommandFieldType
+    /// JSON 里可以是 null / 不写。
+    public var optional: Bool
+    public init(name: String, type: CommandFieldType, optional: Bool = false) {
+        self.name = name
+        self.type = type
+        self.optional = optional
+    }
+}
+
+extension CommandKind {
+    /// 面向操作员：选动作面板默认列出（04 Q51）。false = 整条替换 / 增删类（参数里有只能手写 JSON 的结构体，或删一路输入 / 一个输出）：
+    /// 按错一个键能删掉一路或整个换掉节目，只放"高级：手写 JSON"。
+    public var operatorFacing: Bool {
+        switch self {
+        case .cut, .fade, .setTransition, .autoTransition, .setPreview, .setProgram, .tbar, .ftb, .overlay,
+             .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode,
+             .startRecord, .stopRecord, .startStream, .stopStream, .setOutputEnabled, .renameOutput, .renameInput:
+            true
+        case .setTransitionParams, .setOverlay, .setOverlayDecoration, .setBusEffects,
+             .setInputSettings, .addInput, .removeInput, .setInputSource, .addOutput, .removeOutput, .setOutputSettings, .loadShow:
+            false
+        }
+    }
 }
 
 /// 命令目录。
 public enum CommandCatalog {
     public static func entry(for kind: CommandKind) -> CommandDoc {
         entries.first { $0.kind == kind }!
+    }
+
+    /// 一条命令的类型化参数描述（穷举 switch：契约加 case 这里编译就红）。
+    public static func fields(for kind: CommandKind) -> [CommandField] {
+        let input = CommandField(name: "input", type: .input(allowsBlack: false))
+        let channel = CommandField(name: "channel", type: .overlayChannel)
+        let on = CommandField(name: "on", type: .onOff)
+        let bus = CommandField(name: "bus", type: .bus)
+        let dB = CommandField(name: "dB", type: .decibels(min: InputAudioSettings.gainRangeDb.lowerBound, max: InputAudioSettings.gainRangeDb.upperBound))
+        let anyOutput = CommandField(name: "output", type: .output(kinds: []))
+        switch kind {
+        case .cut, .autoTransition: return []
+        case .fade: return [CommandField(name: "durationTicks", type: .durationTicks)]
+        case .setTransition: return [CommandField(name: "type", type: .transitionType), CommandField(name: "durationTicks", type: .durationTicks)]
+        case .setTransitionParams: return [CommandField(name: "wipe", type: .json("WipeParams")), CommandField(name: "stinger", type: .json("StingerParams"))]
+        case .setPreview, .setProgram: return [CommandField(name: "input", type: .input(allowsBlack: true))]
+        case .tbar: return [CommandField(name: "progress", type: .fraction)]
+        case .ftb, .setAFV: return [on]
+        case .overlay: return [channel, on, CommandField(name: "input", type: .input(allowsBlack: false), optional: true)]
+        case .setOverlay: return [channel, CommandField(name: "rect", type: .json("NormalizedRect")), CommandField(name: "animation", type: .json("OverlayAnimation"))]
+        case .setOverlayDecoration:
+            return [channel, CommandField(name: "border", type: .json("OverlayBorder"), optional: true),
+                    CommandField(name: "anchor", type: .choice(["topLeft", "top", "topRight", "left", "center", "right", "bottomLeft", "bottom", "bottomRight"])),
+                    CommandField(name: "previewOn", type: .onOff)]
+        case .audioGain: return [input, dB]
+        case .mute: return [input, on]
+        case .busGain: return [bus, dB]
+        case .busMute: return [bus, on]
+        case .setMonitorMode: return [CommandField(name: "mode", type: .choice(["afl", "pfl"]))]
+        case .setBusEffects: return [bus, CommandField(name: "effects", type: .json("[EffectSlot]"))]
+        case .startRecord, .stopRecord: return [CommandField(name: "output", type: .output(kinds: [.record]))]
+        case .startStream, .stopStream: return [CommandField(name: "output", type: .output(kinds: [.stream]))]
+        case .setOutputEnabled: return [CommandField(name: "output", type: .output(kinds: [.ndi, .externalDisplay, .virtualCamera, .multiview])), on]
+        case .renameOutput: return [anyOutput, CommandField(name: "name", type: .text)]
+        case .setInputSettings: return [input, CommandField(name: "settings", type: .json("InputSettings"))]
+        case .renameInput: return [input, CommandField(name: "name", type: .text)]
+        case .addInput: return [CommandField(name: "config", type: .json("InputConfig"))]
+        case .removeInput: return [input]
+        case .setInputSource: return [input, CommandField(name: "source", type: .json("InputSource"))]
+        case .addOutput: return [CommandField(name: "config", type: .json("OutputState"))]
+        case .removeOutput: return [anyOutput]
+        case .setOutputSettings: return [anyOutput, CommandField(name: "settings", type: .json("OutputSettings"))]
+        case .loadShow: return [CommandField(name: "show", type: .json("Show"))]
+        }
     }
 
     /// 按 Command.swift 的声明顺序。
