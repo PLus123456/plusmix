@@ -77,6 +77,10 @@ struct AppSettings: Equatable, Sendable {
     var externalBehindInterface = false
     /// 底栏停录制 / 停推流之前先确认（W5-B，默认开；快捷键 / MIDI / API 一律不问）。
     var confirmBeforeStop = true
+    /// 每条总线送到输出设备的哪一对声道（W5-K，J8）；nil = 跟设备默认（Master 1/2，设备 ≥ 4 声道时耳机 3/4）。
+    var busOutputMap: BusOutputMap?
+    /// 设备没有耳机声道时，监听（独听 / PFL）临时占用 Master 声道（W5-K，X09）。
+    var borrowMasterForMonitor = false
 
     /// 外部显示管理器的主屏层级（ExternalDisplayManager.mainScreenLayering）。
     var externalMainScreenLayering: ExternalDisplayWindow.MainScreenLayering { externalBehindInterface ? .behindInterface : .front }

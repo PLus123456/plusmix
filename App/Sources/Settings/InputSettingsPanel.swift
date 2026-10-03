@@ -6,6 +6,7 @@ import AppKit
 import Combine
 import SwiftUI
 import SwitcherContracts
+import SwitcherRender
 
 @MainActor
 final class InputSettingsModel: ObservableObject {
@@ -146,6 +147,20 @@ final class InputSettingsModel: ObservableObject {
         form.model = m
         sourceError = ""
     }
+
+    // MARK: 本路画面 / tally / 取色（W5-K：H3 / H6 / X55）
+
+    /// 预览裁多画面纹理的哪一格（nil = 布局里没有这一路）。
+    var previewRect: NormalizedRect? { nil }
+    /// 标题行的 tally："在 PGM" / "在 PVW" / 空。
+    var tallyText: String { "" }
+    /// 正在"在画面上取色"。
+    @Published private(set) var isPickingKeyColor = false
+    /// 最近一次取到的颜色（测试看）。
+    private(set) var lastPickedColor: RGB8?
+    func startPickingKeyColor() {}
+    /// 音频一节的"跟随视频"开关（绑 InputAudioSettings.afv）。
+    var followVideoBinding: Binding<Bool> { Binding(get: { false }, set: { _ in }) }
 
     /// 窗口关掉：摘掉表单的设备插拔订阅。
     func close() {
@@ -315,6 +330,10 @@ final class InputSettingsWindowController: PanelWindowController {
     }
 
     static func autosaveName(input number: Int) -> String { "InputSettings-\(number)" }
+
+    /// 本路实时画面（多画面纹理裁这一格）与它的点击容器（取色）。
+    let previewView = MetalDisplayView(frame: .zero)
+    let previewContainer = NSView(frame: .zero)
 
     func apply(state: MixerState) {
         model.apply(state: state)

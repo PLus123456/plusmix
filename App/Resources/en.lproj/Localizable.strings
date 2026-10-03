@@ -19,6 +19,8 @@
 "addInput.background.gradient" = "Gradient";
 "addInput.background.gray" = "Flat gray";
 "addInput.background.noise" = "Gray with noise";
+"addInput.banner.help" = "Read the guide";
+"addInput.banner.openSettings" = "Open System Settings…";
 "addInput.camera.count" = "%d devices found";
 "addInput.camera.device" = "Device";
 "addInput.camera.micHint" = "The device’s own microphone is captured too (needs microphone permission).";
@@ -69,6 +71,11 @@
 "addInput.file.rate" = "Playback rate";
 "addInput.file.title" = "Video file";
 "addInput.full" = "This show already has the maximum of %d inputs";
+"addInput.group.devices" = "Devices";
+"addInput.group.media" = "Media";
+"addInput.group.network" = "Network";
+"addInput.group.screen" = "Screen";
+"addInput.group.test" = "Test";
 "addInput.image.hint" = "PNG with alpha; large images are pre-scaled.";
 "addInput.image.path" = "Image";
 "addInput.image.title" = "Image";
@@ -151,6 +158,7 @@
 "audio.transport.thunderbolt" = "Thunderbolt";
 "audio.transport.usb" = "USB";
 "audio.transport.virtual" = "Virtual device";
+"audioSettings.windowTitle.master" = "Audio Settings — Master";
 "aux.display.dropped" = " (%ld dropped)";
 "aux.display.line" = "%@ · %ld frames";
 "aux.displayState.failed" = "failed";
@@ -781,6 +789,7 @@
 "overlay.rect.y" = "Y";
 "overlay.slideFrom" = "Slide from";
 "overlay.slideFrom.auto" = "Automatic (nearest edge)";
+"overlay.windowTitle" = "Overlay Settings";
 "prefs.api.enabled" = "Enable HTTP / WebSocket API";
 "prefs.api.hint" = "Changes take effect the next time the engine starts (“Apply and Restart Engine” applies them now).";
 "prefs.api.host" = "Listen address";

@@ -16,6 +16,10 @@ final class PanelCoordinator: NSObject {
     private(set) var preferencesWindow: PreferencesWindowController?
     private(set) var hotkeyWindow: HotkeyEditorWindowController?
     private(set) var midiWindow: MIDIMappingWindowController?
+    /// 叠加设置窗（W5-K）。
+    private(set) var overlaySettingsWindow: OverlaySettingsWindowController?
+    /// 音频设置窗（每条一个，W5-K）。
+    private(set) var audioSettingsWindows: [AudioStrip: AudioSettingsWindowController] = [:]
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
     private var session: SwitcherSession?
@@ -152,6 +156,18 @@ final class PanelCoordinator: NSObject {
         w.present()
         return w
     }
+
+    // MARK: 叠加设置窗 / 音频设置窗（W5-K）
+
+    @discardableResult
+    func showOverlaySettings(channel: Int?) -> OverlaySettingsWindowController {
+        let w = OverlaySettingsWindowController(model: OverlaySettingsModel(state: state, channel: channel ?? 1))
+        w.present()
+        return w
+    }
+
+    @discardableResult
+    func showAudioSettings(_ strip: AudioStrip, page: AudioSettingsPage? = nil) -> AudioSettingsWindowController? { nil }
 
     // MARK: 多画面（W3-C 的窗口；窗口菜单 / 底栏走 MainWindowController.toggleMultiviewWindow）
 

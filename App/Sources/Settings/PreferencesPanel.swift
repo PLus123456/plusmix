@@ -60,6 +60,8 @@ final class PreferencesModel: ObservableObject {
     let updateStatus: String
     @Published var automaticUpdates: Bool
     private unowned let controller: AppController
+    /// 音频设备与每条总线的声道（W5-K，J8）。
+    let audioOutput: AudioOutputSettingsModel
     /// 确认 sheet 挂在哪个窗口上（PreferencesWindowController 设）。
     weak var presentingWindow: NSWindow?
 
@@ -68,6 +70,7 @@ final class PreferencesModel: ObservableObject {
 
     init(controller: AppController) {
         self.controller = controller
+        audioOutput = AudioOutputSettingsModel(device: controller.settings.audioDevice, map: controller.settings.busOutputMap)
         updatesConfigured = controller.updateController.isConfigured
         updateStatus = controller.updateController.statusText
         automaticUpdates = controller.updateController.automaticallyChecksForUpdates

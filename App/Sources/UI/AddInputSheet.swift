@@ -106,6 +106,11 @@ struct AddInputModel {
     /// 从现有来源填回表单（输入设置窗"来源"一节：改完 makeConfig 出来的来源与原来逐字段相同）。
     init(source: InputSource) {
         kind = Kind(source.kind)
+        fill(from: source)
+    }
+
+    /// 把一个来源的字段填进表单（只填这一类的字段、不换当前页；添加面板按"上次用的"预填各类，W5-K / G2）。
+    mutating func fill(from source: InputSource) {
         switch source {
         case .camera(let id): cameraUniqueID = id
         case .decklink(let id, let connection, let channels):
@@ -314,17 +319,22 @@ final class AddInputFormModel: ObservableObject {
     var fullMessage: String { L("addInput.full", maxInputs) }
     var onConfirm: (() -> Void)?
     var onCancel: (() -> Void)?
+    /// 权限 / SDK / 驱动状态与"打开系统设置…""看说明"（测试注入，W5-K / G6）。
+    let environment: AddInputEnvironment
+    /// 本机记忆（上次的类型与设备 / 路径、最近文件；W5-K / G2 / G11）。
+    let history: AddInputHistory?
     private var audioInfos: [String: AudioInputDeviceInfo] = [:]
     private var decklinkInfos: [String: DeckLinkDeviceInfo] = [:]
     private var audioSubscription: AudioInputDevices.Subscription?
     private var ndiSearching = false
 
     /// 添加输入：默认编号 = 最小空闲编号。
-    convenience init(state: MixerState, maxInputs: Int) {
+    convenience init(state: MixerState, maxInputs: Int, history: AddInputHistory? = nil, environment: AddInputEnvironment = .live) {
         var m = AddInputModel()
         m.number = AddInputModel.nextFreeNumber(in: state, maxInputs: maxInputs)
         let used = Set(state.inputs.map(\.number))
-        self.init(model: m, freeNumbers: (1...max(1, maxInputs)).filter { !used.contains($0) }, maxInputs: maxInputs)
+        self.init(model: m, freeNumbers: (1...max(1, maxInputs)).filter { !used.contains($0) }, maxInputs: maxInputs,
+                  history: history, environment: environment)
         model.cameraUniqueID = cameras.first?.id
         model.displayID = AddInputModel.displays().first?.id
     }
@@ -334,15 +344,17 @@ final class AddInputFormModel: ObservableObject {
         var m = AddInputModel(source: config.source)
         m.number = config.number
         m.name = config.name
-        self.init(model: m, freeNumbers: [config.number], maxInputs: max(config.number, 1))
+        self.init(model: m, freeNumbers: [config.number], maxInputs: max(config.number, 1), history: nil, environment: .live)
         if model.cameraUniqueID == nil { model.cameraUniqueID = cameras.first?.id }
         if model.displayID == nil { model.displayID = AddInputModel.displays().first?.id }
     }
 
-    private init(model: AddInputModel, freeNumbers: [Int], maxInputs: Int) {
+    private init(model: AddInputModel, freeNumbers: [Int], maxInputs: Int, history: AddInputHistory?, environment: AddInputEnvironment) {
         self.model = model
         self.freeNumbers = freeNumbers
         self.maxInputs = maxInputs
+        self.history = history
+        self.environment = environment
         cameras = AddInputModel.cameras().map { AddInputChoice(id: $0.id, title: $0.name) }
         displays = AddInputModel.displays().map { AddInputChoice(id: String($0.id), title: $0.name) }
         reloadAudioDevices()
@@ -450,6 +462,18 @@ final class AddInputFormModel: ObservableObject {
             }
         }
     }
+
+    /// 当前页顶部的横幅（权限被拒 / SDK 没编进来 / 驱动没装；W5-K / G6）。
+    var banner: AddInputBanner? { nil }
+
+    /// 有横幅时"添加"旁边的一句。
+    var addNote: String? { nil }
+
+    /// 横幅上的按钮。
+    func perform(_ action: AddInputBanner.Action) {}
+
+    /// 视频 / 图片页的最近文件（G11）。
+    var recentFiles: [AddInputRecentFile] { [] }
 
     /// 生成配置；失败把原因写进 errorMessage。
     func makeConfig() -> InputConfig? {
@@ -751,9 +775,10 @@ final class AddInputSheetController: NSWindowController {
     var model: AddInputModel { form.model }
 
     /// kind = 打开时停在哪一页（底栏主体给上次添加用的类型，▴ / 菜单栏"按类型添加"给点的那一种；W5-F）。
-    init(state: MixerState, maxInputs: Int, kind: AddInputModel.Kind = .synthetic, onConfirm: @escaping (InputConfig) -> Void) {
+    init(state: MixerState, maxInputs: Int, kind: AddInputModel.Kind = .synthetic, history: AddInputHistory? = nil, environment: AddInputEnvironment = .live,
+         onConfirm: @escaping (InputConfig) -> Void) {
         self.onConfirm = onConfirm
-        form = AddInputFormModel(state: state, maxInputs: maxInputs)
+        form = AddInputFormModel(state: state, maxInputs: maxInputs, history: history, environment: environment)
         form.model.kind = kind
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520), styleMask: [.titled], backing: .buffered, defer: false)
         panel.title = L("addInput.title")

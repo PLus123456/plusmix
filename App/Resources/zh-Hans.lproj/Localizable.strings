@@ -19,6 +19,8 @@
 "addInput.background.gradient" = "渐变";
 "addInput.background.gray" = "纯灰";
 "addInput.background.noise" = "灰底噪声";
+"addInput.banner.help" = "看说明";
+"addInput.banner.openSettings" = "打开系统设置…";
 "addInput.camera.count" = "找到 %d 台设备";
 "addInput.camera.device" = "设备";
 "addInput.camera.micHint" = "设备自带的麦克风也会接进来（需要麦克风权限）。";
@@ -69,6 +71,11 @@
 "addInput.file.rate" = "播放速率";
 "addInput.file.title" = "视频文件";
 "addInput.full" = "本节目的输入已满（%d 路）";
+"addInput.group.devices" = "设备";
+"addInput.group.media" = "媒体";
+"addInput.group.network" = "网络";
+"addInput.group.screen" = "屏幕";
+"addInput.group.test" = "测试";
 "addInput.image.hint" = "PNG 带 alpha；大图预缩放。";
 "addInput.image.path" = "图片";
 "addInput.image.title" = "图片";
@@ -151,6 +158,7 @@
 "audio.transport.thunderbolt" = "雷雳";
 "audio.transport.usb" = "USB";
 "audio.transport.virtual" = "虚拟设备";
+"audioSettings.windowTitle.master" = "音频设置 — Master";
 "aux.display.dropped" = "（丢 %ld）";
 "aux.display.line" = "%@ · %ld 帧";
 "aux.displayState.failed" = "失败";
@@ -781,6 +789,7 @@
 "overlay.rect.y" = "Y";
 "overlay.slideFrom" = "从哪条边滑入";
 "overlay.slideFrom.auto" = "自动（离位置最近的边）";
+"overlay.windowTitle" = "叠加设置";
 "prefs.api.enabled" = "启用 HTTP / WebSocket API";
 "prefs.api.hint" = "改动下次启动引擎时生效（“应用并重起引擎”立刻生效）。";
 "prefs.api.host" = "监听地址";

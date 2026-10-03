@@ -168,6 +168,17 @@ final class MixerModel: ObservableObject {
     }
 
     func busState(_ bus: Bus) -> BusState { state.audio.buses.first { $0.bus == bus } ?? BusState(bus: bus) }
+
+    // MARK: 音频设置窗与设备声道（W5-K）
+
+    /// 条子上的齿轮：打开这一条的"音频设置"窗。
+    var onOpenAudioSettings: ((AudioStrip, AudioSettingsPage?) -> Void)?
+    func openAudioSettings(_ strip: AudioStrip, page: AudioSettingsPage? = nil) {}
+
+    /// 调音台头部的提示（设备没有耳机声道）。
+    private(set) var headerHint: String?
+    func setOutputInfo(outputChannels: Int?, map: BusOutputMap?) {}
+    static func headphonesHint(outputChannels: Int?, map: BusOutputMap?) -> String? { nil }
 }
 
 /// AppKit 容器：主窗口右栏；SwiftUI 内容。表的 50 ms 读数由 session 的 AudioMeterFeed 推过来（MainWindowController 接线）。

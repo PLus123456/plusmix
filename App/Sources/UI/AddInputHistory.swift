@@ -39,6 +39,12 @@ final class AddInputHistory {
         if let data = try? JSONEncoder().encode(recentSources) { defaults.set(data, forKey: Keys.recentSources) }
     }
 
+    /// 某一类上次加的来源（添加面板按它预填这一类的设备 / 路径，W5-K / G2）。
+    func lastSource(for kind: AddInputModel.Kind) -> InputSource? { nil }
+
+    /// 视频 / 图片最近用过的文件（新的在前，最多 10 个；W5-K / G11）。
+    func recentFiles(for kind: AddInputModel.Kind) -> [String] { [] }
+
     /// 清掉（测试）。
     func reset() {
         recentSources = []
