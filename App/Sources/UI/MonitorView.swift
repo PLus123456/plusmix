@@ -27,7 +27,22 @@ final class MonitorView: NSView {
     var fullscreenMenu: ((OutputSource) -> NSMenu?)?
     /// 现在标题条上是哪一路（黑场 / 输入不在 = noInput）。
     private(set) var shownInput = MixerState.noInput
+    /// 标题条上次按什么画的（编号 + 名字；nil = 还没画过）：没变就不重新拼字。
+    private var shownTitle: TitleKey?
+    private var shownBadgeKeys: [BadgeKey] = []
     private var shownBadges: [String] = []
+
+    private struct TitleKey: Equatable {
+        var number: Int
+        /// nil = 这个编号的输入不在（或黑场）。
+        var name: String?
+    }
+
+    private struct BadgeKey: Equatable {
+        var channel: Int
+        var input: Int?
+        var name: String?
+    }
 
     init(target: DisplayTarget) {
         self.target = target
@@ -100,44 +115,43 @@ final class MonitorView: NSView {
 
     private var roleName: String { target == .program ? "PGM" : "PVW" }
 
-    /// 标题条内容：编号 + 名字；0 = 黑场。齿轮跟着这一路灰 / 亮，PGM 画开着的叠加徽标。
+    /// 标题条内容：编号 + 名字；0 = 黑场。齿轮跟着这一路灰 / 亮，PGM 画开着的叠加徽标。每个快照都调：先比编号 / 名字，变了才拼字、改控件。
     func apply(state: MixerState) {
         let number = target == .program ? state.program : state.preview
         let input = number == MixerState.noInput ? nil : state.input(number)
-        let numberText: String, nameText: String
-        if number == MixerState.noInput {
-            numberText = "—"
-            nameText = L("monitor.black")
-        } else {
-            numberText = "\(number)"
-            nameText = input?.name ?? L("monitor.missingInput", number)
-        }
-        if numberLabel.stringValue != numberText { numberLabel.stringValue = numberText }
-        if nameLabel.stringValue != nameText { nameLabel.stringValue = nameText }
-        let roleText = target == .program && state.ftb.on ? "PGM · FTB" : roleName
-        if roleLabel.stringValue != roleText { roleLabel.stringValue = roleText }
-        let settable = input == nil ? MixerState.noInput : number
-        if settable != shownInput || gearButton.isEnabled != (input != nil) {
-            shownInput = settable
+        let title = TitleKey(number: number, name: input?.name)
+        if title != shownTitle {
+            shownTitle = title
+            if number == MixerState.noInput {
+                numberLabel.stringValue = "—"
+                nameLabel.stringValue = L("monitor.black")
+            } else {
+                numberLabel.stringValue = "\(number)"
+                nameLabel.stringValue = input?.name ?? L("monitor.missingInput", number)
+            }
+            shownInput = input == nil ? MixerState.noInput : number
             gearButton.isEnabled = input != nil
             gearButton.toolTip = input.map { L("monitor.gearTip", roleName, number, $0.name) } ?? L("monitor.gearTipBlack", roleName)
-        } else if let input, gearButton.toolTip != L("monitor.gearTip", roleName, number, input.name) {
-            gearButton.toolTip = L("monitor.gearTip", roleName, number, input.name)   // 改名
         }
+        let ftb = target == .program && state.ftb.on
+        if ftb != (roleLabel.stringValue != roleName) { roleLabel.stringValue = ftb ? "PGM · FTB" : roleName }
         if target == .program { applyBadges(state) }
     }
 
     /// PGM 的叠加徽标：每个开着的通道一个"通道号 · 输入名"（按通道顺序）。
     private func applyBadges(_ state: MixerState) {
+        let keys = state.overlays.enumerated().filter { $0.element.on }.map { index, overlay in
+            BadgeKey(channel: index + 1, input: overlay.input, name: overlay.input.flatMap { state.input($0)?.name })
+        }
+        guard keys != shownBadgeKeys else { return }
+        shownBadgeKeys = keys
         var texts: [String] = []
         var tips: [String] = []
-        for (index, overlay) in state.overlays.enumerated() where overlay.on {
-            let channel = index + 1
-            let name = overlay.input.map { state.input($0)?.name ?? L("monitor.missingInput", $0) } ?? "—"
-            texts.append(L("monitor.overlayBadge", channel, name))
-            tips.append(overlay.input.map { L("monitor.overlayBadgeTip", channel, $0, name) } ?? L("monitor.overlayBadgeTipEmpty", channel))
+        for key in keys {
+            let name = key.input.map { key.name ?? L("monitor.missingInput", $0) } ?? "—"
+            texts.append(L("monitor.overlayBadge", key.channel, name))
+            tips.append(key.input.map { L("monitor.overlayBadgeTip", key.channel, $0, name) } ?? L("monitor.overlayBadgeTipEmpty", key.channel))
         }
-        guard texts != shownBadges else { return }
         shownBadges = texts
         for (i, badge) in badges.enumerated() {
             if i < texts.count {
