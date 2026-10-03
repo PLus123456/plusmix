@@ -135,7 +135,7 @@ extension CommandKind { public var operatorFacing: Bool }   // false：setTransi
 ```bash
 xcodebuild -project Switcher.xcodeproj -scheme Switcher -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/DerivedData test-without-building -only-testing:SwitcherTests/ThumbnailRateTests -only-testing:SwitcherTests/DisplayLedgerAppTests
 ```
-- `make lint BRANCH=w5-app-settings-actions`：禁词 / 版本号 / Package.swift / 依赖方向通过；**归属一项相对 main 多出 `reports/w5-app-bottom-bar.md`、`reports/w5-app-toolbar.md`**（92 / 93 的报告，叠放带进来的，与 93 当时同样情况），`scripts/check-ownership.sh w5-app-settings-actions --base w5-app-toolbar` = "38 个改动文件都在允许范围内"；check-links、check-rt-symbols 通过。
+- `make lint BRANCH=w5-app-settings-actions`：禁词 / 版本号 / Package.swift / 依赖方向通过；**归属一项相对 main 多出 `reports/w5-app-bottom-bar.md`、`reports/w5-app-toolbar.md`**（92 / 93 的报告，叠放带进来的，与 93 当时同样情况），`scripts/check-ownership.sh w5-app-settings-actions --base w5-app-toolbar` = "40 个改动文件都在允许范围内"；check-links、check-rt-symbols 通过。
 
 ## 3. 没做的和原因
 
