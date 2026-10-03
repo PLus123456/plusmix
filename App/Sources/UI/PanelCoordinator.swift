@@ -16,6 +16,8 @@ final class PanelCoordinator: NSObject {
     private(set) var preferencesWindow: PreferencesWindowController?
     private(set) var hotkeyWindow: HotkeyEditorWindowController?
     private(set) var midiWindow: MIDIMappingWindowController?
+    /// 统计窗（W5-L，底栏"统计"）。
+    private(set) var statsWindow: StatsWindowController?
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
     private var session: SwitcherSession?
@@ -149,6 +151,20 @@ final class PanelCoordinator: NSObject {
         let w = MIDIMappingWindowController(model: model)
         w.onClose = { [weak self] in self?.midiWindow = nil }
         midiWindow = w
+        w.present()
+        return w
+    }
+
+    /// 统计窗（只读；已开就置前）。
+    @discardableResult
+    func showStats() -> StatsWindowController {
+        if let w = statsWindow {
+            w.present()
+            return w
+        }
+        let w = StatsWindowController(model: StatsWindowModel())
+        w.onClose = { [weak self] in self?.statsWindow = nil }
+        statsWindow = w
         w.present()
         return w
     }

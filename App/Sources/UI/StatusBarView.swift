@@ -8,6 +8,11 @@ import Darwin
 final class StatusBarView: NSView {
     let statusLabel = Theme.monoLabel("", size: 11, color: Theme.dimText)
     let noticeLabel = Theme.label("", size: 11, color: Theme.dimText)
+    /// 提醒条（W5-L，N02）：没有提醒时藏起来。
+    let reminderView = PanelView(color: Theme.reminderBackground)
+    private let reminderLabel = Theme.label("", size: 11, weight: .semibold, color: Theme.reminderText)
+    /// 提醒条上的字（没有提醒为空串）。
+    var reminderText: String { reminderView.isHidden ? "" : reminderLabel.stringValue }
     /// 左右留白（两边一样）。
     static let padding: CGFloat = 10
     /// 正在显示的提示（没有为空串；本机信息不算提示）。

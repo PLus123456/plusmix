@@ -6,6 +6,7 @@ import AppKit
 import SwitcherContracts
 import SwitcherEngine
 import SwitcherControl
+import SwitcherTally
 import VMixCompat
 
 /// 一条命令走完总线之后给 UI 的反馈（状态行提示用）。
@@ -37,6 +38,11 @@ final class ControlRuntime {
     let midi: MIDIController
     /// 第三方 API 兼容层（nil = 偏好设置里关着）。
     let compat: VMixCompatServer?
+    /// 只读 tally 流（W5-L）：发布器挂状态机、服务起 WS /tally + GET /tally；设置 › Tally 关着为 nil。
+    private(set) var tallyPublisher: TallyPublisher?
+    private(set) var tallyServer: TallyServer?
+    /// tally 流起不来的原因（端口被占等）。
+    private(set) var tallyError: String?
     /// API 起不来的原因（端口被占等）；起来了为 nil。
     private(set) var apiError: String?
     /// 兼容层起不来的原因。

@@ -935,6 +935,11 @@
 "transition.wipe.title" = "Wipe";
 "vcam.status.unavailableInTests" = "测试宿主不查询系统扩展";
 
+/* W5-L（98）：防睡眠 / App Nap、只读 tally 流、远程控制、提醒条、统计窗、界面锁 */
+"bottom.stats" = "统计";
+"statsWindow.title" = "统计";
+"statsWindow.waiting" = "等待第一行统计…";
+
 /* W4-B：更新（Sparkle）与诊断包 */
 "menu.checkForUpdates" = "检查更新…";
 "menu.help" = "帮助";

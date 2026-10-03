@@ -39,6 +39,8 @@ final class AppController {
     let addInputHistory: AddInputHistory
     /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
     let updateController: UpdateController
+    /// 引擎运行时拿着的"别睡"（W5-L，P1）：系统睡眠 + App Nap 一条、显示器休眠一条，按设置"性能与电源"的两个开关。
+    let engineActivity = EngineActivity()
     private var replacing = false
     /// 未保存判定的基准：上次新建 / 打开 / 保存时的"节目内容"（documentContent）；与当前的不同 = 有未保存的改动（W5-B）。
     private var documentBaseline: Show?

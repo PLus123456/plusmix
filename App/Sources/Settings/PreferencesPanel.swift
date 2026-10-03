@@ -42,6 +42,13 @@ final class PreferencesModel: ObservableObject {
     @Published var audioDevice: AppSettings.AudioDevice
     @Published var compatLayerEnabled: Bool
     @Published var compatLayerPort: Int
+    /// 兼容层的监听地址与 HTTP 端口（W5-L 远程控制页：仅本机 / 允许局域网二选一；HTTP 端口原来写死 8088）。
+    @Published var compatLayerHost: String
+    @Published var compatLayerHTTPPort: Int
+    /// 设置"性能与电源" / "Tally" / "提醒"三节（W5-L）：各自即时生效，不经"应用"。
+    let power: PowerSettingsModel
+    let tally: TallySettingsModel
+    let reminders: ReminderSettingsModel
     /// PVW 预览全部叠加（渲染器总开关，换 session 生效）。
     @Published var overlaysInPreview: Bool
     /// 外部输出在主屏上不盖住主界面（ExternalDisplayManager.mainScreenLayering，应用即生效）。
@@ -83,6 +90,11 @@ final class PreferencesModel: ObservableObject {
         audioDevice = s.audioDevice
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
+        compatLayerHost = s.compatLayerHost
+        compatLayerHTTPPort = s.compatLayerHTTPPort
+        power = PowerSettingsModel(controller: controller)
+        tally = TallySettingsModel(controller: controller)
+        reminders = ReminderSettingsModel(controller: controller)
         overlaysInPreview = s.overlaysInPreview
         externalBehindInterface = s.externalBehindInterface
         confirmBeforeStop = s.confirmBeforeStop
@@ -109,6 +121,32 @@ final class PreferencesModel: ObservableObject {
     }
 
     var programFormat: ProgramFormat { ProgramFormat(width: formatWidth, height: formatHeight, frameRate: frameRate) }
+
+    // MARK: 远程控制（W5-L，P3 / X33）
+
+    /// 本地 API：仅本机 / 允许局域网（写进 apiHost）。
+    var apiScope: ListenScope {
+        get { ListenScope(host: apiHost) }
+        set { apiHost = newValue.host(replacing: apiHost) }
+    }
+
+    /// 兼容层：仅本机 / 允许局域网（写进 compatLayerHost）。
+    var compatScope: ListenScope {
+        get { ListenScope(host: compatLayerHost) }
+        set { compatLayerHost = newValue.host(replacing: compatLayerHost) }
+    }
+
+    /// 别的机器（或本机）该连的 API 地址：http://<地址>:<端口>；允许局域网又找不到局域网地址时为空串。
+    var apiAddress: String { "" }
+    /// 其余局域网地址（多块网卡时）。
+    var apiOtherAddresses: [String] { [] }
+    /// 允许局域网又没设 token 时的黄字提醒。
+    var apiWarning: String? { nil }
+    /// 兼容层的 HTTP 地址（…/api）与 TCP 地址（地址:端口）。
+    var compatHTTPAddress: String { "" }
+    var compatTCPAddress: String { "" }
+    /// 兼容层允许局域网时的提醒（它没有鉴权）。
+    var compatWarning: String? { nil }
 
     func selectFormatPreset(_ f: ProgramFormat) {
         formatWidth = f.width

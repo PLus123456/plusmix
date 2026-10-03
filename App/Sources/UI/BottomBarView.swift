@@ -51,6 +51,16 @@ final class BottomBarView: NSView {
     let multiview = SplitBarButton(name: L("bottom.multiview"), title: L("bottom.multiview"))
     /// 右组：叠加（97 之前仍是弹出层）。
     let overlayButton = Theme.button(L("bottom.overlay"), target: nil, action: nil)
+    /// 右组："统计"开只读统计窗（W5-L，E5）。
+    let statsButton = Theme.button(L("bottom.stats"), target: nil, action: nil)
+    /// 底栏最右：锁定界面（W5-L，E8）。
+    let lockButton = Theme.button("", target: nil, action: nil)
+    /// 点"统计"。
+    var onStats: (() -> Void)?
+    /// 点锁（MainWindowController 翻主窗口的锁）。
+    var onToggleLock: (() -> Void)?
+    /// 锁按钮现在是不是高亮（= 锁着）。
+    private(set) var isLockHighlighted = false
     /// 左组，从左到右（E2）。
     var leftGroup: [SplitBarButton] { [addInput, record, external, stream, multiview] }
     /// 状态行：窗口最底一行、全宽（E9）。

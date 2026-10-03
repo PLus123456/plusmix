@@ -935,6 +935,11 @@
 "transition.wipe.title" = "Wipe";
 "vcam.status.unavailableInTests" = "Not queried in the test host";
 
+/* W5-L (98): sleep / App Nap, read-only tally stream, remote control, reminders, statistics window, interface lock */
+"bottom.stats" = "Statistics";
+"statsWindow.title" = "Statistics";
+"statsWindow.waiting" = "Waiting for the first statistics line…";
+
 /* W4-B: updates (Sparkle) and diagnostics */
 "menu.checkForUpdates" = "Check for Updates…";
 "menu.help" = "Help";

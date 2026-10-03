@@ -18,6 +18,14 @@ final class MainWindow: NSWindow {
         if keyHandler?(event) == true { return }
         super.keyDown(with: event)
     }
+
+    /// 界面锁（W5-L，E8）：锁着时这个窗口里的鼠标点击不生效（锁按钮除外）。
+    var isInterfaceLocked = false
+    /// 被锁拦下的鼠标事件数（测试看）。
+    private(set) var blockedMouseEvents = 0
+
+    /// 锁着时这个事件该不该拦。
+    func blocksForLock(_ event: NSEvent) -> Bool { false }
 }
 
 @MainActor
@@ -66,6 +74,14 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     private var retiredProgramDropped: UInt64 = 0
     private var retiredProgramUndelivered: UInt64 = 0
     nonisolated(unsafe) private var occlusionObserver: (any NSObjectProtocol)?
+
+    /// 界面锁着没有（W5-L，E8）。
+    var isInterfaceLocked: Bool { (window as? MainWindow)?.isInterfaceLocked ?? false }
+    /// 现在显示的提醒（W5-L，N02）。
+    private(set) var activeReminders: [Reminder] = []
+
+    /// 锁 / 解锁界面（底栏最右的锁按钮）。
+    func setInterfaceLocked(_ locked: Bool) {}
 
     /// 测试用：清零快照分发的计数，让一条用例只量自己（UISmokeTests 的"每秒最多 60 次"，用户 2026-09-24 选的做法 (a)；
     /// 计数原来跨用例累计、以事件为锚的 1 s 窗口偶发数到 61，W3-E2 报告 §5 第 13 条）。

@@ -62,6 +62,9 @@ final class SwitcherSession {
     private(set) var t0: HostTime = .zero
     /// 最近一次起好的起步记录（start 成功后有；诊断 / 测试看）。
     private(set) var startReport: StartReport?
+    /// 停机走过的几步（W5-L：tally → API → 引擎；测试看顺序）。
+    enum StopStep: Equatable { case tally, api, engine }
+    private(set) var stopSequence: [StopStep] = []
 
     /// 一次起步的记录（诊断，W3-E6）：各段耗时、定 t0 之后花掉多少提前量、引擎报的时钟起晚。W1-B3 当时靠临时探针才量到这几个数
     /// （reports/w1-core-3.md §1.1），现在每次起都记下并打一行日志；AppController 另存进程里第一次起好的那份（冷启动只在它身上）。

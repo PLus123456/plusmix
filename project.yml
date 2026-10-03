@@ -108,6 +108,8 @@ targets:
       - package: SwitcherControl
       - package: SwitcherControl
         product: VMixCompat                  # G4：偏好设置里的第三方 API 兼容层开关（W3-D）
+      - package: SwitcherControl
+        product: SwitcherTally               # W5-L（98）：设置 › Tally 打开时 App 起只读 tally 流（默认关，Q46）
       - package: SwitcherTestKit
       - package: Sparkle                     # W4-B：自动更新（UpdateController）；Xcode 把 Sparkle.framework 嵌进 Contents/Frameworks 并签名
       - target: SwitcherCameraExtension      # W3-C：嵌到 Contents/Library/SystemExtensions/

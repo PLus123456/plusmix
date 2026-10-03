@@ -194,6 +194,8 @@ final class MonitorView: NSView {
     var displayedNumber: String { numberLabel.stringValue }
     var displayedName: String { nameLabel.stringValue }
     var roleText: String { roleLabel.stringValue }
+    /// PGM 标题条上的 FTB 色块亮着没有（W5-L，N02）。
+    var isFTBIndicatorShown: Bool { false }
     /// 正在显示的叠加徽标文字（按通道顺序）。
     var overlayBadgeTexts: [String] { shownBadges }
     var overlayBadgeViews: [NSView] { badges.filter { !$0.isHidden } }
