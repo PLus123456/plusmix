@@ -192,10 +192,12 @@ final class BottomBarView: NSView {
     @objc private func recordPressed() {
         let records = state.outputs.filter { $0.kind == .record }
         if !records.isEmpty {
-            // 有任何一路在录就全停（先确认），否则全起（同一拍发多条 = ISO 共用起点；开始不问）
+            // 有任何一路在录就全停（先确认），否则起参与录制的那几路（同一拍发多条 = ISO 共用起点；开始不问；W5-I：录制页 / ISO 表里取消勾的路不起，K4 / K9）
             let running = records.filter(\.enabled)
             if running.isEmpty {
-                for r in records { send?(.startRecord(output: r.number)) }
+                let armed = OutputLinkage.armedRecords(in: state)
+                if armed.isEmpty { showNotice(L("bottom.record.noneArmed")) }
+                for r in armed { send?(.startRecord(output: r.number)) }
             } else {
                 confirmStop(.stopRecord, routes: running) { [weak self] in
                     guard let self else { return }
@@ -203,11 +205,9 @@ final class BottomBarView: NSView {
                 }
             }
         } else {
-            // 节目里没有录制输出：先加一个再开
+            // 节目里没有录制输出：先加一个再开（码率按节目格式，K8）
             let number = (state.outputs.map(\.number).max() ?? 0) + 1
-            let show = ShowDocuments.emptyShow()
-            var output = show.outputs[0]
-            output.number = number
+            let output = RecordDefaults.output(number: number, name: L("show.defaultRecordName"), format: state.format, directory: ShowDocuments.defaultRecordDirectory)
             send?(.addOutput(config: output))
             send?(.startRecord(output: number))
         }

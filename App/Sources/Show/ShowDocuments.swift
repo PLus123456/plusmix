@@ -35,11 +35,11 @@ final class ShowDocuments {
     }
 
     /// 空节目：没有输入，带一个默认录制输出（录到 recordDirectory，默认 ~/Movies/PlusMix），PGM / PVW 都是黑场。
+    /// 录制输出的码率按节目格式给（W5-I，K8 / Q30：1080p60 → 18 Mb/s、AAC 256k；契约默认值不动）。
     static func emptyShow(name: String = L("show.untitled"), recordDirectory: String = ShowDocuments.defaultRecordDirectory) -> Show {
-        let record = OutputState(number: 1, kind: .record, name: L("show.defaultRecordName"), enabled: false,
-                                 settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
-                                                          record: RecordSettings(directory: recordDirectory)))
-        let state = MixerState(outputs: [record])
+        let format = MixerState().format
+        let record = RecordDefaults.output(number: 1, name: L("show.defaultRecordName"), format: format, directory: recordDirectory)
+        let state = MixerState(format: format, outputs: [record])
         return Show(name: name, state: state)
     }
 

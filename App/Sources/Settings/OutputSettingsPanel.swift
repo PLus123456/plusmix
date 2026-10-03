@@ -6,16 +6,20 @@
 // W5-B：推流页在推的那一段（目标开着、没起不来）地址 / 密钥 / 编码锁住、"删除目的地"灰掉（X05 / X24，同 ISO 页录着的路）；地址 / 密钥回车或失焦才提交；
 // 起不来的那一段写明原因、不锁（要能改对地址，改对后运行表自动重试），给"重试"与"停用这一路"；录制页"容器"与"停止后转 MP4"合成一个"文件格式"单选，
 // 只写 remuxToMP4、不写 container（照读，04 Q12 (a)）；录着的时候页顶提示"改动从下一次开录起生效"（K6）。
+// W5-I（prompt 95）：最上面加"输出总览"（F8）；录制页改成录制输出列表（K4）、ISO 页改成表（K9）、推流页加起停 / 状态行 / 服务 / 质量 / 鉴权 / 合计上行
+// （L3 / L5–L10）、外部显示页改成每屏单选（M2 / M5）、多画面布局页加格子编辑（M7）、每一节标题行加名字框（F9）。各页的逻辑在 OutputPagesModel.swift，
+// 视图在 OutputPagesViews.swift，跟随规则在 OutputLinkage.swift。
 import AppKit
 import SwiftUI
 import SwitcherContracts
+import SwitcherExternal
 import SwitcherRender
 import SwitcherVirtualCamera
 
 @MainActor
 final class OutputSettingsModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case record, iso, stream, external, ndi, virtualCamera, multiview
+        case overview, record, iso, stream, external, ndi, virtualCamera, multiview
         var id: String { rawValue }
         var title: String { L("outputSettings.tab.\(rawValue)") }
     }
@@ -47,6 +51,18 @@ final class OutputSettingsModel: ObservableObject {
     let queriesSystemExtensions: Bool
     /// ISO 页估算"还能录多久"时留出的磁盘余量（= 录制的下限，AppSettings.recordMinimumFreeMB）。
     let reserveBytes: UInt64
+    /// 推流页每一路在"服务"下拉里刚选过的服务 id（每场发地址的平台从地址认不出来；只在窗口开着时记，节目里只存地址）。
+    @Published var chosenServices: [Int: String] = [:]
+    /// 推流页展开了"编码详情…"的目的地。
+    @Published var expandedEncodeDetails: Set<Int> = []
+    /// ISO 表列出纯音频 / 图片输入（默认收起）。
+    @Published var isoShowAllInputs = false
+    /// 总览里点的那一路（详情页滚到它）。
+    @Published var focusedOutput: Int?
+    /// 停录制 / 推流前问一声（PanelCoordinator 接到 ConfirmationCenter，挂在输出设置窗上）；nil = 直接停（模型级测试）。
+    var confirmStop: ((ConfirmationCenter.Kind, [OutputState], @escaping @MainActor () -> Void) -> Void)?
+    /// 接着的显示器（外部显示页的每屏单选；测试可换）。
+    var displays: () -> [DisplayInfo] = { ExternalDisplays.all() }
 
     init(state: MixerState, tab: Tab, defaultRecordDirectory: String, showName: String, queriesSystemExtensions: Bool, reserveBytes: UInt64 = 0,
          aux: AuxOutputRuntime? = nil) {
@@ -140,7 +156,19 @@ final class OutputSettingsModel: ObservableObject {
         send?(.renameOutput(output: number, name: trimmed))
     }
 
-    private func add(_ output: OutputState) {
+    /// 一条命令先在本地状态上照做（表单立刻响应），快照回来再对齐（外部显示页每屏单选一次发好几条）。
+    func applyLocally(_ c: Command) {
+        switch c {
+        case .addOutput(let config): state.outputs.append(config); state.outputs.sort { $0.number < $1.number }
+        case .setOutputSettings(let n, let settings): if let i = state.outputs.firstIndex(where: { $0.number == n }) { state.outputs[i].settings = settings }
+        case .setOutputEnabled(let n, let on): if let i = state.outputs.firstIndex(where: { $0.number == n }) { state.outputs[i].enabled = on }
+        case .renameOutput(let n, let name): if let i = state.outputs.firstIndex(where: { $0.number == n }) { state.outputs[i].name = name }
+        default: break
+        }
+    }
+
+    /// 加一个输出：本地先加，再发 addOutput。
+    func addOutputConfig(_ output: OutputState) {
         state.outputs.append(output)
         state.outputs.sort { $0.number < $1.number }
         send?(.addOutput(config: output))
@@ -153,9 +181,8 @@ final class OutputSettingsModel: ObservableObject {
     /// 没有录制输出就先加一个默认的（同底栏"录制"按钮）。
     func updateRecord(_ body: (inout OutputSettings) -> Void) {
         if recordOutput == nil {
-            var o = ShowDocuments.emptyShow(recordDirectory: defaultRecordDirectory).outputs[0]
-            o.number = nextOutputNumber()
-            add(o)
+            // 新建录制输出的默认值跟节目格式走（K8 / Q30）
+            addOutputConfig(RecordDefaults.output(number: nextOutputNumber(), name: L("show.defaultRecordName"), format: state.format, directory: defaultRecordDirectory))
         }
         guard let r = recordOutput else { return }
         updateOutput(r.number) { s in
@@ -221,7 +248,7 @@ final class OutputSettingsModel: ObservableObject {
             guard existing == nil, let config = state.input(input) else { return }
             var output = ISORoutes.makeISOOutput(for: config, in: state, defaultDirectory: defaultRecordDirectory)
             output.number = nextOutputNumber()
-            add(output)
+            addOutputConfig(output)
         } else if let existing, !existing.enabled {
             removeOutput(existing.number)
         }
@@ -245,11 +272,12 @@ final class OutputSettingsModel: ObservableObject {
 
     var streamOutputs: [OutputState] { state.outputs.filter { $0.kind == .stream } }
 
+    /// 加一个目的地：质量按默认档（封顶 1080p、关键帧 2 s 按节目帧率写帧数，Q30），第 2 个起"与推流 1 相同"（L9）。
     @discardableResult
     func addStream(url: String, key: String) -> Int {
         let n = nextOutputNumber()
-        let settings = OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: StreamSettings(url: url, streamKey: key))
-        add(OutputState(number: n, kind: .stream, name: L("outputSettings.stream.name", streamOutputs.count + 1), enabled: false, settings: settings))
+        addOutputConfig(OutputState(number: n, kind: .stream, name: L("outputSettings.stream.name", streamOutputs.count + 1), enabled: false,
+                                    settings: newStreamSettings(url: url, key: key)))
         return n
     }
 
@@ -303,7 +331,7 @@ final class OutputSettingsModel: ObservableObject {
         let n = nextOutputNumber()
         let screenName = NSScreen.screen(number: screenNumber)?.localizedName ?? "\(screenNumber)"
         // fallbackToMain 用默认（提案 015 起默认 false = 显示器不在就收起窗口等它回来）；要退回主屏在页上打开
-        add(OutputState(number: n, kind: .externalDisplay, name: L("outputSettings.external.name", screenName), enabled: true,
+        addOutputConfig(OutputState(number: n, kind: .externalDisplay, name: L("outputSettings.external.name", screenName), enabled: true,
                         settings: OutputSettings(source: source, display: DisplayOutputSettings(displayID: screenNumber))))
         return n
     }
@@ -346,7 +374,7 @@ final class OutputSettingsModel: ObservableObject {
         let n = nextOutputNumber()
         var extra: [String: JSONValue] = [OutputExtras.ndiConversion: .string(conversion)]
         if !groups.isEmpty { extra[OutputExtras.ndiGroups] = .string(groups) }
-        add(OutputState(number: n, kind: .ndi, name: name, enabled: true, settings: OutputSettings(source: source, extra: extra)))
+        addOutputConfig(OutputState(number: n, kind: .ndi, name: name, enabled: true, settings: OutputSettings(source: source, extra: extra)))
         return n
     }
 
@@ -377,7 +405,7 @@ final class OutputSettingsModel: ObservableObject {
         if let o = virtualCameraOutput {
             setOutputEnabled(o.number, on: enabled)
         } else {
-            add(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: .program)))
+            addOutputConfig(OutputState(number: nextOutputNumber(), kind: .virtualCamera, name: L("outputSettings.vcam.name"), enabled: enabled, settings: OutputSettings(source: .program)))
         }
     }
 
@@ -418,7 +446,7 @@ final class OutputSettingsModel: ObservableObject {
         if let o = multiviewOutput {
             updateOutput(o.number) { $0.multiview = layout }
         } else {
-            add(OutputState(number: nextOutputNumber(), kind: .multiview, name: L("outputSettings.multiview.name"), enabled: false,
+            addOutputConfig(OutputState(number: nextOutputNumber(), kind: .multiview, name: L("outputSettings.multiview.name"), enabled: false,
                             settings: OutputSettings(source: .multiview, multiview: layout)))
         }
     }
@@ -440,11 +468,7 @@ final class OutputSettingsModel: ObservableObject {
 
 struct OutputSettingsView: View {
     @ObservedObject var model: OutputSettingsModel
-    @State private var newStreamURL = ""
-    @State private var newStreamKey = ""
     @State private var newNDIName = "PlusMix"   // App 侧的 NDI 源默认名用产品名（W4-D）；包内默认值不动
-    @State private var newExternalScreen: UInt32 = NSScreen.main?.displayNumber ?? 0
-    @State private var newExternalSource: OutputSource = .program
 
     var body: some View {
         HStack(spacing: 0) {
@@ -464,46 +488,19 @@ struct OutputSettingsView: View {
     @ViewBuilder
     private var tabBody: some View {
         switch model.tab {
-        case .record: recordTab
-        case .iso: isoTab
-        case .stream: streamTab
-        case .external: externalTab
+        case .overview: OutputOverviewPage(model: model)
+        case .record: RecordPage(model: model)
+        case .iso: ISOPage(model: model)
+        case .stream: StreamPage(model: model)
+        case .external: ExternalDisplayPage(model: model)
         case .ndi: ndiTab
         case .virtualCamera: virtualCameraTab
-        case .multiview: multiviewTab
+        case .multiview: MultiviewPage(model: model)
         }
     }
 
-    // MARK: 多画面布局
+    // MARK: 编码表单的绑定与控件（录制页 / 推流页共用）
 
-    private var multiviewTab: some View {
-        let layout = model.multiviewLayout
-        return Section(L("outputSettings.multiview.title")) {
-            Picker(L("outputSettings.multiview.preset"), selection: Binding(get: { layout.preset }, set: { model.setMultiviewPreset($0) })) {
-                ForEach(MultiviewLayout.presetNames, id: \.self) { Text(L("outputSettings.multiview.preset.\($0)")).tag($0) }
-            }
-            .disabled(!layout.custom.isEmpty)
-            Toggle(L("outputSettings.multiview.safeArea"), isOn: Binding(get: { layout.safeArea }, set: { model.setMultiviewSafeArea($0) }))
-            Toggle(L("outputSettings.multiview.meters"), isOn: Binding(get: { layout.meters }, set: { model.setMultiviewMeters($0) }))
-            if !layout.custom.isEmpty {
-                Text(L("outputSettings.multiview.customActive", layout.custom.count)).font(.caption).foregroundStyle(.secondary)
-                ForEach(Array(model.customCellRows.enumerated()), id: \.offset) { _, row in
-                    LabeledContent(row.source, value: row.rect)
-                }
-                Button(L("outputSettings.multiview.clearCustom")) { model.clearMultiviewCustomCells() }
-            }
-            Text(L("outputSettings.multiview.hint")).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: 录制
-
-    private var recordVideo: Binding<VideoEncodeSettings> {
-        model.recordBinding(\.video, default: nil).map(get: { $0 ?? VideoEncodeSettings() }, set: { Optional($0) })
-    }
-    private var recordAudio: Binding<AudioEncodeSettings> {
-        model.recordBinding(\.audio, default: nil).map(get: { $0 ?? AudioEncodeSettings() }, set: { Optional($0) })
-    }
     static func video(of number: Int, in model: OutputSettingsModel) -> Binding<VideoEncodeSettings> {
         model.outputBinding(number, \.video, default: nil).map(get: { $0 ?? VideoEncodeSettings() }, set: { Optional($0) })
     }
@@ -512,52 +509,6 @@ struct OutputSettingsView: View {
     }
     static func stream(of number: Int, in model: OutputSettingsModel) -> Binding<StreamSettings> {
         model.outputBinding(number, \.stream, default: nil).map(get: { $0 ?? StreamSettings(url: "") }, set: { Optional($0) })
-    }
-
-    private var recordTab: some View {
-        Group {
-            if let note = model.recordLiveNote {
-                Section { Text(note).foregroundStyle(.orange) }
-            }
-            Section(L("outputSettings.record.format")) {
-                Picker(L("outputSettings.codec"), selection: recordVideo.codec) {
-                    ForEach(OutputSettingsModel.videoCodecs, id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
-                }
-                // 文件格式（W5-B，K5）：原来的"容器"与"停止后转 MP4"合成一个单选，只写 remuxToMP4
-                Picker(L("outputSettings.record.fileFormat"), selection: Binding(get: { model.recordFileFormat }, set: { model.recordFileFormat = $0 })) {
-                    ForEach(OutputSettingsModel.RecordFileFormat.allCases) { Text($0.title).tag($0) }
-                }
-                if let note = model.recordLegacyContainerNote {
-                    Text(note).font(.caption).foregroundStyle(.secondary)
-                }
-                Self.resolutionPicker(recordVideo)
-                Self.bitrateField(recordVideo)
-                Stepper(value: recordVideo.keyframeIntervalFrames, in: 1...600, step: 1) {
-                    Text(L("outputSettings.keyframeInterval", model.recordOutput?.settings.video?.keyframeIntervalFrames ?? 120))
-                }
-                Picker(L("outputSettings.audioCodec"), selection: recordAudio.codec) {
-                    ForEach(OutputSettingsModel.audioCodecs, id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
-                }
-                Self.audioBitrateField(recordAudio)
-            }
-            Section(L("outputSettings.record.file")) {
-                HStack {
-                    TextField(L("outputSettings.record.directory"), text: recordSettingsBinding.directory)
-                    Button(L("common.browse")) { chooseDirectory() }
-                }
-                TextField(L("outputSettings.record.fileNamePattern"), text: recordSettingsBinding.fileNamePattern)
-                LabeledContent(L("outputSettings.record.example"), value: model.recordExampleFileName)
-                Stepper(value: recordSettingsBinding.fragmentIntervalSeconds, in: 0.5...10, step: 0.5) {
-                    Text(L("outputSettings.record.fragmentInterval", model.recordOutput?.settings.record?.fragmentIntervalSeconds ?? 1))
-                }
-                Text(L("outputSettings.record.hint")).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var recordSettingsBinding: Binding<RecordSettings> {
-        let fallback = RecordSettings(directory: model.defaultRecordDirectory)
-        return model.recordBinding(\.record, default: nil).map(get: { $0 ?? fallback }, set: { Optional($0) })
     }
 
     static func resolutionPicker(_ video: Binding<VideoEncodeSettings>) -> some View {
@@ -590,101 +541,6 @@ struct OutputSettingsView: View {
         }), format: .number)
     }
 
-    private func chooseDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        if panel.runModal() == .OK, let url = panel.url { model.updateRecord { $0.record?.directory = url.path } }
-    }
-
-    // MARK: ISO
-
-    private var isoTab: some View {
-        Section(L("outputSettings.iso.title")) {
-            Text(L("outputSettings.iso.hint")).font(.caption).foregroundStyle(.secondary)
-            ForEach(model.state.inputs) { input in
-                HStack {
-                    Toggle(L("outputSettings.iso.input", input.number, input.name), isOn: Binding(get: { model.isoInputs.contains(input.number) },
-                                                                                                    set: { model.setISO(input: input.number, on: $0) }))
-                        .disabled(model.isoLocked(input: input.number))
-                    Text(model.isoRouteText(input: input.number)).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if model.state.inputs.isEmpty { Text(L("outputSettings.iso.noInputs")).foregroundStyle(.secondary) }
-            Text(model.isoEstimateText).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: 推流
-
-    private var streamTab: some View {
-        Group {
-            ForEach(model.streamOutputs) { output in
-                StreamDestinationSection(model: model, output: output)
-            }
-            Section(L("outputSettings.stream.add")) {
-                TextField(L("outputSettings.stream.url"), text: $newStreamURL, prompt: Text(L("outputSettings.stream.urlPrompt")))
-                SecureField(L("outputSettings.stream.key"), text: $newStreamKey)
-                Button(L("outputSettings.stream.addButton")) {
-                    guard !newStreamURL.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                    model.addStream(url: newStreamURL.trimmingCharacters(in: .whitespaces), key: newStreamKey)
-                    newStreamURL = ""
-                    newStreamKey = ""
-                }
-                Text(L("outputSettings.stream.hint")).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    // MARK: 外部显示
-
-    private var externalTab: some View {
-        Group {
-            ForEach(model.externalOutputs) { output in
-                Section(L("outputSettings.external.section", output.number, output.name)) {
-                    Toggle(L("outputSettings.external.enabled"), isOn: Binding(get: { output.enabled }, set: { model.setOutputEnabled(output.number, on: $0) }))
-                    screenPicker(Binding(get: { OutputExtras.displayNumber(of: output) ?? 0 }, set: { model.setExternalDisplay(output.number, screenNumber: $0, source: nil) }),
-                                 current: OutputExtras.displayNumber(of: output))
-                    sourcePicker(Binding(get: { output.settings.source }, set: { model.setExternalDisplay(output.number, screenNumber: nil, source: $0) }))
-                    sourceNote(output.settings.source)
-                    Toggle(L("outputSettings.external.fallbackToMain"), isOn: Binding(get: { output.settings.display?.fallbackToMain ?? false },
-                                                                                       set: { model.setExternalFallback(output.number, on: $0) }))
-                        .help(L("outputSettings.external.fallbackHelp"))
-                    LabeledContent(L("outputSettings.external.status"), value: model.displayStatus(output: output.number, kind: "externalDisplay") ?? "—")
-                    Button(L("outputSettings.external.close")) { model.removeOutput(output.number) }
-                }
-            }
-            Section(L("outputSettings.external.add")) {
-                screenPicker($newExternalScreen)
-                sourcePicker($newExternalSource)
-                sourceNote(newExternalSource)
-                Button(L("outputSettings.external.open")) { model.addExternalDisplay(screenNumber: newExternalScreen, source: newExternalSource) }
-                Text(L("outputSettings.external.hint")).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func screenPicker(_ b: Binding<UInt32>, current: UInt32? = nil) -> some View {
-        Picker(L("outputSettings.external.screen"), selection: b) {
-            ForEach(model.screenChoices(including: current), id: \.id) { c in Text(c.title).tag(c.id) }
-        }
-    }
-
-    private func sourcePicker(_ b: Binding<OutputSource>) -> some View {
-        Picker(L("outputSettings.source"), selection: b) {
-            ForEach(model.sourceChoices, id: \.self) { Text($0.title(in: model.state)).tag($0) }
-        }
-    }
-
-    /// 来源选了某路输入时的一行说明（Aux = 原始画面）。
-    @ViewBuilder
-    private func sourceNote(_ source: OutputSource) -> some View {
-        if let note = model.sourceNote(for: source) {
-            Text(note).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: NDI
 
     private var ndiTab: some View {
@@ -706,7 +562,7 @@ struct OutputSettingsView: View {
     // MARK: 虚拟摄像头
 
     private var virtualCameraTab: some View {
-        Section(L("outputSettings.vcam.title")) {
+        Section {
             Toggle(L("outputSettings.vcam.enabled"), isOn: Binding(get: { model.virtualCameraOutput?.enabled ?? false }, set: { model.setVirtualCamera(enabled: $0) }))
             // 来源不可选：固定送 PGM（W3-E4；设计方案 §2 / §3 的数据流）
             LabeledContent(L("outputSettings.source"), value: L("source.program"))
@@ -720,78 +576,15 @@ struct OutputSettingsView: View {
             }
             LabeledContent(L("outputSettings.vcam.bundleID"), value: model.extensionIdentifier)
             Text(L("outputSettings.vcam.hint")).font(.caption).foregroundStyle(.secondary)
+        } header: {
+            // 标题行带名字框（F9）；还没有虚拟摄像头输出时只有标题
+            if let o = model.virtualCameraOutput {
+                OutputSectionHeader(model: model, output: o, title: L("outputSettings.vcam.title"), subtitle: L("outputSettings.outputNumber", o.number))
+            } else {
+                Text(L("outputSettings.vcam.title"))
+            }
         }
         .onAppear { if model.queriesSystemExtensions { model.refreshVirtualCameraStatus() } }
-    }
-}
-
-/// 推流页的一个目的地（W5-B）。在推的（目标开着、没起不来）地址 / 密钥 / 编码锁住并注明"停止后可改"，"删除目的地"灰掉（L12 / X05 / X24）；
-/// 地址 / 密钥是草稿，回车或离开输入框才提交（原来每按一个键发一次 setOutputSettings）；起不来的写明原因、不锁，给"重试"与"停用这一路"（L13）。
-struct StreamDestinationSection: View {
-    @ObservedObject var model: OutputSettingsModel
-    let output: OutputState
-    @State private var draftURL: String
-    @State private var draftKey: String
-    @FocusState private var focus: Field?
-    enum Field: Hashable { case url, key }
-
-    init(model: OutputSettingsModel, output: OutputState) {
-        self.model = model
-        self.output = output
-        _draftURL = State(initialValue: output.settings.stream?.url ?? "")
-        _draftKey = State(initialValue: output.settings.stream?.streamKey ?? "")
-    }
-
-    private var number: Int { output.number }
-    private var locked: Bool { model.isStreamLocked(number) }
-    private var savedURL: String { output.settings.stream?.url ?? "" }
-    private var savedKey: String { output.settings.stream?.streamKey ?? "" }
-
-    private func commit() {
-        let url = draftURL.trimmingCharacters(in: .whitespaces)
-        guard !locked, url != savedURL || draftKey != savedKey else { return }
-        model.commitStreamAddress(number, url: url, key: draftKey)
-    }
-
-    var body: some View {
-        Section(L("outputSettings.stream.section", number, output.name)) {
-            LabeledContent(L("outputSettings.stream.status"), value: model.streamStatus(output: number))
-            if output.enabled, model.failures[number] != nil {
-                Text(L("outputSettings.stream.failedHint")).font(.caption).foregroundStyle(.red)
-                HStack {
-                    Button(L("outputSettings.stream.retry")) { model.retryStream(number) }
-                    Button(L("outputSettings.stream.disable")) { model.disableStream(number) }
-                }
-            }
-            if let note = model.streamLockNote(number) {
-                Text(note).font(.caption).foregroundStyle(.orange)
-            }
-            TextField(L("outputSettings.stream.url"), text: $draftURL)
-                .focused($focus, equals: .url).onSubmit(commit).disabled(locked)
-            SecureField(L("outputSettings.stream.key"), text: $draftKey)
-                .focused($focus, equals: .key).onSubmit(commit).disabled(locked)
-            Group {
-                Stepper(value: OutputSettingsView.stream(of: number, in: model).reconnectMaxSeconds, in: 1...300, step: 1) {
-                    Text(L("outputSettings.stream.reconnect", output.settings.stream?.reconnectMaxSeconds ?? 30))
-                }
-                Picker(L("outputSettings.codec"), selection: OutputSettingsView.video(of: number, in: model).codec) {
-                    ForEach([VideoCodec.h264, .hevc], id: \.self) { Text(L("codec.\($0.rawValue)")).tag($0) }
-                }
-                OutputSettingsView.resolutionPicker(OutputSettingsView.video(of: number, in: model))
-                OutputSettingsView.bitrateField(OutputSettingsView.video(of: number, in: model))
-                Stepper(value: OutputSettingsView.video(of: number, in: model).keyframeIntervalFrames, in: 1...600) {
-                    Text(L("outputSettings.keyframeInterval", output.settings.video?.keyframeIntervalFrames ?? 120))
-                }
-                OutputSettingsView.audioBitrateField(OutputSettingsView.audio(of: number, in: model))
-            }
-            .disabled(locked)
-            Button(L("outputSettings.stream.remove")) { model.removeOutput(number) }
-                .disabled(locked)
-        }
-        // 离开输入框 = 提交；别处（API / 另一个窗口）改了地址、而这一格没在编辑：草稿跟上
-        .onChange(of: focus) { old, new in if old != nil, old != new { commit() } }
-        .onChange(of: savedURL) { _, v in if focus != .url { draftURL = v } }
-        .onChange(of: savedKey) { _, v in if focus != .key { draftKey = v } }
     }
 }
 

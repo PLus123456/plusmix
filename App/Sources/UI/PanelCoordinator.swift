@@ -20,6 +20,8 @@ final class PanelCoordinator: NSObject {
     private var statsToken: ObserverToken?
     private var session: SwitcherSession?
     private var state = MixerState()
+    /// 输出之间的跟随（W5-I：ISO 跟录制 1、推流跟推流 1；OutputLinkage）：每个快照算一次，窗口关着也跟。
+    let linkage = OutputLinkageSync()
 
     init(controller: AppController) {
         self.controller = controller
@@ -41,6 +43,7 @@ final class PanelCoordinator: NSObject {
         midiWindow?.close()
         midiWindow = nil
         self.session = session
+        linkage.reset()
         guard let session else { state = MixerState(); return }
         preferencesWindow?.model.rebind()
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
@@ -50,6 +53,7 @@ final class PanelCoordinator: NSObject {
 
     private func apply(state: MixerState) {
         self.state = state
+        for c in linkage.commands(for: state) { session?.send(c) }
         for (number, w) in inputSettingsWindows {
             if state.input(number) == nil { w.close(); inputSettingsWindows.removeValue(forKey: number) } else { w.apply(state: state) }
         }
@@ -95,6 +99,17 @@ final class PanelCoordinator: NSObject {
         model.onRetry = { [weak self] numbers in self?.session?.retryFailedOutputs(numbers) }
         model.refreshRouteDetails()
         let w = OutputSettingsWindowController(model: model)
+        // 推流页停一路 / 全部停止：与底栏同一问（W5-B），挂在输出设置窗上；偏好设置里关了就直接停
+        model.confirmStop = { [weak self, weak w] kind, routes, perform in
+            guard let self, self.controller.settings.confirmBeforeStop else { perform(); return }
+            let names = routes.map(\.name).joined(separator: L("confirm.part.separator"))
+            let title = kind == .stopRecord ? L("confirm.stopRecord.title", routes.count) : L("confirm.stopStream.title", routes.count)
+            let button = kind == .stopRecord ? L("confirm.stopRecord.button") : L("confirm.stopStream.button")
+            let request = ConfirmationCenter.Request(kind: kind, title: title, message: L("confirm.stop.message", names),
+                                                     buttons: [.init(title: button, choice: .confirm, destructive: true), .init(title: L("common.cancel"), choice: .cancel)],
+                                                     defaultChoice: nil)
+            ConfirmationCenter.shared.ask(request, in: w?.window) { choice in if choice == .confirm { perform() } }
+        }
         w.onClose = { [weak self] in self?.outputSettingsWindow = nil }
         outputSettingsWindow = w
         w.present()
