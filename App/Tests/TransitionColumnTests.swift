@@ -258,10 +258,10 @@ final class TransitionColumnTests: XCTestCase {
         cell.muteButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { cell.muteButton.bezelColor == nil })
         // 录制按钮：Theme.setHighlighted 同一条路
-        Theme.setHighlighted(wc.bottomBar.recordButton, true, color: Theme.recording)
-        XCTAssertEqual(titleColor(wc.bottomBar.recordButton), .white)
-        Theme.setHighlighted(wc.bottomBar.recordButton, false, color: Theme.recording)
-        XCTAssertNotEqual(titleColor(wc.bottomBar.recordButton), .white)
+        Theme.setHighlighted(wc.bottomBar.record.bodyButton, true, color: Theme.recording)
+        XCTAssertEqual(titleColor(wc.bottomBar.record.bodyButton), .white)
+        Theme.setHighlighted(wc.bottomBar.record.bodyButton, false, color: Theme.recording)
+        XCTAssertNotEqual(titleColor(wc.bottomBar.record.bodyButton), .white)
     }
 
     /// V-08：时钟的 12 小时制用 hmma 模板按界面语言排（中文是"上午 12:13"的顺序，原来写死 "hh:mm a" 成了"12:13 上午"）。

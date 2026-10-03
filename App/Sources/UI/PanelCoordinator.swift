@@ -101,6 +101,14 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
+    /// 推流页并把焦点放在"添加目的地"（W5-F，L1：没有目的地时点底栏推流主体）。
+    @discardableResult
+    func showStreamAddDestination() -> OutputSettingsWindowController {
+        let w = showOutputSettings(tab: .stream)
+        w.model.requestAddDestinationFocus()
+        return w
+    }
+
     @discardableResult
     func showPreferences() -> PreferencesWindowController {
         if let w = preferencesWindow {

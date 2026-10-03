@@ -110,7 +110,7 @@ final class LocalizationTests: XCTestCase {
         }
         XCTAssertEqual(L("menu.about"), "关于 PlusMix")
         XCTAssertEqual(L10n.string("menu.about", language: "en"), "About PlusMix")
-        XCTAssertEqual(L("aux.external.windowTitle"), "PlusMix 外部输出")
+        XCTAssertEqual(L("aux.external.windowTitle"), "PlusMix 外部显示")   // W5-F / M4：统一叫外部显示
         XCTAssertEqual(L10n.string("bottom.noRecordOutputTip", language: "en"), "No record output in this show: clicking adds a default one (~/Movies/PlusMix)")
         XCTAssertEqual(L10n.string("diagnostics.save.name", language: "en", "20260928-1200"), "PlusMix-diagnostics-20260928-1200.zip")
     }

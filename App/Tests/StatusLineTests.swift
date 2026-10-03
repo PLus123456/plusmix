@@ -38,11 +38,11 @@ final class StatusLineTests: XCTestCase {
             let expected = StatusLineFormatter.line(current: line, previous: i > 0 ? lines[i - 1] : nil, format: session.format)
             XCTAssertEqual(entry.text, expected, "ts=\(line.ts) 状态行与 jsonl 重算不一致")
             // 2. 从显示文字里抠数字，对文件字段
-            XCTAssertEqual(number(after: "render ", in: entry.text).map { abs($0 - line.renderMs) < 0.006 }, true, "render_ms：显示 \(entry.text) vs 文件 \(line.renderMs)")
+            XCTAssertEqual(number(after: "渲染 ", in: entry.text).map { abs($0 - line.renderMs) < 0.006 }, true, "render_ms：显示 \(entry.text) vs 文件 \(line.renderMs)")
             XCTAssertEqual(number(after: "丢帧 ", in: entry.text), Double(line.missedRender), "missed_render")
             XCTAssertEqual(number(after: "GPU ", in: entry.text).map { abs($0 - line.gpuPct.rounded()) < 0.5 }, true, "gpu_pct")
             XCTAssertEqual(number(after: "CPU ", in: entry.text).map { abs($0 - line.cpuPct.rounded()) < 0.5 }, true, "cpu_pct")
-            if i > 0, let fps = number(after: "fps ", in: entry.text) {
+            if i > 0, let fps = number(after: "帧率 ", in: entry.text) {
                 let expectedFPS = Double(line.tick.rawValue - lines[i - 1].tick.rawValue) / (line.ts - lines[i - 1].ts)
                 XCTAssertEqual(fps, (expectedFPS * 10).rounded() / 10, accuracy: 0.11, "fps 由相邻两行 tick / ts 算")
             }
@@ -70,13 +70,14 @@ final class StatusLineTests: XCTestCase {
                                 Stats.EncoderEntry(skipped: 2, bitrate: 6_000_000, frames: 60, state: "recording")],
                       audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 12.4, gpuPct: 26.6)
         let fields = StatusLineFormatter.fields(current: b, previous: a, format: .hd1080p60)
-        XCTAssertEqual(fields.map(\.label), ["节目", "fps", "render", "GPU", "CPU", "丢帧", "编码跳帧", "码率", "磁盘"])
-        XCTAssertEqual(fields.map(\.value), ["1920×1080 60", "60.0", "2.00 ms", "27%", "12%", "3", "2", "6.00 Mb/s", "120.6 GB"])
+        // W5-F（E9 / V-22）：字段名统一走本地化表（原来"fps / render"是英文），节目格式写短"1080p60"（原来"1920×1080 60"）
+        XCTAssertEqual(fields.map(\.label), ["节目", "帧率", "渲染", "GPU", "CPU", "丢帧", "编码跳帧", "码率", "磁盘"])
+        XCTAssertEqual(fields.map(\.value), ["1080p60", "60.0", "2.00 ms", "27%", "12%", "3", "2", "6.00 Mb/s", "120.6 GB"])
         let first = StatusLineFormatter.fields(current: a, previous: nil, format: .hd1080p60)
         XCTAssertEqual(first[1].value, "—", "第一行没有上一行，fps 显示 —")
         XCTAssertEqual(first[6].value, "—", "没有编码器时显示 —")
         XCTAssertEqual(StatusLineFormatter.line(current: a, previous: nil, format: .hd1080p60),
-                       "节目 1920×1080 60  ·  fps —  ·  render 1.23 ms  ·  GPU 27%  ·  CPU 12%  ·  丢帧 3  ·  编码跳帧 —  ·  码率 —  ·  磁盘 —")
+                       "节目 1080p60  ·  帧率 —  ·  渲染 1.23 ms  ·  GPU 27%  ·  CPU 12%  ·  丢帧 3  ·  编码跳帧 —  ·  码率 —  ·  磁盘 —")
         // 只有 idle 的录制输出：编码字段 —，磁盘照报
         let idle = Stats(ts: 102, tick: Tick(720), renderMs: 2, missedRender: 3, jitterMs: 0.1, perInput: [:],
                          encoder: [Stats.EncoderEntry(skipped: 0, bitrate: 0, diskFreeMb: 512, state: "idle")],

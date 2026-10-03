@@ -750,9 +750,11 @@ final class AddInputSheetController: NSWindowController {
     /// 当前表单值（测试看）。
     var model: AddInputModel { form.model }
 
-    init(state: MixerState, maxInputs: Int, onConfirm: @escaping (InputConfig) -> Void) {
+    /// kind = 打开时停在哪一页（底栏主体给上次添加用的类型，▴ / 菜单栏"按类型添加"给点的那一种；W5-F）。
+    init(state: MixerState, maxInputs: Int, kind: AddInputModel.Kind = .synthetic, onConfirm: @escaping (InputConfig) -> Void) {
         self.onConfirm = onConfirm
         form = AddInputFormModel(state: state, maxInputs: maxInputs)
+        form.model.kind = kind
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520), styleMask: [.titled], backing: .buffered, defer: false)
         panel.title = L("addInput.title")
         super.init(window: panel)

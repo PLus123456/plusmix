@@ -16,20 +16,20 @@ final class RecordingTests: XCTestCase {
         session.send(.setProgram(input: 1))
         XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
         AppTest.pump(seconds: 1.5)   // 音频对齐、第一行 Stats
-        XCTAssertEqual(wc.bottomBar.recordButton.title, "录制")
+        XCTAssertEqual(wc.bottomBar.record.bodyButton.title, "录制")
 
         let clickStart = Date()
-        wc.bottomBar.recordButton.performClick(nil)
-        XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.recordButton.title == "● 录制中" }, "应显示录制中：\(wc.bottomBar.recordButton.title)")
+        wc.bottomBar.record.bodyButton.performClick(nil)
+        XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.record.bodyButton.title == "● 录制中" }, "应显示录制中：\(wc.bottomBar.record.bodyButton.title)")
         XCTAssertNotNil(session.outputs.recorders[1], "录制器应在跑")
         while Date().timeIntervalSince(clickStart) < 5 { AppTest.pump(seconds: 0.005) }
         // 停先弹确认（W5-B，停止前确认默认开）；按钮间隔量到点"停止录制"那一刻——stopRecord 在那时才发
-        wc.bottomBar.recordButton.performClick(nil)
+        wc.bottomBar.record.bodyButton.performClick(nil)
         XCTAssertNotNil(AppTest.waitForConfirmation(.stopRecord), "停止前应弹确认")
         let clickStop = Date()
         AppTest.answer(.confirm)
-        XCTAssertTrue(AppTest.waitUntil(15) { wc.bottomBar.recordButton.title == "录制" && session.outputs.lastResults[1] != nil },
-                      "封口后按钮应回「录制」：\(wc.bottomBar.recordButton.title)")
+        XCTAssertTrue(AppTest.waitUntil(15) { wc.bottomBar.record.bodyButton.title == "录制" && session.outputs.lastResults[1] != nil },
+                      "封口后按钮应回「录制」：\(wc.bottomBar.record.bodyButton.title)")
         let result = try XCTUnwrap(session.outputs.lastResults[1])
         let ticks = Int(result.stopTick.rawValue - result.start.tick.rawValue)
         let interval = clickStop.timeIntervalSince(clickStart)

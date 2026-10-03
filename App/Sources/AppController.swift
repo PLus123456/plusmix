@@ -35,6 +35,8 @@ final class AppController {
     private(set) var hotkeyTableError: String?
     /// 面板与窗口（W3-E）。
     lazy var panels = PanelCoordinator(controller: self)
+    /// 添加输入的本机记忆：上次的类型、最近添加的来源（W5-F，底栏"添加输入 ▴"与菜单栏"按类型添加"）。
+    let addInputHistory: AddInputHistory
     /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
     let updateController: UpdateController
     private var replacing = false
@@ -55,6 +57,7 @@ final class AppController {
         // App 自己在主线程建的锚客户端（W3-E2 加的绕法）删了（W3-E5），守门用例 testMIDI_hotplugAfterShowReplaced_newSourceConnects
         defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
         updateController = UpdateController(defaults: defaults, isTestHost: isTestHost)
+        addInputHistory = AddInputHistory(defaults: defaults)
         if isTestHost {
             L10n.languageOverride = "zh-Hans"
             let configDir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/config", isDirectory: true)
@@ -89,6 +92,7 @@ final class AppController {
         }
         windowController.defaultRecordDirectory = documents.recordDirectory
         windowController.panels = panels
+        windowController.addInputHistory = addInputHistory
         windowController.bottomBar.shouldConfirmStop = { [weak self] in self?.settings.confirmBeforeStop ?? true }
     }
 

@@ -5,6 +5,8 @@
 // W3-E3 接上 NDI 发送后 encoder[] 里也有 NDI 的项（码率是 UYVY 原始码率，约 2 Gb/s）：给了输出类型时先找录制 / 推流，都没在跑才看 NDI；
 // Stats 的项不带类型，类型由调用方从快照给。W3-E5 起按每项的 `output`（提案 019 的输出编号）查快照里的 kind 对号，不再按"与 outputs 同序"
 // （两次采样之间输出表变了、或一行顺序颠倒的 Stats 也对得准）。
+// W5-F（01a E9 / 03 V-22）：节目格式写短"1080p60 / 1080p59.94"（非 16:9 写全宽高"1080×1920p30"）；字段名一律走本地化表、统一语言
+// （原来"fps / render"是英文、其余是中文；GPU / CPU 是通用缩写，两种语言都写它）。
 import Foundation
 import SwitcherContracts
 
@@ -34,11 +36,11 @@ enum StatusLineFormatter {
 
     static func fields(current: Stats, previous: Stats?, format: ProgramFormat, kinds: [Int: OutputKind]? = nil) -> [Field] {
         var out: [Field] = []
-        out.append(Field(label: L("status.program"), value: "\(format.width)×\(format.height) \(format.frameRate)"))
-        out.append(Field(label: "fps", value: outputFPS(current: current, previous: previous).map { String(format: "%.1f", $0) } ?? "—"))
-        out.append(Field(label: "render", value: String(format: "%.2f ms", current.renderMs)))
-        out.append(Field(label: "GPU", value: String(format: "%.0f%%", current.gpuPct)))
-        out.append(Field(label: "CPU", value: String(format: "%.0f%%", current.cpuPct)))
+        out.append(Field(label: L("status.program"), value: formatText(format)))
+        out.append(Field(label: L("status.fps"), value: outputFPS(current: current, previous: previous).map { String(format: "%.1f", $0) } ?? "—"))
+        out.append(Field(label: L("status.render"), value: String(format: "%.2f ms", current.renderMs)))
+        out.append(Field(label: L("status.gpu"), value: String(format: "%.0f%%", current.gpuPct)))
+        out.append(Field(label: L("status.cpu"), value: String(format: "%.0f%%", current.cpuPct)))
         out.append(Field(label: L("status.missed"), value: "\(current.missedRender)"))
         if let e = activeEncoder(in: current, kinds: kinds) {
             out.append(Field(label: L("status.encoderSkipped"), value: "\(e.skipped)"))
@@ -55,6 +57,11 @@ enum StatusLineFormatter {
         return out
     }
 
+    /// 节目格式的短写法（E9）：16:9 写"高 p 帧率"（1080p60、1080p59.94、2160p30），别的比例写全宽高（1080×1920p30）。
+    static func formatText(_ format: ProgramFormat) -> String {
+        format.width * 9 == format.height * 16 ? "\(format.height)p\(format.frameRate)" : "\(format.width)×\(format.height)p\(format.frameRate)"
+    }
+
     static func bitrateText(_ bitsPerSecond: Double) -> String {
         if bitsPerSecond >= 1_000_000 { return String(format: "%.2f Mb/s", bitsPerSecond / 1_000_000) }
         if bitsPerSecond >= 1_000 { return String(format: "%.0f kb/s", bitsPerSecond / 1_000) }
@@ -67,7 +74,7 @@ enum StatusLineFormatter {
         return String(format: "%.0f MB", megabytes)
     }
 
-    /// 一行文字："节目 1920×1080 60 · fps 60.0 · render 1.93 ms · …"。
+    /// 一行文字："节目 1080p60  ·  帧率 60.0  ·  渲染 1.93 ms  ·  …"。
     static func line(current: Stats, previous: Stats?, format: ProgramFormat, kinds: [Int: OutputKind]? = nil) -> String {
         fields(current: current, previous: previous, format: format, kinds: kinds).map { "\($0.label) \($0.value)" }.joined(separator: "  ·  ")
     }

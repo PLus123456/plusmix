@@ -30,6 +30,12 @@ struct OutputRouteStatus: Equatable {
 enum OutputButtonSeverity: Int, Comparable, Sendable {
     case off, live, pending, warning, error
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
+
+    /// 底栏 ▴ 菜单里一路的勾（W5-F）：在录 / 在推 = ✓；开着但还没录上 / 推上（连接中、起不来、封口中）= 横杠；没开 = 空。
+    func menuState(enabled: Bool) -> NSControl.StateValue {
+        guard enabled else { return .off }
+        return self == .live ? .on : .mixed
+    }
 }
 
 /// 一个主体按钮显示什么。

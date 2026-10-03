@@ -29,12 +29,12 @@ final class LiveSafetyTests: XCTestCase {
 
         // 开始不问
         let asked = ConfirmationCenter.shared.askedCount[.stopRecord] ?? 0
-        bar.recordButton.performClick(nil)
+        bar.record.bodyButton.performClick(nil)
         XCTAssertNil(ConfirmationCenter.shared.pending(), "开始录制不问")
-        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[1] != nil && bar.recordButton.title == "● 录制中" }, bar.recordButton.title)
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[1] != nil && bar.record.bodyButton.title == "● 录制中" }, bar.record.bodyButton.title)
 
         // 停：先弹 sheet，确认之前不发 stopRecord；取消 = 照录
-        bar.recordButton.performClick(nil)
+        bar.record.bodyButton.performClick(nil)
         let ask = try XCTUnwrap(AppTest.waitForConfirmation(.stopRecord), "停止录制前应弹确认")
         XCTAssertEqual(ask.request.title, "确定停止录制（1 路）？")
         XCTAssertTrue(wc.window?.attachedSheet === ask.alert.window, "sheet 挂在主窗口上")
@@ -48,23 +48,24 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertNotNil(session.outputs.recorders[1])
 
         // 再按、点"停止录制" = 停并封口；点下的那一刻就发 stopRecord（不等 sheet 收起动画，那要晚 ~260 ms）
-        bar.recordButton.performClick(nil)
+        bar.record.bodyButton.performClick(nil)
         XCTAssertNotNil(AppTest.waitForConfirmation(.stopRecord))
         let sentBefore = session.commandsSent
         AppTest.answer(.confirm)
         XCTAssertNil(ConfirmationCenter.shared.pending(.stopRecord), "点下就回答完了")
         XCTAssertEqual(session.commandsSent, sentBefore + 1, "点下“停止录制”的那一刻就发了 stopRecord")
         XCTAssertTrue(AppTest.waitUntil(10) { session.state.output(1)?.enabled == false && session.outputs.recorders[1] == nil && session.outputs.lastResults[1] != nil },
-                      "确定后停并封口：\(bar.recordButton.title)")
+                      "确定后停并封口：\(bar.record.bodyButton.title)")
         XCTAssertEqual(ConfirmationCenter.shared.askedCount[.stopRecord] ?? 0, asked + 2)
 
         // 推流同一口径：开始不问，停先问（在跑的路连一个没人听的端口）
         session.send(.addOutput(config: AppTest.streamOutput(number: 2, url: AppTest.closedRTMP("stop"))))
-        XCTAssertTrue(AppTest.waitUntil(3) { bar.streamButton.isEnabled })
-        bar.streamButton.performClick(nil)
+        // W5-F / L1 起推流主体没有目的地时也不灰（点了打开推流页），"按钮可用"不再等于"底栏已经看到这个目的地"：等底栏的快照里有它
+        XCTAssertTrue(AppTest.waitUntil(3) { bar.stream.bodyButton.isEnabled && bar.streamDestinations.map(\.number) == [2] })
+        bar.stream.bodyButton.performClick(nil)
         XCTAssertNil(ConfirmationCenter.shared.pending(), "开始推流不问")
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.streams[2] != nil }, "推流应起来（连接中 / 退避）")
-        bar.streamButton.performClick(nil)
+        bar.stream.bodyButton.performClick(nil)
         let streamAsk = try XCTUnwrap(AppTest.waitForConfirmation(.stopStream), "停止推流前应弹确认")
         XCTAssertEqual(streamAsk.request.title, "确定停止推流（1 路）？")
         AppTest.answer(.confirm)
@@ -77,9 +78,9 @@ final class LiveSafetyTests: XCTestCase {
         prefs.model.apply()
         XCTAssertFalse(controller.settings.confirmBeforeStop)
         XCTAssertEqual(controller.defaults.object(forKey: AppSettings.Keys.confirmBeforeStop) as? Bool, false, "写进 UserDefaults")
-        bar.recordButton.performClick(nil)
+        bar.record.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[1] != nil })
-        bar.recordButton.performClick(nil)
+        bar.record.bodyButton.performClick(nil)
         XCTAssertNil(ConfirmationCenter.shared.pending(), "关了就不问")
         XCTAssertTrue(AppTest.waitUntil(10) { session.state.output(1)?.enabled == false && session.outputs.recorders[1] == nil })
         prefs.model.confirmBeforeStop = true
@@ -431,7 +432,7 @@ final class LiveSafetyTests: XCTestCase {
         session.send(.addOutput(config: AppTest.streamOutput(number: 2, url: AppTest.closedRTMP("healthy"), name: "主平台")))
         session.send(.addOutput(config: AppTest.streamOutput(number: 3, url: "foo://example.com/live", name: "备用")))
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.filter { $0.kind == .stream }.count == 2 })
-        bar.streamButton.performClick(nil)
+        bar.stream.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.streams[2] != nil && session.outputs.failureReason(output: 3) != nil }, "\(session.outputs.failed)")
         let healthy = try XCTUnwrap(session.outputs.streams[2])
         let reason = try XCTUnwrap(session.outputs.failureReason(output: 3))
@@ -439,16 +440,16 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertFalse(reason.contains("unsupportedScheme"), "原因是人话，不是 Swift 枚举：\(reason)")
         // Stats 里起不来的那一路报 failed（原来报 idle，按钮显示"推流 · idle"）
         XCTAssertTrue(AppTest.waitUntil(3) { bar.encoderEntry(forOutput: 3)?.state == "failed" }, "\(String(describing: bar.encoderEntry(forOutput: 3)))")
-        XCTAssertTrue(AppTest.waitUntil(3) { bar.streamButton.title.contains("异常") }, bar.streamButton.title)
+        XCTAssertTrue(AppTest.waitUntil(3) { bar.stream.bodyButton.title.contains("异常") }, bar.stream.bodyButton.title)
         XCTAssertEqual(bar.streamSummary.severity, .error)
-        XCTAssertTrue(bar.streamButton.toolTip?.contains(reason) == true, "底栏提示写原因：\(bar.streamButton.toolTip ?? "")")
+        XCTAssertTrue(bar.stream.bodyButton.toolTip?.contains(reason) == true, "底栏提示写原因：\(bar.stream.bodyButton.toolTip ?? "")")
         // X37：没连上就不提示"已开始"，只提示"连接中"
         XCTAssertTrue(notices.contains("推流 2 连接中…"), "\(notices)")
         XCTAssertFalse(notices.contains { $0.contains("已开始") }, "没连上不能说已开始：\(notices)")
 
         // 有起不来的路时点主体 = 只重试它，不停正常的那一路，也不问
         let failures = notices.filter { $0.contains("推流 3") }.count
-        bar.streamButton.performClick(nil)
+        bar.stream.bodyButton.performClick(nil)
         AppTest.pump(seconds: 0.5)
         XCTAssertNil(ConfirmationCenter.shared.pending(), "重试不是停：不问")
         XCTAssertTrue(session.outputs.streams[2] === healthy, "正常的那一路没被停、没被重建")
@@ -464,12 +465,12 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertTrue(session.outputs.streams[2] === healthy)
 
         // 都在跑（没有起不来的）：点主体 = 停全部，先问
-        bar.streamButton.performClick(nil)
+        bar.stream.bodyButton.performClick(nil)
         let ask = try XCTUnwrap(AppTest.waitForConfirmation(.stopStream))
         XCTAssertEqual(ask.request.title, "确定停止推流（2 路）？")
         AppTest.answer(.confirm)
         XCTAssertTrue(AppTest.waitUntil(10) { session.outputs.streams.isEmpty && session.state.outputs.allSatisfy { !$0.enabled } })
-        XCTAssertEqual(bar.streamButton.title, "推流")
+        XCTAssertEqual(bar.stream.bodyButton.title, "推流")
     }
 
     func testUI_streamStateTextLocalized() {

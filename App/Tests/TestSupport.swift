@@ -54,6 +54,7 @@ enum AppTest {
         Task { await controller.newShow(); done.value = true }
         guard waitUntil(15, { done.value && controller.session?.isRunning == true }) else { throw XCTSkip("新建节目没起来") }
         resetMainWindowUI()   // W5-A：打开节目会按 Show.layout 收起调音台 / 搬主窗口，每条用例从同样的界面开始
+        controller.addInputHistory.reset()   // W5-F：添加面板停在"上次的类型"、最近添加的来源是本机记忆，每条用例从默认开始
         return controller.session!
     }
 
