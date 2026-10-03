@@ -125,10 +125,67 @@ public enum ControlAction: Hashable, Sendable {
             return [o.enabled ? .stopStream(output: output) : .startStream(output: output)]
         case .toggleAFV:
             return [.setAFV(on: !state.audio.afv)]
-        case .fadeMs, .previewAndTransition, .overlayInput, .overlaysOff, .outputSwitch, .outputKindSwitch, .recordAll, .recordISO, .streamAll,
-             .inputAFV, .busRoute, .solo, .busMuteSwitch, .ui:
-            return []   // 红灯轮：只有签名
+        case .fadeMs(let ms):
+            return [.fade(durationTicks: Self.ticks(milliseconds: ms, at: state.format.frameRate))]
+        case .previewAndTransition(let ref):
+            guard let n = ref.resolve(in: state) else { return [] }
+            return [.setPreview(input: n), .autoTransition]
+        case .overlayInput(let channel, let ref):
+            guard (1...MixerState.overlayCount).contains(channel), let n = ref.resolve(in: state) else { return [] }
+            return [.overlay(channel: channel, on: true, input: n)]
+        case .overlaysOff:
+            return state.overlays.enumerated().filter(\.element.on).map { .overlay(channel: $0.offset + 1, on: false, input: nil) }
+        case .outputSwitch(let number, let mode):
+            // 单路：显式目标照发（同 ftb(on:)，脚本可重放）
+            guard let o = state.output(number), Self.switchableKinds.contains(o.kind) else { return [] }
+            return [.setOutputEnabled(output: number, on: mode.target(current: o.enabled))]
+        case .outputKindSwitch(let kind, let mode):
+            guard Self.switchableKinds.contains(kind) else { return [] }
+            return Self.switchAll(state.outputs.filter { $0.kind == kind }, mode: mode) { o, on in .setOutputEnabled(output: o.number, on: on) }
+        case .recordAll(let mode):
+            return Self.switchAll(state.outputs.filter { $0.kind == .record }, mode: mode) { o, on in on ? .startRecord(output: o.number) : .stopRecord(output: o.number) }
+        case .recordISO(let mode):
+            let iso = state.outputs.filter { o in
+                guard o.kind == .record, case .input = o.settings.source else { return false }
+                return true
+            }
+            return Self.switchAll(iso, mode: mode) { o, on in on ? .startRecord(output: o.number) : .stopRecord(output: o.number) }
+        case .streamAll(let mode):
+            return Self.switchAll(state.outputs.filter { $0.kind == .stream }, mode: mode) { o, on in on ? .startStream(output: o.number) : .stopStream(output: o.number) }
+        case .inputAFV(let ref, let mode):
+            return Self.changeAudio(ref, in: state) { a in a.afv = mode.target(current: a.afv) }
+        case .busRoute(let ref, let bus, let mode):
+            return Self.changeAudio(ref, in: state) { a in a.routing[bus] = mode.target(current: a.routing[bus]) }
+        case .solo(let ref, let mode):
+            return Self.changeAudio(ref, in: state) { a in a.solo = mode.target(current: a.solo) }
+        case .busMuteSwitch(let bus, let mode):
+            let muted = state.audio.buses.first { $0.bus == bus }?.muted ?? false
+            return [.busMute(bus: bus, on: mode.target(current: muted))]
+        case .ui:
+            return []   // App 自己派发（HotkeyDispatcher / MIDIController 交给它设的 handler）
         }
+    }
+
+    /// outputSwitch / outputKindSwitch 管的四类（录制 / 推流有自己的起停命令，setOutputEnabled 对它们会被拒）。
+    public static let switchableKinds: [OutputKind] = [.ndi, .externalDisplay, .virtualCamera, .multiview]
+
+    /// 毫秒 → 拍（四舍五入，负数按 0）：1000 ms 在 30p 是 30 拍、59.94p 是 60 拍。
+    public static func ticks(milliseconds: Int, at rate: FrameRate) -> Int {
+        Int((Double(max(0, milliseconds)) * rate.framesPerSecond.doubleValue / 1000).rounded())
+    }
+
+    /// 一组输出一起开 / 关：切换 = 有开着的就全关，否则全开；只发状态要变的那几路（按输出表的顺序）。
+    private static func switchAll(_ outputs: [OutputState], mode: SwitchMode, _ make: (OutputState, Bool) -> Command) -> [Command] {
+        let on = mode.target(current: outputs.contains(where: \.enabled))
+        return outputs.filter { $0.enabled != on }.map { make($0, on) }
+    }
+
+    /// 改这一路音频设置里的一位：没有单独的命令，按快照整体写回这一路的设置（setInputSettings）；没变就不发。
+    private static func changeAudio(_ ref: InputRef, in state: MixerState, _ change: (inout InputAudioSettings) -> Void) -> [Command] {
+        guard let n = ref.resolve(in: state), let input = state.input(n) else { return [] }
+        var settings = input.settings
+        change(&settings.audio)
+        return settings == input.settings ? [] : [.setInputSettings(input: n, settings: settings)]
     }
 }
 

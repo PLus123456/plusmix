@@ -39,11 +39,56 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
     }
 
     /// 参数（JSON 那一层的键与类型）。`command` 的参数看所包命令的 CommandCatalog 描述，这里为空。
-    public var fields: [CommandField] { [] }   // 红灯轮：只有签名
+    public var fields: [CommandField] {
+        let mode = CommandField(name: "mode", type: .switchMode)
+        let input = CommandField(name: "input", type: .inputRef)
+        switch self {
+        case .command, .toggleFTB, .toggleAFV, .overlaysOff: return []
+        case .toggleOverlay: return [CommandField(name: "channel", type: .overlayChannel)]
+        case .toggleMute: return [input]
+        case .toggleRecord: return [CommandField(name: "output", type: .output(kinds: [.record]))]
+        case .toggleStream: return [CommandField(name: "output", type: .output(kinds: [.stream]))]
+        case .fadeMs: return [CommandField(name: "durationMs", type: .durationMs)]
+        case .previewAndTransition: return [input]
+        case .overlayInput: return [CommandField(name: "channel", type: .overlayChannel), input]
+        case .outputSwitch: return [CommandField(name: "output", type: .output(kinds: ControlAction.switchableKinds)), mode]
+        case .outputKindSwitch: return [CommandField(name: "kind", type: .outputKind(kinds: ControlAction.switchableKinds)), mode]
+        case .recordAll, .recordISO, .streamAll: return [mode]
+        case .inputAFV, .solo: return [input, mode]
+        case .busRoute: return [input, CommandField(name: "bus", type: .bus), mode]
+        case .busMuteSwitch: return [CommandField(name: "bus", type: .bus), mode]
+        case .ui: return [CommandField(name: "name", type: .text)]
+        }
+    }
 
-    /// 按下时可能发的命令（选动作面板的小字 API 键名、"按下时会发什么"）。界面动作不发命令。
-    public var emits: [CommandKind] { [] }   // 红灯轮：只有签名
+    /// 按下时可能发的命令（选动作面板的小字 API 键名、"按下时会发什么"）。界面动作不发命令；`command` 看所包的那条。
+    public var emits: [CommandKind] {
+        switch self {
+        case .command: []
+        case .toggleFTB: [.ftb]
+        case .toggleOverlay, .overlayInput, .overlaysOff: [.overlay]
+        case .toggleMute: [.mute]
+        case .toggleRecord, .recordAll, .recordISO: [.startRecord, .stopRecord]
+        case .toggleStream, .streamAll: [.startStream, .stopStream]
+        case .toggleAFV: [.setAFV]
+        case .fadeMs: [.fade]
+        case .previewAndTransition: [.setPreview, .autoTransition]
+        case .outputSwitch, .outputKindSwitch: [.setOutputEnabled]
+        case .inputAFV, .busRoute, .solo: [.setInputSettings]
+        case .busMuteSwitch: [.busMute]
+        case .ui: []
+        }
+    }
 
-    /// 分组（与 CommandCatalog 同一套：切换 / 叠加 / 音频 / 输出，另加"界面"）。
-    public var group: String { "" }   // 红灯轮：只有签名
+    /// 分组（与 CommandCatalog 同一套：切换 / 叠加 / 音频 / 输出，另加"界面"）。`command` 看所包命令的分组。
+    public var group: String {
+        switch self {
+        case .command: "命令"
+        case .toggleFTB, .fadeMs, .previewAndTransition: "切换"
+        case .toggleOverlay, .overlayInput, .overlaysOff: "叠加"
+        case .toggleMute, .toggleAFV, .inputAFV, .busRoute, .solo, .busMuteSwitch: "音频"
+        case .toggleRecord, .toggleStream, .recordAll, .recordISO, .streamAll, .outputSwitch, .outputKindSwitch: "输出"
+        case .ui: "界面"
+        }
+    }
 }

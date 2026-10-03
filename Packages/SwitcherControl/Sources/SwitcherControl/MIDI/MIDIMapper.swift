@@ -85,18 +85,35 @@ public struct MIDIMapper: Sendable {
 
     public init(table: MIDIMapTable) { self.table = table }
 
-    /// 一条消息对应的命令（组合动作按顺序多条；红灯轮：只有签名）。
-    public mutating func commands(for message: MIDIMessage, state: MixerState) -> [Command] {
-        command(for: message, state: state).map { [$0] } ?? []
+    /// 一条消息对应的第一条命令（老调用方；组合动作用 commands）。
+    public mutating func command(for message: MIDIMessage, state: MixerState) -> Command? {
+        commands(for: message, state: state).first
     }
 
-    /// 一条消息对应的命令；没映射、Note 松开、动作解析不出（引用不存在）都返回 nil。
-    public mutating func command(for message: MIDIMessage, state: MixerState) -> Command? {
+    /// 音符按下时绑的是界面动作（ControlAction.ui）就给它的名字（不进总线，MIDIController 交给 App 设的 handler）。
+    public func uiAction(for message: MIDIMessage) -> String? {
+        guard case .note = message.trigger, !message.isNoteOff, message.value > 0,
+              case .action(.ui(let name))? = table.mapping(for: message.trigger)?.action else { return nil }
+        return name
+    }
+
+    /// 一条消息对应的命令（W5-J：Note 绑的组合动作按顺序多条）；没映射、Note 松开、动作解析不出（引用不存在）都返回空。
+    public mutating func commands(for message: MIDIMessage, state: MixerState) -> [Command] {
         switch message.trigger {
         case .note:
-            guard let mapping = table.mapping(for: message.trigger), case .action(let action) = mapping.action else { return nil }
-            guard !message.isNoteOff, message.value > 0 else { return nil }
-            return action.resolve(in: state).first
+            guard let mapping = table.mapping(for: message.trigger), case .action(let action) = mapping.action else { return [] }
+            guard !message.isNoteOff, message.value > 0 else { return [] }
+            return action.resolve(in: state)
+        case .cc, .cc14:
+            return continuousCommand(for: message).map { [$0] } ?? []
+        }
+    }
+
+    /// CC：推杆 / 推子（连续控制，一条消息至多一条命令）。
+    private mutating func continuousCommand(for message: MIDIMessage) -> Command? {
+        switch message.trigger {
+        case .note:
+            return nil
         case .cc(let channel, let controller):
             // 显式的 7-bit 映射优先；否则看它是不是某个 14-bit 映射的 MSB（0–31）或 LSB（32–63）
             if let mapping = table.mapping(for: message.trigger) {

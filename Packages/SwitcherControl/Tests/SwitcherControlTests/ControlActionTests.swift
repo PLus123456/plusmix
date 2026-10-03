@@ -27,9 +27,9 @@ final class ControlActionTests: XCTestCase {
         XCTAssertEqual(entries.map(\.command), [.setPreview(input: 3), .autoTransition])
         XCTAssertEqual(entries.map(\.source), [.hotkey, .hotkey])
         XCTAssertEqual(entries.map(\.sequence), receipts.map(\.sequence))
-        let done = await waitUntil { f.stateMachine.publisher.latest?.state.program == 3 }
-        XCTAssertTrue(done, "转场做完 PGM = 3")
+        await f.stateMachine.prepare(upTo: Tick(20))   // 没有渲染线程：手动推拍，4 拍的转场做完
         let state = await f.stateMachine.state
+        XCTAssertEqual(state.program, 3, "转场做完 PGM = 3")
         XCTAssertEqual(state.preview, 1, "原 PGM 回到 PVW")
         // 异步入口同样按顺序
         d.table = HotkeyTable(bindings: [HotkeyBinding(key: KeyCombo("alt+4")!, action: .previewAndTransition(input: 4))])
@@ -40,10 +40,19 @@ final class ControlActionTests: XCTestCase {
         let later = f.bus.recentEntries().filter { $0.sequence > before }
         XCTAssertEqual(later.map(\.command), [.setPreview(input: 4), .autoTransition])
         XCTAssertEqual(later.map(\.sequence), [before + 1, before + 2])
-        // 前一条被拒（输入 9 不存在）就不再发后一条：不然 autoTransition 会把原来的 PVW 推上去
+        // 输入 9 不存在：解析不出，一条都不发（不会只发出 autoTransition 把原来的 PVW 推上去）
         d.table = HotkeyTable(bindings: [HotkeyBinding(key: KeyCombo("alt+9")!, action: .previewAndTransition(input: 9))])
+        let beforeMissing = f.bus.lastSequence
+        let none = try await d.handleAllAndWait(KeyCombo("alt+9")!)
+        XCTAssertEqual(none.count, 0)
+        XCTAssertEqual(f.bus.lastSequence, beforeMissing)
+        XCTAssertEqual(d.counters.unresolved, 1)
+        // 逐条提交的口径：前一条被总线拒（抛 CommandRejection）就停，后一条不发
         let beforeRejected = f.bus.lastSequence
-        do { _ = try await d.handleAllAndWait(KeyCombo("alt+9")!); XCTFail("应抛") } catch is CommandRejection {}
+        do {
+            _ = try await HotkeyDispatcher.submitInOrder([.setPreview(input: 9), .autoTransition], to: f.bus, source: .hotkey)
+            XCTFail("应抛")
+        } catch is CommandRejection {}
         XCTAssertEqual(f.bus.lastSequence, beforeRejected, "被拒的那条不占序号，后一条没发")
         XCTAssertFalse(f.bus.recentEntries().contains { $0.sequence > beforeRejected })
     }
