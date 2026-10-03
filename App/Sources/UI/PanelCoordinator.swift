@@ -200,8 +200,30 @@ final class PanelCoordinator: NSObject {
     /// 叠加设置窗上次停在哪一路（关了再从底栏开，还是那一路）。
     private var lastOverlayChannel = 1
 
+    /// 音频设置窗（J2 / J3）：每条总线 / 每路输入一个，同一条再点 = 置前（page 给了就切到那一页）。表读调音台同一份 50 ms 读数。
     @discardableResult
-    func showAudioSettings(_ strip: AudioStrip, page: AudioSettingsPage? = nil) -> AudioSettingsWindowController? { nil }
+    func showAudioSettings(_ strip: AudioStrip, page: AudioSettingsPage? = nil) -> AudioSettingsWindowController? {
+        guard let session else { return nil }
+        if case .input(let n) = strip, state.input(n) == nil, session.state.input(n) == nil { return nil }
+        if let w = audioSettingsWindows[strip] {
+            if let page, w.model.pages.contains(page) { w.model.page = page }
+            w.present()
+            return w
+        }
+        let model = AudioSettingsModel(strip: strip, state: session.state, page: page ?? .general)
+        model.send = { [weak session] c in session?.send(c) }
+        model.onOpenInputSettings = { [weak self] n in self?.showInputSettings(input: n) }
+        let w = AudioSettingsWindowController(model: model, meters: controller.windowController.mixerPanel.meters)
+        forwardHotkeys(w)
+        w.onClose = { [weak self] in self?.audioSettingsWindows.removeValue(forKey: strip) }
+        // 没存过位置、又已经开着别的音频设置窗：错开放（同输入设置窗，X44）
+        if !w.restoredSavedFrame, let last = audioSettingsWindows.values.compactMap(\.window).filter(\.isVisible).max(by: { $0.orderedIndex > $1.orderedIndex }) {
+            w.window?.setFrameTopLeftPoint(NSPoint(x: last.frame.minX + 24, y: last.frame.maxY - 24))
+        }
+        audioSettingsWindows[strip] = w
+        w.present()
+        return w
+    }
 
     // MARK: 多画面（W3-C 的窗口；窗口菜单 / 底栏走 MainWindowController.toggleMultiviewWindow）
 

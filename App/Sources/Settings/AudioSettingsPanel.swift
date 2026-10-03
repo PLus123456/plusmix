@@ -1,4 +1,12 @@
-// 音频设置窗（W5-K，prompt 97 交付 4，01a J2–J7 / 02 X12）：每条总线 / 每路输入一扇独立窗。
+// 音频设置窗（W5-K，prompt 97 交付 4，01a J2–J5 / 02 X12）：每条总线 / 每路输入一扇独立窗"音频设置 — Master / 输入 n"（同一条只开一个），
+// 原来调音台总线条的"效果 (n)"开的是挂在主窗口上的 SwiftUI sheet——开着时主窗口不是 key 窗口，快捷键全失灵（X12，S1）。
+// 窗左常驻这一条推子后的电平表（读调音台同一份 50 ms 的 AudioEngineStatus，MixerMeters），左侧分页 常规 / 均衡 / 压缩 / 限幅（只总线）；
+// 噪声门 / 插件等提案 023 与后续方案。均衡 / 压缩 / 限幅每页顶部一个"启用"开关（"用 X"和"启用"合一：关 = 旁路、参数留着）+ 参数 + 复位，改了即时生效。
+// 范围沿用 EffectEditorRanges（界面 ⊆ 引擎钳位，AudioEffectsTests 钉着），EQ 段数上限 3（一个 AUNBandEQ 格最多 16 段）。
+// 压缩页：提案 024 已批 (b)（新 id compressor、自写 C 压缩器，契约归 P5、实现归 102），落地之前按 (c) 的写实文案过渡——
+// 简单模式给"阈值 + 压缩量 + 输出增益"，压缩量就是 AUDynamicsProcessor 的 headroom（"输出不超过阈值 + 压缩量"，不冒充固定比例），起音 / 释放 / 扩展比放"高级"。
+// 每路的效果格 102 之前还没作用到声音：输入的均衡 / 压缩页照留"效果尚未作用到声音（本版本）"的横幅（AudioEffectsSupport）。
+// 常规页只读格式 + 推子读数（前级增益 / 自动增益先不加，J5 有意保留）。模型只发 setBusEffects / setInputSettings，快照回来再刷新。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -12,35 +20,397 @@ enum AudioStrip: Hashable {
 enum AudioSettingsPage: String, CaseIterable, Identifiable {
     case general, eq, compressor, limiter
     var id: String { rawValue }
+    var title: String { L("audioSettings.page.\(rawValue)") }
 }
 
 @MainActor
 final class AudioSettingsModel: ObservableObject {
     let strip: AudioStrip
-    @Published var page: AudioSettingsPage = .general
+    @Published var page: AudioSettingsPage
     @Published private(set) var state: MixerState
     var send: ((Command) -> Void)?
+    /// 我们刚发出去还没回来的效果链：快照没赶上前别用旧值盖掉表单（同输入设置窗）。
+    private var pendingSlots: [EffectSlot]?
+    private var pendingSince = Date.distantPast
+    @Published private var localSlots: [EffectSlot]
+    /// 打开"输入设置"窗（输入的常规页上的按钮）。
+    var onOpenInputSettings: ((Int) -> Void)?
 
-    init(strip: AudioStrip, state: MixerState) {
+    init(strip: AudioStrip, state: MixerState, page: AudioSettingsPage = .general) {
         self.strip = strip
         self.state = state
+        self.page = page
+        localSlots = Self.slots(of: strip, in: state)
     }
 
-    var pages: [AudioSettingsPage] { [] }
-    func apply(state: MixerState) { self.state = state }
+    /// 总线有限幅一页，输入没有（限幅只在总线上，J4）。
+    var pages: [AudioSettingsPage] {
+        if case .bus = strip { return [.general, .eq, .compressor, .limiter] }
+        return [.general, .eq, .compressor]
+    }
+
+    var stripTitle: String {
+        switch strip {
+        case .bus(let bus): L("bus.\(bus.name)")
+        case .input(let n): L("audioSettings.inputTitle", n)
+        }
+    }
+
+    var windowTitle: String { L("audioSettings.windowTitle", stripTitle) }
+
+    static func slots(of strip: AudioStrip, in state: MixerState) -> [EffectSlot] {
+        switch strip {
+        case .bus(let bus): state.audio.buses.first { $0.bus == bus }?.effects ?? []
+        case .input(let n): state.input(n)?.settings.effects ?? []
+        }
+    }
+
+    func apply(state: MixerState) {
+        self.state = state
+        let incoming = Self.slots(of: strip, in: state)
+        if let p = pendingSlots {
+            if incoming == p || Date().timeIntervalSince(pendingSince) > 0.3 {
+                pendingSlots = nil
+                if incoming != localSlots { localSlots = incoming }
+            }
+        } else if incoming != localSlots {
+            localSlots = incoming
+        }
+    }
+
+    // MARK: 效果链（EffectChainEditor 是值模型）
+
+    var editor: EffectChainEditor { EffectChainEditor(slots: localSlots) }
+
+    /// 改一项：本地先改（表单立刻响应），再整条发出去（setBusEffects / setInputSettings）。
+    func edit(_ body: (inout EffectChainEditor) -> Void) {
+        var e = editor
+        body(&e)
+        let slots = e.slots
+        guard slots != localSlots else { return }
+        localSlots = slots
+        pendingSlots = slots
+        pendingSince = Date()
+        switch strip {
+        case .bus(let bus):
+            send?(.setBusEffects(bus: bus, effects: slots))
+        case .input(let n):
+            guard var settings = state.input(n)?.settings else { return }
+            settings.effects = slots
+            send?(.setInputSettings(input: n, settings: settings))
+        }
+    }
+
+    func binding<T>(_ keyPath: WritableKeyPath<EffectChainEditor, T>) -> Binding<T> {
+        Binding(get: { self.editor[keyPath: keyPath] }, set: { v in self.edit { $0[keyPath: keyPath] = v } })
+    }
+
+    /// 均衡 / 压缩 / 限幅页的横幅：效果还没作用到声音的那一半（每路 102 之前）。
+    var effectsBanner: String? {
+        switch strip {
+        case .bus: AudioEffectsSupport.banner(applied: AudioEffectsSupport.busEffectsApplied)
+        case .input: AudioEffectsSupport.banner(applied: AudioEffectsSupport.inputEffectsApplied)
+        }
+    }
+
+    // MARK: 每页顶部的"启用"（"用 X"和"启用"合一：关 = 旁路、参数留着）
+
+    var eqEnabled: Bool { editor.eq.contains { $0.enabled } }
+    func setEQEnabled(_ on: Bool) {
+        edit { e in
+            if on && e.eq.isEmpty { e.eq = [Self.defaultBand(index: 0)] }
+            for i in e.eq.indices { e.eq[i].enabled = on }
+        }
+    }
+
+    var compressorEnabled: Bool { editor.dynamics.present && editor.dynamics.enabled }
+    func setCompressorEnabled(_ on: Bool) {
+        edit { e in
+            if on { e.dynamics.present = true }
+            e.dynamics.enabled = on
+        }
+    }
+
+    var limiterEnabled: Bool { editor.limiter.present && editor.limiter.enabled }
+    func setLimiterEnabled(_ on: Bool) {
+        edit { e in
+            if on { e.limiter.present = true }
+            e.limiter.enabled = on
+        }
+    }
+
+    // MARK: 复位（参数回默认，开没开不动）
+
+    /// 新加的第 n 段 EQ 默认放在哪：低 / 中 / 高（100 Hz / 1 kHz / 8 kHz），0 dB。
+    static let defaultBandCenters: [Double] = [100, 1000, 8000]
+    static func defaultBand(index: Int) -> EffectChainEditor.EQBand {
+        var b = EffectChainEditor.EQBand()
+        b.centerHz = defaultBandCenters[min(index, defaultBandCenters.count - 1)]
+        return b
+    }
+
+    func addEQBand() {
+        edit { e in
+            guard e.eq.count < EffectChainEditor.maxEQBands else { return }
+            var b = Self.defaultBand(index: e.eq.count)
+            b.enabled = e.eq.isEmpty || e.eq.contains { $0.enabled }
+            e.eq.append(b)
+        }
+    }
+
+    func removeEQBand(at index: Int) { edit { e in if e.eq.indices.contains(index) { e.eq.remove(at: index) } } }
+
+    /// 第 i 段 EQ 的一个参数（按下标：EffectChainEditor 每次从链重建、段的 id 不稳定；下标越界读 0、写不动）。
+    func bandBinding(_ index: Int, _ keyPath: WritableKeyPath<EffectChainEditor.EQBand, Double>) -> Binding<Double> {
+        Binding(get: {
+            let eq = self.editor.eq
+            return eq.indices.contains(index) ? eq[index][keyPath: keyPath] : 0
+        }, set: { v in
+            self.edit { e in if e.eq.indices.contains(index) { e.eq[index][keyPath: keyPath] = v } }
+        })
+    }
+
+    func resetEQ() {
+        edit { e in
+            for i in e.eq.indices {
+                let on = e.eq[i].enabled
+                e.eq[i] = Self.defaultBand(index: i)
+                e.eq[i].enabled = on
+            }
+        }
+    }
+
+    func resetCompressor() {
+        edit { e in
+            let (present, enabled) = (e.dynamics.present, e.dynamics.enabled)
+            e.dynamics = EffectChainEditor.Dynamics()
+            e.dynamics.present = present
+            e.dynamics.enabled = enabled
+        }
+    }
+
+    func resetLimiter() {
+        edit { e in
+            let (present, enabled) = (e.limiter.present, e.limiter.enabled)
+            e.limiter = EffectChainEditor.Limiter()
+            e.limiter.present = present
+            e.limiter.enabled = enabled
+        }
+    }
+
+    // MARK: 常规页（只读格式 + 推子读数）
+
+    /// 引擎的格式（混音器全是 48 kHz 立体声，设计方案 §3.5）。
+    var formatText: String { L("audioSettings.general.formatValue") }
+
+    var faderDb: Double {
+        switch strip {
+        case .bus(let bus): state.audio.buses.first { $0.bus == bus }?.gainDb ?? 0
+        case .input(let n): state.input(n)?.settings.audio.gainDb ?? 0
+        }
+    }
+    var faderText: String { MixerModel.gainText(faderDb) }
+
+    var isMuted: Bool {
+        switch strip {
+        case .bus(let bus): state.audio.buses.first { $0.bus == bus }?.muted ?? false
+        case .input(let n): state.input(n)?.settings.audio.muted ?? false
+        }
+    }
+
+    /// 表的读数（推子后，调音台同一份 50 ms 读数）。
+    func meter(_ meters: MixerMeters) -> (peak: [Double]?, rms: [Double]?) {
+        switch strip {
+        case .bus(let bus): (meters.busPeakDb[bus], meters.busRmsDb[bus])
+        case .input(let n): (meters.inputPeakDb[n], meters.inputRmsDb[n])
+        }
+    }
 }
 
 struct AudioSettingsView: View {
     @ObservedObject var model: AudioSettingsModel
-    var body: some View { Text(L("audioSettings.windowTitle.master")) }
+    @ObservedObject var meters: MixerMeters
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                meterColumn
+                Divider()
+                List(model.pages, selection: pageSelection) { p in Text(p.title).tag(p) }
+                    .listStyle(.sidebar)
+                    .frame(width: 120)
+                    .accessibilityLabel(L("audioSettings.pageList"))
+                Divider()
+                Form { pageBody }.formStyle(.grouped)
+            }
+            Divider()
+            HStack {
+                Text(model.windowTitle).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(L("common.close")) { onClose() }
+            }
+            .padding(10)
+        }
+    }
+
+    private var pageSelection: Binding<AudioSettingsPage?> {
+        Binding(get: { model.page }, set: { if let p = $0 { model.page = p } })
+    }
+
+    /// 窗左常驻这一条推子后的电平表（J4）。
+    private var meterColumn: some View {
+        let m = model.meter(meters)
+        return VStack(spacing: 6) {
+            Text(L("audioSettings.meterPost")).font(.system(size: 9)).foregroundStyle(.secondary)
+            MeterBar(peakDb: m.peak, rmsDb: m.rms)
+                .frame(width: 14)
+                .frame(maxHeight: .infinity)
+            Text(MixerModel.peakText(m.peak ?? [])).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .padding(.vertical, 12)
+        .frame(width: 64)
+    }
+
+    @ViewBuilder
+    private var pageBody: some View {
+        switch model.page {
+        case .general: general
+        case .eq: eq
+        case .compressor: compressor
+        case .limiter: limiter
+        }
+    }
+
+    private var banner: some View {
+        Group {
+            if let banner = model.effectsBanner {
+                Section {
+                    Text(banner).font(.headline).foregroundStyle(.orange)
+                    Text(L("effects.notEffectiveHelp")).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var general: some View {
+        Section(L("audioSettings.page.general")) {
+            LabeledContent(L("audioSettings.general.format"), value: model.formatText)
+            LabeledContent(L("audioSettings.general.fader"), value: model.faderText)
+            LabeledContent(L("audioSettings.general.mute"), value: model.isMuted ? L("common.on") : L("common.off"))
+            Text(L("audioSettings.general.hint")).font(.caption).foregroundStyle(.secondary)
+            if case .input(let n) = model.strip {
+                Button(L("audioSettings.general.openInputSettings")) { model.onOpenInputSettings?(n) }
+            }
+        }
+    }
+
+    private func enableRow(_ on: Bool, set: @escaping (Bool) -> Void) -> some View {
+        Toggle(L("audioSettings.enabled"), isOn: Binding(get: { on }, set: set))
+            .toggleStyle(.switch)
+    }
+
+    @ViewBuilder
+    private var eq: some View {
+        banner
+        Section(L("effects.eq.title")) {
+            enableRow(model.eqEnabled) { model.setEQEnabled($0) }
+            let bands = model.editor.eq
+            ForEach(Array(bands.indices), id: \.self) { i in
+                let band = bands[i]
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(L("audioSettings.eq.band", i + 1)).font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button(L("effects.eq.remove")) { model.removeEQBand(at: i) }
+                    }
+                    Slider(value: model.bandBinding(i, \.centerHz), in: EffectEditorRanges.eqCenterHz) { Text(L("effects.eq.centerHz", Int(band.centerHz))) }
+                    Slider(value: model.bandBinding(i, \.q), in: EffectEditorRanges.eqQ) { Text(L("effects.eq.q", band.q)) }
+                    Slider(value: model.bandBinding(i, \.gainDb), in: EffectEditorRanges.eqGainDb) { Text(L("effects.eq.gainDb", band.gainDb)) }
+                }
+                .disabled(!band.enabled)
+            }
+            HStack {
+                if model.editor.eq.count < EffectChainEditor.maxEQBands {
+                    Button(L("effects.eq.add")) { model.addEQBand() }
+                }
+                Spacer()
+                Button(L("audioSettings.reset")) { model.resetEQ() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var compressor: some View {
+        banner
+        let d = model.editor.dynamics
+        Section(L("effects.dynamics.title")) {
+            enableRow(model.compressorEnabled) { model.setCompressorEnabled($0) }
+            Group {
+                Slider(value: model.binding(\.dynamics.thresholdDb), in: EffectEditorRanges.dynThresholdDb) { Text(L("effects.dynamics.thresholdDb", d.thresholdDb)) }
+                Slider(value: model.binding(\.dynamics.headroomDb), in: EffectEditorRanges.dynHeadroomDb) { Text(L("audioSettings.compressor.amount", d.headroomDb)) }
+                Text(L("audioSettings.compressor.amountHint", d.thresholdDb + d.headroomDb)).font(.caption).foregroundStyle(.secondary)
+                Slider(value: model.binding(\.dynamics.overallGainDb), in: EffectEditorRanges.dynOverallGainDb) { Text(L("audioSettings.compressor.makeup", d.overallGainDb)) }
+                DisclosureGroup(L("audioSettings.advanced")) {
+                    Slider(value: model.binding(\.dynamics.attackSeconds), in: EffectEditorRanges.dynAttackSeconds) { Text(L("effects.dynamics.attackMs", d.attackSeconds * 1000)) }
+                    Slider(value: model.binding(\.dynamics.releaseSeconds), in: EffectEditorRanges.dynReleaseSeconds) { Text(L("effects.dynamics.releaseMs", d.releaseSeconds * 1000)) }
+                    Slider(value: model.binding(\.dynamics.expansionRatio), in: EffectEditorRanges.dynExpansionRatio) { Text(L("effects.dynamics.expansionRatio", d.expansionRatio)) }
+                }
+            }
+            .disabled(!model.compressorEnabled)
+            HStack {
+                Text(L("audioSettings.compressor.note")).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(L("audioSettings.reset")) { model.resetCompressor() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var limiter: some View {
+        banner
+        let l = model.editor.limiter
+        Section(L("effects.limiter.title")) {
+            enableRow(model.limiterEnabled) { model.setLimiterEnabled($0) }
+            Group {
+                Slider(value: model.binding(\.limiter.attackSeconds), in: EffectEditorRanges.limAttackSeconds) { Text(L("effects.limiter.attackMs", l.attackSeconds * 1000)) }
+                Text(L("audioSettings.limiter.latencyHint")).font(.caption).foregroundStyle(.secondary)
+                Slider(value: model.binding(\.limiter.decaySeconds), in: EffectEditorRanges.limDecaySeconds) { Text(L("effects.limiter.decayMs", l.decaySeconds * 1000)) }
+                Slider(value: model.binding(\.limiter.preGainDb), in: EffectEditorRanges.limPreGainDb) { Text(L("effects.limiter.preGainDb", l.preGainDb)) }
+            }
+            .disabled(!model.limiterEnabled)
+            HStack {
+                Spacer()
+                Button(L("audioSettings.reset")) { model.resetLimiter() }
+            }
+        }
+    }
 }
 
+/// 音频设置窗：每条一个（PanelCoordinator 管）；换 session 时关（模型绑的是旧 session）。不是 sheet，开着时主窗口照常点、照常收快捷键。
 @MainActor
 final class AudioSettingsWindowController: PanelWindowController {
     let model: AudioSettingsModel
-    init(model: AudioSettingsModel) {
+
+    init(model: AudioSettingsModel, meters: MixerMeters) {
         self.model = model
-        super.init(title: "", size: NSSize(width: 560, height: 480), autosaveName: "AudioSettings", content: AudioSettingsView(model: model))
+        let close = CloseBox()
+        super.init(title: model.windowTitle, size: NSSize(width: 640, height: 500), autosaveName: Self.autosaveName(model.strip),
+                   content: AudioSettingsView(model: model, meters: meters, onClose: { close.action?() }), minSize: NSSize(width: 540, height: 400))
+        close.action = { [weak self] in self?.close() }
     }
+
+    /// 存档名按条分开（几扇同时开不叠在一起）。
+    static func autosaveName(_ strip: AudioStrip) -> String {
+        switch strip {
+        case .bus(let bus): "AudioSettings-\(bus.name)"
+        case .input(let n): "AudioSettings-input-\(n)"
+        }
+    }
+
     func apply(state: MixerState) { model.apply(state: state) }
+
+    /// SwiftUI 视图要在 super.init 之前建好，"关闭"按钮的动作之后再接上。
+    private final class CloseBox { var action: (() -> Void)? }
 }

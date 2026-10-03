@@ -212,6 +212,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         bottomBar.willPopUpMenu = { [weak self] menu in self?.activeBottomMenu = menu }
         inputStrip.onOpenSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
         mixerPanel.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
+        mixerPanel.onOpenAudioSettings = { [weak self] strip, page in self?.panels?.showAudioSettings(strip, page: page) }   // 条子齿轮 → 音频设置窗（W5-K / J2）
         mixerPanel.onMeters = { [weak self] levels in self?.inputStrip.applyAudioLevels(levels) }   // 纯音频输入格子的电平表
     }
 
