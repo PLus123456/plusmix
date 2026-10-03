@@ -2,6 +2,8 @@
 // 组装规则（CONTRACTS.md §2.3 注入规则）：帧槽由这里建（W1-B 的 LockFreeFrameSlot），音频环也由这里建（W1-D 的 CAudioRing），
 // 交给输入实现（InputFactory）、引擎（registerInput）和音频引擎（AudioRuntime.register）。
 // W3-C：输入拿到的是 InputFrameTee（主槽 + 分支）：主槽注册给引擎（挑帧带到达余量），分支给每路的视频 ISO（OutputRuntime 按需开 / 关）。
+// W5-H：文件输入"只有结束动作变了"（格子上的循环开关）不重建，改在跑着的那个 FileInput 上；图片输入盯着文件，外面改了对同一个输入对象重新读同一条路径
+// （ImageFileWatcher；SwitcherInputs 里有监视之前的接线，问题单 W5H-w2-inputs-image-input-no-file-watch）。
 import Foundation
 import SwitcherContracts
 import SwitcherEngine
@@ -12,7 +14,8 @@ import SwitcherISO
 @MainActor
 final class InputRuntime {
     struct Entry {
-        let config: InputConfig
+        /// 快照里的配置（相对路径原样；只改结束动作时就地换成新的）。
+        var config: InputConfig
         let made: MadeInput
         let slot: LockFreeFrameSlot
         let tee: InputFrameTee
@@ -37,16 +40,28 @@ final class InputRuntime {
         self.audio = audio
     }
 
-    /// 正在监视的图片文件（W5-H；红灯轮：只给签名）。
-    var watchedImagePaths: [String] { [] }
+    /// 图片输入的文件监视（按输入编号）。
+    private var imageWatchers: [Int: ImageFileWatcher] = [:]
+    /// 正在监视的图片文件（已解析成绝对路径，按编号排；测试看）。
+    var watchedImagePaths: [String] { imageWatchers.keys.sorted().compactMap { imageWatchers[$0]?.path } }
+    /// 图片文件改了、重新读过几次（按编号；测试 / 诊断看）。
+    private(set) var imageReloads: [Int: Int] = [:]
 
     /// 某路的运行状态（没有为 nil）。
     func runtimeState(of number: Int) -> InputState? { entries[number]?.input.state }
 
-    /// 让运行表跟上快照：新编号建 + 注册（+ start），消失的编号 stop + 注销，来源变了的重建。名字 / 设置变化不重建。
+    /// 让运行表跟上快照：新编号建 + 注册（+ start），消失的编号 stop + 注销，来源变了的重建。名字 / 设置变化不重建；
+    /// 文件输入只有结束动作变了（路径、速率都没变）也不重建：改在跑着的 FileInput 上（它的 endAction 运行中可改），播放位置接着走（W5-H，D5 的循环）。
     func reconcile(_ state: MixerState, timing: ProgramTiming) {
         let wanted = Dictionary(uniqueKeysWithValues: state.inputs.map { ($0.number, $0) })
-        for (number, entry) in entries where wanted[number]?.source != entry.config.source {
+        for (number, entry) in entries {
+            guard let config = wanted[number] else { remove(number); continue }
+            guard config.source != entry.config.source else { continue }
+            if let endAction = Self.onlyEndActionChanged(from: entry.config.source, to: config.source), let file = entry.input as? FileInput {
+                file.endAction = endAction
+                entries[number]?.config = config
+                continue
+            }
             remove(number)
         }
         for config in state.inputs where entries[config.number] == nil {
@@ -74,6 +89,26 @@ final class InputRuntime {
         }
         entries[config.number] = Entry(config: config, made: made, slot: slot, tee: tee)
         if started { startInput(made.input) }
+        if case .image(let path) = Self.resolvingMediaPaths(config, against: mediaBaseDirectory).source, made.input is ImageInput {
+            let number = config.number
+            imageWatchers[number] = ImageFileWatcher(path: path) { [weak self] in self?.reloadImage(number) }
+        }
+    }
+
+    /// 两个来源只差结束动作（同一个文件、同一个速率）：返回新的结束动作；否则 nil。
+    nonisolated static func onlyEndActionChanged(from old: InputSource, to new: InputSource) -> FileEndAction? {
+        guard case .file(let oldPath, let oldEnd, let oldRate) = old, case .file(let newPath, let newEnd, let newRate) = new,
+              oldPath == newPath, oldRate == newRate, oldEnd != newEnd else { return nil }
+        return newEnd
+    }
+
+    /// 图片文件在外面被改了：同一个输入对象停了再起 = 按同一条路径重新解码，帧槽、引擎注册、ISO 分支都不动（PGM 上停在上一帧、下一拍换上，不闪黑）。
+    /// 解码在主线程上（和加图片输入时一样，几十毫秒）；引擎还没起（started = false）时只等 startAll 去读。
+    private func reloadImage(_ number: Int) {
+        guard started, let input = entries[number]?.input as? ImageInput else { return }
+        input.stop()
+        startInput(input)
+        imageReloads[number, default: 0] += 1
     }
 
     /// 图片 / 视频文件输入的相对路径挂到 base 下，与 headless 同一条规则（HeadlessRun 第 1 步：以 / 开头原样，否则 `showURL 所在目录/path`）；
@@ -102,6 +137,7 @@ final class InputRuntime {
     }
 
     private func remove(_ number: Int) {
+        imageWatchers.removeValue(forKey: number)?.stop()
         guard let entry = entries.removeValue(forKey: number) else { return }
         engine.unregisterInput(number: number)
         if entry.made.audioRing != nil { audio?.unregister(number: number) }

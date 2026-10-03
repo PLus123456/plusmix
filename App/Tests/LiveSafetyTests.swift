@@ -585,11 +585,12 @@ final class LiveSafetyTests: XCTestCase {
         let window = try XCTUnwrap(AppTest.controller.windowController.window)
         let cell1 = try XCTUnwrap(strip.cells[1])
 
-        // 右键菜单："删除"前有分隔线
+        // 右键菜单："删除"在最后、前面有分隔线（W5-H 起菜单补齐了常用动作，D8；"删除"仍单独隔开）
         let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
                                                      context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         let menu = try XCTUnwrap(cell1.menu(for: event))
-        XCTAssertEqual(menu.items.map(\.isSeparatorItem), [false, false, true, false], menu.items.map(\.title).description)
+        XCTAssertTrue(menu.items.count >= 2 && menu.items[menu.items.count - 2].isSeparatorItem, menu.items.map(\.title).description)
+        XCTAssertEqual(menu.items.filter(\.isSeparatorItem).count, 2, "删除前一条、设置类前一条：\(menu.items.map(\.title))")
         XCTAssertEqual(menu.items.last?.title, "删除输入 1")
 
         // 哪儿都没用的 3 号：直接删，不问

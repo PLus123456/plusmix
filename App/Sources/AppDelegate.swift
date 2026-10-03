@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var virtualCameraStatusItem: NSMenuItem?
     /// "输出"菜单（menuNeedsUpdate 按对象认，标题已本地化）。
     private var outputMenu: NSMenu?
+    /// 窗口 › 输入缩略图 ▸（W5-H）。
+    private var thumbnailSizeMenu: NSMenu?
     /// "切换"菜单（W5-G：自己是 delegate，不认任何键）。
     private(set) var switchMenu: SwitchMenuController?
     private var settings = AppSettings()
@@ -147,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         input.addItem(byType)
         addByTypeItem = byType
         inputSettingsItem = input.addItem(withTitle: L("menu.input.settings"), action: #selector(inputSettings(_:)), keyEquivalent: "I")
+        input.addItem(withTitle: L("menu.input.find"), action: #selector(focusInputSearch(_:)), keyEquivalent: "f")   // ⌘F：输入条的搜索框（W5-H，D3）
         main.addItem(submenu(input, title: L("menu.input")))
 
         let switching = SwitchMenuController()
@@ -192,8 +195,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         windowMenu.addItem(withTitle: L("menu.window.minimize"), action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: L("menu.window.zoom"), action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
-        windowMenu.addItem(withTitle: L("menu.window.mixer"), action: #selector(toggleMixer), keyEquivalent: "")
+        windowMenu.addItem(withTitle: L("menu.window.mixer"), action: #selector(toggleMixer(_:)), keyEquivalent: "")
         windowMenu.addItem(withTitle: L("menu.window.multiview"), action: #selector(toggleMultiview), keyEquivalent: "")
+        // 输入缩略图 ▸ 小 / 中 / 大（W5-H，D11；与输入条右键同一份，存本机）
+        let thumbnails = NSMenu(title: L("menu.window.thumbnailSize"))
+        thumbnails.delegate = self
+        thumbnailSizeMenu = thumbnails
+        windowMenu.addItem(submenu(thumbnails, title: L("menu.window.thumbnailSize")))
         main.addItem(submenu(windowMenu, title: L("menu.window")))
         NSApp.windowsMenu = windowMenu
 
@@ -284,7 +292,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let tab = ((sender as? NSMenuItem)?.representedObject as? String).flatMap(OutputSettingsModel.Tab.init(rawValue:)) ?? .record
         controller.panels.showOutputSettings(tab: tab)
     }
-    @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
+    /// 窗口 › 调音台 / 输入条右端"调音台"开关（同一个 selector，W5-H D2）。
+    @objc func toggleMixer(_ sender: Any?) { controller.windowController.toggleMixerPanel() }
+    /// 输入 › 搜索输入（⌘F）：焦点进输入条的搜索框（W5-H D3）。名字别用系统的 performFindPanelAction:（文本框有焦点时会被它接走）。
+    @objc func focusInputSearch(_ sender: Any?) { controller.windowController.inputStrip.focusSearch() }
 
     /// 关于面板：系统标准面板 + credits（AboutPanel）。
     @objc func showAbout(_ sender: Any?) { AboutPanel.show() }
@@ -347,6 +358,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rebuildRecentMenu()
             return
         }
+        if menu === thumbnailSizeMenu {
+            // 与输入条右键同一份（每次现建：菜单项不能同时挂在两个菜单里）
+            let fresh = controller.windowController.inputStrip.thumbnailSizeMenu()
+            menu.removeAllItems()
+            menu.autoenablesItems = false
+            for item in fresh.items {
+                fresh.removeItem(item)
+                menu.addItem(item)
+            }
+            return
+        }
         if menu === inputMenu {
             addByTypeItem?.submenu = controller.windowController.addInputMenu() ?? NSMenu(title: L("menu.input.addByType"))
             inputSettingsItem?.title = inputSettingsTarget.map { L("menu.input.settingsNamed", $0.number, $0.name) } ?? L("menu.input.settings")
@@ -376,7 +398,7 @@ extension AppDelegate: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         let session = controller.session
         switch menuItem.action {
-        case #selector(toggleMixer):
+        case #selector(toggleMixer(_:)):
             menuItem.state = controller.windowController.isMixerPanelVisible ? .on : .off
         case #selector(toggleMultiview):
             menuItem.state = controller.windowController.isMultiviewWindowVisible ? .on : .off

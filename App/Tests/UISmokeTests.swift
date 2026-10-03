@@ -22,6 +22,7 @@ final class UISmokeTests: XCTestCase {
         session.send(.addInput(config: config1))
         model.number = 2
         model.syntheticFrameRate = .fps30
+        model.syntheticAudio = true   // 第 8 步点它的静音：W5-H 起没有声音的输入静音灰着（D7），这一路要带音频
         session.send(.addInput(config: try model.makeConfig()))
         XCTAssertTrue(AppTest.waitUntil(10) { session.state.inputs.count == 2 }, "两路输入应进快照")
         XCTAssertTrue(AppTest.waitUntil(10) { session.inputs.runtimeState(of: 1) == .live && session.inputs.runtimeState(of: 2) == .live },

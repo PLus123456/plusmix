@@ -521,6 +521,7 @@ final class InputStripTests: XCTestCase {
         XCTAssertNil(toggle.bezelColor, "收起 = 不高亮")
         _ = NSApp.sendAction(mixerItem.action!, to: nil, from: mixerItem)
         XCTAssertTrue(AppTest.waitUntil(1) { self.wc.isMixerPanelVisible && toggle.bezelColor == Theme.accent }, "菜单那一路也同步高亮")
+        wc.window?.contentView?.layoutSubtreeIfNeeded()   // 调音台刚拉出来，输入条变窄后再量
         let toggleFrame = AppTest.alignmentFrame(toggle, in: strip)
         XCTAssertEqual(toggleFrame.maxX, strip.bounds.maxX - 8, accuracy: 4, "在输入条右端")
 
