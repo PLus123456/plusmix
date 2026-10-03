@@ -1,5 +1,5 @@
 // ISO 分路的纯逻辑（W3-C 交付 3；W3-E2 把 ISO 入口收成一个：输出设置 › ISO 页，底栏"ISO…"只是打开它）：
-// 每路输入一个开关 = 节目里有没有这路的视频 ISO 录制输出（kind = .record、source = .input(n)），开 / 关就是 addOutput / removeOutput 命令；
+// 每路输入一个开关 = 节目里有没有这路的视频 ISO 录制输出（kind = .record、source = .input(n)），开 / 关就是 addOutput / removeOutput 命令（W5-I 起 ISO 页是表，K9）；
 // 起 / 停由底栏的录制按钮一起做（同一拍起多条 startRecord）。录制目录、剩余空间和"还能录多久"（按 PGM + 所选 ISO 路的码率之和）给 ISO 页显示。
 import Foundation
 import SwitcherContracts
@@ -21,14 +21,15 @@ enum ISORoutes {
     /// 全部录制输出（PGM + ISO），按编号。
     static func allRecords(in state: MixerState) -> [OutputState] { state.outputs.filter { $0.kind == .record } }
 
-    /// 给输入 n 建一个 ISO 录制输出：编码 / 目录抄 PGM 录制输出（没有就默认），文件名模板带 {output} 免得同一秒同名，名字 "ISO n"。
+    /// 给输入 n 建一个 ISO 录制输出：编码 / 文件一节同 PGM 录制输出（录制 1；没有就按节目格式的默认值），文件名模板带 {output} 免得同一秒同名，名字 "ISO n"。
+    /// 之后录制 1 改了，没在录的 ISO 路跟着改、在录的停了再跟（W5-I，K10：OutputLinkage / OutputLinkageSync）——不再是"创建时抄一次"。
     static func makeISOOutput(for input: InputConfig, in state: MixerState, defaultDirectory: String) -> OutputState {
         let number = (state.outputs.map(\.number).max() ?? 0) + 1
         let pgm = programRecord(in: state)
-        var record = pgm?.settings.record ?? RecordSettings(directory: defaultDirectory)
+        var record = pgm.flatMap(OutputLinkage.sharedRecordFile(from:)) ?? RecordSettings(directory: defaultDirectory)
         if !record.fileNamePattern.contains("{output}") { record.fileNamePattern += "-{output}" }
-        let settings = OutputSettings(source: .input(number: input.number), video: pgm?.settings.video ?? VideoEncodeSettings(),
-                                      audio: pgm?.settings.audio ?? AudioEncodeSettings(), record: record)
+        let settings = OutputSettings(source: .input(number: input.number), video: pgm?.settings.video ?? RecordDefaults.video(for: state.format),
+                                      audio: pgm?.settings.audio ?? RecordDefaults.audio(), record: record)
         return OutputState(number: number, kind: .record, name: L("outputSettings.iso.name", input.number), enabled: false, settings: settings)
     }
 

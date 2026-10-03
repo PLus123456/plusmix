@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "checked": "2026-10-03",
+  "note": "推流服务预设（04 Q31 (a)）：只是填地址的快捷方式，节目里只存完整地址，不存服务 id；App 按地址开头认出是哪个服务。顺序就是下拉的顺序。kind: custom = 自定义（不填地址）；perSession = 平台每场发地址 + 推流码（不填地址，只给一句去哪拿）；fixed = 入口固定，选中即填 url（可改）。入口地址的核对记录见 reports/w5-app-output-pages.md。",
+  "services": [
+    {
+      "id": "customRTMP",
+      "kind": "custom",
+      "schemes": ["rtmp", "rtmps"],
+      "name": { "zh-Hans": "自定义（RTMP / RTMPS）", "en": "Custom (RTMP / RTMPS)" },
+      "hint": {
+        "zh-Hans": "地址写 rtmp://服务器/应用 或 rtmps://服务器/应用，推流码填在「密钥」里。自建服务器（MediaMTX、SRS、nginx-rtmp）要账号密码的，按它的规矩写在地址后面的查询串里，例如 MediaMTX 是 ?user=…&pass=…。",
+        "en": "Use rtmp://server/app or rtmps://server/app and put the stream key in Key. Self-hosted servers (MediaMTX, SRS, nginx-rtmp) that need a login take it in the query string after the address, e.g. ?user=…&pass=… for MediaMTX."
+      }
+    },
+    {
+      "id": "customSRT",
+      "kind": "custom",
+      "schemes": ["srt"],
+      "name": { "zh-Hans": "自定义（SRT）", "en": "Custom (SRT)" },
+      "hint": {
+        "zh-Hans": "地址写 srt://主机:端口?streamid=…&passphrase=…&latency=…（latency 单位毫秒，常用 120–2000）。streamid 和 passphrase 只用字母、数字和 - . _ ~，passphrase 10–79 个字符。密钥框填了会当作 streamid（地址里已有 streamid 时不用）。",
+        "en": "Use srt://host:port?streamid=…&passphrase=…&latency=… (latency in milliseconds, typically 120–2000). Use only letters, digits and - . _ ~ in streamid and passphrase; the passphrase must be 10–79 characters. A key in Key is sent as streamid unless the address already has one."
+      }
+    },
+    {
+      "id": "wechatChannels",
+      "kind": "perSession",
+      "schemes": ["rtmp", "rtmps"],
+      "name": { "zh-Hans": "微信视频号", "en": "WeChat Channels" },
+      "hint": {
+        "zh-Hans": "在视频号助手网页（channels.weixin.qq.com）的直播管理里创建直播，复制「推流地址」填到地址、「推流密钥」填到密钥；每场直播都不一样。",
+        "en": "Create a live event under Live management in the Channels assistant web page (channels.weixin.qq.com), then copy the push address into Address and the push key into Key. Both change for every event."
+      }
+    },
+    {
+      "id": "douyin",
+      "kind": "perSession",
+      "schemes": ["rtmp", "rtmps"],
+      "name": { "zh-Hans": "抖音", "en": "Douyin" },
+      "hint": {
+        "zh-Hans": "开播前在抖音的直播后台取「推流地址」和「推流码」，分别填到地址和密钥。地址和推流码每场可能不同；第三方推流可能要先在平台开通权限。",
+        "en": "Before going live, copy the push address and push code from Douyin's live console into Address and Key. They may change for every event, and third-party streaming may have to be enabled for your account first."
+      }
+    },
+    {
+      "id": "bilibili",
+      "kind": "perSession",
+      "schemes": ["rtmp", "rtmps"],
+      "match": ["bilivideo.com/live-bvc"],
+      "name": { "zh-Hans": "哔哩哔哩", "en": "Bilibili" },
+      "hint": {
+        "zh-Hans": "在直播中心 › 我的直播间 › 开播设置里开播后，复制「服务器地址」填到地址、「串流密钥」填到密钥；密钥每次开播都会变。",
+        "en": "Start the live room under Live center › My live room › Settings, then copy the server address into Address and the stream key into Key. The key changes every time you go live."
+      }
+    },
+    {
+      "id": "kuaishou",
+      "kind": "perSession",
+      "schemes": ["rtmp", "rtmps"],
+      "name": { "zh-Hans": "快手", "en": "Kuaishou" },
+      "hint": {
+        "zh-Hans": "开播前在快手的直播后台取「推流地址」和「推流码」，分别填到地址和密钥。地址和推流码每场可能不同；第三方推流可能要先在平台开通权限。",
+        "en": "Before going live, copy the push address and push code from Kuaishou's live console into Address and Key. They may change for every event, and third-party streaming may have to be enabled for your account first."
+      }
+    },
+    {
+      "id": "youtube",
+      "kind": "fixed",
+      "schemes": ["rtmp", "rtmps"],
+      "url": "rtmp://a.rtmp.youtube.com/live2",
+      "match": ["rtmp://a.rtmp.youtube.com/", "rtmps://a.rtmps.youtube.com", "rtmp://b.rtmp.youtube.com/", "rtmps://b.rtmps.youtube.com"],
+      "backupURL": "rtmp://b.rtmp.youtube.com/live2?backup=1",
+      "name": { "zh-Hans": "YouTube", "en": "YouTube" },
+      "hint": {
+        "zh-Hans": "推流码在 YouTube 工作室 › 直播 › 串流设置里（「串流密钥」）。要加密传输可把地址改成 rtmps://a.rtmps.youtube.com/live2；备用入口 rtmp://b.rtmp.youtube.com/live2?backup=1 可以另加一个目的地，用同一个推流码。",
+        "en": "The stream key is in YouTube Studio › Go live › Stream settings. For an encrypted connection change the address to rtmps://a.rtmps.youtube.com/live2. The backup ingest rtmp://b.rtmp.youtube.com/live2?backup=1 can be added as a second destination with the same key."
+      }
+    },
+    {
+      "id": "facebook",
+      "kind": "fixed",
+      "schemes": ["rtmps"],
+      "url": "rtmps://live-api-s.facebook.com:443/rtmp/",
+      "match": ["rtmps://live-api-s.facebook.com"],
+      "name": { "zh-Hans": "Facebook", "en": "Facebook" },
+      "hint": {
+        "zh-Hans": "Facebook 只收 RTMPS。在直播制作工具（Live Producer）里选「串流软件」，复制「串流密钥」填到密钥；页面上显示的服务器地址和这里不同时以页面为准。",
+        "en": "Facebook only accepts RTMPS. In Live Producer choose Streaming software and copy the stream key into Key. If the page shows a different server URL, use that one."
+      }
+    },
+    {
+      "id": "twitch",
+      "kind": "fixed",
+      "schemes": ["rtmp", "rtmps"],
+      "url": "rtmp://ingest.global-contribute.live-video.net/app",
+      "match": ["rtmp://ingest.global-contribute.live-video.net", "rtmps://ingest.global-contribute.live-video.net", "contribute.live-video.net/app", "rtmp://live.twitch.tv/app"],
+      "name": { "zh-Hans": "Twitch", "en": "Twitch" },
+      "hint": {
+        "zh-Hans": "这是 Twitch 的全球自动入口（就近分配）。推流码在创作者仪表板 › 设置 › 直播里（「主要串流密钥」）。",
+        "en": "This is Twitch's global ingest (routes to the nearest server). The stream key is in Creator Dashboard › Settings › Stream (Primary stream key)."
+      }
+    }
+  ]
+}
