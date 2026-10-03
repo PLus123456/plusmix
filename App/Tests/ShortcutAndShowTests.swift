@@ -380,7 +380,7 @@ final class AddInputSheetTests: XCTestCase {
         XCTAssertEqual(sheet.title, "添加输入")
         let controller = try XCTUnwrap(sheet.windowController as? AddInputSheetController)
         XCTAssertEqual(controller.model.number, 2, "默认编号 = 最小空闲编号")
-        XCTAssertEqual(controller.model.kind, .synthetic)
+        XCTAssertEqual(controller.model.kind, .camera, "第一次停在摄像头 / 采集卡（W5-K / G2：合成测试源不作默认，Q58）")
         AppTest.pump(seconds: 0.3)
         // TEST_RUNNER_SWITCHER_HOLD=秒：让 sheet 停一会儿，好从外面用 screencapture 截真图（cacheDisplay 截不到 AppKit 的 SwiftUI 底控件）
         if let hold = ProcessInfo.processInfo.environment["SWITCHER_HOLD"].flatMap(Double.init) { AppTest.pump(seconds: hold) }
@@ -393,10 +393,11 @@ final class AddInputSheetTests: XCTestCase {
         controller.cancelForTesting()
         XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet == nil }, "取消应收起 sheet")
         XCTAssertEqual(session.state.inputs.count, 1, "取消不加输入")
-        // 确定：默认合成源 → 加了 2 号
+        // 确定：选合成测试源 → 加了 2 号（W5-K 起默认停在摄像头，测试机不加摄像头）
         wc.presentAddInput()
         XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet != nil })
         let c2 = try XCTUnwrap(window.attachedSheet?.windowController as? AddInputSheetController)
+        c2.selectKindForTesting(.synthetic)
         c2.confirmForTesting()
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.inputs.count == 2 && session.state.input(2)?.kind == .synthetic }, "确定应加一路合成源")
         XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet == nil })

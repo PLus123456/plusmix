@@ -146,8 +146,12 @@ final class InputCellView: NSView {
     private(set) var isOutsideMultiviewLayout = false
     private var runtime: InputState?
 
-    /// 纯音频输入（没有画面）：格子画占位，不画多画面格子。
-    var isAudioOnly: Bool { config.kind == .audio }
+    /// 纯音频输入（没有画面）：格子画占位，不画多画面格子。视频文件输入选的是 mp3 / wav / m4a / aac 也算（W5-K，04 Q57）。
+    var isAudioOnly: Bool {
+        if config.kind == .audio { return true }
+        if case .file(let path, _, _) = config.source { return MediaFileInfo.isAudioFile(path) }
+        return false
+    }
 
     /// 电平（推子后峰值 dBFS，[L, R]；nil = 没有读数）→ 占位里的表（-60 … 0 dBFS 线性映射到 0 … 1）。只对纯音频输入有意义。
     func applyAudioLevel(_ peakDb: [Double]?) {

@@ -339,8 +339,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     /// 添加输入面板：kind = nil 停在上次添加用的类型（底栏主体、⌘I），给了就直达那一页（▴ / 菜单栏"按类型添加"，G1）。
     func presentAddInput(kind: AddInputModel.Kind? = nil) {
         guard let session, let window, addInputSheet == nil else { return }
-        let initial = kind ?? addInputHistory?.lastKind ?? .synthetic
-        let sheet = AddInputSheetController(state: session.state, maxInputs: session.engine.maxInputs, kind: initial) { [weak self, weak session] config in
+        let initial = kind ?? addInputHistory?.lastKind ?? AddInputHistory.defaultKind
+        let sheet = AddInputSheetController(state: session.state, maxInputs: session.engine.maxInputs, kind: initial, history: addInputHistory) { [weak self, weak session] config in
             session?.send(.addInput(config: config))
             self?.addInputHistory?.noteAdded(config)
         }
@@ -413,7 +413,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     func addInputMenu() -> NSMenu? {
         let menu = NSMenu(title: L("menu.input.addByType"))
         menu.autoenablesItems = false
-        for kind in AddInputModel.Kind.allCases {
+        for kind in AddInputModel.Kind.displayOrder {   // 和添加面板左栏同一顺序（W5-K：分组，合成测试源在最后）
             menu.addItem(.action(L("addInputMenu.kind", kind.title)) { [weak self] in self?.presentAddInput(kind: kind) })
         }
         guard let session, let history = addInputHistory else { return menu }

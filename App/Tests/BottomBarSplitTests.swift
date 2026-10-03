@@ -447,15 +447,16 @@ final class BottomBarSplitTests: XCTestCase {
 
         // ▴：八种类型直达（和添加面板左栏同一顺序）+ 最近添加的来源（还没有）
         var menu = try XCTUnwrap(wc.addInputMenu())
-        let kinds = AddInputModel.Kind.allCases.map { $0.title + "…" }
+        let kinds = AddInputModel.Kind.displayOrder.map { $0.title + "…" }   // W5-K：左栏分组后的顺序（合成测试源在最后）
         XCTAssertEqual(Array(menu.items.filter { $0.action != nil }.prefix(8)).map(\.title), kinds, "八种类型直达")
         XCTAssertFalse(menu.items.contains { $0.isSectionHeader && $0.title == L("addInputMenu.recent") }, "没有最近添加的来源时不列这一段")
 
-        // 主体 = 打开添加面板（第一次停在合成测试源）；加一路 30 fps 合成源
+        // 主体 = 打开添加面板（第一次停在摄像头 / 采集卡，W5-K / G2）；切到合成测试源加一路 30 fps
         bar.addInput.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(3) { window.attachedSheet != nil })
         var sheet = try XCTUnwrap(window.attachedSheet?.windowController as? AddInputSheetController)
-        XCTAssertEqual(sheet.model.kind, .synthetic)
+        XCTAssertEqual(sheet.model.kind, .camera)
+        sheet.selectKindForTesting(.synthetic)
         sheet.form.model.syntheticFrameRate = .fps30
         sheet.confirmForTesting()
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.input(1) != nil && window.attachedSheet == nil })
