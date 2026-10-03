@@ -23,11 +23,21 @@ final class BottomBarView: NSView {
     /// 重试起不来的那几路（session.retryFailedOutputs）。
     var onRetryOutputs: (([Int]) -> Void)?
 
-    let addInputButton: NSButton
-    let recordButton: NSButton
-    let streamButton: NSButton
-    let externalButton: NSButton
-    let multiviewButton: NSButton
+    let addInput = SplitBarButton(name: L("bottom.addInput"), title: L("bottom.addInput"))
+    let record = SplitBarButton(name: L("bottom.record"), title: L("bottom.record"))
+    let external = SplitBarButton(name: L("bottom.external"), title: L("bottom.external"))
+    let stream = SplitBarButton(name: L("bottom.stream"), title: L("bottom.stream"))
+    let multiview = SplitBarButton(name: L("bottom.multiview"), title: L("bottom.multiview"))
+    var leftGroup: [SplitBarButton] { [addInput, record, external, stream, multiview] }
+    var statusBar: NSView { self }
+    func recordGearMenu() -> NSMenu { NSMenu() }
+    func recordMenu() -> NSMenu { NSMenu() }
+    func streamMenu() -> NSMenu { NSMenu() }
+    var addInputButton: NSButton { addInput.bodyButton }
+    var recordButton: NSButton { record.bodyButton }
+    var streamButton: NSButton { stream.bodyButton }
+    var externalButton: NSButton { external.bodyButton }
+    var multiviewButton: NSButton { multiview.bodyButton }
     let overlayButton: NSButton
     let isoButton: NSButton
     let statusLabel = Theme.monoLabel("", size: 11, color: Theme.dimText)
@@ -47,11 +57,6 @@ final class BottomBarView: NSView {
     static let noticeSeconds: TimeInterval = 4
 
     override init(frame: NSRect) {
-        addInputButton = Theme.button(L("bottom.addInput"), target: nil, action: nil)
-        recordButton = Theme.toggleButton(L("bottom.record"), target: nil, action: nil)
-        streamButton = Theme.toggleButton(L("bottom.stream"), target: nil, action: nil)
-        externalButton = Theme.button(L("bottom.external"), target: nil, action: nil)
-        multiviewButton = Theme.button(L("bottom.multiview"), target: nil, action: nil)
         overlayButton = Theme.button(L("bottom.overlay"), target: nil, action: nil)
         isoButton = Theme.button("ISO…", target: nil, action: nil)
         super.init(frame: frame)
@@ -73,7 +78,7 @@ final class BottomBarView: NSView {
         addInputButton.keyEquivalent = "i"
         addInputButton.keyEquivalentModifierMask = [.command]
 
-        let buttons = NSStackView(views: [addInputButton, recordButton, isoButton, streamButton, externalButton, multiviewButton, overlayButton])
+        let buttons = NSStackView(views: [addInput, record, isoButton, stream, external, multiview, overlayButton])
         buttons.orientation = .horizontal
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
