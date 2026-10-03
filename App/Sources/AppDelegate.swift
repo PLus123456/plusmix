@@ -8,7 +8,7 @@
 //   输入      添加输入… ⌘I / 按类型添加 ▸ / 输入 N「名字」设置… ⇧⌘I（标题写出是 PVW 上哪一路，PVW 空时灰，O4）
 //   切换      SwitchMenuController（O1：Cut / 执行当前转场 / 五种类型 / FTB / Overlay ▸，右列的键只显示）
 //   输出      录制 ▸ / 推流 ▸ / 外部显示 ▸ / 全部外部显示开·关 / 多画面窗口 / 虚拟摄像头 ▸ / ─ / 七个输出设置页（▸ 的几个和底栏 ▴ / ⚙ 同一份菜单）
-//   窗口      最小化 / 缩放 / ─ / 调音台 / 多画面
+//   窗口      最小化 / 缩放 / ─ / 调音台 / 多画面 / 统计 / ─ / 锁定界面（W5-L：= 底栏右组的"统计"与锁，规则 5；锁着时打勾，菜单栏不受锁影响、从这里也能解锁）
 //   帮助      PlusMix 使用手册 / 快捷键一览 / ─ / 导出诊断包… / 打开诊断文件夹（O3；工具条"?"弹同一份）
 // 菜单项一律 nil target、动作在这里：工具条（MainToolbar）的按钮挂的是同一个 selector，所以两处点下去是同一段代码，灰不灰也在 validateMenuItem 里一处定。
 // 文案全部走 L10n（包里返回中文的状态在 App 侧查表，OutputStatusText）。启动参数与设置见 AppSettings。
@@ -194,6 +194,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: L("menu.window.mixer"), action: #selector(toggleMixer), keyEquivalent: "")
         windowMenu.addItem(withTitle: L("menu.window.multiview"), action: #selector(toggleMultiview), keyEquivalent: "")
+        windowMenu.addItem(withTitle: L("menu.window.stats"), action: #selector(showStatistics(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: L("menu.window.lock"), action: #selector(toggleInterfaceLock(_:)), keyEquivalent: "")
         main.addItem(submenu(windowMenu, title: L("menu.window")))
         NSApp.windowsMenu = windowMenu
 
@@ -285,6 +288,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.panels.showOutputSettings(tab: tab)
     }
     @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
+    /// 统计窗（= 底栏"统计"，W5-L）。
+    @objc func showStatistics(_ sender: Any?) { controller.panels.showStats() }
+    /// 锁定 / 解锁界面（= 底栏最右的锁，W5-L）。
+    @objc func toggleInterfaceLock(_ sender: Any?) {
+        let wc = controller.windowController
+        wc.setInterfaceLocked(!wc.isInterfaceLocked)
+    }
 
     /// 关于面板：系统标准面板 + credits（AboutPanel）。
     @objc func showAbout(_ sender: Any?) { AboutPanel.show() }
@@ -380,6 +390,8 @@ extension AppDelegate: NSMenuItemValidation {
             menuItem.state = controller.windowController.isMixerPanelVisible ? .on : .off
         case #selector(toggleMultiview):
             menuItem.state = controller.windowController.isMultiviewWindowVisible ? .on : .off
+        case #selector(toggleInterfaceLock(_:)):
+            menuItem.state = controller.windowController.isInterfaceLocked ? .on : .off
         case #selector(inputSettings(_:)):
             return inputSettingsTarget != nil
         case #selector(openLastSession(_:)):

@@ -1046,6 +1046,8 @@
 "statsWindow.kind.externalDisplay" = "External display";
 "statsWindow.kind.virtualCamera" = "Virtual camera";
 "statsWindow.kind.multiview" = "Multiview";
+"menu.window.stats" = "Statistics";
+"menu.window.lock" = "Lock Interface";
 
 /* W4-B: updates (Sparkle) and diagnostics */
 "menu.checkForUpdates" = "Check for Updates…";

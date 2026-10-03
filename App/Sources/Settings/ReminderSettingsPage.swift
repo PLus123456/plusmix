@@ -19,12 +19,11 @@ final class ReminderSettingsModel: ObservableObject {
         lowAudioEnabled = r.lowAudioEnabled
     }
 
-    /// 即时生效：写本机设置，主窗口的提醒马上按新设置算。
+    /// 即时生效：只写提醒的四个键，主窗口的提醒马上按新设置算。
     private func commit() {
-        var s = controller.settings
-        s.reminders = ReminderSettings(notLiveEnabled: notLiveEnabled, notLiveMinutes: ReminderSettings.clampMinutes(notLiveMinutes),
-                                       ftbEnabled: ftbEnabled, lowAudioEnabled: lowAudioEnabled)
-        controller.updateSettings(s)
+        let reminders = ReminderSettings(notLiveEnabled: notLiveEnabled, notLiveMinutes: ReminderSettings.clampMinutes(notLiveMinutes),
+                                         ftbEnabled: ftbEnabled, lowAudioEnabled: lowAudioEnabled)
+        controller.updateSettings({ $0.reminders = reminders }, saving: { $0.saveReminders(to: $1) })
     }
 }
 

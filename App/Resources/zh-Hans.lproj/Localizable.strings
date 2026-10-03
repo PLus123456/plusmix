@@ -1046,6 +1046,8 @@
 "statsWindow.kind.externalDisplay" = "外部显示";
 "statsWindow.kind.virtualCamera" = "虚拟摄像头";
 "statsWindow.kind.multiview" = "多画面";
+"menu.window.stats" = "统计";
+"menu.window.lock" = "锁定界面";
 
 /* W4-B：更新（Sparkle）与诊断包 */
 "menu.checkForUpdates" = "检查更新…";

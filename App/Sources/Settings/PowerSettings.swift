@@ -30,12 +30,10 @@ final class PowerSettingsModel: ObservableObject {
         machineRows = MachineInfo.rows
     }
 
-    /// 即时生效：写本机设置，AppController 按引擎在不在跑拿 / 放。
+    /// 即时生效：只写这两个键，AppController 按引擎在不在跑拿 / 放。
     private func commit() {
-        var s = controller.settings
-        s.preventSleepWhileRunning = preventSleep
-        s.preventDisplaySleepWhileRunning = preventDisplaySleep
-        controller.updateSettings(s)
+        let (sleep, display) = (preventSleep, preventDisplaySleep)
+        controller.updateSettings({ $0.preventSleepWhileRunning = sleep; $0.preventDisplaySleepWhileRunning = display }, saving: { $0.savePower(to: $1) })
         objectWillChange.send()   // 现状那一行跟着变
     }
 

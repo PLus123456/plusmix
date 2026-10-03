@@ -21,10 +21,7 @@ final class EngineActivityTests: XCTestCase {
         let session = try AppTest.freshSession()
         let controller = AppTest.controller
         addTeardownBlock { @MainActor in
-            var s = AppTest.controller.settings
-            s.preventSleepWhileRunning = true
-            s.preventDisplaySleepWhileRunning = true
-            AppTest.controller.updateSettings(s)
+            AppTest.controller.updateSettings({ $0.preventSleepWhileRunning = true; $0.preventDisplaySleepWhileRunning = true }, saving: { $0.savePower(to: $1) })
             AppTest.controller.panels.closeAll()
             if AppTest.controller.session == nil { AppTest.restartEngine() }
         }
@@ -47,10 +44,18 @@ final class EngineActivityTests: XCTestCase {
         XCTAssertTrue(power.preventDisplaySleep)
         XCTAssertGreaterThanOrEqual(power.machineRows.count, 2, "只读机型 / GPU：\(power.machineRows)")
         XCTAssertTrue(power.machineRows.contains { $0.value.contains(MTLCreateSystemDefaultDevice()?.name ?? "?") }, "GPU 那一行：\(power.machineRows)")
+        // 即时生效的开关只写自己的键：内存里有启动参数带进来的值（这里用 API token 模拟 --api-token），不会顺手存成本机设置
+        let beforeArgs = controller.settings
+        let storedToken = controller.defaults.string(forKey: AppSettings.Keys.apiToken)
+        var withArgument = beforeArgs
+        withArgument.apiToken = "from-command-line"
+        controller.settings = withArgument
         power.preventDisplaySleep = false
         XCTAssertTrue(AppTest.waitUntil(2) { !held().contains(display) }, "关掉显示器那个开关 → 只放显示器那一条：\(held())")
         XCTAssertTrue(held().contains(system), "系统那一条不动")
         XCTAssertEqual(controller.defaults.object(forKey: AppSettings.Keys.preventDisplaySleep) as? Bool, false, "存进本机设置")
+        XCTAssertEqual(controller.defaults.string(forKey: AppSettings.Keys.apiToken), storedToken, "启动参数带进来的值没被顺手写进本机设置")
+        controller.settings = beforeArgs
         power.preventDisplaySleep = true
         XCTAssertTrue(AppTest.waitUntil(2) { held().contains(display) })
         power.preventSleep = false
@@ -81,10 +86,7 @@ final class TallyAppTests: XCTestCase {
         let session = try AppTest.freshSession()
         let controller = AppTest.controller
         addTeardownBlock { @MainActor in
-            var s = AppTest.controller.settings
-            s.tallyEnabled = false
-            s.tallyPort = nil
-            AppTest.controller.updateSettings(s)
+            AppTest.controller.updateSettings({ $0.tallyEnabled = false; $0.tallyPort = nil }, saving: { $0.saveTally(to: $1) })
             AppTest.controller.panels.closeAll()
         }
         try AppTest.addSynthetics(session, count: 2)
@@ -180,7 +182,7 @@ final class RemoteControlPageTests: XCTestCase {
         XCTAssertEqual(m.apiScope, .localOnly)
         let bound = try XCTUnwrap(session.control.apiServer?.boundPort, "API 应已起：\(session.control.apiError ?? "")")
         XCTAssertEqual(m.apiAddress, "http://127.0.0.1:\(bound)")
-        XCTAssertEqual(try AppTest.http("GET", m.apiAddress + "/api/v1/state").status, 200, "页上的地址连得上")
+        XCTAssertEqual(try AppTest.http("GET", m.apiAddress + "/api/v1/state" + AppTest.tokenQuery(session)).status, 200, "页上的地址连得上")
         XCTAssertNil(m.apiWarning, "仅本机不提醒")
 
         // 允许局域网：监听 0.0.0.0，页上显示本机局域网 IP + 端口；没设 token → 黄字
@@ -260,9 +262,7 @@ final class ReminderTests: XCTestCase {
         let controller = AppTest.controller
         let wc = controller.windowController
         addTeardownBlock { @MainActor in
-            var s = AppTest.controller.settings
-            s.reminders = ReminderSettings()
-            AppTest.controller.updateSettings(s)
+            AppTest.controller.updateSettings({ $0.reminders = ReminderSettings() }, saving: { $0.saveReminders(to: $1) })
             AppTest.controller.panels.closeAll()
         }
         try AppTest.addSynthetics(session, count: 1)
@@ -419,11 +419,13 @@ final class StatsWindowTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { dup() == (session.stats?.perInput[1]?.dup ?? 0) - baseline }, "窗里 = 当前累计 − 基线：\(String(describing: dup()))")
         // API 读到的也是累计口径（同一份 Stats）
         let port = try XCTUnwrap(session.control.apiServer?.boundPort)
-        let state = try AppTest.http("GET", "http://127.0.0.1:\(port)/api/v1/state")
+        let state = try AppTest.http("GET", "http://127.0.0.1:\(port)/api/v1/state" + AppTest.tokenQuery(session))
         let perInput = ((state.json?["stats"] as? [String: Any])?["per_input"] as? [String: Any])?["1"] as? [String: Any]
         XCTAssertGreaterThanOrEqual((perInput?["dup"] as? NSNumber)?.uint64Value ?? 0, before, "API 的 dup 没被清零：\(String(describing: perInput))")
-        // 再点一次 = 同一个窗
+        // 再点一次 = 同一个窗；菜单栏"窗口 › 统计"也是它（规则 5）
         wc.bottomBar.statsButton.performClick(nil)
+        XCTAssertTrue(controller.panels.statsWindow === w)
+        AppTest.delegate.showStatistics(nil)
         XCTAssertTrue(controller.panels.statsWindow === w)
         session.send(.stopStream(output: streamNumber))
     }
@@ -538,7 +540,7 @@ final class InterfaceLockTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.program == 1 && session.state.preview == 2 }, "菜单栏照常")
         // API 照常
         let port = try XCTUnwrap(session.control.apiServer?.boundPort)
-        let api = try AppTest.http("POST", "http://127.0.0.1:\(port)/api/v1/command", body: #"{"command":{"cut":{}}}"#)
+        let api = try AppTest.http("POST", "http://127.0.0.1:\(port)/api/v1/command" + AppTest.tokenQuery(session), body: #"{"command":{"cut":{}}}"#)
         XCTAssertEqual(api.json?["applied"] as? Bool, true, api.text)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.program == 2 }, "API 照常")
         // MIDI 照常（虚拟源连得上才跑这一段）
@@ -562,6 +564,19 @@ final class InterfaceLockTests: XCTestCase {
         XCTAssertFalse(window.blocksForLock(down), "解锁后点击照常")
         XCTAssertFalse(bar.isLockHighlighted)
         XCTAssertNil(lock.bezelColor)
+
+        // 菜单栏"窗口 › 锁定界面"是同一个开关（规则 5），锁着时打勾；菜单栏不受锁影响，从这里也能解锁
+        let lockSelector = #selector(AppDelegate.toggleInterfaceLock(_:))
+        let lockItem = try XCTUnwrap(NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items).first { $0.action == lockSelector })
+        XCTAssertEqual(lockItem.title, "锁定界面")
+        AppTest.delegate.toggleInterfaceLock(lockItem)
+        XCTAssertTrue(wc.isInterfaceLocked && bar.isLockHighlighted)
+        XCTAssertTrue(AppTest.delegate.validateMenuItem(lockItem))
+        XCTAssertEqual(lockItem.state, .on, "锁着时打勾")
+        AppTest.delegate.toggleInterfaceLock(lockItem)
+        XCTAssertFalse(wc.isInterfaceLocked)
+        _ = AppTest.delegate.validateMenuItem(lockItem)
+        XCTAssertEqual(lockItem.state, .off)
     }
 }
 
@@ -580,12 +595,11 @@ final class IdleWakeProbeTests: XCTestCase {
         let mode = ProcessInfo.processInfo.environment["SWITCHER_IDLE_PROBE_MODE"] ?? "activity"
         let controller = AppTest.controller
         _ = try AppTest.freshSession()
-        let original = controller.settings
-        addTeardownBlock { @MainActor in AppTest.controller.updateSettings(original) }
-        var s = controller.settings
-        s.preventSleepWhileRunning = mode != "none"
-        s.preventDisplaySleepWhileRunning = mode != "none"
-        controller.updateSettings(s)
+        addTeardownBlock { @MainActor in
+            AppTest.controller.updateSettings({ $0.preventSleepWhileRunning = true; $0.preventDisplaySleepWhileRunning = true }, saving: { $0.savePower(to: $1) })
+        }
+        let hold = mode != "none"
+        controller.updateSettings({ $0.preventSleepWhileRunning = hold; $0.preventDisplaySleepWhileRunning = hold }, saving: { $0.savePower(to: $1) })
         let show = try AppTest.repoRoot().appendingPathComponent("scenarios/g4-show.json")
         let opened = AppTest.expectationBox()
         Task { await controller.openShow(url: show); opened.value = true }

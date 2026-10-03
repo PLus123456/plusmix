@@ -440,6 +440,15 @@ final class AppController {
         await replaceSession(show: show, baseline: .keep)
     }
 
+    /// 即时生效的几节（性能与电源 / Tally / 提醒，W5-L）：改内存里的设置、只写这一节自己的键（save），马上落到跑着的 session（settings 的 didSet）。
+    /// 不像"应用"那样整份写回：那会把启动参数带进来的值（--api-token、--no-api……）顺手存成本机设置。
+    func updateSettings(_ change: (inout AppSettings) -> Void, saving save: (AppSettings, UserDefaults) -> Void) {
+        var s = settings
+        change(&s)
+        save(s, defaults)
+        settings = s
+    }
+
     /// 偏好设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的包内选项（外部输出的主屏层级）同时落到跑着的 session。
     func updateSettings(_ s: AppSettings) {
         s.save(to: defaults)

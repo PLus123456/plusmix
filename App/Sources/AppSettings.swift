@@ -218,12 +218,30 @@ struct AppSettings: Equatable, Sendable {
         defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview)
         defaults.set(externalBehindInterface, forKey: Keys.externalBehindInterface)
         defaults.set(confirmBeforeStop, forKey: Keys.confirmBeforeStop)
-        defaults.set(preventSleepWhileRunning, forKey: Keys.preventSleep)
-        defaults.set(preventDisplaySleepWhileRunning, forKey: Keys.preventDisplaySleep)
-        defaults.set(tallyEnabled, forKey: Keys.tallyEnabled)
-        if let tallyPort { defaults.set(tallyPort, forKey: Keys.tallyPort) } else { defaults.removeObject(forKey: Keys.tallyPort) }
         defaults.set(compatLayerHost, forKey: Keys.compatLayerHost)
         defaults.set(compatLayerHTTPPort, forKey: Keys.compatLayerHTTPPort)
+        savePower(to: defaults)
+        saveTally(to: defaults)
+        saveReminders(to: defaults)
+    }
+
+    // 即时生效的三节（W5-L）只写自己的键（AppController.updateSettings(_:saving:)）：整份写回会把启动参数带进来的值（--api-token、--no-api……）
+    // 顺手存成本机设置。
+
+    /// 性能与电源：两个防睡眠开关。
+    func savePower(to defaults: UserDefaults) {
+        defaults.set(preventSleepWhileRunning, forKey: Keys.preventSleep)
+        defaults.set(preventDisplaySleepWhileRunning, forKey: Keys.preventDisplaySleep)
+    }
+
+    /// Tally：开关与端口（没单独设端口 = 删键，跟着 API 端口 + 1）。
+    func saveTally(to defaults: UserDefaults) {
+        defaults.set(tallyEnabled, forKey: Keys.tallyEnabled)
+        if let tallyPort { defaults.set(tallyPort, forKey: Keys.tallyPort) } else { defaults.removeObject(forKey: Keys.tallyPort) }
+    }
+
+    /// 提醒：四个键。
+    func saveReminders(to defaults: UserDefaults) {
         defaults.set(reminders.notLiveEnabled, forKey: Keys.reminderNotLive)
         defaults.set(reminders.notLiveMinutes, forKey: Keys.reminderNotLiveMinutes)
         defaults.set(reminders.ftbEnabled, forKey: Keys.reminderFTB)

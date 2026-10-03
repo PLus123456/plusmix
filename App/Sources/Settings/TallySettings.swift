@@ -41,12 +41,13 @@ final class TallySettingsModel: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    /// 即时生效：开关 / 端口写进本机设置，AppController 让跑着的 session 起 / 停 / 换端口。
+    /// 即时生效：只写开关 / 端口两个键，AppController 让跑着的 session 起 / 停 / 换端口。
     private func commit(port newPort: Int?) {
-        var s = controller.settings
-        s.tallyEnabled = enabled
-        if let newPort { s.tallyPort = newPort }
-        controller.updateSettings(s)
+        let on = enabled
+        controller.updateSettings({ s in
+            s.tallyEnabled = on
+            if let newPort { s.tallyPort = newPort }
+        }, saving: { $0.saveTally(to: $1) })
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in MainActor.assumeIsolated { self?.refresh() } }
     }
 

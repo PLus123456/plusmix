@@ -89,6 +89,11 @@ extension AppTest {
                                   pressure: type == .leftMouseUp || type == .rightMouseUp ? 0 : 1)
     }
 
+    /// 这个 session 的 API 设了 token 时要拼在地址后面的查询串（API 也认 `?token=`；别的用例——ReleaseTests R7——可能给内存里的设置加过 token）。
+    static func tokenQuery(_ session: SwitcherSession) -> String {
+        session.control.apiServer?.configuration.token.map { "?token=\($0)" } ?? ""
+    }
+
     /// 解析一帧 JSON 文本。
     static func jsonObject(_ text: String) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
