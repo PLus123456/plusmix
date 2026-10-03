@@ -121,11 +121,25 @@ extension CommandKind { public var operatorFacing: Bool }   // false：setTransi
 ### 2.4 全量
 
 - SwitcherControl 全包 `swift test`：SwitcherControlTests **41 条 0 失败**、VMixCompatTests 25 条（1 跳，原来就跳）0 失败、TallyTests 3 条 0 失败。
-- `make test-app`：见 §2.5（全量跑完后填）。
+- `make test-app`（`XCB_FLAGS=` 不带 -quiet，xcresulttool 核过；release frameprobe 先编好，ISO A4 / 推流端到端 / 录制 ±1 帧都是真跑的）：
+
+| 轮次 | 结果 | 说明 |
+|---|---|---|
+| 第一遍（2026-10-03 23:34，`41e34db`） | 170 条：160 过、4 跳、**6 红** | ① `AccessibilitySourceScanTests.testAccessibility_swiftUIControlsDeclareLabels`——**本会话引起的**：带"需重起引擎"小标签的几个控件用了 label 闭包、行上的动作按钮的 accessibilityLabel 不在三行内，`f4feaf9` 修。② 其余 5 条（显示账本、外部显示菜单落在哪块屏、ISO A4 帧数、录制 ±1 帧、推流到 MediaMTX）：跑的时候 98 的 xcodebuild 也在跑（同机多会话，见记忆 shared-machine-runs）；等机器空闲后单独复跑，4 条过、显示账本那条因"窗口不可见"自己跳过 |
+| 第二遍（2026-10-04 00:32，`ba8dfa2`，机器空闲 60 s 后开跑） | **170 条：163 过、3 跳、4 红**（xcresulttool：result Failed / totalTestCount 170 / passed 163 / failed 4 / skipped 3，302 s） | `RecordingTests.testRecord_5sTwoTracksDurationExact`（1.17 帧 > 1 帧）单独复跑**过**；`MainWindowLayoutTests.testUI_mainWindowRestoresSavedFrameInsteadOfCentering`（窗口落到外接屏坐标）单独复跑**过**（92 记过它在接 LG 屏时偶发红）；`ThumbnailRateTests` 两条（监视器 / 缩略图 0 帧）——**对照：把基线 `8a13a21`（93 的头）git archive 到草稿区单独编、同一时刻跑这两条，红得一模一样**（同样 0 帧、同样的断言），当时用户空闲 33 分钟、过了 30 分钟的屏保门槛，之后又有人在用这台机器（HIDIdleTime 2 s），测试窗口露不出来；同一时刻显示账本那条也因"窗口不可见"自己跳过 |
+
+跳过的 3 条与 92 / 93 相同：键盘导航 BLOCKED-系统设置、内置摄像头 BLOCKED-权限、虚拟摄像头出画 BLOCKED-签名。
+
+**还欠的**：两条缩略图帧率（和显示账本那条）要在桌面可见、主窗口没被盖住的时候再跑一次（约 20 s）：
+
+```bash
+xcodebuild -project Switcher.xcodeproj -scheme Switcher -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/DerivedData test-without-building -only-testing:SwitcherTests/ThumbnailRateTests -only-testing:SwitcherTests/DisplayLedgerAppTests
+```
 - `make lint BRANCH=w5-app-settings-actions`：禁词 / 版本号 / Package.swift / 依赖方向通过；**归属一项相对 main 多出 `reports/w5-app-bottom-bar.md`、`reports/w5-app-toolbar.md`**（92 / 93 的报告，叠放带进来的，与 93 当时同样情况），`scripts/check-ownership.sh w5-app-settings-actions --base w5-app-toolbar` = "38 个改动文件都在允许范围内"；check-links、check-rt-symbols 通过。
 
 ## 3. 没做的和原因
 
+0. **"全量 0 失败"没在最后一遍里达成**：两条缩略图帧率因为测试窗口露不出来而 0 帧（基线同一时刻同样红，§2.4），要桌面可见时补跑；其余 166 条全过或按原因跳过。
 1. **E6 快捷按钮小窗**（prompt 写"可选"）：没做。动作目录 / `ActionText` 已经能给每条绑定出"大字备注 + 小字动作"，做瓦片窗只差界面。
 2. **E4 底栏 ≡ 工具菜单**（prompt 写"≡ 缓做"）：没做。
 3. **转场槽动作**（100）、**随包手册**（103）、契约：按 prompt 不做。⌥1–⌥4 现在绑"执行当前转场"，100 改成"转场 n"。
