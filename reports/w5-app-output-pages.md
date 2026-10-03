@@ -101,7 +101,7 @@ worktree `.claude/worktrees/w5-app-output-pages-95c271`，桌面端分支 `claud
 `InputWiringTests.testInputs_builtInCameraLiveWithin5sAndPictureShows`（BLOCKED-权限：摄像头没授权）、`VirtualCameraAppTests.testL1_virtualCameraEgress_requiresSignedExtension`（BLOCKED-签名）。
 ISO A4（`testA4_app_isoRoutesSharedStartAndStop_filesAlignWithin1Frame`）真跑了、过（13 s）。没有一条显示类用例红（屏幕没锁）。
 
-`make lint BRANCH=w5-app-output-pages`：全绿——禁词 / 版本号 / Package.swift、check-deps、`check-ownership`（16 个改动文件都在 App/ 与 reports/ 内）、check-links（167 个 Markdown）、check-rt-symbols。
+`make lint BRANCH=w5-app-output-pages`：全绿——禁词 / 版本号 / Package.swift、check-deps、`check-ownership`（加上本报告与问题单共 18 个改动文件，都在 App/ 与 reports/ 内）、check-links（167 个 Markdown）、check-rt-symbols。
 
 ## 3. 没做的和原因
 
