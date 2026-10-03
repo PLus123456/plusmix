@@ -105,26 +105,27 @@ enum ActionCatalog {
         }
     }
 
-    /// 命令归到哪一组（CommandCatalog 的"输入表 / 输出表"并进输入 / 输出）。
+    /// 命令归到哪一组（同 CommandCatalog 的分组，"输入表 / 输出表"并进输入 / 输出；穷举：契约加命令这里编译就红）。
     static func group(of kind: CommandKind) -> ActionGroup {
-        switch CommandCatalog.entry(for: kind).group {
-        case "切换": .switching
-        case "叠加": .overlay
-        case "音频": .audio
-        case "输出", "输出表": .output
-        case "输入表": .input
-        default: .show
+        switch kind {
+        case .cut, .fade, .setTransition, .setTransitionParams, .autoTransition, .setPreview, .setProgram, .tbar, .ftb: .switching
+        case .overlay, .setOverlay, .setOverlayDecoration: .overlay
+        case .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setBusEffects: .audio
+        case .startRecord, .stopRecord, .startStream, .stopStream, .setOutputEnabled, .renameOutput, .addOutput, .removeOutput, .setOutputSettings: .output
+        case .setInputSettings, .renameInput, .addInput, .removeInput, .setInputSource: .input
+        case .loadShow: .show
         }
     }
 
+    /// 开关 / 组合动作归到哪一组（同 ControlActionKind.group）。
     static func group(of kind: ControlActionKind) -> ActionGroup {
-        switch kind.group {
-        case "切换": .switching
-        case "叠加": .overlay
-        case "音频": .audio
-        case "输出": .output
-        case "界面": .ui
-        default: .show
+        switch kind {
+        case .toggleFTB, .fadeMs, .previewAndTransition: .switching
+        case .toggleOverlay, .overlayInput, .overlaysOff: .overlay
+        case .toggleMute, .toggleAFV, .inputAFV, .busRoute, .solo, .busMuteSwitch: .audio
+        case .toggleRecord, .toggleStream, .recordAll, .recordISO, .streamAll, .outputSwitch, .outputKindSwitch: .output
+        case .ui: .ui
+        case .command: .show
         }
     }
 

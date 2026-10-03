@@ -126,11 +126,7 @@ final class ActionPickerModel: ObservableObject {
         switch e.kind {
         case .ui: return [L("actionPicker.preview.ui")]
         case .fader(let f):
-            switch f {
-            case .tbar: return ["tbar（progress: 0…1）"]
-            case .inputGain: return ["audioGain（input, dB）"]
-            case .busGain: return ["busGain（bus, dB）"]
-            }
+            return [L("actionPicker.preview.fader.\(f.rawValue)")]
         default:
             guard let action = builtAction else { return [L("actionPicker.preview.incomplete")] }
             guard let s = state() else { return [L("actionPicker.preview.noShow")] }
@@ -195,7 +191,7 @@ enum ActionText {
         case (.onOff, .bool(let on)): return on ? L("actionPicker.value.on") : L("actionPicker.value.off")
         case (.switchMode, .string(let s)): return L("actionPicker.value.mode.\(s)")
         case (_, .seconds(let s)): return seconds(s)
-        case (.transitionType, .string(let s)): return s.prefix(1).uppercased() + s.dropFirst()
+        case (.transitionType, .string(let s)): return L("transition.type.\(s)")
         case (.fraction, .double(let d)): return "\(Int((d * 100).rounded()))%"
         case (.decibels, .double(let d)): return String(format: "%g dB", d)
         case (.text, .string(let s)): return "“\(s)”"
@@ -393,7 +389,7 @@ struct ActionFieldsForm: View {
             DurationField(label: label, seconds: secondsBinding(f))
         case .transitionType:
             Picker(label, selection: stringBinding(f, TransitionType.fade.rawValue)) {
-                ForEach(TransitionType.allCases, id: \.self) { t in Text(t.rawValue.prefix(1).uppercased() + t.rawValue.dropFirst()).tag(t.rawValue) }
+                ForEach(TransitionType.allCases, id: \.self) { t in Text(L("transition.type.\(t.rawValue)")).tag(t.rawValue) }
             }
         case .fraction:
             Slider(value: doubleBinding(f, 0.5), in: 0...1) { Text(label) }

@@ -119,7 +119,7 @@ final class SettingsWindowTests: XCTestCase {
         let settings = try XCTUnwrap(panels.settingsWindow)
         XCTAssertEqual(settings.window?.title, "设置")
         XCTAssertEqual(settings.model.sidebar.map(\.group), [.show, .machine])
-        XCTAssertEqual(settings.model.sidebar[0].pages.map(\.title), ["节目格式", "录制", "ISO 分路录制", "推流", "外部显示", "NDI® 发送", "虚拟摄像头", "多画面布局", "节目音频"])
+        XCTAssertEqual(settings.model.sidebar[0].pages.map(\.title), ["节目格式", "录制", "ISO 分路", "推流", "外部显示", "NDI® 发送", "虚拟摄像头", "多画面布局", "节目音频"])
         XCTAssertEqual(settings.model.sidebar[1].pages.map(\.title), ["常规", "音频设备", "远程控制", "Tally", "快捷键", "MIDI", "性能与电源", "更新与诊断", "高级"])
         XCTAssertEqual(SettingsPage.Group.show.title, "本节目")
         XCTAssertEqual(SettingsPage.Group.machine.title, "本机")
@@ -180,7 +180,7 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertEqual(ask.buttonTitles, ["保存", "取消", "放弃改动"])
         XCTAssertTrue(ask.window === window2, "问在设置窗上")
         AppTest.answer(.cancel)
-        XCTAssertTrue(AppTest.waitUntil(2) { ConfirmationCenter.shared.pending(.unsavedSettings) == nil })
+        XCTAssertTrue(AppTest.waitUntil(2) { ConfirmationCenter.shared.pending(.unsavedSettings) == nil && window2.attachedSheet == nil })   // sheet 挂着时 performClose 不做事：等它收起
         XCTAssertTrue(window2.isVisible, "取消 = 不关")
         XCTAssertEqual(hotkeys.rows.count, saved + 1, "改动还在")
 
@@ -188,7 +188,7 @@ final class SettingsWindowTests: XCTestCase {
         settings2.model.select(.general)
         XCTAssertNotNil(AppTest.waitForConfirmation(.unsavedSettings), "切页前先问")
         AppTest.answer(.cancel)
-        XCTAssertTrue(AppTest.waitUntil(2) { ConfirmationCenter.shared.pending(.unsavedSettings) == nil })
+        XCTAssertTrue(AppTest.waitUntil(2) { ConfirmationCenter.shared.pending(.unsavedSettings) == nil && window2.attachedSheet == nil })   // sheet 挂着时 performClose 不做事：等它收起
         XCTAssertEqual(settings2.model.page, .hotkeys)
 
         // 放弃 = 关窗、改动丢掉；再打开是存过的那张表
@@ -213,6 +213,7 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertEqual(try HotkeyTable.load(from: controller.hotkeyFileURL).action(for: KeyCombo(key: "k")), .command(.cut))
 
         // 存不了（冲突）：点保存也不关，错误写在表下面
+        XCTAssertTrue(AppTest.waitUntil(2) { window3.attachedSheet == nil })
         panels.showSettings(page: .hotkeys)
         let conflicted = try XCTUnwrap(panels.settingsWindow)
         conflicted.model.hotkeys.addRow(key: "K", action: .toggleFTB)
@@ -222,6 +223,7 @@ final class SettingsWindowTests: XCTestCase {
         AppTest.pump(seconds: 0.3)
         XCTAssertTrue(conflicted.window?.isVisible == true, "冲突存不了：不关")
         XCTAssertNotNil(conflicted.model.hotkeys.errorMessage)
+        XCTAssertTrue(AppTest.waitUntil(2) { conflicted.window?.attachedSheet == nil })
 
         // MIDI 页同一条规则
         conflicted.model.hotkeys.revert()

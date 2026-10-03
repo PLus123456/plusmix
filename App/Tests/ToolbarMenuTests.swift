@@ -134,9 +134,11 @@ final class ToolbarMenuTests: XCTestCase {
         XCTAssertTrue(openRows.contains { $0.hasPrefix("工具条.switcher.json → ") }, "刚存的文件在最近列表里：\(openRows)")
         XCTAssertTrue(openRows.contains { $0.hasPrefix("清除列表 → ") })
 
-        // 设置▾ = App 菜单"设置… / 快捷键… / MIDI 映射…"与输出菜单里各设置页的同一批项
+        // 设置▾ = App 菜单"设置… / 快捷键… / MIDI 映射… / 所有设置页 ▸"与输出菜单里各设置页的同一批项（W5-J：设置▾ 列设置窗的全部页，
+        // App 菜单"所有设置页"是同一份）
         let settingsRows = bar.settingsMenu().items.filter { !$0.isSeparatorItem }.map(signature)
-        let menuRows = (try appMenu).items.map(signature) + output.items.map(signature)
+        let allPages = (try appMenu).items.compactMap(\.submenu).flatMap(\.items)
+        let menuRows = (try appMenu).items.map(signature) + allPages.map(signature) + output.items.map(signature)
         XCTAssertGreaterThanOrEqual(settingsRows.count, 10, "设置▾：设置… + 七个输出设置页 + 快捷键… + MIDI 映射…：\(settingsRows)")
         for row in settingsRows { XCTAssertTrue(menuRows.contains(row), "设置▾ 的“\(row)”在菜单栏里有同样的一项") }
         for name in ["设置…", "快捷键…", "MIDI 映射…", "录制设置…", "推流设置…", "外部显示设置…"] {
