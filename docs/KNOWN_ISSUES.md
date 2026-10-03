@@ -6,6 +6,7 @@ S0 / S1 不许出现在已发布版本的表里——这个版本**还没有发*
 G6 合入第五波止血五路（W5-A 目视与弹出、W5-B 直播安全、W5-C 总线效果链、W5-D 推流鉴权、W5-E 转场守卫）：2026-09-29 界面对照调研查出的 S0 五条（X01–X05）全部修了，
 S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半）、X19、X25、X30 修了（下面"2026-10-02 第五波止血已修"表，每条有先红后绿的用例）。
 仍阻塞 0.1.0 的：新发现的 S1（MIDIHost.sync 偶发崩溃）、8 小时长稳没有在修复后的树上重跑、签名账号；S1 X07（每路效果）与 X08 / X09（Bus A / B 出口）归骨架批次（102 / 97），按 Q68 (a) 同样要在放行前修——**用户 2026-10-03 确认：等 97 / 102 做完再发，不重新定级（X12 同）**。
+**2026-10-04 G7 合入第五波骨架七路**（W5-F 底栏、W5-G 工具条与菜单栏、W5-H 输入条与格子、W5-I 输出页、W5-J 设置窗与选动作、W5-K 面板改版、W5-L 其他；reports/G7.md）：UIA 表里 S2 X21（叠加浮层）、W5-B 的副作用（一路永远起不来挡着停）、下表凭据外泄的 ①（底栏提示）修了；S1 X08 的 App 半（音频设备页每条总线选声道 → 建引擎时用）、X12 的输入 / 叠加 / 音频设置窗修了——**X07、X09 的引擎侧、X12 的设置窗那一半仍开着**；新记 S2 两条（设置窗在前快捷键不派发、外部显示路由规则两份并存）。0.1.0 仍不发（reports/G7.md §7）。
 
 ## 0.1.0 候选（分支 release/0.1 → main；2026-09-28 G5 判不发；2026-10-02 G6 重判不发，阻塞项与归属见 reports/G6.md §7）
 
@@ -17,7 +18,9 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 | S1 → 已修（等 8 小时复验） | 视频文件输入**循环播放**时内存每圈涨约 0.5 MB（长稳 S2 实测 60.8 MB/h，门槛 ≤ 10）。根因：文件解码线程没有自动释放池。**W2-A3 2026-09-28 已修**（解码 / 推帧线程每轮迭代包 `autoreleasepool`）：用例修前 0.465 → 修后 0.017 MB/圈，fileprobe 120 圈 footprint 从 +65.7 MB 变平 | 修前：短片段循环长时间直播的节目 | — | reports/issues/W4A-w2-inputs-file-loop-memory-and-prores-starve.md §3；reports/w2-inputs-3.md | 正式的 S2 值等用户终端重跑 8 小时 `make soak`（2026-10-02 仍没跑）；通过后从表里删 |
 | S2 | 系统守护进程 / 桌面活动突发时渲染线程成串跳拍（10 分钟里 1–11 拍；V2 仍在 0.02% 以内）。W1-B3 定位：突发让整个进程的非实时线程和 GPU 一起停 100 ms 量级，只有实时线程按时醒，是 GPU 侧；已给渲染完成线程挂实时策略并给每次跳拍归因（GPU 晚 / 完成线程晚），在途深度是契约（≤ 2 帧）没动 | 直播机同时跑重桌面任务 | 直播时关掉其它占 GPU / CPU 的程序（测试标准 §2.8） | reports/issues/G4-w1-core-missed-render-bursts-under-daemon-activity.md；reports/w1-core-3.md §4 | 要不要把在途深度提到 4 等 8 小时长稳的 V2 累计定（契约） |
 | S3（原记 S2） | 标准负载（8 路合成源 + 摄像头 + 文件 + 录制 + 2 路推流 + NDI 发送）下进程 CPU 合计约 0.6 个核（8 小时均值 60.1%），其中 NDI SDK 自己的发送线程约 0.25 核（没有接收方也压两路）。**用户 2026-10-03 定口径：S3 的 CPU 判定不含 NDI SDK 线程**（测试标准 §3 / §4 S3，阈值 60% 不动），按线程快照扣掉 `ndis:*` 后 9-28 那次是 35.0%、达目标；SDK 线程我们不管、不重写 | 开着 NDI 发送时 | 不需要 NDI 时关掉该输出 | reports/issues/W4A-w2-stream-ndi-send-cpu-share.md；W4A-g5-cpu-multicore-distribution.md | 多核探查项仍到检查点安排；不再是发布判定的变量 |
-| S2 | 推流凭据外泄三处（W5-D 之后地址里的 user:pass@ 真的生效了，所以是密码）：①底栏推流按钮的悬停提示原样显示每个目的地的地址（含 user:pass@ 与 SRT passphrase）；②`GET /api/v1/state` 与 WebSocket 全量状态原样带 `streamKey` 与 `url`；③密钥写在地址路径里（`rtmp://h/app/密钥`，密钥栏留空）时原样进诊断包 | 用 userinfo / 路径密钥写法的推流；API 开在局域网且没设 token 时同网段任何人 | 密钥填密钥栏；共享屏幕时别悬停；API 只开本机 + token | reports/issues/W5D-w5-app-bottom-bar-stream-tooltip-shows-credentials.md、W5D-w2-control-api-state-exposes-stream-credentials.md、W5D-w4-release-diagnostics-stream-key-in-url-path.md | ① 92 W5-F（提示用 `StreamURLRedaction.redact(url:)`）；② 控制会话 + 提案（API 形态变）；③ W4-B（ShowRedaction 看同层 streamKey 为空 + 路径末段） |
+| S2 | 推流凭据外泄两处（W5-D 之后地址里的 user:pass@ 真的生效了，所以是密码）：②`GET /api/v1/state` 与 WebSocket 全量状态原样带 `streamKey` 与 `url`；③密钥写在地址路径里（`rtmp://h/app/密钥`，密钥栏留空）时原样进诊断包。①底栏推流按钮 / ▴ 菜单的悬停提示 **W5-F 2026-10-03 已修**（只写名字和打过码的地址，`StreamURLRedaction.redact(url:)`；G7 合入） | 用 userinfo / 路径密钥写法的推流；API 开在局域网且没设 token 时同网段任何人 | 密钥填密钥栏；API 只开本机 + token | reports/issues/W5D-w2-control-api-state-exposes-stream-credentials.md、W5D-w4-release-diagnostics-stream-key-in-url-path.md | ② 控制会话 + 提案（API 形态变）；③ W4-B（ShowRedaction 看同层 streamKey 为空 + 路径末段） |
+| S2 | **设置窗在前时快捷键不派发**（X12 的残口）：W5-K 给输入 / 叠加 / 音频设置窗挂了 `forwardHotkeys`（没被文本框吃掉的按键照走快捷键表），W5-J 的设置窗（`SettingsWindow` 的 PanelWindow）的 keyHandler 只给快捷键页录键用、没接 `session.control.handleKey`——设置窗在前按空格 / 数字不切 | 现场开着设置窗调东西时 | 点回主窗口 | reports/w5-app-panels.md §3 表最后一行；reports/G7.md §7 | App 会话（两行：keyHandler 先 `handleRecordingKey`、不吃再 `controller.session?.control.handleKey(event)`；归属待用户定，G7 不写功能） |
+| S3 | 外部显示"每块屏一路"的规则有两份实现并存：W5-F 的 `ExternalOutputMenuBuilder`（底栏 ⚙ / 工具条 / 监视器右键的菜单）与 W5-I 的 `ExternalDisplayRouting`（外部显示页每屏单选），逐条相同、各有用例，改规则要改两处 | 维护 | — | reports/w5-app-output-pages.md §3 第 1 条 | App 会话合成一份（W5-I 建议菜单改调 `ExternalDisplayRouting`，≤ 50 行） |
 | S2 | 兼容层 `Cut Input=n`（以及 HTTP 批量 `[setPreview(n), cut]`）在转场进行中落不到 n：W5-E 之后 setPreview 被拒、cut 把当前转场立即做完，PGM 是原来那次转场的目标、函数仍回 "Cut"（W5-E 之前 PGM 会跳一下再是 n） | 转场中再点名切某一路 | 转场结束后再发；或先 Cut、再 ActiveInput n | reports/issues/W5E-w3-control2-compat-cut-input-mid-transition.md | 100 W5-M 定口径（报错 / 改翻译成 cut + setProgram / 写文档） |
 | S3 | 进程里第一次打开节目时连 MIDIServer 冷启动约 0.6 s，在主线程上同步等：界面卡一下（节目时钟不再受影响，W3-E6 已把它挪到定 t0 之前） | 每次启动 App 后的第一次打开节目 | — | reports/w3-app-7.md §3 | W2-C（挪到后台线程） |
 | S3 | 已存节目里虚拟摄像头输出的 source 字段可能是 PVW / 输入 n，运行时一律送 PGM（页面已写明"送 PGM"，不再可选） | 旧节目文件 | — | reports/w3-app-5.md §3 第 1 条 | 不处理 |
@@ -27,20 +30,36 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 ### 界面对照调研（UIA，2026-09-29）查出、尚未修的
 
 来源 docs/ui-study/02-功能缺口.md §1（63 条，编号 X01–X63）与 reports/issues/UIA-*.md；这里只列 S0 / S1 与影响发布判定的 S2，级别是调研的判断、X01–X05 的 S0 由用户按 04 Q68 (a) 定。"计划"是 docs/plan/prompts/ 里的 prompt 号（落地方案 §8）。
-**2026-10-02 G6 按第五波止血结果更新**：修了的挪到下面"2026-10-02 第五波止血已修"表，这里只剩归骨架 / 契约批次的。
+**2026-10-02 G6 按第五波止血结果更新**：修了的挪到下面"2026-10-02 第五波止血已修"表，这里只剩归骨架 / 契约批次的。**2026-10-04 G7 按骨架七路再更新**：X21、W5-B 副作用挪到"2026-10-04 第五波骨架已修"表；X08 / X12 / X15 改写成做了一半的实情。
 
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
 | S1 | **每路输入**的音频效果链界面能调、引擎不读，声音不变（X07；总线那一半 W5-C 2026-10-01 已接）。界面已标"效果尚未作用到声音（本版本）"、"效果链"改名"音频效果"（W5-B），常量 `AudioEffectsSupport.inputEffectsApplied = false` | 用每路 EQ / 压缩的节目 | 效果加在总线上 | UIA-w2-audio-effect-chains-not-applied | 102 W1-D3（C 热路径每路效果格），接上时翻常量 |
-| S1 | Bus A / B 没有任何出口（不送设备声道、不进录制 / NDI®）；2 声道输出设备上耳机总线没声，独听 / PFL / AFL 都听不到（X08 / X09） | 返送、耳机监听 | 用 ≥ 4 声道的接口 | 02 X08、X09 | 97 W5-K（音频设备页与总线出口） |
-| S1 | 效果 sheet 开着时快捷键失灵；主窗口不是 key 窗口时（输入 / 输出 / 偏好设置窗在前）空格 / 回车 / 数字都不派发（X12） | 现场 | 关掉 sheet、点回主窗口 | 02 X12 | 97 W5-K（音频设置独立窗、不挂 sheet） |
-| S2 | 录制 / 推流 source 设成 PVW / 多画面照录 PGM（X15）；录制 `container` 字段界面已不写、契约"标废弃（照读不写）"归提案 023（X14 的契约半） | API / 节目文件写的来源 | — | UIA-w1-outputs-record-container-and-source | 99 P5（023）、95 W5-I |
-| S2 | "叠加…"仍是 transient 浮层：点主窗口任何地方就关，边切边调做不到（X21；朝上开、不被裁 W5-A 已修） | 边切边调叠加 | 调好再切 | UIA-w3-app-bottom-bar-popups-overflow-window | 97 W5-K（独立非模态窗） |
-| S2 | W5-B 止血的副作用：推流有一路**一直**起不来时，底栏主体永远是"重试它"、停不了正常在推的那几路（出路在推流页那一段"停用这一路"或改对地址自动重试） | 多目的地、一路永远起不来 | 推流页停用那一路 | reports/w5-app-safety.md §3 第 1 条 | 92 W5-F（▴ 单路起停、"全部停止"） |
-| S3（文档） | 手册与实现对不上的九处 2026-09-29 已按实情改；第五波止血之后又多出一批要改的（退出口径、文件格式单选、"重试间隔最长 n s"、总线效果已生效与 5–35 ms 监听延迟、Adobe 鉴权 vs 查询串、转场中 PVW / PGM 也被拒）| 读手册的人 | — | reports/w5-app-safety.md §5 第 9 条、w5-audio-bus-effects.md §1.6、w5-stream-auth.md §5 第 3 条、w5-core-transition-guard.md §3 第 6 条 | 103 W4-C2 |
+| S1 → 一半 | Bus A / B 出口：**W5-K 做了 App 半**——设置 › 音频设备 每条总线选一对声道（或"不输出"）→ 建引擎时进 `AudioEngineConfiguration.outputChannelMap`，≥ 4 声道接口上 Bus A / B 真出声（本机只有 2 声道设备，BLOCKED-硬件，人工清单 docs/checklists/G7.md §9）；**X09 仍在**：2 声道设备上耳机总线没声、独听 / PFL / AFL 听不到，"监听时临时占用 Master 声道"开关已在、标尚未生效（引擎不会在独听时换声道），"监听 Master / Bus A / B"菜单项灰着 | 2 声道设备上的耳机监听 | 用 ≥ 4 声道的接口 | reports/issues/W5K-w1-audio-monitor-selected-bus.md | W1-D 系 / 102 评估（prompt 102 的 G7 追加行） |
+| S1 → 一半 | X12：效果 sheet 没了（W5-K 换成音频设置独立窗），输入设置 / 叠加设置 / 音频设置窗在前时按键照走快捷键表（`forwardHotkeys`）；**设置窗（W5-J）在前时仍不派发**（上表的新 S2） | 开着设置窗时 | 点回主窗口 | 02 X12；reports/w5-app-panels.md §3 | App 会话（见上表） |
+| S2 | 录制 / 推流 source 设成 PVW / 多画面照录 PGM（X15）：W5-I 的界面已不给这种来源（录制页来源下拉只列 PGM / 输入），从 API / 节目文件写进来的仍照录 PGM，拒收等 023；录制 `container` 字段界面已不写、契约"标废弃（照读不写）"归提案 023（X14 的契约半） | API / 节目文件写的来源 | — | UIA-w1-outputs-record-container-and-source；reports/w5-app-output-pages.md §3 第 7 条 | 99 P5（023） |
+| S3（文档） | 手册与实现对不上的九处 2026-09-29 已按实情改；第五波止血之后又多出一批要改的（退出口径、文件格式单选、"重试间隔最长 n s"、总线效果已生效与 5–35 ms 监听延迟、Adobe 鉴权 vs 查询串、转场中 PVW / PGM 也被拒）；**骨架七路之后手册里底栏 / 工具条 / 菜单栏 / 输入条 / 添加输入 / 输入设置 / 叠加 / 音频 / 输出各页 / 设置窗 / tally / 远程控制整段都要重写**（清单在 prompt 103 的 G7 追加行与 W5I / W5L 两张问题单） | 读手册的人 | — | 七份骨架报告的 §5 "手册要跟着改"；reports/issues/W5I-w4-docs-output-pages-manual.md、W5L-w4-docs-2-tally-remote-sleep-manual.md | 103 W4-C2 |
 
 目视问题（docs/ui-study/03-目视检查.md 的 34 条）：用户点名的两处（转场列、底栏菜单）与 03 §3 里 prompt 86 点名的 S3（V-03 / V-05 / V-06 / V-08 / V-12 / V-14 / V-16 / V-17 / V-27）W5-A 已修；
-其余（V-01 监视器 16:9、V-04 表头折行、V-07 全局暗灰、V-09 / V-10 空状态、V-11、V-15 长路径、V-18 / V-19 菜单用词、V-20、V-21、V-22 状态行、V-24、V-25、V-28、V-29、V-30）归 92–97 的改版（reports/w5-app-visual.md §3）。
+其余（V-01 监视器 16:9、V-04 表头折行、V-07 全局暗灰、V-09 / V-10 空状态、V-11、V-15 长路径、V-18 / V-19 菜单用词、V-20、V-21、V-22 状态行、V-24、V-25、V-28、V-29、V-30）归 92–97 的改版（reports/w5-app-visual.md §3）——**2026-10-04 G7 合入后各报告 §1 标了编号的都算改了**（V-04 / V-07 97、V-09 / V-23 94、V-15 95、V-12 96、V-22 / V-24 92 / 93……），G7 没有逐条目视复核，留在 docs/checklists/G7.md §1 第 5 条由人工打勾。
+
+### 2026-10-04 第五波骨架（G7 合入 W5-F…W5-L）已修（不再出现在上表；每条有先红后绿的用例，用例在各分支报告 §2）
+
+| 原级别 | 编号 | 现象 | 修在 | 用例 | 报告 |
+|---|---|---|---|---|---|
+| S2 | X21 | "叠加…"是 transient 浮层，点主窗口就关 | 独立非模态叠加设置窗，四个入口（底栏、转场列 / 格子 Overlay 右键、切换 › Overlay ▸ › 叠加设置…），只开一个；整幅 / 画中画二选一、时长按秒、新节目默认淡入 0.5 s（W5-K） | `OverlayRevampTests` | reports/w5-app-panels.md |
+| S2 | — | W5-B 的副作用：推流一路永远起不来时底栏主体只会"重试它"、停不了正常的路 | ▴ 每个目的地一项单路起停 + "全部停止"（先确认）；主体口径不变（W5-F） | `BottomBarSplitTests` | reports/w5-app-bottom-bar.md |
+| S2 | 凭据① | 底栏推流提示原样显示地址含密码 | 菜单与提示只写名字 + 打码地址（`StreamURLRedaction.redact(url:)`）（W5-F） | `BottomBarSplitTests` | 同上 |
+| S1（App 半） | X08 | Bus A / B 没有出口 | 设置 › 音频设备 每条总线选声道对 → 建引擎时进 `outputChannelMap`；两条总线不共用一对；"恢复设备默认"（W5-K） | `AudioSettingsRevampTests` | reports/w5-app-panels.md |
+| S1（三扇窗） | X12 | 输入 / 叠加 / 音频设置窗在前时快捷键失灵 | `PanelWindow.keyHandler` → 快捷键表（`forwardHotkeys`）（W5-K）；设置窗那一半仍开着 | `PanelsRevampTests` | 同上 |
+| S2 | X33 | 远程控制监听地址只能手填，不知道别的机器连哪 | 远程控制页：API / 兼容层各"仅本机 / 允许局域网" + 可访问地址与复制、没 token 黄字、兼容层 HTTP 端口可改（W5-L） | `W5LMiscTests.testPanels_remoteControlPageShowsReachableAddress` | reports/w5-app-misc.md |
+| v1 缺口 | X32 | App 不起 tally 流 | 设置 › Tally：WS /tally + GET /tally，默认关、端口 = API + 1，停机顺序 tally → API → 引擎（W5-L） | `testTally_appServesReadOnlyStream` | 同上 |
+| 建议 | N02 / P1 / E5 / E8 | 界面内提醒、防睡眠 / App Nap、统计窗、界面锁 | 状态行提醒条 + PGM · FTB 慢闪；引擎运行时 `beginActivity`（两条电源断言）；只读统计窗（重置只记基线）；底栏最右的锁拦主窗口点击、快捷键 / 菜单 / API 照常（W5-L） | `W5LMiscTests` ×6 | 同上 |
+| 功能 | 01a A / B / O | 工具条、监视器齿轮与右键、菜单栏重排（"切换"只选不执行、帮助、"打开上次退出时的节目"） | W5-G | `ToolbarMenuTests` ×10 | reports/w5-app-toolbar.md |
+| 功能 | 01a D / G13 / G14 / D11 | 格子两行按钮与右键、分类、搜索、占位格、拖放、图片多选与改了自动换上、缩略图三档 | W5-H | `InputStripTests` ×10 | reports/w5-app-input-strip.md |
+| 功能 | 01a F8 / F9 / K4 / K6–K10 / L3 / L5–L10 / L12 / M5 / M7 | 输出总览、录制输出列表与参与录制、ISO 表、推流服务预设 / 质量 / 鉴权 / 合计上行、外部显示每屏单选、多画面格子编辑 | W5-I | `OutputPagesTests` ×11 | reports/w5-app-output-pages.md |
+| 功能 | 01a F1 / F4–F7 / N1–N3 / N5 / Q29 | 一个"设置"窗（侧栏两组、即时生效、待应用、导出 / 导入 / 恢复默认、高级页）、选动作面板、默认键表 ⌥1–⌥4 / ⌃1–⌃4、控制层可绑动作 | W5-J | `SettingsWindowTests` ×5、`ActionPickerTests`、SwitcherControl `ControlActionTests` | reports/w5-app-settings-actions.md |
+| 功能 | 01a G2–G12 / H1 / H3–H9 / J2–J8 | 添加输入面板（分组、记忆、横幅、最近文件、文件信息）、输入设置窗（分节、本路画面、取色、复位、复制）、音频设置窗与调音台重排、音频设备页 | W5-K | `AddInputRevampTests` / `InputSettingsRevampTests` / `AudioSettingsRevampTests` / `PanelsRevampTests` | reports/w5-app-panels.md |
 
 ### 2026-10-02 第五波止血（G6 合入 W5-A…W5-E）已修（不再出现在上表；每条有先红后绿的用例，用例在各分支报告 §2）
 
@@ -103,5 +122,8 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 - 长稳 / 性能脚本在 Claude 会话（非交互）里不接摄像头、不采 powermetrics、Instruments Leaks 附加不上；在用户终端里跑才是完整负载（reports/w4-soak.md §3）。
 - ~~`MultiviewMetersTests` 两条"逐像素相同"2026-10-01 起在本机红~~ **已解（2026-10-03）**：用户定改成与 `V8ReferenceTests.compare` 同一套 PSNR ≥ 40 dB / SSIM ≥ 0.98 判法（G6 改 `assertEqualsReference`，参考图没动），两条在 26A428 上 50.8 / 51.7 dB 绿。以后系统字体资源变化只影响名字标签几个像素，不再红。
 - **StreamingTests 的 MediaMTX / 代理端口与 `$TMPDIR/switcher-streaming-tests/` 输出目录是写死、共用的**：几个会话同机并行跑会互相踢掉（`errno 48`、`closing existing publisher`、录制目录被对方删）；要错开跑或给端口 / 目录加进程号偏移（reports/issues/G6-w2-stream-streamingtests-shared-ports-and-output-dir.md）。App 测试宿主的 UserDefaults suite（`com.plusmix.switcher.tests`）与 `$TMPDIR/switcher-tests/` 同理（reports/w5-app-safety.md §5 第 2 条）。
+- App 测试宿主的 UserDefaults suite 2026-10-03 起**按构建路径分开**（W5-K，`AppController.testDefaultsSuite` = `com.plusmix.switcher.tests.<hash>`），测试宿主启动时不读存下来的 API token、R7 用 defer 还原（W5-L）：G7 第 1 轮（只合了 92）还撞上旧 suite 里别的 worktree 留下的 `apiToken`（两条 401，`defaults delete com.plusmix.switcher.tests apiToken` 后过），98 合入后源头没了；`$TMPDIR/switcher-tests/` 仍共用。
+- `xcodebuild … -quiet` 偶发只报一行 `error: the following command failed with exit code 0 but produced no further output`、不编（W5-H / W5-J 都撞过，`make gen` 之后或别的会话在编时）；去掉 -quiet 重跑一次就过。
+- `MainWindowLayoutTests.testUI_mainWindowRestoresSavedFrameInsteadOfCentering` 在系统焦点窗口落在外接屏上时必红（存档按 NSScreen.main 换算，W5-F §5 第 11 条、W5-L §2.3）；`NDITests.NDILoopbackTests` 的 pts 单调断言在 SDK 重复送一帧时红（G7 第 5 轮一次、单独复跑一次红一次绿）——先单独复跑再判。
 - gate4 要在没有别的引擎 / xctest / xcodebuild 的机器上跑才作数（两个引擎并行 V1 推到 10 ms 以上、V2 丢上千帧；V6 的判定要求第 1000 拍之前没丢过帧）；查"别的引擎"用 `ps -axo comm= | grep '/switcher-headless$'`，别用 `pgrep -f`（等待脚本的命令行里也带这几个字）。`scripts/gate4.sh --checkpoint G6` 起运行报告不再改写 reports/G4.md 与 g4 基线（G6）。
 - 显示类用例（SwitcherRender `DisplayDecouplingTests`、Outputs `ExternalTests.DisplayStatsTests`、App `DisplayLedgerAppTests` / `ThumbnailRateTests` / S7 两条）在屏幕锁定、窗口被别的 App 整块盖住、机器忙时红，单独重跑都过（W5-A / W5-B / W5-C 报告 §5）。
