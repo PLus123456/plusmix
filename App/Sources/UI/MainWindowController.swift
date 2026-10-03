@@ -182,12 +182,14 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
             bottomBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             bottomBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             bottomBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            inputStrip.heightAnchor.constraint(greaterThanOrEqualToConstant: 190),
+            inputStrip.heightAnchor.constraint(greaterThanOrEqualToConstant: Theme.inputStripMinimumHeight),
             mixerPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: Theme.mixerPanelWidth),
             monitors.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
         ])
         window.layoutIfNeeded()
-        centerSplit.setPosition(window.frame.height - Theme.bottomBarHeight - 230, ofDividerAt: 0)
+        // 输入条开始时 197 高（W5-A 原型实测的值）。原来写成"窗口外框高 − 底栏 − 230"，230 里暗含了 32 pt 的标题栏；W5-G 加了工具条之后
+        // 那一行是 52 pt，输入条就少了 20、被下面的最大坐标夹到 189（全量第一遍 MainWindowLayoutTests 红出来的）。改按内容区算，和标题栏多高无关。
+        centerSplit.setPosition(content.bounds.height - Theme.bottomBarHeight - Theme.inputStripInitialHeight - centerSplit.dividerThickness, ofDividerAt: 0)
         // 分隔条 1 pt 不算在调音台里（W5-A 量出 339，G6 追加 ③）
         outerSplit.setPosition(window.frame.width - Theme.mixerPanelWidth - outerSplit.dividerThickness, ofDividerAt: 0)
 
@@ -506,7 +508,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        splitView === centerSplit ? splitView.frame.height - 190 : splitView.frame.width - Theme.mixerPanelWidth - splitView.dividerThickness
+        // 分隔条 1 pt 不算在输入条里（和调音台那边 G6 追加 ③ 同一个口径；原来拖到底输入条是 189）
+        splitView === centerSplit ? splitView.frame.height - Theme.inputStripMinimumHeight - splitView.dividerThickness
+                                  : splitView.frame.width - Theme.mixerPanelWidth - splitView.dividerThickness
     }
 
     func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool { false }

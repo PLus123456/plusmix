@@ -241,6 +241,14 @@ final class ToolbarMenuTests: XCTestCase {
         XCTAssertEqual(bar.external.menuButton.accessibilityLabel(), "外部显示快捷菜单")
         XCTAssertEqual(bar.settings.menuButton.accessibilityLabel(), "设置快捷菜单")
         XCTAssertEqual(bar.helpButton.accessibilityLabel(), "帮助")
+        // AccessibilityTests 只走主窗口的内容区，工具条在内容区外面：这里把每一项单独走一遍（按钮都要有名字）
+        for item in bar.toolbar.items {
+            guard let view = item.view else { continue }
+            XCTAssertEqual(AppTest.accessibilityViolations(in: view), [], "工具条项 \(item.itemIdentifier.rawValue) 里缺辅助功能名的控件")
+        }
+        for monitor in [wc.previewMonitor, wc.programMonitor] {
+            XCTAssertEqual(AppTest.accessibilityViolations(in: monitor), [], "监视器标题条（齿轮 / 徽标）缺辅助功能名")
+        }
 
         // 点过工具条按钮之后，空格仍是 Cut（没被按钮吃掉）
         let dir = try tempDirectory("focus")

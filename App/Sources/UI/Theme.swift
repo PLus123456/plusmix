@@ -30,6 +30,9 @@ enum Theme {
     static let thumbnailHeight: CGFloat = 112.5   // 16:9
     static let transitionColumnWidth: CGFloat = 150
     static let mixerPanelWidth: CGFloat = 340
+    /// 输入条最矮多高（格子按钮点得到，W5-A / X61）与开始时多高（W5-A 原型实测）。
+    static let inputStripMinimumHeight: CGFloat = 190
+    static let inputStripInitialHeight: CGFloat = 197
     /// 底栏总高 = 按钮行 + 状态行（W5-F 起状态行独立成窗口最底一行，总高不变）。
     static let bottomBarHeight: CGFloat = 58
     /// 状态行高（窗口最底一行）。
