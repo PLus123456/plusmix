@@ -33,6 +33,8 @@ final class HotkeyEditorModel: ObservableObject {
         var argument: Int
         /// kind == .other 时保留原命令。
         var other: Command?
+        /// 这十来种以外、又不是一条命令的动作（W5-J 的开关 / 组合动作，合窗前的过渡：原样保留，不丢）。
+        var extra: ControlAction?
         var note: String
 
         init(keyText: String, action: ControlAction, note: String) {
@@ -42,11 +44,13 @@ final class HotkeyEditorModel: ObservableObject {
             kind = .other
             argument = 0
             other = nil
+            extra = nil
             set(action: action)
         }
 
         mutating func set(action: ControlAction) {
             other = nil
+            extra = nil
             switch action {
             case .command(.setPreview(let n)): kind = .setPreview; argument = n
             case .command(.setProgram(let n)): kind = .setProgram; argument = n
@@ -56,10 +60,11 @@ final class HotkeyEditorModel: ObservableObject {
             case .command(let c): kind = .other; other = c
             case .toggleFTB: kind = .toggleFTB
             case .toggleOverlay(let ch): kind = .toggleOverlay; argument = ch
-            case .toggleMute(let n): kind = .toggleMute; argument = n
+            case .toggleMute(.number(let n)): kind = .toggleMute; argument = n
             case .toggleRecord(let o): kind = .toggleRecord; argument = o
             case .toggleStream(let o): kind = .toggleStream; argument = o
             case .toggleAFV: kind = .toggleAFV
+            default: kind = .other; extra = action
             }
         }
 
@@ -73,11 +78,11 @@ final class HotkeyEditorModel: ObservableObject {
             case .fade: .command(.fade(durationTicks: argument))
             case .toggleFTB: .toggleFTB
             case .toggleOverlay: .toggleOverlay(channel: argument)
-            case .toggleMute: .toggleMute(input: argument)
+            case .toggleMute: .toggleMute(input: .number(argument))
             case .toggleRecord: .toggleRecord(output: argument)
             case .toggleStream: .toggleStream(output: argument)
             case .toggleAFV: .toggleAFV
-            case .other: other.map { .command($0) }
+            case .other: other.map { .command($0) } ?? extra
             }
         }
     }

@@ -35,10 +35,27 @@ enum HotkeyText {
         }
     }
 
-    /// 表里绑到某个动作的组合键（按表里的顺序），连成"空格、⇧C"；没有返回 nil。
+    /// 表里绑到某个动作的组合键（按表里的顺序，停用的行不算），连成"空格、⇧C"；修饰键相同的连号数字（3 个及以上）写成"⌥1–⌥4"
+    /// （W5-J：默认表的 ⌥1–⌥4 在转场槽落地前都是"执行当前转场"）。没有返回 nil。
     static func keys(in table: HotkeyTable, matching match: (ControlAction) -> Bool) -> String? {
-        let keys = table.bindings.filter { match($0.action) }.map { display($0.key) }
-        return keys.isEmpty ? nil : keys.joined(separator: L("key.listSeparator"))
+        let combos = table.bindings.filter { $0.enabled && match($0.action) }.map(\.key)
+        guard !combos.isEmpty else { return nil }
+        var parts: [String] = []
+        var i = 0
+        while i < combos.count {
+            var j = i
+            if let first = Int(combos[i].key), combos[i].key.count == 1 {
+                while j + 1 < combos.count, combos[j + 1].modifiers == combos[i].modifiers, let next = Int(combos[j + 1].key), combos[j + 1].key.count == 1,
+                      next == first + (j + 1 - i) { j += 1 }
+            }
+            if j - i >= 2 {
+                parts.append(display(combos[i]) + "–" + display(combos[j]))
+            } else {
+                parts += combos[i...j].map(display)
+            }
+            i = j + 1
+        }
+        return parts.joined(separator: L("key.listSeparator"))
     }
 
     /// 一条绑定的动作写成人话（快捷键一览）："PVW 选输入（输入 2）""叠加开关（通道 3）"；其他命令用命令目录的说明（CommandText）。

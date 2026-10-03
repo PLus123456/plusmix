@@ -191,9 +191,11 @@ final class ToolbarMenuTests: XCTestCase {
         XCTAssertNotEqual(bar.external.bodyButton.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.accent,
                           "关了字色回到系统的")
 
-        // 设置主体 = 设置窗（与 ⌘, 同一个）
+        // 设置主体 = 设置窗（与 ⌘, 同一个动作：回到上次那一页，W5-J）
+        controller.panels.closeAll()
         bar.settings.bodyButton.performClick(nil)
-        XCTAssertNotNil(controller.panels.preferencesWindow, "工具条“设置”打开设置窗")
+        let page = try XCTUnwrap(controller.panels.currentSettingsPage, "工具条“设置”打开设置窗")
+        XCTAssertTrue(controller.panels.settingsWindow(showing: page)?.isVisible == true, "工具条“设置”打开设置窗（\(page.id)）")
 
         // 打开▾ 里点最近的那一项 = 打开那个文件（与菜单"打开最近"同一条路）；先把测试屏那一路删掉，回到存过的样子（不然要先问保存）
         controller.panels.closeAll()
@@ -277,7 +279,8 @@ final class ToolbarMenuTests: XCTestCase {
         let menu = try menu("切换")
         refresh(menu)
         // Cut ／ 执行当前转场（类型 · 时长）／ ─ ／ 五种类型（T-bar 与回车用，只选不执行）／ ─ ／ FTB ／ Overlay ▸
-        XCTAssertEqual(rows(menu), ["Cut | 空格", "执行当前转场（Fade · 0.5 秒） | 回车", "—", "# T-bar 和回车用（只选，不执行）",
+        // 默认表 W5-J 起有 ⌥1–⌥4（转场槽落地前 = 执行当前转场）与 ⌃1–⌃4（叠加开关）：右列照实写，连号写成"⌥1–⌥4"
+        XCTAssertEqual(rows(menu), ["Cut | 空格", "执行当前转场（Fade · 0.5 秒） | 回车、⌥1–⌥4", "—", "# T-bar 和回车用（只选，不执行）",
                                     "Cut", "Fade", "Wipe", "Zoom", "Stinger", "—", "FTB | F", "Overlay ▸"])
         XCTAssertFalse(menu.items.contains { ["快捷键…", "MIDI 映射…"].contains(MenuKeyColumn.title(of: $0)) }, "快捷键 / MIDI 映射挪出了“切换”")
         let cut = try item(menu, "Cut")
@@ -288,25 +291,27 @@ final class ToolbarMenuTests: XCTestCase {
         let ftb = try item(menu, "FTB")
         let overlay = try XCTUnwrap(try item(menu, "Overlay").submenu)
         refresh(overlay)
-        XCTAssertEqual(rows(overlay), ["Overlay 1（未指定，开 = 用 PVW）", "Overlay 2（未指定，开 = 用 PVW）", "Overlay 3（未指定，开 = 用 PVW）", "Overlay 4（未指定，开 = 用 PVW）"])
+        XCTAssertEqual(rows(overlay), ["Overlay 1（未指定，开 = 用 PVW） | ⌃1", "Overlay 2（未指定，开 = 用 PVW） | ⌃2", "Overlay 3（未指定，开 = 用 PVW） | ⌃3",
+                                       "Overlay 4（未指定，开 = 用 PVW） | ⌃4"])
         // 一个 keyEquivalent 都不设（HotkeyDispatcher 是唯一的触发口），子菜单也一样
         func allItems(_ m: NSMenu) -> [NSMenuItem] { m.items + m.items.compactMap(\.submenu).flatMap(allItems) }
         for i in allItems(menu) where !i.isSeparatorItem {
             XCTAssertEqual(i.keyEquivalent, "", "“\(MenuKeyColumn.title(of: i))”不设 keyEquivalent")
         }
 
-        // 改一条快捷键（Cut 从空格换成 C、给 Overlay 1 加一个 ⌥1）：菜单右列跟着变
+        // 改两条快捷键（Cut 从空格换成 C、Overlay 1 从 ⌃1 换成 ⌥⇧1）：菜单右列跟着变
         var table = HotkeyTable.default
         let cutIndex = try XCTUnwrap(table.bindings.firstIndex { $0.action == .command(.cut) })
         table.bindings[cutIndex].key = try XCTUnwrap(KeyCombo("c"))
-        table.bindings.append(HotkeyBinding(key: try XCTUnwrap(KeyCombo("alt+1")), action: .toggleOverlay(channel: 1)))
+        let overlayIndex = try XCTUnwrap(table.bindings.firstIndex { $0.action == .toggleOverlay(channel: 1) })
+        table.bindings[overlayIndex].key = try XCTUnwrap(KeyCombo("alt+shift+1"))
         try controller.applyHotkeyTable(table)
         refresh(menu)
         refresh(overlay)
         XCTAssertEqual(MenuKeyColumn.keys(of: cut), "C", "Cut 的键跟着表变：\(rows(menu))")
-        XCTAssertEqual(MenuKeyColumn.keys(of: auto), "回车")
-        XCTAssertEqual(MenuKeyColumn.keys(of: overlay.items[0]), "⌥1", "Overlay 1 的键：\(rows(overlay))")
-        XCTAssertNil(MenuKeyColumn.keys(of: overlay.items[1]))
+        XCTAssertEqual(MenuKeyColumn.keys(of: auto), "回车、⌥1–⌥4")
+        XCTAssertEqual(MenuKeyColumn.keys(of: overlay.items[0]), "⌥⇧1", "Overlay 1 的键：\(rows(overlay))")
+        XCTAssertEqual(MenuKeyColumn.keys(of: overlay.items[1]), "⌃2", "Overlay 2 没动")
 
         // 按一次 C：菜单不认这个键（不会各触发一次），只有快捷键表那一路 → 恰好一次 Cut，来源 hotkey
         let since = session.control.bus.recentEntries().last?.sequence ?? 0

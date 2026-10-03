@@ -275,14 +275,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // MARK: 设置（App 菜单"设置…"下与工具条"设置▾"）
+    // MARK: 设置（App 菜单"设置…"下与工具条"设置▾"；W5-J：一律走 showSettings(page:)）
 
-    @objc func showHotkeys(_ sender: Any?) { controller.panels.showHotkeyEditor() }
-    @objc func showMIDI(_ sender: Any?) { controller.panels.showMIDIMapping() }
-    @objc func showPreferences(_ sender: Any?) { controller.panels.showPreferences() }
+    @objc func showHotkeys(_ sender: Any?) { controller.panels.showSettings(page: .hotkeys) }
+    @objc func showMIDI(_ sender: Any?) { controller.panels.showSettings(page: .midi) }
+    /// ⌘, / 工具条"设置"主体：回到上次那一页（没开过 = 常规）。
+    @objc func showPreferences(_ sender: Any?) { controller.panels.showSettings() }
     @objc func outputSettings(_ sender: Any?) {
         let tab = ((sender as? NSMenuItem)?.representedObject as? String).flatMap(OutputSettingsModel.Tab.init(rawValue:)) ?? .record
-        controller.panels.showOutputSettings(tab: tab)
+        controller.panels.showSettings(page: .output(tab))
     }
     @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
 

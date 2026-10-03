@@ -17,7 +17,7 @@ final class ControlEditorTests: XCTestCase {
         let model = editor.model
         model.resetToDefault()   // 别的测试可能已经存过表
         XCTAssertTrue(model.save())
-        XCTAssertEqual(model.rows.count, 23, "默认表 23 条")
+        XCTAssertEqual(model.rows.count, 31, "默认表 31 条（W5-J 按 04 Q29 补了 ⌥1–⌥4 与 ⌃1–⌃4）")
         XCTAssertTrue(model.conflicts.isEmpty)
 
         // 加一条 k → Cut；再加一条 k → FTB 就冲突，存不了
@@ -64,7 +64,7 @@ final class ControlEditorTests: XCTestCase {
 
         // 恢复默认表并存
         model.resetToDefault()
-        XCTAssertEqual(model.rows.count, 23)
+        XCTAssertEqual(model.rows.count, 31)
         XCTAssertTrue(model.save())
         XCTAssertEqual(session.control.hotkeys.table, .default)
         XCTAssertNil(session.control.hotkeys.table.action(for: KeyCombo(key: "k")))

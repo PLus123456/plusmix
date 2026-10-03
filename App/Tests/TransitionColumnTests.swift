@@ -196,20 +196,23 @@ final class TransitionColumnTests: XCTestCase {
         XCTAssertTrue(panel.cutButton.toolTip?.contains("快捷键：空格") == true, panel.cutButton.toolTip ?? "nil")
         XCTAssertFalse(panel.fadeButton.toolTip?.contains("快捷键：回车") == true, "默认表里回车是\"按已选转场\"，不是 Fade：\(panel.fadeButton.toolTip ?? "nil")")
         XCTAssertTrue(panel.fadeButton.toolTip?.contains("没有快捷键") == true, panel.fadeButton.toolTip ?? "nil")
-        XCTAssertTrue(panel.tbarTypeButton.toolTip?.contains("回车：按这里选的转场执行") == true, "回车按 T-bar 这一行选的转场执行：\(panel.tbarTypeButton.toolTip ?? "nil")")
+        // 默认表 W5-J 起 ⌥1–⌥4 也是"执行当前转场"（转场槽落地前，04 Q29），连号写成"⌥1–⌥4"
+        XCTAssertTrue(panel.tbarTypeButton.toolTip?.contains("回车、⌥1–⌥4：按这里选的转场执行") == true, "回车按 T-bar 这一行选的转场执行：\(panel.tbarTypeButton.toolTip ?? "nil")")
         XCTAssertTrue(panel.ftbButton.toolTip?.contains("快捷键：F") == true, panel.ftbButton.toolTip ?? "nil")
 
         var table = HotkeyTable.default
         table.bindings.removeAll { $0.key == KeyCombo(key: "space") || $0.key == KeyCombo(key: "return") }
         table.bindings.append(HotkeyBinding(key: KeyCombo(key: "c", modifiers: [.shift]), action: .command(.cut)))
         table.bindings.append(HotkeyBinding(key: KeyCombo(key: "return"), action: .command(.fade(durationTicks: 30))))
-        table.bindings.append(HotkeyBinding(key: KeyCombo(key: "1", modifiers: [.option]), action: .toggleOverlay(channel: 1)))
+        table.bindings.removeAll { $0.action == .toggleOverlay(channel: 1) }   // 默认的 ⌃1（W5-J）
+        table.bindings.append(HotkeyBinding(key: KeyCombo(key: "1", modifiers: [.option, .shift]), action: .toggleOverlay(channel: 1)))
         try controller.applyHotkeyTable(table)
         XCTAssertTrue(panel.cutButton.toolTip?.contains("快捷键：⇧C") == true, "换表后提示跟着变：\(panel.cutButton.toolTip ?? "nil")")
         XCTAssertFalse(panel.cutButton.toolTip?.contains("空格") == true)
         XCTAssertTrue(panel.fadeButton.toolTip?.contains("快捷键：回车") == true, panel.fadeButton.toolTip ?? "nil")
         XCTAssertFalse(panel.tbarTypeButton.toolTip?.contains("回车：按这里选的转场执行") == true, "回车改绑 Fade 以后不再说回车按这里执行：\(panel.tbarTypeButton.toolTip ?? "nil")")
-        XCTAssertTrue(panel.overlayButtons[0].toolTip?.contains("⌥1") == true, panel.overlayButtons[0].toolTip ?? "nil")
+        XCTAssertFalse(panel.tbarTypeButton.toolTip?.contains("回车、") == true, panel.tbarTypeButton.toolTip ?? "nil")
+        XCTAssertTrue(panel.overlayButtons[0].toolTip?.contains("⌥⇧1") == true, panel.overlayButtons[0].toolTip ?? "nil")
     }
 
     /// C6：Overlay 通道没指定输入时按下 = 用当前 PVW 那一路打开；再按 = 关，通道设置不清空；PVW 是黑场时不打开、底栏提示。

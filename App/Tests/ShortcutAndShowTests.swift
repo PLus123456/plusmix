@@ -28,7 +28,7 @@ final class ShortcutAndShowTests: XCTestCase {
         XCTAssertFalse(session.control.handleKey(key("2", flags: [.command], keyCode: 19)), "带 ⌘ 的交给菜单")
         XCTAssertFalse(session.control.handleKey(key("2", keyCode: 19, repeat: true)), "自动重复不触发")
         XCTAssertFalse(session.control.handleKey(key("x", keyCode: 7)), "没绑定的键交回响应链")
-        XCTAssertEqual(session.control.hotkeyTable.bindings.count, 23, "默认表：10 数字 + 10 Shift 数字 + 空格 + 回车 + F")
+        XCTAssertEqual(session.control.hotkeyTable.bindings.count, 31, "默认表：10 数字 + 10 Shift 数字 + 空格 + 回车 + F + ⌥1–⌥4（执行转场）+ ⌃1–⌃4（叠加开关，W5-J / Q29）")
     }
 
     func testShow_newSaveOpenRecentAndAutosave() throws {

@@ -1,4 +1,6 @@
 // 面板与窗口的总管（W3-E）：输入设置窗（每路一个）、输出设置窗、偏好设置、快捷键编辑器、MIDI 映射。
+// W5-J 第一步（入口整理，01a F2 / 04 Q04 (a)）：⌘, / 工具条"设置▾" / 各 ⚙ / 菜单里的设置页一律走 showSettings(page:)（SettingsPage），
+// 页先落到现有的窗：输出各页 = 输出设置窗那一页，快捷键 / MIDI = 各自的窗，其余 = 偏好设置窗；⌘, 回到上次那一页（本机记忆）。
 // 换 session 时设置类窗口关掉（模型绑的是旧 session 的状态）；偏好设置窗例外（W5-B，X04）：它的设置是本机的，节目格式 / 节目音频几项按新 session 重读一遍，
 // 换格式之后窗口还在原处，不用再找。多画面窗口 / 外部显示窗口是 W3-C 的（G4 合并时以 W3-C 的运行表为准）：
 // 多画面 = MainWindowController.multiviewWindow，外部显示窗口 = AuxOutputRuntime.external 跟着快照里的 externalDisplay 输出开关
@@ -56,6 +58,49 @@ final class PanelCoordinator: NSObject {
         outputSettingsWindow?.apply(state: state)
     }
 
+    // MARK: 设置（W5-J）
+
+    /// 上次打开的设置页存在这个键下（本机记忆；⌘, 与工具条"设置"主体回到它）。
+    static let lastSettingsPageKey = "SettingsLastPage"
+    /// 最近一次打开的设置页（测试看）。
+    private(set) var currentSettingsPage: SettingsPage?
+
+    /// 上次那一页（没开过为 nil）。
+    var lastSettingsPage: SettingsPage? {
+        controller.defaults.string(forKey: Self.lastSettingsPageKey).flatMap(SettingsPage.init(id:))
+    }
+
+    /// 忘掉上次那一页（测试从"没开过"开始）。
+    func forgetLastSettingsPage() {
+        controller.defaults.removeObject(forKey: Self.lastSettingsPageKey)
+        currentSettingsPage = nil
+    }
+
+    /// 打开设置的某一页；nil = 回到上次那一页（没开过 = 常规）。返回打开的页。
+    @discardableResult
+    func showSettings(page: SettingsPage? = nil) -> SettingsPage {
+        let target = page ?? lastSettingsPage ?? .general
+        switch target {
+        case .output(let tab): openOutputSettings(tab: tab)
+        case .hotkeys: openHotkeyEditor()
+        case .midi: openMIDIMapping()
+        default: openPreferences()
+        }
+        currentSettingsPage = target
+        controller.defaults.set(target.id, forKey: Self.lastSettingsPageKey)
+        return target
+    }
+
+    /// 某一页所在的窗（第一步：页落在现有的几扇窗里）。
+    func settingsWindow(showing page: SettingsPage) -> NSWindow? {
+        switch page {
+        case .output(let tab): outputSettingsWindow?.model.tab == tab ? outputSettingsWindow?.window : nil
+        case .hotkeys: hotkeyWindow?.window
+        case .midi: midiWindow?.window
+        default: preferencesWindow?.window
+        }
+    }
+
     // MARK: 设置窗
 
     @discardableResult
@@ -78,8 +123,15 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
+    /// 输出设置的某一页（= showSettings(page: .output(tab))）。
     @discardableResult
     func showOutputSettings(tab: OutputSettingsModel.Tab = .record) -> OutputSettingsWindowController {
+        showSettings(page: .output(tab))
+        return outputSettingsWindow!
+    }
+
+    @discardableResult
+    private func openOutputSettings(tab: OutputSettingsModel.Tab) -> OutputSettingsWindowController {
         if let w = outputSettingsWindow {
             w.model.tab = tab
             w.present()
@@ -109,8 +161,15 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
+    /// 偏好设置（第一步里本机各页与节目格式 / 节目音频都在这扇窗里；= showSettings(page: .general)）。
     @discardableResult
     func showPreferences() -> PreferencesWindowController {
+        showSettings(page: .general)
+        return preferencesWindow!
+    }
+
+    @discardableResult
+    private func openPreferences() -> PreferencesWindowController {
         if let w = preferencesWindow {
             w.present()
             return w
@@ -122,8 +181,15 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
+    /// 快捷键（= showSettings(page: .hotkeys)）。
     @discardableResult
     func showHotkeyEditor() -> HotkeyEditorWindowController {
+        showSettings(page: .hotkeys)
+        return hotkeyWindow!
+    }
+
+    @discardableResult
+    private func openHotkeyEditor() -> HotkeyEditorWindowController {
         if let w = hotkeyWindow {
             w.present()
             return w
@@ -137,8 +203,15 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
+    /// MIDI 映射（= showSettings(page: .midi)）。
     @discardableResult
     func showMIDIMapping() -> MIDIMappingWindowController {
+        showSettings(page: .midi)
+        return midiWindow!
+    }
+
+    @discardableResult
+    private func openMIDIMapping() -> MIDIMappingWindowController {
         if let w = midiWindow {
             w.present()
             return w
