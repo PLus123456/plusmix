@@ -9,6 +9,7 @@ import AppKit
 enum SettingsMenu {
     /// 输出设置窗的页（"输出"菜单与设置▾ 用同一张表）。
     static let outputPages: [(key: String, tab: OutputSettingsModel.Tab)] = [
+        ("menu.output.overview", .overview),   // W5-I 的总览页（设置窗侧栏第一项）；W5-I 报告 §3 第 5 条让 G7 补菜单项
         ("menu.output.record", .record), ("menu.output.iso", .iso), ("menu.output.stream", .stream), ("menu.output.external", .external),
         ("menu.output.ndi", .ndi), ("menu.output.virtualCamera", .virtualCamera), ("menu.output.multiview", .multiview),
     ]

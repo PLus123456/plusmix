@@ -658,6 +658,7 @@
 "menu.output.iso" = "ISO Recording…";
 "menu.output.multiview" = "Multiview Layout…";
 "menu.output.ndi" = "NDI® Output Settings…";
+"menu.output.overview" = "Output Overview…";
 "menu.output.record" = "Recording Settings…";
 "menu.output.recordSubmenu" = "Record";
 "menu.output.stream" = "Streaming Settings…";

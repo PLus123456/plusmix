@@ -658,6 +658,7 @@
 "menu.output.iso" = "ISO 分路录制…";
 "menu.output.multiview" = "多画面布局…";
 "menu.output.ndi" = "NDI® 发送设置…";
+"menu.output.overview" = "输出总览…";
 "menu.output.record" = "录制设置…";
 "menu.output.recordSubmenu" = "录制";
 "menu.output.stream" = "推流设置…";
