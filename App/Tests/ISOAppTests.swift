@@ -91,7 +91,8 @@ final class ISOAppTests: XCTestCase {
     }
 
     /// ISO 二选一（W3-E2 交付第 4 条）：留输出设置 › ISO 页，底栏 ISO… 改成它的入口。加的路走 W3-C 的 ISORoutes：
-    /// 编码 / 目录抄 PGM 录制输出、文件名模板一定带 {output}（PGM 的模板没有也补上）、名字 "ISO n"；录着的路锁住不许删；页里有磁盘余量估算。
+    /// 编码 / 目录同 PGM 录制输出（录制 1）、文件名模板一定带 {output}（PGM 的模板没有也补上）、名字 "ISO n"；录着的路锁住不许删；页里有磁盘余量估算。
+    /// W5-I（K10）起不是"创建时抄一次"：录制 1 之后再改，没在录的 ISO 路跟着改，在录的停了再跟。
     func testISO_singleEntry_bottomBarOpensSettingsTab_templateCarriesOutput() throws {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 2)
@@ -117,8 +118,13 @@ final class ISOAppTests: XCTestCase {
         XCTAssertEqual(iso.name, "ISO 2")
         XCTAssertFalse(iso.enabled, "加进来不自动开录（底栏录制按钮一起起停）")
         XCTAssertTrue(iso.settings.record?.fileNamePattern.contains("{output}") ?? false, "ISO 的文件名模板必须带 {output}：\(String(describing: iso.settings.record))")
-        XCTAssertEqual(iso.settings.video?.bitrateBps, 4_000_000, "编码参数抄 PGM 录制输出")
+        XCTAssertEqual(iso.settings.video?.bitrateBps, 4_000_000, "编码参数同 PGM 录制输出（录制 1）")
         XCTAssertEqual(iso.settings.record?.directory, pgm.settings.record?.directory)
+        // 新口径（K10）：录制 1 之后再改（这里走 API），没在录的 ISO 路跟着改，不再停在创建时抄的那一份
+        settings.video?.bitrateBps = 5_000_000
+        session.send(.setOutputSettings(output: pgm.number, settings: settings))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(iso.number)?.settings.video?.bitrateBps == 5_000_000 },
+                      "ISO 路跟录制 1 的编码：\(String(describing: session.state.output(iso.number)?.settings.video))")
         XCTAssertEqual(model.isoInputs, [2])
         XCTAssertFalse(model.isoLocked(input: 2))
         XCTAssertTrue(model.isoEstimateText.contains(pgm.settings.record?.directory ?? "?"), "页里要有目录 / 余量估算：\(model.isoEstimateText)")
@@ -130,8 +136,15 @@ final class ISOAppTests: XCTestCase {
         model.setISO(input: 2, on: false)
         AppTest.pump(seconds: 0.3)
         XCTAssertNotNil(ISORoutes.isoRecord(in: session.state, input: 2), "录着的路不许在 ISO 页删")
+        // 录着的时候录制 1 再改：在录的这一路不动（运行中的录制器不吃新设置），停了再跟
+        settings.video?.bitrateBps = 7_000_000
+        session.send(.setOutputSettings(output: pgm.number, settings: settings))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(pgm.number)?.settings.video?.bitrateBps == 7_000_000 })
+        AppTest.pump(seconds: 0.3)
+        XCTAssertEqual(session.state.output(iso.number)?.settings.video?.bitrateBps, 5_000_000, "在录的 ISO 路这一次不跟")
         session.send(.stopRecord(output: iso.number))
         XCTAssertTrue(AppTest.waitUntil(10) { session.state.output(iso.number)?.enabled == false && session.outputs.recorders.isEmpty })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(iso.number)?.settings.video?.bitrateBps == 7_000_000 }, "停了以后跟上（下一次开录生效）")
         XCTAssertTrue(AppTest.waitUntil(2) { !model.isoLocked(input: 2) })
         model.setISO(input: 2, on: false)
         XCTAssertTrue(AppTest.waitUntil(2) { ISORoutes.isoRecord(in: session.state, input: 2) == nil }, "停了以后可以删")
