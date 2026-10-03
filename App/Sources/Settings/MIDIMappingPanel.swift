@@ -289,8 +289,8 @@ struct MIDIMappingView: View {
                 Text(model.sources.map { $0.name + ($0.connected ? "" : " (" + L("midi.disconnected") + ")") }.joined(separator: ", "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                TextField(L("hotkeys.search"), text: $model.search).textFieldStyle(.roundedBorder).frame(maxWidth: 200)
-                    .accessibilityLabel(L("hotkeys.search"))
+                TextField(L("midi.search"), text: $model.search).textFieldStyle(.roundedBorder).frame(maxWidth: 220)
+                    .accessibilityLabel(L("midi.search"))
             }
             .padding(10)
             Divider()

@@ -352,7 +352,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     init(model: SettingsModel) {
         self.model = model
-        let window = PanelWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 640), styleMask: [.titled, .closable, .resizable, .miniaturizable],
+        // 默认高 760：侧栏两组 20 页不用滚就看得全（macOS 27 的侧栏行高）
+        let window = PanelWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 760), styleMask: [.titled, .closable, .resizable, .miniaturizable],
                                  backing: .buffered, defer: false)
         window.title = L("settings.windowTitle")
         window.isReleasedWhenClosed = false

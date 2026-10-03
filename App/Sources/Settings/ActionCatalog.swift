@@ -89,8 +89,19 @@ enum FieldValue: Hashable, Sendable {
 
 @MainActor
 enum ActionCatalog {
+    /// 按界面语言缓存的目录（行上的一句话摘要每次重绘都要查，别每次重建）。
+    private static var cache: [String: [ActionEntry]] = [:]
+
     /// 某个场合能选的全部项（含默认不列的高级项与旧写法）。
     static func entries(for context: ActionPickerContext) -> [ActionEntry] {
+        let key = "\(context)|" + (L10n.languageOverride ?? Bundle.main.preferredLocalizations.first ?? "")
+        if let hit = cache[key] { return hit }
+        let built = buildEntries(for: context)
+        cache[key] = built
+        return built
+    }
+
+    private static func buildEntries(for context: ActionPickerContext) -> [ActionEntry] {
         switch context {
         case .midiCC:
             return FaderKind.allCases.map(faderEntry)

@@ -2,7 +2,7 @@
 
 分支：`w5-app-settings-actions`（worktree `.claude/worktrees/w5-app-settings-actions-ee8dce`，worktree 自己的分支名 `claude/w5-app-settings-actions-ee8dce`，两个名字指同一个提交）。
 **基线不是 main**：prompt 写"从 G6 合入后的 main 开"，但交付 1 要"⌘, / 工具条设置▾ / 各 ⚙ 打开同一个窗的对应页"，工具条（93）与底栏各 ⚙（92）都还没合进 main（main = `190fe32`），
-所以照 93 / 94 的先例从 **93 的分支头 `w5-app-toolbar` = `8a13a21`**（含 92）开。G7 按 92 → 93 → 96 的顺序合即可；95 / 97 / 98 是从 main 开的，合并时与本分支在 App/ 有冲突（§5 第 1 条）。
+所以照 93 的先例从 **93 的分支头 `w5-app-toolbar` = `8a13a21`**（含 92）开——94 / 97 / 98 也都叠在这个头上，只有 95 是从 main 开的。G7 按 92 → 93 →（94 / 95 / 96 / 97 / 98）合；它们与本分支在 App/ 的冲突见 §5 第 1 条。
 机器：MacBook Pro M5 Max（128 GB），macOS 27.0，Xcode 27.0，接电源；第五波几个会话同机并行（97 的 App 用例和我的错开跑）。
 
 提交（`git log 8a13a21..HEAD`）：
@@ -139,7 +139,7 @@ extension CommandKind { public var operatorFacing: Bool }   // false：setTransi
 
 ## 5. 下一个会话需要知道的坑
 
-1. **G7 合并**：本分支叠在 93（含 92）上，按 92 → 93 → 96 合。95 / 97 / 98 从 main 开，都会动 `PreferencesPanel.swift` / `OutputSettingsPanel.swift` / `PanelCoordinator.swift` / 两份 strings：偏好设置的长表单在本分支已拆成页（`ShowFormatPage` … `AdvancedPage`），97 的"设置 › 音频设备"每总线声道加到 `AudioDevicePage`，98 的远程控制 / Tally / 性能页替换本分支的占位页；95 给 `OutputSettingsModel.Tab` 加的页（如"输出总览"）会自动出现在设置窗侧栏和设置▾（`SettingsPage.pages` 按 `Tab.allCases`），但 `OutputSettingsView` 的 body 在本分支多了 `showsTabList` 分支，95 改 body 时会冲突。老入口 `showOutputSettings(tab:).model` 等保持不变，各分支的用例不用改调用。
+1. **G7 合并**：本分支叠在 93（含 92）上；94 / 97 / 98 也叠在 93 头上，95 从 main 开。它们都会动 `PreferencesPanel.swift` / `OutputSettingsPanel.swift` / `PanelCoordinator.swift` / `AppSettings.swift` / 两份 strings：偏好设置的长表单在本分支已拆成页（`ShowFormatPage` … `AdvancedPage`），**97 的"音频设备"一节（每条总线选声道，新键 `AppSettings.busOutputMap`）搬进 `AudioDevicePage`，`busOutputMap` 还要加进 `SettingsTransfer.keys`（导出 / 导入 / 恢复默认）**；98 的远程控制 / Tally / 性能页替换本分支的占位页；95 给 `OutputSettingsModel.Tab` 加的页（如"输出总览"）会自动出现在设置窗侧栏和设置▾（`SettingsPage.pages` 按 `Tab.allCases`），但 `OutputSettingsView` 的 body 在本分支多了 `showsTabList` 分支，95 改 body 时会冲突。97 把测试宿主的 defaults suite 改成按构建路径分开（`AppController.testDefaultsSuite`），`SettingsTransfer` 用的就是这个常量，合并后不用改。老入口 `showOutputSettings(tab:).model` 等保持不变，各分支的用例不用改调用。
 2. **确认框收起前 `performClose` 什么都不做**（sheet 还挂着）：设置窗用例每答完一问先等 `window.attachedSheet == nil`。
 3. **测试宿主里 `AppController.settings` 会被改回 API 端口 0、空音频设备**（`applyTestHostOverrides`），所以"待应用"按 PreferencesModel 自己的值和 `session.settings` 比，不按 `controller.settings` 比；UserDefaults 里存的是用户填的值。
 4. **`@Published` 属性的 didSet 里别给自己赋值**：磁盘下限的负数在 commit 里钳、页上的框也钳。

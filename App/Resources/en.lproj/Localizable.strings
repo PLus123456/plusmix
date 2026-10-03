@@ -664,6 +664,7 @@
 "midi.noTrigger" = "not learned";
 "midi.notRunning" = "MIDI controller is not running";
 "midi.number" = "Number";
+"midi.search" = "Search (trigger / action / note)";
 "midi.sources" = "%d MIDI sources:";
 "midi.trigger.cc" = "CC";
 "midi.trigger.cc14" = "14-bit CC";
@@ -935,11 +936,11 @@
 "prefs.compat.pending" = "The switch and port take effect the next time the engine starts (\"Apply and Restart Engine\" applies them now).";
 "prefs.compat.port" = "TCP port";
 "prefs.compat.title" = "Third-party API compatibility layer";
-"prefs.confirm.hint" = "Only the bottom bar's Record / Stream buttons, and only when stopping; hotkeys, MIDI and the API never ask. New / Open / format changes / Quit always ask while recording or streaming. Takes effect when you click Apply.";
+"prefs.confirm.hint" = "Only the bottom bar's Record / Stream buttons, and only when stopping; hotkeys, MIDI and the API never ask. New / Open / format changes / Quit always ask while recording or streaming. Takes effect immediately.";
 "prefs.confirm.stop" = "Confirm before stopping recording / streaming (bottom bar buttons)";
 "prefs.confirm.title" = "Confirmations";
 "prefs.external.behindInterface" = "Keep external displays on the main display behind the interface";
-"prefs.external.hint" = "Only affects external display windows on the main display (the one with the menu bar): they stay below the interface and other windows, even when clicked; on other displays they stay full screen in front. Takes effect on Apply; stored in this Mac's preferences, not in the show file.";
+"prefs.external.hint" = "Only affects external display windows on the main display (the one with the menu bar): they stay below the interface and other windows, even when clicked; on other displays they stay full screen in front. Takes effect immediately; stored in this Mac's preferences, not in the show file.";
 "prefs.external.title" = "External displays";
 "prefs.format.apply" = "Apply Format (restarts engine)";
 "prefs.format.frameRate" = "Frame rate";

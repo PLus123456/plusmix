@@ -136,6 +136,15 @@ final class ActionPickerModel: ObservableObject {
         }
     }
 
+    /// 预览那几行是不是命令（不是"解析不出 / 界面动作"这类说明）。
+    var previewIsCommands: Bool {
+        guard let e = selected, let action = builtAction, let s = state() else { return false }
+        switch e.kind {
+        case .ui, .fader: return false
+        default: return !action.resolve(in: s).isEmpty
+        }
+    }
+
     /// 一条命令写成"setPreview（input: 3）"——就是进总线的那一条（API 键名 + 参数）。
     static func commandLine(_ c: Command) -> String {
         let kind = CommandKind(of: c).rawValue
@@ -284,13 +293,14 @@ struct ActionPickerView: View {
                     .tag(e.id)
                 }
             }
-            .frame(height: 230)
+            .frame(height: 300)
             Divider()
             ActionFieldsForm(model: model)
             VStack(alignment: .leading, spacing: 2) {
                 Text(L("actionPicker.preview.title")).font(.caption).foregroundStyle(.secondary)
                 ForEach(Array(model.preview.enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.caption.monospaced()).lineLimit(2)
+                    // 进总线的命令用等宽字，解释性的话（解析不出、界面动作……）用正文字
+                    Text(line).font(model.previewIsCommands ? .caption.monospaced() : .caption).lineLimit(2)
                 }
             }
             HStack {
