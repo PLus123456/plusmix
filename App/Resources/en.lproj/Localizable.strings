@@ -940,6 +940,7 @@
 "bottom.statsTip" = "Statistics window (read-only): each input, rendering, each output, displays, audio; “Reset” only restarts the counts inside the window";
 "lock.lock" = "Lock interface";
 "lock.unlock" = "Unlock interface";
+"lock.lockedTitle" = "Locked";
 "lock.lockTip" = "Lock the interface: while locked, mouse clicks in the main window do nothing (prevents accidental clicks); shortcuts, MIDI, the API and the menu bar keep working; separate windows such as Settings are not locked";
 "lock.unlockTip" = "Interface locked: click here to unlock";
 "lock.blockedNotice" = "Interface locked: click the lock at the right end of the bottom bar to unlock; shortcuts still work";

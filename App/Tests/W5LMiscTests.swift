@@ -507,6 +507,8 @@ final class InterfaceLockTests: XCTestCase {
         XCTAssertTrue(window.isInterfaceLocked)
         XCTAssertTrue(bar.isLockHighlighted, "锁着时按钮高亮")
         XCTAssertNotNil(lock.bezelColor)
+        XCTAssertEqual(lock.title, "已锁定", "锁着时按钮上写明（窗口不在前台时系统不画底色，靠字认）")
+        XCTAssertEqual(lock.accessibilityLabel(), "解锁界面")
 
         // 主窗口里的点击：拦
         let cut = wc.transitionPanel.cutButton
@@ -564,6 +566,8 @@ final class InterfaceLockTests: XCTestCase {
         XCTAssertFalse(window.blocksForLock(down), "解锁后点击照常")
         XCTAssertFalse(bar.isLockHighlighted)
         XCTAssertNil(lock.bezelColor)
+        XCTAssertEqual(lock.title, "", "开着时只有图标")
+        XCTAssertEqual(lock.accessibilityLabel(), "锁定界面")
 
         // 菜单栏"窗口 › 锁定界面"是同一个开关（规则 5），锁着时打勾；菜单栏不受锁影响，从这里也能解锁
         let lockSelector = #selector(AppDelegate.toggleInterfaceLock(_:))

@@ -435,15 +435,18 @@ final class BottomBarView: NSView {
     @objc private func statsPressed() { onStats?() }
     @objc private func lockPressed() { onToggleLock?() }
 
-    /// 锁按钮跟着锁的状态：锁着 = 闭合的锁、金色高亮；开着 = 打开的锁。图标 / 提示 / 辅助功能名一起换。
+    /// 锁按钮跟着锁的状态：锁着 = 闭合的锁 +"已锁定"、金色高亮；开着 = 只有打开的锁。图标 / 字 / 提示 / 辅助功能名一起换。
+    /// 另写"已锁定"是因为窗口不在前台时系统不画按钮的底色（金色只在前台看得到，目视核对截到的），字和闭合的锁前后台都在。
     func setLocked(_ locked: Bool) {
         isLockHighlighted = locked
         let label = locked ? L("lock.unlock") : L("lock.lock")
         let symbol = locked ? "lock.fill" : "lock.open"
         lockButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        lockButton.title = locked ? L("lock.lockedTitle") : ""
+        lockButton.imagePosition = locked ? .imageLeading : .imageOnly
         lockButton.setAccessibilityLabel(label)
         lockButton.toolTip = locked ? L("lock.unlockTip") : L("lock.lockTip")
-        Theme.setHighlighted(lockButton, locked, color: Theme.lockActive)
+        Theme.setHighlighted(lockButton, locked, color: Theme.lockActive)   // 改完标题再调（它按当前标题换白字）
     }
 }
 

@@ -85,17 +85,17 @@ enum RemoteAddressCopy {
     }
 }
 
-/// 一行只读地址 + "复制"。
+/// 一行只读地址 + "复制"。地址整行显示、不截断（LabeledContent 对半分会把端口截成"…"）。
 struct AddressRow: View {
     let label: String
     let address: String
 
     var body: some View {
-        LabeledContent(label) {
-            HStack(spacing: 8) {
-                Text(verbatim: address).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                Button(L("prefs.remote.copy")) { RemoteAddressCopy.copy(address) }.controlSize(.small)
-            }
+        HStack(spacing: 8) {
+            Text(label)
+            Spacer(minLength: 12)
+            Text(verbatim: address).font(.system(.body, design: .monospaced)).textSelection(.enabled).lineLimit(1).fixedSize()
+            Button(L("prefs.remote.copy")) { RemoteAddressCopy.copy(address) }.controlSize(.small)
         }
     }
 }

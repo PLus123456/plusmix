@@ -940,6 +940,7 @@
 "bottom.statsTip" = "统计窗（只读）：每路输入、渲染、每个输出、显示、音频；“重置”只在窗里从 0 算起";
 "lock.lock" = "锁定界面";
 "lock.unlock" = "解锁界面";
+"lock.lockedTitle" = "已锁定";
 "lock.lockTip" = "锁定界面：锁着时主窗口里的鼠标点击不生效（防误触），快捷键、MIDI、API、菜单栏照常；设置等独立窗口不锁";
 "lock.unlockTip" = "界面已锁定：点这里解锁";
 "lock.blockedNotice" = "界面已锁定：点底栏最右的锁解锁；快捷键照常";
