@@ -86,14 +86,14 @@ final class TransitionColumnTests: XCTestCase {
         print("转场列最小高 \(minHeight)")
         XCTAssertLessThanOrEqual(minHeight, 409, "列最小高")
 
-        // 最小窗口：T-bar 行不再被压扁
-        AppTest.setMainWindowSize(NSSize(width: 1100, height: 700))
-        print("转场列 1100×700：列高 \(panel.bounds.height)，T-bar 高 \(panel.tbar.frame.height)")
-        XCTAssertGreaterThanOrEqual(panel.tbar.frame.height, 60, "1100×700 时 T-bar ≥ 60")
+        // 最小窗口：T-bar 行不再被压扁（W5-G 起最小窗口的外框把工具条那一行算进去，内容区仍是原来 1100×700 时的高，见 AppTest.minimumMainWindowSize）
+        AppTest.setMainWindowSize(AppTest.minimumMainWindowSize)
+        print("转场列 最小窗口 \(AppTest.minimumMainWindowSize)：列高 \(panel.bounds.height)，T-bar 高 \(panel.tbar.frame.height)")
+        XCTAssertGreaterThanOrEqual(panel.tbar.frame.height, 60, "最小窗口时 T-bar ≥ 60")
         let small700 = edges(panel)
         for (name, l, r) in small700 {
-            XCTAssertEqual(l, left, accuracy: 1, "1100×700 \(name) 左边")
-            XCTAssertEqual(r, right, accuracy: 1, "1100×700 \(name) 右边")
+            XCTAssertEqual(l, left, accuracy: 1, "最小窗口 \(name) 左边")
+            XCTAssertEqual(r, right, accuracy: 1, "最小窗口 \(name) 右边")
         }
     }
 

@@ -26,6 +26,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     let inputStrip = InputStripView(frame: .zero)
     let mixerPanel = MixerPanelView(frame: .zero)
     let bottomBar = BottomBarView(frame: .zero)
+    /// 顶部工具条（W5-G）。
+    let mainToolbar = MainToolbar()
     private let outerSplit = NSSplitView()
     private let centerSplit = NSSplitView()
     private(set) var session: SwitcherSession?

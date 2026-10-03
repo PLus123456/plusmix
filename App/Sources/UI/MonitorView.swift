@@ -11,6 +11,10 @@ final class MonitorView: NSView {
     private let numberLabel = Theme.monoLabel("—", size: 14, color: .white)
     private let nameLabel = Theme.label("", size: 13, weight: .semibold, color: .white)
     private let roleLabel = Theme.label("", size: 11, weight: .bold, color: .white)
+    /// 标题条右端的齿轮（W5-G）。
+    let gearButton = NSButton(title: "", target: nil, action: nil)
+    /// PGM 标题条上的叠加徽标（W5-G）。
+    private(set) var overlayBadgeViews: [NSView] = []
 
     init(target: DisplayTarget) {
         self.target = target
@@ -65,6 +69,9 @@ final class MonitorView: NSView {
             roleLabel.stringValue = target == .program ? "PGM" : "PVW"
         }
     }
+
+    var overlayBadgeTexts: [String] { [] }
+    var roleText: String { roleLabel.stringValue }
 
     var displayedNumber: String { numberLabel.stringValue }
     var displayedName: String { nameLabel.stringValue }

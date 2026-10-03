@@ -168,6 +168,9 @@ final class ExternalOutputMenuBuilder: NSObject {
         return menu
     }
 
+    /// 监视器右键"全屏输出到 ▸"（W5-G）：红灯轮只给签名。
+    func fullscreenMenu(source: OutputSource) -> NSMenu { NSMenu() }
+
     final class Pick: NSObject {
         let displayID: UInt32
         let displayName: String

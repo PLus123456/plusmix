@@ -130,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         byType.submenu = NSMenu(title: L("menu.input.addByType"))
         input.addItem(byType)
         addByTypeItem = byType
-        input.addItem(withTitle: L("menu.input.settings"), action: #selector(inputSettings), keyEquivalent: "I")
+        input.addItem(withTitle: L("menu.input.settings"), action: #selector(inputSettings(_:)), keyEquivalent: "I")
         main.addItem(submenu(input, title: L("menu.input")))
 
         let transition = NSMenu(title: L("menu.transition"))
@@ -231,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func saveShowAs() { controller.saveAs() }
     @objc private func addInput() { controller.windowController.presentAddInput() }
     /// 输入设置：PVW 上那一路，没有就第一路。
-    @objc private func inputSettings() {
+    @objc func inputSettings(_ sender: Any?) {
         guard let s = controller.session else { return }
         let number = s.state.preview != MixerState.noInput ? s.state.preview : (s.state.inputs.first?.number ?? 0)
         guard number != MixerState.noInput else { return }
@@ -254,6 +254,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.panels.showOutputSettings(tab: tab)
     }
     @objc private func toggleMixer() { controller.windowController.toggleMixerPanel() }
+
+    // W5-G：红灯轮只给签名
+    @objc func toggleExternalDisplays(_ sender: Any?) {}
+    @objc func pickTransitionType(_ sender: Any?) {}
+    @objc func showManual(_ sender: Any?) {}
+    @objc func showHotkeyList(_ sender: Any?) {}
 
     /// 关于面板：系统标准面板 + credits（AboutPanel）。
     @objc func showAbout(_ sender: Any?) { AboutPanel.show() }

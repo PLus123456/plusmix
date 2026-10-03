@@ -8,7 +8,8 @@ import SwitcherContracts
 
 @MainActor
 final class MainWindowLayoutTests: XCTestCase {
-    /// 先 1440×900 再缩到最小 1100×700：输入条 ≥ 190、调音台 ≥ 340（原来按比例缩到 133 / 216）；放回 1440×900 输入条高度不变（差额都给上半区）。
+    /// 先 1440×900 再缩到最小窗口（原来 1100×700；W5-G 加了工具条之后外框高 20 pt、内容区不变）：输入条 ≥ 190、调音台 ≥ 340（原来按比例缩到 133 / 216）；
+    /// 放回 1440×900 输入条高度不变（差额都给上半区）。
     func testUI_splitKeepsInputStripMinimum() throws {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 2)
@@ -21,8 +22,10 @@ final class MainWindowLayoutTests: XCTestCase {
         let strip900 = wc.inputStrip.frame.height
         print("1440×900：输入条 \(strip900)，调音台 \(wc.mixerPanel.frame.width)，上半区 \(wc.transitionPanel.frame.height)")
         XCTAssertGreaterThanOrEqual(strip900, 190)
-        AppTest.setMainWindowSize(NSSize(width: 1100, height: 700))
-        print("1100×700：输入条 \(wc.inputStrip.frame.height)，调音台 \(wc.mixerPanel.frame.width)，上半区 \(wc.transitionPanel.frame.height)")
+        // 最小窗口（W5-G 起工具条那一行算在外框里：1100×700 时的内容区 → 外框 AppTest.minimumMainWindowSize，判据不变）
+        let minimum = AppTest.minimumMainWindowSize
+        AppTest.setMainWindowSize(minimum)
+        print("最小窗口 \(Int(minimum.width))×\(Int(minimum.height))（内容区 \(window.contentLayoutRect.size)）：输入条 \(wc.inputStrip.frame.height)，调音台 \(wc.mixerPanel.frame.width)，上半区 \(wc.transitionPanel.frame.height)")
         XCTAssertGreaterThanOrEqual(wc.inputStrip.frame.height, 190, "最小窗口时输入条不低于 190（格子按钮点得到）")
         XCTAssertGreaterThanOrEqual(wc.mixerPanel.frame.width, Theme.mixerPanelWidth - 1, "最小窗口时调音台不窄于 340")
         XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingSize.height - 0.5, "上半区放得下转场列")
