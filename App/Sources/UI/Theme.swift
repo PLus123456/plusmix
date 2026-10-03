@@ -28,6 +28,8 @@ enum Theme {
     static let monitorTitleHeight: CGFloat = 26
     static let thumbnailWidth: CGFloat = 200
     static let thumbnailHeight: CGFloat = 112.5   // 16:9
+    /// 缩略图宽（三档，W5-H D11）。红灯轮：只给签名。
+    static func thumbnailWidth(for size: ThumbnailSize) -> CGFloat { thumbnailWidth }
     static let transitionColumnWidth: CGFloat = 150
     static let mixerPanelWidth: CGFloat = 340
     /// 输入条最矮多高（格子按钮点得到，W5-A / X61）与开始时多高（W5-A 原型实测）。

@@ -19,6 +19,15 @@ final class InputCellView: NSView {
     private let statusLabel = Theme.label("", size: 10, color: .white)
     let overlayButtons: [NSButton]
     let muteButton: NSButton
+    // W5-H 两行按钮（红灯轮：只给签名，还没排进格子）
+    let removeButton = NSButton(title: "×", target: nil, action: nil)
+    let transitionButton = NSButton(title: "", target: nil, action: nil)
+    let cutButton = NSButton(title: "Cut", target: nil, action: nil)
+    let loopButton = NSButton(title: "", target: nil, action: nil)
+    let gearButton = NSButton(title: "", target: nil, action: nil)
+    var firstRowButtons: [NSButton] { [] }
+    var secondRowButtons: [NSButton] { overlayButtons + [muteButton] }
+    var categoryColor: InputCategories.Color? { nil }
     /// 纯音频输入的占位（W3-E2 / W2-A2 口径：没有画面，画话筒 + 名字 + 电平表，不显示成"无信号"的黑块）。
     private let audioPlaceholder = NSStackView()
     private let audioIcon = NSImageView()
@@ -183,7 +192,9 @@ final class InputCellView: NSView {
     }
 
     /// 右键：设置 / 重命名 / 删除（稿子里每格的 Close；完整的输入设置在 W3-E）。"删除"和前两项之间隔一条线（W5-B，D9）。
-    override func menu(for event: NSEvent) -> NSMenu? {
+    override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
+
+    func contextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(withTitle: L("cell.menu.settings"), action: #selector(settingsPressed), keyEquivalent: "").target = self
         menu.addItem(withTitle: L("cell.menu.rename"), action: #selector(renamePressed), keyEquivalent: "").target = self

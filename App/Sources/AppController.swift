@@ -37,6 +37,8 @@ final class AppController {
     lazy var panels = PanelCoordinator(controller: self)
     /// 添加输入的本机记忆：上次的类型、最近添加的来源（W5-F，底栏"添加输入 ▴"与菜单栏"按类型添加"）。
     let addInputHistory: AddInputHistory
+    /// 输入条的本机偏好（W5-H）。
+    let stripPreferences: InputStripPreferences
     /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
     let updateController: UpdateController
     private var replacing = false
@@ -58,6 +60,7 @@ final class AppController {
         defaults = isTestHost ? UserDefaults(suiteName: Self.testDefaultsSuite) ?? .standard : .standard
         updateController = UpdateController(defaults: defaults, isTestHost: isTestHost)
         addInputHistory = AddInputHistory(defaults: defaults)
+        stripPreferences = InputStripPreferences(defaults: defaults)
         if isTestHost {
             L10n.languageOverride = "zh-Hans"
             let configDir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/config", isDirectory: true)

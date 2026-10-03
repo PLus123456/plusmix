@@ -88,6 +88,10 @@ struct AddInputModel {
     var fileEndAction: FileEndAction = .loop
     var fileRate: Double = 1
     var imagePath: String = ""
+    /// 图片页多选（W5-H G14；红灯轮：只给签名）。
+    static let imagePanelAllowsMultipleSelection = false
+    mutating func setImagePaths(_ paths: [String]) { imagePath = paths.first ?? "" }
+    var imageSelectionSummary: String { "" }
     // NDI（提案 008）
     var ndiSourceName = ""
     var ndiBandwidth: NDIBandwidth = .highest

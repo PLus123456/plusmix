@@ -37,6 +37,9 @@ final class InputRuntime {
         self.audio = audio
     }
 
+    /// 正在监视的图片文件（W5-H；红灯轮：只给签名）。
+    var watchedImagePaths: [String] { [] }
+
     /// 某路的运行状态（没有为 nil）。
     func runtimeState(of number: Int) -> InputState? { entries[number]?.input.state }
 

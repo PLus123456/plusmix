@@ -462,6 +462,11 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
 
     var isMultiviewWindowVisible: Bool { multiviewWindow?.isShowing ?? false }
 
+    /// 分类改名（W5-H；红灯轮：只给签名）。
+    func renameCategory(_ color: InputCategories.Color, to name: String) {}
+    /// 缩略图三档（W5-H；红灯轮：只给签名）。
+    func setThumbnailSize(_ size: ThumbnailSize) {}
+
     /// 收起 / 展开调音台。
     func toggleMixerPanel() {
         let collapsed = outerSplit.isSubviewCollapsed(mixerPanel)

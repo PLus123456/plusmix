@@ -13,6 +13,18 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         didSet { for c in cells.values { c.onOpenSettings = onOpenSettings } }
     }
     let searchField = NSSearchField()
+    // W5-H（红灯轮：只给签名）
+    let categoryBar = CategoryTagBar()
+    var selectedCategory: InputCategories.Color? { nil }
+    let addPlaceholder = AddInputPlaceholderView()
+    let mixerToggle = NSButton(title: "", target: nil, action: nil)
+    var arrangedItems: [NSView] { stack.arrangedSubviews }
+    private(set) var isDropTargetHighlighted = false
+    var minimumHeight: CGFloat { Theme.inputStripMinimumHeight }
+    func thumbnailSizeMenu() -> NSMenu { NSMenu() }
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { [] }
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool { false }
+    override func draggingEnded(_ sender: any NSDraggingInfo) {}
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
     private(set) var cells: [Int: InputCellView] = [:]
