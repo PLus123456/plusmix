@@ -50,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         controller = AppController(isTestHost: Self.isTestHost)
         settings = AppSettings.load(arguments: ProcessInfo.processInfo.arguments, defaults: controller.defaults)
+        // 测试宿主启动时不读存下来的 API token（W5-L）：各 worktree 的测试宿主共用一个 defaults suite，别的分支的用例留下过一个 token，
+        // 之后每次启动起的引擎都要 token、连 API 的用例一律 401。要 token 的用例（ReleaseTests R7）自己在内存里设
+        if Self.isTestHost { settings.apiToken = nil }
         controller.settings = settings
         buildMenu()
     }
