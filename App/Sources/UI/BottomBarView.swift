@@ -177,9 +177,11 @@ final class BottomBarView: NSView {
                                  attempt: detail?.attempt, failure: detail?.failure)
     }
 
+    /// 每个快照（≤ 60 Hz）都会调：标题 / 提示没变就不重设——重设标题会把白字的 attributedTitle 冲掉、按钮重算尺寸、整窗下一次画之前重新布局，
+    /// 点按钮（performClick 先画高亮再发命令）就慢一截、还忽快忽慢（RecordingTests 的"起止拍差 = 按钮间隔 ± 1 帧"量得出来，报告 §5）。
     private func show(_ summary: OutputButtonSummary, on button: SplitBarButton) {
-        button.bodyButton.title = summary.title
-        button.bodyButton.toolTip = summary.toolTip
+        if button.bodyButton.title != summary.title { button.bodyButton.title = summary.title }
+        if button.bodyButton.toolTip != summary.toolTip { button.bodyButton.toolTip = summary.toolTip }
         button.setBodyHighlighted(summary.highlighted, color: summary.color)
     }
 
@@ -197,7 +199,8 @@ final class BottomBarView: NSView {
         // 外部显示：有开着的就高亮；提示逐路写状态（Stats.display[]）
         let displays = state.outputs.filter { $0.kind == .externalDisplay }
         external.setBodyHighlighted(displays.contains(where: \.enabled))
-        external.bodyButton.toolTip = externalTip(displays)
+        let tip = externalTip(displays)
+        if external.bodyButton.toolTip != tip { external.bodyButton.toolTip = tip }
     }
 
     private func externalTip(_ outputs: [OutputState]) -> String {
