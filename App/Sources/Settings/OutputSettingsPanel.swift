@@ -477,7 +477,14 @@ struct OutputSettingsView: View {
                 .frame(width: 150)
                 .accessibilityLabel(L("outputSettings.tabList"))
             Divider()
-            Form { tabBody }.formStyle(.grouped)
+            // 总览里点了某一路：切到它的页、滚到它那一节（F8）
+            ScrollViewReader { proxy in
+                Form { tabBody }.formStyle(.grouped)
+                    .onChange(of: model.focusedOutput) { _, n in
+                        guard let n else { return }
+                        DispatchQueue.main.async { withAnimation { proxy.scrollTo(n, anchor: .top) } }
+                    }
+            }
         }
     }
 
@@ -546,7 +553,7 @@ struct OutputSettingsView: View {
     private var ndiTab: some View {
         Group {
             ForEach(model.ndiOutputs) { output in
-                NDIOutputSection(model: model, output: output)
+                NDIOutputSection(model: model, output: output).id(output.number)
             }
             Section(L("outputSettings.ndi.add")) {
                 TextField(L("outputSettings.ndi.name"), text: $newNDIName)

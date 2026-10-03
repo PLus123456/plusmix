@@ -151,7 +151,7 @@ struct RecordPage: View {
                 Text(L("outputSettings.record.hint")).font(.caption).foregroundStyle(.secondary)
             }
             ForEach(model.recordList) { output in
-                RecordOutputSection(model: model, output: output)
+                RecordOutputSection(model: model, output: output).id(output.number)
             }
             Section {
                 Button(L("outputSettings.record.add")) { model.addRecordOutput() }
@@ -269,6 +269,7 @@ struct StreamPage: View {
     @ObservedObject var model: OutputSettingsModel
     @State private var newStreamURL = ""
     @State private var newStreamKey = ""
+    @State private var newService = "customRTMP"
 
     var body: some View {
         Group {
@@ -282,17 +283,35 @@ struct StreamPage: View {
                 }
             }
             ForEach(model.streamOutputs) { output in
-                StreamDestinationSection(model: model, output: output)
+                StreamDestinationSection(model: model, output: output).id(output.number)
             }
             Section(L("outputSettings.stream.add")) {
+                // 服务（L6）：固定入口的直接填进地址框；每场发地址的平台 / 自定义只给一句去哪拿
+                Picker(L("outputSettings.stream.service"), selection: $newService) {
+                    ForEach(OutputSettingsModel.streamServices) { Text($0.title).tag($0.id) }
+                }
+                .onChange(of: newService) { _, id in
+                    guard let service = StreamServiceCatalog.service(id: id) else { return }
+                    if service.kind == .fixed {
+                        newStreamURL = service.url ?? newStreamURL
+                    } else if StreamServiceCatalog.service(forURL: newStreamURL).kind == .fixed {
+                        newStreamURL = ""
+                    }
+                }
+                if let hint = StreamServiceCatalog.service(id: newService)?.hintText, !hint.isEmpty {
+                    Text(hint).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
                 TextField(L("outputSettings.stream.url"), text: $newStreamURL, prompt: Text(L("outputSettings.stream.urlPrompt")))
                 SecureField(L("outputSettings.stream.key"), text: $newStreamKey)
                 Button(L("outputSettings.stream.addButton")) {
                     let url = newStreamURL.trimmingCharacters(in: .whitespaces)
-                    model.addStream(url: url, key: newStreamKey)
+                    guard !url.isEmpty else { return }
+                    let n = model.addStream(url: url, key: newStreamKey)
+                    model.chosenServices[n] = newService
                     newStreamURL = ""
                     newStreamKey = ""
                 }
+                .disabled(newStreamURL.trimmingCharacters(in: .whitespaces).isEmpty)
                 Text(L("outputSettings.stream.hint")).font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -515,7 +534,7 @@ struct ExternalDisplayPage: View {
                 Text(L("outputSettings.external.screensHint")).font(.caption).foregroundStyle(.secondary)
             }
             ForEach(model.externalOutputs) { output in
-                ExternalOutputSection(model: model, output: output)
+                ExternalOutputSection(model: model, output: output).id(output.number)
             }
         }
     }
