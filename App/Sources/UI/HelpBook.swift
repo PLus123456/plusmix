@@ -31,6 +31,22 @@ enum HelpBook {
         open(url)
     }
 
+    /// 打开手册的某一节（入口页 + 锚点；添加输入横幅的"看说明"，W5-K）。手册不在包里（103 之前）：弹一句说明，返回 false。
+    @discardableResult
+    static func openManual(anchor: String) -> Bool {
+        guard let base = manualURL() else {
+            let alert = NSAlert()
+            alert.messageText = L("help.manualMissing.title")
+            alert.informativeText = L("help.manualMissing.text")
+            alert.runModal()
+            return false
+        }
+        var c = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        c?.fragment = anchor
+        open(c?.url ?? base)
+        return true
+    }
+
     /// 按这张表生成快捷键一览、写进临时目录、打开。写不进去返回 nil。
     @discardableResult
     static func openHotkeyList(table: HotkeyTable) -> URL? {

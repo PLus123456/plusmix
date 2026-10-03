@@ -294,7 +294,7 @@ final class ToolbarMenuTests: XCTestCase {
         let overlay = try XCTUnwrap(try item(menu, "Overlay").submenu)
         refresh(overlay)
         XCTAssertEqual(rows(overlay), ["Overlay 1（未指定，开 = 用 PVW） | ⌃1", "Overlay 2（未指定，开 = 用 PVW） | ⌃2", "Overlay 3（未指定，开 = 用 PVW） | ⌃3",
-                                       "Overlay 4（未指定，开 = 用 PVW） | ⌃4"])
+                                       "Overlay 4（未指定，开 = 用 PVW） | ⌃4", "—", "叠加设置…"], "W5-K：叠加设置窗在菜单栏也有入口（规则 5）；W5-J：⌃1–⌃4 是默认键")
         // 一个 keyEquivalent 都不设（HotkeyDispatcher 是唯一的触发口），子菜单也一样
         func allItems(_ m: NSMenu) -> [NSMenuItem] { m.items + m.items.compactMap(\.submenu).flatMap(allItems) }
         for i in allItems(menu) where !i.isSeparatorItem {

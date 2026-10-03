@@ -38,6 +38,10 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     /// 最小高变了（三档、裁切比例、路数变了布局）。
     var onMinimumHeightChange: (() -> Void)?
 
+    /// 格子 Overlay k 的右键"叠加设置…"（W5-K）。
+    var onOverlaySettings: ((Int) -> Void)? {
+        didSet { for c in cells.values { c.onOverlaySettings = onOverlaySettings } }
+    }
     let searchField = NSSearchField()
     let categoryBar = CategoryTagBar()
     let mixerToggle: NSButton
@@ -227,6 +231,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         let cell = InputCellView(config: config)
         cell.send = send
         cell.onOpenSettings = onOpenSettings
+        cell.onOverlaySettings = onOverlaySettings   // W5-K：Overlay 小按钮右键"叠加设置…"
         cell.onChangeSource = onChangeSource
         cell.onNotice = onNotice
         cell.onSetCategory = { [weak self] number, color in self?.setCategory(color, for: number) }

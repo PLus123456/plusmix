@@ -50,8 +50,13 @@ final class AppController {
         didSet { if oldValue != isDocumentEdited { windowController.window?.isDocumentEdited = isDocumentEdited } }
     }
 
-    /// 测试宿主的 UserDefaults suite。
-    static let testDefaultsSuite = "com.plusmix.switcher.tests"
+    /// 测试宿主的 UserDefaults suite：按这份构建所在的位置分开（每个 worktree 有自己的 DerivedData）。原来所有 worktree 共用一个 suite，
+    /// 几个会话同时跑 App 测试时，别的进程 freshSession 清"添加输入的本机记忆"会把这边正在用的键清掉（W5-K 实测：上次的类型 / 最近文件读回来是空的）。
+    static let testDefaultsSuite: String = {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325   // FNV-1a：同一个位置每次一样
+        for byte in Bundle.main.bundlePath.utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
+        return "com.plusmix.switcher.tests." + String(hash, radix: 36)
+    }()
 
     init(isTestHost: Bool) {
         self.isTestHost = isTestHost

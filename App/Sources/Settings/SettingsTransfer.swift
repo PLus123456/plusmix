@@ -91,6 +91,7 @@ enum SettingsTransfer {
         AppSettings.Keys.audioDevice, AppSettings.Keys.apiEnabled, AppSettings.Keys.apiListen, AppSettings.Keys.recordFallbackDirectory,
         AppSettings.Keys.recordMinimumFreeMB, AppSettings.Keys.compatLayerEnabled, AppSettings.Keys.compatLayerPort, AppSettings.Keys.compatLayerHost,
         AppSettings.Keys.overlaysInPreview, AppSettings.Keys.externalBehindInterface, AppSettings.Keys.confirmBeforeStop, "AppleLanguages",
+        AppSettings.Keys.busOutputMap, AppSettings.Keys.borrowMasterForMonitor,   // W5-K：每条总线的声道 / 借 Master（G7 合并时加进导出 / 导入 / 恢复默认）
     ]
 
     /// 恢复默认时清掉的键（包里的 + 访问令牌）。

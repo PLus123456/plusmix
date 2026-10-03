@@ -53,8 +53,15 @@ final class AccessibilityTests: XCTestCase {
         check("偏好设置", panels.showPreferences().window?.contentView)
         check("快捷键编辑器", panels.showHotkeyEditor().window?.contentView)
         check("MIDI 映射", panels.showMIDIMapping().window?.contentView)
-        wc.presentOverlayPanel(relativeTo: wc.bottomBar.overlayButton)
-        check("叠加面板", wc.overlayPanelController?.view)
+        // W5-K：叠加从底栏浮层改成独立的叠加设置窗（I1）；音频设置窗（J2）同样查一遍
+        let overlay = panels.showOverlaySettings(channel: 1)
+        for channel in 1...MixerState.overlayCount {
+            overlay.model.channel = channel
+            check("叠加设置 · \(channel)", overlay.window?.contentView)
+        }
+        for strip in [AudioStrip.bus(.master), .input(1)] {
+            check("音频设置 · \(strip)", panels.showAudioSettings(strip)?.window?.contentView)
+        }
         wc.transitionPanel.paramsButton.performClick(nil)   // W3-E2：转场参数弹出面板
         check("转场参数", wc.transitionPanel.paramsPopoverContentView)
         panels.closeAll()

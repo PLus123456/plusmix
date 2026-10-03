@@ -41,8 +41,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     private var statsToken: ObserverToken?
     private var noticeToken: ObserverToken?
     private var meterToken: ObserverToken?
-    /// 叠加面板（底栏右组"叠加"弹出，W5-F 起是 BottomBarPanel：贴按钮上沿、整块在窗口里）。
-    private var overlayPanel: BottomBarPanel?
     private var externalMenuBuilder: ExternalOutputMenuBuilder?
     /// 最近一次从底栏弹出的菜单（模态；测试开着时量位置、量完 cancelTracking）。
     private(set) var activeBottomMenu: NSMenu?
@@ -51,8 +49,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     private(set) var multiviewWindow: MultiviewWindowController?
     /// 新 ISO 路的默认录制目录（AppController 按测试宿主 / 正常设）。
     var defaultRecordDirectory: String = ShowDocuments.defaultRecordDirectory
-    /// 叠加面板（弹出期间存在；测试驱动它的模型）。
-    private(set) var overlayPanelController: OverlayPanelController?
     private var addInputSheet: AddInputSheetController?
     /// 面板总管（AppController 挂上来；输入设置窗 / 多画面 / 外部显示菜单从这里开）。
     weak var panels: PanelCoordinator?
@@ -224,7 +220,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         // 底栏（W5-F）：添加输入停在上次的类型 / ▴ 类型直达 + 最近添加；外部显示 ⚙ 路由菜单、主体全部开关；各 ⚙ 与菜单里的"…设置…"打开输出设置对应的页
         bottomBar.onAddInput = { [weak self] kind in self?.presentAddInput(kind: kind) }
         bottomBar.addInputMenu = { [weak self] in self?.addInputMenu() }
-        bottomBar.onOverlayPanel = { [weak self] anchor in self?.presentOverlayPanel(relativeTo: anchor) }
+        bottomBar.onOverlayPanel = { [weak self] _ in self?.panels?.showOverlaySettings(channel: nil) }   // 叠加设置独立窗（W5-K / I1，原来是 transient 浮层）
+        transitionPanel.onOverlaySettings = { [weak self] channel in self?.panels?.showOverlaySettings(channel: channel) }   // 右键"叠加设置…"直达第 k 路
+        inputStrip.onOverlaySettings = { [weak self] channel in self?.panels?.showOverlaySettings(channel: channel) }
         bottomBar.externalMenu = { [weak self] in self?.externalOutputMenu() }
         bottomBar.onExternalToggle = { [weak self] in self?.toggleExternalDisplays() ?? true }
         bottomBar.onMultiview = { [weak self] in self?.toggleMultiviewWindow() }
@@ -244,6 +242,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         inputStrip.onMinimumHeightChange = { [weak self] in self?.updateInputStripMinimum() }
         inputStrip.setMixerVisible(isMixerPanelVisible)
         mixerPanel.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
+        mixerPanel.onOpenAudioSettings = { [weak self] strip, page in self?.panels?.showAudioSettings(strip, page: page) }   // 条子齿轮 → 音频设置窗（W5-K / J2）
         mixerPanel.onMeters = { [weak self] levels in self?.inputStrip.applyAudioLevels(levels) }   // 纯音频输入格子的电平表
     }
 
@@ -259,7 +258,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         noticeToken = nil
         meterToken = nil
         self.session = session
-        overlayPanel?.close()   // 叠加面板的模型绑的是旧 session（W5-F 起它不像 NSPopover 那样碰一下别处就自己收）
         let send: ((Command) -> Void)? = session.map { s in { [weak s] c in s?.send(c) } }
         transitionPanel.send = send
         if let session { transitionPanel.hotkeyTable = session.control.hotkeyTable }
@@ -276,6 +274,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         multiviewWindow?.source = source
         bottomBar.resetStats()
         mixerPanel.clearMeters()
+        // 调音台头部：设备没有耳机声道时写明（W5-K / X09，音频设备页同一句）
+        mixerPanel.model.setOutputInfo(outputChannels: session?.audio.outputChannelCount, map: session?.audio.effectiveOutputMap)
         // 底栏主体按钮：起不来的原因 / 推流正在第几次连接（运行表）、重试起不来的那几路（W5-B）
         bottomBar.routeDetail = session.map { s in { [weak s] n in (s?.outputs.failureReason(output: n), s?.outputs.streamConnectAttempt(output: n)) } }
         bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }
@@ -345,7 +345,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         bottomBar.apply(state: state)
         mainToolbar.apply(state: state)
         refreshToolbarStatus()
-        overlayPanelController?.apply(state: state)
     }
 
     private func apply(stats: Stats) {
@@ -372,8 +371,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     /// 添加输入面板：kind = nil 停在上次添加用的类型（底栏主体、⌘I），给了就直达那一页（▴ / 菜单栏"按类型添加"，G1）。
     func presentAddInput(kind: AddInputModel.Kind? = nil) {
         guard let session, let window, addInputSheet == nil else { return }
-        let initial = kind ?? addInputHistory?.lastKind ?? .synthetic
-        let sheet = AddInputSheetController(state: session.state, maxInputs: session.engine.maxInputs, kind: initial) { [weak self, weak session] config in
+        let initial = kind ?? addInputHistory?.lastKind ?? AddInputHistory.defaultKind
+        let sheet = AddInputSheetController(state: session.state, maxInputs: session.engine.maxInputs, kind: initial, history: addInputHistory) { [weak self, weak session] config in
             session?.send(.addInput(config: config))
             self?.addInputHistory?.noteAdded(config)
         }
@@ -382,29 +381,6 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         window.beginSheet(sheetWindow) { [weak self] _ in
             MainActor.assumeIsolated { self?.addInputSheet = nil }
         }
-    }
-
-    func presentOverlayPanel(relativeTo anchor: NSView) {
-        guard let session else { return }
-        if let overlayPanel {
-            let wasOpen = overlayPanel.isVisible
-            overlayPanel.close()
-            if wasOpen { return }   // 再点一次 = 收起
-        }
-        let controller = OverlayPanelController(state: session.state)
-        controller.send = { [weak session] c in session?.send(c) }
-        // 内容尺寸 400 × min(640, 窗口内容高 − 120)：原来没设，NSPopover 把 400×640 的表单压进 320×320，每行标签头一两个字被裁（X63）
-        controller.preferredContentSize = BottomBarPopup.overlayPanelSize(windowContentHeight: window?.contentLayoutRect.height ?? 900)
-        // 朝上开、整块在窗口里（W5-A 原来用 NSPopover；W5-F 叠加挪到右组以后 NSPopover 以按钮为中心会伸出窗口右沿，换成 BottomBarPanel）
-        let panel = BottomBarPanel(content: controller)
-        panel.onClose = { [weak self, weak panel] in
-            guard let self, self.overlayPanel === panel else { return }
-            self.overlayPanel = nil
-            self.overlayPanelController = nil
-        }
-        panel.show(from: anchor)
-        overlayPanel = panel
-        overlayPanelController = controller
     }
 
     /// 外部显示路由菜单（底栏"⚙ 外部显示" / 菜单栏"输出 › 外部显示 ▸"都用它；93 的工具条正中也用这一个）。
@@ -446,7 +422,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     func addInputMenu() -> NSMenu? {
         let menu = NSMenu(title: L("menu.input.addByType"))
         menu.autoenablesItems = false
-        for kind in AddInputModel.Kind.allCases {
+        for kind in AddInputModel.Kind.displayOrder {   // 和添加面板左栏同一顺序（W5-K：分组，合成测试源在最后）
             menu.addItem(.action(L("addInputMenu.kind", kind.title)) { [weak self] in self?.presentAddInput(kind: kind) })
         }
         guard let session, let history = addInputHistory else { return menu }

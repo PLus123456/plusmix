@@ -22,6 +22,8 @@ final class InputCellView: NSView {
     var onSetCategory: ((Int, InputCategories.Color?) -> Void)?
     /// 状态行提示（转场进行中点了缩略图）。
     var onNotice: ((String) -> Void)?
+    /// 底行 Overlay k 小按钮的右键"叠加设置…"（W5-K / I1：直达第 k 路）。
+    var onOverlaySettings: ((Int) -> Void)?
     /// 删这一路会碰到的地方（InputStripView 按快照填；空 = 直接删，W5-B）。
     var removalImpacts: [InputRemovalImpact] = []
     let display = MetalDisplayView(frame: .zero)
@@ -105,6 +107,7 @@ final class InputCellView: NSView {
         for b in overlayButtons {
             b.action = #selector(overlayPressed(_:))
             b.setAccessibilityLabel(L("cell.overlay.a11y", b.tag))
+            b.menu = OverlaySettingsMenu.make(channel: b.tag, target: self, action: #selector(overlaySettingsPressed(_:)))
         }
         muteButton.action = #selector(mutePressed)
         gearButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: L("cell.gear.a11y", number))
@@ -319,8 +322,12 @@ final class InputCellView: NSView {
     private(set) var isOutsideMultiviewLayout = false
     private var runtime: InputState?
 
-    /// 纯音频输入（没有画面）：格子画占位，不画多画面格子。
-    var isAudioOnly: Bool { config.kind == .audio }
+    /// 纯音频输入（没有画面）：格子画占位，不画多画面格子。视频文件输入选的是 mp3 / wav / m4a / aac 也算（W5-K，04 Q57）。
+    var isAudioOnly: Bool {
+        if config.kind == .audio { return true }
+        if case .file(let path, _, _) = config.source { return MediaFileInfo.isAudioFile(path) }
+        return false
+    }
 
     /// 电平（推子后峰值 dBFS，[L, R]；nil = 没有读数）→ 占位里的表（-60 … 0 dBFS 线性映射到 0 … 1）。只对纯音频输入有意义。
     func applyAudioLevel(_ peakDb: [Double]?) {
@@ -515,6 +522,8 @@ final class InputCellView: NSView {
         guard channel >= 1, channel <= overlayButtons.count else { return nil }
         return overlayButtons[channel - 1].bezelColor != nil
     }
+
+    @objc private func overlaySettingsPressed(_ sender: NSMenuItem) { onOverlaySettings?(sender.tag) }
 
     @objc private func mutePressed() {
         guard Self.silenceReason(config) == nil else { return }

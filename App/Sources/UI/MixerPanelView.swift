@@ -6,6 +6,13 @@
 // 监听方式 / 总线效果链走提案 012 的 setMonitorMode / setBusEffects（P3 落地）；每路"跟随视频"= InputAudioSettings.afv（用户 2026-09-22 批），
 // 走 setInputSettings，门控显示读 AudioEngineStatus.afvGain（afv = false 的路引擎恒给 1 = 0 dB）。
 // W5-B（X06）：音频引擎还不读总线效果链（AudioEffectsSupport）：总线条的"效果"不亮计数、效果 sheet 顶部写"效果尚未作用到声音（本版本）"。
+// W5-K（prompt 97 交付 4，01a J2 / J3 / J6 / J7，02 X12 / X31，03 V-04）：
+// - 每条总线条顶部、每路输入条上的齿轮开独立的"音频设置 — Master / 输入 n"窗（AudioSettingsPanel），去掉挂在主窗口上的效果 sheet（开着时快捷键全失灵）；
+//   总线条的"效果 (n)"直达那扇窗的均衡页；输入条右键"输入设置…"仍开整窗。
+// - 布局：Master 条常驻最右、总线组（Bus A / Bus B / 耳机）固定在它左边、输入组在最左边横向滚动；输入组与总线组都可收起成一根竖条（X31：输入多时
+//   Master / 总线不再被挤出视野）；表头不折行（V-04）。设备没有耳机声道时表头写明（X09，音频设备页同一句）。
+// - Master 条："监听"（耳机里听哪条总线；现在只有耳机总线，听 Master / Bus A / B 要音频引擎支持——灰着写原因，问题单 W5K-w1-audio-monitor-selected-bus）
+//   与 i = 响度详情（瞬时 / 短期 / 积分 / LRA / 真峰值，读 Stats 1 Hz）。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -56,6 +63,24 @@ final class MixerMeters: ObservableObject {
     }
 }
 
+/// 一条总线的响度详情（Stats.audio.meters.buses[]，1 Hz；铁律 4：界面不另算）。
+struct LoudnessDetail: Equatable {
+    var momentary: Double
+    var shortTerm: Double
+    var integrated: Double
+    var range: Double
+    var truePeak: [Double]
+
+    /// 弹出层的五行（名字, 读数）。LUFS 到下限（静音）写 "—"。
+    var rows: [(label: String, value: String)] {
+        func lufs(_ v: Double) -> String { v <= Stats.AudioCounters.Meters.floorDb + 0.5 ? "—" : String(format: "%.1f LUFS", v) }
+        let tp = truePeak.max() ?? Stats.AudioCounters.Meters.floorDb
+        return [(L("mixer.loudness.momentary"), lufs(momentary)), (L("mixer.loudness.shortTerm"), lufs(shortTerm)),
+                (L("mixer.loudness.integrated"), lufs(integrated)), (L("mixer.loudness.range"), String(format: "%.1f LU", max(0, range))),
+                (L("mixer.loudness.truePeak"), tp <= Stats.AudioCounters.Meters.floorDb + 0.5 ? "—" : String(format: "%.1f dBTP", tp))]
+    }
+}
+
 /// 调音台的状态与动作。
 @MainActor
 final class MixerModel: ObservableObject {
@@ -63,6 +88,8 @@ final class MixerModel: ObservableObject {
     /// A1 计数 + Master 读数文字（Stats，1 Hz）。
     @Published private(set) var statsText = ""
     @Published private(set) var masterPeakText = "−∞ dBFS"
+    /// 每条总线的响度详情（Stats，1 Hz；Master 条的 i，J7 / V08）。
+    @Published private(set) var loudness: [Bus: LoudnessDetail] = [:]
     var send: ((Command) -> Void)?
     var onOpenInputSettings: ((Int) -> Void)?
 
@@ -73,7 +100,11 @@ final class MixerModel: ObservableObject {
 
     var inputNumbers: [Int] { state.inputs.map(\.number) }
 
-    func apply(state: MixerState) { self.state = state }
+    /// 快照来了：调音台只用输入表与音频状态，转场进度 / 叠加动画这些每拍都变的字段不触发重画（W5-K；主窗口每帧重画会拖慢点击，W5-F 的坑）。
+    func apply(state: MixerState) {
+        guard state.inputs != self.state.inputs || state.audio != self.state.audio else { return }
+        self.state = state
+    }
 
     func apply(stats: Stats) {
         let a = stats.audio
@@ -83,6 +114,12 @@ final class MixerModel: ObservableObject {
         } else {
             masterPeakText = "−∞ dBFS"
         }
+        var details: [Bus: LoudnessDetail] = [:]
+        for m in a.meters.buses {
+            guard let bus = Bus.allCases.first(where: { $0.name == m.bus }) else { continue }
+            details[bus] = LoudnessDetail(momentary: m.lufsM, shortTerm: m.lufsS, integrated: m.lufsI, range: m.lra, truePeak: m.truePeakDb)
+        }
+        if details != loudness { loudness = details }
     }
 
     /// "−20.1 dBFS"（取 L / R 的最大值）；静音显示 −∞。
@@ -150,7 +187,7 @@ final class MixerModel: ObservableObject {
         applied ? L("mixer.effects", count) : L("mixer.effectsInactive")
     }
     func busEffectsButtonTitle(_ bus: Bus) -> String { Self.busEffectsButtonTitle(count: busState(bus).effects.count) }
-    /// 总线效果 sheet 顶部的横幅（没接上时）。
+    /// 总线效果页顶部的横幅（没接上时）。
     var busEffectsBanner: String? { AudioEffectsSupport.banner(applied: AudioEffectsSupport.busEffectsApplied) }
 
     /// 总线效果链（提案 012 的 setBusEffects）。
@@ -168,6 +205,48 @@ final class MixerModel: ObservableObject {
     }
 
     func busState(_ bus: Bus) -> BusState { state.audio.buses.first { $0.bus == bus } ?? BusState(bus: bus) }
+
+    // MARK: 音频设置窗与设备声道（W5-K）
+
+    /// 条子上的齿轮：打开这一条的"音频设置"窗（page = 直达哪一页）。
+    var onOpenAudioSettings: ((AudioStrip, AudioSettingsPage?) -> Void)?
+    func openAudioSettings(_ strip: AudioStrip, page: AudioSettingsPage? = nil) { onOpenAudioSettings?(strip, page) }
+
+    /// 输入组 / 总线组展开着（收起 = 一根竖条；X31）。Master 条常驻，不收。
+    @Published var inputsExpanded = true
+    @Published var busesExpanded = false
+
+    /// 调音台头部的提示（设备没有耳机声道，X09）。
+    @Published private(set) var headerHint: String?
+    /// 现在的输出设备有几个声道（空设备 / 不知道为 nil）与每条总线的出口（AudioRuntime 建引擎时用的那一份）。
+    func setOutputInfo(outputChannels: Int?, map: BusOutputMap?) {
+        let hint = Self.headphonesHint(outputChannels: outputChannels, map: map)
+        if hint != headerHint { headerHint = hint }
+    }
+
+    /// 设备只有 2 个（或更少）输出声道、耳机总线又没占 Master 的声道：耳机 / 独听 / PFL 都听不到（X09）。空设备不提示。
+    static func headphonesHint(outputChannels: Int?, map: BusOutputMap?) -> String? {
+        guard let channels = outputChannels, channels > 0 else { return nil }
+        if let hp = map?.headphones, hp + 1 < channels { return nil }
+        guard channels <= 2 else { return nil }
+        return L("audioDevice.noHeadphoneChannels")
+    }
+
+    // MARK: 监听这条（J7；引擎侧要 W1-D 系支持）
+
+    /// 耳机里现在听的是哪条总线：引擎只有耳机总线自己（独听 / PFL / AFL 都在它上面）。
+    private(set) var listenBus: Bus = .headphones
+    /// 能不能让耳机听别的总线（Master / Bus A / Bus B）：要音频引擎支持，这一版还不能（问题单 W5K-w1-audio-monitor-selected-bus）。
+    static let listenToOtherBusSupported = false
+
+    /// 选耳机里听哪条总线；引擎不支持的不换，返回 false（菜单里那几项本来就灰着、写了原因）。
+    @discardableResult
+    func listen(_ bus: Bus) -> Bool {
+        guard bus == .headphones || Self.listenToOtherBusSupported else { return false }
+        listenBus = bus
+        objectWillChange.send()
+        return true
+    }
 }
 
 /// AppKit 容器：主窗口右栏；SwiftUI 内容。表的 50 ms 读数由 session 的 AudioMeterFeed 推过来（MainWindowController 接线）。
@@ -180,6 +259,10 @@ final class MixerPanelView: NSView {
     }
     var onOpenInputSettings: ((Int) -> Void)? {
         didSet { model.onOpenInputSettings = onOpenInputSettings }
+    }
+    /// 齿轮：打开音频设置窗（W5-K）。
+    var onOpenAudioSettings: ((AudioStrip, AudioSettingsPage?) -> Void)? {
+        didSet { model.onOpenAudioSettings = onOpenAudioSettings }
     }
     private let host: NSHostingView<MixerView>
     /// 最近一次从 Stats 读到的 Master 峰值（dBFS，[L, R]；nil = 还没有）。测试看。
@@ -207,7 +290,7 @@ final class MixerPanelView: NSView {
 
     func apply(state: MixerState) { model.apply(state: state) }
 
-    /// 1 Hz：读数文字 + A1。
+    /// 1 Hz：读数文字 + A1 + 响度详情。
     func apply(stats: Stats) {
         model.apply(stats: stats)
         masterPeakDb = stats.audio.meters.buses.first { $0.bus == Bus.master.name }?.peakDb
@@ -231,27 +314,31 @@ final class MixerPanelView: NSView {
 
 // MARK: - SwiftUI
 
+/// 总线条的宽（比输入条窄：没有声像 / 送出；Master + 三条总线在 340 pt 的调音台里放得下，X31）。
+let mixerBusStripWidth: CGFloat = 64
+
 struct MixerView: View {
     @ObservedObject var model: MixerModel
     @ObservedObject var meters: MixerMeters
-    @State private var effectsBus: Bus?
 
     var body: some View {
         VStack(spacing: 6) {
-            header
-            Divider()
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 6) {
-                    ForEach(model.state.inputs) { input in
-                        MixerInputStrip(model: model, meters: meters, input: input)
-                    }
-                    if !model.state.inputs.isEmpty { Divider().frame(height: 300) }
-                    ForEach(Bus.allCases, id: \.self) { bus in
-                        MixerBusStrip(model: model, meters: meters, bus: bus) { effectsBus = bus }
-                    }
-                }
-                .padding(.horizontal, 6)
+            MixerHeaderView(model: model)
+            if let hint = model.headerHint {
+                Label(hint, systemImage: "headphones")
+                    .font(.caption).foregroundStyle(.orange)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .help(L("audioDevice.noHeadphoneChannelsHelp"))
             }
+            Divider()
+            HStack(alignment: .top, spacing: 4) {
+                inputGroup
+                Divider().frame(height: 300)
+                busGroup
+                MixerBusStrip(model: model, meters: meters, bus: .master)   // Master 常驻、固定在最右（X31）
+            }
+            .padding(.horizontal, 6)
             Divider()
             HStack {
                 Text(model.masterPeakText).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
@@ -264,23 +351,68 @@ struct MixerView: View {
             .padding(.bottom, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)   // 内容贴顶（V-03：原来垂直居中，上下各空约 250 pt）
-        .sheet(item: $effectsBus) { bus in
-            BusEffectsSheet(model: model, bus: bus)
+    }
+
+    /// 输入组：横向滚动；收起 = 一根竖条（点了展开）。
+    @ViewBuilder
+    private var inputGroup: some View {
+        if model.inputsExpanded {
+            VStack(spacing: 2) {
+                GroupToggle(title: L("mixer.group.inputs", model.state.inputs.count), expanded: true) { model.inputsExpanded = false }
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 6) {
+                        ForEach(model.state.inputs) { input in
+                            MixerInputStrip(model: model, meters: meters, input: input)
+                        }
+                        if model.state.inputs.isEmpty {
+                            Text(L("mixer.noInputs")).font(.caption).foregroundStyle(.secondary).frame(width: 92)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            CollapsedGroupBar(title: L("mixer.group.inputs", model.state.inputs.count)) { model.inputsExpanded = true }
         }
     }
 
-    private var header: some View {
+    /// 总线组（Bus A / Bus B / 耳机）：固定在 Master 左边，不随输入滚动；收起 = 一根竖条。
+    @ViewBuilder
+    private var busGroup: some View {
+        if model.busesExpanded {
+            VStack(spacing: 2) {
+                GroupToggle(title: L("mixer.group.buses"), expanded: true) { model.busesExpanded = false }
+                HStack(alignment: .top, spacing: 4) {
+                    ForEach([Bus.busA, .busB, .headphones], id: \.self) { bus in
+                        MixerBusStrip(model: model, meters: meters, bus: bus)
+                    }
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        } else {
+            CollapsedGroupBar(title: L("mixer.group.buses")) { model.busesExpanded = true }
+        }
+    }
+}
+
+/// 调音台表头：标题 + AFV 总开关 + 监听方式；不折行（V-04：原来"监听"折成两行、窄的时候"调音台"也折、"AFV"消失）。
+struct MixerHeaderView: View {
+    @ObservedObject var model: MixerModel
+
+    var body: some View {
         HStack(spacing: 8) {
-            Text(L("mixer.title")).font(.system(size: 13, weight: .semibold))
-            Spacer()
+            Text(L("mixer.title")).font(.system(size: 13, weight: .semibold)).lineLimit(1).fixedSize()
+            Spacer(minLength: 4)
             Toggle(L("mixer.afv"), isOn: Binding(get: { model.state.audio.afv }, set: { model.setAFV(on: $0) }))
                 .toggleStyle(.switch).controlSize(.mini)
+                .fixedSize()
                 .help(L("mixer.afvHelp"))
             Picker(L("mixer.monitor"), selection: Binding(get: { model.state.audio.monitorMode }, set: { model.setMonitorMode($0) })) {
                 Text("AFL").tag(MonitorMode.afl)
                 Text("PFL").tag(MonitorMode.pfl)
             }
-            .pickerStyle(.segmented).controlSize(.mini).frame(width: 90)
+            .labelsHidden()
+            .pickerStyle(.segmented).controlSize(.mini).frame(width: 84)
             .help(L("mixer.monitorHelp"))
         }
         .padding(.horizontal, 8)
@@ -288,8 +420,66 @@ struct MixerView: View {
     }
 }
 
+/// 组标题（展开时）：名字 + 收起箭头。
+private struct GroupToggle: View {
+    let title: String
+    let expanded: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { label }
+            .accessibilityLabel(L("mixer.group.collapse", title))
+            .buttonStyle(.plain)
+            .help(L("mixer.group.collapse", title))
+    }
+
+    private var label: some View {
+        HStack(spacing: 3) {
+            Image(systemName: expanded ? "chevron.left" : "chevron.right").font(.system(size: 8, weight: .bold))
+            Text(title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+    }
+}
+
+/// 组收起后的竖条：点了展开。
+private struct CollapsedGroupBar: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { label }
+            .accessibilityLabel(L("mixer.group.expand", title))
+            .buttonStyle(.plain)
+            .help(L("mixer.group.expand", title))
+    }
+
+    private var label: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+            Text(title).font(.system(size: 10, weight: .semibold)).fixedSize().rotationEffect(.degrees(-90)).frame(width: 14, height: 120)
+        }
+        .frame(width: 20, height: 300)
+        .foregroundStyle(.secondary)
+        .background(Color(nsColor: Theme.cellBackground), in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
 extension Bus: @retroactive Identifiable {
     public var id: Int { rawValue }
+}
+
+/// 条子顶部的齿轮（开这一条的音频设置窗）。
+private struct StripGear: View {
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { Image(systemName: "gearshape").font(.system(size: 10)) }
+            .accessibilityLabel(label)
+            .buttonStyle(.borderless)
+            .help(label)
+    }
 }
 
 /// 一路输入的条子。
@@ -302,7 +492,12 @@ struct MixerInputStrip: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("\(input.number) \(input.name)").font(.system(size: 11, weight: .semibold)).lineLimit(1).frame(width: 84)
+            HStack(spacing: 2) {
+                Text("\(input.number) \(input.name)").font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Spacer(minLength: 0)
+                StripGear(label: L("mixer.audioSettingsOf", L("audioSettings.inputTitle", input.number))) { model.openAudioSettings(.input(input.number)) }
+            }
+            .frame(width: 84)
             HStack(spacing: 4) {
                 MeterBar(peakDb: meters.inputPeakDb[input.number], rmsDb: meters.inputRmsDb[input.number])
                 VerticalFader(value: audio.gainDb, range: MixerModel.faderRange, label: L("mixer.inputFader", input.number)) { model.setInputGain(input.number, dB: $0) }
@@ -328,11 +523,14 @@ struct MixerInputStrip: View {
                 .toggleStyle(.button).controlSize(.mini)
                 .help(L("mixer.followVideoHelp"))
             afvIndicator
-            Button(L("mixer.inputSettings")) { model.onOpenInputSettings?(input.number) }.controlSize(.mini)
         }
         .frame(width: 92)
         .padding(4)
         .background(Color(nsColor: Theme.cellBackground), in: RoundedRectangle(cornerRadius: 4))
+        .contextMenu {
+            Button(L("mixer.audioSettingsOf", L("audioSettings.inputTitle", input.number))) { model.openAudioSettings(.input(input.number)) }
+            Button(L("mixer.inputSettings")) { model.onOpenInputSettings?(input.number) }
+        }
     }
 
     private var afvIndicator: some View {
@@ -341,66 +539,92 @@ struct MixerInputStrip: View {
     }
 }
 
-/// 一条总线的条子。
+/// 一条总线的条子（比输入条窄）：齿轮、表 + 推子、读数、LUFS、静音、效果 (n)；Master 另有监听与响度详情。
 struct MixerBusStrip: View {
     @ObservedObject var model: MixerModel
     @ObservedObject var meters: MixerMeters
     let bus: Bus
-    let onEffects: () -> Void
+    @State private var showingLoudness = false
 
     var body: some View {
         let s = model.busState(bus)
         VStack(spacing: 4) {
-            Text(L("bus.\(bus.name)")).font(.system(size: 11, weight: .semibold)).frame(width: 84)
+            HStack(spacing: 1) {
+                Text(L("bus.\(bus.name)")).font(.system(size: 11, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+                StripGear(label: L("mixer.audioSettingsOf", L("bus.\(bus.name)"))) { model.openAudioSettings(.bus(bus)) }
+            }
+            .frame(width: mixerBusStripWidth - 4)
             HStack(spacing: 4) {
                 MeterBar(peakDb: meters.busPeakDb[bus], rmsDb: meters.busRmsDb[bus])
                 VerticalFader(value: s.gainDb, range: MixerModel.faderRange, label: L("mixer.busFader", L("bus.\(bus.name)"))) { model.setBusGain(bus, dB: $0) }
             }
             .frame(height: 170)
-            Text(MixerModel.gainText(s.gainDb)).font(.system(size: 10, design: .monospaced))
+            Text(MixerModel.gainText(s.gainDb)).font(.system(size: 10, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.8)
             Text(meters.busLoudnessLUFS[bus].map { $0 > -100 ? String(format: "%.1f LUFS", $0) : "— LUFS" } ?? "— LUFS")
-                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).help(L("mixer.lufsHelp"))
+                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7).help(L("mixer.lufsHelp"))
             Toggle(L("mixer.mute"), isOn: Binding(get: { s.muted }, set: { model.setBusMute(bus, on: $0) }))
                 .toggleStyle(.button).controlSize(.mini)
-            Button(model.busEffectsButtonTitle(bus)) { onEffects() }.controlSize(.mini)
+            Button(model.busEffectsButtonTitle(bus)) { model.openAudioSettings(.bus(bus), page: .eq) }.controlSize(.mini)
                 .accessibilityLabel(L("mixer.busEffectsTitle", L("bus.\(bus.name)")))
                 .foregroundStyle(model.busEffectsBanner == nil ? HierarchicalShapeStyle.primary : .secondary)
-                .help(model.busEffectsBanner.map { $0 + "\n" + L("effects.notEffectiveHelp") } ?? "")
+                .help(model.busEffectsBanner.map { $0 + "\n" + L("effects.notEffectiveHelp") } ?? L("mixer.busEffectsHint"))
+            if bus == .master { masterExtras }
         }
-        .frame(width: 92)
+        .frame(width: mixerBusStripWidth)
         .padding(4)
         .background(Color(nsColor: Theme.cellBackground), in: RoundedRectangle(cornerRadius: 4))
     }
-}
 
-/// 总线效果链的 sheet。
-struct BusEffectsSheet: View {
-    @ObservedObject var model: MixerModel
-    let bus: Bus
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                if let banner = model.busEffectsBanner {
-                    Section {
-                        Text(banner).font(.headline).foregroundStyle(.orange)
-                        Text(L("effects.notEffectiveHelp")).font(.caption).foregroundStyle(.secondary)
+    /// Master 条：监听（耳机里听哪条总线）+ i（响度详情）。
+    private var masterExtras: some View {
+        HStack(spacing: 2) {
+            Menu {
+                Button(L("mixer.listen.headphones")) { model.listen(.headphones) }
+                Section(L("mixer.listen.unsupportedHeader")) {
+                    ForEach([Bus.master, .busA, .busB], id: \.self) { bus in
+                        Button(L("bus.\(bus.name)")) { model.listen(bus) }.disabled(!MixerModel.listenToOtherBusSupported)
                     }
                 }
-                EffectChainView(editor: Binding(get: { EffectChainEditor(slots: model.busState(bus).effects) }, set: { model.setBusEffects(bus, $0.slots) }))
-                Text(L("mixer.busEffectsHint")).font(.caption).foregroundStyle(.secondary)
+            } label: {
+                Image(systemName: "headphones")
             }
-            .formStyle(.grouped)
-            Divider()
-            HStack {
-                Text(L("mixer.busEffectsTitle", L("bus.\(bus.name)"))).font(.headline)
-                Spacer()
-                Button(L("common.done")) { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(10)
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel(L("mixer.listen"))
+            .help(L("mixer.listenHelp"))
+            Button { showingLoudness.toggle() } label: { Image(systemName: "info.circle") }
+                .accessibilityLabel(L("mixer.loudness.title"))
+                .buttonStyle(.borderless)
+                .help(L("mixer.loudness.title"))
+                .popover(isPresented: $showingLoudness, arrowEdge: .leading) { LoudnessDetailView(model: model, bus: bus) }
         }
-        .frame(width: 420, height: 520)
+    }
+}
+
+/// 响度详情（J7 / V08）：瞬时 / 短期 / 积分 / LRA / 真峰值，读 Stats（1 Hz）。积分复位要不要进命令待定（02 V08），这一版没有复位。
+struct LoudnessDetailView: View {
+    @ObservedObject var model: MixerModel
+    let bus: Bus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("mixer.loudness.heading", L("bus.\(bus.name)"))).font(.headline)
+            if let detail = model.loudness[bus] {
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
+                    ForEach(Array(detail.rows.enumerated()), id: \.offset) { _, row in
+                        GridRow {
+                            Text(row.label).foregroundStyle(.secondary)
+                            Text(row.value).font(.system(.body, design: .monospaced))
+                        }
+                    }
+                }
+            } else {
+                Text(L("mixer.loudness.none")).foregroundStyle(.secondary)
+            }
+            Text(L("mixer.loudness.hint")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 260)
     }
 }
 

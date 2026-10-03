@@ -3,6 +3,7 @@
 // 换 session 时输入设置窗关掉（模型绑的是旧 session 的那一路）；设置窗不关，只重绑（输出页换成新 session 的模型、格式 / 节目音频重读，W5-B X04 / W5-J F1）。
 // 老入口 showPreferences() / showOutputSettings(tab:) / showHotkeyEditor() / showMIDIMapping() 与 xxxWindow 属性照用：返回设置窗里那一页的句柄。
 // 多画面窗口 / 外部显示窗口是 W3-C 的（G4 合并时以 W3-C 的运行表为准）：
+// W5-K（97）加叠加设置窗（一个）与音频设置窗（每条总线 / 每路输入一个）；输入设置 / 叠加设置 / 音频设置窗在前时，没被文本框吃掉的按键照样走快捷键表（X12，forwardHotkeys）。
 // 多画面 = MainWindowController.multiviewWindow，外部显示窗口 = AuxOutputRuntime.external 跟着快照里的 externalDisplay 输出开关
 // （设置面板 / 菜单加输出 → 开窗口；用户关窗口 → removeOutput）；这里只留 showMultiview 转调。
 import AppKit
@@ -16,6 +17,10 @@ final class PanelCoordinator: NSObject {
     private(set) var inputSettingsWindows: [Int: InputSettingsWindowController] = [:]
     /// 设置窗（没开为 nil）。
     private(set) var settingsWindow: SettingsWindowController?
+    /// 叠加设置窗（W5-K）。
+    private(set) var overlaySettingsWindow: OverlaySettingsWindowController?
+    /// 音频设置窗（每条一个，W5-K）。
+    private(set) var audioSettingsWindows: [AudioStrip: AudioSettingsWindowController] = [:]
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
     private var session: SwitcherSession?
@@ -36,6 +41,11 @@ final class PanelCoordinator: NSObject {
         statsToken = nil
         for (_, w) in inputSettingsWindows { w.close() }
         inputSettingsWindows.removeAll()
+        overlaySettingsWindow?.close()   // 叠加 / 音频设置窗的模型绑的是旧 session（W5-K）
+        overlaySettingsWindow = nil
+        lastOverlayChannel = 1           // 换了节目从 Overlay 1 开始
+        for (_, w) in audioSettingsWindows { w.close() }
+        audioSettingsWindows.removeAll()
         self.session = session
         linkage.reset()
         guard let session else { state = MixerState(); return }
@@ -53,6 +63,10 @@ final class PanelCoordinator: NSObject {
             if state.input(number) == nil { w.close(); inputSettingsWindows.removeValue(forKey: number) } else { w.apply(state: state) }
         }
         settingsWindow?.model.outputs.apply(state: state)
+        overlaySettingsWindow?.apply(state: state)
+        for (strip, w) in audioSettingsWindows {
+            if case .input(let n) = strip, state.input(n) == nil { w.close(); audioSettingsWindows.removeValue(forKey: strip) } else { w.apply(state: state) }
+        }
     }
 
     // MARK: 设置（W5-J）
@@ -197,6 +211,9 @@ final class PanelCoordinator: NSObject {
         let model = InputSettingsModel(config: config)
         model.send = { [weak session] c in session?.send(c) }
         let w = InputSettingsWindowController(model: model)
+        w.attach(source: session.displaySource, format: session.format)   // 本路画面：多画面纹理裁这一格（W5-K / H3）
+        w.apply(state: state.input(number) != nil ? state : session.state)
+        forwardHotkeys(w)
         w.onClose = { [weak self] in self?.inputSettingsWindows.removeValue(forKey: number) }
         // 这一路没存过位置（居中摆的）、又已经开着别的输入设置窗：错开放在最近那个的右下，不叠在一起（X44）
         if !w.restoredSavedFrame, let last = inputSettingsWindows.values.compactMap(\.window).filter(\.isVisible).max(by: { $0.orderedIndex > $1.orderedIndex }) {
@@ -207,6 +224,61 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
+    /// 设置类窗口在前时，没被文本框吃掉的按键照样走快捷键表（02 X12：原来只有主窗口是 key 时才派发，输入设置 / 叠加 / 音频设置窗在前按空格不切）。
+    private func forwardHotkeys(_ w: PanelWindowController) {
+        (w.window as? PanelWindow)?.keyHandler = { [weak self] event in self?.session?.control.handleKey(event) ?? false }
+    }
+
+    // MARK: 叠加设置窗 / 音频设置窗（W5-K）
+
+    /// 叠加设置窗（I1）：只有一个；channel = 直达第 k 路（转场列 / 格子的右键），nil = 停在上次那一路（底栏"叠加…"）。已经开着就置前、切通道。
+    @discardableResult
+    func showOverlaySettings(channel: Int?) -> OverlaySettingsWindowController {
+        if let w = overlaySettingsWindow {
+            if let channel { w.model.channel = channel }
+            w.present()
+            return w
+        }
+        let model = OverlaySettingsModel(state: session?.state ?? state, channel: channel ?? lastOverlayChannel)
+        model.send = { [weak self] c in self?.session?.send(c) }
+        let w = OverlaySettingsWindowController(model: model)
+        forwardHotkeys(w)
+        w.onClose = { [weak self, weak w] in
+            if let w { self?.lastOverlayChannel = w.model.channel }
+            self?.overlaySettingsWindow = nil
+        }
+        overlaySettingsWindow = w
+        w.present()
+        return w
+    }
+
+    /// 叠加设置窗上次停在哪一路（关了再从底栏开，还是那一路；换节目回到 1）。
+    private var lastOverlayChannel = 1
+
+    /// 音频设置窗（J2 / J3）：每条总线 / 每路输入一个，同一条再点 = 置前（page 给了就切到那一页）。表读调音台同一份 50 ms 读数。
+    @discardableResult
+    func showAudioSettings(_ strip: AudioStrip, page: AudioSettingsPage? = nil) -> AudioSettingsWindowController? {
+        guard let session else { return nil }
+        if case .input(let n) = strip, state.input(n) == nil, session.state.input(n) == nil { return nil }
+        if let w = audioSettingsWindows[strip] {
+            if let page, w.model.pages.contains(page) { w.model.page = page }
+            w.present()
+            return w
+        }
+        let model = AudioSettingsModel(strip: strip, state: session.state, page: page ?? .general)
+        model.send = { [weak session] c in session?.send(c) }
+        model.onOpenInputSettings = { [weak self] n in self?.showInputSettings(input: n) }
+        let w = AudioSettingsWindowController(model: model, meters: controller.windowController.mixerPanel.meters)
+        forwardHotkeys(w)
+        w.onClose = { [weak self] in self?.audioSettingsWindows.removeValue(forKey: strip) }
+        // 没存过位置、又已经开着别的音频设置窗：错开放（同输入设置窗，X44）
+        if !w.restoredSavedFrame, let last = audioSettingsWindows.values.compactMap(\.window).filter(\.isVisible).max(by: { $0.orderedIndex > $1.orderedIndex }) {
+            w.window?.setFrameTopLeftPoint(NSPoint(x: last.frame.minX + 24, y: last.frame.maxY - 24))
+        }
+        audioSettingsWindows[strip] = w
+        w.present()
+        return w
+    }
     // MARK: 多画面（W3-C 的窗口；窗口菜单 / 底栏走 MainWindowController.toggleMultiviewWindow）
 
     /// 显示多画面窗口（已显示就不动）。
@@ -220,6 +292,10 @@ final class PanelCoordinator: NSObject {
         inputSettingsWindows.removeAll()
         settingsWindow?.close()   // 程序收尾：不问（没存的快捷键 / MIDI 改动丢掉）
         settingsWindow = nil
+        overlaySettingsWindow?.close()
+        overlaySettingsWindow = nil
+        for (_, w) in audioSettingsWindows { w.close() }
+        audioSettingsWindows.removeAll()
         if controller.windowController.isMultiviewWindowVisible { controller.windowController.toggleMultiviewWindow() }
     }
 }

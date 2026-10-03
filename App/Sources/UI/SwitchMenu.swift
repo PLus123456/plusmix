@@ -48,6 +48,8 @@ final class SwitchMenuController: NSObject, NSMenuDelegate {
         overlay.submenu = overlayMenu
         menu.addItem(overlay)
         for item in overlayItems { overlayMenu.addItem(item) }
+        overlayMenu.addItem(.separator())
+        overlayMenu.addItem(NSMenuItem(title: L("overlay.settingsMenuItem"), action: #selector(AppDelegate.showOverlaySettings(_:)), keyEquivalent: ""))   // W5-K：叠加设置窗
         refresh()
     }
 

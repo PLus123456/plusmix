@@ -20,6 +20,8 @@ final class TransitionPanelView: NSView {
     }
     /// 底栏提示（Overlay 空通道又没有 PVW 可用时说一句）。
     var onNotice: ((String) -> Void)?
+    /// Overlay k 的右键"叠加设置…"：打开叠加设置窗并停在第 k 路（W5-K / I1）。
+    var onOverlaySettings: ((Int) -> Void)?
     /// 当前快捷键表：按钮提示从它反查（换 session / 快捷键编辑器保存时设）。
     var hotkeyTable: HotkeyTable = .default {
         didSet { refreshTooltips() }
@@ -103,6 +105,7 @@ final class TransitionPanelView: NSView {
             b.tag = i + 1
             b.target = self
             b.action = #selector(overlayPressed(_:))
+            b.menu = OverlaySettingsMenu.make(channel: i + 1, target: self, action: #selector(overlaySettingsPressed(_:)))
         }
         // 两档控件：次要控件 small 20 pt、配 small 字号 11 pt（原来只改 controlSize、字还是 13 pt，字挤）
         let smallFont = NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))
@@ -417,6 +420,8 @@ final class TransitionPanelView: NSView {
         popover.show(relativeTo: paramsButton.bounds, of: paramsButton, preferredEdge: .maxX)
         paramsPopover = popover
     }
+
+    @objc private func overlaySettingsPressed(_ sender: NSMenuItem) { onOverlaySettings?(sender.tag) }
 
     /// Overlay n（菜单栏"切换 › Overlay ▸"同一口径，OverlayToggle）。
     @objc private func overlayPressed(_ sender: NSButton) {

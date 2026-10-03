@@ -6,6 +6,8 @@
 // 记成"待应用"（pendingRestart = 想要的 ≠ 跑着的 session 用的），集中到页底"应用并重起引擎"，录制 / 推流在跑先确认（87 的 confirmEngineRestart）。
 // 换完引擎窗不关，格式 / 节目音频按新 session 重读（rebind）。旧的 apply / applyProgramFormat / applyShowAudio / applyAndRestart 还在（用例与内部调用）。
 // API 的监听地址"仅本机 / 允许局域网"是 98 的远程控制页；这里的"高级"页先能填 host:port。
+// W5-K（97）："音频设备"页 = AudioOutputSettingsSection（设备 + 每条总线选声道对，AudioOutputSettingsModel），G7 合并时从偏好设置长表单搬进本机 › 音频设备；
+// 模型改了（选设备 / 声道 / 借 Master）按即时生效提交（bindAudioOutput）。
 import AppKit
 import Metal
 import SwiftUI
@@ -16,11 +18,6 @@ import VMixCompat
 
 @MainActor
 final class PreferencesModel: ObservableObject {
-    struct AudioDeviceChoice: Identifiable, Hashable {
-        let id: String
-        let title: String
-        let device: AppSettings.AudioDevice
-    }
     struct LanguageChoice: Identifiable, Hashable {
         let id: String
         let title: String
@@ -61,7 +58,6 @@ final class PreferencesModel: ObservableObject {
     @Published var apiHost: String { didSet { syncAPIListenText(); commit() } }
     @Published var apiPort: Int { didSet { syncAPIListenText(); commit() } }
     @Published var apiToken: String { didSet { commit() } }
-    @Published var audioDevice: AppSettings.AudioDevice { didSet { commit() } }
     @Published var compatLayerEnabled: Bool { didSet { commit() } }
     @Published var compatLayerPort: Int { didSet { syncCompatListenText(); commit() } }
     /// 兼容层的监听地址（HTTP 与 TCP 共用，W5-J 起可填；默认只听本机）。
@@ -85,7 +81,6 @@ final class PreferencesModel: ObservableObject {
     /// 要重起引擎才生效、还没生效的项（按 PendingRestart 的顺序）。
     @Published private(set) var pendingRestart: [PendingRestart] = []
     @Published private(set) var status = ""
-    let audioDeviceChoices: [AudioDeviceChoice]
     let languageChoices: [LanguageChoice]
     /// 更新一节（W4-B，Sparkle）：是否配置了更新源、上次检查时间、自动检查开关（即时写回 Sparkle）。
     let updatesConfigured: Bool
@@ -94,18 +89,24 @@ final class PreferencesModel: ObservableObject {
         didSet { if !loading, updatesConfigured { controller.updateController.automaticallyChecksForUpdates = automaticUpdates } }
     }
     private unowned let controller: AppController
+    /// 音频设备与每条总线的声道（W5-K，J8）；导入设置 / 恢复默认后按 AppController.settings 重建（reloadMachineSettings）。
+    @Published private(set) var audioOutput: AudioOutputSettingsModel
     /// 确认 sheet 挂在哪个窗口上（设置窗设）。
     weak var presentingWindow: NSWindow?
     /// 读初值 / 重读时不提交。
     private var loading = true
     /// 监听地址框与 host / port 互相同步时不再回写。
     private var syncingListen = false
+    /// 音频设备模型（W5-K）改了（选设备 / 声道 / 借 Master）就按即时生效提交；重建模型（reloadMachineSettings）时再绑一次。
+    private var audioOutputToken: AnyCancellable?
 
     /// 兼容层的法律提示（设计方案 §0、§9.3：独立模块、默认关、发布前问律师）。
     static var compatLegalNotice: String { L("prefs.compat.legal") }
 
     init(controller: AppController) {
         self.controller = controller
+        audioOutput = AudioOutputSettingsModel(device: controller.settings.audioDevice, map: controller.settings.busOutputMap,
+                                               borrowMasterForMonitor: controller.settings.borrowMasterForMonitor)
         updatesConfigured = controller.updateController.isConfigured
         updateStatus = controller.updateController.statusText
         automaticUpdates = controller.updateController.automaticallyChecksForUpdates
@@ -118,7 +119,6 @@ final class PreferencesModel: ObservableObject {
         apiHost = s.apiHost
         apiPort = s.apiPort
         apiToken = s.apiToken ?? ""
-        audioDevice = s.audioDevice
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
         compatLayerHost = s.compatLayerHost
@@ -134,23 +134,21 @@ final class PreferencesModel: ObservableObject {
         monitorPoint = audio.monitorPoint
         let languages = controller.defaults.stringArray(forKey: "AppleLanguages")
         language = languages?.first.flatMap { code in L10n.supportedLanguages.contains(code) ? code : nil } ?? Self.systemLanguage
-        var choices = [AudioDeviceChoice(id: "default", title: L("prefs.audio.systemDefault"), device: .systemDefault),
-                       AudioDeviceChoice(id: "null", title: L("prefs.audio.null"), device: .null)]
-        for d in AudioHAL.devices() where d.outputChannels > 0 {
-            choices.append(AudioDeviceChoice(id: "name:" + d.name, title: d.name, device: .named(d.name)))
-        }
-        if case .named(let n) = s.audioDevice, !choices.contains(where: { $0.device == s.audioDevice }) {
-            choices.append(AudioDeviceChoice(id: "name:" + n, title: L("prefs.audio.missing", n), device: .named(n)))
-        }
-        audioDeviceChoices = choices
         languageChoices = [LanguageChoice(id: Self.systemLanguage, title: L("prefs.language.system"))] + L10n.supportedLanguages.map { LanguageChoice(id: $0, title: L("prefs.language.\($0)")) }
         loading = false
+        bindAudioOutput()
         refreshPending()
     }
 
+    /// 音频输出设备（W5-K 起由"音频设备"一节的模型管：设备 + 每条总线的声道）。
+    var audioDevice: AppSettings.AudioDevice {
+        get { audioOutput.device }
+        set { audioOutput.selectDevice(newValue) }
+    }
+    var audioDeviceChoices: [AudioOutputSettingsModel.DeviceChoice] { audioOutput.devices }
     var audioDeviceID: String {
-        get { audioDeviceChoices.first { $0.device == audioDevice }?.id ?? "default" }
-        set { if let c = audioDeviceChoices.first(where: { $0.id == newValue }) { audioDevice = c.device } }
+        get { audioOutput.selectedID }
+        set { audioOutput.selectDevice(id: newValue) }
     }
 
     var programFormat: ProgramFormat { ProgramFormat(width: formatWidth, height: formatHeight, frameRate: frameRate) }
@@ -177,6 +175,10 @@ final class PreferencesModel: ObservableObject {
     /// 导出诊断包（与帮助菜单同一个流程）。
     func exportDiagnostics() { DiagnosticsExport.present(controller: controller) }
 
+    private func bindAudioOutput() {
+        audioOutputToken = audioOutput.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.commit() }
+    }
+
     // MARK: 提交（即时生效）
 
     /// 本机的项写回 UserDefaults + AppController（下次起 session 用；运行时能改的同时落到跑着的 session），再重算待应用的项。
@@ -188,7 +190,9 @@ final class PreferencesModel: ObservableObject {
         s.apiHost = host.isEmpty ? "127.0.0.1" : host
         s.apiPort = max(0, min(65535, apiPort))
         s.apiToken = apiToken.isEmpty ? nil : apiToken
-        s.audioDevice = audioDevice
+        s.audioDevice = audioOutput.device
+        s.busOutputMap = audioOutput.storedMap
+        s.borrowMasterForMonitor = audioOutput.borrowMasterForMonitor
         s.compatLayerEnabled = compatLayerEnabled
         s.compatLayerPort = max(1, min(65535, compatLayerPort))
         let compatHost = compatLayerHost.trimmingCharacters(in: .whitespaces)
@@ -346,7 +350,8 @@ final class PreferencesModel: ObservableObject {
         apiHost = s.apiHost
         apiPort = s.apiPort
         apiToken = s.apiToken ?? ""
-        audioDevice = s.audioDevice
+        audioOutput = AudioOutputSettingsModel(device: s.audioDevice, map: s.busOutputMap, borrowMasterForMonitor: s.borrowMasterForMonitor)
+        bindAudioOutput()
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
         compatLayerHost = s.compatLayerHost
@@ -520,20 +525,15 @@ struct GeneralPage: View {
     }
 }
 
-/// 本机 › 音频设备（每条总线选声道是 97 的事）。
+/// 本机 › 音频设备：97（W5-K）的整节（设备 + 每条总线选声道对 + 2 声道设备借 Master 监听），换设备要重起引擎（96 的待应用机制）。
 struct AudioDevicePage: View {
     @ObservedObject var model: PreferencesModel
 
     var body: some View {
         Form {
+            AudioOutputSettingsSection(model: model.audioOutput)   // 设备 + 每条总线的声道（W5-K / J8）
             Section {
-                HStack {
-                    Picker(L("prefs.audio.device"), selection: Binding(get: { model.audioDeviceID }, set: { model.audioDeviceID = $0 })) {
-                        ForEach(model.audioDeviceChoices) { Text($0.title).tag($0.id) }
-                    }
-                    RestartTag()
-                }
-                Text(L("prefs.audio.hint")).font(.caption).foregroundStyle(.secondary)
+                HStack { Text(L("settings.pending.audioDevice")); Spacer(); RestartTag() }
             }
         }
         .formStyle(.grouped)
