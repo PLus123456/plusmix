@@ -3,6 +3,8 @@
 // 勾 = 这块屏正在输出的源（enabled），关着的那一路在它的源后面标"（已关）"。点源：这块屏已有输出 = 换源（setOutputSettings，窗不重开）并打开；没有 = addOutput；
 // 同一块屏不再叠出第二路（老节目里同屏的别的路一并关掉，配置留着）。不用子菜单（底栏菜单朝上开，子菜单的方向由系统定、会往下伸，03 §2.2）。
 // 已有的外部显示输出在倒数第二段：逐路"删除 n …（状态）"（removeOutput）与"关闭全部外部显示"（只关不删）；最后一段"外部显示设置… / NDI® 发送设置…"（M3）。
+// W5-G：工具条正中"外部显示▾"弹的就是这个菜单（向下开）；监视器右键"全屏输出到 ▸"用 fullscreenMenu(source:)——每块屏一项，点 = 这块屏改出这个监视器的画面
+// （同"点源"），已经在出它的那块再点 = 关（同"关闭"，配置留着）。
 // "关闭"只在这块屏有配置时列：两块屏 × 6 路输入时菜单已经 549 pt 高（W5-A 实测），每段再加一行、末尾再加一段，最小窗口（1100×700）里就放不下了
 // （E1：整块在窗口里），而没有配置的屏本来就没东西可关（报告 §3）。
 // 主体（M1，04 Q03 第 3 条）= toggleAll：有开着的 → 全部关（配置留着）；都关着 → 全部按原配置开（每块屏一路）；一路都没配 → 在第一块非主屏上开 PGM；
@@ -111,9 +113,7 @@ final class ExternalOutputMenuBuilder: NSObject {
         }
         for (index, display) in displays.enumerated() {
             if index > 0 { menu.addItem(.separator()) }
-            let size = (Int(display.frame.width), Int(display.frame.height), display.maximumFramesPerSecond)
-            menu.addItem(.sectionHeader(title: display.isMain ? L("externalMenu.displayMain", display.name, size.0, size.1, size.2)
-                                                              : L("externalMenu.display", display.name, size.0, size.1, size.2)))
+            menu.addItem(.sectionHeader(title: Self.displayTitle(display)))
             let primary = Self.primaryOutput(on: display, in: state)
             if let primary {
                 let off = NSMenuItem(title: L("externalMenu.off"), action: #selector(offPicked(_:)), keyEquivalent: "")
@@ -168,8 +168,41 @@ final class ExternalOutputMenuBuilder: NSObject {
         return menu
     }
 
-    /// 监视器右键"全屏输出到 ▸"（W5-G）：红灯轮只给签名。
-    func fullscreenMenu(source: OutputSource) -> NSMenu { NSMenu() }
+    /// 一块屏的名字："LG ULTRAGEAR（2560×1440 60 Hz，主屏）"。
+    static func displayTitle(_ display: DisplayInfo) -> String {
+        let size = (Int(display.frame.width), Int(display.frame.height), display.maximumFramesPerSecond)
+        return display.isMain ? L("externalMenu.displayMain", display.name, size.0, size.1, size.2)
+                              : L("externalMenu.display", display.name, size.0, size.1, size.2)
+    }
+
+    /// 监视器右键"全屏输出到 ▸"（W5-G，01a B3）：每块屏一项，勾 = 这块屏正在出这个来源；点没勾的 = 这块屏改出它（同路由菜单里点源：
+    /// 有输出就换源、没有就加一路，同屏别的路关掉），点有勾的 = 关这块屏（同"关闭"，配置留着）。
+    func fullscreenMenu(source: OutputSource) -> NSMenu {
+        let menu = NSMenu(title: L("monitor.menu.fullscreen"))
+        menu.autoenablesItems = false
+        if displays.isEmpty {
+            menu.addItem(withTitle: L("externalMenu.noDisplays"), action: nil, keyEquivalent: "").isEnabled = false
+        }
+        for display in displays {
+            let showing = Self.primaryOutput(on: display, in: state).map { $0.enabled && $0.settings.source == source } ?? false
+            let item = NSMenuItem(title: Self.displayTitle(display), action: #selector(fullscreenPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = Pick(displayID: display.id, displayName: display.name, source: showing ? nil : source)
+            item.state = showing ? .on : .off
+            item.toolTip = showing ? L("monitor.menu.fullscreenOffTip") : L("monitor.menu.fullscreenTip", source.title(in: state))
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func fullscreenPicked(_ sender: NSMenuItem) {
+        guard let pick = sender.representedObject as? Pick, let display = display(for: pick) else { return }
+        if let source = pick.source {
+            select(source, on: display, displayName: pick.displayName)
+        } else {
+            turnOff(display)
+        }
+    }
 
     final class Pick: NSObject {
         let displayID: UInt32
@@ -188,8 +221,13 @@ final class ExternalOutputMenuBuilder: NSObject {
     /// 选源：这块屏已有输出 = 换源（同一个输出，窗不重开）并打开，同屏别的路关掉；没有 = 加一路。
     @objc private func sourcePicked(_ sender: NSMenuItem) {
         guard let pick = sender.representedObject as? Pick, let source = pick.source, let display = display(for: pick) else { return }
+        select(source, on: display, displayName: pick.displayName)
+    }
+
+    /// 这块屏改出 source（路由菜单点源、监视器右键"全屏输出到"共用）。
+    private func select(_ source: OutputSource, on display: DisplayInfo, displayName: String) {
         guard let primary = Self.primaryOutput(on: display, in: state) else {
-            send?(.addOutput(config: Self.makeOutput(in: state, displayID: pick.displayID, displayName: pick.displayName, source: source)))
+            send?(.addOutput(config: Self.makeOutput(in: state, displayID: display.id, displayName: displayName, source: source)))
             return
         }
         if primary.settings.source != source {
@@ -197,8 +235,8 @@ final class ExternalOutputMenuBuilder: NSObject {
             settings.source = source
             send?(.setOutputSettings(output: primary.number, settings: settings))
             // 名字还是菜单起的"显示器 · 旧源"就跟着换（用户改过的名字不动）
-            if primary.name == Self.autoName(displayName: pick.displayName, source: primary.settings.source, in: state) {
-                send?(.renameOutput(output: primary.number, name: Self.autoName(displayName: pick.displayName, source: source, in: state)))
+            if primary.name == Self.autoName(displayName: displayName, source: primary.settings.source, in: state) {
+                send?(.renameOutput(output: primary.number, name: Self.autoName(displayName: displayName, source: source, in: state)))
             }
         }
         if !primary.enabled { send?(.setOutputEnabled(output: primary.number, on: true)) }
@@ -210,6 +248,10 @@ final class ExternalOutputMenuBuilder: NSObject {
     /// 关闭：这块屏不出画面，配置留着。
     @objc private func offPicked(_ sender: NSMenuItem) {
         guard let pick = sender.representedObject as? Pick, let display = display(for: pick) else { return }
+        turnOff(display)
+    }
+
+    private func turnOff(_ display: DisplayInfo) {
         for o in Self.outputs(on: display, in: state) where o.enabled { send?(.setOutputEnabled(output: o.number, on: false)) }
     }
 

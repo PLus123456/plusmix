@@ -143,7 +143,7 @@ final class TransitionColumnTests: XCTestCase {
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }
 
-    /// 点 Fade（或菜单 切换 › Fade）会把"下一次转场"改成 Fade：T-bar 那一行要明显变化（高亮一阵），不能只换一个小字。
+    /// 点 Fade（或菜单 切换 › 类型，W5-G 起）会把"下一次转场"改成 Fade：T-bar 那一行要明显变化（高亮一阵），不能只换一个小字。
     func testUI_tbarTypeRowHighlightsWhenTypeChanges() throws {
         let session = try prepare()
         let panel = AppTest.controller.windowController.transitionPanel

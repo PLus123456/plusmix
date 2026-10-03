@@ -1,5 +1,7 @@
 // 快捷键的显示文字（W5-A：转场列按钮的提示从当前快捷键表反查，01a C5 / X40）：修饰键用 ⌃⌥⇧⌘ 符号（苹果的顺序），
 // 命名键翻成人话（空格 / 回车 / Esc / 方向键…），字母大写。表里的 JSON 写法（"shift+1"）不变，只是给人看的样子。
+// W5-G：动作的匹配（HotkeyMatch，转场列提示与"切换"菜单右列共用一套）、一条绑定的动作写成人话（帮助 › 快捷键一览）。
+import SwitcherContracts
 import SwitcherControl
 
 @MainActor
@@ -37,5 +39,41 @@ enum HotkeyText {
     static func keys(in table: HotkeyTable, matching match: (ControlAction) -> Bool) -> String? {
         let keys = table.bindings.filter { match($0.action) }.map { display($0.key) }
         return keys.isEmpty ? nil : keys.joined(separator: L("key.listSeparator"))
+    }
+
+    /// 一条绑定的动作写成人话（快捷键一览）："PVW 选输入（输入 2）""叠加开关（通道 3）"；其他命令用命令目录的说明（CommandText）。
+    static func describe(_ action: ControlAction) -> String {
+        let row = HotkeyEditorModel.Row(keyText: "", action: action, note: "")
+        guard row.kind != .other else { return row.other.map(CommandText.summary) ?? L("hotkeys.action.other") }
+        if row.kind == .fade { return L("hotkeyList.fade", row.argument) }
+        guard let label = row.kind.argumentLabel else { return row.kind.title }
+        return L("hotkeyList.actionWithArgument", row.kind.title, label, row.argument)
+    }
+}
+
+/// 快捷键表里"这条绑定是不是这个动作"（W5-G：转场列按钮提示、"切换"菜单右列、快捷键一览都按它反查，口径一处定）。
+enum HotkeyMatch {
+    static func cut(_ a: ControlAction) -> Bool { if case .command(.cut) = a { return true }; return false }
+    static func fade(_ a: ControlAction) -> Bool { if case .command(.fade) = a { return true }; return false }
+    /// 按已选转场执行（回车的默认绑定）。
+    static func auto(_ a: ControlAction) -> Bool { if case .command(.autoTransition) = a { return true }; return false }
+    static func ftb(_ a: ControlAction) -> Bool {
+        if case .toggleFTB = a { return true }
+        if case .command(.ftb) = a { return true }
+        return false
+    }
+    static func overlay(_ channel: Int) -> (ControlAction) -> Bool {
+        { a in
+            if case .toggleOverlay(let ch) = a { return ch == channel }
+            if case .command(.overlay(let ch, _, _)) = a { return ch == channel }
+            return false
+        }
+    }
+    /// 只改"下一次转场"的类型（不执行）：setTransition 到这种类型（时长不论）。
+    static func selectType(_ type: TransitionType) -> (ControlAction) -> Bool {
+        { a in
+            if case .command(.setTransition(let t, _)) = a { return t == type }
+            return false
+        }
     }
 }

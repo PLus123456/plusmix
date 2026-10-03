@@ -120,6 +120,7 @@ final class ToolbarMenuTests: XCTestCase {
         // 打开▾ = "打开最近"那一份数据 + 打开上次退出时的节目 + 清除列表
         let dir = try tempDirectory("toolbar")
         defer { try? FileManager.default.removeItem(at: dir) }
+        controller.documents.clearRecents()   // 测试宿主的最近列表跨用例共用：上一遍的同名文件会让标题带上目录名
         let url = dir.appendingPathComponent("工具条.\(ShowDocuments.fileExtension)")
         XCTAssertTrue(controller.write(session.makeShow(), to: url))
         let recentItem = try item(show, "打开最近")
@@ -160,6 +161,8 @@ final class ToolbarMenuTests: XCTestCase {
         XCTAssertNotNil(AppTest.waitForConfirmation(.saveChanges), "菜单“新建”同一问")
         AppTest.answer(.cancel)
         XCTAssertTrue(controller.session === session)
+        // sheet 挂着的时候系统把整条工具条置灰（和用户看到的一样），等它收起再点
+        XCTAssertTrue(AppTest.waitUntil(2) { window.attachedSheet == nil })
 
         // 保存：有文件就写回（不弹面板）
         bar.saveButton.performClick(nil)
@@ -172,7 +175,10 @@ final class ToolbarMenuTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(7) != nil })
         bar.external.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(7)?.enabled == true }, "工具条主体：全部开")
-        XCTAssertTrue(AppTest.waitUntil(2) { bar.isExternalHighlighted }, "开着时工具条主体高亮")
+        XCTAssertTrue(AppTest.waitUntil(2) { bar.isExternalHighlighted && bar.external.showsIndicator }, "开着时工具条主体高亮")
+        XCTAssertEqual(bar.external.bodyButton.title, "外部显示", "标题文字不变")
+        XCTAssertEqual(bar.external.bodyButton.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.accent,
+                       "开着 = 字是强调色（工具条的玻璃外框不画 bezelColor）")
         XCTAssertEqual(wc.bottomBar.external.bodyButton.bezelColor, Theme.accent, "底栏主体同样高亮（同一份开关状态）")
         refresh(output)
         let toggle = try XCTUnwrap(output.items.first { $0.action == #selector(AppDelegate.toggleExternalDisplays(_:)) })
@@ -181,7 +187,9 @@ final class ToolbarMenuTests: XCTestCase {
         perform(output, toggle)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(7)?.enabled == false }, "菜单项：全部关（配置留着）")
         XCTAssertNotNil(session.state.output(7))
-        XCTAssertTrue(AppTest.waitUntil(2) { !bar.isExternalHighlighted })
+        XCTAssertTrue(AppTest.waitUntil(2) { !bar.isExternalHighlighted && !bar.external.showsIndicator })
+        XCTAssertNotEqual(bar.external.bodyButton.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.accent,
+                          "关了字色回到系统的")
 
         // 设置主体 = 设置窗（与 ⌘, 同一个）
         bar.settings.bodyButton.performClick(nil)
@@ -447,7 +455,9 @@ final class ToolbarMenuTests: XCTestCase {
         session.send(.overlay(channel: 1, on: true, input: 3))
         XCTAssertTrue(AppTest.waitUntil(2) { pgm.overlayBadgeTexts == ["1 · 合成 3", "3 · 合成 1"] }, "通道顺序、带输入名：\(pgm.overlayBadgeTexts)")
         XCTAssertEqual(wc.previewMonitor.overlayBadgeTexts, [], "PVW 不画徽标")
+        pgm.layoutSubtreeIfNeeded()   // 刚显示出来的徽标要等下一次布局才有位置（窗口被盖住时不画，这里直接排一次）
         let badgeFrames = pgm.overlayBadgeViews.map { $0.convert($0.bounds, to: pgm) }
+        XCTAssertEqual(badgeFrames.count, 2)
         let titleBottom = Theme.monitorTitleHeight
         for f in badgeFrames {
             XCTAssertLessThanOrEqual(f.maxY, pgm.isFlipped ? titleBottom : pgm.bounds.height, "徽标在标题条里")
@@ -518,6 +528,7 @@ final class ToolbarMenuTests: XCTestCase {
         let controller = AppTest.controller
         let dir = try tempDirectory("recent")
         defer { try? FileManager.default.removeItem(at: dir) }
+        controller.documents.clearRecents()   // 测试宿主的最近列表跨用例、跨 worktree 共用：上一遍留下的同名文件会让目录名再往上加一级
         let a = dir.appendingPathComponent("周日/节目.\(ShowDocuments.fileExtension)")
         let b = dir.appendingPathComponent("周三/节目.\(ShowDocuments.fileExtension)")
         let c = dir.appendingPathComponent("周三/独一份.\(ShowDocuments.fileExtension)")

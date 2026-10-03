@@ -1,5 +1,7 @@
 // 主窗口（设计方案 §10）：NSSplitView 分区——上 PVW / PGM 双监 + 中间转场列，下输入缩略图条，右侧可收起的调音台，底部输出栏 + 状态行
 // （W5-F：底栏按钮是"⚙ ｜ 主体 ｜ ▴"分体按钮，状态行独立成窗口最底一行；底栏的菜单 / 面板入口都从这里接到 session、面板总管与添加输入的本机记忆）。
+// W5-G：标题栏那一行是工具条（MainToolbar，`.unified`）；监视器标题条的齿轮 / 右键接到面板总管与外部显示路由。工具条那一行算在窗口外框里：
+// 最小窗口按"内容区仍是原来 1100×700 时那么大"定（macOS 27 上外框 1100×720），转场列 / 输入条 / 底栏在最小窗口里的保证不变。
 // 绑定：所有子视图只拿 `send`（发 Command）和快照 / Stats 观察者；换 session 时 `bind(session:)` 重挂一遍。
 import AppKit
 import SwitcherContracts
@@ -27,7 +29,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     let mixerPanel = MixerPanelView(frame: .zero)
     let bottomBar = BottomBarView(frame: .zero)
     /// 顶部工具条（W5-G）。
-    let mainToolbar = MainToolbar()
+    let mainToolbar: MainToolbar
     private let outerSplit = NSSplitView()
     private let centerSplit = NSSplitView()
     private(set) var session: SwitcherSession?
@@ -84,12 +86,22 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         if saving { window.setFrameAutosaveName(autosaveName) }
     }
 
+    /// 最小窗口时内容区要有多大：没有工具条时 1100×700 的窗口里的内容区（W5-A 的转场列 / 输入条 / 底栏都按它排过）。
+    static var minimumContentSize: NSSize {
+        NSWindow.contentRect(forFrameRect: NSRect(x: 0, y: 0, width: 1100, height: 700), styleMask: [.titled, .closable, .miniaturizable, .resizable]).size
+    }
+
     init() {
         let window = MainWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
                                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                 backing: .buffered, defer: false)
         window.title = Self.windowTitle(showName: nil)   // 产品名 PlusMix（W4-D）
-        window.minSize = NSSize(width: 1100, height: 700)
+        // 工具条先挂上、再按存档摆：存档里的是带工具条的外框，反过来挂会让窗口每次启动都高一截
+        let toolbar = MainToolbar()
+        mainToolbar = toolbar
+        window.toolbar = toolbar.toolbar
+        window.toolbarStyle = .unified
+        window.contentMinSize = Self.minimumContentSize
         window.backgroundColor = Theme.windowBackground
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
@@ -179,6 +191,14 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         // 分隔条 1 pt 不算在调音台里（W5-A 量出 339，G6 追加 ③）
         outerSplit.setPosition(window.frame.width - Theme.mixerPanelWidth - outerSplit.dividerThickness, ofDividerAt: 0)
 
+        // 工具条（W5-G）：外部显示▾ 弹底栏 ⚙ 外部显示同一个路由菜单；其余按钮是 nil target 的 AppDelegate 动作（与菜单栏同一项）
+        mainToolbar.externalMenuProvider = { [weak self] in self?.externalOutputMenu() }
+        mainToolbar.willPopUpMenu = { [weak self] menu in self?.activeBottomMenu = menu }
+        // 监视器标题条（W5-G，B1–B3）：齿轮 / 右键"输入设置…"开这一路的输入设置；右键"全屏输出到 ▸"按外部显示路由的口径
+        for monitor in [previewMonitor, programMonitor] {
+            monitor.onOpenInputSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
+            monitor.fullscreenMenu = { [weak self] source in self?.fullscreenMenu(source: source) }
+        }
         transitionPanel.onNotice = { [weak self] message in self?.bottomBar.showNotice(message) }
         // 底栏（W5-F）：添加输入停在上次的类型 / ▴ 类型直达 + 最近添加；外部显示 ⚙ 路由菜单、主体全部开关；各 ⚙ 与菜单里的"…设置…"打开输出设置对应的页
         bottomBar.onAddInput = { [weak self] kind in self?.presentAddInput(kind: kind) }
@@ -225,6 +245,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         // 底栏主体按钮：起不来的原因 / 推流正在第几次连接（运行表）、重试起不来的那几路（W5-B）
         bottomBar.routeDetail = session.map { s in { [weak s] n in (s?.outputs.failureReason(output: n), s?.outputs.streamConnectAttempt(output: n)) } }
         bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }
+        mainToolbar.setSessionAvailable(session != nil)   // 没有 session 时节目组以外置灰（W5-G）
+        refreshToolbarStatus()
         guard let session else {
             window?.title = Self.windowTitle(showName: nil)
             return
@@ -286,12 +308,21 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         inputStrip.apply(state: state)
         mixerPanel.apply(state: state)
         bottomBar.apply(state: state)
+        mainToolbar.apply(state: state)
+        refreshToolbarStatus()
         overlayPanelController?.apply(state: state)
     }
 
     private func apply(stats: Stats) {
         bottomBar.apply(stats: stats)
+        refreshToolbarStatus()
         mixerPanel.apply(stats: stats)
+    }
+
+    /// 工具条右组的录制 / 推流状态与外部显示主体的提示：读底栏刚算好的同一份汇总（铁律 4，不另算）。没变就不动。
+    private func refreshToolbarStatus() {
+        mainToolbar.showOutputStatus(record: bottomBar.recordSummary, stream: bottomBar.streamSummary)
+        mainToolbar.setExternalToolTip(bottomBar.external.bodyButton.toolTip)
     }
 
     // MARK: 快捷键（W2-C 的 HotkeyDispatcher：用户表 hotkeys.json，没有就默认表；命令来源 hotkey）
@@ -349,6 +380,15 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         builder.onOutputSettings = { [weak self] tab in self?.panels?.showOutputSettings(tab: tab) }
         externalMenuBuilder = builder   // 菜单项的 target 是它，得活到菜单关掉
         return builder.makeMenu()
+    }
+
+    /// 监视器右键"全屏输出到 ▸"：每块屏一项，来源 = 这个监视器（W5-G，B3；外部显示路由同一个构造器）。
+    func fullscreenMenu(source: OutputSource) -> NSMenu? {
+        guard let session else { return nil }
+        let builder = ExternalOutputMenuBuilder(state: session.state, displayStats: session.stats?.display ?? [])
+        builder.send = { [weak session] c in session?.send(c) }
+        externalMenuBuilder = builder   // 菜单项的 target 是它，得活到菜单关掉
+        return builder.fullscreenMenu(source: source)
     }
 
     /// 从某个按钮朝上弹外部显示菜单（整块在窗口里，X50）。
