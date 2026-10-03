@@ -238,13 +238,9 @@ struct ActionButton: View {
     @State private var model: ActionPickerModel?
 
     var body: some View {
-        Button {
-            model = makeModel()
-        } label: {
-            Text(summary).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .help(summary)
-        .accessibilityLabel(L("actionPicker.button.a11y", summary))
+        Button { model = makeModel() } label: { Text(summary).lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading) }
+            .accessibilityLabel(L("actionPicker.button.a11y", summary))
+            .help(summary)
         .popover(isPresented: Binding(get: { model != nil }, set: { if !$0 { model = nil } }), arrowEdge: .bottom) {
             if let model {
                 ActionPickerView(model: model, done: {

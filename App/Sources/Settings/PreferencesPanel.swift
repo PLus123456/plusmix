@@ -431,18 +431,19 @@ struct ShowFormatPage: View {
     var body: some View {
         Form {
             Section {
-                Picker(selection: Binding(get: { model.isCustomResolution ? "custom" : "\(model.formatWidth)x\(model.formatHeight)" }, set: { v in
-                    if v == "custom" {
-                        if !model.isCustomResolution { model.setCustomResolution(width: model.formatWidth + 2, height: model.formatHeight) }
-                        return
+                HStack {
+                    Picker(L("prefs.format.resolution"), selection: Binding(get: { model.isCustomResolution ? "custom" : "\(model.formatWidth)x\(model.formatHeight)" }, set: { v in
+                        if v == "custom" {
+                            if !model.isCustomResolution { model.setCustomResolution(width: model.formatWidth + 2, height: model.formatHeight) }
+                            return
+                        }
+                        let parts = v.split(separator: "x").compactMap { Int($0) }
+                        if parts.count == 2 { model.formatWidth = parts[0]; model.formatHeight = parts[1] }
+                    })) {
+                        ForEach(PreferencesModel.resolutions, id: \.0) { r in Text(verbatim: PreferencesModel.resolutionTitle(width: r.0, height: r.1)).tag("\(r.0)x\(r.1)") }
+                        Text(L("settings.format.custom")).tag("custom")
                     }
-                    let parts = v.split(separator: "x").compactMap { Int($0) }
-                    if parts.count == 2 { model.formatWidth = parts[0]; model.formatHeight = parts[1] }
-                })) {
-                    ForEach(PreferencesModel.resolutions, id: \.0) { r in Text(verbatim: PreferencesModel.resolutionTitle(width: r.0, height: r.1)).tag("\(r.0)x\(r.1)") }
-                    Text(L("settings.format.custom")).tag("custom")
-                } label: {
-                    HStack { Text(L("prefs.format.resolution")); RestartTag() }
+                    RestartTag()
                 }
                 if model.isCustomResolution {
                     HStack {
@@ -454,10 +455,11 @@ struct ShowFormatPage: View {
                     }
                     Text(L("settings.format.customHint")).font(.caption).foregroundStyle(.secondary)
                 }
-                Picker(selection: $model.frameRate) {
-                    ForEach(PreferencesModel.frameRates, id: \.self) { Text(verbatim: "\($0)").tag($0) }
-                } label: {
-                    HStack { Text(L("prefs.format.frameRate")); RestartTag() }
+                HStack {
+                    Picker(L("prefs.format.frameRate"), selection: $model.frameRate) {
+                        ForEach(PreferencesModel.frameRates, id: \.self) { Text(verbatim: "\($0)").tag($0) }
+                    }
+                    RestartTag()
                 }
                 Text(L("prefs.format.hint")).font(.caption).foregroundStyle(.secondary)
             }
@@ -476,10 +478,11 @@ struct ShowAudioPage: View {
                 Stepper(value: $model.alignmentFrames, in: PreferencesModel.alignmentRange, step: PreferencesModel.alignmentStep) {
                     HStack { Text(L("prefs.showAudio.alignment", model.alignmentFrames, Double(model.alignmentFrames) / 48)); RestartTag() }
                 }
-                Picker(selection: $model.monitorPoint) {
-                    ForEach(SwitcherContracts.MonitorPoint.allCases, id: \.self) { Text(L("prefs.showAudio.monitorPoint.\($0.rawValue)")).tag($0) }
-                } label: {
-                    HStack { Text(L("prefs.showAudio.monitorPoint")); RestartTag() }
+                HStack {
+                    Picker(L("prefs.showAudio.monitorPoint"), selection: $model.monitorPoint) {
+                        ForEach(SwitcherContracts.MonitorPoint.allCases, id: \.self) { Text(L("prefs.showAudio.monitorPoint.\($0.rawValue)")).tag($0) }
+                    }
+                    RestartTag()
                 }
                 Text(L("prefs.showAudio.hint")).font(.caption).foregroundStyle(.secondary)
             }
@@ -505,7 +508,7 @@ struct GeneralPage: View {
                 Text(L("prefs.language.hint")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("prefs.preview.title")) {
-                Toggle(isOn: $model.overlaysInPreview) { HStack { Text(L("prefs.preview.overlaysAll")); RestartTag() } }
+                HStack { Toggle(L("prefs.preview.overlaysAll"), isOn: $model.overlaysInPreview); RestartTag() }
                 Text(L("prefs.preview.hint")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("prefs.external.title")) {
@@ -524,10 +527,11 @@ struct AudioDevicePage: View {
     var body: some View {
         Form {
             Section {
-                Picker(selection: Binding(get: { model.audioDeviceID }, set: { model.audioDeviceID = $0 })) {
-                    ForEach(model.audioDeviceChoices) { Text($0.title).tag($0.id) }
-                } label: {
-                    HStack { Text(L("prefs.audio.device")); RestartTag() }
+                HStack {
+                    Picker(L("prefs.audio.device"), selection: Binding(get: { model.audioDeviceID }, set: { model.audioDeviceID = $0 })) {
+                        ForEach(model.audioDeviceChoices) { Text($0.title).tag($0.id) }
+                    }
+                    RestartTag()
                 }
                 Text(L("prefs.audio.hint")).font(.caption).foregroundStyle(.secondary)
             }
@@ -544,13 +548,13 @@ struct RemoteControlPage: View {
     var body: some View {
         Form {
             Section(L("prefs.api.title")) {
-                Toggle(isOn: $model.apiEnabled) { HStack { Text(L("prefs.api.enabled")); RestartTag() } }
+                HStack { Toggle(L("prefs.api.enabled"), isOn: $model.apiEnabled); RestartTag() }
                 LabeledContent(L("settings.remote.listening"), value: "\(model.apiHost):\(model.apiPort)")
                 SecureField(L("prefs.api.token"), text: $model.apiToken)
                 Text(L("prefs.api.hint")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("prefs.compat.title")) {
-                Toggle(isOn: $model.compatLayerEnabled) { HStack { Text(L("prefs.compat.enabled")); RestartTag() } }
+                HStack { Toggle(L("prefs.compat.enabled"), isOn: $model.compatLayerEnabled); RestartTag() }
                 LabeledContent(L("settings.remote.listening"), value: "\(model.compatLayerHost):\(model.compatLayerPort)")
                 Text(PreferencesModel.compatLegalNotice).font(.caption).foregroundStyle(.secondary)
                 Text(L("prefs.compat.pending")).font(.caption).foregroundStyle(.secondary)
@@ -661,8 +665,8 @@ struct AdvancedPage: View {
                 Text(L("settings.advanced.fallbackHint")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("settings.advanced.listen")) {
-                TextField(text: $model.apiListenText) { HStack { Text(L("settings.advanced.apiListen")); RestartTag() } }
-                TextField(text: $model.compatListenText) { HStack { Text(L("settings.advanced.compatListen")); RestartTag() } }
+                HStack { TextField(L("settings.advanced.apiListen"), text: $model.apiListenText); RestartTag() }
+                HStack { TextField(L("settings.advanced.compatListen"), text: $model.compatListenText); RestartTag() }
                 if let error = model.listenError { Text(error).font(.caption).foregroundStyle(.red) }
                 Text(L("settings.advanced.listenHint")).font(.caption).foregroundStyle(.secondary)
             }
