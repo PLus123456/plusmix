@@ -279,7 +279,7 @@ final class SettingsWindowTests: XCTestCase {
         prefs.compatListenText = "0.0.0.0:8100"
         XCTAssertEqual(controller.defaults.string(forKey: AppSettings.Keys.compatLayerHost), "0.0.0.0")
         XCTAssertEqual(controller.defaults.integer(forKey: AppSettings.Keys.compatLayerPort), 8100)
-        XCTAssertEqual(controller.settings.compatConfiguration?.host ?? AppSettings.load(arguments: [], defaults: controller.defaults).compatLayerHost, "0.0.0.0")
+        XCTAssertEqual(AppSettings.load(arguments: [], defaults: controller.defaults).compatLayerHost, "0.0.0.0", "存下来的是 0.0.0.0；跑着的设置在测试宿主里一律改回只听本机（W5-L applyTestHostOverrides，G7 合并时按它改口径）")
         // 数字不加千分位
         XCTAssertEqual(PreferencesModel.plainInteger.format(1500), "1500")
     }
