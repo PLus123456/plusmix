@@ -152,6 +152,7 @@
 "addInput.screen.kind" = "抓取";
 "addInput.screen.listed" = "窗口 %d 个、应用 %d 个";
 "addInput.screen.loading" = "正在列出窗口 / 应用…";
+"addInput.screen.mainDisplay" = "主屏（有菜单栏的那块）";
 "addInput.screen.noDisplays" = "没有找到显示器";
 "addInput.screen.title" = "屏幕 / 窗口 / 应用";
 "addInput.screen.window" = "窗口";
@@ -935,7 +936,7 @@
 "prefs.audio.missing" = "%@（未找到）";
 "prefs.audio.null" = "空设备（不出声）";
 "prefs.audio.systemDefault" = "系统默认（跟随变更）";
-"prefs.audio.title" = "音频输出";
+"prefs.audio.title" = "音频设备";
 "prefs.compat.enabled" = "启用兼容层（默认关）";
 "prefs.compat.legal" = "法律提示：这个模块模仿第三方导播软件的 HTTP / TCP 控制协议，只为让现成的控制面板配置能用；协议与名称归各自所有者，本软件与其没有关联。它是独立模块、默认关闭，正式发布前还要经律师审阅。";
 "prefs.compat.pending" = "开关与端口下次起引擎生效（\"应用并重起引擎\"立刻生效）。";

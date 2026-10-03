@@ -569,8 +569,8 @@ final class AddInputFormModel: ObservableObject {
         case .display:
             screenTiles = NSScreen.screens.compactMap { screen in
                 guard let n = screen.displayNumber else { return nil }
-                let size = "\(Int(screen.frame.width))×\(Int(screen.frame.height))"
-                return ScreenTile(kind: .display, key: String(n), title: screen.displayTitle, subtitle: size)
+                // 标题里已经有尺寸（displayTitle），副标题只标主屏
+                return ScreenTile(kind: .display, key: String(n), title: screen.displayTitle, subtitle: screen == NSScreen.screens.first ? L("addInput.screen.mainDisplay") : "")
             }
         case .window:
             if windowInfos.isEmpty { loadScreenLists() }

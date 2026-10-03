@@ -152,6 +152,7 @@
 "addInput.screen.kind" = "Capture";
 "addInput.screen.listed" = "%d windows, %d applications";
 "addInput.screen.loading" = "Listing windows / applications…";
+"addInput.screen.mainDisplay" = "Main display (with the menu bar)";
 "addInput.screen.noDisplays" = "No displays found";
 "addInput.screen.title" = "Screen / window / application";
 "addInput.screen.window" = "Window";
@@ -935,7 +936,7 @@
 "prefs.audio.missing" = "%@ (not found)";
 "prefs.audio.null" = "Null device (silent)";
 "prefs.audio.systemDefault" = "System default (follows changes)";
-"prefs.audio.title" = "Audio output";
+"prefs.audio.title" = "Audio Device";
 "prefs.compat.enabled" = "Enable compatibility layer (off by default)";
 "prefs.compat.legal" = "Legal notice: this module imitates a third-party switcher’s HTTP / TCP control protocol only so existing control-panel configurations keep working; the protocol and names belong to their owners and this software is not affiliated with them. It is a separate module, off by default, and still needs legal review before a formal release.";
 "prefs.compat.pending" = "The switch and port take effect the next time the engine starts (\"Apply and Restart Engine\" applies them now).";
