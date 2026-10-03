@@ -242,6 +242,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         multiviewWindow?.source = source
         bottomBar.resetStats()
         mixerPanel.clearMeters()
+        // 调音台头部：设备没有耳机声道时写明（W5-K / X09，音频设备页同一句）
+        mixerPanel.model.setOutputInfo(outputChannels: session?.audio.outputChannelCount, map: session?.audio.effectiveOutputMap)
         // 底栏主体按钮：起不来的原因 / 推流正在第几次连接（运行表）、重试起不来的那几路（W5-B）
         bottomBar.routeDetail = session.map { s in { [weak s] n in (s?.outputs.failureReason(output: n), s?.outputs.streamConnectAttempt(output: n)) } }
         bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }

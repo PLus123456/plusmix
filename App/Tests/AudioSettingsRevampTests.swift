@@ -4,6 +4,7 @@ import AppKit
 import SwiftUI
 import XCTest
 import SwitcherContracts
+import SwitcherAudio
 @testable import Switcher
 
 @MainActor
@@ -123,5 +124,62 @@ final class AudioSettingsRevampTests: XCTestCase {
         XCTAssertEqual(rows?.map(\.label), ["瞬时（400 ms）", "短期（3 s）", "积分", "响度范围（LRA）", "真峰值"])
         XCTAssertEqual(rows?.map(\.value), ["-21.0 LUFS", "-23.0 LUFS", "-24.5 LUFS", "5.2 LU", "-1.2 dBTP"])
         XCTAssertEqual(model.loudness[.busA]?.rows.map(\.value), ["—", "—", "—", "0.0 LU", "—"], "静音写 —")
+    }
+}
+
+@MainActor
+final class AudioDeviceRevampTests: XCTestCase {
+    /// J8 的细节：声道对不共用（选了别人正用的那一对，原来那条改不输出）、换设备只去掉这台没有的声道、恢复设备默认、存本机（UserDefaults 往返）、
+    /// 没改过就存 nil（跟设备默认）、AudioRuntime 建引擎时把它换成 BusChannelMap、2 声道设备给"监听时临时占用 Master 声道"并写明尚未生效。
+    func testAudio_busOutputMapStoredLocallyAndFitsDevice() throws {
+        XCTAssertEqual(BusOutputMap.standard(outputChannels: 2), BusOutputMap(master: 0), "2 声道：只有 Master 1/2")
+        XCTAssertEqual(BusOutputMap.standard(outputChannels: 8), BusOutputMap(master: 0, headphones: 2), "≥ 4 声道：耳机 3/4（与包里 standard 同口径）")
+        XCTAssertEqual(BusOutputMap.standard(outputChannels: 8).busChannelMap, BusChannelMap.standard(outputChannels: 8))
+        XCTAssertEqual(BusOutputMap(master: 0, busA: 4, busB: 6, headphones: 2).fitting(outputChannels: 6), BusOutputMap(master: 0, busA: 4, headphones: 2))
+        XCTAssertEqual(BusOutputMap(master: 0).fitting(outputChannels: 1), BusOutputMap(master: 0), "单声道设备上 1/2 照留")
+
+        let model = AudioOutputSettingsModel(device: .systemDefault, map: nil)
+        model.devicesProvider = { [.init(name: "接口", outputChannels: 8), .init(name: "耳机", outputChannels: 2)] }
+        model.reloadDevices()
+        model.selectDevice(.named("接口"))
+        XCTAssertEqual(model.map, .standard(outputChannels: 8), "没改过：跟设备默认")
+        XCTAssertNil(model.storedMap, "没改过存 nil")
+        model.setPair(.busB, first: 2)
+        XCTAssertEqual(model.map, BusOutputMap(master: 0, busB: 2), "耳机原来在 3/4，让给 Bus B 后改不输出")
+        XCTAssertEqual(model.lastDisplaced, .headphones)
+        model.setPair(.headphones, first: 6)
+        XCTAssertEqual(model.storedMap, BusOutputMap(master: 0, busB: 2, headphones: 6))
+        model.selectDevice(.named("耳机"))
+        XCTAssertEqual(model.map, BusOutputMap(master: 0), "换到 2 声道设备：这台没有的声道对去掉")
+        XCTAssertTrue(model.offersBorrowMasterForMonitor)
+        XCTAssertTrue(L("audioDevice.borrowMasterPending").contains("W5K-w1-audio-monitor-selected-bus"), "写明尚未生效与问题单")
+        model.resetToDeviceDefault()
+        XCTAssertNil(model.storedMap)
+        model.selectDevice(.null)
+        XCTAssertNil(model.outputChannels)
+        XCTAssertNil(model.headphonesHint, "空设备不提示")
+        XCTAssertEqual(model.pairChoices.map(\.title), ["不输出"])
+
+        // 存本机：AppSettings 往返（JSON 进 UserDefaults）
+        let suite = "com.plusmix.switcher.tests.busmap-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        var s = AppSettings()
+        s.busOutputMap = BusOutputMap(master: 0, busA: 2, busB: nil, headphones: 4)
+        s.borrowMasterForMonitor = true
+        s.save(to: defaults)
+        let loaded = AppSettings.load(arguments: [], defaults: defaults)
+        XCTAssertEqual(loaded.busOutputMap, s.busOutputMap)
+        XCTAssertTrue(loaded.borrowMasterForMonitor)
+        s.busOutputMap = nil
+        s.save(to: defaults)
+        XCTAssertNil(defaults.object(forKey: AppSettings.Keys.busOutputMap), "nil = 跟设备默认，键删掉")
+
+        // AudioRuntime 建引擎时传进去（空设备也带着，配置里看得到）
+        let session = try AppTest.freshSession()
+        let runtime = AudioRuntime(stateMachine: SwitcherSession.detachedStateMachine(), device: .null, busOutputMap: BusOutputMap(master: 0, busA: 2))
+        XCTAssertEqual(runtime.engine.configuration.outputChannelMap, BusChannelMap(master: (0, 1), busA: (2, 3)))
+        XCTAssertNil(runtime.outputChannelCount, "空设备没有声道数")
+        XCTAssertNil(session.audio.engine.configuration.outputChannelMap, "测试宿主默认不带映射（跟设备默认）")
     }
 }

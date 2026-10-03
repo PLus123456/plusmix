@@ -1,6 +1,6 @@
 // 偏好设置（W3-E 交付第 7 条）：节目分辨率 / 帧率（在 Show 里，改了要换 session）、API 端口 / token、音频输出设备、PVW 预览全部叠加（W3-E2）、
 // 外部输出在主屏上不盖住主界面（W3-E3）、第三方 API 兼容层（VMixCompat）开关（带法律提示）、语言、更新（W4-B 接 Sparkle，这里只留位置）、
-// 操作确认（W5-B：底栏停录制 / 推流前先确认，默认开）。
+// 操作确认（W5-B：底栏停录制 / 推流前先确认，默认开）；W5-K："音频设备"一节给每条总线选声道对（AudioOutputSettingsSection）。
 // W5-B（02 X04 / 01a F5）：节目格式"应用"、节目音频"应用"、"应用并重起引擎"在录制 / 推流在跑时先确认（sheet 挂在本窗口上）；换完引擎这个窗口不关，
 // 只把格式 / 节目音频几项重新读一遍新 session（rebind）。
 // API / 音频 / 兼容层用 W2-B2 的同一组 UserDefaults 键（AppSettings.Keys），下次起 session 生效；"应用并重启引擎"立刻生效。
@@ -13,11 +13,6 @@ import SwitcherAudio
 
 @MainActor
 final class PreferencesModel: ObservableObject {
-    struct AudioDeviceChoice: Identifiable, Hashable {
-        let id: String
-        let title: String
-        let device: AppSettings.AudioDevice
-    }
     struct LanguageChoice: Identifiable, Hashable {
         let id: String
         let title: String
@@ -39,7 +34,6 @@ final class PreferencesModel: ObservableObject {
     @Published var apiHost: String
     @Published var apiPort: Int
     @Published var apiToken: String
-    @Published var audioDevice: AppSettings.AudioDevice
     @Published var compatLayerEnabled: Bool
     @Published var compatLayerPort: Int
     /// PVW 预览全部叠加（渲染器总开关，换 session 生效）。
@@ -53,7 +47,6 @@ final class PreferencesModel: ObservableObject {
     /// 底栏停录制 / 停推流前先确认（W5-B，默认开）。
     @Published var confirmBeforeStop: Bool
     @Published private(set) var status = ""
-    let audioDeviceChoices: [AudioDeviceChoice]
     let languageChoices: [LanguageChoice]
     /// 更新一节（W4-B，Sparkle）：是否配置了更新源、上次检查时间、自动检查开关（apply 时写回 Sparkle）。
     let updatesConfigured: Bool
@@ -70,7 +63,8 @@ final class PreferencesModel: ObservableObject {
 
     init(controller: AppController) {
         self.controller = controller
-        audioOutput = AudioOutputSettingsModel(device: controller.settings.audioDevice, map: controller.settings.busOutputMap)
+        audioOutput = AudioOutputSettingsModel(device: controller.settings.audioDevice, map: controller.settings.busOutputMap,
+                                               borrowMasterForMonitor: controller.settings.borrowMasterForMonitor)
         updatesConfigured = controller.updateController.isConfigured
         updateStatus = controller.updateController.statusText
         automaticUpdates = controller.updateController.automaticallyChecksForUpdates
@@ -83,7 +77,6 @@ final class PreferencesModel: ObservableObject {
         apiHost = s.apiHost
         apiPort = s.apiPort
         apiToken = s.apiToken ?? ""
-        audioDevice = s.audioDevice
         compatLayerEnabled = s.compatLayerEnabled
         compatLayerPort = s.compatLayerPort
         overlaysInPreview = s.overlaysInPreview
@@ -94,21 +87,18 @@ final class PreferencesModel: ObservableObject {
         monitorPoint = audio.monitorPoint
         let languages = controller.defaults.stringArray(forKey: "AppleLanguages")
         language = languages?.first.flatMap { code in L10n.supportedLanguages.contains(code) ? code : nil } ?? Self.systemLanguage
-        var choices = [AudioDeviceChoice(id: "default", title: L("prefs.audio.systemDefault"), device: .systemDefault),
-                       AudioDeviceChoice(id: "null", title: L("prefs.audio.null"), device: .null)]
-        for d in AudioHAL.devices() where d.outputChannels > 0 {
-            choices.append(AudioDeviceChoice(id: "name:" + d.name, title: d.name, device: .named(d.name)))
-        }
-        if case .named(let n) = s.audioDevice, !choices.contains(where: { $0.device == s.audioDevice }) {
-            choices.append(AudioDeviceChoice(id: "name:" + n, title: L("prefs.audio.missing", n), device: .named(n)))
-        }
-        audioDeviceChoices = choices
         languageChoices = [LanguageChoice(id: Self.systemLanguage, title: L("prefs.language.system"))] + L10n.supportedLanguages.map { LanguageChoice(id: $0, title: L("prefs.language.\($0)")) }
     }
 
+    /// 音频输出设备（W5-K 起由"音频设备"一节的模型管：设备 + 每条总线的声道）。
+    var audioDevice: AppSettings.AudioDevice {
+        get { audioOutput.device }
+        set { audioOutput.selectDevice(newValue) }
+    }
+    var audioDeviceChoices: [AudioOutputSettingsModel.DeviceChoice] { audioOutput.devices }
     var audioDeviceID: String {
-        get { audioDeviceChoices.first { $0.device == audioDevice }?.id ?? "default" }
-        set { if let c = audioDeviceChoices.first(where: { $0.id == newValue }) { audioDevice = c.device } }
+        get { audioOutput.selectedID }
+        set { audioOutput.selectDevice(id: newValue) }
     }
 
     var programFormat: ProgramFormat { ProgramFormat(width: formatWidth, height: formatHeight, frameRate: frameRate) }
@@ -132,7 +122,9 @@ final class PreferencesModel: ObservableObject {
         s.apiHost = apiHost.trimmingCharacters(in: .whitespaces).isEmpty ? "127.0.0.1" : apiHost.trimmingCharacters(in: .whitespaces)
         s.apiPort = max(0, min(65535, apiPort))
         s.apiToken = apiToken.isEmpty ? nil : apiToken
-        s.audioDevice = audioDevice
+        s.audioDevice = audioOutput.device
+        s.busOutputMap = audioOutput.storedMap
+        s.borrowMasterForMonitor = audioOutput.borrowMasterForMonitor
         s.compatLayerEnabled = compatLayerEnabled
         s.compatLayerPort = max(1, min(65535, compatLayerPort))
         s.overlaysInPreview = overlaysInPreview
@@ -228,12 +220,7 @@ struct PreferencesView: View {
                 SecureField(L("prefs.api.token"), text: $model.apiToken)
                 Text(L("prefs.api.hint")).font(.caption).foregroundStyle(.secondary)
             }
-            Section(L("prefs.audio.title")) {
-                Picker(L("prefs.audio.device"), selection: Binding(get: { model.audioDeviceID }, set: { model.audioDeviceID = $0 })) {
-                    ForEach(model.audioDeviceChoices) { Text($0.title).tag($0.id) }
-                }
-                Text(L("prefs.audio.hint")).font(.caption).foregroundStyle(.secondary)
-            }
+            AudioOutputSettingsSection(model: model.audioOutput)   // 设备 + 每条总线的声道（W5-K / J8）
             Section(L("prefs.showAudio.title")) {
                 Stepper(value: $model.alignmentFrames, in: PreferencesModel.alignmentRange, step: PreferencesModel.alignmentStep) {
                     Text(L("prefs.showAudio.alignment", model.alignmentFrames, Double(model.alignmentFrames) / 48))

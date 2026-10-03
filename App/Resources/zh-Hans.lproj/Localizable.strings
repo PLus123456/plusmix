@@ -198,8 +198,17 @@
 "audio.transport.thunderbolt" = "雷雳";
 "audio.transport.usb" = "USB";
 "audio.transport.virtual" = "虚拟设备";
+"audioDevice.borrowMaster" = "监听时临时占用 Master 声道";
+"audioDevice.borrowMasterPending" = "这一版的音频引擎还不会在独听时临时换声道：选上先记下，引擎支持后生效（问题单 W5K-w1-audio-monitor-selected-bus）。现在要听耳机总线，请换一台多声道设备。";
+"audioDevice.busOutput" = "%@ 送到";
+"audioDevice.channelCount" = "这台设备有 %d 个输出声道";
+"audioDevice.deviceLine" = "%@（%d 个输出声道）";
+"audioDevice.displaced" = "%@ 原来用这一对声道，已改成不输出（两条总线不共用一对声道）";
+"audioDevice.hint" = "改了设备或声道，点下面的“应用并重起引擎”才生效（录制 / 推流在跑会先问）。录制 / 推流 / NDI® 用的是 Master 本身，不受这里影响。";
 "audioDevice.noHeadphoneChannels" = "当前设备没有耳机声道";
 "audioDevice.noHeadphoneChannelsHelp" = "这台输出设备只有 2 个声道、都给了 Master：耳机总线（独听 / PFL / AFL）听不到。可以在 设置 › 音频设备 里换一台多声道设备，或选“监听时临时占用 Master 声道”。";
+"audioDevice.noOutput" = "不输出";
+"audioDevice.resetMap" = "恢复设备默认";
 "audioSettings.advanced" = "高级";
 "audioSettings.compressor.amount" = "压缩量 %.1f dB";
 "audioSettings.compressor.amountHint" = "超过阈值的部分被压住：输出最多到 %.1f dBFS（阈值 + 压缩量）。这个压缩器没有固定比例。";
@@ -923,7 +932,6 @@
 "prefs.apply" = "应用";
 "prefs.applyRestart" = "应用并重起引擎";
 "prefs.audio.device" = "设备";
-"prefs.audio.hint" = "下次启动引擎时生效（“应用并重起引擎”立刻生效）。";
 "prefs.audio.missing" = "%@（未找到）";
 "prefs.audio.null" = "空设备（不出声）";
 "prefs.audio.systemDefault" = "系统默认（跟随变更）";

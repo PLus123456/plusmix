@@ -198,8 +198,17 @@
 "audio.transport.thunderbolt" = "Thunderbolt";
 "audio.transport.usb" = "USB";
 "audio.transport.virtual" = "Virtual device";
+"audioDevice.borrowMaster" = "Use the Master channels while monitoring";
+"audioDevice.borrowMasterPending" = "This version’s audio engine can’t switch channels while soloing yet: the choice is saved and takes effect once the engine supports it (issue W5K-w1-audio-monitor-selected-bus). To hear the headphone bus today, use a device with more channels.";
+"audioDevice.busOutput" = "%@ goes to";
+"audioDevice.channelCount" = "This device has %d output channels";
+"audioDevice.deviceLine" = "%@ (%d output channels)";
+"audioDevice.displaced" = "%@ was using this channel pair and is now off (two buses can’t share a pair)";
+"audioDevice.hint" = "Device and channel changes take effect with “Apply and Restart Engine” below (you are asked first if recording / streaming is running). Recording / streaming / NDI® use Master itself and are not affected by this.";
 "audioDevice.noHeadphoneChannels" = "This device has no headphone channels";
 "audioDevice.noHeadphoneChannelsHelp" = "This output device has only 2 channels and Master uses them: the headphone bus (solo / PFL / AFL) can’t be heard. Pick a device with more channels in Settings › Audio Device, or choose “Use the Master channels while monitoring”.";
+"audioDevice.noOutput" = "Off";
+"audioDevice.resetMap" = "Restore device defaults";
 "audioSettings.advanced" = "Advanced";
 "audioSettings.compressor.amount" = "Amount %.1f dB";
 "audioSettings.compressor.amountHint" = "Anything above the threshold is held down: the output stays at or below %.1f dBFS (threshold + amount). This compressor has no fixed ratio.";
@@ -923,7 +932,6 @@
 "prefs.apply" = "Apply";
 "prefs.applyRestart" = "Apply and Restart Engine";
 "prefs.audio.device" = "Device";
-"prefs.audio.hint" = "Takes effect the next time the engine starts (“Apply and Restart Engine” applies it now).";
 "prefs.audio.missing" = "%@ (not found)";
 "prefs.audio.null" = "Null device (silent)";
 "prefs.audio.systemDefault" = "System default (follows changes)";

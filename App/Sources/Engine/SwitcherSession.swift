@@ -134,7 +134,7 @@ final class SwitcherSession {
         let maxNumber = initial.inputs.map(\.number).max() ?? 1
         let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
         self.engine = engine
-        let audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio)
+        let audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio, busOutputMap: settings.busOutputMap)
         self.audio = audio
         let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
         if let mediaBaseDirectory { inputs.mediaBaseDirectory = mediaBaseDirectory }
