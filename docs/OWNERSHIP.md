@@ -85,6 +85,7 @@
 | W5-N | 文件播放控制、推流状态面板、录制 / 推流时长 | `w5-playback-status` | `App/` `Packages/SwitcherInputs/Sources/SwitcherInputs/File/` `Packages/SwitcherInputs/Tests/SwitcherInputsTests/` | prompt 101；从 P5 合入后的 main 开；File/ 只做播放命令接线与就地改结束动作 / 速率 |
 | W1-D3 | 每路音频效果格（C 热路径） | `w1-audio-3` | `Packages/SwitcherAudio/` `App/Sources/Engine/AudioEffectsSupport.swift` | prompt 102；从 P5 合入后的 main 开；App 只翻一个常量 |
 | W4-C2 | 手册与实现再对齐、随包 HTML 手册 | `w4-docs-2` | `docs/` `!docs/spec/` `!docs/plan/` `Samples/` `README.md` `App/Resources/Help/` | prompt 103；从 G6 合入后的 main 开，每批合入后 rebase |
+| W1-B4 | 监听同步：按总线效果链的实测延迟把视频延后同样毫秒数 | `w1-core-4` | `Packages/SwitcherCore/Sources/SwitcherEngine/` `Packages/SwitcherCore/Tests/SwitcherEngineTests/` `Packages/SwitcherAudio/Sources/Integration/` `Packages/SwitcherAudio/Tests/IntegrationTests/` `Tools/switcher-headless/` | prompt 105；用户 2026-10-03 定；Integration 只做补偿方式开关与把延迟值交给引擎；headless 只加 `--av-compensation`；从 G6 合入后的 main 开 |
 | G7 | 第五波骨架与契约后合入、0.1.x 放行 | `g7` | `Tools/` `scripts/` `Makefile` `scenarios/` `reports/` `baselines/` `docs/checklists/` `docs/OWNERSHIP.md` `docs/plan/prompts/` `docs/plan/导播台落地方案.md` `scripts/prompt-page/` `docs/KNOWN_ISSUES.md` `docs/ui-study/` `CHANGELOG.md` `~Packages/*:50` `~App/:50` | prompt 104；docs/ui-study/ 只加"落地情况"一段与改后截图；CHANGELOG.md 归 G5 类（发布门槛）会话，用户 2026-10-03 定 |
 
 ## 补充规则（P0 加的，落地方案里没写明；不同意就改这里）
