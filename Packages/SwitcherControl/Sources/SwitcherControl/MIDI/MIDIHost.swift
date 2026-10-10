@@ -1,6 +1,5 @@
 import CoreMIDI
 import Foundation
-import Synchronization
 
 // 进程级的 CoreMIDI 宿主（W2-C2，reports/issues/W3E-w2-control-midi-hotplug-after-restart.md）。
 // 探针（reports/w2-control-2.md §1）证实：CoreMIDI 把进程里**所有**客户端的通知（源增删 = 热插拔）派到"进程里第一次
@@ -59,19 +58,41 @@ final class MIDIHost: @unchecked Sendable {
     var isCurrent: Bool { Thread.current === thread }
 
     /// 在宿主线程上同步跑 body、拿回结果；已经在宿主线程上就直接跑（不然会等自己）。
+    /// W2-C3：离开 `withoutActuallyEscaping` 时运行时检查闭包没被别人留着，留着就 trap（"non-escaping closure has escaped"，Debug / Release 都是）。
+    /// 交给 run loop 的块要等它返回、被 run loop 释放时才放掉捕获的东西，可调用方在 signal 之后随时会走——所以块不直接捕获闭包，
+    /// 闭包放在 `SyncCall` 里，宿主线程跑完先清掉、再放行调用方（修前块里先 signal，调用方抢在块被释放之前离开就崩，
+    /// reports/issues/W5A-w2-control-midihost-sync-escaping-crash.md）。
     func sync<T: Sendable>(_ body: @Sendable () -> T) -> T {
         if isCurrent { return body() }
-        let done = DispatchSemaphore(value: 0)
-        let result = Mutex<T?>(nil)
-        withoutActuallyEscaping(body) { escapable in
-            CFRunLoopPerformBlock(runLoop, CFRunLoopMode.defaultMode.rawValue) {
-                result.withLock { $0 = escapable() }
-                done.signal()
-            }
+        return withoutActuallyEscaping(body) { escapable in
+            let call = SyncCall(escapable)
+            CFRunLoopPerformBlock(runLoop, CFRunLoopMode.defaultMode.rawValue) { call.run() }
             CFRunLoopWakeUp(runLoop)
-            done.wait()
+            return call.wait()
         }
-        return result.withLock { $0! }
+    }
+
+    /// `sync` 的一次交接：闭包在宿主线程上跑完就清掉，块晚些被释放时只放掉对本对象的引用、不再牵着闭包。
+    /// `@unchecked Sendable` 的理由：`body` 在调用方线程 init 时写、宿主线程 `run` 里读并清空；`result` 宿主线程写、调用方 `wait` 返回后读；
+    /// 前后由入队（CFRunLoopPerformBlock 内部加锁）和信号量隔开，同一时刻只有一条线程碰它们。
+    private final class SyncCall<T: Sendable>: @unchecked Sendable {
+        private var body: (@Sendable () -> T)?
+        private var result: T?
+        private let done = DispatchSemaphore(value: 0)
+
+        init(_ body: @escaping @Sendable () -> T) { self.body = body }
+
+        /// 宿主线程：跑 → 清掉闭包 → 放行调用方，顺序不能换。
+        func run() {
+            result = body?()
+            body = nil
+            done.signal()
+        }
+
+        func wait() -> T {
+            done.wait()
+            return result!
+        }
     }
 
     /// 送到宿主线程上异步跑；已经在宿主线程上就直接跑（保持通知的先后顺序）。
