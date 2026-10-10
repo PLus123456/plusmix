@@ -11,7 +11,9 @@ import SwitcherContracts
 //     其他槽走契约的 latest(atOrBefore: t_n)
 //   → renderer.render(...)：.skipped 记 missed_render → 归还借用。
 //   → 每路记下这拍用的帧（InputLatencyRecorder，提案 005 的 L1）。
-// GPU 完成回调线程（RenderSink）：取 now → 计 render_ms / 派发抖动 / 帧数 / 每路 L1（now − 新帧的 ingressTime）
+// GPU 完成回调线程（RenderSink）：取 now → 计 render_ms / 派发抖动 / 帧数 → 视频延后（W1-B4，Engine/VideoDelay.swift）：
+//   Lₙ = 0 且延迟队列空：当场派发（下一行）；否则 tickTime 改成拍点 + Lₙ、入队，派发线程到期再派。
+// 派发（完成线程当场或派发线程到期，同一时刻只有一条）：每路 L1（派发那一刻 − 新帧的 ingressTime）
 //   → 对每个 FrameConsumer 调 consume（必须立即返回，各自入队；引擎给每次 consume 计时，超过 1 ms 计入 slowConsumeCalls 供诊断）。
 // 输入表与消费者表：不可变对象 + 原子指针发布（HazardPublisher），注册 / 注销在普通线程换表。
 // Stats：`makeStats()` 在普通线程从 EngineCounters 组装（铁律 4）。
@@ -27,6 +29,8 @@ public struct EngineOptions: Sendable {
     /// 到达余量参数（注册输入时交给实现了 ArrivalPacedFrameSlot 的槽；initialFloor / maxRaise / programFrame 为 nil 时按节目帧率填；
     /// `registerInput(number:slot:pacing:)` 可按输入另给一份）。
     public var pacing = PacingOptions()
+    /// 视频延后（W1-B4，提案 028）：最大延后（队列深度按它算）、每拍最多改多少、派发线程的实时策略。
+    public var videoDelay = VideoDelayOptions()
     public init() {}
 }
 
@@ -38,7 +42,7 @@ public enum EngineError: Error, Equatable {
 }
 
 /// 引擎。组装方（headless / App / 测试）创建：状态机 + 渲染器 + 每路帧槽 + 消费者。
-public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink {
+public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink, VideoDelayControl, VideoDelayDispatching {
     public let stateMachine: StateMachine
     public let renderer: any Renderer
     public let format: ProgramFormat
@@ -74,6 +78,8 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
     }
 
     private let inputTable: RenderInputTable
+    /// 视频延后（W1-B4）：设定值、每帧的 Lₙ、延迟队列、派发线程。
+    let videoDelayLine: VideoDelayLine
     /// 每路 L1 的记录环（提案 005）。
     private let latency: InputLatencyRecorder
     private let slotsPublisher: HazardPublisher<SlotTable>
@@ -108,6 +114,7 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         counters = EngineCounters(maxInputs: maxInputs)
         inputTable = RenderInputTable(capacity: maxInputs + 1)
         latency = InputLatencyRecorder(inputCapacity: maxInputs + 1)
+        videoDelayLine = VideoDelayLine(options: options.videoDelay, frameRate: format.frameRate, counters: counters)
         slotsPublisher = HazardPublisher(initial: SlotTable(slots: Array(repeating: nil, count: maxInputs + 1)), readerCapacity: 2)
         slotsReader = slotsPublisher.makeReaderSlot()
         snapshotReader = stateMachine.publisher.makeReaderSlot()
@@ -208,15 +215,23 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         let clock = ProgramClock(spec: TickClockSpec(t0: t0, frameRate: format.frameRate), options: options.clock)
         self.clock = clock
         latency.t0.store(clock.spec.time(of: firstTick).ticks, ordering: .releasing)
+        do {
+            try videoDelayLine.start(sink: self)
+        } catch {
+            started.store(false, ordering: .releasing)
+            throw error
+        }
         clockStartLag = max(.zero, HostClock.now() - clock.spec.time(of: firstTick))
         try clock.start(handler: self, firstTick: firstTick, lastTick: lastTick)
     }
 
-    /// 停引擎：时钟停 → 渲染器 shutdown → 状态机线程停。只预热没起的引擎也用它释放渲染器与状态机线程。
+    /// 停引擎：时钟停 → 渲染器 shutdown（完成回调全部到过）→ 延迟队列里剩下的帧派完、派发线程停 → 状态机线程停。
+    /// 只预热没起的引擎也用它释放渲染器与状态机线程。
     public func stop() async {
         guard started.load(ordering: .acquiring) || warmedUp else { return }
         clock?.stop()
         renderer.shutdown()
+        videoDelayLine.stop()
         renderer.sink = nil
         stateMachine.stop()
         warmedUp = false
@@ -224,6 +239,20 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
     }
 
     public var isRunning: Bool { started.load(ordering: .acquiring) }
+
+    // MARK: 视频延后（W1-B4，提案 028；任意线程）
+
+    /// 设定视频延后（钳到 [0, options.videoDelay.maxDelay]）。音频引擎在 videoDelay 补偿方式下把 Master 效果链的实测延迟交过来；
+    /// 运行中改了，Lₙ 按每拍最多 1/4 拍平滑过去（tickTime 严格递增、不丢不重）。没起也能设（下次起的第一帧就用它）。
+    public func setVideoDelayTarget(_ delay: HostDuration) { videoDelayLine.setTarget(delay) }
+    /// 设定值（已钳位）。
+    public var videoDelayTarget: HostDuration { videoDelayLine.targetDuration }
+    /// 实际在用的延后：最近派发的那一帧的 Lₙ（slew 过程中与设定值不同）。显示源（渲染器的 displayDelayProvider）读它。
+    public var videoDelayApplied: HostDuration { counters.videoDelayApplied }
+    /// 延迟队列深度（⌈maxDelay / 拍长⌉ + 1）。
+    public var videoDelayQueueCapacity: Int { videoDelayLine.queue.capacity }
+    /// 派发线程的 mach 端口（测试的分配探针）；没起为 0。
+    var videoDelayDispatchThreadPort: UInt32 { videoDelayLine.threadPort.load(ordering: .acquiring) }
 
     // MARK: 渲染线程（ProgramClockHandler）
 
@@ -291,7 +320,17 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink 
         counters.renderNsSumValue.add(UInt64(max(renderNs, 0)), ordering: .relaxed)
         counters.renderCountValue.add(1, ordering: .relaxed)
         _ = counters.dispatchJitterMaxNsValue.max((now - frame.tickTime).magnitude.nanoseconds, ordering: .relaxed)
-        latency.account(tick: frame.tick, now: now, into: counters)   // 提案 005：派发那一刻 − 各路新帧的 ingressTime
+        // 视频延后：Lₙ = 0 且队列空时当场派发（与以前同一条路）；否则改好 tickTime 入队，派发线程到期再派
+        if let out = videoDelayLine.admit(frame, now: now) { dispatch(out, now: now) }
+    }
+
+    // MARK: 派发（GPU 完成线程当场，或派发线程到期；同一时刻只有一条线程在这里）
+
+    func dispatchDelayed(_ frame: RenderedFrame) { dispatch(frame, now: HostClock.now()) }
+
+    @inline(__always)
+    private func dispatch(_ frame: RenderedFrame, now: HostTime) {
+        latency.account(tick: frame.tick, now: now, into: counters)   // 提案 005：派发那一刻 − 各路新帧的 ingressTime（延后之后量，含 L）
         let threshold = options.slowConsumeThreshold
         consumers.withLock { list in
             var i = 0
