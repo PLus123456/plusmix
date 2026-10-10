@@ -19,7 +19,7 @@ One vocabulary is used everywhere: interface, show files, API and this manual ([
 
 ## The main window
 
-![The main window (1440×900; six synthetic test inputs, PGM 1, PVW 2)](../img/main-window-en.png)
+![The main window (1440×900; the "event" sample with English input names: four cameras, a mixer feed and a title, PGM 1, PVW 2)](../img/main-window-en.jpg)
 
 The smallest window is 1100×720 (including the toolbar row). The areas:
 
