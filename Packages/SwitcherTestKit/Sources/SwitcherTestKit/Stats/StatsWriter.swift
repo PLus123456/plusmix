@@ -138,6 +138,7 @@ public final class StatsWriter: @unchecked Sendable {
         out.rssMb = fix(s.rssMb)
         out.cpuPct = fix(s.cpuPct)
         out.gpuPct = fix(s.gpuPct)
+        out.videoDelayMs = fix(s.videoDelayMs)   // 022
         out.perInput = s.perInput.mapValues { p in
             var p = p
             p.fps = fix(p.fps); p.latencyMs = fix(p.latencyMs); p.latencyMaxMs = fix(p.latencyMaxMs)
@@ -145,7 +146,7 @@ public final class StatsWriter: @unchecked Sendable {
         }
         out.encoder = s.encoder.map { e in
             var e = e
-            e.bitrate = fix(e.bitrate); e.diskFreeMb = fix(e.diskFreeMb)
+            e.bitrate = fix(e.bitrate); e.diskFreeMb = fix(e.diskFreeMb); e.uptimeS = fix(e.uptimeS)   // 022：uptime_s
             return e
         }
         out.audio.meters.buses = s.audio.meters.buses.map { b in

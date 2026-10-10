@@ -53,6 +53,9 @@ public struct NDISendCounters: Hashable, Sendable {
     /// SDK 在、但 NDIlib_initialize / NDIlib_send_create 失败（提案 019）：Stats 的 state = failed，与"SDK 不在"的 unavailable 分开；
     /// 下一次 start() 清掉。
     public var startFailed: Bool = false
+    /// 提案 022：start() 那一刻（uptime_s 的起点；没起过 = nil）与最近一次错误文案（SDK 不在 / initialize / send_create 失败；下一次 start 清）。
+    public var startedAt: HostTime? = nil
+    public var lastError: String = ""
 
     public init() {}
 
@@ -63,9 +66,11 @@ public struct NDISendCounters: Hashable, Sendable {
     public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, bytesPerFrame: Int, running: Bool = true, output: Int = 0) -> Stats.EncoderEntry {
         let frames = framesSent &- (previous?.framesSent ?? 0)
         let bitrate = windowSeconds > 0 ? Double(frames * UInt64(bytesPerFrame)) * 8 / windowSeconds : 0
+        let publishing = !startFailed && !unavailable && running
         return Stats.EncoderEntry(output: output, skipped: skipped, bitrate: bitrate, frames: framesSent, dropped: skipped, diskFreeMb: 0, reconnects: 0,
                                   connections: UInt64(max(0, connections)),
-                                  state: startFailed ? "failed" : (unavailable ? "unavailable" : (running ? "publishing" : "idle")))
+                                  state: startFailed ? "failed" : (unavailable ? "unavailable" : (running ? "publishing" : "idle")),
+                                  uptimeS: publishing ? (startedAt.map { max(0, (HostClock.now() - $0).seconds) } ?? 0) : 0, lastError: lastError)   // 022
     }
 }
 
@@ -210,11 +215,14 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
             guard !running else { throw NDISendError.alreadyRunning }
             let haveSDK = Self.isAvailable
             counters.startFailed.store(false, ordering: .relaxed)   // 019：上一次起失败的记号到这次 start 为止
+            counters.startedAtTicks.store(HostClock.now().ticks, ordering: .relaxed)   // 022：uptime_s 起点；上一次的错误到这次 start 为止
+            counters.lastErrorText.withLock { $0 = haveSDK ? "" : "NDI SDK 不在（编译时没探测到）" }
             #if canImport(NDI)
             if !configuration.dryRun {
                 guard NDIlib_initialize() else {
                     counters.unavailable.store(true, ordering: .relaxed)
                     counters.startFailed.store(true, ordering: .relaxed)   // 019：SDK 在但起不来 → Stats failed
+                    counters.lastErrorText.withLock { $0 = "NDIlib_initialize 失败" }   // 022
                     throw NDISendError.initializeFailed
                 }
                 nameCString = strdup(configuration.name)
@@ -224,6 +232,7 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
                 guard let s = NDIlib_send_create(&desc) else {
                     counters.unavailable.store(true, ordering: .relaxed)
                     counters.startFailed.store(true, ordering: .relaxed)   // 019
+                    counters.lastErrorText.withLock { $0 = "NDIlib_send_create 失败" }   // 022
                     throw NDISendError.createFailed
                 }
                 sender = s
@@ -615,6 +624,8 @@ final class AtomicNDICounters: @unchecked Sendable {
     let connections = Atomic<Int>(0)
     let unavailable = Atomic<Bool>(true)
     let startFailed = Atomic<Bool>(false)
+    let startedAtTicks = Atomic<UInt64>(0)          // 022：0 = 没起过
+    let lastErrorText = Mutex<String>("")           // 022
     let lastCPUProbeMs = Atomic<Double>(0)
     let lastGPUProbeMs = Atomic<Double>(0)
     let autoSwitches = Atomic<UInt64>(0)
@@ -652,6 +663,9 @@ final class AtomicNDICounters: @unchecked Sendable {
         c.connections = connections.load(ordering: .relaxed)
         c.unavailable = unavailable.load(ordering: .relaxed)
         c.startFailed = startFailed.load(ordering: .relaxed)
+        let started = startedAtTicks.load(ordering: .relaxed)
+        c.startedAt = started == 0 ? nil : HostTime(ticks: started)   // 022
+        c.lastError = lastErrorText.withLock { $0 }
         return c
     }
 }

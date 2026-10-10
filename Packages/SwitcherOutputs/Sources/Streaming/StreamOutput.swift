@@ -143,6 +143,9 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     private let audioThreadGroup = DispatchGroup()
     // 诊断：最近一次退出发布循环的原因
     private let lastExitReason = Mutex<String>("")
+    // 提案 022：start 成功那一刻（uptime_s 的起点）与最近一次错误文案（断线 / 连接失败 / 放弃；下一次 start 清）
+    private let startedAt = Mutex<HostTime?>(nil)
+    private let lastError = Mutex<String>("")
 
     /// 用 VideoToolbox 编码器。
     public convenience init(configuration: Configuration, transportFactory: any StreamTransportFactory) throws {
@@ -199,9 +202,22 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     public var lastExitReasonDescription: String { lastExitReason.withLock { $0 } }
 
     /// Stats.encoder[i] 的一项：skipped = 本路编码器的 E1 计数；bitrate = 窗口内交给传输层的 bit/s；
-    /// frames / dropped / reconnects / state 按提案 001 / 002（`StreamCounters.statsEntry`：framesSent / networkDropped / reconnects / state.name）。
+    /// frames / dropped / reconnects / state / disconnects / attempt 按提案 001 / 002 / 022（`StreamCounters.statsEntry`）；
+    /// uptime_s / last_error（提案 022）只有本对象知道：uptime = 现在 − start() 成功那一刻（含握手 / 退避 / 重连期间；idle / stopped / failed = 0），
+    /// last_error = 最近一次断线原因 / 连接失败原因 / 放弃的原因，下一次 start() 清。
     public func statsEntry(previous: StreamCounters?, windowSeconds: Double, output: Int = 0) -> Stats.EncoderEntry {
-        counters.statsEntry(previous: previous, windowSeconds: windowSeconds, encoderSkipped: videoEncoder.counters.skipped, output: output)
+        statsEntry(counters: counters, previous: previous, windowSeconds: windowSeconds, output: output)
+    }
+
+    /// 同上，但用调用方已取的快照算（组装方把同一份快照当下一窗口的起点时用，两次取快照之间的帧不会两边都不算；headless 的 EncoderStatsSource）。
+    public func statsEntry(counters c: StreamCounters, previous: StreamCounters?, windowSeconds: Double, output: Int = 0) -> Stats.EncoderEntry {
+        var e = c.statsEntry(previous: previous, windowSeconds: windowSeconds, encoderSkipped: videoEncoder.counters.skipped, output: output)
+        switch c.state {
+        case .idle, .stopped, .failed: e.uptimeS = 0
+        default: e.uptimeS = startedAt.withLock { $0 }.map { max(0, (HostClock.now() - $0).seconds) } ?? 0
+        }
+        e.lastError = lastError.withLock { $0 }
+        return e
     }
 
     // MARK: 生命周期
@@ -213,6 +229,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             stopInitiated.store(false, ordering: .releasing)
             stopRequested.store(false, ordering: .releasing)
             atomicCounters.published.store(false, ordering: .releasing)
+            lastError.withLock { $0 = "" }   // 022：下一次 start 清上一次的错误
             queue.beginBuffering()   // 编码器起来之前就开始收：握手期间的帧 / 包排在缓冲里，连上后照送（W2-D2）
             try videoEncoder.start()
             if let audio = configuration.audio, let ring = pcmRing {
@@ -253,6 +270,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 audioAccepting.store(true, ordering: .releasing)
             }
             running = true
+            startedAt.withLock { $0 = HostClock.now() }   // 022：uptime_s 的起点
             stopped.enter()
             senderTask = Task.detached(priority: .userInitiated) { [self] in
                 await self.run()
@@ -357,7 +375,9 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
         var wakeIterator = wake.makeAsyncIterator()
         while !stopRequested.load(ordering: .acquiring) {
             guard policy.allows(attempt: failures + 1) else {
-                finalState = .failed("连续 \(failures) 次连不上，超过最大尝试次数")
+                let why = "连续 \(failures) 次连不上，超过最大尝试次数"
+                finalState = .failed(why)
+                lastError.withLock { $0 = why }   // 022
                 break
             }
             if failures > 0 {
@@ -373,6 +393,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 transport = try transportFactory.makeTransport(for: destination, audioFormat: audioEncoder?.configuration)
             } catch {
                 logger.error("[\(self.consumerName, privacy: .public)] 建传输层失败：\(String(describing: error), privacy: .public)")
+                lastError.withLock { $0 = "建传输层失败：\(error)" }   // 022
                 failures += 1
                 continue
             }
@@ -380,6 +401,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 try await withTimeout(seconds: configuration.connectTimeoutSeconds) { try await transport.connect() }
             } catch {
                 logger.warning("[\(self.consumerName, privacy: .public)] 连接失败：\(String(describing: error), privacy: .public)")
+                lastError.withLock { $0 = "连接失败：\(error)" }   // 022
                 await transport.close()
                 failures += 1
                 continue
@@ -407,6 +429,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             if reason == .stopped { break }
             videoEncoder.requestKeyframe()
             logger.warning("[\(self.consumerName, privacy: .public)] 断线：\(String(describing: reason), privacy: .public)")
+            lastError.withLock { $0 = "断线：\(reason)" }   // 022：最近一次断线的原因（disconnected / stalled / sendFailed(…)）
             atomicCounters.disconnects.add(1, ordering: .relaxed)
             disconnectedAt = HostClock.now()
             failures = 1

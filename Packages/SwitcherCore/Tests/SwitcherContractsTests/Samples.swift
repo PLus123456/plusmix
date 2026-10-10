@@ -87,18 +87,21 @@ enum Samples {
         return show
     }
 
-    /// P2 之后每个新字段都填非默认值（latency、frames / dropped / disk_free_mb / reconnects / state、discontinuities / meters）。
+    /// P2 之后每个新字段都填非默认值（latency、frames / dropped / disk_free_mb / reconnects / state、discontinuities / meters；022 的 uptime_s / disconnects / last_error / video_delay_ms）。
     static func stats() -> Stats {
         Stats(ts: 1_757_690_000.5, tick: Tick(216_000), renderMs: 1.75, missedRender: 0, jitterMs: 0.42,
               perInput: [1: Stats.PerInput(fps: 30, dup: 30, drop: 0, latencyMs: 33.4, latencyMaxMs: 41.7),
                          2: Stats.PerInput(fps: 60, dup: 0, drop: 1, latencyMs: 16.7, latencyMaxMs: 18.2)],
-              encoder: [Stats.EncoderEntry(output: 1, skipped: 0, bitrate: 6_000_000, frames: 215_990, dropped: 0, diskFreeMb: 40_960.5, reconnects: 0, state: "recording"),
-                        Stats.EncoderEntry(output: 2, skipped: 3, bitrate: 2_500_000, frames: 215_000, dropped: 12, diskFreeMb: 0, reconnects: 2, connections: 0, state: "publishing")],
+              encoder: [Stats.EncoderEntry(output: 1, skipped: 0, bitrate: 6_000_000, frames: 215_990, dropped: 0, diskFreeMb: 40_960.5, reconnects: 0, state: "recording",
+                                           uptimeS: 3600.25),
+                        Stats.EncoderEntry(output: 2, skipped: 3, bitrate: 2_500_000, frames: 215_000, dropped: 12, diskFreeMb: 0, reconnects: 2, connections: 0, state: "publishing",
+                                           uptimeS: 3583.5, disconnects: 1, lastError: "stalled")],   // 022：在推时 attempt = 0
               audio: Stats.AudioCounters(dropouts: 0, underruns: 1, discontinuities: 2, meters: meters()),
               rssMb: 512.25, cpuPct: 12.5, gpuPct: 30,
               display: [Stats.DisplayEntry(output: 4, kind: "externalDisplay", frames: 36_000, dropped: 0, state: "presenting"),
                         Stats.DisplayEntry(output: 5, kind: "virtualCamera", frames: 35_900, dropped: 4, undelivered: 1_200, state: "publishing"),
-                        Stats.DisplayEntry(output: 0, kind: "monitor", frames: 21_500, dropped: 1, state: "presenting")])
+                        Stats.DisplayEntry(output: 0, kind: "monitor", frames: 21_500, dropped: 1, state: "presenting")],
+              videoDelayMs: 12.5)
     }
 
     /// 四条总线（顺序 = Bus.allCases）+ 两路输入的表读数；A / B 总线静音（下限 −120）。

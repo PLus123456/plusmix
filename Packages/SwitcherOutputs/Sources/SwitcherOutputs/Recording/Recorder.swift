@@ -153,6 +153,8 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
     private var finishDeadline: HostTime = .zero   // 封口宽限到期时刻（stop 请求时定）
     private var completion: (@Sendable (Result<RecordingResult, Swift.Error>) -> Void)?
     private var failure: String?
+    private var startedAt: HostTime?           // stateLock；提案 022 的 uptime_s 从它算
+    private var lastErrorText = ""             // stateLock；提案 022 的 last_error：最近一次 .failed 的文案，start 清
 
     private let audioRing: AudioBlockRing?
     private let atomicCounters = AtomicRecorderCounters()
@@ -183,10 +185,16 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
 
     /// 状态（任意线程）。
     public var state: State { stateLock.withLock { stateValue } }
-    /// 计数快照。
+    /// 计数快照（提案 022：uptimeSeconds 只在 recording / stopping 时非 0；lastError = 最近一次失败的文案，start 清）。
     public var counters: RecorderCounters {
         var c = countersSnapshot()
         c.encoder = encoder.counters
+        let (state, started, lastError) = stateLock.withLock { (stateValue, startedAt, lastErrorText) }
+        switch state {
+        case .recording, .stopping: c.uptimeSeconds = started.map { max(0, (HostClock.now() - $0).seconds) } ?? 0
+        default: c.uptimeSeconds = 0
+        }
+        c.lastError = lastError
         return c
     }
     /// Stats.encoder[i] 的一项（提案 001 / 002）：见 `RecorderCounters.statsEntry`；state 按录制状态。只在 Stats 采样线程上调（每秒一次）。
@@ -200,7 +208,12 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
 
     private func countersSnapshot() -> RecorderCounters { atomicCounters.snapshot() }
 
-    private func setState(_ s: State) { stateLock.withLock { stateValue = s } }
+    private func setState(_ s: State) {
+        stateLock.withLock {
+            stateValue = s
+            if case .failed(let message) = s { lastErrorText = message }   // 022：last_error
+        }
+    }
 
     // MARK: 开始 / 停止
 
@@ -217,6 +230,8 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
             lastConsumedTick.store(Int64.min, ordering: .relaxed)
             audioSealedAtomic.store(false, ordering: .relaxed)
             stateValue = .recording
+            startedAt = HostClock.now()   // 022：uptime_s 的起点；下一次 start 清上一次的错误
+            lastErrorText = ""
         }
         let free = Recorder.freeBytes(for: configuration.url)
         atomicCounters.diskFreeBytes.store(free, ordering: .relaxed)

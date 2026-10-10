@@ -2,8 +2,9 @@ import Foundation
 
 /// stats.jsonl 的一行（测试标准 §7；P2 按已批提案 001 / 002 / 004 / 005 扩了 per_input、encoder、audio 三节）。字段名逐字：
 /// ts、tick、render_ms、missed_render、jitter_ms、per_input{fps, dup, drop, latency_ms, latency_max_ms}、
-/// encoder[{skipped, bitrate, frames, dropped, disk_free_mb, reconnects, state}]、display[{output, kind, frames, dropped, undelivered, state}]、
-/// audio{dropouts, underruns, discontinuities, meters}、rss_mb、cpu_pct、gpu_pct。
+/// encoder[{output, skipped, bitrate, frames, dropped, disk_free_mb, reconnects, connections, state, uptime_s, disconnects, last_error, attempt}]、
+/// display[{output, kind, frames, dropped, undelivered, state}]、audio{dropouts, underruns, discontinuities, meters}、rss_mb、cpu_pct、gpu_pct、video_delay_ms
+///（uptime_s / disconnects / last_error / attempt 与 video_delay_ms 是提案 022，P5-2 落地，用户 2026-10-11 批）。
 /// UI 状态行、API、测试三方读同一个结构，不许各自另算（铁律 4）。
 ///
 /// 口径（每秒一行，"窗口" = 上一行到这一行之间）：
@@ -21,6 +22,8 @@ import Foundation
 ///   undelivered = 不在呈现 / 发布时没送出去的帧数累计（提案 018，与 dropped 不重叠）；state 见 `DisplayEntry.states`。
 /// - `audio`：A1，dropouts = 输出回调超时累计，underruns = 缓冲欠载累计，discontinuities = 波形不连续累计；meters = 表读数（提案 004，见 `AudioCounters`）。
 /// - `rss_mb`：进程 RSS（MB）；`cpu_pct`：进程 CPU（100 = 一个核）；`gpu_pct`：GPU 占用。
+/// - `video_delay_ms`（提案 022 B2 / 028）：采样那一刻为监听同步把视频延后的毫秒数 L（W1-B4 的 videoDelay 补偿：按 Master 效果链的实测延迟延后派发；
+///   补偿方式 audioPTS、没有效果、或组装方没接视频延后时为 0）。瞬时值，不累计；引擎 `EngineCounters.videoDelayMs` 填。
 /// 累计值单调不减，任意两行相减就是窗口内的增量。
 ///
 /// 兼容：P2 / P3 之前写的 stats.jsonl 没有新字段，解码时缺键给默认值（0 / "idle" / 空数组 / 空）；写出时总是写全。
@@ -49,6 +52,8 @@ public struct Stats: Hashable, Codable, Sendable {
     public var cpuPct: Double
     /// JSON 键 gpu_pct。
     public var gpuPct: Double
+    /// JSON 键 video_delay_ms（提案 022 B2）：采样那一刻为监听同步把视频延后的毫秒数（提案 028 的 L；没延后 = 0）。瞬时值。
+    public var videoDelayMs: Double
 
     /// per_input 的元素。
     public struct PerInput: Hashable, Codable, Sendable {
@@ -60,6 +65,8 @@ public struct Stats: Hashable, Codable, Sendable {
         public var drop: UInt64
         /// JSON 键 latency_ms（提案 005）：窗口内该输入的 L1 平均值（ms）= 帧交给第一个 FrameConsumer 的那一刻 − 该帧的 `Frame.ingressTime`，
         /// 只算"这一拍第一次用到的帧"（帧率转换的重复拍不算）。窗口内没有样本写 0；引擎侧算法归 W1-B2，之前引擎写 0。
+        /// 定义不变、但含视频延后（提案 028 第 4 条）：videoDelay 补偿下"交给第一个 FrameConsumer 的那一刻"在延后之后，所以 L1 含当时的 L
+        ///（开着压缩 / 限幅时多 5–35 ms）；判定 L1 时扣掉同一行的顶层 `video_delay_ms`，阈值数字不动（测试标准 §3 L1 行，用户 2026-10-11 定）。
         public var latencyMs: Double
         /// JSON 键 latency_max_ms（提案 005）：同口径的窗口最大值（ms）。
         public var latencyMaxMs: Double
@@ -111,8 +118,22 @@ public struct Stats: Hashable, Codable, Sendable {
         /// JSON 键 state（提案 002）：输出的运行状态。推流：idle / connecting / publishing / backoff / stopping / stopped / failed；
         /// NDI：publishing / idle / unavailable（SDK 不在）/ failed（SDK 在但 initialize / send_create 失败，019）；录制：idle / recording / stopping / stopped / failed。
         public var state: String
+        /// JSON 键 uptime_s（提案 022）：这一路**本次运行**的时长（秒）= 采样那一刻 − `start()` 成功那一刻（host time 差）。推流含握手 / 退避 / 重连期间
+        ///（"运行着"就算，与 state 一起看）；idle / stopped / failed 写 0。填数：录制 `Recorder`、推流 `StreamOutput`、NDI `NDISender` 各自记 startedAt。
+        public var uptimeS: Double
+        /// JSON 键 disconnects（提案 022）：推流连上之后掉线 / 停滞被判断线的次数，自启动累计（`StreamCounters.disconnects`）；录制 / NDI 写 0。
+        /// 与 `reconnects` 的区别：reconnects 只记成功连回来的，断了没连回来的只有这里能看出来。
+        public var disconnects: UInt64
+        /// JSON 键 last_error（提案 022）：最近一次错误的文案，空串 = 没出过错；**下一次 `start()` 清空**（与 019 的 NDI startFailed 同口径）。
+        /// 推流 = 最近一次断线 / 连接失败的原因（退出原因 / 连接错误的描述）或 failed 的原因；录制 = `State.failed(String)` 的文案或 writer 失败的原因；
+        /// NDI = SDK 不在 / initialize / send_create 失败的文案；起不来的路（`start()` 抛错、Stats 里报 failed）由组装方（App `OutputRuntime`）把原因填进来。
+        public var lastError: String
+        /// JSON 键 attempt（提案 022 B1）：推流**这一轮**连接是第几次尝试（`StreamState.connecting(attempt)` / `.backoff(attempt)` 的 attempt，从 1 起）；
+        /// 在推 / 空闲 / 停止 / failed = 0；录制 / NDI 写 0。底栏"连接中 / 重连中（第 n 次）"从此读它（铁律 4）。
+        public var attempt: Int
         public init(output: Int = 0, skipped: UInt64, bitrate: Double, frames: UInt64 = 0, dropped: UInt64 = 0, diskFreeMb: Double = 0,
-                    reconnects: UInt64 = 0, connections: UInt64 = 0, state: String = "idle") {
+                    reconnects: UInt64 = 0, connections: UInt64 = 0, state: String = "idle",
+                    uptimeS: Double = 0, disconnects: UInt64 = 0, lastError: String = "", attempt: Int = 0) {
             self.output = output
             self.skipped = skipped
             self.bitrate = bitrate
@@ -122,13 +143,21 @@ public struct Stats: Hashable, Codable, Sendable {
             self.reconnects = reconnects
             self.connections = connections
             self.state = state
+            self.uptimeS = uptimeS
+            self.disconnects = disconnects
+            self.lastError = lastError
+            self.attempt = attempt
         }
         enum CodingKeys: String, CodingKey {
             case output, skipped, bitrate, frames, dropped
             case diskFreeMb = "disk_free_mb"
             case reconnects, connections, state
+            case uptimeS = "uptime_s"
+            case disconnects
+            case lastError = "last_error"
+            case attempt
         }
-        /// 老文件只有 skipped / bitrate：其余缺键给 0 / "idle"（output / connections 是 019 加的，缺键 = 0）。
+        /// 老文件只有 skipped / bitrate：其余缺键给 0 / "idle"（output / connections 是 019 加的，uptime_s / disconnects / last_error / attempt 是 022 加的，缺键 = 0 / ""）。
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             output = try c.decodeIfPresent(Int.self, forKey: .output) ?? 0
@@ -140,9 +169,14 @@ public struct Stats: Hashable, Codable, Sendable {
             reconnects = try c.decodeIfPresent(UInt64.self, forKey: .reconnects) ?? 0
             connections = try c.decodeIfPresent(UInt64.self, forKey: .connections) ?? 0
             state = try c.decodeIfPresent(String.self, forKey: .state) ?? "idle"
+            uptimeS = try c.decodeIfPresent(Double.self, forKey: .uptimeS) ?? 0
+            disconnects = try c.decodeIfPresent(UInt64.self, forKey: .disconnects) ?? 0
+            lastError = try c.decodeIfPresent(String.self, forKey: .lastError) ?? ""
+            attempt = try c.decodeIfPresent(Int.self, forKey: .attempt) ?? 0
         }
-        /// JSON 键名（output 在最前，与 display[] 一样；019）。
-        public static let jsonKeys = ["output", "skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "connections", "state"]
+        /// JSON 键名（output 在最前，与 display[] 一样；019。022 的四个排在 state 之后）。
+        public static let jsonKeys = ["output", "skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "connections", "state",
+                                      "uptime_s", "disconnects", "last_error", "attempt"]
     }
 
     /// display 的元素（提案 013）：显示类输出没有编码器，帧数 / 丢帧 / 状态进这里。
@@ -322,7 +356,7 @@ public struct Stats: Hashable, Codable, Sendable {
 
     public init(ts: Double, tick: Tick, renderMs: Double, missedRender: UInt64, jitterMs: Double, perInput: [Int: PerInput],
                 encoder: [EncoderEntry], audio: AudioCounters, rssMb: Double, cpuPct: Double, gpuPct: Double,
-                display: [DisplayEntry] = []) {
+                display: [DisplayEntry] = [], videoDelayMs: Double = 0) {
         self.ts = ts
         self.tick = tick
         self.renderMs = renderMs
@@ -335,6 +369,7 @@ public struct Stats: Hashable, Codable, Sendable {
         self.rssMb = rssMb
         self.cpuPct = cpuPct
         self.gpuPct = gpuPct
+        self.videoDelayMs = videoDelayMs
     }
 
     enum CodingKeys: String, CodingKey {
@@ -347,9 +382,10 @@ public struct Stats: Hashable, Codable, Sendable {
         case rssMb = "rss_mb"
         case cpuPct = "cpu_pct"
         case gpuPct = "gpu_pct"
+        case videoDelayMs = "video_delay_ms"
     }
 
-    /// 老 stats.jsonl 没有 display（提案 013）：缺键 = 空数组。写出总是写全。
+    /// 老 stats.jsonl 没有 display（提案 013）/ video_delay_ms（提案 022）：缺键 = 空数组 / 0。写出总是写全。
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ts = try c.decode(Double.self, forKey: .ts)
@@ -364,10 +400,11 @@ public struct Stats: Hashable, Codable, Sendable {
         rssMb = try c.decode(Double.self, forKey: .rssMb)
         cpuPct = try c.decode(Double.self, forKey: .cpuPct)
         gpuPct = try c.decode(Double.self, forKey: .gpuPct)
+        videoDelayMs = try c.decodeIfPresent(Double.self, forKey: .videoDelayMs) ?? 0
     }
 
-    /// 顶层键名，按测试标准 §7 的顺序。
-    public static let jsonKeys = ["ts", "tick", "render_ms", "missed_render", "jitter_ms", "per_input", "encoder", "display", "audio", "rss_mb", "cpu_pct", "gpu_pct"]
+    /// 顶层键名，按测试标准 §7 的顺序（video_delay_ms 是 022 加在末尾的）。
+    public static let jsonKeys = ["ts", "tick", "render_ms", "missed_render", "jitter_ms", "per_input", "encoder", "display", "audio", "rss_mb", "cpu_pct", "gpu_pct", "video_delay_ms"]
 
     /// 写 jsonl 用的编码器：键排序、不转义斜杠、不换行。非有限的浮点值会抛错，写入方要先处理。
     public static let lineEncoder: JSONEncoder = {
