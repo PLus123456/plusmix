@@ -8,6 +8,7 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 仍阻塞 0.1.0 的：新发现的 S1（MIDIHost.sync 偶发崩溃）、8 小时长稳没有在修复后的树上重跑、签名账号；S1 X07（每路效果）与 X08 / X09（Bus A / B 出口）归骨架批次（102 / 97），按 Q68 (a) 同样要在放行前修——**用户 2026-10-03 确认：等 97 / 102 做完再发，不重新定级（X12 同）**。
 **2026-10-04 G7 合入第五波骨架七路**（W5-F 底栏、W5-G 工具条与菜单栏、W5-H 输入条与格子、W5-I 输出页、W5-J 设置窗与选动作、W5-K 面板改版、W5-L 其他；reports/G7.md）：UIA 表里 S2 X21（叠加浮层）、W5-B 的副作用（一路永远起不来挡着停）、下表凭据外泄的 ①（底栏提示）修了；S1 X08 的 App 半（音频设备页每条总线选声道 → 建引擎时用）、X12 的输入 / 叠加 / 音频设置窗修了——**X07、X09 的引擎侧、X12 的设置窗那一半仍开着**；新记 S2 两条（设置窗在前快捷键不派发、外部显示路由规则两份并存）。0.1.0 仍不发（reports/G7.md §7）。
 **2026-10-10 用户看完 G7 报告**：main 快进到 g7；12 条拍板全部裁定并落进 prompt / 提案 / 归属（reports/G7.md §7.1 末、落地方案 §8.8）——S1 `MIDIHost.sync` 崩溃新开 prompt 106（W2-C3）；X12 残口归 100；推流鉴权"写进查询串"归 101；W5-I 的三个 extra 标记、W5-K 的监听总线与叠加默认淡入升成契约（提案 025–027 已批，P5 落地）；下一个发的版本号 0.1.1（G8 判，prompt 107）。
+**2026-10-10 G8a**（reports/G8.md §1.1）：`p5-contracts`（已批的 023§1 / 024 (b) / 025 / 026 / 027 进契约，Command 34 → 35；**020 / 021 / 022 / 023 二–五只有提案、等用户批**，100 / 101 要等它们落地）、`w2-control-3`（S1 `MIDIHost.sync` 崩溃已修——下表销号，移到"2026-10-10 G8a 已修"表）、`w1-core-4`（视频延后 L 的引擎 / 渲染器 / Integration / headless；**App 的三行接线待 G8b**，下表新加一行 S2）合入 `g8`，整仓 make test 后等用户点头快进 main。
 
 ## 0.1.0 候选（分支 release/0.1 → main；2026-09-28 G5 判不发；2026-10-02 G6 重判不发，阻塞项与归属见 reports/G6.md §7）
 
@@ -15,15 +16,15 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
-| **S1** | `MIDIHost.sync` 偶发崩溃（Swift 运行时 "non-escaping closure has escaped"）：起停 session 走 MIDIController.start / stop → MIDIHost.sync，闭包交给宿主线程的 run loop 后块里先 `done.signal()`，调用方离开 `withoutActuallyEscaping` 时块还没释放、运行时判逃逸直接 trap。正式 App 新建 / 打开节目、改格式、退出走同一条路；时序竞争，机器忙时更易出（W5-A / W5-B 的 App 测试宿主 2026-10-01 各崩一次，单独复跑都绿）| 所有用户（崩了就是整个导播台退出） | 无 | reports/issues/W5A-w2-control-midihost-sync-escaping-crash.md | **106 W2-C3**（prompt 106，2026-10-10 开单；只动 MIDIHost.swift：参数改 @escaping 去掉 withoutActuallyEscaping，或闭包放进可清空的盒子、signal 之前放掉）；**0.1.0 阻塞项** |
 | S1 → 已修（等 8 小时复验） | 视频文件输入**循环播放**时内存每圈涨约 0.5 MB（长稳 S2 实测 60.8 MB/h，门槛 ≤ 10）。根因：文件解码线程没有自动释放池。**W2-A3 2026-09-28 已修**（解码 / 推帧线程每轮迭代包 `autoreleasepool`）：用例修前 0.465 → 修后 0.017 MB/圈，fileprobe 120 圈 footprint 从 +65.7 MB 变平 | 修前：短片段循环长时间直播的节目 | — | reports/issues/W4A-w2-inputs-file-loop-memory-and-prores-starve.md §3；reports/w2-inputs-3.md | 正式的 S2 值等用户终端重跑 8 小时 `make soak`（2026-10-02 仍没跑）；通过后从表里删 |
+| S2 | App 里扬声器 / 耳机监听仍比画面晚 L（开着 Master 压缩 / 限幅时 5–35 ms）：W1-B4 的视频延后（引擎延迟队列、渲染器显示延后、Integration 补偿方式开关、headless `--av-compensation`）已合入，**App 的三行接线还没接**（`MetalRendererOptions.videoDelayHeadroom` / `displayDelayHistory`、`renderer.displayDelayProvider`、`audio.engine.videoDelay = engine`；不接 = audioPTS 行为，录制 / 推流 / NDI 不错位）；开录起点按节目输出时间线一起改（不改的话 L > 0 时视频轨从 L 开始、AVFoundation 读出一帧黑） | 开着 Master 效果时的现场监听 | 关掉 Master 的压缩 / 限幅 | reports/issues/W1B4-g8-ownership-and-glue.md §2、reports/w1-core-4.md §3 / §5 第 1 条 | **G8b 胶水**（App ≤ 50 行，接完 App 全量 + L3 看监听）；Stats 的 `video_delay_ms` 等 022 批后 P5 填 |
 | S2 | 系统守护进程 / 桌面活动突发时渲染线程成串跳拍（10 分钟里 1–11 拍；V2 仍在 0.02% 以内）。W1-B3 定位：突发让整个进程的非实时线程和 GPU 一起停 100 ms 量级，只有实时线程按时醒，是 GPU 侧；已给渲染完成线程挂实时策略并给每次跳拍归因（GPU 晚 / 完成线程晚），在途深度是契约（≤ 2 帧）没动 | 直播机同时跑重桌面任务 | 直播时关掉其它占 GPU / CPU 的程序（测试标准 §2.8） | reports/issues/G4-w1-core-missed-render-bursts-under-daemon-activity.md；reports/w1-core-3.md §4 | 要不要把在途深度提到 4 等 8 小时长稳的 V2 累计定（契约） |
 | S3（原记 S2） | 标准负载（8 路合成源 + 摄像头 + 文件 + 录制 + 2 路推流 + NDI 发送）下进程 CPU 合计约 0.6 个核（8 小时均值 60.1%），其中 NDI SDK 自己的发送线程约 0.25 核（没有接收方也压两路）。**用户 2026-10-03 定口径：S3 的 CPU 判定不含 NDI SDK 线程**（测试标准 §3 / §4 S3，阈值 60% 不动），按线程快照扣掉 `ndis:*` 后 9-28 那次是 35.0%、达目标；SDK 线程我们不管、不重写 | 开着 NDI 发送时 | 不需要 NDI 时关掉该输出 | reports/issues/W4A-w2-stream-ndi-send-cpu-share.md；W4A-g5-cpu-multicore-distribution.md | 多核探查项仍到检查点安排；不再是发布判定的变量 |
 | S2 | 推流凭据外泄两处（W5-D 之后地址里的 user:pass@ 真的生效了，所以是密码）：②`GET /api/v1/state` 与 WebSocket 全量状态原样带 `streamKey` 与 `url`；③密钥写在地址路径里（`rtmp://h/app/密钥`，密钥栏留空）时原样进诊断包。①底栏推流按钮 / ▴ 菜单的悬停提示 **W5-F 2026-10-03 已修**（只写名字和打过码的地址，`StreamURLRedaction.redact(url:)`；G7 合入） | 用 userinfo / 路径密钥写法的推流；API 开在局域网且没设 token 时同网段任何人 | 密钥填密钥栏；API 只开本机 + token | reports/issues/W5D-w2-control-api-state-exposes-stream-credentials.md、W5D-w4-release-diagnostics-stream-key-in-url-path.md | ② 控制会话 + 提案（API 形态变）；③ W4-B（ShowRedaction 看同层 streamKey 为空 + 路径末段） |
 | S2 | **设置窗在前时快捷键不派发**（X12 的残口）：W5-K 给输入 / 叠加 / 音频设置窗挂了 `forwardHotkeys`（没被文本框吃掉的按键照走快捷键表），W5-J 的设置窗（`SettingsWindow` 的 PanelWindow）的 keyHandler 只给快捷键页录键用、没接 `session.control.handleKey`——设置窗在前按空格 / 数字不切 | 现场开着设置窗调东西时 | 点回主窗口 | reports/w5-app-panels.md §3 表最后一行；reports/G7.md §7 | **100 W5-M**（用户 2026-10-10 定；两行：keyHandler 先 `handleRecordingKey`、不吃再 `controller.session?.control.handleKey(event)`；归属待用户定，G7 不写功能） |
 | S3 | 外部显示"每块屏一路"的规则有两份实现并存：W5-F 的 `ExternalOutputMenuBuilder`（底栏 ⚙ / 工具条 / 监视器右键的菜单）与 W5-I 的 `ExternalDisplayRouting`（外部显示页每屏单选），逐条相同、各有用例，改规则要改两处 | 维护 | — | reports/w5-app-output-pages.md §3 第 1 条 | 101 W5-N 顺带（可不做；W5-I 建议菜单改调 `ExternalDisplayRouting`，≤ 50 行） |
 | S2 | 兼容层 `Cut Input=n`（以及 HTTP 批量 `[setPreview(n), cut]`）在转场进行中落不到 n：W5-E 之后 setPreview 被拒、cut 把当前转场立即做完，PGM 是原来那次转场的目标、函数仍回 "Cut"（W5-E 之前 PGM 会跳一下再是 n） | 转场中再点名切某一路 | 转场结束后再发；或先 Cut、再 ActiveInput n | reports/issues/W5E-w3-control2-compat-cut-input-mid-transition.md | 100 W5-M 定口径（报错 / 改翻译成 cut + setProgram / 写文档） |
-| S3 | 进程里第一次打开节目时连 MIDIServer 冷启动约 0.6 s，在主线程上同步等：界面卡一下（节目时钟不再受影响，W3-E6 已把它挪到定 t0 之前） | 每次启动 App 后的第一次打开节目 | — | reports/w3-app-7.md §3 | W2-C（挪到后台线程） |
+| S3 | 进程里第一次打开节目时连 MIDIServer 冷启动约 0.6 s（**W2-C3 2026-10-10 量到最坏约 4.7 s**：这台机器的 MIDIServer 按需拉起、空闲几分钟退出，赶上它退出 / 重启就是几秒），在主线程上同步等：界面卡一下（节目时钟不再受影响，W3-E6 已把它挪到定 t0 之前） | 每次启动 App 后的第一次打开节目 | — | reports/w3-app-7.md §3；reports/w2-control-3.md §3 第 1 条、§5 第 4 条 | W2-C 系 + App 会话一起（`MIDIController.start` 改异步回报 + App `ControlRuntime` 接回调设 midiError，78 的用例依赖同步 start；做法与估量在 reports/w2-control-3.md §3 第 1 条，包里单方面改不了） |
 | S3 | 已存节目里虚拟摄像头输出的 source 字段可能是 PVW / 输入 n，运行时一律送 PGM（页面已写明"送 PGM"，不再可选） | 旧节目文件 | — | reports/w3-app-5.md §3 第 1 条 | 不处理 |
 | S3 | SRT 的 passphrase / streamid 里有要转义的字符（空格 & = % + 中文……）就推不上：HaishinKit 手切查询串、值不解码就交给 libsrt | SRT 到开 passphrase 的服务器 | passphrase / streamid 只用字母数字和 - . _ ~ | reports/issues/W5D-w2-stream-srt-passphrase-reserved-chars.md | W2-D 系（SRT 分支解码一次自己设） |
 | S3 | HaishinKit 2.2.5 RTMP 鉴权的残口：第三轮服务器回 needauth（挑战过期才会）时 `url.user!` / `salt!` 强制解包崩；另三条毛病（密码不解码、密码错狂连、递归重连竞态）W5-D 已绕开（HaishinKit 永远拿不到带 userinfo 的地址） | 极少 | — | reports/issues/W5D-w4-release-haishinkit-rtmp-authenticator.md | W4-B（上游补丁 / 升依赖） |
@@ -43,6 +44,12 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 
 目视问题（docs/ui-study/03-目视检查.md 的 34 条）：用户点名的两处（转场列、底栏菜单）与 03 §3 里 prompt 86 点名的 S3（V-03 / V-05 / V-06 / V-08 / V-12 / V-14 / V-16 / V-17 / V-27）W5-A 已修；
 其余（V-01 监视器 16:9、V-04 表头折行、V-07 全局暗灰、V-09 / V-10 空状态、V-11、V-15 长路径、V-18 / V-19 菜单用词、V-20、V-21、V-22 状态行、V-24、V-25、V-28、V-29、V-30）归 92–97 的改版（reports/w5-app-visual.md §3）——**2026-10-04 G7 合入后各报告 §1 标了编号的都算改了**（V-04 / V-07 97、V-09 / V-23 94、V-15 95、V-12 96、V-22 / V-24 92 / 93……），G7 没有逐条目视复核，留在 docs/checklists/G7.md §1 第 5 条由人工打勾。
+
+### 2026-10-10 G8a 合入（P5 契约落地四 / W2-C3 / W1-B4）已修（不再出现在上表；每条有先红后绿的用例）
+
+| 原级别 | 编号 | 现象 | 修在 | 用例 | 报告 |
+|---|---|---|---|---|---|
+| S1 | — | `MIDIHost.sync` 偶发崩溃（Swift 运行时 "non-escaping closure has escaped"）：闭包交给宿主线程的 run loop 块里先 `done.signal()`，块被释放前调用方已离开 `withoutActuallyEscaping`，Debug / Release 都 trap；App 起停 session（新建 / 打开节目、改格式、退出）都走它 | 闭包放进私有 `SyncCall`，CF 块只捕获它，宿主线程跑完先清掉闭包再 signal；`sync` 签名与四个调用处一字不动（W2-C3，问题单的改法 (b)） | `MIDIHostTests.testC_midiHostSync_stressNoTrap`（修前独立进程 10 遍红 9，修后 30 遍 0；W2-C3 自己 Control 全包 ×3、App 全量 ×2 0 崩）；G8a：P5 合入那一轮还没合它时 Control 全包就崩了一次（`xctest-2026-10-10-232027.ips`），合入后 Control 全包 ×3 0 崩、整仓 make test 的 App 全量 + App 第 2 遍（共 448 个用例次）0 崩——加上 W2-C3 自己的 2 轮 = G7 §7 要的"连跑 3 轮不再出现" | reports/w2-control-3.md |
 
 ### 2026-10-04 第五波骨架（G7 合入 W5-F…W5-L）已修（不再出现在上表；每条有先红后绿的用例，用例在各分支报告 §2）
 
@@ -117,7 +124,7 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 
 ### 测试与工具（不影响产品，影响谁跑测试）
 
-- 几条依赖窗口 / 时序的用例在机器忙或窗口被盖住时偶发红，单独重跑都过：`DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`、`ExternalTests` 的 `DisplayStatsTests`、App 的 S7 两条与 `ThumbnailRateTests`、NDI 回环两条计时断言、`ThrottleProxyTests`。
+- 几条依赖窗口 / 时序的用例在机器忙或窗口被盖住时偶发红，单独重跑都过：`DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`、`ExternalTests` 的 `DisplayStatsTests`、App 的 S7 两条与 `ThumbnailRateTests`、NDI 回环两条计时断言、`ThrottleProxyTests`；`ToolbarMenuTests.testUI_inputSettingsMenuTitleNamesInput`（G8a 整仓那一轮 `performActionForItem` 之后没开出输入设置窗、红一次，单独复跑与第二遍全量都绿，原因没查到——再红就单开问题单，reports/G8.md §4.1 第 5 条）。
 - 七张多画面参考图是 macOS 27 的中文字形，26.x 机器上按 PSNR ≥ 40 dB 看（reports/issues/P4-w3-compositor-multiview-cjk-labels-macos27.md）。
 - L5 的"退步 > 10%"规则在 V3（微秒量级）与 CPU / GPU 上会因运行间起伏误报，绝对下限（`scripts/perf/regression.json` 的 `floor`）等用户定（reports/w4-soak.md §4 第 2 条）。
 - 长稳 / 性能脚本在 Claude 会话（非交互）里不接摄像头、不采 powermetrics、Instruments Leaks 附加不上；在用户终端里跑才是完整负载（reports/w4-soak.md §3）。
@@ -128,3 +135,4 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 - `MainWindowLayoutTests.testUI_mainWindowRestoresSavedFrameInsteadOfCentering` 在系统焦点窗口落在外接屏上时必红（存档按 NSScreen.main 换算，W5-F §5 第 11 条、W5-L §2.3）；`NDITests.NDILoopbackTests` 的 pts 单调断言在 SDK 重复送一帧时红（G7 第 5 轮一次、单独复跑一次红一次绿）——先单独复跑再判。
 - gate4 要在没有别的引擎 / xctest / xcodebuild 的机器上跑才作数（两个引擎并行 V1 推到 10 ms 以上、V2 丢上千帧；V6 的判定要求第 1000 拍之前没丢过帧）；查"别的引擎"用 `ps -axo comm= | grep '/switcher-headless$'`，别用 `pgrep -f`（等待脚本的命令行里也带这几个字）。`scripts/gate4.sh --checkpoint G6` 起运行报告不再改写 reports/G4.md 与 g4 基线（G6）。
 - 显示类用例（SwitcherRender `DisplayDecouplingTests`、Outputs `ExternalTests.DisplayStatsTests`、App `DisplayLedgerAppTests` / `ThumbnailRateTests` / S7 两条）在屏幕锁定、窗口被别的 App 整块盖住、机器忙时红，单独重跑都过（W5-A / W5-B / W5-C 报告 §5）。
+- 带视频延后的录像（`--av-compensation videoDelay` + Master 效果 L > 0，W1-B4 起 headless 默认）用 `frameprobe av` 量整秒配对要给 `--start-tick −round(L × fps)`，否则 11 对全判"不在整秒"（开录起点仍是拍点，视频轨从 L 开始、AVFoundation 在 0…L 读出一帧黑，FrameAnalysis 按第一帧 pts 推拍号）；录制中途改 Master 效果同样错开 ΔL（reports/issues/W1B4-w1-testkit-frameprobe-delayed-video-start.md，归 W1-A 系）。
