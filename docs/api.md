@@ -171,7 +171,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setPreview`
 
-把 PVW 换成该输入。
+把 PVW 换成该输入；转场进行中（含 T-bar 推到一半）被拒（applied = false）。
 
 | 参数 | 含义 |
 |---|---|
@@ -187,7 +187,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setProgram`
 
-直接把 PGM 换成该输入（硬切），PVW 不变。
+直接把 PGM 换成该输入（硬切），PVW 不变；转场进行中被拒（applied = false）。
 
 | 参数 | 含义 |
 |---|---|
@@ -414,6 +414,22 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 {
   "setMonitorMode" : {
     "mode" : "pfl"
+  }
+}
+```
+
+#### `setMonitorSource`
+
+耳机 / 监听总线上听哪条总线（master / busA / busB）；headphones 自己无效被拒；独听仍优先；与现状相同的值 applied = false。
+
+| 参数 | 含义 |
+|---|---|
+| `bus` | 0 = master, 1 = busA, 2 = busB（3 = headphones 无效） |
+
+```json
+{
+  "setMonitorSource" : {
+    "bus" : 1
   }
 }
 ```
@@ -786,6 +802,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
           }
         },
         "stream" : {
+          "followFirst" : false,
           "reconnectMaxSeconds" : 30,
           "streamKey" : "key",
           "url" : "rtmp://localhost/live"
@@ -835,10 +852,12 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
       },
       "record" : {
+        "armed" : true,
         "container" : "mov",
         "directory" : "/Volumes/Rec",
         "fileNamePattern" : "{show}-{date}-{time}",
         "fragmentIntervalSeconds" : 1,
+        "ownFormat" : false,
         "remuxToMP4" : false
       },
       "source" : {
@@ -908,7 +927,8 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
           }
         ],
         "monitorMode" : "afl",
-        "monitorPoint" : "preDelayLine"
+        "monitorPoint" : "preDelayLine",
+        "monitorSource" : 0
       },
       "inputs" : [
         {

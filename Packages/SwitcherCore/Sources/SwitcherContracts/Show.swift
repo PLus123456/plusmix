@@ -194,6 +194,34 @@ extension OutputSettings {
     }
 }
 
+extension OutputSettings {
+    /// 提案 025：W5-I 放在 `extra` 里的三个 App 层标记（`app.record.armed` / `app.record.ownFormat` / `app.stream.followFirst`）→ 正式字段
+    /// `RecordSettings.armed` / `.ownFormat` / `StreamSettings.followFirst`。只有出现过旧键的才搬、按旧键的原值走（bool）；搬完清掉旧键（值不是 bool、
+    /// 或对应子结构不在的，只清键）；幂等。**不在 `migratingLegacyKeys()` 里自动调**：025 之前的 App 还在读写 extra 键，搬迁时机由 App 定
+    /// （用户 2026-10-10 定：App 在 Show.load 后调一次、读写切到字段，归 101 / W5-N）；之后可以并进 `migratingLegacyKeys()`。
+    public func migratingLegacyAppFlags() -> OutputSettings {
+        var s = self
+        func takeBool(_ key: String) -> Bool? {
+            defer { s.extra.removeValue(forKey: key) }
+            if case .bool(let b)? = s.extra[key] { return b }
+            return nil
+        }
+        if let armed = takeBool(RecordSettings.legacyArmedExtraKey) { s.record?.armed = armed }
+        if let own = takeBool(RecordSettings.legacyOwnFormatExtraKey) { s.record?.ownFormat = own }
+        if let follow = takeBool(StreamSettings.legacyFollowFirstExtraKey) { s.stream?.followFirst = follow }
+        return s
+    }
+}
+
+extension Show {
+    /// 提案 025：对每个输出做一次 `OutputSettings.migratingLegacyAppFlags()`（App 在 Show.load 后调一次，归 101）。
+    public func migratingLegacyAppFlags() -> Show {
+        var show = self
+        for i in show.outputs.indices { show.outputs[i].settings = show.outputs[i].settings.migratingLegacyAppFlags() }
+        return show
+    }
+}
+
 extension MultiviewLayoutSettings {
     /// 过渡键名（`OutputSettings.extra`）。
     public static let legacyExtraKey = "layout"

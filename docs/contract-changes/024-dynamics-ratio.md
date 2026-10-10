@@ -66,3 +66,8 @@ docs/ui-study/04-待拍板.md Q61 要压缩器简单模式"阈值 + 比例 + 输
 3. **量到的延迟自动进 A/V 对齐**：接进 W5-C 的 `EffectLatencyTimeline`（泵在音频 PTS 侧补，录制 / 推流 / NDI 的音画不漂——对文件与流而言等价于"给视频加同样的延迟"）。扬声器 / 耳机监听没有 PTS 补不到。**用户 2026-10-03 定：监听也同步，视频延后同样的毫秒数**——引擎侧的视频延迟机制另开 prompt 105（W1-B4 / w1-core-4）：渲染完成的帧按 pts + L 再派发，补偿方式一处开关（videoDelay 默认 / audioPTS 对照），不许双重补偿。
 4. 分工：契约（新 id `compressor` 与键表、CONTRACTS.md §2.4、docs/api.md）归 **P5 / prompt 99**；C 压缩器 + 自检 + 对齐接线归 **W1-D3 / prompt 102**（总线与每路共用一份实现，总线那一格先接）；界面简单模式归 **97 / W5-K**（102 之前先按 (c) 的写实文案过渡）。
 5. 顺带两处口径，用户 2026-10-03 定"按 G6 的建议来"：(1) `parametricEQ.q` 按经典 Q（半增益带宽，BW = 2/ln2·asinh(1/2q)），一个 EQ 格（AUNBandEQ）最多 16 段、连续的 parametricEQ 格合成一格、每条总线最多 3 格——P5 写进 CONTRACTS.md §2.4 与 EffectSlot 注释，不改字段；(2) `peakLimiter` 加可选键 `ceilingDb`（默认 0，范围 −20…0）：AUPeakLimiter 的天花板固定 0 dBFS，实现为同一格内限幅之后的输出增益（C 侧渲染完乘一个系数，无分配、不多占格），替掉 W5-C "预增益 +x、总线增益 −x" 的表达法——契约归 P5、C 归 102。
+
+## 落地记录（P5 / prompt 99，2026-10-10）
+
+契约部分已落地（分支 `p5-contracts`）：`EffectSlot` 注释与 docs/CONTRACTS.md §2.4 的键表加 `compressor`（`thresholdDb` −60…0 默认 −20、`ratio` 1…20 默认 4、`kneeDb` 0…24 默认 6、`attackSeconds` 0.0001…0.2 默认 0.005、`releaseSeconds` 0.01…3 默认 0.1、`makeupGainDb` 0…24 默认 0；与 `dynamicsProcessor` 二选一占同一格）、`peakLimiter.ceilingDb`（−20…0，默认 0）、`parametricEQ.q` 经典 Q 口径、一格 ≤ 16 段 / 每总线 ≤ 3 格；`BusState.effects` 的"占位"字样改掉。
+三个苹果单元的键范围不在契约里重复（= `SwitcherAudio.EffectParameterRanges`，表在 reports/w5-audio-bus-effects.md §1.5）。没有新类型、不改 JSON 形态、schemaVersion 不升；用例 `Contracts024Tests`。C 压缩器、延迟自检、`ceilingDb` 的实现归 W1-D3（prompt 102）。

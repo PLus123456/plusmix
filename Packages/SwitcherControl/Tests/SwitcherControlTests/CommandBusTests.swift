@@ -106,6 +106,7 @@ final class CommandBusTests: XCTestCase {
             .setPreview(input: 3), .setProgram(input: 0), .tbar(progress: 0.5), .ftb(on: true),
             .overlay(channel: 4, on: true, input: 2), .setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .fade, durationTicks: 10)),
             .audioGain(input: 1, dB: -6), .mute(input: 2, on: true), .busGain(bus: .master, dB: -3), .busMute(bus: .busA, on: true), .setAFV(on: true),
+            .setMonitorSource(bus: .busB),   // 提案 026
             .startRecord(output: 1), .stopRecord(output: 1), .startStream(output: 2), .stopStream(output: 2),
             .setInputSettings(input: 1, settings: InputSettings()), .renameInput(input: 1, name: "新名"),
             .addInput(config: InputConfig(number: 5, name: "五", source: .synthetic(settings: SyntheticSourceSettings()))), .removeInput(input: 4),
@@ -120,6 +121,7 @@ final class CommandBusTests: XCTestCase {
             .removeInput(input: 99), .removeOutput(output: 99), .fade(durationTicks: -1),
             .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 9, cutAtTick: 0)),
             .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 0, cutAtTick: 0)),
+            .setMonitorSource(bus: .headphones),   // 提案 026：耳机不能听自己
         ]
         for c in illegal {
             XCTAssertNotNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应拒绝")

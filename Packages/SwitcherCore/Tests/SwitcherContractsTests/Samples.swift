@@ -29,14 +29,15 @@ enum Samples {
                         settings: OutputSettings(source: .program,
                                                  video: VideoEncodeSettings(codec: .hevc, bitrateBps: 12_000_000, keyframeIntervalFrames: 120, width: nil, height: nil),
                                                  audio: AudioEncodeSettings(codec: .aac, bitrateBps: 192_000),
-                                                 record: RecordSettings(directory: "/Movies/Switcher", fileNamePattern: "{show}-{date}-{time}", container: .mov, fragmentIntervalSeconds: 1, remuxToMP4: true),
+                                                 record: RecordSettings(directory: "/Movies/Switcher", fileNamePattern: "{show}-{date}-{time}", container: .mov, fragmentIntervalSeconds: 1, remuxToMP4: true,
+                                                                        armed: false, ownFormat: true),   // 提案 025：非默认值
                                                  stream: nil, extra: ["prores": .bool(false)])),
             OutputState(number: 2, kind: .stream, name: "推流 A", enabled: false,
                         settings: OutputSettings(source: .program,
                                                  video: VideoEncodeSettings(codec: .h264, bitrateBps: 6_000_000, keyframeIntervalFrames: 120, width: 1280, height: 720),
                                                  audio: AudioEncodeSettings(codec: .aac, bitrateBps: 160_000),
                                                  record: nil,
-                                                 stream: StreamSettings(url: "rtmp://127.0.0.1/live", streamKey: "abc", reconnectMaxSeconds: 30), extra: [:])),
+                                                 stream: StreamSettings(url: "rtmp://127.0.0.1/live", streamKey: "abc", reconnectMaxSeconds: 30, followFirst: true), extra: [:])),
             OutputState(number: 3, kind: .multiview, name: "多画面", enabled: true,
                         settings: OutputSettings(source: .multiview,
                                                  multiview: MultiviewLayoutSettings(preset: "3x3",
@@ -54,6 +55,7 @@ enum Samples {
         a.monitorMode = .pfl
         a.alignmentFrames = 1024          // 提案 007：非默认值
         a.monitorPoint = .postDelayLine
+        a.monitorSource = .busB           // 提案 026：非默认值
         a.buses[Bus.master.rawValue].gainDb = -3
         a.buses[Bus.busA.rawValue].muted = true
         a.buses[Bus.headphones.rawValue].effects = [EffectSlot(id: "peakLimiter", enabled: true, params: [:])]
@@ -148,6 +150,7 @@ enum Samples {
             .busMute(bus: .headphones, on: false),
             .setAFV(on: true),
             .setMonitorMode(mode: .pfl),
+            .setMonitorSource(bus: .busA),   // 提案 026
             .setBusEffects(bus: .busB, effects: [EffectSlot(id: "dynamicsProcessor", enabled: false, params: ["thresholdDb": -12, "expansionRatio": 2])]),
             .startRecord(output: 1),
             .stopRecord(output: 1),
@@ -188,6 +191,7 @@ enum Samples {
         case .busMute: "busMute"
         case .setAFV: "setAFV"
         case .setMonitorMode: "setMonitorMode"
+        case .setMonitorSource: "setMonitorSource"
         case .setBusEffects: "setBusEffects"
         case .startRecord: "startRecord"
         case .stopRecord: "stopRecord"
@@ -206,5 +210,5 @@ enum Samples {
         case .loadShow: "loadShow"
         }
     }
-    static let commandCaseCount = 34
+    static let commandCaseCount = 35   // 提案 026：setMonitorSource
 }

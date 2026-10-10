@@ -65,6 +65,7 @@
 "actionPicker.command.setInputSettings" = "Replace input settings";
 "actionPicker.command.setInputSource" = "Change input source";
 "actionPicker.command.setMonitorMode" = "Monitor mode";
+"actionPicker.command.setMonitorSource" = "Monitor source";
 "actionPicker.command.setOutputEnabled" = "Set output on / off";
 "actionPicker.command.setOutputSettings" = "Replace output settings";
 "actionPicker.command.setOverlay" = "Overlay position and animation";

@@ -65,6 +65,7 @@
 "actionPicker.command.setInputSettings" = "整体替换输入设置";
 "actionPicker.command.setInputSource" = "换输入来源";
 "actionPicker.command.setMonitorMode" = "监听方式";
+"actionPicker.command.setMonitorSource" = "监听来源";
 "actionPicker.command.setOutputEnabled" = "输出设为开 / 关";
 "actionPicker.command.setOutputSettings" = "整体替换输出设置";
 "actionPicker.command.setOverlay" = "叠加位置与动画";

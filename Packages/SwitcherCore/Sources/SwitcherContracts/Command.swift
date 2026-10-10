@@ -1,8 +1,8 @@
 // 命令（设计方案 §9.1）：UI、快捷键、MIDI、API 都只发命令，不直接改状态。
 
 /// 一条命令的内容。覆盖 §9.1 列出的全部，另加几条后续会话必然要用的（转场选择、总线、输出与叠加的设置）。
-/// 34 个 case（P3 按提案 010 / 012 加了 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、
-/// renameOutput、setInputSource，W3-E2 按提案 016 加了 setTransitionParams；对照见 CONTRACTS.md §8）。
+/// 35 个 case（P3 按提案 010 / 012 加了 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、
+/// renameOutput、setInputSource，W3-E2 按提案 016 加了 setTransitionParams，P5 按提案 026 加了 setMonitorSource；对照见 CONTRACTS.md §8）。
 /// JSON 形态由 Swift 合成的 Codable 决定：`{"fade":{"durationTicks":30}}`、无参数的是 `{"cut":{}}`；
 /// 快照钉在 SwitcherContractsTests 里，是 HTTP API 的 wire format。
 public enum Command: Hashable, Codable, Sendable {
@@ -19,8 +19,9 @@ public enum Command: Hashable, Codable, Sendable {
     case setTransitionParams(wipe: WipeParams, stinger: StingerParams)
     /// 按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。
     case autoTransition
+    /// 把 PVW 换成该输入（0 = 黑场）；转场进行中被拒（与 autoTransition 同一口径，提案 023）。
     case setPreview(input: Int)
-    /// 直接把 PGM 换成该输入（硬切），PVW 不变。
+    /// 直接把 PGM 换成该输入（硬切），PVW 不变。转场进行中被拒（提案 023）。
     case setProgram(input: Int)
     /// 推杆位置 0–1；到 1 提交（对调并回到 0）。
     case tbar(progress: Double)
@@ -44,6 +45,9 @@ public enum Command: Hashable, Codable, Sendable {
     case setAFV(on: Bool)
     /// 耳机监听方式 PFL / AFL（提案 012）。监听点（延迟线前 / 后）是 `AudioState.monitorPoint`，走 Show，不是这条。
     case setMonitorMode(mode: MonitorMode)
+    /// 耳机 / 监听总线上听哪条总线（提案 026）：master / busA / busB；`headphones` 自己无效，校验器拒（HTTP 400）、reducer 也原样返回。
+    /// 与现状相同的值原样返回（applied = false）。独听仍优先于它。
+    case setMonitorSource(bus: Bus)
     /// 整体替换一条总线的效果链（提案 012）。链顺序 = 处理顺序，`enabled = false` 的格旁路。
     case setBusEffects(bus: Bus, effects: [EffectSlot])
 

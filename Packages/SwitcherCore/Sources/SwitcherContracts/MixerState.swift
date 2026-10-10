@@ -162,6 +162,15 @@ public struct OverlayAnimation: Hashable, Codable, Sendable {
 
     /// JSON 键名。
     public static let jsonKeys = ["kind", "durationTicks", "slideFrom"]
+
+    /// 新节目四路叠加的默认进出动画时长（秒，提案 027，用户 2026-10-10 批）；按节目帧率换成拍存，见 `defaultFade(for:)`。
+    public static let defaultFadeSeconds = 0.5
+    /// 新节目的默认叠加动画（提案 027）：fade，round(0.5 s × 帧率) 拍（60 / 59.94 → 30、30 / 29.97 → 15、25 → 13、50 → 25、24 → 12）。
+    /// `OverlayAnimation()` 无参默认仍是 cut 0 拍（它不知道帧率；API / 脚本直接构造的不受影响）；已存文件里的 animation 照读不变。
+    /// App 新建节目（emptyShow）、`MixerState.newShow(format:outputs:)` 都用它，三方一致。
+    public static func defaultFade(for format: ProgramFormat) -> OverlayAnimation {
+        OverlayAnimation(kind: .fade, durationTicks: Int((defaultFadeSeconds * format.frameRate.approximateFramesPerSecond).rounded()))
+    }
 }
 
 /// 画中画边框（提案 010）。
@@ -293,7 +302,8 @@ public struct BusState: Hashable, Codable, Sendable {
     public var gainDb: Double
     /// 总线静音。
     public var muted: Bool
-    /// 总线效果链占位（ParametricEQ / DynamicsProcessor / PeakLimiter）。
+    /// 总线效果链（W5-C 起生效）：id 与键表见 `EffectSlot`（parametricEQ / dynamicsProcessor / compressor / peakLimiter）；
+    /// 每条总线最多 3 格，连续的 parametricEQ 格合成一格（≤ 16 段），超出的不装；链顺序 = 处理顺序，enabled = false 的格旁路。
     public var effects: [EffectSlot]
     public init(bus: Bus, gainDb: Double = 0, muted: Bool = false, effects: [EffectSlot] = []) {
         self.bus = bus
@@ -331,22 +341,27 @@ public struct AudioState: Hashable, Codable, Sendable {
     public var alignmentFrames: Int
     /// 耳机 / 监听总线取对齐延迟线之前（低延迟监听，默认）还是之后（与节目画面对齐）。提案 007；同上，没有对应命令。
     public var monitorPoint: MonitorPoint
+    /// 耳机 / 监听总线上听的是哪条总线（提案 026，用户 2026-10-10 批）：master（默认，老文件缺键也是）/ busA / busB；走 `setMonitorSource`。
+    /// `headphones` 自己无效：命令在校验器 / reducer 被拒，文件 / API 全量状态里出现的按 master 读。独听（PFL / AFL，`monitorMode` + 每路 solo）仍优先于它。
+    /// 设备客户端按它取总线送耳机（引擎侧归 W1-D3 / prompt 102；之前耳机固定听 Master）。
+    public var monitorSource: Bus
 
     /// 对齐延迟的默认值（帧）。
     public static let defaultAlignmentFrames = 2048
 
     public init(buses: [BusState] = Bus.allCases.map { BusState(bus: $0) }, afv: Bool = false, monitorMode: MonitorMode = .afl,
-                alignmentFrames: Int = AudioState.defaultAlignmentFrames, monitorPoint: MonitorPoint = .preDelayLine) {
+                alignmentFrames: Int = AudioState.defaultAlignmentFrames, monitorPoint: MonitorPoint = .preDelayLine, monitorSource: Bus = .master) {
         self.buses = buses
         self.afv = afv
         self.monitorMode = monitorMode
         self.alignmentFrames = alignmentFrames
         self.monitorPoint = monitorPoint
+        self.monitorSource = monitorSource
     }
 
-    enum CodingKeys: String, CodingKey { case buses, afv, monitorMode, alignmentFrames, monitorPoint }
+    enum CodingKeys: String, CodingKey { case buses, afv, monitorMode, alignmentFrames, monitorPoint, monitorSource }
 
-    /// 老 Show / 老快照没有 alignmentFrames / monitorPoint：缺键给默认值（提案 007）。写出总是写全。
+    /// 老 Show / 老快照没有 alignmentFrames / monitorPoint（提案 007）/ monitorSource（提案 026）：缺键给默认值；monitorSource = headphones 按 master 读。写出总是写全。
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         buses = try c.decode([BusState].self, forKey: .buses)
@@ -354,10 +369,12 @@ public struct AudioState: Hashable, Codable, Sendable {
         monitorMode = try c.decode(MonitorMode.self, forKey: .monitorMode)
         alignmentFrames = try c.decodeIfPresent(Int.self, forKey: .alignmentFrames) ?? AudioState.defaultAlignmentFrames
         monitorPoint = try c.decodeIfPresent(MonitorPoint.self, forKey: .monitorPoint) ?? .preDelayLine
+        let source = try c.decodeIfPresent(Bus.self, forKey: .monitorSource) ?? .master
+        monitorSource = source == .headphones ? .master : source
     }
 
     /// JSON 键名。
-    public static let jsonKeys = ["buses", "afv", "monitorMode", "alignmentFrames", "monitorPoint"]
+    public static let jsonKeys = ["buses", "afv", "monitorMode", "alignmentFrames", "monitorPoint", "monitorSource"]
 }
 
 // MARK: - 输出
@@ -426,7 +443,7 @@ public enum RecordContainer: String, Codable, Sendable {
 
 /// 录制参数（设计方案 §8 录制行）。
 public struct RecordSettings: Hashable, Codable, Sendable {
-    /// 录制目录。相对路径的口径（提案 007 B）：headless 相对进程工作目录；App 相对 `~/Movies/Switcher`。
+    /// 录制目录。相对路径的口径（提案 007 B）：headless 相对进程工作目录；App 相对 `~/Movies/PlusMix`（W4-D 改名前是 `~/Movies/Switcher`）。
     public var directory: String
     /// 文件名模板，支持 {show} {date} {time} {output}。
     public var fileNamePattern: String
@@ -436,14 +453,43 @@ public struct RecordSettings: Hashable, Codable, Sendable {
     public var fragmentIntervalSeconds: Double
     /// 停止后转封装成 MP4（失败保留 .mov）。
     public var remuxToMP4: Bool
+    /// 参与"全部录制"（提案 025，W5-I 的 `extra["app.record.armed"]` 升正式字段）：true（默认，老文件缺键也是 true）= 底栏 / API 的"全部开始"起这一路；
+    /// false = 只能单路起（ISO 表里 PGM 那一行取消 = 只录 ISO）。headless / API 现在逐路 startRecord，不看它；"全部录制"要认它归控制会话。
+    public var armed: Bool
+    /// 自己的编码格式（提案 025，W5-I 的 `extra["app.record.ownFormat"]`）：只对来源是某路输入的录制（ISO 路）有意义——
+    /// false（默认）= 编码参数跟主录制（第一个来源 = PGM 的录制输出）；true = 用自己的 video / audio。
+    public var ownFormat: Bool
     public init(directory: String, fileNamePattern: String = "{show}-{date}-{time}", container: RecordContainer = .mov,
-                fragmentIntervalSeconds: Double = 1, remuxToMP4: Bool = false) {
+                fragmentIntervalSeconds: Double = 1, remuxToMP4: Bool = false, armed: Bool = true, ownFormat: Bool = false) {
         self.directory = directory
         self.fileNamePattern = fileNamePattern
         self.container = container
         self.fragmentIntervalSeconds = fragmentIntervalSeconds
         self.remuxToMP4 = remuxToMP4
+        self.armed = armed
+        self.ownFormat = ownFormat
     }
+
+    enum CodingKeys: String, CodingKey { case directory, fileNamePattern, container, fragmentIntervalSeconds, remuxToMP4, armed, ownFormat }
+
+    /// 025 之前的文件没有 armed / ownFormat：缺键 = true / false（与 W5-I 对 extra 缺键的语义相同）。写出总是写全。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        directory = try c.decode(String.self, forKey: .directory)
+        fileNamePattern = try c.decode(String.self, forKey: .fileNamePattern)
+        container = try c.decode(RecordContainer.self, forKey: .container)
+        fragmentIntervalSeconds = try c.decode(Double.self, forKey: .fragmentIntervalSeconds)
+        remuxToMP4 = try c.decode(Bool.self, forKey: .remuxToMP4)
+        armed = try c.decodeIfPresent(Bool.self, forKey: .armed) ?? true
+        ownFormat = try c.decodeIfPresent(Bool.self, forKey: .ownFormat) ?? false
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["directory", "fileNamePattern", "container", "fragmentIntervalSeconds", "remuxToMP4", "armed", "ownFormat"]
+
+    /// 025 之前 App（W5-I）放在 `OutputSettings.extra` 里的键：`OutputSettings.migratingLegacyAppFlags()` 把它们搬进 `armed` / `ownFormat`。
+    public static let legacyArmedExtraKey = "app.record.armed"
+    public static let legacyOwnFormatExtraKey = "app.record.ownFormat"
 }
 
 /// 推流目的地（RTMP / RTMPS / SRT 由 url 的 scheme 决定）。
@@ -454,11 +500,32 @@ public struct StreamSettings: Hashable, Codable, Sendable {
     public var streamKey: String
     /// 指数退避重连的上限（秒）。
     public var reconnectMaxSeconds: Double
-    public init(url: String, streamKey: String = "", reconnectMaxSeconds: Double = 30) {
+    /// 编码参数跟第一个推流目的地（提案 025，W5-I 的 `extra["app.stream.followFirst"]` 升正式字段）：false（默认，老文件缺键也是 false）= 自己的 video / audio；
+    /// true = 跟编号最小的 stream 输出的 video / audio（地址、密钥、重连上限不跟）。谁来跟是 App（OutputLinkage）的事，契约只存标记。
+    public var followFirst: Bool
+    public init(url: String, streamKey: String = "", reconnectMaxSeconds: Double = 30, followFirst: Bool = false) {
         self.url = url
         self.streamKey = streamKey
         self.reconnectMaxSeconds = reconnectMaxSeconds
+        self.followFirst = followFirst
     }
+
+    enum CodingKeys: String, CodingKey { case url, streamKey, reconnectMaxSeconds, followFirst }
+
+    /// 025 之前的文件没有 followFirst：缺键 = false。写出总是写全。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        streamKey = try c.decode(String.self, forKey: .streamKey)
+        reconnectMaxSeconds = try c.decode(Double.self, forKey: .reconnectMaxSeconds)
+        followFirst = try c.decodeIfPresent(Bool.self, forKey: .followFirst) ?? false
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["url", "streamKey", "reconnectMaxSeconds", "followFirst"]
+
+    /// 025 之前 App（W5-I）放在 `OutputSettings.extra` 里的键：`OutputSettings.migratingLegacyAppFlags()` 把它搬进 `followFirst`。
+    public static let legacyFollowFirstExtraKey = "app.stream.followFirst"
 }
 
 /// 多画面的一个自定义格子（提案 010）。
@@ -669,6 +736,16 @@ public struct MixerState: Hashable, Codable, Sendable {
         self.overlays = overlays
         self.audio = audio
         self.outputs = outputs
+    }
+
+    /// 新节目的默认状态（提案 027，用户 2026-10-10 批）：`MixerState(format:outputs:)` 再把四路叠加的进出动画设成 `OverlayAnimation.defaultFade(for: format)`
+    /// （淡入淡出 0.5 s，按帧率换拍）；其余字段与 `init` 的默认相同。App 新建节目、API / headless 建新节目都从这里拿，叠加行为三方一致；
+    /// `MixerState()` / `MixerState(format:)` 的默认（cut 0 拍）不变——它们是测试与脚本的"裸状态"。
+    public static func newShow(format: ProgramFormat = .hd1080p60, outputs: [OutputState] = []) -> MixerState {
+        var s = MixerState(format: format, outputs: outputs)
+        let fade = OverlayAnimation.defaultFade(for: format)
+        for i in s.overlays.indices { s.overlays[i].animation = fade }
+        return s
     }
 
     /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复。

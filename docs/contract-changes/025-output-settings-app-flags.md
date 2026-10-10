@@ -35,3 +35,10 @@
 ## 怎么迁移
 
 不升 schemaVersion：老文件缺键 = 默认；App 在 Show.load 后搬一次 extra 里的三个键（有则写进字段、删键），写回时就没有旧键了。写出总是写全三个字段。
+
+## 落地记录（P5 / prompt 99，2026-10-10）
+
+契约已落地（分支 `p5-contracts`）：`RecordSettings.armed`（缺键 true）/ `RecordSettings.ownFormat`（缺键 false）/ `StreamSettings.followFirst`（缺键 false），显式 `init(from:)` 兜老文件、写出总是写全、`jsonKeys` 钉住；
+旧键搬迁做成 `OutputSettings.migratingLegacyAppFlags()` / `Show.migratingLegacyAppFlags()`（有键按原值搬、搬完清键、幂等；键名常量 `RecordSettings.legacyArmedExtraKey` 等），
+**不并进 `Show.load` / `migratingLegacyKeys()`**：025 之前的 App 还在读写 extra 键，并进去会让 App 在 101 切换之前丢掉"取消参与"的状态；按本提案"怎么迁移"一节由 App（101）在 Show.load 后调一次并把读写切到字段，之后再并进 `migratingLegacyKeys()`。
+用例 `Contracts025Tests`（缺键默认 / 往返 / 写全 / 老场景节目照读 / 搬迁规则）。CONTRACTS.md §2.5 加 RecordSettings / StreamSettings 两行与一段说明。`Show.schemaVersion` 不升。

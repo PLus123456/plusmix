@@ -36,14 +36,12 @@ final class ShowDocuments {
 
     /// 空节目：没有输入，带一个默认录制输出（录到 recordDirectory，默认 ~/Movies/PlusMix），PGM / PVW 都是黑场。
     /// 录制输出的码率按节目格式给（W5-I，K8 / Q30：1080p60 → 18 Mb/s、AAC 256k；契约默认值不动）。
-    /// 四个叠加通道默认淡入淡出 0.5 s（W5-K / I3），按节目帧率换成拍（契约里存拍、默认是切入；不动契约默认值，只在 App 新建节目时写）。
+    /// 四个叠加通道默认淡入淡出 0.5 s（W5-K / I3）：提案 027（用户 2026-10-10 批）进了契约默认值，这里调 `MixerState.newShow`（按节目帧率换拍），
+    /// 与 API / headless 建的新节目一致。
     static func emptyShow(name: String = L("show.untitled"), recordDirectory: String = ShowDocuments.defaultRecordDirectory) -> Show {
         let format = MixerState().format
         let record = RecordDefaults.output(number: 1, name: L("show.defaultRecordName"), format: format, directory: recordDirectory)
-        var state = MixerState(format: format, outputs: [record])
-        let ticks = Int((OverlaySettingsModel.defaultFadeSeconds * state.format.frameRate.approximateFramesPerSecond).rounded())
-        for i in state.overlays.indices { state.overlays[i].animation = OverlayAnimation(kind: .fade, durationTicks: ticks) }
-        return Show(name: name, state: state)
+        return Show(name: name, state: MixerState.newShow(format: format, outputs: [record]))
     }
 
     /// 空节目，录制目录用本对象的。
