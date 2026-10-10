@@ -5,8 +5,8 @@
 enum AudioEffectsSupport {
     /// 四条总线的效果链已经作用到声音：W5-C（prompt 88）接进了混音器每条总线的三个 AU 格。
     static let busEffectsApplied = true
-    /// 每路输入的效果链已经作用到声音：要在 C 热路径里加每路效果格（W1-D3 / prompt 102），之前仍是 false。
-    static let inputEffectsApplied = false
+    /// 每路输入的效果链已经作用到声音：W1-D3（prompt 102）在 C 热路径里给每路加了 EQ / 动态两格，`InputSettings.effects` 由音频引擎按最新快照落下去。
+    static let inputEffectsApplied = true
 
     /// 没接上时效果页顶部的横幅；接上了为 nil。
     static func banner(applied: Bool) -> String? { applied ? nil : L("effects.notEffective") }
