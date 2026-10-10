@@ -3,6 +3,7 @@ import Foundation
 import SwitcherContracts
 import SwitcherControl
 import SwitcherRender
+import SwitcherAudioIntegration
 import VMixCompat
 
 /// 子命令分发。run 子命令构造 `HeadlessSession`（同步部分），装 Ctrl-C，起 Task 跑引擎，然后主线程进 run loop（--preview 时是 NSApp 的）。
@@ -13,7 +14,7 @@ enum HeadlessCLI {
                         [--preview] [--audio-device null|default|<设备名>] [--lead-ms 1000] [--input-lead-ms 8.33] [--stop-timeout 60] [--no-gpu-stats]
                         [--api] [--api-listen 127.0.0.1:8765] [--api-token <token>] [--iso-audio N]
                         [--compat] [--compat-listen 127.0.0.1] [--compat-tcp-port 8099] [--compat-http-port 8088] [--tally-port N]
-                        [--ndi-send <名字>] [--ndi-jitter-frames 1] [--stream <rtmp/srt 地址>]…
+                        [--ndi-send <名字>] [--ndi-jitter-frames 1] [--stream <rtmp/srt 地址>]… [--av-compensation videoDelay|audioPTS]
       switcher-headless make-show --out scenarios/m0-show.json [--width 1920 --height 1080] [--preset m0|g3|g4|g4-ndi|soak|perf-e4] [--ndi-name <名字>]
                         [--camera auto|none|<uniqueID>] [--file <片段路径>]
       switcher-headless make-scenario --out scenarios/m0.json [--minutes 60] [--fps 60] [--inputs 8] [--preset m0|g3|g4|soak]
@@ -34,6 +35,9 @@ enum HeadlessCLI {
     --preset soak（W4-A 长稳）：G4 节目 + 10 号摄像头（--camera auto = 内置那台，none = 不要）+ 11 号文件（--file，循环）；1 录制、2 多画面、3 / 4 推流、5 NDI；
                 场景每 30 s 一次转场（Cut / Fade / Wipe / Zoom / Stinger 轮流），每 5 min 翻一路叠加，PGM 只轮 1–8 号（A2 / A3 的闪光配对）。
     --preset perf-e4（W4-A L5 的 E4）：只有一路文件输入（--file）在 PGM 上，录制；片段放完停在末帧。
+    --av-compensation（W1-B4，提案 028）：总线效果（压缩 / 限幅的前瞻）让声音晚 L 时补在哪一侧。videoDelay（默认）= 画面也晚 L（引擎按拍点 + L 派发、
+                音频 PTS 不前移，监听与画面同步，PGM 多 L 延迟）；audioPTS = W5-C 的做法（音频 PTS 前移 L，画面不动，监听晚 L），留作对照。
+                场景 / 节目不带效果时两者结果相同（L = 0）。
     Ctrl-C：停时钟 → 渲染器排空 → 录制封口 → 退出；再按一次立即退出。
     """
 
@@ -43,7 +47,7 @@ enum HeadlessCLI {
         "out", "width", "height", "minutes", "fps", "inputs", "baseline", "write-baseline", "v1-avg-ms", "meta",
         "api-listen", "api-token", "iso-audio", "preset",
         "compat-listen", "compat-tcp-port", "compat-http-port", "tally-port", "ndi-send", "ndi-jitter-frames", "ndi-name",
-        "stream", "camera", "file",
+        "stream", "camera", "file", "av-compensation",
     ]
 
     static func dispatch(_ args: [String]) throws {
@@ -77,7 +81,7 @@ enum HeadlessCLI {
                                  api: try apiOptions(p), isoAudio: try p.int("iso-audio") ?? 0,
                                  compat: try compatOptions(p), tallyPort: try p.int("tally-port"),
                                  ndiSend: p.string("ndi-send"), ndiJitterFrames: try p.int("ndi-jitter-frames") ?? 1,
-                                 streamURLs: p.repeated["stream"] ?? [])
+                                 streamURLs: p.repeated["stream"] ?? [], avCompensation: try avCompensation(p))
         guard (0...2).contains(options.ndiJitterFrames) else { throw CLIError("--ndi-jitter-frames 只能是 0–2") }
         let session = try HeadlessSession(options: options)
         SignalHandling.install(session)
@@ -100,6 +104,13 @@ enum HeadlessCLI {
         } else {
             dispatchMain()
         }
+    }
+
+    /// --av-compensation videoDelay|audioPTS（W1-B4）：没给 = videoDelay。
+    static func avCompensation(_ p: ParsedArguments) throws -> AVCompensation {
+        guard let s = p.string("av-compensation") else { return .videoDelay }
+        guard let mode = AVCompensation(rawValue: s) else { throw CLIError("--av-compensation 只能是 videoDelay / audioPTS，收到 \(s)") }
+        return mode
     }
 
     /// --api / --api-listen / --api-token → 服务配置；没给 --api（也没给另外两个）就不起。
