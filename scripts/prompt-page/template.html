@@ -173,6 +173,37 @@ ol.conf li{margin-bottom:4px}
 </div>
 <p class="note">红框是闸门：进不去下一波。绿框里的会话各占一个目录，同时开。</p>
 
+<div class="ros">
+  <div class="ros-head"><span class="t">Run of show · 第五波（界面改版）与 0.1.1 · 2026-10-10 排法</span><span class="legend"><span><i style="background:#262B34;border:1px solid #3A4150"></i>串行</span><span><i style="border:2px solid var(--pgm)"></i>检查点</span><span><i style="background:#16281E;border:1px solid var(--pvw)"></i>并行波次</span></span></div>
+  <div class="lane">
+    <div class="wave"><div class="cap">止血 · 五路并行 · 已合入</div><div class="s"><b>86</b>目视与弹出</div><div class="s"><b>87</b>直播安全</div><div class="s"><b>88</b>总线效果链</div><div class="s"><b>89</b>推流鉴权</div><div class="s"><b>90</b>转场守卫</div></div><span class="arrow">→</span>
+    <div class="step gate">G6<small>已过 · 10-02</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">骨架 · 七路叠分支 · 已合入</div><div class="s"><b>92</b>底栏</div><div class="s"><b>93</b>工具条 / 菜单栏</div><div class="s"><b>94</b>输入条</div><div class="s"><b>95</b>输出页</div><div class="s"><b>96</b>设置与动作</div><div class="s"><b>97</b>面板</div><div class="s"><b>98</b>其他</div></div><span class="arrow">→</span>
+    <div class="step gate">G7<small>已过 · 10-04 · main</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">第一拨 · 四路并行 · 现在开</div><div class="s"><b>99</b>P5 契约</div><div class="s"><b>105</b>监听同步</div><div class="s"><b>106</b>MIDI 崩溃修复</div><div class="s"><b>103</b>手册（随后 rebase）</div></div><span class="arrow">→</span>
+    <div class="step gate">G8a<small>合 99 → main</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">第二拨 · 100 → 101 叠分支 ‖ 102</div><div class="s"><b>100</b>转场槽</div><div class="s"><b>101</b>播放 / 状态（叠在 100 上）</div><div class="s"><b>102</b>每路效果 + 监听总线</div></div><span class="arrow">→</span>
+    <div class="step gate">G8b<small>全量 · 0.1.1</small></div>
+  </div>
+</div>
+<p class="note">灰字是已过的闸门。第一拨四路目录互不相交，四个窗口同时开；G8a 只合 99（加做完的 105 / 106）、15 分钟；第二拨里 101 必须叠在 100 的分支头上（两路都动 App/ 与 Localizable.strings），102 与它们并行。</p>
+
+<div class="callout"><b>现在怎么开（2026-10-10 定；细则 §8.8）</b>
+<div class="tbl"><table>
+<tr><th>拨</th><th>会话</th><th>从哪开</th><th>能同时开的</th><th>不能同时的 / 要等的</th></tr>
+<tr><td><span class="pill w">第一拨 · 现在</span></td><td class="id">99 P5 契约</td><td class="mono">main</td><td class="id">103 / 105 / 106</td><td>020–022 的提案写全要停下问你；做完先由 G8a 合进 main，100–102 才能开</td></tr>
+<tr><td><span class="pill w">第一拨</span></td><td class="id">105 W1-B4 监听同步</td><td class="mono">main</td><td class="id">99 / 103 / 106</td><td>与 102 都动 SwitcherAudio/Integration：102 晚开、叠在 105 上或等 G8a 合入</td></tr>
+<tr><td><span class="pill w">第一拨</span></td><td class="id">106 W2-C3 MIDIHost 崩溃</td><td class="mono">main</td><td class="id">99 / 103 / 105</td><td>要在 100 之前合入（100 也动 SwitcherControl/MIDI/）</td></tr>
+<tr><td><span class="pill w">第一拨起</span></td><td class="id">103 W4-C2 手册</td><td class="mono">main</td><td>任何会话</td><td>100 / 101 合入后 rebase 一次补两节；make help 由 G8 挂</td></tr>
+<tr><td><span class="pill g">闸门</span></td><td class="id">G8a（107 前半）</td><td class="mono">g8 ← main</td><td>—</td><td>等 99；合 99 + 做完的 105 / 106 → 整仓 make test → 问你后快进 main</td></tr>
+<tr><td><span class="pill w">第二拨</span></td><td class="id">100 W5-M 转场槽</td><td class="mono">G8a 后的 main</td><td class="id">102</td><td>等 G8a；101 叠在它上面，分支头别 rebase</td></tr>
+<tr><td><span class="pill w">第二拨</span></td><td class="id">101 W5-N 播放 / 状态 / 鉴权写法</td><td class="mono">w5-transition-slots 的头</td><td class="id">102</td><td>等 100 有可叠的分支头；lint 加 <span class="k">--base w5-transition-slots</span></td></tr>
+<tr><td><span class="pill w">第二拨</span></td><td class="id">102 W1-D3 每路效果 + 026 引擎侧</td><td class="mono">main（105 未合入则叠它头上）</td><td class="id">100 / 101</td><td>等 G8a（023 / 024 / 026 的契约）；A7 / A1 真设备 10 分钟别和 gate4 同时</td></tr>
+<tr><td><span class="pill g">闸门</span></td><td class="id">G8b（107 后半）</td><td class="mono">g8 续</td><td>—</td><td>等 100–103；全量 / gate4 / perf 要机器安静；8 小时长稳你终端跑；全过才改 0.1.1 与 CHANGELOG</td></tr>
+</table></div>
+<b>同机互斥</b>（目录不相交也不能同时跑）：gate4、perf-baseline、8 小时长稳、两个会话的 make test-app 全量、StreamingTests 的 MediaMTX 用例、显示类 / 实时类用例——错开跑，红了先单独复跑。<br>
+<b>叠分支的 lint</b>：<span class="k">scripts/check-ownership.sh &lt;分支&gt; --base &lt;上一路分支&gt;</span>，否则上一路的改动算成自己的越界。</div>
+
 <h2 id="s1"><span class="num">1</span>现状盘点</h2>
 <h3>1.1 读了什么</h3>
 <div class="tbl"><table>
@@ -341,7 +372,7 @@ ol.conf li{margin-bottom:4px}
 <tr><td><span class="pill b">S3 合规</span></td><td class="id">X59 X62</td><td>关于面板没有 NDI® 声明与开源许可入口；偏好设置里出现竞品模块名"VMixCompat"</td><td class="mono">UIA-w3-app-ui-copy-compliance</td><td class="id">86 W5-A；lint 规则归 91 G6</td></tr>
 </table></div>
 <h3>8.3 第五波拆分</h3>
-<p>三批：<b>止血</b>（不改契约、S 为主，0.1.0 候选能收）→ G6 → <b>主窗口骨架与面板改版</b>（不改契约，0.1.x）→ P5 契约落地 → <b>契约批了才能做的</b> → G7。体量口径同第 2 节；"只准动"已落进 docs/OWNERSHIP.md。</p>
+<p>三批：<b>止血</b>（不改契约、S 为主，0.1.0 候选能收）→ G6 → <b>主窗口骨架与面板改版</b>（不改契约，0.1.x）→ P5 契约落地 → <b>契约批了才能做的</b> → G7 → <b>契约 + 契约后</b>（99–103 / 105 / 106，排法见 §8.8 与顶部的表）→ G8。体量口径同第 2 节；"只准动"已落进 docs/OWNERSHIP.md。</p>
 <div class="tbl"><table>
 <tr><th>编号</th><th>会话</th><th>只准动</th><th>依赖</th><th>批次</th><th>验收 / 用例</th><th>体量</th></tr>
 <tr><td class="id">85</td><td>UIA 界面对照调研（已完成，补记）</td><td>docs/ui-study、docs/plan、手册与已知问题的实情修正</td><td>G5</td><td><span class="pill p">记录</span></td><td>check-links、lint</td><td>—</td></tr>
@@ -358,12 +389,15 @@ ol.conf li{margin-bottom:4px}
 <tr><td class="id">96</td><td>W5-J 设置体系合窗 + 共用选动作面板 + 控制层动作补齐</td><td>App/、SwitcherControl Hotkeys / MIDI / CommandCatalog</td><td>G6；Q04 默认 (a) 分两步、Q29 / Q51–Q53</td><td><span class="pill w">骨架</span></td><td class="mono">testPanels_settingsWindowOpensRequestedPage testHotkeys_compoundActionEmitsCommandsInOrder</td><td>L</td></tr>
 <tr><td class="id">97</td><td>W5-K 面板改版：添加输入、输入设置（本路画面、取色）、叠加独立窗、音频设置窗与设备声道</td><td>App/</td><td>88（J 区）、Q40 / Q55 / Q58 默认</td><td><span class="pill w">骨架</span></td><td class="mono">testPanels_overlayWindowStaysOpenWhileSwitching testAudio_busChannelMapReachesDevice</td><td>L</td></tr>
 <tr><td class="id">98</td><td>W5-L 其他：防睡眠 / App Nap、App 起只读 tally 流、远程控制页、界面内提醒、统计窗、界面锁</td><td>App/、project.yml（只加 SwitcherTally）</td><td>G6；Q46 / Q47 / Q50 默认</td><td><span class="pill w">骨架</span></td><td class="mono">testApp_engineRunningHoldsActivityAssertion testTally_appServesReadOnlyStream</td><td>M</td></tr>
-<tr><td class="id">99</td><td>P5 契约落地四：提案 020 转场槽 + FTB 时长、021 文件播放控制、022 输出统计补字段、023 小口径收口</td><td>SwitcherContracts、CONTRACTS.md、reducer、CommandBus、填数方</td><td>用户批 020–023</td><td><span class="pill p">串行</span></td><td>契约用例、api.md 重生成、整仓 make test</td><td>M</td></tr>
-<tr><td class="id">100</td><td>W5-M 转场槽落地：转场列（含 T-bar 横放）、快捷键 / MIDI / 兼容层 Transition1–4、Stream Deck</td><td>App/、SwitcherControl Hotkeys / MIDI / VMixCompat、Tools/streamdeck-plugin</td><td>99</td><td><span class="pill w">契约后</span></td><td class="mono">testUI_transitionSlotMenuConfiguresWithoutExecuting testC5_transition2ExecutesSlot</td><td>L</td></tr>
-<tr><td class="id">101</td><td>W5-N 文件播放控制、推流状态面板、录制 / 推流时长</td><td>App/、SwitcherInputs/File</td><td>99</td><td><span class="pill w">契约后</span></td><td class="mono">testUI_fileCellPlayPauseRestart testUI_streamStatusPanelReadsStatsUptime</td><td>M</td></tr>
-<tr><td class="id">102</td><td>W1-D3 每路音频效果格（C 热路径）</td><td>SwitcherAudio/</td><td>88、99（023 effects 口径）</td><td><span class="pill w">契约后</span></td><td class="mono">A7 = 0、check-rt-symbols、每路 EQ 频响差</td><td>L</td></tr>
-<tr><td class="id">103</td><td>W4-C2 手册与实现再对齐、随包 HTML 手册、快捷键表重排</td><td>docs（除 spec / plan）、Samples、App/Resources/Help</td><td>G6 之后随各批更新</td><td><span class="pill w">文档</span></td><td>check-links、帮助菜单能打开</td><td>M</td></tr>
-<tr><td class="id">104</td><td>G7 检查点：骨架与契约后各路合入、L3 目视清单重看、0.1.x 放行</td><td>同 G6</td><td>92–103</td><td><span class="pill g">闸门</span></td><td>make test、gate4、perf-baseline、docs/checklists/G7.md</td><td>M</td></tr>
+<tr><td class="id">99</td><td>P5 契约落地四：提案 020 转场槽 + FTB 时长、021 文件播放控制、022 输出统计补字段、023 小口径收口；+ 024 (b)、025–027（已批）</td><td>SwitcherContracts、CONTRACTS.md、reducer、CommandBus、填数方</td><td>023 一节 / 024 / 025–027 已批；020–022 写全问用户</td><td><span class="pill p">串行 · 第一拨</span></td><td>契约用例、api.md 重生成、整仓 make test</td><td>M</td></tr>
+<tr><td class="id">100</td><td>W5-M 转场槽落地：转场列（含 T-bar 横放）、快捷键 / MIDI / 兼容层 Transition1–4、Stream Deck；转场项点了就做；X12 残口两行</td><td>App/、SwitcherControl Hotkeys / MIDI / VMixCompat、Tools/streamdeck-plugin</td><td>99 合入 main（G8a）后从 main 开</td><td><span class="pill w">契约后 · 第二拨</span></td><td class="mono">testUI_transitionSlotMenuConfiguresWithoutExecuting testUI_settingsWindowForwardsHotkeys testC5_transition2ExecutesSlot</td><td>L</td></tr>
+<tr><td class="id">101</td><td>W5-N 文件播放控制、推流状态面板、录制 / 推流时长；鉴权"写法"二选一（查询串）；extra → 025 字段的 App 侧</td><td>App/、SwitcherInputs/File</td><td>99；<b>叠在 100 的分支头上开</b></td><td><span class="pill w">契约后 · 第二拨</span></td><td class="mono">testUI_fileCellPlayPauseRestart testUI_streamStatusPanelReadsStatsUptime testPanels_streamAuthQueryStringWritesQueryAndMasks</td><td>M</td></tr>
+<tr><td class="id">102</td><td>W1-D3 每路音频效果格（C 热路径）+ 024 自写压缩器 + 026 引擎侧（监听总线 / X09）</td><td>SwitcherAudio/</td><td>88、99（023 / 024 / 026）；105 未合入就叠在它头上</td><td><span class="pill w">契约后 · 第二拨</span></td><td class="mono">A7 = 0、check-rt-symbols、每路 EQ 频响差</td><td>L</td></tr>
+<tr><td class="id">103</td><td>W4-C2 手册与实现再对齐、随包 HTML 手册、快捷键表重排、project.yml 的 Help folder reference</td><td>docs（除 spec / plan）、Samples、App/Resources/Help、project.yml（只那一条）</td><td>现在能开；100 / 101 合入后 rebase 补两节</td><td><span class="pill w">文档 · 第一拨起</span></td><td>check-links、帮助菜单能打开、包里有 Help/</td><td>M</td></tr>
+<tr><td class="id">104</td><td>G7 检查点：骨架七路合入、L3 清单重写、0.1.x 判不发（2026-10-04 已做；契约后各路当时没开工，由 G8 合）</td><td>同 G6</td><td>92–98</td><td><span class="pill g">闸门 · 已过</span></td><td>reports/G7.md、docs/checklists/G7.md</td><td>M</td></tr>
+<tr><td class="id">105</td><td>W1-B4 监听同步：按总线效果链的实测延迟把视频延后同样毫秒数（用户 2026-10-03 定）</td><td>SwitcherEngine、SwitcherAudio/Integration（开关）、headless 参数</td><td>G6；现在能开</td><td><span class="pill w">第一拨</span></td><td class="mono">testAV_videoDelayFollowsBusEffectLatency A2 两种模式 ≤ 1 ms</td><td>M</td></tr>
+<tr><td class="id">106</td><td>W2-C3 MIDIHost.sync 偶发崩溃修复（0.1.x 唯一的 S1 崩溃）</td><td>SwitcherControl/MIDI、SwitcherControlTests</td><td>—；现在能开，要在 100 之前合入</td><td><span class="pill w">第一拨</span></td><td class="mono">testC_midiHostSync_stressNoTrap App 全量不崩</td><td>S</td></tr>
+<tr><td class="id">107</td><td>G8 检查点（两段）：G8a 合 99（+ 105 / 106）快进 main → G8b 合 100–103 → 全量 → 0.1.1 放行 + 版本号 + CHANGELOG + make help</td><td>同 G7 + 版本号三处、CHANGELOG.md</td><td>G8a：99；G8b：100–103、105、106</td><td><span class="pill g">闸门</span></td><td>make test、gate4、perf-baseline、docs/checklists/G8.md</td><td>M</td></tr>
 </table></div>
 <h3>8.4 顺序与规矩</h3>
 <ul>
@@ -372,6 +406,9 @@ ol.conf li{margin-bottom:4px}
   <li>契约后三路（100–102）等 P5（99）合入 main 后再开；P5 等用户批提案 020–023。文档（103）随每批合入 rebase 一次。</li>
   <li>每个会话照旧：只动自己目录、先写红测试、报告五段、不 push 不 merge；App 用例写在 App/Tests/，函数名带上表里的 ID。</li>
   <li>竞品截图在用户本机 <span class="k">vmix-28-guide/</span>（已加进 .gitignore，不入库）；prompt 里"图 NNN"指它；给 App 的文案一律是我们自己的说法（铁律 6）。</li>
+  <li><b>G7 之后的排法（2026-10-10 定，细则 §8.8 与顶部"现在怎么开"）</b>：第一拨 99 / 105 / 106 / 103 从 main 并行开 → G8a 合 99（+ 做完的 105 / 106）快进 main → 第二拨 100 从 main 开、<b>101 叠在 100 的分支头上</b>、102 从 main 开（105 没合入就叠它头上）→ 103 rebase 补 100 / 101 → G8b。</li>
+  <li><b>叠分支的 lint</b>：<span class="k">scripts/check-ownership.sh &lt;分支&gt; --base &lt;上一路分支&gt;</span>；被叠的那一路别 rebase 重写分支头。</li>
+  <li><b>同机互斥</b>：gate4 / 8 小时长稳 / perf-baseline 要机器上没有别的引擎与 xcodebuild；StreamingTests、显示类 / 实时类用例几个会话同时跑会互相挤红；两个会话别同时跑 make test-app 全量。</li>
 </ul>
 <h3>8.5 待你拍板（prompt 已按下面的默认值写；改了哪条就改对应 prompt）</h3>
 <div class="tbl"><table>
@@ -390,6 +427,30 @@ ol.conf li{margin-bottom:4px}
 <tr><td class="id">Q36–Q65</td><td>其余 30 条</td><td>全按 04 第 5 节的"倾向"做，只需知会</td><td class="id">各 prompt 已写入</td></tr>
 </table></div>
 
+<h3>8.6 两个闸门的结果一屏（细节 reports/G6.md、reports/G7.md）</h3>
+<ul>
+  <li><b>G6（2026-10-02）</b>：止血五路合入，UIA 的 S0 五条全修；0.1.0 不发——新发现 S1 <span class="k">MIDIHost.sync</span> 崩溃、8 小时没重跑、签名账号、X07–X09 / X12 等骨架批次。2026-10-03 用户裁定六条（PSNR 判法、024 (b)、CHANGELOG 归 G5 类、S3 不含 NDI 线程、L5 floor、监听同步 → 105）。main 快进到 g6。</li>
+  <li><b>G7（2026-10-04）</b>：骨架七路合入（叠分支六路 0 冲突、从 main 开的 95 要手接），六包 777 / App 228 两遍 0 红、gate4 20 / 20；perf S3 环境噪声待安静重跑。0.1.x 仍不发：MIDIHost.sync S1、X07 / X09 引擎侧 / X12 设置窗残口、8 小时没跑、签名、L3 没人跑。main 2026-10-10 快进到 g7。</li>
+</ul>
+<h3>8.7 G7 之后的裁定（2026-10-10）</h3>
+<div class="tbl"><table>
+<tr><th>#</th><th>拍板项</th><th>裁定</th><th>落在哪</th></tr>
+<tr><td class="id">1</td><td>最小窗口 1100×720 还是保 700</td><td>先不管（外观还要改）</td><td class="id">103 按 720 写</td></tr>
+<tr><td class="id">2</td><td>"切换"菜单 / 转场列的类型项只选不执行？</td><td><b>点了就做转场</b>；"只选"只留槽 ▾ 的"用于 T-bar"</td><td class="id">100</td></tr>
+<tr><td class="id">3</td><td>外部显示菜单每屏列"关闭"</td><td>先这么放着</td><td class="id">—</td></tr>
+<tr><td class="id">4</td><td>推流鉴权"写进查询串"选项</td><td><b>给</b>：鉴权表"写法"二选一，查询串也打码</td><td class="id">101、103</td></tr>
+<tr><td class="id">5</td><td>W5-I 的三个 extra 标记</td><td><b>升正式字段</b>（提案 025 已批）</td><td class="id">99 落契约、101 App 侧</td></tr>
+<tr><td class="id">6</td><td>W5-K 的监听总线 / 叠加默认淡入</td><td><b>进契约</b>（提案 026 / 027 已批）</td><td class="id">99、102 引擎侧</td></tr>
+<tr><td class="id">7</td><td>X12 残口归谁</td><td>归 100（两行 + 用例，0.1.1 前修）</td><td class="id">100</td></tr>
+<tr><td class="id">8</td><td>Help folder reference 归谁</td><td>103 的归属行加 project.yml（只一条）</td><td class="id">103、OWNERSHIP</td></tr>
+<tr><td class="id">9</td><td>版本号</td><td>下一个发 <b>0.1.1</b></td><td class="id">107 G8b</td></tr>
+<tr><td class="id">10</td><td>关循环回 holdLastFrame 还是 black</td><td>不存之前的结束动作；关循环 = 停在最后一帧</td><td class="id">101 提示、103 手册</td></tr>
+<tr><td class="id">11</td><td>界面锁给不给键</td><td>不给默认键</td><td class="id">103 手册</td></tr>
+<tr><td class="id">12</td><td>下一批怎么开</td><td>叠分支（101 叠 100；102 晚于 105 就叠 105）</td><td class="id">§8.8、顶部表</td></tr>
+</table></div>
+<p class="note">同日另开 106（MIDIHost.sync S1 崩溃修复）与 107（G8 两段式检查点）；全文在 reports/G7.md §7.1 末。</p>
+<h3>8.8 谁等谁、谁能同时</h3>
+<p>见页首"现在怎么开"那张表（同一张，落地方案 §8.8 是原文）。一句话：<b>第一拨四路（99 / 105 / 106 / 103）现在就开、互不相干；G8a 把 99 合进 main 之后才开 100 / 101 / 102；101 必须叠在 100 上；全量 / gate4 / perf / 长稳同机只跑一个。</b></p>
 <h2 id="s9"><span class="num">9</span>Prompt 库</h2>
 <p>每个会话一张卡。"复制 前言 + 本段"会把 00 通用前言拼在前面，直接粘进新会话即可。单独文件在仓库的 docs/plan/prompts/ 目录；本页由 <span class="k">scripts/gen-prompt-page.py</span> 从那里生成，卡片上的状态标签按仓库里分支的状态自动算（{{GENERATED}}）。</p>
 <div class="lib-tools"><button id="openAll">展开全部</button><button id="closeAll">收起全部</button><span class="note">序号是执行顺序；同一个十位数的是同一波次（4x 是 G3 之后的契约落地与续做；85 起是界面对照调研之后的第五波：86–90 止血、91 G6、92–98 骨架改版、99 契约、100–103 契约后与文档、104 G7，见第 8 节）。</span></div>

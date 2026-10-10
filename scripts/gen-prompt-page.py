@@ -112,7 +112,7 @@ def main():
                    f'已合入 main / 已完成：{html.escape(lst("done"))}。<br>完成、等合 main：{html.escape(lst("wait"))}。<br>'
                    f'进行中：{html.escape(lst("run"))}；未开始：{html.escape(lst(""))}。<br>'
                    '下一步：同一波次的会话各开一个 worktree（<span class="k">git worktree add ../plusmix-&lt;分支&gt; -b &lt;分支&gt; main</span>）开工；'
-                   '只动 App/ 的会话建议串行（Localizable.strings 每个都改）；检查点在整波之后合并、跑全量、写报告。</div>')
+                   '排法按页首"现在怎么开"那张表（第一拨 99 / 105 / 106 / 103 并行；叠分支的会话 lint 加 --base）；检查点在整波之后合并、跑全量、写报告。</div>')
     tmpl = open(a.template, encoding="utf-8").read()
     out = (tmpl.replace("{{STATS}}", stats).replace("{{STATUS}}", status_html).replace("{{LIB}}", "\n".join(cards))
            .replace("{{GENERATED}}", html.escape(f"生成于 {when}，{cur} @ {head}")))

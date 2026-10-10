@@ -1,6 +1,6 @@
 # 随包手册目录要在 project.yml 里写成 folder reference——103 的目录里没有 project.yml
 
-归属会话 / 分支：W4-C2（prompt 103，`w4-docs-2`）+ 认领 project.yml 的那一行（等用户定：给 103 的归属行加 `project.yml`（只加 `App/Resources/Help/` 那一条 folder reference），或由下一个检查点加）
+归属会话 / 分支：**W4-C2（prompt 103，`w4-docs-2`）——用户 2026-10-10 定：103 的 OWNERSHIP 行加 `project.yml`、只许 Help 的 folder reference 一条**（原记：等用户定：给 103 的归属行加 `project.yml`（只加 `App/Resources/Help/` 那一条 folder reference），或由下一个检查点加）
 发现于：G7 检查点读 reports/w5-app-toolbar.md §5 第 10 条（W5-G 在草稿区拷贝里做的探针）
 现象：
 - App（W5-G）找随包手册的路径是 `Contents/Resources/Help/<lproj 名>/index.html`（`zh-Hans`、`en`），没有就 `Help/index.html`；现在包里没有 Help，帮助菜单"PlusMix 使用手册"灰着、标题写"手册尚未随包"。

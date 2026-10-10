@@ -1,6 +1,6 @@
 # 设置窗（W5-J 合窗）在前时按键不走快捷键表——X12 的最后一个残口
 
-归属会话 / 分支：App 会话（`App/Sources/Settings/SettingsWindow.swift`，W5-J 的地盘；用户 2026-10-03 定 X12 等 97 / 102 做完再发——97 做完后只剩这一处）
+归属会话 / 分支：**100 W5-M / `w5-transition-slots`（用户 2026-10-10 定，prompt 100 裁定行 ②；0.1.1 放行前修）**，原记 App 会话（`App/Sources/Settings/SettingsWindow.swift`，W5-J 的地盘；用户 2026-10-03 定 X12 等 97 / 102 做完再发——97 做完后只剩这一处）
 发现于：G7 检查点合入 W5-K 时读 reports/w5-app-panels.md §3 表最后一行（"输出设置 / 偏好设置 / 快捷键编辑器窗在前时的快捷键……留给它们"），对照 W5-J 的 `SettingsWindow.swift`：`PanelWindow.keyHandler` 只接了 `handleRecordingKey`（快捷键页录键用）
 现象：
 - W5-K 给输入设置 / 叠加设置 / 音频设置三扇窗挂了 `PanelCoordinator.forwardHotkeys`（没被文本框吃掉的按键交给 `session.control.handleKey`），这三扇窗在前时空格 / 数字 / 回车照样切（`PanelsRevampTests` 钉着）。

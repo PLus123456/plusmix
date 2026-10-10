@@ -1,6 +1,6 @@
 # MIDIHost.sync 偶发崩溃："non-escaping closure has escaped"（起停 session 时 App 测试宿主整个崩掉）
 
-归属会话 / 分支：控制会话（W2-C 系）；`Packages/SwitcherControl/Sources/SwitcherControl/MIDI/MIDIHost.swift`（W2-C2 的 c51c7d7 引入）
+归属会话 / 分支：**W2-C3 / `w2-control-3`（prompt 106，2026-10-10 开单）**；原记控制会话（W2-C 系）；`Packages/SwitcherControl/Sources/SwitcherControl/MIDI/MIDIHost.swift`（W2-C2 的 c51c7d7 引入）
 发现于：W5-A（prompt 86，分支 w5-app-visual）跑 `make test-app` 全量，2026-10-01；同一天 W5-B（w5-app-safety）的测试宿主也崩在同一处
 严重级：S1（正式 App 里新建 / 打开节目、改格式、退出时同样会走这条路，崩了就是整个导播台退出）
 
