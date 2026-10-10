@@ -41,8 +41,8 @@ final class Contracts026Tests: XCTestCase {
     }
 
     func test026_setMonitorSourceCommand_jsonShapeAndCaseCount() throws {
-        XCTAssertEqual(Samples.commandCaseCount, 35, "026 加 setMonitorSource：34 → 35")
-        XCTAssertEqual(Set(Samples.commands().map(Samples.caseName(of:))).count, 35)
+        XCTAssertEqual(Samples.commandCaseCount, 42, "026 加 setMonitorSource：34 → 35；P5-2 的 020 / 021 / 023 → 42")
+        XCTAssertEqual(Set(Samples.commands().map(Samples.caseName(of:))).count, 42)
         let c = Command.setMonitorSource(bus: .busA)
         let data = try sortedEncoder.encode(c)
         XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"setMonitorSource":{"bus":1}}"#)

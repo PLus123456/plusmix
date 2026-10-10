@@ -219,7 +219,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `ftb`
 
-渐黑开 / 关（显式目标，脚本可重放）；时长用状态里的 ftb.durationTicks。
+渐黑开 / 关（显式目标，脚本可重放）；时长用状态里的 ftb.durationTicks（改它走 setFTBDuration）。
 
 | 参数 | 含义 |
 |---|---|
@@ -229,6 +229,68 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 {
   "ftb" : {
     "on" : true
+  }
+}
+```
+
+#### `setTransitionSlot`
+
+改转场槽 1–4 之一的配置（效果 + 时长 + Wipe / Stinger 参数整体替换），转场进行中也收；改的是当前槽且空闲时当前那组同时按槽重拷，进行中的那一次按开始时的参数走完再重拷；相同配置 applied = false。
+
+| 参数 | 含义 |
+|---|---|
+| `slot` | 1–4 |
+| `config` | {type: cut / fade / wipe / zoom / stinger, durationTicks: 时长（拍，≥ 0），wipe: {direction, softness 0–1}, stinger: {input 或不写, cutAtTick ≥ 0}} |
+
+```json
+{
+  "setTransitionSlot" : {
+    "config" : {
+      "durationTicks" : 60,
+      "stinger" : {
+        "cutAtTick" : 0
+      },
+      "type" : "wipe",
+      "wipe" : {
+        "direction" : "topToBottom",
+        "softness" : 0.2
+      }
+    },
+    "slot" : 2
+  }
+}
+```
+
+#### `useTransitionSlot`
+
+选中转场槽 1–4（把槽拷进当前那组、currentSlot = slot）；start = true 同时开始 auto 转场、一拍内原子完成（cut / 时长 0 = 立即对调，Stinger 槽没选输入照常开始）；start = false 只选中给 T-bar / 回车用。转场进行中被拒（applied = false）。
+
+| 参数 | 含义 |
+|---|---|
+| `slot` | 1–4 |
+| `start` | true = 选中并开始；false = 只选中 |
+
+```json
+{
+  "useTransitionSlot" : {
+    "slot" : 2,
+    "start" : true
+  }
+}
+```
+
+#### `setFTBDuration`
+
+改 FTB 淡入 / 淡出黑的时长（拍）；渐变进行中电平从当前值按新时长继续走、不跳变；相同值 applied = false；不跟随转场时长。
+
+| 参数 | 含义 |
+|---|---|
+| `ticks` | 时长（拍，≥ 0） |
+
+```json
+{
+  "setFTBDuration" : {
+    "ticks" : 15
   }
 }
 ```
@@ -462,6 +524,32 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 }
 ```
 
+#### `setInputAudio`
+
+一路的独听 / AFV 参与 / 总线路由，三个参数都可选，不写 = 不动；全不写或全与现状相同 applied = false（替代按快照改一位再 setInputSettings 整体写回）。
+
+| 参数 | 含义 |
+|---|---|
+| `input` | 输入编号 |
+| `solo` | true / false，或不写 |
+| `afv` | true = 参与 AFV 门控，false = 不跟随视频，或不写 |
+| `routing` | {master, busA, busB, headphones} 整体替换，或不写 |
+
+```json
+{
+  "setInputAudio" : {
+    "input" : 1,
+    "routing" : {
+      "busA" : true,
+      "busB" : false,
+      "headphones" : false,
+      "master" : true
+    },
+    "solo" : true
+  }
+}
+```
+
 ### 输出
 
 #### `startRecord`
@@ -614,6 +702,10 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
         "spillSuppression" : 0.5,
         "tolerance" : 0.3
       },
+      "playback" : {
+        "paused" : false,
+        "restartOnProgram" : false
+      },
       "transform" : {
         "flipHorizontal" : false,
         "flipVertical" : false,
@@ -694,6 +786,10 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
           "spillSuppression" : 0.5,
           "tolerance" : 0.3
         },
+        "playback" : {
+          "paused" : false,
+          "restartOnProgram" : false
+        },
         "transform" : {
           "flipHorizontal" : false,
           "flipVertical" : false,
@@ -766,6 +862,60 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
         "sourceName" : "MAC (Cam 1)"
       }
     }
+  }
+}
+```
+
+#### `setPlayback`
+
+文件输入播放 / 暂停（paused = true 画面停在当前帧、每拍重推）；不是文件输入被拒；相同值 applied = false。
+
+| 参数 | 含义 |
+|---|---|
+| `input` | 文件输入编号 |
+| `paused` | true = 暂停，false = 播放 |
+
+```json
+{
+  "setPlayback" : {
+    "input" : 3,
+    "paused" : true
+  }
+}
+```
+
+#### `seekPlayback`
+
+文件输入定位到第 seconds 秒（0 = 从头播）：状态里记一次定位请求 (seekTick, seekSeconds)，组装方交给文件输入执行，首帧晚 1–2 拍；不是文件输入 / 负数被拒；同一拍同一位置再发 applied = false。"切上 PGM 时从头播"是每路的 settings.playback.restartOnProgram（走 setInputSettings）。
+
+| 参数 | 含义 |
+|---|---|
+| `input` | 文件输入编号 |
+| `seconds` | 秒，≥ 0 |
+
+```json
+{
+  "seekPlayback" : {
+    "input" : 3,
+    "seconds" : 0
+  }
+}
+```
+
+#### `setInputColor`
+
+改一路的分类颜色（Finder 标签那六种），不写 = 清掉分类；相同值 applied = false。分类的名字在 Show.layout 里，不走命令。
+
+| 参数 | 含义 |
+|---|---|
+| `input` | 输入编号 |
+| `color` | red / orange / yellow / green / blue / purple，或不写 = 无分类 |
+
+```json
+{
+  "setInputColor" : {
+    "color" : "red",
+    "input" : 1
   }
 }
 ```
@@ -969,6 +1119,10 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
               "spillSuppression" : 0.5,
               "tolerance" : 0.3
             },
+            "playback" : {
+              "paused" : false,
+              "restartOnProgram" : false
+            },
             "transform" : {
               "flipHorizontal" : false,
               "flipVertical" : false,
@@ -1088,8 +1242,55 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
         "preview" : 0,
         "program" : 1,
         "transition" : {
+          "currentSlot" : 1,
           "durationTicks" : 30,
           "progress" : 0,
+          "slots" : [
+            {
+              "durationTicks" : 30,
+              "stinger" : {
+                "cutAtTick" : 0
+              },
+              "type" : "fade",
+              "wipe" : {
+                "direction" : "leftToRight",
+                "softness" : 0
+              }
+            },
+            {
+              "durationTicks" : 60,
+              "stinger" : {
+                "cutAtTick" : 0
+              },
+              "type" : "wipe",
+              "wipe" : {
+                "direction" : "leftToRight",
+                "softness" : 0
+              }
+            },
+            {
+              "durationTicks" : 60,
+              "stinger" : {
+                "cutAtTick" : 0
+              },
+              "type" : "zoom",
+              "wipe" : {
+                "direction" : "leftToRight",
+                "softness" : 0
+              }
+            },
+            {
+              "durationTicks" : 60,
+              "stinger" : {
+                "cutAtTick" : 0
+              },
+              "type" : "stinger",
+              "wipe" : {
+                "direction" : "leftToRight",
+                "softness" : 0
+              }
+            }
+          ],
           "source" : "auto",
           "stinger" : {
             "cutAtTick" : 0

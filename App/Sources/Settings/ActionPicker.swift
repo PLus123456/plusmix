@@ -360,7 +360,7 @@ struct ActionFieldsForm: View {
                 Text(L("actionPicker.value.currentProgram")).tag(Optional(InputRef.program))
                 ForEach(inputs, id: \.number) { i in Text(L("actionPicker.value.inputNamed", i.number, i.name)).tag(Optional(InputRef.number(i.number))) }
             }
-        case .overlayChannel:
+        case .overlayChannel, .transitionSlot:   // 叠加通道 1–4 / 转场槽 1–4（020）都是四段
             Picker(label, selection: intBinding(f, 1)) {
                 ForEach(1...MixerState.overlayCount, id: \.self) { Text("\($0)").tag($0) }
             }
@@ -391,7 +391,7 @@ struct ActionFieldsForm: View {
                 ForEach(SwitchMode.allCases, id: \.self) { m in Text(L("actionPicker.value.mode.\(m.rawValue)")).tag(m.rawValue) }
             }
             .pickerStyle(.segmented)
-        case .durationTicks, .durationMs:
+        case .durationTicks, .durationMs, .seconds:   // .seconds（021）：秒数直接写进 JSON，不换算
             DurationField(label: label, seconds: secondsBinding(f))
         case .transitionType:
             Picker(label, selection: stringBinding(f, TransitionType.fade.rawValue)) {
@@ -408,7 +408,7 @@ struct ActionFieldsForm: View {
             Picker(label, selection: stringBinding(f, options.first ?? "")) {
                 ForEach(options, id: \.self) { Text($0).tag($0) }
             }
-        case .json:
+        case .json, .busRouting:   // busRouting（023 五）的勾选控件归 100
             EmptyView()
         }
     }

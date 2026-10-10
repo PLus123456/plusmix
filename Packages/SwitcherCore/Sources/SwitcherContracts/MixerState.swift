@@ -44,6 +44,50 @@ public struct StingerParams: Hashable, Codable, Sendable {
     }
 }
 
+/// 转场槽（提案 020，用户 2026-10-11 批）：一个槽 = 一套完整的"效果 + 时长 + Wipe 参数 + Stinger 参数"，字段与 `TransitionState` 的当前那组一一对应。
+/// `TransitionState.slots` 恰好 4 个（下标 0–3 = 槽 1–4），随节目文件存（槽里有 Stinger 用的输入编号，换节目必须跟着换）。
+/// 快捷键 / MIDI / API / 兼容层 / Stream Deck 按槽触发（`useTransitionSlot`）、按槽改配置（`setTransitionSlot`）。
+public struct TransitionSlot: Hashable, Codable, Sendable {
+    /// 转场类型（cut 也允许，但出厂槽与搬迁不用它）。
+    public var type: TransitionType
+    /// 时长（拍）。
+    public var durationTicks: Int
+    /// Wipe 参数。
+    public var wipe: WipeParams
+    /// Stinger 参数。
+    public var stinger: StingerParams
+    public init(type: TransitionType, durationTicks: Int, wipe: WipeParams = WipeParams(), stinger: StingerParams = StingerParams()) {
+        self.type = type
+        self.durationTicks = durationTicks
+        self.wipe = wipe
+        self.stinger = stinger
+    }
+
+    /// 槽数。
+    public static let count = 4
+    /// 槽的编号范围（命令里的 slot）。
+    public static let indexRange = 1...4
+    /// 出厂四槽的秒数：1 = Fade 0.5 s、2 = Wipe 1 s、3 = Zoom 1 s、4 = Stinger 1 s。
+    public static let factoryDefaultSeconds: [Double] = [0.5, 1, 1, 1]
+
+    /// 出厂四槽：1 = Fade 0.5 s、2 = Wipe 1 s（leftToRight、软边 0）、3 = Zoom 1 s、4 = Stinger 1 s（输入 nil、换底拍 0）；
+    /// 秒按节目帧率换拍（round，与叠加默认淡入同一算法：60 / 59.94 → 30 / 60 / 60 / 60，30 → 15 / 30 / 30 / 30，25 → 13 / 25 / 25 / 25）。
+    /// 与 020 之前的四个按钮等价，老用户察觉不到变化。
+    public static func factoryDefaults(for format: ProgramFormat) -> [TransitionSlot] {
+        let fps = format.frameRate.approximateFramesPerSecond
+        func ticks(_ i: Int) -> Int { Int((factoryDefaultSeconds[i] * fps).rounded()) }
+        return [
+            TransitionSlot(type: .fade, durationTicks: ticks(0)),
+            TransitionSlot(type: .wipe, durationTicks: ticks(1), wipe: WipeParams(direction: .leftToRight, softness: 0)),
+            TransitionSlot(type: .zoom, durationTicks: ticks(2)),
+            TransitionSlot(type: .stinger, durationTicks: ticks(3), stinger: StingerParams(input: nil, cutAtTick: 0)),
+        ]
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["type", "durationTicks", "wipe", "stinger"]
+}
+
 /// 转场状态。空闲时 `type` / `durationTicks` 就是"下一次转场"的选择（UI 的转场按钮和时长预设改的是它）。
 ///
 /// `progress` 的意义：新画面（= preview 输入）盖在旧画面（= program 输入）上的比例，0 … 1。
@@ -51,6 +95,10 @@ public struct StingerParams: Hashable, Codable, Sendable {
 /// - auto 转场：第 s 拍应用命令，之后第 s + k 拍 progress = k / durationTicks（W1-B），到 1 时状态机把 program 与 preview 对调并回到空闲。
 /// - tbar：progress 直接等于推杆位置；推到 1 提交（对调 + 回到 0）。
 /// 渲染器只看 `progress` 和 `type`；Cut 没有中间态（durationTicks 对它无意义）。
+///
+/// 转场槽（提案 020）：`slots` 恰好 4 个；`currentSlot` = 当前那组（type / durationTicks / wipe / stinger）对应哪个槽（1–4），
+/// nil = 当前那组是 `setTransition` / `fade` / `setTransitionParams` / API 直接给的、不对应任何槽。T-bar / 回车 / `autoTransition` 用的永远是当前那组，
+/// 所以"跟当前槽"不需要别的字段。渲染器只看当前那组，一个字节不动。
 public struct TransitionState: Hashable, Codable, Sendable {
     /// 转场类型。
     public var type: TransitionType
@@ -66,9 +114,16 @@ public struct TransitionState: Hashable, Codable, Sendable {
     public var wipe: WipeParams
     /// Stinger 参数。
     public var stinger: StingerParams
+    /// 转场槽 1–4（提案 020）：恰好 4 个（`MixerState.validate()` 查）。写出总是写全；020 之前的文件缺键 → 裸解码为空数组，由 `Show.migratingLegacyKeys()` 补出厂槽。
+    public var slots: [TransitionSlot]
+    /// 当前那组对应的槽（1–4）；nil = 不对应任何槽。缺键 = nil；nil 不写键。
+    public var currentSlot: Int?
 
+    /// 不给 `slots` = 按 60 fps 的出厂四槽（这里不知道帧率；`MixerState.newShow(format:)` 按节目帧率重算）；
+    /// 不给 `currentSlot` = 自动对号：当前那组与某个槽相同就是那个槽（`TransitionState()` 的 fade 30 = 槽 1），否则 nil（`TransitionState(type: .cut, durationTicks: 0)` 这种裸状态）。
     public init(type: TransitionType = .fade, durationTicks: Int = 30, progress: Double = 0, source: TransitionSource = .auto,
-                startTick: Tick? = nil, wipe: WipeParams = WipeParams(), stinger: StingerParams = StingerParams()) {
+                startTick: Tick? = nil, wipe: WipeParams = WipeParams(), stinger: StingerParams = StingerParams(),
+                slots: [TransitionSlot] = TransitionSlot.factoryDefaults(for: .hd1080p60), currentSlot: Int? = nil) {
         self.type = type
         self.durationTicks = durationTicks
         self.progress = progress
@@ -76,10 +131,59 @@ public struct TransitionState: Hashable, Codable, Sendable {
         self.startTick = startTick
         self.wipe = wipe
         self.stinger = stinger
+        self.slots = slots
+        self.currentSlot = currentSlot ?? Self.slotIndex(matching: TransitionSlot(type: type, durationTicks: durationTicks, wipe: wipe, stinger: stinger), in: slots, preferring: nil)
     }
+
+    enum CodingKeys: String, CodingKey { case type, durationTicks, progress, source, startTick, wipe, stinger, slots, currentSlot }
+
+    /// 020 之前的 JSON 没有 slots / currentSlot：解成 [] / nil，`Show.migratingLegacyKeys()` 补齐（`validate()` 要求恰好 4 个，没经搬迁的进不了状态机）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(TransitionType.self, forKey: .type)
+        durationTicks = try c.decode(Int.self, forKey: .durationTicks)
+        progress = try c.decode(Double.self, forKey: .progress)
+        source = try c.decode(TransitionSource.self, forKey: .source)
+        startTick = try c.decodeIfPresent(Tick.self, forKey: .startTick)
+        wipe = try c.decode(WipeParams.self, forKey: .wipe)
+        stinger = try c.decode(StingerParams.self, forKey: .stinger)
+        slots = try c.decodeIfPresent([TransitionSlot].self, forKey: .slots) ?? []
+        currentSlot = try c.decodeIfPresent(Int.self, forKey: .currentSlot)
+    }
+
+    /// JSON 键名（startTick / currentSlot 可缺）。
+    public static let jsonKeys = ["type", "durationTicks", "progress", "source", "startTick", "wipe", "stinger", "slots", "currentSlot"]
 
     /// 正在转场（画面上有两路混合）。
     public var isActive: Bool { progress > 0 || startTick != nil }
+
+    /// 当前那组（type / durationTicks / wipe / stinger）看成一个槽的配置；设置 = 四个字段整体替换（不动 currentSlot / 进度）。
+    public var currentGroup: TransitionSlot {
+        get { TransitionSlot(type: type, durationTicks: durationTicks, wipe: wipe, stinger: stinger) }
+        set {
+            type = newValue.type
+            durationTicks = newValue.durationTicks
+            wipe = newValue.wipe
+            stinger = newValue.stinger
+        }
+    }
+
+    /// 把槽 index（1–4）拷进当前那组并记 `currentSlot = index`；越界不动。进度 / startTick 不碰（调用方自己决定要不要开始）。
+    public mutating func select(slot index: Int) {
+        guard TransitionSlot.indexRange.contains(index), index - 1 < slots.count else { return }
+        currentGroup = slots[index - 1]
+        currentSlot = index
+    }
+
+    /// 当前那组与哪个槽相同：先看 `preferring`（对得上就是它），否则按顺序找第一个相同的；都不同 → nil。
+    public func slotIndexMatchingCurrentGroup(preferring index: Int? = nil) -> Int? {
+        Self.slotIndex(matching: currentGroup, in: slots, preferring: index)
+    }
+
+    static func slotIndex(matching group: TransitionSlot, in slots: [TransitionSlot], preferring index: Int?) -> Int? {
+        if let i = index, TransitionSlot.indexRange.contains(i), i - 1 < slots.count, slots[i - 1] == group { return i }
+        return slots.firstIndex(of: group).map { $0 + 1 }
+    }
 }
 
 /// FTB（§1.1）。`on` 是目标，`level` 是当前黑的比例（渲染器乘 1 − level）；状态机每拍把 level 向目标推 1 / durationTicks。
@@ -302,7 +406,7 @@ public struct BusState: Hashable, Codable, Sendable {
     public var gainDb: Double
     /// 总线静音。
     public var muted: Bool
-    /// 总线效果链（W5-C 起生效）：id 与键表见 `EffectSlot`（parametricEQ / dynamicsProcessor / compressor / peakLimiter）；
+    /// 总线效果链（W5-C 起生效）——只放音频效果（提案 023 第三节）：id 与键表见 `EffectSlot`（parametricEQ / dynamicsProcessor / compressor / peakLimiter）；
     /// 每条总线最多 3 格，连续的 parametricEQ 格合成一格（≤ 16 段），超出的不装；链顺序 = 处理顺序，enabled = false 的格旁路。
     public var effects: [EffectSlot]
     public init(bus: Bus, gainDb: Double = 0, muted: Bool = false, effects: [EffectSlot] = []) {
@@ -447,7 +551,8 @@ public struct RecordSettings: Hashable, Codable, Sendable {
     public var directory: String
     /// 文件名模板，支持 {show} {date} {time} {output}。
     public var fileNamePattern: String
-    /// 容器格式。
+    /// 容器格式——**已废弃（提案 023 第二节，用户 2026-10-11 批）**：运行时从不读它，文件一律写 .mov；要 .mp4 用 `remuxToMP4`（停止后转封装，失败保留 .mov），
+    /// 两者表达同一件事。字段与枚举留着（删了是破坏性 wire 变更）：缺键 = mov，写出仍写（老程序读新文件不缺键）；不加 `@available`（App 的 OutputSettingsPanel 还读它给提示）。
     public var container: RecordContainer
     /// movieFragmentInterval，秒；崩溃可恢复到最后一个片段。
     public var fragmentIntervalSeconds: Double
@@ -472,12 +577,12 @@ public struct RecordSettings: Hashable, Codable, Sendable {
 
     enum CodingKeys: String, CodingKey { case directory, fileNamePattern, container, fragmentIntervalSeconds, remuxToMP4, armed, ownFormat }
 
-    /// 025 之前的文件没有 armed / ownFormat：缺键 = true / false（与 W5-I 对 extra 缺键的语义相同）。写出总是写全。
+    /// 025 之前的文件没有 armed / ownFormat：缺键 = true / false（与 W5-I 对 extra 缺键的语义相同）；container 可缺（023 二，= mov）。写出总是写全。
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         directory = try c.decode(String.self, forKey: .directory)
         fileNamePattern = try c.decode(String.self, forKey: .fileNamePattern)
-        container = try c.decode(RecordContainer.self, forKey: .container)
+        container = try c.decodeIfPresent(RecordContainer.self, forKey: .container) ?? .mov
         fragmentIntervalSeconds = try c.decode(Double.self, forKey: .fragmentIntervalSeconds)
         remuxToMP4 = try c.decode(Bool.self, forKey: .remuxToMP4)
         armed = try c.decodeIfPresent(Bool.self, forKey: .armed) ?? true
@@ -605,7 +710,8 @@ public struct DisplayOutputSettings: Hashable, Codable, Sendable {
 
 /// 一个输出的设置。按 kind 取用相关的子结构，其他留 nil；`extra` 给各输出会话放自己的附加项（占位）。
 public struct OutputSettings: Hashable, Codable, Sendable {
-    /// 送什么画面。
+    /// 送什么画面。录制输出的 source 只认 program / input(n)：从 API / 节目文件写进来的 preview / multiview **按 program 录**（录制器的来源选择只认这两种），
+    /// 校验器不拒（提案 023 第二节 (a)，用户 2026-10-11 批）；界面上录制来源只给 PGM / 某路输入。
     public var source: OutputSource
     /// 视频编码参数；不编码的输出为 nil。
     public var video: VideoEncodeSettings?
@@ -693,6 +799,10 @@ public enum MixerStateError: Error, Equatable {
     case reservedInputNumber(Int)
     case duplicateInput(Int)
     case duplicateOutput(Int)
+    /// 转场槽不是恰好 4 个（提案 020）。
+    case transitionSlotCount(Int)
+    /// currentSlot 不在 1…4（提案 020）。
+    case transitionSlotIndex(Int)
 }
 
 /// 不可变快照（设计方案 §4）。相比 §4 多了 `format` 和 `inputs`：addInput / removeInput / setInputSettings 要在 reduce 里落地，
@@ -745,13 +855,18 @@ public struct MixerState: Hashable, Codable, Sendable {
         var s = MixerState(format: format, outputs: outputs)
         let fade = OverlayAnimation.defaultFade(for: format)
         for i in s.overlays.indices { s.overlays[i].animation = fade }
+        // 提案 020：出厂四槽按节目帧率算，当前那组 = 槽 1（Fade 0.5 s）
+        s.transition.slots = TransitionSlot.factoryDefaults(for: format)
+        s.transition.select(slot: 1)
         return s
     }
 
-    /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复。
+    /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复、转场槽恰好 4 个且 currentSlot 为 nil 或 1…4（020）。
     /// 不查引用（PGM / PVW / 叠加 / Stinger 指向的输入在不在）：悬空引用由 reducer 的 removeInput 清，渲染器按"没有这路"画（用户 2026-09-27 定）。
     public func validate() throws {
         guard overlays.count == MixerState.overlayCount else { throw MixerStateError.overlayCount(overlays.count) }
+        guard transition.slots.count == TransitionSlot.count else { throw MixerStateError.transitionSlotCount(transition.slots.count) }
+        if let i = transition.currentSlot, !TransitionSlot.indexRange.contains(i) { throw MixerStateError.transitionSlotIndex(i) }
         guard audio.buses.map(\.bus) == Bus.allCases else { throw MixerStateError.busOrder }
         var seen = Set<Int>()
         for i in inputs {
@@ -790,7 +905,7 @@ public struct MixerState: Hashable, Codable, Sendable {
         return result
     }
 
-    /// 清掉瞬态（转场 / FTB / 叠加动画的进度和起始拍），载入节目文件时用；目标值（on）保留并直接到位。
+    /// 清掉瞬态（转场 / FTB / 叠加动画的进度和起始拍、文件输入的定位请求——021），载入节目文件时用；目标值（on / paused / restartOnProgram）保留并直接到位。
     public mutating func resetTransientState() {
         transition.progress = 0
         transition.startTick = nil
@@ -800,6 +915,10 @@ public struct MixerState: Hashable, Codable, Sendable {
         for i in overlays.indices {
             overlays[i].animProgress = overlays[i].on ? 1 : 0
             overlays[i].startTick = nil
+        }
+        for i in inputs.indices {
+            inputs[i].settings.playback.seekSeconds = nil
+            inputs[i].settings.playback.seekTick = nil
         }
     }
 }

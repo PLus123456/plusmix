@@ -53,9 +53,12 @@ final class CodableTests: XCTestCase {
         XCTAssertEqual(obj["schemaVersion"] as? Int, 1)
         // layout 原样保留（不解释）
         XCTAssertEqual(back.layout.values["mixerVisible"], .bool(true))
-        // Show ↔ MixerState：makeState 清掉瞬态（转场进度、动画进度、startTick）
+        // Show ↔ MixerState：makeState 清掉瞬态（转场进度、动画进度、startTick、文件输入的定位请求——021）
         let state = back.makeState()
-        XCTAssertEqual(state.inputs, show.inputs)
+        XCTAssertEqual(show.inputs[2].settings.playback.seekSeconds, 1.5, "样例里带着定位瞬态，文件照存")
+        var persisted = show.inputs
+        for i in persisted.indices { persisted[i].settings.playback.seekSeconds = nil; persisted[i].settings.playback.seekTick = nil }
+        XCTAssertEqual(state.inputs, persisted, "定位瞬态清掉，其余（含 paused / restartOnProgram / color）不动")
         XCTAssertEqual(state.outputs, show.outputs)
         XCTAssertEqual(state.audio, show.audio)
         XCTAssertEqual(state.program, 1)

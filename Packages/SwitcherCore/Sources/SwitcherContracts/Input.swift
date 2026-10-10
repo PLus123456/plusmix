@@ -398,6 +398,45 @@ public struct KeyerSettings: Hashable, Codable, Sendable {
     }
 }
 
+/// 文件输入的播放控制（提案 021，用户 2026-10-11 批）：只对 `InputSource.file` 有意义，别的 kind 照存不读。
+/// `paused` / `restartOnProgram` 是目标（随文件存）；`seekSeconds` / `seekTick` 是**瞬态**的一次定位请求：
+/// 组装方（App InputRuntime / headless）看到 (seekTick, seekSeconds) 变了就对 FileInput 做一次 seek，做完不改状态；
+/// `MixerState.resetTransientState()`（载入节目）清成 nil。reducer 在这一路切上 PGM 的那一拍（cut / auto 完成 / T-bar 提交 / setProgram）
+/// 且 `restartOnProgram` 时写 seekSeconds = 0、seekTick = 那一拍——与手发 `seekPlayback(0)` 同一条路，组装方不用认第二种信号。
+/// 暂停中切上 PGM 且 restartOnProgram：定位到 0 但仍暂停（两个目标各管各的）。"从头"的首帧晚 1–2 拍（FileInput 的 seekLead）。
+/// 缺键 = 默认；写出写全，nil 不写键。
+public struct PlaybackSettings: Hashable, Codable, Sendable {
+    /// 目标：是否暂停（true = 画面停在最近推出的那一帧、每拍重推；false = 播放）。
+    public var paused: Bool
+    /// 这一路切上 PGM 时从头播（在 PVW 上预览时不动）。
+    public var restartOnProgram: Bool
+    /// 最近一次定位请求的目标位置（秒，从文件头算；0 = 从头）。上限由 FileInput 按文件时长钳，契约不知道时长。
+    public var seekSeconds: Double?
+    /// 那次定位请求落在哪一拍（reducer 的 tick）；与 `seekSeconds` 一起构成"一次请求"。
+    public var seekTick: Tick?
+
+    public init(paused: Bool = false, restartOnProgram: Bool = false, seekSeconds: Double? = nil, seekTick: Tick? = nil) {
+        self.paused = paused
+        self.restartOnProgram = restartOnProgram
+        self.seekSeconds = seekSeconds
+        self.seekTick = seekTick
+    }
+
+    enum CodingKeys: String, CodingKey { case paused, restartOnProgram, seekSeconds, seekTick }
+
+    /// 缺键 = 默认（`{}` 也合法）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+        restartOnProgram = try c.decodeIfPresent(Bool.self, forKey: .restartOnProgram) ?? false
+        seekSeconds = try c.decodeIfPresent(Double.self, forKey: .seekSeconds)
+        seekTick = try c.decodeIfPresent(Tick.self, forKey: .seekTick)
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["paused", "restartOnProgram", "seekSeconds", "seekTick"]
+}
+
 /// 一路输入的全部可调设置（设计方案 §4 `Input.settings`）。存在 MixerState.inputs 里，只此一份。
 public struct InputSettings: Hashable, Codable, Sendable {
     /// 四边裁切。
@@ -406,24 +445,46 @@ public struct InputSettings: Hashable, Codable, Sendable {
     public var transform: Transform2D
     /// 音频参数（路由 / 增益 / 静音 / 独听 / 声像 / 延迟补偿）。
     public var audio: InputAudioSettings
-    /// 这一路的效果链（id 与键表见 `EffectSlot`；每路的接线归 W1-D3 / prompt 102，装什么的口径见提案 023 第三节）。
+    /// 这一路的效果链——**只放音频效果**（提案 023 第三节，用户 2026-10-11 批）：id 表 = `EffectSlot` 的四个音频 id，与 `BusState.effects` 同一套，
+    /// 两条链都跑在音频实时线程（每路的接线归 W1-D3 / prompt 102）。以后的视频效果（模糊 / LUT / 遮罩）另加 `videoEffects` 字段、跑在渲染线程，不混在这里。
+    /// 认不出的 id 实现跳过。
     public var effects: [EffectSlot]
     /// 抠像（口径见提案 009）。
     public var keyer: KeyerSettings
+    /// 文件输入的播放控制（提案 021）；别的 kind 照存不读。缺键 = 默认。
+    public var playback: PlaybackSettings
 
     public init(crop: CropInsets = .none, transform: Transform2D = .identity, audio: InputAudioSettings = InputAudioSettings(),
-                effects: [EffectSlot] = [], keyer: KeyerSettings = KeyerSettings()) {
+                effects: [EffectSlot] = [], keyer: KeyerSettings = KeyerSettings(), playback: PlaybackSettings = PlaybackSettings()) {
         self.crop = crop
         self.transform = transform
         self.audio = audio
         self.effects = effects
         self.keyer = keyer
+        self.playback = playback
     }
 
+    enum CodingKeys: String, CodingKey { case crop, transform, audio, effects, keyer, playback }
+
+    /// 021 之前的文件 / API 请求没有 playback：缺键 = 默认（播放、不从头、无定位）。写出总是写全。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        crop = try c.decode(CropInsets.self, forKey: .crop)
+        transform = try c.decode(Transform2D.self, forKey: .transform)
+        audio = try c.decode(InputAudioSettings.self, forKey: .audio)
+        effects = try c.decode([EffectSlot].self, forKey: .effects)
+        keyer = try c.decode(KeyerSettings.self, forKey: .keyer)
+        playback = try c.decodeIfPresent(PlaybackSettings.self, forKey: .playback) ?? PlaybackSettings()
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["crop", "transform", "audio", "effects", "keyer", "playback"]
+
     /// 把所有数值钳到合法范围（reducer 应用 setInputSettings 时调）：
-    /// 延迟 0–500 ms、增益 −96…+24 dB、声像 −1…1、裁切各边 0–1 且对边之和 ≤ 1（右 / 下让位）、缩放 > 0。
+    /// 延迟 0–500 ms、增益 −96…+24 dB、声像 −1…1、裁切各边 0–1 且对边之和 ≤ 1（右 / 下让位）、缩放 > 0、定位秒数 ≥ 0（021）。
     public func clamped() -> InputSettings {
         var s = self
+        if let seek = s.playback.seekSeconds { s.playback.seekSeconds = seek.isFinite ? max(0, seek) : 0 }
         s.audio.delayMs = min(max(s.audio.delayMs, InputAudioSettings.delayRangeMs.lowerBound), InputAudioSettings.delayRangeMs.upperBound)
         s.audio.gainDb = min(max(s.audio.gainDb, InputAudioSettings.gainRangeDb.lowerBound), InputAudioSettings.gainRangeDb.upperBound)
         s.audio.pan = min(max(s.audio.pan, -1), 1)
@@ -442,6 +503,12 @@ public struct InputSettings: Hashable, Codable, Sendable {
 
 // MARK: - 配置与协议
 
+/// 输入的分类颜色（提案 023 第四节，用户 2026-10-11 批）：Finder 标签那六种，rawValue = W5-H `InputCategories.Color` 的值。
+/// 颜色同时给多画面标签、Stream Deck 按钮、API 用；分类的**名字**（"红色 = 机位"）只是界面标签，留在 `Show.layout["inputCategoryNames"]`，契约不解释（023 四 (a)）。
+public enum InputColor: String, Codable, Sendable, CaseIterable {
+    case red, orange, yellow, green, blue, purple
+}
+
 /// 一路输入的静态配置：编号、名字、来源、设置。节目文件和 MixerState.inputs 里存的就是它。
 public struct InputConfig: Hashable, Codable, Sendable, Identifiable {
     /// 输入编号，从 1 起；0 保留给"无输入 / 黑场"。
@@ -452,13 +519,34 @@ public struct InputConfig: Hashable, Codable, Sendable, Identifiable {
     public var source: InputSource
     /// 可调设置。
     public var settings: InputSettings
+    /// 分类颜色（提案 023 第四节）；nil / 缺键 = 无分类，nil 不写键。走 `setInputColor`；`addInput` 带的照收；removeInput 删掉这一路就没了（编号再给别的输入用不继承）。
+    public var color: InputColor?
 
-    public init(number: Int, name: String, source: InputSource, settings: InputSettings = InputSettings()) {
+    public init(number: Int, name: String, source: InputSource, settings: InputSettings = InputSettings(), color: InputColor? = nil) {
         self.number = number
         self.name = name
         self.source = source
         self.settings = settings
+        self.color = color
     }
+
+    enum CodingKeys: String, CodingKey { case number, name, source, settings, color }
+
+    /// 023 之前的文件没有 color：缺键 = nil（无分类）。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        number = try c.decode(Int.self, forKey: .number)
+        name = try c.decode(String.self, forKey: .name)
+        source = try c.decode(InputSource.self, forKey: .source)
+        settings = try c.decode(InputSettings.self, forKey: .settings)
+        color = try c.decodeIfPresent(InputColor.self, forKey: .color)
+    }
+
+    /// JSON 键名（color 可缺）。
+    public static let jsonKeys = ["number", "name", "source", "settings", "color"]
+
+    /// W5-H 把分类存在 `Show.layout` 的这个键下（`{"<输入编号>": "<颜色>"}`）；`Show.migratingLegacyInputCategories()` 把它搬进各路 `color`。
+    public static let legacyCategoriesLayoutKey = "inputCategories"
 
     /// 由 source 推出的类型。
     public var kind: InputKind { source.kind }

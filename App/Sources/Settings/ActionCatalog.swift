@@ -119,11 +119,11 @@ enum ActionCatalog {
     /// 命令归到哪一组（同 CommandCatalog 的分组，"输入表 / 输出表"并进输入 / 输出；穷举：契约加命令这里编译就红）。
     static func group(of kind: CommandKind) -> ActionGroup {
         switch kind {
-        case .cut, .fade, .setTransition, .setTransitionParams, .autoTransition, .setPreview, .setProgram, .tbar, .ftb: .switching
+        case .cut, .fade, .setTransition, .setTransitionParams, .autoTransition, .setPreview, .setProgram, .tbar, .ftb, .setTransitionSlot, .useTransitionSlot, .setFTBDuration: .switching   // 后三条：提案 020（P5-2）
         case .overlay, .setOverlay, .setOverlayDecoration: .overlay
-        case .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setMonitorSource, .setBusEffects: .audio   // setMonitorSource：提案 026（P5）
+        case .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setMonitorSource, .setBusEffects, .setInputAudio: .audio   // setMonitorSource：提案 026（P5）；setInputAudio：023 五（P5-2）
         case .startRecord, .stopRecord, .startStream, .stopStream, .setOutputEnabled, .renameOutput, .addOutput, .removeOutput, .setOutputSettings: .output
-        case .setInputSettings, .renameInput, .addInput, .removeInput, .setInputSource: .input
+        case .setInputSettings, .renameInput, .addInput, .removeInput, .setInputSource, .setPlayback, .seekPlayback, .setInputColor: .input   // 后三条：提案 021 / 023 四（P5-2）
         case .loadShow: .show
         }
     }
@@ -259,6 +259,9 @@ enum ActionCatalog {
             case .onOff: v[f.name] = .bool(true)
             case .switchMode: v[f.name] = .string(SwitchMode.toggle.rawValue)
             case .durationTicks, .durationMs: v[f.name] = .seconds(f.name == "durationMs" ? 1 : 0.5)
+            case .seconds: v[f.name] = .seconds(0)   // 021：从头
+            case .transitionSlot: v[f.name] = .int(1)   // 020
+            case .busRouting: break   // 023 五：可选，不填 = 不动（勾选控件归 100）
             case .transitionType: v[f.name] = .string(TransitionType.fade.rawValue)
             case .fraction: v[f.name] = .double(0.5)
             case .decibels(let lo, let hi): v[f.name] = .double(f.name == "minDb" ? -60 : (f.name == "maxDb" ? min(12, hi) : max(lo, min(0, hi))))
@@ -318,11 +321,13 @@ enum ActionCatalog {
             return (raw as? Bool).map { .bool($0) }
         case .fraction, .decibels:
             return (raw as? Double).map { .double($0) } ?? (raw as? Int).map { .double(Double($0)) }
-        case .overlayChannel, .output, .bus:
+        case .overlayChannel, .output, .bus, .transitionSlot:
             return (raw as? Int).map { .int($0) }
+        case .seconds:
+            return (raw as? Double).map { .seconds($0) } ?? (raw as? Int).map { .seconds(Double($0)) }
         case .outputKind, .switchMode, .transitionType, .text, .choice:
             return (raw as? String).map { .string($0) }
-        case .json:
+        case .json, .busRouting:
             return nil
         }
     }
