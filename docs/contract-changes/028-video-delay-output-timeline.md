@@ -71,3 +71,5 @@ L 变了：非 Master 来源在变化那一块按差值拼接（变大丢、变�
 2. ISOFrameTap 那一行**本会话改**（扩到 `Packages/SwitcherOutputs/Sources/ISO/ISOFrameTap.swift` 这一个文件 + ISOTests 一条用例）。
 3. 录制起止按输出时间线开录**只写进报告**（App / headless 的后续会话照改法改）；本会话的 headless 只加 `--av-compensation`。
 同一天用户还批了把显示延后扩到 SwitcherRender（MetalRenderer 的显示源）。
+
+2026-10-11（用户看完 reports/G8.md，"2–5 按 G8 的想法"）：① 契约文字、`renderMs` 一行、Stats 顶层 `video_delay_ms`（022 B2，同日批）归 **P5-2**（prompt 108）；② 测试标准 §3 的 L1 行加一句"videoDelay 下判定扣掉当时的 `video_delay_ms`，阈值数字不动"（P5-2）；③ 录制起止按输出时间线开录归 **G8b 的胶水**（App `OutputRuntime.swift` 两处 + headless `HeadlessRun.swift` 两处 + `AVCompensationTests` 去掉 `startTick = −2` 的变通），与 App 的三行接线一起做；④ W1-B4 已随 G8a 合入 main（f0c33ef）。

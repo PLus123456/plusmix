@@ -1,7 +1,7 @@
 # 022 输出统计补字段：`Stats.encoder[].uptime_s` / `disconnects` / `last_error`（顺带：`attempt`、顶层 `video_delay_ms`）
 
 提出会话 / 分支：P5（prompt 99）/ `p5-contracts`；来源 docs/ui-study/01a 第 5 节候选 5、E10 / L11、04 Q13（用户按落地方案 §8.5 默认 (a)）、R7-E6；读数方归 prompt 101（推流状态面板、底栏时长），顺带两项分别来自 W5-B §4 第 1 条（G6 追加）与 prompt 105 交付 4
-状态：**待批**（批了由 P5 落契约 + 填数方 + StatsWriter / StatsSummary + 测试标准 §7 字段表；App 把起不来的原因填进 last_error 归 101 或 App 胶水；`video_delay_ms` 的填数归 105）
+状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + 填数方 + StatsWriter / StatsSummary + 测试标准 §7 字段表；App 把起不来的原因填进 last_error 归 101 或 App 胶水；`video_delay_ms` 的填数归 105）
 
 ## 改什么
 
