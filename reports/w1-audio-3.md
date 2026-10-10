@@ -73,15 +73,15 @@ SwitcherContracts 一个字没动（023 / 024 / 026 的契约 P5 已落地，直
 | `testA_inputEffects_eqChangesResponse`（混音器级 + 集成级各一） | 输入 1 一段 1 kHz +12 dB（q 2）：Master **+12.000 dB**；输入 2（同一信号，Bus A）**−0.000 dB**；集成级关掉后 0 dB（±0.05）、状态 eqEnabled / eqBands 对得上 | 12 ± 0.5；别的路 ± 0.05 | ✅ |
 | `testA_inputEffects_bypassIsTransparent`（两级） | 两格（EQ +12、压缩阈值 −40 / 10:1）开过（电平差 > 3 dB）再关：与同一信号的无效果路**逐样本最大差 0**，PTS 起点相同、延迟 0 | 逐样本相同 | ✅ |
 | `testA_inputEffects_addRemoveInputNoDropout`（空设备实时，W2-E 用例扩一条） | 输入 2 带 [EQ, compressor] 增删 100 次：dropouts **0**、underruns **0**、不连续 **0**、违规 **0**；格开着 100/100 次；常驻路 click 均值 −0.008 ms、最大 0.008 ms | A1 三项 0 | ✅ |
-| A7 离线 10 分钟（`testA7_offline10min_zeroViolations`，8 路每路两格全开：EQ 一段 + 偶数路压缩器 / 奇数路 DynamicsProcessor，Bus A 1 号格压缩器，Master ceilingDb −1，监听来源 Bus A，每 100 块改一路压缩器参数） | TODO | 0 | TODO |
-| A7 真设备 1 分钟（`testA7_realDevice_zeroViolations`，内置扬声器，4 路每路两格 + 四总线三格 + Bus A 压缩器） | TODO | 0 | TODO |
+| A7 离线 10 分钟（`testA7_offline10min_zeroViolations`，8 路每路两格全开：EQ 一段 + 偶数路压缩器 / 奇数路 DynamicsProcessor，Bus A 1 号格压缩器，Master ceilingDb −1，监听来源 Bus A，每 100 块改一路压缩器参数） | 违规 **0**、实时区分配 **0**、欠载 0、112 500 块，墙钟 66.9 s（9.0× 实时），最长块 1687 µs（预算 5333；W5-C 时 2049） | 0 | ✅ |
+| A7 真设备 1 分钟（`testA7_realDevice_zeroViolations`，内置扬声器 Master 静音，4 路每路两格 + Master 三格 + Bus A 压缩器 + 消费者队列 + 每秒改增益 / 淡变） | 违规 **0**、实时区分配 **0**、dropouts 0、underruns 0、11 346 块 | 0 | ✅ |
 | A7：`testA7_inputEffectsParamChangesWhileRendering_noAllocationInRealtime`（新；守卫 + malloc 钩子，2000 块每块改一路 EQ 段 / 压缩器六个参数 / 每 97 块切种类 / 改 ceilingDb / 换监听来源 / 翻借 Master） | 违规 0、实时区分配 0、欠载 0、丢命令 0 | 0 | ✅ |
-| `scripts/check-rt-symbols.sh`（debug / release） | 4 个目标文件：无 malloc / 锁 / 日志 / ObjC / Swift 符号；新用的 `log2f` / `exp2f` 本来就在允许清单里，清单没改 | 绿 | ✅（debug）/ TODO（release） |
+| `scripts/check-rt-symbols.sh`（debug / release） | 4 个目标文件：无 malloc / 锁 / 日志 / ObjC / Swift 符号，外部符号都在审计清单内；新用的 `log2f` / `exp2f` 本来就在允许清单里，清单没改 | 绿 | ✅（两种配置） |
 | W1-B 的 AllocationProbe（malloc 钩子）回调线程 malloc | 上面三条 A7 用例都挂着钩子：0 | 0 | ✅ |
-| A2 回归（`scripts/gate4.sh --checkpoint W1D3 --label w1d3`，= `make gate4-run` 不写 G4 的入库文件） | TODO | 与基线均值差 ≤ 1 ms | TODO |
-| A1 真设备 10 分钟（`testA1_builtInOutput_dropoutsAndUnderrunsZero`，`SW_AUDIO_A1_SECONDS=600`） | TODO | 0 | TODO |
-| SwitcherAudio 全包 `swift test` | TODO | 全绿 | TODO |
-| V1 / CPU：8 路全开效果（每路 EQ 一段 + 压缩器，Master EQ + 压缩器 + 限幅）vs 不开，空设备 20 s（`testCPU_eightInputsAllEffects_report`） | TODO | 报数；超 W4-A 基线 10% 要解释 | TODO |
+| A2 回归（`scripts/gate4.sh --minutes 10 --label w1d3 --checkpoint W1D3 --baseline baselines/g7-m5max.json`，= `make gate4-run` 不写基线、不碰 G4 的入库文件；G4 场景本身不带效果，每路两格 / 压缩器都关着，测的是热路径改完 A2 没漂） | 整秒闪光 **116 对：均值 +0.000 ms、σ 0.000、最大 0.000 ms**（与 g7 基线差 0）；A3 0.00 ms / 8 h；A4（PGM + 4 个 ISO 音轨）click 极差 0.188 ms；A1 超时 + 欠载 0、不连续 0；E1 0。数据在 `.build/gate4/w1d3/`（运行报告 `W1D3-run-w1d3.md` 搬进去了，不入库） | 与基线均值差 ≤ 1 ms | ✅（差 0.000） |
+| A1 真设备 10 分钟（`testA1_builtInOutput_dropoutsAndUnderrunsZero`，`SW_AUDIO_A1_SECONDS=600`，内置扬声器 Master 静音，2 路 ±100 ppm + 每路两格 + Master 三格 + Bus A 压缩器） | dropouts **0**、underruns **0**、违规 **0**、112 663 次回调；回调抖动 max 0.077 ms（直方图全部在 0–100 µs 桶）、提前量 6.25–6.35 ms、最长块 3200 µs（W1-D 时 2632）、输入比率 0.9998977 / 1.0000977；喂源线程最大间隔 1.08 ms、欠载事件 0 | 0 | ✅ |
+| SwitcherAudio 全包 `swift test`（debug，4 分 10 秒） | SwitcherAudioTests **85**（跳过 2：改系统默认设备要 FULL、麦克风权限）+ IntegrationTests **73**（跳过 5：真设备 A2 / A2A3 / A3 长跑 / A5 回环两处——都按环境变量跳过），**0 失败**；A7 离线 600 s 见上 | 全绿 | ✅ |
+| V1 / CPU：8 路全开效果（每路 EQ 一段 + 压缩器，Master EQ + 压缩器 + 限幅）vs 不开，空设备各 20 s（`testCPU_eightInputsAllEffects_report`，测试进程 = 引擎 + 8 条实时合成源线程 + 泵） | **release**：进程 CPU 13.1% → 14.8%（**+1.7 个百分点**，单核口径），混音块均值 456 → 544 µs（**+88 µs / 块**）；debug（Swift -Onone、C 仍 -O2）：16.0% → 26.8%（+10.9 pt），块均值 281 → 523 µs；两种构建 dropouts / underruns / 违规 / 不连续全 0，最长块 ≤ 4107 µs（预算 5333，尖峰是 libebur128 每秒的短期响度求和 + 8 条源线程争抢，与效果无关）。W4-A 的 S3 基线是整个 headless 进程（含视频）的口径，不能直接减；按混音块算每路 EQ + 压缩器 ≈ 10 µs / 块（压缩器每帧一次 log2f + exp2f 是大头），8 路 + Master 三格 +88 µs / 块 = 一块预算的 1.7%，远低于 10% | 报数 | ✅（报数，不超） |
 
 ### 2.2 压缩器（G6 追加 ①–⑥）
 
@@ -116,7 +116,13 @@ SwitcherContracts 一个字没动（023 / 024 / 026 的契约 P5 已落地，直
 
 ### 2.5 收尾全量
 
-TODO
+| 项 | 结果 |
+|---|---|
+| `swift test --package-path Packages/SwitcherAudio`（debug，4 分 10 秒） | SwitcherAudioTests 85（跳过 2）+ IntegrationTests 73（跳过 5），**0 失败**；A7 离线 600 s 违规 0 / 分配 0（最长块 1687 µs，预算 5333） |
+| 真设备（内置扬声器，另开的一次） | A7 60 s 违规 0；A1 600 s dropouts 0 / underruns 0 / 违规 0（§2.1） |
+| gate4 A2 回归 | ✅（上表）。那一轮 **V2 两帧（0.0056%，02:53:43 一次 +2）与 S2（+25 MB / 10 分钟，73 MB/h 的不足 1 h 拟合）是红的，都不是音频、也不是本会话的改动**：`load.log` 02:53:33–02:53:58 另一个会话的 App（PlusMix 54–67%、contactsd 66%、xcodebuild 202%）在跑 App 测试，渲染 3.87 ms 那一拍丢的；S2 与 W5-C（+22 MB / 10 分钟）、G5 final2（+21 MB）同量，不到 1 小时的拟合"仅供参考"。S3 CPU 44.7%（比 g7 基线低 11 个百分点，效果都关着） |
+| `make lint BRANCH=w1-audio-3` | 禁词、版本号、Package.swift 约束、依赖方向（8 个包）、归属（21 个改动文件都在允许范围内）、相对链接（178 个 Markdown）、实时符号（debug）：全绿；`check-rt-symbols.sh --release` 也绿 |
+| `make test-app` | 没跑：App 只翻了一个常量，87 / 88 的两条用例明说"102 接上时翻"，合入后要红两条（§1.4、问题单第 3 条），由 App 会话 / G8 胶水改 |
 
 ## 3. 没做的和原因
 
