@@ -15,7 +15,7 @@ Active while the main window is in front (not while typing in a text field); als
 | `Return` | Run the current transition (selected type / duration; Fade 30 ticks by default) |
 | `F` | FTB on / off |
 | `⌥1` … `⌥4` | Run transition 1–4 (in this version all four = run the current transition, like Return) |
-| `⌃1` … `⌃4` | Overlay 1–4 on / off |
+| `⌃1` … `⌃4` | Overlay 1–4 on / off (switch only, the input is not changed: a channel without an input shows nothing) |
 
 - **Recording and streaming have no default keys**: stopping them from a hotkey never asks, so one stray key would stop the show. Add them yourself if you want ([Editing the table](#editing-the-table)), e.g. with "All recordings on / off".
 - **The interface lock has no default shortcut**: use the lock at the far right of the bottom bar, or Window › Lock Interface.
@@ -30,7 +30,7 @@ The grey keys on the right of the Transition menu come from the shortcut table a
 Settings › Shortcuts (PlusMix › Shortcuts…): one row per binding — Enabled (checkbox), key combination (type it, or click "Record" and press it), action (a one-line summary; click it for the action picker), note, and "Edit JSON… / Duplicate / Remove" at the end of the row.
 
 - A search field at the top (finds keys, actions and notes); "Add", "Reset to Defaults" and "Save" at the bottom. "Duplicate" inserts a copy of the row below with the key left empty for you to record.
-- Binding the same combination twice among enabled rows is flagged red and cannot be saved; disabled rows are not dispatched and don't count as conflicts.
+- Binding the same combination twice among enabled rows shows "n conflicts" next to Save and the table can't be saved; disabled rows are not dispatched and don't count as conflicts.
 - A new row has no action and must get one before saving ("Row n has no action yet") — it never silently becomes some other command.
 - **Click "Save" when done**; with unsaved changes, closing the window or switching pages asks "Save / Cancel / Discard Changes". The page shows where the table file is.
 - "Edit JSON…": write one command directly (the top-level key is the command name, the same form as the HTTP API's `command`); it is checked when applied, and a recognised command turns back into the matching action.
@@ -41,7 +41,7 @@ Opens from a row's action button:
 
 - A search field at the top (you can type straight away; it searches action names, descriptions and API key names across groups); groups on the left: Switching / Overlays / Audio / Outputs / Inputs / Show / Interface / All / Recent.
 - One line per action on the right: our name, a one-line description and the API key name in small print (compound actions list what they send, e.g. "previewAndTransition → setPreview + autoTransition").
-- Below it a form built from the action's parameters: an input is a "number · name" menu plus "Current PVW / Current PGM" (whatever is on PVW / PGM at the moment of the press); durations are in seconds (0.5 / 1 / 2 + custom); overlay channels 1–4; outputs only list the kinds that fit; one of the four buses; switches have three segments: on / off / toggle.
+- Below it a form built from the action's parameters: an input is a menu ("Input 3 “name”") plus "Current PVW / Current PGM" (whatever is on PVW / PGM at the moment of the press); durations are in seconds (0.5 / 1 / 2 + custom); overlay channels 1–4; outputs only list the kinds that fit; one of the four buses; switches have three segments: on / off / toggle.
 - At the bottom "What a press sends now:" — the commands computed from the current show, exactly what goes onto the command bus when the key is pressed.
 - By default only operator actions are listed. Whole-replacement commands (show / input settings / output settings) and adding / removing inputs and outputs need "Show whole-replacement commands (advanced)" or "Advanced: Write JSON…" (checked before saving).
 
@@ -124,7 +124,8 @@ Saving checks that every action fits its trigger (Notes take button actions, CCs
 }
 ```
 
-Inside a Note's `"action": {"action": …}` goes an action written exactly as in hotkeys.json above. Devices unplugged and plugged back are picked up again; devices connected while the app runs are discovered too.
+Inside a Note's `"action": {"action": …}` goes an action written exactly as in hotkeys.json above. **The default map is empty** (no factory mappings; restoring defaults empties it); an unreadable midi.json also falls back to the empty map, without a notice.
+Devices unplugged and plugged back are picked up again; devices connected while the app runs are discovered too.
 
 ## Stream Deck, Companion, tally, scripts
 

@@ -4,7 +4,7 @@ All settings live in one "Settings" window. Every way in opens that same window:
 
 - ⌘,, PlusMix › Settings…, and the main Settings button in the toolbar: back to the page you looked at last ("General" the first time).
 - Settings▾ in the toolbar and PlusMix › All Settings Pages ▸: straight to a page; PlusMix › Shortcuts… / MIDI Mapping… go straight to those two.
-- The settings pages listed in the Output menu and the ⚙ buttons in the bottom bar (Record, Stream, External Display, Multiview): straight to that output page.
+- The settings pages listed in the Output menu and the ⚙ of Stream / Multiview in the bottom bar: straight to that output page; the ⚙ of Record / External Display first opens a small menu (Recording Settings… / ISO Recording…; External Display Settings… / NDI® Output Settings…).
 
 ## Two groups of pages
 
@@ -20,16 +20,17 @@ The sidebar has two groups; each page's header says where it is stored:
 - **Most changes apply immediately**: changes on the output pages go to the engine right away (a stream destination that is live locks its URL and encoding, see [Outputs › Streaming](outputs.md#2-streaming)); changes on the This Mac pages are stored right away.
 - **Settings that only take effect with a new engine** (show format, show audio, audio device, local API, compatibility layer, preview all overlays in PVW) are tagged "Restarts engine". A change is kept as **pending**; the bottom of the window says "n pending: …".
   "Apply and Restart Engine" at the bottom applies them all at once (while recording / streaming runs it first asks "… will stop n recording(s), m stream(s)"; Cancel changes nothing). Changing a value back removes it from the pending list.
-  The window stays open on the same page after the restart. If you never click it, pending changes apply the next time the engine starts (New, Open, reopening the app).
+  The window stays open on the same page after the restart. If you don't click it: the This-Mac items (audio device, local API, compatibility layer, preview all overlays in PVW) are already stored and apply the next time the engine starts (New, Open, reopening the app);
+  **pending Show Format and Show Audio changes are lost unless applied** — closing the Settings window or creating / opening a show re-reads those two pages from the show.
 - **The Shortcuts and MIDI pages need Save**: the table is checked as a whole (conflicts, unrecognised keys) before saving. With unsaved changes, closing the window or switching pages asks "Save / Cancel / Discard Changes"; if it can't be saved (a conflict) the window stays and the error is shown under the table.
 
 Three buttons at the bottom left:
 
 | Button | What it does |
 |---|---|
-| Export Settings… | Writes this Mac's settings, the shortcut table and the MIDI mapping into one JSON file (`PlusMix Settings.json`) to take to another machine. **The access token is not exported** |
+| Export Settings… | Writes this Mac's settings, the shortcut table and the MIDI mapping into one JSON file (`PlusMix Settings.json`) to take to another machine. **The access token is not exported**; neither are Reminders, Performance & Power, Tally and the compatibility layer's HTTP port |
 | Import Settings… | Pick an exported file; it first lists "This replaces on this Mac: n Mac settings, the shortcut table (m), the MIDI mapping (k)" and asks; shows are not touched, settings that need an engine restart become pending |
-| Restore Defaults | This Mac's settings, the shortcut table and the MIDI mapping go back to defaults and the access token is cleared (asks first); shows are not touched and the engine is not restarted |
+| Restore Defaults | This Mac's settings, the shortcut table and the MIDI mapping go back to defaults and the access token is cleared (asks first); shows are not touched and the engine is not restarted. Reminders, Performance & Power, Tally and the compatibility layer's HTTP port are left as they are |
 
 ## This Show
 
@@ -58,7 +59,7 @@ Three buttons at the bottom left:
   Changing the device only drops the pairs the new device doesn't have; "Restore device defaults" goes back to the device's default assignment. Recording / streaming / NDI® use Master itself and are not affected by this.
 - **2-channel devices** (built-in speakers, plain USB headsets): both channels go to Master, so this page and the mixer header say "This device has no headphone channels" — solo / PFL / AFL live on the headphone bus and can't be heard then.
   "Use the Master channels while monitoring" is **not in effect yet** in this version (the choice is saved and works once the audio engine supports it); to hear the headphone bus today, use a device with more channels.
-- Device and channel changes need "Apply and Restart Engine".
+- A device change needs "Apply and Restart Engine". **Changing only channel pairs does not enable that button** (this version doesn't count it as pending): the change is stored and applies the next time the engine starts (New / Open, reopening the app).
 
 ### Remote Control
 
@@ -108,7 +109,8 @@ See [Shortcuts](shortcuts.md).
 
 ## Launch arguments
 
-When starting the app from a terminal (`open PlusMix.app --args …`, or running `PlusMix.app/Contents/MacOS/PlusMix …` directly). Launch arguments only apply to that run and are not stored as Mac settings:
+When starting the app from a terminal (`open PlusMix.app --args …`, or running `PlusMix.app/Contents/MacOS/PlusMix …` directly). Launch arguments only apply to that run;
+**but if you change anything on the General, Audio Devices, Remote Control or Advanced pages during that run, this Mac's settings are written back as a whole and the launch-argument values (`--no-api`, `--api-listen`, `--api-token`, `--audio-device`, `--record-*`) are stored too** — don't edit those pages while running with launch arguments:
 
 | Argument | Effect |
 |---|---|

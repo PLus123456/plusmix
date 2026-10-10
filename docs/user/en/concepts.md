@@ -21,7 +21,7 @@ One vocabulary is used everywhere: interface, show files, API and this manual ([
 
 ![The main window (1440×900; the "event" sample with English input names: four cameras, a mixer feed and a title, PGM 1, PVW 2)](../img/main-window-en.jpg)
 
-The smallest window is 1100×720 (including the toolbar row). The areas:
+The smallest window is 1100×720 (including the toolbar row; a little taller with Large thumbnails). The areas:
 
 | Area | What it does |
 |---|---|
@@ -44,7 +44,7 @@ Most buttons have three parts: **⚙ opens the settings of that kind, the main b
 | Add Input… | — | The Add Input panel, on the type you used last (same as ⌘I) | Jump straight to one of the eight types; "Recently Added" (up to 5) adds another input of that source without the panel (lowest free number, automatic name); = Input › Add by Type ▸ |
 | Record | Menu: Recording Settings… / ISO Recording… | Nothing recording → every route that **takes part in recording** starts on the same tick; something recording → stop all (asks first). No record output in the show yet → it adds a default one (recording into `~/Movies/PlusMix`) and starts | One line per record output "name · state" (✓ = recording); click a recording line to stop just that route (asks first); routes that are off are greyed out (a single route can't be started mid-recording); "Stop All" at the end; = Output › Record ▸ |
 | External Display | Menu: one single-choice section per display (PGM / PVW / Multiview / Input n; once a display has been set up the first line is "Off", and an output that is off is marked "(off)"), remove a route / Turn Off All External Displays, External Display Settings… / NDI® Output Settings…; = Output › External Display ▸ | Some are on → turn them all off; all off → turn them all back on as configured; none configured → show PGM full screen on the first non-main display; no second display → open the ⚙ menu | — |
-| Stream | Settings › Streaming | Nothing on → start all; some couldn't start → retry only those (healthy ones are not stopped and nothing is asked); all live → stop all (asks first). No destination in the show yet → opens the Streaming page with the cursor in the "Add destination" URL field | Start All / Stop All; one item per destination ("name · state · bitrate"; click = start just that one if off, stop just that one if live, retry just that one if it couldn't start); Streaming Settings… / Stream Status…; = Output › Stream ▸ |
+| Stream | Settings › Streaming | Nothing on → start all; some couldn't start → retry only those (healthy ones are not stopped and nothing is asked); all live → stop all (asks first). No destination in the show yet → opens the Streaming page with the cursor in the "Add destination" URL field | Start All / Stop All; one item per destination ("name · state · bitrate"; click = start just that one if off, stop just that one if live, retry just that one if it couldn't start); Streaming Settings… / Stream Status… (in this version both open the Streaming page); = Output › Stream ▸ |
 | Multiview | Settings › Multiview Layout | The separate multiview window on / off (highlighted while open) | — |
 | Overlay… (right group) | — | Opens the Overlay Settings window on the channel you edited last (see [Overlay channels](#overlay-channels)) | — |
 | Statistics (right group) | — | The statistics window (below) | — |
@@ -53,7 +53,7 @@ Most buttons have three parts: **⚙ opens the settings of that kind, the main b
 The Record / Stream buttons show **the worst route**: "● Recording (3)", "● Streaming 2/3" (live destinations / all destinations); when a route is reconnecting or couldn't start the button turns orange "Stream · 1 in trouble" (dark red when it couldn't start);
 the tooltip lists "name: state" for every route, with the reason for routes that couldn't start. A first connection reads "Connecting"; only after a destination has been live does a drop read "Reconnecting (attempt n)". Details in [Outputs › Streaming](outputs.md#2-streaming).
 
-**Stopping asks first**: the bottom-bar Record / Stream button, stopping one route from ▴, and "Stop all" on the Streaming page all show "Stop recording (n)?" with every route's state; Return does not land on "Stop", Esc cancels.
+**Stopping asks first**: the bottom-bar Record / Stream button, stopping one route from ▴, and "Stop all" on the Streaming page all show "Stop recording (n)?" listing the routes to stop (the bottom-bar question also shows each route's state); Return does not land on "Stop", Esc cancels.
 Hotkeys, MIDI and the API never ask. Settings › General › Confirmations turns the stop question off (the bottom bar, the ▴ menus and the Streaming page all follow it); the question shown on New / Open / format change / Quit while recording or streaming cannot be turned off.
 
 ### Reminders, statistics window, interface lock
@@ -71,11 +71,12 @@ Hotkeys, MIDI and the API never ask. Settings › General › Confirmations turn
 
 | Menu | Contents |
 |---|---|
-| PlusMix | About PlusMix, Check for Updates…, Settings… (⌘,), Shortcuts…, MIDI Mapping…, All Settings Pages ▸, Hide, Quit |
+| PlusMix | About PlusMix, Check for Updates…, Settings… (⌘,), Shortcuts…, MIDI Mapping…, All Settings Pages ▸, Hide PlusMix, Quit PlusMix (⌘Q) |
 | Show | New (⌘N), Open… (⌘O), Open Recent ▸, Open Show from Last Quit, Save (⌘S), Save As… (⇧⌘S) |
+| Edit | Undo, Redo, Cut, Copy, Paste, Select All — for text fields; changes to the show (adding / removing inputs, settings) cannot be undone |
 | Input | Add Input… (⌘I), Add by Type ▸, Input N "name" Settings… (⇧⌘I, the input on PVW; greyed out while PVW is black), Find Input (⌘F) |
 | Transition | Cut, Run Current Transition (type · duration), the five types under "T-bar and Return use (select only, doesn't run)", FTB, Overlay ▸ 1–4 and Overlay Settings…. The grey text on the right is the key bound in the current shortcut table (display only; keys are handled by the shortcut table) |
-| Output | Record ▸, Stream ▸, External Display ▸ (the same menus as the bottom bar), Turn On / Turn Off All External Displays, Multiview Window, Virtual Camera ▸, then the output settings pages (Output Overview…, Recording Settings…, ISO Recording…, Streaming Settings…, External Display Settings…, NDI® Output Settings…, Virtual Camera…, Multiview Layout…) |
+| Output | Record ▸, Stream ▸, External Display ▸ (the same menus as the bottom bar), Turn On All External Displays / Turn Off All External Displays ("Show PGM on Second Display" when none is configured and a second display exists; greyed out without a second display), Multiview Window, Virtual Camera ▸, then the output settings pages (Output Overview…, Recording Settings…, ISO Recording…, Streaming Settings…, External Display Settings…, NDI® Output Settings…, Virtual Camera…, Multiview Layout…) |
 | Window | Minimize, Zoom, Audio Mixer, Multiview Window, Input Thumbnails ▸ (Small / Medium / Large), Statistics, Lock Interface |
 | Help | PlusMix User Guide (this manual, installed with the app as web pages), Keyboard Shortcuts (a page generated from the current shortcut table, opened in your browser), Export Diagnostics…, Show Diagnostics Folder |
 
@@ -99,7 +100,7 @@ The full command list is the [API reference](../../api.md) (Chinese); the shortc
 |---|---|---|
 | Cut | Atomic swap of PGM and PVW | none |
 | Fade | Cross-fade | duration |
-| Wipe | New picture wipes in | direction (left → right, right → left, top → bottom, bottom → top, diagonal), softness (0–1) |
+| Wipe | New picture wipes in | direction (left → right, right → left, top → bottom, bottom → top, diagonal), softness (0–0.3 in the UI; the API accepts 0–1) |
 | Zoom | New picture grows from the centre | duration |
 | Stinger | An image / file with alpha on top; the picture underneath swaps at tick n | stinger input number, cut tick |
 
@@ -117,7 +118,7 @@ The transition column, top to bottom:
 
 Every button's tooltip shows the key bound in the current shortcut table (it follows changes to the table). In the Transition menu the five types are, like "Fade ▾", **select only**; "Run Current Transition" runs it.
 
-FTB has its own duration (defaults to the transition duration, both 30 ticks); tally does not change while black. In this version the FTB duration cannot be changed from the UI, only in the show file (`ftb.durationTicks`) or through the API's `loadShow`.
+FTB has its own duration (defaults to the transition duration, both 30 ticks); tally does not change while black. In this version the FTB duration cannot be changed from the UI, only in the show file (`mixer.ftb.durationTicks`) or through the API's `loadShow`.
 
 ## Overlay channels
 
@@ -125,6 +126,7 @@ Each channel has one input, a rectangle in 0–1 program coordinates, an in / ou
 an optional border (for picture-in-picture) and an anchor (zoom animates around it).
 
 Showing and hiding: Overlay 1–4 in the transition column, the small 1–4 buttons on a cell (click = put this input on that channel and show it; if it is already showing there = hide), Transition › Overlay ▸, and the hotkeys ⌃1–⌃4.
+The column and menu buttons use the input on PVW for a channel that has no input yet; **the ⌃1–⌃4 hotkeys only switch the channel and never change its input**, so on a channel without an input they show nothing.
 
 The **Overlay Settings window** is a normal window (it doesn't block the main window; you can keep clicking cells and pressing hotkeys). Open it from Overlay… in the bottom bar (on the channel you edited last), from "Overlay Settings…" in the right-click menu of Overlay k in the transition column or of a cell's small k button (straight to channel k), or from Transition › Overlay ▸ › Overlay Settings….
 
@@ -144,7 +146,7 @@ The **Overlay Settings window** is a normal window (it doesn't block the main wi
 ## Audio
 
 - **Per input**: gain (−96…+24 dB), mute, solo, pan, audio delay compensation (0–500 ms; delays the sound only, for a capture device's own A/V offset), bus routing, follow video.
-  They can be changed on the input's mixer strip and in Input Settings › Audio (both are the same settings).
+  The input's mixer strip has the fader (−60…+12 dB), mute, solo, pan, bus sends and follow video; the full gain range and the audio delay compensation are in Input Settings › Audio (both change the same settings).
 - **Four buses**, each with gain / mute / an effect chain. Master feeds recording / streaming / NDI®; Bus A / B are secondary mixes (foldback etc.); Headphones is the monitor bus (solo / PFL / AFL live there).
   Which two channels of the output device each bus goes to is chosen in Settings › Audio Devices (needs a multichannel device; see [Settings › Audio Devices](settings.md#audio-devices)).
 - **Bus effect chains now affect the sound**: parametric EQ (up to 16 bands per slot, the UI offers 3), compressor and peak limiter, processed in chain order; a slot that is turned off is bypassed (its parameters kept); at most 3 slots per bus.
@@ -158,8 +160,9 @@ The **Overlay Settings window** is a normal window (it doesn't block the main wi
 ### The mixer
 
 - Header: the AFV switch and AFL / PFL. Inputs on the left (scroll horizontally), Bus A / B / Headphones in the middle, the Master strip pinned on the right; the input group and the bus group each collapse into a narrow bar (by default inputs are expanded and buses collapsed).
-- Each strip: name and gear (= that strip's audio settings window), fader and meter, mute / solo, send to M / A / B / H, follow video. Under the Master strip: short-term loudness (LUFS), "Effects (n)" (opens the EQ page),
-  the headphones icon (the Listen menu) and "i" (loudness details: momentary / short-term / integrated / loudness range LRA / true peak, updated every second; integrated loudness counts from engine start and can't be reset in this version).
+- Input strips: name and gear (= that input's audio settings window; right-click also has "Input Settings…"), fader and meter, pan, mute / solo, send to M / A / B / H, follow video, and a line with the AFV gate reading.
+- Bus strips (Bus A / B / Headphones / Master): name and gear, fader and meter, short-term loudness (LUFS), mute, "Effects (n)" (opens that bus's EQ page). The Master strip also has the headphones icon (the Listen menu) and
+  "i" (loudness details: momentary / short-term / integrated / loudness range LRA / true peak, updated every second; integrated loudness counts from engine start and can't be reset in this version).
 - The Listen menu: in this version the headphones carry the headphone bus only; "listen to Master / Bus A / Bus B" are listed but greyed out (they need audio engine support).
 - Meters: each strip shows peak and RMS, the Master strip also short-term loudness; true peak, momentary / integrated loudness and LRA are in the loudness details, the API and `stats.jsonl`. Recording and streaming loudness use these meters.
 
@@ -179,7 +182,7 @@ Turning "Enabled" off bypasses the effect and keeps its parameters; "Reset" sets
 ## Show files
 
 The Show menu: New / Open… / Open Recent / Open Show from Last Quit / Save / Save As… (the four buttons at the left of the toolbar are the same actions).
-The file is readable JSON with the same fields as the API's `state` ([CONTRACTS.md §2.8](../../CONTRACTS.md), Chinese) and can be generated by scripts ([example](../../../Samples/tools/make-shows.py)).
+The file is readable JSON with the same field names as the API's `state` (format, PGM / PVW, transition, FTB and overlays sit under `mixer`, plus `schemaVersion`, `name` and `layout`; [CONTRACTS.md §2.8](../../CONTRACTS.md), Chinese) and can be generated by scripts ([example](../../../Samples/tools/make-shows.py)).
 
 - An input's **runtime state** (signal or not) and an output's **runtime numbers** (frames, bitrate) are not in the file; only configuration is.
 - Recording / streaming outputs are always stopped when a file is opened; only a button, shortcut or API call starts them.
@@ -187,8 +190,8 @@ The file is readable JSON with the same fields as the API's `state` ([CONTRACTS.
   Live operation does not: which input is on PVW / PGM, transition progress, FTB, which overlays are showing, whether recording / streaming runs, window arrangement.
 - **New, Open, Open Recent, double-clicking a show in Finder, Quit** (⌘Q, or closing the main window — closing the main window quits): while recording / streaming runs it first asks "Creating a new show will stop 1 recording(s), 1 stream(s)";
   with unsaved changes it then asks "Save changes to 'name'?" (Save / Don't Save / Cancel; "Save…" for a show that has never been saved). Cancelling at any step changes nothing.
-- Quitting **never silently rewrites** the show file you opened: "Don't Save" leaves the file byte-for-byte unchanged. The current state is still kept in `~/Library/Application Support/PlusMix/LastSession.switcher.json` (for crash recovery).
-- Next launch: if a file was open last time → that file is opened (as it is on disk); if it was a never-saved show → it is restored from LastSession (marked unsaved).
-  To get back changes you didn't save when quitting: Show › Open Show from Last Quit (it is not a file; saving asks where to save it).
+- Quitting **never silently rewrites** the show file you opened: "Don't Save" leaves the file byte-for-byte unchanged. On a normal quit the current state is also kept in `~/Library/Application Support/PlusMix/LastSession.switcher.json` (written only on a normal quit, not after a crash).
+- Next launch: the show file you last opened or saved is opened (as it is on disk, without unsaved changes); only if you never opened or saved a file, or that file is gone, is the show restored from LastSession (marked unsaved).
+  So after New, quitting without saving reopens the earlier file next time. To get back changes you didn't save when quitting: Show › Open Show from Last Quit (it is not a file; saving asks where to save it).
 - The program format and show audio need an engine restart ("Apply and Restart Engine" in Settings); you are asked first while recording / streaming runs, and the Settings window stays open.
-- The shortcut table and MIDI map are **not** in the show file; they live next to it as `hotkeys.json` / `midi.json` ([Shortcuts](shortcuts.md)); this Mac's settings (the "This Mac" group in Settings) are not in the show file either.
+- The shortcut table and MIDI map are **not** in the show file; they are `hotkeys.json` / `midi.json` in `~/Library/Application Support/PlusMix`, next to LastSession ([Shortcuts](shortcuts.md)); this Mac's settings (the "This Mac" group in Settings) are not in the show file either.

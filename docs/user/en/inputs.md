@@ -14,7 +14,7 @@ The panel's left column is grouped by purpose; the first line of every page says
 | Media | Video file, Image |
 | Test | Synthetic test source |
 
-- The first time it opens on "Camera / capture card"; after that on the type you added last, with **the last source of every type** filled in (camera, file, NDI® source and bandwidth, audio device and channels, which display…). A remembered device that is gone falls back to the first one in the list.
+- The first time it opens on "Camera / capture card"; after that on the type you added last, with **the last source of every type** filled in (camera, file, NDI® source and bandwidth, audio device and channels, which display…). A remembered camera or display that is gone falls back to the first one in the list (an audio device that is gone shows "(missing)").
 - The number defaults to the lowest free one (you can change it; only free numbers are listed, existing inputs are never renumbered). A show holds at most 16 inputs; when it is full, "Add" is greyed out with "This show already has the maximum of 16 inputs".
 - The panel can be resized and reopens at that size.
 - Any input can later be pointed at a different device in Input Settings › Source; number, name, settings and PGM / PVW / overlay references are kept.
@@ -28,6 +28,7 @@ The panel's left column is grouped by purpose; the first line of every page says
 | NDI® runtime not available, this build has no DeckLink support, DeckLink driver not installed | "Read the guide": opens the matching section of this manual |
 
 Access that has never been asked for shows no banner — macOS asks when you add the first one. After granting or installing, the banner updates when you come back to the panel.
+Note: "NDI® runtime not available" and "This build has no DeckLink support" mean **this copy of the app was built without that SDK**; an input added anyway stays in error until you use an app built with the SDK (the NDI® banner's "it starts working once the runtime is installed" does not hold). "DeckLink driver not installed" really does recover once the driver is installed and the card connected.
 
 ## Input states
 
@@ -36,8 +37,8 @@ Each input cell shows one of three states. The dividing line is "will it recover
 | State | Meaning | Examples |
 |---|---|---|
 | **live** | Producing frames (or audio, for audio-only inputs) | — |
-| **noSignal (waiting)** | Nothing right now, **will recover by itself**; the cell says what it is waiting for | Device unplugged, DeckLink driver missing, NDI® source not yet online, external display unplugged, file still opening |
-| **error** | **Will not recover by itself**; you need to act | Permission denied (System Settings), SDK not compiled in (rebuild), image not found (fix the path), stream failed to start (change configuration) |
+| **noSignal (waiting)** | Nothing right now, **will recover by itself**. The cell only says "No signal" (audio-only inputs: "Waiting for the audio device…"), not what it is waiting for — go through [Troubleshooting › No signal](troubleshooting.md#2-no-signal) for the causes | Device unplugged, DeckLink driver missing, NDI® source not yet online, external display unplugged, file still opening |
+| **error** | **Will not recover by itself**; you need to act. The cell shows the reason, in Chinese in this version (e.g. a camera permission message telling you to allow access in System Settings) | Permission denied (System Settings), SDK not compiled in (rebuild), file / image not found (fix the path), stream failed to start (change configuration) |
 
 In noSignal the frame slot keeps the last frame (PGM does not flash black). Plugging the device back, installing the driver or the source
 coming online restores the input automatically — no need to delete and re-add; number and settings are unchanged. Permission denied is
@@ -68,7 +69,7 @@ SDI / HDMI inputs on Blackmagic DeckLink / UltraStudio cards. Requires the Black
   frames are not shown (the cell keeps the last frame and says "no signal"); the input recovers when the signal returns.
 - Embedded audio: the card provides 2–16 channels; the "Channels" field picks which two ([channel mapping](#channel-mapping)); the SDK only
   accepts 2 / 8 / 16, so asking for channel 6 opens 8.
-- Driver missing: the cell says to install Blackmagic Desktop Video and that no restart is needed (noSignal; recovers when installed).
+- Driver missing: the cell says "No signal" (noSignal); install Blackmagic Desktop Video and connect the card and it recovers by itself, no restart needed. In an app built without the DeckLink SDK the cell shows "DeckLink SDK 未编译进来：…后重新编译" ("DeckLink SDK not compiled in … rebuild", error).
 - Status: capture from real hardware **has not been verified on this project's machines** (no DeckLink hardware on the development Mac);
   the bridge was tested against the SDK's simulated device. If you have a card, please report through the [device compatibility table](../../testing/设备兼容性.md) (Chinese).
 
@@ -91,8 +92,9 @@ Anything AVFoundation decodes (H.264 / HEVC / ProRes in .mov / .mp4 …).
 - Frames follow the **program clock** (clock slave); playback rate is adjustable; at the end: hold last frame / loop / black.
 - The panel keeps "Recent" files (up to 10, newest first; click to fill in, double-click to add; a file that is gone is greyed out as "(missing)"); once a file is chosen its information is shown, e.g. "H.264 · 1920×1080 · 60 fps · 0:10" (no audio and alpha are mentioned too).
 - The audio track goes through this input's fader / buses / AFV like any other input.
-- **Audio-only files** (mp3 / wav / m4a / aac): the open panel accepts them, the information reads "Audio only · …" and the cell is drawn as audio-only; but **in this version the file input still needs a video track**, so the input then shows "no video track".
-- **The Loop button on the cell** lights up only for video files: one click changes just the "At end" setting (on = loop, off = hold last frame) and playback continues without restarting. **Turning loop off = hold the last frame at the end**; to go to black at the end, set "At end" to "Black" in Input Settings › Source (changing the source rebuilds the input, so the file restarts).
+- **Audio-only files** (mp3 / wav / m4a / aac): the open panel accepts them, the information reads "Audio only · …" and the cell is drawn as audio-only; but **in this version the file input still needs a video track**, so the input then shows "没有视频轨" ("no video track").
+- **The Loop button on the cell** lights up only for video files: one click changes just the "At end" setting (on = loop, off = hold last frame) and playback continues without restarting. **Turning loop off = hold the last frame at the end**; to go to black at the end, set "At end" to "Black" in Input Settings › Source and click "Apply Source" (changing only "At end" doesn't rebuild either; playback continues).
+- If the file is missing when the input is added (the cell shows "文件不存在：…", "file not found"): once the file is in place, remove the input and add it again, or reopen the show — unlike images, video files are not picked up by themselves.
 - The path is stored in the show file; relative paths are relative to the show file's directory (for a show that has never been saved, `~/Movies/PlusMix`; [Samples › relative paths](../../../Samples/README.md#2-相对路径), Chinese).
 
 ## Image
@@ -103,17 +105,17 @@ PNG (with alpha) / JPEG / HEIC … Large images are pre-scaled to the program si
   (the [samples](../../../Samples/README.md#5-重新生成) ship three).
 - **Several at once**: select several files in the open panel; each becomes one input named after its file (the first takes the number chosen in the panel, the rest the next free numbers; if there aren't enough free numbers nothing is added and the panel says why).
 - **Edits to the file show up automatically**: change the image in your image editor and save (overwrite or replace); PGM switches to the new picture on the next tick, without a black frame and without rebuilding the input.
-  An input whose file didn't exist when it was added (the cell says "image not found") is not created automatically when the file appears later: click "Apply Source" in Input Settings › Source.
+  The file doesn't have to exist when the input is added: the cell first shows "图片不存在：…" ("image not found") and switches to the picture by itself once the file appears (checked every 0.25 s).
 - It can also be the Stinger layer: point the Stinger input at it in the transition parameters.
 - Images have no audio (the cell's Mute button is greyed out).
 
 ## NDI® receive
 
-NDI® video (with sound) from other computers or devices on the same network. Requires the NDI SDK for Apple (default `/Library/NDI SDK for Apple`) at build time; at run time without the SDK the input is an error
-("cannot search for NDI sources"). (NDI® is a registered trademark of Vizrt NDI AB.)
+NDI® video (with sound) from other computers or devices on the same network. Requires the NDI SDK for Apple (default `/Library/NDI SDK for Apple`) at build time; in an app built without it the cell shows "NDI SDK 未编译进来：…后重新编译"
+("NDI SDK not compiled in … rebuild", error), and the NDI® page of the Add Input panel says "Cannot look for NDI sources: …". (NDI® is a registered trademark of Vizrt NDI AB.)
 
 - While this page of the panel is open it searches again every 4 s (a spinner shows while it searches) and lists the sources on the network (names look like `MACHINE (source)`); **double-click to add**; you can also type one.
-  A missing source is noSignal ("no NDI source found on the network … sender not running, different subnet, or wrong name") and connects when it appears.
+  A missing source is noSignal (the cell says "No signal": sender not running, different subnet, or wrong name) and connects when it appears.
 - Bandwidth: Highest (full resolution) / Lowest (preview stream) / Audio only; sources used only for thumbnails can use "Lowest" to save more than half the bandwidth and decoding.
 - Jitter buffer 0–2 frames directly sets this input's latency (each frame adds about one frame); default 1.
 - Loopback on one machine (PlusMix sending and receiving) measured 1–2 frames behind PGM.
@@ -126,8 +128,8 @@ Core Audio input devices: built-in microphone, USB interfaces, aggregate devices
   The first use prompts for microphone access.
 - The cell shows a microphone glyph, the name and a level meter; it can be put on PGM / PVW / overlays (picture is black, audio follows AFV as usual);
   the multiview cell shows name + meter too.
-- The device is set to 48 kHz; if it cannot, audio is converted (the panel says "no 48 kHz, will convert"). Unplug → noSignal "disconnected,
-  waiting"; plugged back → live within 3 s.
+- The device is set to 48 kHz; if it cannot, audio is converted (the panel says "no 48 kHz, will convert"). Unplug → noSignal (the cell says
+  "Waiting for the audio device…"); plugged back → live within 3 s.
 
 ## Synthetic test source
 
@@ -143,12 +145,12 @@ The strip across the middle of the main window. Its header, left to right:
 
 - **Category tags**: "All" + six colours (red, orange, yellow, green, blue, purple). Click a colour to show only that category, click it again for all; it combines with the search. Right-click a colour for Rename… / Clear Name (a named tag shows its name).
   To categorise an input: right-click its cell › Category ▸. Categories are saved in the show (changing them counts as unsaved); removing an input clears its category. In this version categories exist only in the app — the API, multiview and control panels don't see them.
-- **Search field**: filter by number or name; ⌘F (Input › Find Input) puts the cursor in it; Return / Esc give focus back to the main window (hotkeys work as usual).
+- **Search field**: filter by number or name; ⌘F (Input › Find Input) puts the cursor in it; Return gives focus back to the main window (the filter stays), Esc gives focus back and clears the filter — hotkeys then work as usual.
 - "**Audio Mixer**" at the right end: show / hide the mixer (the same switch as Window › Audio Mixer; highlighted while shown).
 
 ### Cells
 
-One cell per input: a title bar (number, name, category dot; red background on PGM, green on PVW), the thumbnail (its height follows the input's cropped aspect ratio, no black bars) and two rows of buttons:
+One cell per input: a title bar (number, name, category dot; red background on PGM, green on PVW), the thumbnail (all cells are the same height, taken from the multiview cell's aspect ratio and never taller than 16:9; no black bars) and two rows of buttons:
 
 | Button | What it does |
 |---|---|
@@ -178,7 +180,7 @@ The strip is outlined in blue while you drag; files that are neither video nor i
 ## Per-input settings
 
 The "Input n Settings — name" window: the ⚙ on a cell or right-click › Settings…, the gear on a monitor's title bar (the input on PVW / PGM), or Input › Input N "name" Settings… (⇧⌘I, the input on PVW).
-One window per input, several can be open; hotkeys keep switching the program while it is in front. At the bottom right is this input's live picture (its cell of the multiview, thumbnail quality) and its tally ("On PVW / On PGM"); audio-only inputs say "Audio-only input, no picture".
+One window per input, several can be open; hotkeys keep switching the program while it is in front. The header line shows the number, the name and the tally ("On PVW / On PGM"); at the bottom right is this input's live picture (its cell of the multiview, thumbnail quality); audio-only inputs say "Audio-only input, no picture".
 
 | Section (sidebar order) | Contents |
 |---|---|
@@ -187,7 +189,7 @@ One window per input, several can be open; hotkeys keep switching the program wh
 | Crop & position | Crop on four edges (%), scale, horizontal / vertical offset, rotation, flip horizontally / vertically; numbers can be typed next to the sliders, every item has a reset (↺), and each group can be reset; "Copy position / Paste position" copies crop and position between inputs |
 | Audio | Bus sends, gain, mute, solo (to headphones), pan, audio delay compensation (ms, 0–500, sound only), **Follow video (AFV)** (the same switch as on the mixer strip; has no effect while AFV is off in the mixer header), Reset gain / pan / delay |
 | Audio effects | Per-input audio effect slots (order = processing order); in this version they **can be edited but don't affect the sound yet**, as the banner "Effects don't affect the sound yet (this version)" says |
-| Source | Change device / file / source name / end action / rate; "Apply Source" rebuilds the input from the new source (the picture drops out briefly, files restart), "Revert" discards changes not yet applied |
+| Source | Change type / device / file / source name / end action / rate; "Apply Source" rebuilds the input from the new source (the picture drops out briefly, files restart; a change to "At end" alone doesn't rebuild, playback continues), "Revert" discards changes not yet applied; "Apply Source" is greyed out while nothing has changed |
 
 "**Copy from another input…**" at the bottom of the sidebar: pick an input and the groups to copy (Crop & position / Keyer / Audio / Audio effects); they replace this input's settings in one step.
 

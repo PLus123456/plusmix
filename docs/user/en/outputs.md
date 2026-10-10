@@ -1,7 +1,7 @@
 # Outputs
 
 Each kind of output has a page in the "This Show" group of the [Settings](settings.md) window: Overview, Recording, ISO, Streaming, External Display, NDI® Output, Virtual Camera, Multiview Layout.
-The Output menu lists them, the ⚙ buttons in the bottom bar go straight to the right page, and the main buttons and ▴ menus in the bottom bar are the shortcuts for live operation ([Concepts › Bottom-bar buttons](concepts.md#bottom-bar-buttons)).
+The Output menu lists them, the ⚙ buttons in the bottom bar open the right page (Record's ⚙ is a small menu with "Recording Settings… / ISO Recording…", External Display's ⚙ is the routing menu), and the main buttons and ▴ menus in the bottom bar are the shortcuts for live operation ([Concepts › Bottom-bar buttons](concepts.md#bottom-bar-buttons)).
 
 Every output has a number, a name, a "should be running" switch and its own settings. Each section's title line reads "kind k · Output n" with a name field on the right (press Return or leave the field to rename).
 Runtime numbers (frames / bitrate / drops) live only in the status line, the statistics window and the API's `stats`, never in the show file.
@@ -12,8 +12,8 @@ Runtime numbers (frames / bitrate / drops) live only in the status line, the sta
 | Streaming | PGM | Stream in the bottom bar, ▴ for a single destination, the switch on each destination; `startStream` |
 | NDI® output | PGM / PVW / multiview / one input | the "Send" switch on the NDI® Output page; `setOutputEnabled` |
 | External display | PGM / PVW / multiview / one input (Aux) | External Display in the bottom bar / toolbar, right-click a monitor › Show Fullscreen On; `setOutputEnabled` |
-| Virtual camera | **PGM** | Output › Virtual Camera › Enable / Disable; `setOutputEnabled` |
-| Multiview | the multiview picture (for downstream use) | Multiview Layout page / `setOutputEnabled`; the layout is independent of the switch |
+| Virtual camera | **PGM** | Output › Virtual Camera ▸ › Enable / Disable Virtual Camera Output; `setOutputEnabled` |
+| Multiview | sends nothing by itself, **only carries the layout** (see [Multiview](#6-multiview)) | no switch; for a multiview picture, set the source of an NDI® output / external display to "Multiview" |
 
 ## 0. Overview
 
@@ -70,7 +70,7 @@ Every second the free space of each recording's volume is checked (external driv
 
 | Situation | Behaviour |
 |---|---|
-| Free space below 1 GB | Status line warns "recording n: x MB free" |
+| Free space below 1 GB | Status line warns "Recording n: x MB free on disk" |
 | Below the minimum (200 MB by default; Settings › Advanced › Free space minimum, or the launch argument `--record-min-free-mb`) | **Only that recording stops**; streaming, rendering and other recordings continue. With a fallback folder it moves there and keeps recording |
 | Volume full / write error | That recording stops and keeps what was written; with a fallback folder (Settings › Advanced, or `--record-fallback`) it continues there from the next tick |
 
@@ -84,27 +84,28 @@ Each destination has a section titled "Stream k" with "Output n" and a name fiel
 
 | Item | Notes |
 |---|---|
-| Service | Custom (RTMP / RTMPS), Custom (SRT), WeChat Channels, Douyin, Bilibili, Kuaishou, YouTube, Facebook, Twitch. Services with a fixed ingest (YouTube, Facebook, Twitch) fill in the URL; get the stream key from the platform's dashboard. Platforms that hand out an address per session (WeChat Channels, Douyin, Kuaishou, Bilibili) fill nothing in: copy the "stream URL + stream key" from the platform's live dashboard as the hint says. The show file stores only the full URL; when reopened, the service is recognised from the URL |
+| Service | Custom (RTMP / RTMPS), Custom (SRT), WeChat Channels, Douyin, Bilibili, Kuaishou, YouTube, Facebook, Twitch. Services with a fixed ingest (YouTube, Facebook, Twitch) fill in the URL; get the stream key from the platform's dashboard. Platforms that hand out an address per session (WeChat Channels, Douyin, Kuaishou, Bilibili) fill nothing in: copy the "stream URL + stream key" from the platform's live dashboard as the hint says. The show file stores only the full URL; when reopened, the service is recognised from the URL only for the fixed-ingest services (YouTube, Facebook, Twitch) and Bilibili — WeChat Channels, Douyin and Kuaishou destinations come back as "Custom (RTMP / RTMPS)" (the URL is unchanged and streaming is not affected) |
 | URL | `rtmp://host/app`, `rtmps://host/app`, `srt://host:port?streamid=…&passphrase=…&latency=…`; the scheme selects the protocol. A `user:pass@` part is masked |
 | Stream key | RTMP: appended as the stream name; SRT: becomes `streamid=<key>` when the URL has none |
 | Authentication… | See [Stream authentication](#stream-authentication) below |
 | Quality | 1080p (6 Mb/s when the program runs at ≥ 48 fps, otherwise 4.5 Mb/s; audio AAC 160k), 720p (3 Mb/s; AAC 128k), Custom. A new destination defaults to the highest tier not above the program (1080p at most, never upscaled); editing the encoding by hand shows "Custom" |
 | Encoding details… | Codec, resolution, bitrate, keyframes (in seconds, 2 s for a new destination, with "= n frames" next to it), audio bitrate, **Max retry interval n s (keeps retrying)** |
 | Same as Stream 1 | Checked by default from the second destination on: quality and encoding follow Stream 1 (URL, key and retry interval don't); both are greyed out while checked |
-| Remove Destination | Greyed out while live |
+| Remove Destination | Greyed out while its switch is on (connecting / reconnecting included) |
 
 - "Total upload about n Mb/s (m destinations)" at the bottom of the page: every destination is encoded separately and uses its own share of upload bandwidth, so two destinations need twice as much; leave about twice the total as headroom.
-- **A destination that is live is locked**: service, URL, key, authentication, quality, encoding details and Remove can't be changed; it says "Streaming: URL, key and encoding can be changed after it stops."
+- **A destination whose switch is on is locked** (live, connecting and reconnecting alike; only one that couldn't start is not): service, URL, key, authentication, quality, encoding details and Remove can't be changed; it says "Streaming: URL, key and encoding can be changed after it stops." — if it keeps failing to connect and you need to fix the URL or authentication, turn its switch off first.
 - URL / key edits are committed **when you press Return or leave the field**.
-- **A destination that couldn't start is not locked**: it says "Couldn't start: reason" (e.g. "unsupported address: foo:// (only rtmp:// rtmps:// srt://)", "stream 3 has no URL") and offers "Retry" and "Turn Off This Destination"; fixing the URL / key retries automatically.
+- **A destination that couldn't start is not locked**: it says "Couldn't start: reason" (e.g. "Unsupported address: foo:// (only rtmp://, rtmps://, srt://)", "Stream 3 has no URL") and offers "Retry" and "Turn Off This Destination"; fixing the URL / key retries automatically.
+- The "Add destination" section at the bottom: pick a service (fixed-ingest services fill in the URL, the others say where to get it), enter URL / key and click Add; with no destination in the show yet, the Stream button in the bottom bar opens this section too, with the cursor in the URL field.
 - **Reconnecting**: after a drop it reconnects with exponential back-off and never gives up; "Max retry interval n s" (30 s by default) caps the wait between attempts — it is not a "give up after" limit. The first frame after reconnecting is a keyframe.
 - Destinations are independent: when one loses the network the others drop 0 frames (E7); after a 30 s outage 10 out of 10 reconnects
   succeed within 15 s (E8); the reported "network drops" match real drops within 5 % under bandwidth limits (E9). All of this runs
   automatically against a local MediaMTX with network impairment.
 
-**The stream status in the bottom bar and toolbar** shows the worst destination: "● Streaming" for a single live destination, "● Streaming 2/3" for several (live / all); when one is reconnecting or couldn't start it reads "Stream · 1 in trouble" (orange; dark red when it couldn't start); with only one destination on it shows that destination's state directly.
+**The stream status in the bottom bar and toolbar** shows the worst destination: with a single destination in the show it reads "● Streaming" while live; with several, "● Streaming 2/3" (live / all — "1/3" even when only one is live); when one is reconnecting, still not connected from the second attempt on, or couldn't start, it reads "Stream · 1 in trouble" (orange; dark red when it couldn't start), and with only one destination on it shows that destination's state directly (e.g. "Stream · Reconnecting (attempt 2)").
 A first connection reads "Connecting" ("Connecting (attempt n)" from the second try); only after a destination has been live does a drop read "Reconnecting (attempt n)" — n is the real attempt count. The tooltip lists "name: state" per destination, reasons for those that couldn't start, with passwords in URLs masked.
-When starting, the status line says "stream n connecting…", and "stream n started" only once it is actually live.
+When starting, the status line says "Stream n connecting…", and "Stream n is live" only once it actually is.
 ▴ has one item per destination (click = start / stop / retry just that one); "Stream Status…" currently opens the Streaming page.
 In the API's `stats.encoder[]` the stream `state` is idle / connecting / publishing / backoff / stopping / stopped / failed; a destination that couldn't start reports `failed`.
 
@@ -113,10 +114,10 @@ In the API's `stats.encoder[]` the stream `state` is idle / connecting / publish
 "Authentication…" opens a small form that depends on the URL's protocol:
 
 - **RTMP / RTMPS: user name / password.** This is **Adobe authentication (FMLE compatible)**, used by Wowza, Nimble, FMS and some CDN ingests: the user name and password go into the `user:pass@` part of the URL (masked in the URL field as `rtmp://•••@host/app`),
-  and the connection answers the server's challenge without sending the password in clear. Next to the button it says "Authentication: user xxx (password set)" or "No authentication"; "Clear" removes the whole part.
+  and the connection answers the server's challenge without sending the password in clear. Next to the button it says "Authentication: user xxx (password set)" or "No authentication"; "Clear" in the sheet only empties the user name and password fields; the part is removed from the URL when you click "Save".
 - **Self-hosted servers such as MediaMTX, SRS and nginx-rtmp expect a query string after the URL instead**, e.g. MediaMTX: `rtmp://host:1935/live?user=publisher&pass=secret` — type it straight into the URL field.
   Filling in "Authentication…" has no effect for them: the connection succeeds and publishing is rejected (the system log shows the server's `NetStream.Publish.Unauthorized`). Note that a password in the query string is visible in the URL field.
-- A wrong user name or password: the destination stays "Connecting (attempt n)" and keeps retrying with back-off; the reason is in the system log ("鉴权失败（用户名或密码不对）…" — authentication failed; the streaming engine writes this line in Chinese; see [Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics)). A server that wants another authentication method logs "鉴权方式不支持：…" (method not supported).
+- A wrong user name or password: the destination stays "Connecting (attempt n)" and keeps retrying with back-off; it is locked while its switch is on, so turn the switch off before correcting it; the reason is in the system log ("鉴权失败（用户名或密码不对）…" — authentication failed; the streaming engine writes this line in Chinese; see [Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics)). A server that wants another authentication method logs "鉴权方式不支持：…" (method not supported).
 - **SRT: passphrase** (encryption), written into the URL's `passphrase=` parameter; only letters, digits and `- . _ ~`, 10–79 characters (other characters don't work yet); anything else is rejected and not written.
 
 ### Try it locally first
@@ -145,6 +146,7 @@ Settings › NDI® Output (Output › NDI® Output Settings…, or ⚙ External 
 | Audio | PGM / PVW / multiview send Master; an input source sends that input after its fader |
 | Send | Switch: off = stop sending, settings kept |
 
+- "Add NDI output" at the bottom of the page: enter name, groups, conversion and source and click Add; **a new output is switched on as soon as it is added and starts sending right away**.
 - Renaming, changing the source or the groups ("Apply name / groups") rebuilds the sender (receivers must reselect it); conversion can be switched any time.
 - **SDK missing** (not detected at build time): the output can be added and enabled but nothing is sent; the status says "Unavailable: no NDI SDK" and `stats.encoder[].state` is `"unavailable"`.
 - SDK present but the sender cannot start (initialise / create failed): `state = "failed"` with the reason in the status line; retried when settings change.
@@ -163,12 +165,12 @@ Choosing a source switches that display's output to it and turns it on (other ou
 
 **The main button**: some on → turn all off (settings kept); all off → turn all back on as configured; none configured → show PGM full screen on the first non-main display (the main display = the one with the PlusMix main window); no second display → open the routing menu.
 
-**The settings page** starts with "What each display shows": one single choice per display — the same setting as the routing menu. Below it, each output's details: name, enabled, display, source, fall back to the main display when missing, status, remove.
+**The settings page** starts with "What each display shows": one single choice per display — the same setting as the routing menu. Below it, each output's details: name, enabled, display, source, fall back to the main display when missing, status, and finally a "Close" button — it **removes this output and its settings** (like "Remove n …" in the routing menu); to blank a display only for a while, use that display's "Off" in the routing menu or the main button.
 
 - Source: PGM / PVW / multiview / one input (Aux, full-resolution raw picture).
 - Display absent: by default stays black and waits, leaving the main display alone; "Fall back to the main display when missing" goes full screen on the main display (covering the UI) — only enable it deliberately. Settings › General › Keep external displays on the main display behind the interface keeps an external display window on the main display below the interface.
 - The window takes the latest frame at the display's own refresh; dragging the main window or entering full screen does not touch the render
-  thread (missed-frame count stays flat). Esc closes the window.
+  thread (missed-frame count stays flat). **Pressing Esc in an external display window also removes that output** (like "Close"; its settings are not kept).
 - The show file stores display ID and source and restores them; display IDs can change across reboots, so reselect if needed.
 
 ## 5. Virtual camera
@@ -202,5 +204,5 @@ Settings › Multiview Layout (⚙ Multiview in the bottom bar, or Output › Mu
 - Every cell has a tally border (red PGM / green PVW) and a name label; audio-only inputs show name + meter.
 - The layout is stored in the show file (settings of the first multiview output) and applies to the multiview window, the thumbnail strip and the
   "multiview" source of external displays / NDI®.
-- The multiview output's switch only decides whether the multiview picture is sent downstream (NDI® / external display); the layout does not depend on it,
-  so the output that merely carries the layout can stay off.
+- The show's "Multiview" output only carries the layout: the page has no switch, it is created off, and it can stay off. When an NDI® output or external display uses the "Multiview" source,
+  the renderer produces the multiview picture by itself regardless of this switch (turning it on with the API's `setOutputEnabled` only makes the renderer convert an extra multiview picture each frame that nothing uses).
