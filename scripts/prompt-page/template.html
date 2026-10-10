@@ -174,7 +174,7 @@ ol.conf li{margin-bottom:4px}
 <p class="note">红框是闸门：进不去下一波。绿框里的会话各占一个目录，同时开。</p>
 
 <div class="ros">
-  <div class="ros-head"><span class="t">Run of show · 第五波（界面改版）与 0.1.1 · 2026-10-10 排法</span><span class="legend"><span><i style="background:#262B34;border:1px solid #3A4150"></i>串行</span><span><i style="border:2px solid var(--pgm)"></i>检查点</span><span><i style="background:#16281E;border:1px solid var(--pvw)"></i>并行波次</span></span></div>
+  <div class="ros-head"><span class="t">Run of show · 第五波（界面改版）与 0.1.1 · 2026-10-11 排法</span><span class="legend"><span><i style="background:#262B34;border:1px solid #3A4150"></i>串行</span><span><i style="border:2px solid var(--pgm)"></i>检查点</span><span><i style="background:#16281E;border:1px solid var(--pvw)"></i>并行波次</span></span></div>
   <div class="lane">
     <div class="wave"><div class="cap">止血 · 五路并行 · 已合入</div><div class="s"><b>86</b>目视与弹出</div><div class="s"><b>87</b>直播安全</div><div class="s"><b>88</b>总线效果链</div><div class="s"><b>89</b>推流鉴权</div><div class="s"><b>90</b>转场守卫</div></div><span class="arrow">→</span>
     <div class="step gate">G6<small>已过 · 10-02</small></div><span class="arrow">→</span>
@@ -454,7 +454,7 @@ ol.conf li{margin-bottom:4px}
 </table></div>
 <p class="note">同日另开 106（MIDIHost.sync S1 崩溃修复）与 107（G8 两段式检查点）；全文在 reports/G7.md §7.1 末。</p>
 <h3>8.8 谁等谁、谁能同时</h3>
-<p>见页首"现在怎么开"那张表（同一张，落地方案 §8.8 是原文）。一句话：<b>第一拨四路（99 / 105 / 106 / 103）现在就开、互不相干；G8a 把 99 合进 main 之后才开 100 / 101 / 102；101 必须叠在 100 上；全量 / gate4 / perf / 长稳同机只跑一个。</b></p>
+<p>见页首"现在怎么开"那张表（同一张，落地方案 §8.8 是原文）。一句话（2026-10-11 更新）：<b>G8a 已过、main = f0c33ef 起；现在开 108 P5-2 与 102（并行）、103 随时 rebase；100 等 G8a-2 把 108 合进 main 再开（或叠在 p5-contracts-2 头上）；101 必须叠在 100 上；全量 / gate4 / perf / 长稳同机只跑一个。</b> 用户 2026-10-11 另定：L1 对 videoDelay 的判定扣 video_delay_ms（阈值不动）；W1-B4 的 App 接线与开录起点归 G8b 胶水；P5 的两处口径照现状。</p>
 <h2 id="s9"><span class="num">9</span>Prompt 库</h2>
 <p>每个会话一张卡。"复制 前言 + 本段"会把 00 通用前言拼在前面，直接粘进新会话即可。单独文件在仓库的 docs/plan/prompts/ 目录；本页由 <span class="k">scripts/gen-prompt-page.py</span> 从那里生成，卡片上的状态标签按仓库里分支的状态自动算（{{GENERATED}}）。</p>
 <div class="lib-tools"><button id="openAll">展开全部</button><button id="closeAll">收起全部</button><span class="note">序号是执行顺序；同一个十位数的是同一波次（4x 是 G3 之后的契约落地与续做；85 起是界面对照调研之后的第五波：86–90 止血、91 G6、92–98 骨架改版、99 契约、100–103 契约后与文档、104 G7，见第 8 节）。</span></div>
