@@ -9,9 +9,12 @@ enum AllocationProbe {
     typealias Logger = @convention(c) (UInt32, UInt, UInt, UInt, UInt, UInt32) -> Void
     static let watchedThread = Atomic<UInt32>(0)
     static let secondThread = Atomic<UInt32>(0)
+    /// W1-B4：第三条（视频延后用例同时盯完成线程、派发线程、渲染线程）。
+    static let thirdThread = Atomic<UInt32>(0)
     static let allocations = Atomic<UInt64>(0)
     static let deallocations = Atomic<UInt64>(0)
     static let secondAllocations = Atomic<UInt64>(0)
+    static let thirdAllocations = Atomic<UInt64>(0)
     private static let hook: Logger = { type, _, _, _, _, _ in
         let me = pthread_mach_thread_np(pthread_self())
         if me == watchedThread.load(ordering: .relaxed) {
@@ -19,6 +22,8 @@ enum AllocationProbe {
             if type & 4 != 0 { deallocations.add(1, ordering: .relaxed) }
         } else if me == secondThread.load(ordering: .relaxed) {
             if type & 2 != 0 { secondAllocations.add(1, ordering: .relaxed) }
+        } else if me == thirdThread.load(ordering: .relaxed) {
+            if type & 2 != 0 { thirdAllocations.add(1, ordering: .relaxed) }
         }
     }
 
@@ -28,22 +33,26 @@ enum AllocationProbe {
     }
 
     /// 装钩子并开始对 thread（mach 线程端口）计数；返回 false = 本系统没有 malloc_logger。
-    static func start(watching thread: UInt32, second: UInt32 = 0) -> Bool {
+    static func start(watching thread: UInt32, second: UInt32 = 0, third: UInt32 = 0) -> Bool {
         guard let slot else { return false }
         allocations.store(0, ordering: .relaxed)
         deallocations.store(0, ordering: .relaxed)
         secondAllocations.store(0, ordering: .relaxed)
+        thirdAllocations.store(0, ordering: .relaxed)
         watchedThread.store(thread, ordering: .relaxed)
         secondThread.store(second, ordering: .relaxed)
+        thirdThread.store(third, ordering: .relaxed)
         slot.pointee = hook
         return true
     }
 
-    /// 卸钩子，返回 (被盯线程的 malloc 数, free 数, 第二条线程的 malloc 数)。
-    static func stop() -> (allocations: UInt64, deallocations: UInt64, secondAllocations: UInt64) {
+    /// 卸钩子，返回 (被盯线程的 malloc 数, free 数, 第二条线程的 malloc 数, 第三条线程的 malloc 数)。
+    static func stop() -> (allocations: UInt64, deallocations: UInt64, secondAllocations: UInt64, thirdAllocations: UInt64) {
         slot?.pointee = nil
         watchedThread.store(0, ordering: .relaxed)
         secondThread.store(0, ordering: .relaxed)
-        return (allocations.load(ordering: .relaxed), deallocations.load(ordering: .relaxed), secondAllocations.load(ordering: .relaxed))
+        thirdThread.store(0, ordering: .relaxed)
+        return (allocations.load(ordering: .relaxed), deallocations.load(ordering: .relaxed), secondAllocations.load(ordering: .relaxed),
+                thirdAllocations.load(ordering: .relaxed))
     }
 }

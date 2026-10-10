@@ -21,6 +21,13 @@ public final class EngineCounters: @unchecked Sendable {
     let snapshotStaleValue = Atomic<UInt64>(0)
     let slowConsumeCallsValue = Atomic<UInt64>(0)
     let lastTickValue = Atomic<Int64>(Int64.min)
+    // 视频延后（W1-B4，提案 028）：完成线程写 Lₙ、入队 / 丢帧计数，派发线程写晚到最大值
+    let videoDelayAppliedTicksValue = Atomic<Int64>(0)
+    let framesDelayedValue = Atomic<UInt64>(0)
+    let videoDelayOverflowValue = Atomic<UInt64>(0)
+    let videoDelayQueueMaxValue = Atomic<Int>(0)
+    let videoDelayLateMaxNsValue = Atomic<Int64>(0)
+    let videoDelayPTSGuardValue = Atomic<UInt64>(0)
     /// 每路 L1（提案 005）：累计和（host tick）、样本数、窗口最大值（host tick，读后清零）；下标 = 输入编号，0 不用。
     let inputCapacity: Int
     let latencySumValue: UnsafeMutablePointer<Atomic<UInt64>>
@@ -52,6 +59,23 @@ public final class EngineCounters: @unchecked Sendable {
         let v = lastTickValue.load(ordering: .acquiring)
         return v == Int64.min ? nil : Tick(v)
     }
+    /// 当前视频延后（最近派发的那一帧的 Lₙ = tickTime − 拍点；W1-B4，提案 028）。运行量：界面 / API 要看就读它；
+    /// 进 Stats 是提案 022 顺带的顶层 `video_delay_ms`（P5 开字段之后在 `StatsAssembler.make` 里填 `videoDelayMs` 这一个数）。
+    public var videoDelayApplied: HostDuration { HostDuration(ticks: videoDelayAppliedTicksValue.load(ordering: .acquiring)) }
+    /// 同上，毫秒。
+    public var videoDelayMs: Double { videoDelayApplied.milliseconds }
+    /// 经过延迟队列派发的帧数（Lₙ > 0 或队列里还压着前面的帧）。L = 0 时在完成线程上直接派发，不计。
+    public var framesDelayed: UInt64 { framesDelayedValue.load(ordering: .acquiring) }
+    /// 延迟队列满了被丢的帧数（派发线程被饿了好几拍；正常为 0）。
+    public var videoDelayOverflow: UInt64 { videoDelayOverflowValue.load(ordering: .acquiring) }
+    /// 延迟队列里同时压着的最多帧数（自启动；≤ 深度）。
+    public var videoDelayQueueMax: Int { videoDelayQueueMaxValue.load(ordering: .acquiring) }
+    /// 派发线程实际派发时刻 − 到期时刻的窗口最大值，读后清零（诊断：派发线程是否准时醒）。
+    public func takeVideoDelayLateMax() -> HostDuration {
+        HostDuration(nanoseconds: videoDelayLateMaxNsValue.exchange(0, ordering: .acquiringAndReleasing))
+    }
+    /// tickTime 单调保护触发的次数（slew 把每拍改动限在 1/4 拍内，正常为 0）。
+    public var videoDelayPTSGuards: UInt64 { videoDelayPTSGuardValue.load(ordering: .acquiring) }
     /// 自启动以来的平均 render_ms（拍点 → GPU 完成）。
     public var averageRenderMs: Double {
         let n = renderCountValue.load(ordering: .acquiring)

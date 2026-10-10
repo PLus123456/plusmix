@@ -11,6 +11,9 @@
 // - 标签线程：见 LabelRenderer。
 // - 显示视图（MetalDisplayView）在主线程从 latestDisplayFrame 拿"最新完成的纹理"，用同一个命令队列 blit，
 //   同队列上 Metal 自动追踪读写冲突，所以三重缓冲 + 在途 ≤ 2 就够，不需要第四重。
+// - 显示延后（W1-B4，提案 028）：引擎把画面延后 L 派发时（监听同步），显示源给"拍点 + L 已到期"的最新一帧（`displayDelayProvider`）。
+//   为此多留 ⌈L_max / 拍长⌉ 格合成目标（`displayDelayHistory`），完成线程按格记下"这一格现在装的是第几帧、拍点"；
+//   NV12 输出环也加深 ⌈L_max / 拍长⌉ + 1（`videoDelayHeadroom`：引擎的延迟队列扣着这些帧的输出缓冲）。不开就与以前逐行相同。
 @preconcurrency import Metal
 import CoreVideo
 import Foundation
@@ -36,6 +39,13 @@ public struct MetalRendererOptions: Sendable {
     public var previewOutput: Bool = false
     /// 强制把多画面转成 NV12 填进 `RenderedFrame.multiview`（需要 multiview = true）。默认关，自动填的条件与环的建法同上。
     public var multiviewOutput: Bool = false
+    /// 视频延后的余量（W1-B4，提案 028）：引擎最多把帧压多久再派发（= `EngineOptions.videoDelay.maxDelay`，默认 35 ms；这里默认 0 = 不留）。
+    /// > 0 时 PGM / PVW / 多画面三个 NV12 输出环各加深 ⌈余量 / 拍长⌉ + 1 个缓冲（35 ms @ 60 fps：8 → 12）：延迟队列里压着的帧还扣着它们的输出缓冲，
+    /// 不加深的话环被扣满就退回池子分配（渲染线程上分配）。1080p 每个缓冲 3 MB。
+    public var videoDelayHeadroom: HostDuration = .zero
+    /// 显示也延后（W1-B4）：再多留 ⌈videoDelayHeadroom / 拍长⌉ 格合成目标（1080p 每格 PGM / PVW / 多画面三张 BGRA ≈ 25 MB），
+    /// `latestDisplayFrame` 按 `displayDelayProvider` 给"拍点 + 延后已到期"的最新一帧。默认关（显示最新完成的一帧）。
+    public var displayDelayHistory: Bool = false
     public init() {}
 }
 
@@ -88,6 +98,24 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     /// 多画面电平表的读数通道（W3-B2）：setMeters 写、渲染线程每帧读。跟渲染器同寿命（prepare 之前也能喂）。
     private let meterFeed = MultiviewMeterFeed()
 
+    // MARK: 显示延后（W1-B4）
+    /// 每格现在装着的那一帧（完成线程写：先写拍 / 拍点，再 release 写"帧序号 + 1"；显示线程 acquire 读，读完再核一次序号）。容量固定 64 格。
+    private static let maxSlots = 64
+    private let slotFrame: UnsafeMutablePointer<Atomic<UInt64>>
+    private let slotTick: UnsafeMutablePointer<Atomic<Int64>>
+    private let slotTickTime: UnsafeMutablePointer<Atomic<UInt64>>
+    private let displayDelayLock = NSLock()
+    private var displayDelaySource: (@Sendable () -> HostDuration)?
+    /// 显示延后的来源：组装方设成 `{ engine.videoDelayApplied }`（引擎正在用的延后）；nil 或给出 ≤ 0 = 显示最新完成的一帧（以前的行为）。
+    /// `latestDisplayFrame` 每次调一次它（显示线程，主线程 120 Hz 量级），要快、不能阻塞。
+    public var displayDelayProvider: (@Sendable () -> HostDuration)? {
+        get { displayDelayLock.lock(); defer { displayDelayLock.unlock() }; return displayDelaySource }
+        set { displayDelayLock.lock(); displayDelaySource = newValue; displayDelayLock.unlock() }
+    }
+    /// 延后的那一帧已经被新帧覆盖（历史格数不够），只好给最旧的还完整的一帧的次数（诊断；开了 displayDelayHistory 且延后 ≤ 余量时应为 0）。
+    private let displayDelayShortfallCount = Atomic<UInt64>(0)
+    public var displayDelayShortfalls: UInt64 { displayDelayShortfallCount.load(ordering: .acquiring) }
+
     /// 在途帧数（已提交未完成）。
     let inflight = Atomic<Int>(0)
     /// 已提交的帧数（= 下一帧的序号）。只有渲染线程写。
@@ -135,12 +163,23 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         self.options = options
         skipTimes = .allocate(capacity: MetalRenderer.skipRingCapacity)
         for i in 0..<MetalRenderer.skipRingCapacity { (skipTimes + i).initialize(to: Atomic(0)) }
+        slotFrame = .allocate(capacity: MetalRenderer.maxSlots)
+        slotTick = .allocate(capacity: MetalRenderer.maxSlots)
+        slotTickTime = .allocate(capacity: MetalRenderer.maxSlots)
+        for i in 0..<MetalRenderer.maxSlots {
+            (slotFrame + i).initialize(to: Atomic(0))
+            (slotTick + i).initialize(to: Atomic(0))
+            (slotTickTime + i).initialize(to: Atomic(0))
+        }
     }
 
     deinit {
         shutdown()
         skipTimes.deinitialize(count: MetalRenderer.skipRingCapacity)
         skipTimes.deallocate()
+        slotFrame.deinitialize(count: MetalRenderer.maxSlots); slotFrame.deallocate()
+        slotTick.deinitialize(count: MetalRenderer.maxSlots); slotTick.deallocate()
+        slotTickTime.deinitialize(count: MetalRenderer.maxSlots); slotTickTime.deallocate()
     }
 
     // MARK: - Renderer
@@ -148,24 +187,29 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     public func prepare(format: ProgramFormat, maxInputs: Int) throws {
         shutdown()
         let res = try RenderResources.shared(for: device)
+        let period = TickClockSpec(t0: .zero, frameRate: format.frameRate).duration(ofTicks: 1)
+        // 视频延后的余量（W1-B4）：延后最多压 ⌈余量 / 拍长⌉ 帧；输出环多 +1 盖住"新帧入队时队头正在出队"（与引擎的延迟队列深度同一个算法）
+        let delayFrames = options.videoDelayHeadroom.ticks > 0
+            ? Int((Double(options.videoDelayHeadroom.ticks) / Double(max(1, period.ticks))).rounded(.up)) : 0
+        let ringCount = options.outputRingSize + (delayFrames > 0 ? delayFrames + 1 : 0)
+        let slotTotal = min(MetalRenderer.maxSlots, max(2, options.slotCount) + (options.displayDelayHistory ? delayFrames : 0))
         var newSlots: [RenderSlot] = []
-        for i in 0..<max(2, options.slotCount) {
+        for i in 0..<slotTotal {
             let targets = try RenderTargets(device: device, width: format.width, height: format.height, label: "slot\(i)")
             newSlots.append(RenderSlot(index: i, targets: targets, maxInputs: max(1, maxInputs)))
         }
         // 输入：每路最多约 8 个池缓冲 × 2 平面；输出环的纹理 W3-B2 起在建环时包好、不进这张表，余量留给环被占满时退回池子的缓冲
-        let tbl = SurfaceTextureTable(device: device, capacity: max(1, maxInputs) * 16 + options.outputRingSize * 2 + 8)
-        let rng = try OutputBufferRing(width: format.width, height: format.height, count: options.outputRingSize, device: device)
+        let tbl = SurfaceTextureTable(device: device, capacity: max(1, maxInputs) * 16 + ringCount * 2 + 8)
+        let rng = try OutputBufferRing(width: format.width, height: format.height, count: ringCount, device: device)
         // PVW / 多画面的 NV12 环（W3-B2 可选项）：强制开的在这里建；其余等渲染线程第一次看到状态要它时由后台线程建。
         // P3 时两个环总是在这里建（prepare 时没有状态、渲染线程又不许分配），没有这类输出时 1080p / ringSize 8 各白占约 25 MB
         var eager: [AuxOutputRings.Kind] = []
         if options.previewOutput { eager.append(.preview) }
         if options.multiview && options.multiviewOutput { eager.append(.multiview) }
-        let aux = try AuxOutputRings(device: device, width: format.width, height: format.height, count: options.outputRingSize, eager: eager)
+        let aux = try AuxOutputRings(device: device, width: format.width, height: format.height, count: ringCount, eager: eager)
         // 标签：输入槽按输入表容量要，LabelSet 封顶 64（多画面最多 64 格）
         let lbl = try LabelRenderer(device: device, inputSlots: max(1, maxInputs),
                                     completedFrames: { [weak self] in self?.completed.load(ordering: .acquiring) ?? .max })
-        let period = TickClockSpec(t0: .zero, frameRate: format.frameRate).duration(ofTicks: 1)
         // W1-B3 首帧空渲染：不预热时第 0 帧的 gpuStart − 提交 要 13 ms（队列第一次提交、管线 / 私有纹理第一次用），稳态 < 1 ms；在起时钟之前付掉
         try warmUpGPU(resources: res, slot: newSlots[0], table: tbl, ring: rng, format: format)
         stateLock.lock()
@@ -185,6 +229,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         latestCompletedSlot.store(-1, ordering: .releasing)
         skipWrite.store(0, ordering: .releasing)
         skipRead = 0
+        for i in 0..<MetalRenderer.maxSlots { slotFrame[i].store(0, ordering: .releasing) }
         stateLock.unlock()
         lbl.start()
         aux.start()
@@ -403,6 +448,10 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
             attributeSkips(submitTime: submitTime, gpuEnd: gpuEnd, wakeTime: wakeTime, tick: tick)
             // 先放资源、放行渲染线程，再派发
             slot.releaseFrame()
+            // 显示延后（W1-B4）：这一格现在装的是第 next 帧（先写拍 / 拍点，再 release 发布序号）
+            slotTick[slot.index].store(tick.rawValue, ordering: .relaxed)
+            slotTickTime[slot.index].store(tickTime.ticks, ordering: .relaxed)
+            slotFrame[slot.index].store(next + 1, ordering: .releasing)
             latestCompletedSlot.store(slot.index, ordering: .releasing)
             completed.store(next + 1, ordering: .releasing)
             inflight.wrappingSubtract(1, ordering: .acquiringAndReleasing)
@@ -450,6 +499,7 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
     public var displayCommandQueue: any MTLCommandQueue { commandQueue }
 
     public func latestDisplayFrame(for target: DisplayTarget) -> DisplayFrame? {
+        if let delay = displayDelayProvider?(), delay.ticks > 0 { return delayedDisplayFrame(for: target, delay: delay) }
         let index = latestCompletedSlot.load(ordering: .acquiring)
         guard index >= 0 else { return nil }
         stateLock.lock()
@@ -464,7 +514,50 @@ public final class MetalRenderer: Renderer, DisplayFrameSource, @unchecked Senda
         }
     }
 
+    /// 显示延后（W1-B4）：从最新完成的帧往回找"拍点 + 延后 ≤ 现在"的最新一帧。只看还完整的格：第 k 帧所在格要等第 k + 格数 帧提交才被覆盖，
+    /// 再留一帧余量（显示这次 blit 提交之前，渲染线程最多再提交一帧），所以 k ≥ 已提交 − 格数 + 2。
+    /// 找到了给它；往回找到了完整格的边界还没到期（延后超出历史）给最旧的完整那一帧并计一次 shortfall；一直找到第 0 帧都没到期（刚开始）给 nil。
+    private func delayedDisplayFrame(for target: DisplayTarget, delay: HostDuration) -> DisplayFrame? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        let n = UInt64(slots.count)
+        let done = completed.load(ordering: .acquiring)
+        guard n > 0, done > 0 else { return nil }
+        let sub = submitted.load(ordering: .acquiring)
+        let oldestSafe: UInt64 = sub + 2 > n ? sub + 2 - n : 0
+        let cutoff = HostClock.now() - delay
+        var k = done - 1
+        var chosen: UInt64?
+        var oldestIntact: UInt64?
+        var limited = false
+        while true {
+            if k < oldestSafe { limited = true; break }
+            let s = Int(k % n)
+            guard slotFrame[s].load(ordering: .acquiring) == k + 1 else { limited = true; break }
+            let tickTime = HostTime(ticks: slotTickTime[s].load(ordering: .relaxed))
+            guard slotFrame[s].load(ordering: .acquiring) == k + 1 else { limited = true; break }
+            oldestIntact = k
+            if tickTime <= cutoff { chosen = k; break }
+            if k == 0 { break }
+            k -= 1
+        }
+        if chosen == nil && limited && oldestIntact != nil { displayDelayShortfallCount.add(1, ordering: .relaxed) }
+        guard let pick = chosen ?? (limited ? oldestIntact : nil) else { return nil }
+        let slot = slots[Int(pick % n)]
+        let tick = Tick(slotTick[Int(pick % n)].load(ordering: .relaxed))
+        switch target {
+        case .program: return DisplayFrame(texture: slot.targets.program, version: pick + 1, tick: tick)
+        case .preview: return DisplayFrame(texture: slot.targets.preview, version: pick + 1, tick: tick)
+        case .multiview: return DisplayFrame(texture: slot.targets.multiview, version: pick + 1, tick: tick)
+        }
+    }
+
     // MARK: - 给测试 / 报告看的计数
+
+    /// 合成目标的格数（3，开了显示延后再加 ⌈余量 / 拍长⌉）。
+    var slotCount: Int { stateLock.lock(); defer { stateLock.unlock() }; return slots.count }
+    /// PGM 的 NV12 输出环有几个缓冲（outputRingSize，开了视频延后余量再加 ⌈余量 / 拍长⌉ + 1）。
+    var outputRingCount: Int { stateLock.lock(); defer { stateLock.unlock() }; return ring?.count ?? 0 }
 
     /// PVW / 多画面的输出环建了没有、后台线程建过几次、常驻多少字节（W3-B2 按需建）。
     func isAuxRingBuilt(_ kind: AuxOutputRings.Kind) -> Bool {

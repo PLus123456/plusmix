@@ -16,6 +16,7 @@
 //   Engine/EngineCounters.swift   原子计数 + Stats 行的组装（铁律 4：统计只有这一份）
 //   Engine/StatsPublisher.swift   每秒一行的唯一采样线程，扇出给 StatsWriter / UI / API（提案 003 §D2）
 //   Engine/QueuedFrameConsumer.swift 消费者侧"自己的有界队列 + 自己的线程"的可复用实现
+//   Engine/VideoDelay.swift       视频延后（W1-B4，提案 028）：按 tickTime = 拍点 + L 到期派发，预分配延迟队列 + 派发线程
 //   Show/ShowStore.swift          节目文件读写与 schemaVersion 逐级迁移框架
 //
 // 线程规则（设计方案 §3.2、§3.5；CONTRACTS.md §6）在各文件头逐条注明谁在哪个线程调什么。

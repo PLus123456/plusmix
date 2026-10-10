@@ -13,6 +13,10 @@ import SwitcherAudio
 //   变大 Δ：丢掉接下来的 Δ 帧——正是 AU 刚打开时前瞻缓冲垫出来的那一段（打开前 Reset 过，是零）；
 //   变小 Δ：先补 Δ 帧静音——关掉 / 缩短前瞻时那 Δ 帧内容还在 AU 的缓冲里，丢了，用静音占住时间轴。
 // 输入来源（ISO / 节目信号）不经总线效果，不补。
+// W1-B4（提案 028）：补偿方式 videoDelay 生效时（`followVideoDelay`），所有来源改落在节目输出时间线（采集 + L_m，L_m = Master 的效果链延迟）上——
+// 每个来源要减的延迟变成 L_bus − L_m（Master 恰好 0，不再前移；Bus A / B / 耳机 L_bus − L_m；输入来源 −L_m，即 PTS 往后挪 L_m），
+// 视频那边由引擎按 tickTime = 拍点 + L_m 派发。拼接照旧：差值变大丢、变小补静音（负的同样成立），所以 L_m 变了、或者开关切换时，
+// 非 Master 来源在那一块拼接，Master 不拼接（AU 自己的前瞻在开 / 关那一刻已经跳了）。
 final class ConsumerPump: @unchecked Sendable {
     struct SourceStatus: Hashable, Sendable {
         var source: AudioTapSource
@@ -81,6 +85,8 @@ final class ConsumerPump: @unchecked Sendable {
     private let silencePlanes: UnsafeMutablePointer<UnsafePointer<Float>>
     /// 到目前为止检出的不连续（所有来源之和）。
     private let discontinuityTotal = Atomic<UInt64>(0)
+    /// W1-B4：补偿方式 videoDelay 生效（AudioEngine 接上了视频引擎）——各来源落在节目输出时间线上（见文件头）。任意线程写，泵线程读。
+    let followVideoDelay = Atomic<Bool>(false)
 
     init(mixer: AudioMixer, alignment: HostDuration, latency: EffectLatencyTimeline, resample: Bool, detectDiscontinuities: Bool, period: HostDuration,
          tapCapacity: Int, timebase: MachTimebase) {
@@ -226,11 +232,14 @@ final class ConsumerPump: @unchecked Sendable {
         let list = Array(sources.values)
         lock.unlock()
         var moved = 0
+        let follow = followVideoDelay.load(ordering: .acquiring)
         for src in list {
             while let block = src.tap.pop(into: UnsafePointer(mutablePlanes)) {
                 moved += 1
                 src.blocksPopped += 1
-                let lat = src.bus.map { latency.frames($0, atBlock: block.sequence) } ?? 0
+                // 这一块要减的延迟：audioPTS = 本总线的效果链延迟（输入来源 0）；videoDelay = 再减掉 Master 的（落到节目输出时间线上）
+                let own = src.bus.map { latency.frames($0, atBlock: block.sequence) } ?? 0
+                let lat = follow ? own - latency.frames(.master, atBlock: block.sequence) : own
                 var pts = block.hostTime - alignment - duration(frames: lat)
                 if let applied = src.appliedLatency, applied != lat {
                     if lat > applied {

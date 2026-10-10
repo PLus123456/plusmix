@@ -4,10 +4,13 @@ import SwitcherEngine
 
 /// 一路输入的 ISO 视频 tap：PGM 帧的消费者。每拍在自己的分支槽上按契约的挑帧规则取这一路 pts ≤ 拍点的最新帧，
 /// 换上这一拍的 tick / 拍点时刻交给 `sink`（该路的 Recorder），于是 ISO 文件与 PGM 同一拍点网格、PTS 共用。
+/// 视频延后（W1-B4，提案 028）：引擎延后派发的帧 tickTime = 拍点 + L、program.pts 仍是拍点——挑帧按画面内容的时刻（program.pts），
+/// 打戳用 tickTime（节目输出时间线，ISO 音轨的输入来源同样平移 +L）；L = 0 时两者相等，与以前相同。
 /// 30 fps 的输入在 60 fps 节目里同一帧被录两次（与 PGM 里显示它时一样）；这一路还没有任何帧时这一拍没有输出（只计数）。
 ///
-/// 线程：`consume` 在引擎派发线程上被调（一个线程，MetalRenderer 的完成线程），做的事只有一次无锁挑帧 + 一次 `sink.consume`
-/// （Recorder 的 consume 只入队），零分配（RenderedFrame 是值类型）。分支槽的唯一消费者就是这条线程。
+/// 线程：`consume` 在引擎派发线程上被调（MetalRenderer 的完成线程；视频延后 > 0 时是引擎的派发线程，两条线程交接有 acquire / release、
+/// 从不同时调），做的事只有一次无锁挑帧 + 一次 `sink.consume`（Recorder 的 consume 只入队），零分配（RenderedFrame 是值类型）。
+/// 分支槽的唯一消费者就是"当时在派发的那条线程"。
 public final class ISOFrameTap: FrameConsumer, @unchecked Sendable {
     /// 输入编号。
     public let inputNumber: Int
@@ -53,7 +56,7 @@ public final class ISOFrameTap: FrameConsumer, @unchecked Sendable {
     }
 
     public func consume(_ frame: RenderedFrame) {
-        guard let picked = branch.latest(atOrBefore: frame.tickTime) else {
+        guard let picked = branch.latest(atOrBefore: frame.program.pts) else {
             noFrame.add(1, ordering: .relaxed)
             return
         }

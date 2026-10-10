@@ -44,6 +44,8 @@ struct RunOptions: Sendable {
     var ndiJitterFrames: Int = 1
     /// --stream <地址>（W4-A，可多次）：每个地址一路 W2-D 的 StreamOutput（PGM + Master 音频）。
     var streamURLs: [String] = []
+    /// --av-compensation（W1-B4，提案 028）：videoDelay（默认，画面也晚 L）/ audioPTS（W5-C：音频 PTS 前移 L）。
+    var avCompensation: AVCompensation = .videoDelay
 }
 
 /// 音频输出：--audio-device null|default|<名字> → 集成层（W2-E AudioEngine）的设备选择。空设备 = W1-D 假时钟，不出声，gate 用。
@@ -166,11 +168,21 @@ final class HeadlessSession: @unchecked Sendable {
         }
         guard ticks >= 1 else { throw CLIError("拍数为 0：--duration 太短或场景 durationTicks 为 0") }
         totalTicks = ticks
-        renderer = try MetalRenderer()
+        // W1-B4：videoDelay 下引擎最多把帧压 maxDelay 再派发——输出环按它加深（不加深会被延迟队列扣满、退回池子分配）；
+        // 开着预览窗口时显示也延后（多留几格合成目标，显示源按引擎正在用的延后挑到期的帧）
+        var renderOptions = MetalRendererOptions()
+        if options.avCompensation == .videoDelay {
+            renderOptions.videoDelayHeadroom = EngineOptions().videoDelay.maxDelay
+            renderOptions.displayDelayHistory = options.preview
+        }
+        renderer = try MetalRenderer(options: renderOptions)
         stateMachine = StateMachine(initialState: state)
         let maxNumber = state.inputs.map(\.number).max() ?? 1
         let engine = Engine(stateMachine: stateMachine, renderer: renderer, maxInputs: max(16, maxNumber))
         self.engine = engine
+        if options.avCompensation == .videoDelay && options.preview {
+            renderer.displayDelayProvider = { engine.videoDelayApplied }
+        }
         let bus = CommandBus(stateMachine: stateMachine)
         let feed = StateFeed(stateMachine: stateMachine) { engine.clock?.spec }
         commandBus = bus
@@ -328,7 +340,10 @@ final class HeadlessSession: @unchecked Sendable {
         audioConfig.monitorPoint = SwitcherAudio.MonitorPoint(show.audio.monitorPoint)
         // SW_AUDIO_SILENT=1：真设备也不出声（Master 不映射到设备通道，仍照常处理、照常送录制器）——长跑 / 真设备 A2 用
         if ProcessInfo.processInfo.environment["SW_AUDIO_SILENT"] == "1" { audioConfig.outputChannelMap = BusChannelMap(master: nil) }
+        audioConfig.avCompensation = options.avCompensation
         let audioEngine = try AudioEngine(stateMachine: stateMachine, configuration: audioConfig)
+        // W1-B4：videoDelay 下把视频引擎接上——Master 效果链的实测延迟交给它，画面晚同样的毫秒数派发（不接 = 按 audioPTS 走）
+        if options.avCompensation == .videoDelay { audioEngine.videoDelay = engine }
         for entry in audioInputs {
             var hints = AudioInputHints()
             hints.producerBlockFrames = entry.source.blockFrames
@@ -475,7 +490,7 @@ final class HeadlessSession: @unchecked Sendable {
               时长：\(totalTicks) 拍（\(String(format: "%.1f", options.durationSeconds)) s）  t0 距现在 \(String(format: "%.0f", leadLeft)) ms\(leadLeft < 0 ? "  ⚠️ 起晚了，开头会跳拍" : "")  合成源提前量 \(String(format: "%.2f", inputLeadMs)) ms
               音频：\(options.audioDevice)（对齐延迟 \(String(format: "%.2f", audioEngine.alignmentDuration.milliseconds)) ms，消费者流\(audioEngine.resamplesToHostClock ? "重采样到 host 时钟" : "不重采样")）  录制：\(options.recordURL?.path ?? "无")\(isoRecorders.isEmpty ? "" : "（+ \(isoRecorders.count) 路 ISO 音轨）")  stats：\(options.statsURL?.path ?? "无")  GPU 占用：\(gpu == nil ? "不可用" : "IOKit")
               API：\(apiServer.flatMap(\.baseURL).map { "\($0.absoluteString)/api/v1（WS /api/v1/events）\(options.api?.token == nil ? "" : "，token 鉴权开")" } ?? "关")  兼容层：\(options.compat.map { "\($0.host) TCP \($0.tcpPort) / HTTP \($0.httpPort)" } ?? "关")  tally：\(options.tallyPort.map { "0.0.0.0:\($0)" } ?? "关")  NDI 发送：\(options.ndiSend ?? "关")  推流：\(streams.isEmpty ? "关" : streams.map { "\($0.destination)" }.joined(separator: " / "))
-              时钟实时策略：\(clock.isRealtime ? "已生效" : "⚠️ 未生效（V3 会超）")
+              时钟实时策略：\(clock.isRealtime ? "已生效" : "⚠️ 未生效（V3 会超）")  A/V 补偿：\(audioEngine.avCompensationInEffect.rawValue)（视频延后队列 \(engine.videoDelayQueueCapacity) 帧，最多 \(String(format: "%.0f", engine.options.videoDelay.maxDelay.milliseconds)) ms）
             """)
 
         // 7. 等：跑完 totalTicks 拍（派发 + 跳过 = 总拍数），或收到信号。
@@ -617,6 +632,7 @@ final class HeadlessSession: @unchecked Sendable {
         lines.append("结束：\(interrupted ? "信号中断" : "跑满") \(c.ticksDispatched + c.ticksSkipped) / \(totalTicks) 拍")
         lines.append("  引擎：派发 \(c.ticksDispatched) 拍，跳拍 \(c.ticksSkipped)，渲染器 skipped \(c.renderSkipped)（missed_render = \(c.missedRender)），提交 \(c.framesSubmitted)，完成 \(c.framesCompleted)，派发给消费者 \(c.framesDispatched)，快照等待 \(c.snapshotWaits) / 过期 \(c.snapshotStale)，慢消费者调用 \(c.slowConsumeCalls)")
         lines.append("  时钟：唤醒抖动 p99 \(ms(clock.jitter.percentile(0.99))) ms，max \(ms(clock.jitter.allTimeMax)) ms（\(clock.jitter.sampleCount) 拍）；渲染 V1 平均 \(String(format: "%.3f", c.averageRenderMs)) ms")
+        lines.append("  视频延后（\(options.avCompensation.rawValue)）：最后 \(String(format: "%.3f", c.videoDelayMs)) ms，经延迟队列 \(c.framesDelayed) 帧，队列最多压 \(c.videoDelayQueueMax) / \(engine.videoDelayQueueCapacity)，满了丢 \(c.videoDelayOverflow)，派发晚到期 max \(ms(c.takeVideoDelayLateMax())) ms")
         for input in inputs {
             let k = input.counters
             let s = input.videoSlot?.stats

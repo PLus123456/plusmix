@@ -100,7 +100,7 @@ public struct AudioEngineStatus: Sendable {
         public var devicePpm: Double?
         public var resampleRatio: Double?
         public var resamplerStarved: UInt64
-        /// 当前按多少帧效果链延迟补 PTS（总线来源；输入来源恒 0）。W5-C。
+        /// 当前按多少帧补 PTS：audioPTS = 该总线的效果链延迟（输入来源 0，W5-C）；videoDelay = L_bus − L_m（Master 0，输入来源 −L_m：PTS 往后挪，W1-B4）。
         public var latencyFrames: Int
         /// 效果链延迟变大时丢掉的帧（AU 前瞻垫进来的那一段）/ 变小时补的静音帧，累计。W5-C。
         public var latencyFramesDropped: UInt64
@@ -117,6 +117,10 @@ public struct AudioEngineStatus: Sendable {
     public var monitorMode: MonitorMode
     /// 耳机取延迟线前 / 后（W1-D2）。混音器侧的那个 `MonitorPoint`（契约里的同名类型见提案 007）。
     public var monitorPoint: SwitcherAudio.MonitorPoint
+    /// 实际生效的 A/V 补偿方式（W1-B4）：配置是 videoDelay 且接了视频引擎才是 videoDelay。
+    public var avCompensation: AVCompensation
+    /// 最近交给视频引擎的视频延后（帧 @48 k；audioPTS 或没接时 0）。引擎那边实际在用的值（slew 过程中可能还没到）看 `Engine.videoDelayApplied`。
+    public var videoDelayFrames: Int
     /// 进行中的转场（from, to, 起点）。
     public var activeTransition: String?
     /// FTB 当前黑比例（音频侧算的）。
