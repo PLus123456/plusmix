@@ -20,7 +20,10 @@
 → 提案 017（用户 2026-09-24 批，G4 续做合入会话落地：`Stats.audio.meters` 的 `rms_db`）
 → 提案 019（用户 2026-09-27 批，G4 续做合入会话落地：`Stats.EncoderEntry` 的 `output` / `connections`、NDI state 的 failed、reducer 对 addInput / setInputSettings 剥 border 格）
 → **P4（2026-09-27，分支 p4-contracts）：过期注释 / 口径收口；reducer 两条小规则（removeInput 清 Stinger 引用，addOutput / setOutputSettings / loadShow 先搬过渡键）；
-搬迁清掉 `border` 效果格与悬空的 Stinger 引用；`validate()` 只查结构、不查引用（用户 2026-09-27 定）。没有加改任何公开类型与 JSON 键**。提案文件留在 docs/contract-changes/ 当决策记录。
+搬迁清掉 `border` 效果格与悬空的 Stinger 引用；`validate()` 只查结构、不查引用（用户 2026-09-27 定）。没有加改任何公开类型与 JSON 键**
+→ **P5（2026-10-10，分支 p5-contracts）：提案 023 第一节（转场进行中 setPreview / setProgram 拒收，只落契约文字）、024 (b)（`EffectSlot` 键表加 `compressor` / `peakLimiter.ceilingDb`、经典 Q 口径、≤ 16 段 / ≤ 3 格，只改注释与表）、
+025（`RecordSettings.armed` / `ownFormat`、`StreamSettings.followFirst` + 旧 extra 键的搬迁函数，不并进 Show.load）、026（`AudioState.monitorSource` + `setMonitorSource`，35 个 case）、027（`OverlayAnimation.defaultFade(for:)` + `MixerState.newShow`，新节目叠加默认淡入 0.5 s）；
+020（转场槽 + FTB 时长）/ 021（文件播放控制）/ 022（Stats.encoder 的 uptime_s / disconnects / last_error）/ 023 二–五（container 废弃、effects 只放音频、InputConfig.color、setInputAudio）写成提案待批**。提案文件留在 docs/contract-changes/ 当决策记录。
 
 ---
 
