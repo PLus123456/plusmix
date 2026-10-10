@@ -188,7 +188,7 @@ ol.conf li{margin-bottom:4px}
 </div>
 <p class="note">灰字是已过的闸门。第一拨四路目录互不相交，四个窗口同时开；G8a 只合 99（加做完的 105 / 106）、15 分钟；第二拨里 101 必须叠在 100 的分支头上（两路都动 App/ 与 Localizable.strings），102 与它们并行。</p>
 
-<div class="callout"><b>现在怎么开（2026-10-10 定；细则 §8.8）</b>
+<div class="callout"><b>现在怎么开（2026-10-10 定；细则 §8.8）。</b>第一拨四路（99 / 105 / 106 / 103）现在就开、互不相干；G8a 把 99 合进 main 之后才开 100 / 101 / 102；101 必须叠在 100 上；全量 / gate4 / perf / 长稳同机只跑一个。</div>
 <div class="tbl"><table>
 <tr><th>拨</th><th>会话</th><th>从哪开</th><th>能同时开的</th><th>不能同时的 / 要等的</th></tr>
 <tr><td><span class="pill w">第一拨 · 现在</span></td><td class="id">99 P5 契约</td><td class="mono">main</td><td class="id">103 / 105 / 106</td><td>020–022 的提案写全要停下问你；做完先由 G8a 合进 main，100–102 才能开</td></tr>
@@ -201,8 +201,7 @@ ol.conf li{margin-bottom:4px}
 <tr><td><span class="pill w">第二拨</span></td><td class="id">102 W1-D3 每路效果 + 026 引擎侧</td><td class="mono">main（105 未合入则叠它头上）</td><td class="id">100 / 101</td><td>等 G8a（023 / 024 / 026 的契约）；A7 / A1 真设备 10 分钟别和 gate4 同时</td></tr>
 <tr><td><span class="pill g">闸门</span></td><td class="id">G8b（107 后半）</td><td class="mono">g8 续</td><td>—</td><td>等 100–103；全量 / gate4 / perf 要机器安静；8 小时长稳你终端跑；全过才改 0.1.1 与 CHANGELOG</td></tr>
 </table></div>
-<b>同机互斥</b>（目录不相交也不能同时跑）：gate4、perf-baseline、8 小时长稳、两个会话的 make test-app 全量、StreamingTests 的 MediaMTX 用例、显示类 / 实时类用例——错开跑，红了先单独复跑。<br>
-<b>叠分支的 lint</b>：<span class="k">scripts/check-ownership.sh &lt;分支&gt; --base &lt;上一路分支&gt;</span>，否则上一路的改动算成自己的越界。</div>
+<p class="note"><b>同机互斥</b>（目录不相交也不能同时跑）：gate4、perf-baseline、8 小时长稳、两个会话的 make test-app 全量、StreamingTests 的 MediaMTX 用例、显示类 / 实时类用例——错开跑，红了先单独复跑。<b>叠分支的 lint</b>：<span class="k">scripts/check-ownership.sh &lt;分支&gt; --base &lt;上一路分支&gt;</span>，否则上一路的改动算成自己的越界。</p>
 
 <h2 id="s1"><span class="num">1</span>现状盘点</h2>
 <h3>1.1 读了什么</h3>
