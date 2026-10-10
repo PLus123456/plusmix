@@ -427,7 +427,7 @@ public enum RecordContainer: String, Codable, Sendable {
 
 /// 录制参数（设计方案 §8 录制行）。
 public struct RecordSettings: Hashable, Codable, Sendable {
-    /// 录制目录。相对路径的口径（提案 007 B）：headless 相对进程工作目录；App 相对 `~/Movies/Switcher`。
+    /// 录制目录。相对路径的口径（提案 007 B）：headless 相对进程工作目录；App 相对 `~/Movies/PlusMix`（W4-D 改名前是 `~/Movies/Switcher`）。
     public var directory: String
     /// 文件名模板，支持 {show} {date} {time} {output}。
     public var fileNamePattern: String
@@ -437,14 +437,43 @@ public struct RecordSettings: Hashable, Codable, Sendable {
     public var fragmentIntervalSeconds: Double
     /// 停止后转封装成 MP4（失败保留 .mov）。
     public var remuxToMP4: Bool
+    /// 参与"全部录制"（提案 025，W5-I 的 `extra["app.record.armed"]` 升正式字段）：true（默认，老文件缺键也是 true）= 底栏 / API 的"全部开始"起这一路；
+    /// false = 只能单路起（ISO 表里 PGM 那一行取消 = 只录 ISO）。headless / API 现在逐路 startRecord，不看它；"全部录制"要认它归控制会话。
+    public var armed: Bool
+    /// 自己的编码格式（提案 025，W5-I 的 `extra["app.record.ownFormat"]`）：只对来源是某路输入的录制（ISO 路）有意义——
+    /// false（默认）= 编码参数跟主录制（第一个来源 = PGM 的录制输出）；true = 用自己的 video / audio。
+    public var ownFormat: Bool
     public init(directory: String, fileNamePattern: String = "{show}-{date}-{time}", container: RecordContainer = .mov,
-                fragmentIntervalSeconds: Double = 1, remuxToMP4: Bool = false) {
+                fragmentIntervalSeconds: Double = 1, remuxToMP4: Bool = false, armed: Bool = true, ownFormat: Bool = false) {
         self.directory = directory
         self.fileNamePattern = fileNamePattern
         self.container = container
         self.fragmentIntervalSeconds = fragmentIntervalSeconds
         self.remuxToMP4 = remuxToMP4
+        self.armed = armed
+        self.ownFormat = ownFormat
     }
+
+    enum CodingKeys: String, CodingKey { case directory, fileNamePattern, container, fragmentIntervalSeconds, remuxToMP4, armed, ownFormat }
+
+    /// 025 之前的文件没有 armed / ownFormat：缺键 = true / false（与 W5-I 对 extra 缺键的语义相同）。写出总是写全。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        directory = try c.decode(String.self, forKey: .directory)
+        fileNamePattern = try c.decode(String.self, forKey: .fileNamePattern)
+        container = try c.decode(RecordContainer.self, forKey: .container)
+        fragmentIntervalSeconds = try c.decode(Double.self, forKey: .fragmentIntervalSeconds)
+        remuxToMP4 = try c.decode(Bool.self, forKey: .remuxToMP4)
+        armed = try c.decodeIfPresent(Bool.self, forKey: .armed) ?? true
+        ownFormat = try c.decodeIfPresent(Bool.self, forKey: .ownFormat) ?? false
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["directory", "fileNamePattern", "container", "fragmentIntervalSeconds", "remuxToMP4", "armed", "ownFormat"]
+
+    /// 025 之前 App（W5-I）放在 `OutputSettings.extra` 里的键：`OutputSettings.migratingLegacyAppFlags()` 把它们搬进 `armed` / `ownFormat`。
+    public static let legacyArmedExtraKey = "app.record.armed"
+    public static let legacyOwnFormatExtraKey = "app.record.ownFormat"
 }
 
 /// 推流目的地（RTMP / RTMPS / SRT 由 url 的 scheme 决定）。
@@ -455,11 +484,32 @@ public struct StreamSettings: Hashable, Codable, Sendable {
     public var streamKey: String
     /// 指数退避重连的上限（秒）。
     public var reconnectMaxSeconds: Double
-    public init(url: String, streamKey: String = "", reconnectMaxSeconds: Double = 30) {
+    /// 编码参数跟第一个推流目的地（提案 025，W5-I 的 `extra["app.stream.followFirst"]` 升正式字段）：false（默认，老文件缺键也是 false）= 自己的 video / audio；
+    /// true = 跟编号最小的 stream 输出的 video / audio（地址、密钥、重连上限不跟）。谁来跟是 App（OutputLinkage）的事，契约只存标记。
+    public var followFirst: Bool
+    public init(url: String, streamKey: String = "", reconnectMaxSeconds: Double = 30, followFirst: Bool = false) {
         self.url = url
         self.streamKey = streamKey
         self.reconnectMaxSeconds = reconnectMaxSeconds
+        self.followFirst = followFirst
     }
+
+    enum CodingKeys: String, CodingKey { case url, streamKey, reconnectMaxSeconds, followFirst }
+
+    /// 025 之前的文件没有 followFirst：缺键 = false。写出总是写全。
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        streamKey = try c.decode(String.self, forKey: .streamKey)
+        reconnectMaxSeconds = try c.decode(Double.self, forKey: .reconnectMaxSeconds)
+        followFirst = try c.decodeIfPresent(Bool.self, forKey: .followFirst) ?? false
+    }
+
+    /// JSON 键名。
+    public static let jsonKeys = ["url", "streamKey", "reconnectMaxSeconds", "followFirst"]
+
+    /// 025 之前 App（W5-I）放在 `OutputSettings.extra` 里的键：`OutputSettings.migratingLegacyAppFlags()` 把它搬进 `followFirst`。
+    public static let legacyFollowFirstExtraKey = "app.stream.followFirst"
 }
 
 /// 多画面的一个自定义格子（提案 010）。

@@ -786,6 +786,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
           }
         },
         "stream" : {
+          "followFirst" : false,
           "reconnectMaxSeconds" : 30,
           "streamKey" : "key",
           "url" : "rtmp://localhost/live"
@@ -835,10 +836,12 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
       },
       "record" : {
+        "armed" : true,
         "container" : "mov",
         "directory" : "/Volumes/Rec",
         "fileNamePattern" : "{show}-{date}-{time}",
         "fragmentIntervalSeconds" : 1,
+        "ownFormat" : false,
         "remuxToMP4" : false
       },
       "source" : {

@@ -166,7 +166,9 @@ AUNBandEQ 的带宽参数就是这个定义（设计方案 §7 原来对的 AUPa
 | `AudioState` | {buses[4] 顺序 = Bus.allCases, afv 总开关, monitorMode, alignmentFrames = 2048, monitorPoint}（提案 007） | 状态机 | 混音、UI | — |
 | `MonitorPoint` | {preDelayLine（默认）, postDelayLine}：耳机 / 监听总线取对齐延迟线之前还是之后（提案 007） | Show / 设置面板 | 集成层填 `AudioEngineConfiguration` | — |
 | `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`}；kind = multiview 的 enabled = 要不要把多画面 NV12 送给下游，布局与它无关（见下） | 状态机 | 输出实现、UI | — |
-| `OutputSettings` | {source, video?, audio?, record?, stream?, multiview?（010）, display?（013）, extra 占位} | Show / 命令 | 编码、录制、推流、多画面、外部显示 | — |
+| `OutputSettings` | {source, video?, audio?, record?, stream?, multiview?（010）, display?（013）, extra（各输出会话的附加项，NDI 的 ndi.groups / ndi.conversion 在用）} | Show / 命令 | 编码、录制、推流、多画面、外部显示 | — |
+| `RecordSettings` | {directory, fileNamePattern, container, fragmentIntervalSeconds, remuxToMP4, armed（025，缺键 true）, ownFormat（025，缺键 false）}；armed = 参与"全部录制"，ownFormat = ISO 路用自己的编码参数而不跟主录制 | Show / setOutputSettings | 录制器、App 底栏 / 录制页（OutputLinkage） | — |
+| `StreamSettings` | {url, streamKey, reconnectMaxSeconds, followFirst（025，缺键 false）}；followFirst = 编码参数跟编号最小的 stream 输出（地址 / 密钥 / 重连上限不跟） | Show / setOutputSettings | 推流、App 推流页（OutputLinkage） | — |
 | `MultiviewLayoutSettings` / `MultiviewCell` | {preset, custom[], safeArea, meters} / {source, rect}（提案 010；`OutputSource.multiview` 作格子源无效，渲染器忽略）；meters = 画真实电平（`Stats.audio.meters` 经 `setMeters` 喂进渲染器：输入格画该路、PGM 格 = Master、PVW 格 = 当前 PVW 那路），纯音频输入格总是画、不看它 | Show / setOutputSettings | 渲染（多画面） | 解析只在快照 sequence 变化时做 |
 | `DisplayOutputSettings` | {displayID?（CGDirectDisplayID；nil = 主显示器）, fallbackToMain（默认 false = 显示器不在时黑着等、不动主屏；提案 013 定 true，015 改 false 与运行时一致）} | Show / setOutputSettings | 外部显示运行表 | — |
 | `Tally` | {program, preview}，由快照推导 | 契约代码 | UI、API、多画面、外部 tally | — |
@@ -185,6 +187,10 @@ P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的�
 `OutputState.enabled` 的口径（提案 007 B 第 1 条）：节目文件里的 enabled **只对 headless 的场景文件生效**（t0 起录 / 起推）；App 打开任何节目文件（含退出时自动存的 LastSession）时把 record / stream 的 enabled 清掉，这两类输出只由用户动作（按钮 / 快捷键 / API）起（App 的 `ShowDocuments.stoppingOutputs`）。record / stream 的 enabled 由 startRecord / startStream 置，其余 kind 由 `setOutputEnabled` 置（提案 012）。
 
 `RecordSettings.directory` 的相对路径（提案 007 B 第 2 条）：headless 相对进程工作目录；App 相对 `~/Movies/PlusMix`（W4-D 改名前是 `~/Movies/Switcher`；`MixerState.swift` 里 `RecordSettings.directory` 的注释还写着旧名，等下一次契约会话顺手改）。
+
+**W5-I 的三个 App 层标记升正式字段（提案 025，用户 2026-10-10 批，P5 落地）**：`RecordSettings.armed`（缺键 true）/ `RecordSettings.ownFormat`（缺键 false）/ `StreamSettings.followFirst`（缺键 false），写出总是写全；
+025 之前 App 放在 `OutputSettings.extra` 的 `app.record.armed` / `app.record.ownFormat` / `app.stream.followFirst` 由 `OutputSettings.migratingLegacyAppFlags()`（`Show.migratingLegacyAppFlags()` 对每个输出各做一次）搬进字段并清键，
+**不在 `Show.load` / `migratingLegacyKeys()` 里自动调**：App 在 Show.load 后调一次、读写切到字段（归 101 / W5-N），之后可以并进 `migratingLegacyKeys()`。headless / API 的"全部录制"要认 armed 归控制会话；VMixCompat 不映射。`Show.schemaVersion` 不升。
 
 录制器的停止边界（提案 007 B 第 3 条）：`Recorder.stop(atTick:)` 给拍边界，两轨都由录制器裁到该拍点，越界块只计数不写；边界可以在到达之前预告（`setStopTick`）；nil = 最后一个已收帧的下一拍。
 
