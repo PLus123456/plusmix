@@ -181,6 +181,111 @@ OSStatus sw_effect_input_proc(void *refCon, AudioUnitRenderActionFlags *flags, c
 }
 
 // ---------------------------------------------------------------------------
+// 自写压缩器（提案 024 (b)；sw_audio_rt.h 的注释是定义）：解耦峰值检测器 → dB 域静态曲线 → 增益；前瞻 0
+// ---------------------------------------------------------------------------
+
+#define SW_DB_PER_LOG2       6.02059991327962f    ///< 20·log10(2)：log2 → dB
+#define SW_LOG2_PER_DB       0.166096404744368f   ///< log2(10) / 20：dB → log2
+
+void sw_compressor_process(sw_compressor *c, const float *const *in, float *const *out, uint32_t channels, uint32_t frames) SW_NONBLOCKING {
+    const float T = c->threshold_db, inv_r = c->inv_ratio, W = c->knee_db, half_w = 0.5f * W;
+    const float one_minus_aa = 1.0f - c->alpha_attack, ar = c->alpha_release, makeup = c->makeup_lin, lo = c->knee_lo_lin;
+    const float inv_2w = W > 0.0f ? 1.0f / (2.0f * W) : 0.0f;
+    float env_r = c->env_release, env = c->env;
+    const float *x0 = in[0], *x1 = channels > 1 ? in[1] : in[0];
+    float *y0 = out[0], *y1 = channels > 1 ? out[1] : NULL;
+    for (uint32_t i = 0; i < frames; i++) {
+        const float a0 = fabsf(x0[i]), a1 = fabsf(x1[i]);
+        const float d = a0 > a1 ? a0 : a1;
+        env_r = d > env_r ? d : d + ar * (env_r - d);        // 释放级：瞬时起音、指数释放
+        env += (env_r - env) * one_minus_aa;                 // 起音一阶平滑
+        float g = makeup;
+        if (env > lo) {
+            const float x_db = SW_DB_PER_LOG2 * log2f(env);
+            const float over = x_db - T;
+            float gr_db;                                     // y − x ≤ 0
+            if (W <= 0.0f || over > half_w) gr_db = (inv_r - 1.0f) * over;
+            else if (over < -half_w) gr_db = 0.0f;
+            else { const float t = over + half_w; gr_db = (inv_r - 1.0f) * t * t * inv_2w; }
+            g = makeup * exp2f(gr_db * SW_LOG2_PER_DB);
+        }
+        y0[i] = x0[i] * g;
+        if (y1) y1[i] = x1[i] * g;
+    }
+    // 块末把接近 0 的包络吸到 0（避免长静音后的非规格化数；ARM 不慢但别留着）
+    if (env_r < 1e-12f) env_r = 0.0f;
+    if (env < 1e-12f) env = 0.0f;
+    c->env_release = env_r;
+    c->env = env;
+}
+
+// ---------------------------------------------------------------------------
+// 一格效果（总线 / 每路共用）：AU 或压缩器 cur → other，再乘格内输出增益，然后交换
+// ---------------------------------------------------------------------------
+
+static inline void sw_fx_slot_process(sw_effect_slot *fx, float **cur, float **other, const float *in1_override, uint32_t frames,
+                                      uint64_t sample_time, float gain_k) SW_NONBLOCKING {
+    bool processed = false;
+    const float *in0 = cur[0], *in1 = in1_override ? in1_override : cur[1];
+    if (fx->kind == SW_FX_KIND_COMPRESSOR) {
+        const float *ip[SW_MIX_BUS_CHANNELS] = { in0, in1 };
+        float *op[SW_MIX_BUS_CHANNELS] = { other[0], other[1] };
+        sw_compressor_process(&fx->comp, ip, op, SW_MIX_BUS_CHANNELS, frames);
+        processed = true;
+    } else if (fx->unit) {
+        fx->in[0] = in0; fx->in[1] = in1; fx->in_frames = frames;
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp ts;
+        memset(&ts, 0, sizeof ts);
+        ts.mSampleTime = (Float64)sample_time;
+        ts.mFlags = kAudioTimeStampSampleTimeValid;
+        AudioBufferList *list = &fx->out_list.list;
+        list->mNumberBuffers = 2;
+        AudioBuffer *bufs = list->mBuffers;
+        for (uint32_t c = 0; c < SW_MIX_BUS_CHANNELS; c++) {
+            bufs[c].mNumberChannels = 1;
+            bufs[c].mDataByteSize = (UInt32)(frames * sizeof(float));
+            bufs[c].mData = other[c];
+        }
+        const OSStatus st = sw_rt_audio_unit_render(fx->unit, &flags, &ts, 0, frames, list);
+        if (st != noErr) {
+            // 渲染失败：旁路本格（拷贝），不中断
+            memcpy(other[0], in0, (size_t)frames * sizeof(float));
+            memcpy(other[1], in1, (size_t)frames * sizeof(float));
+        } else if (bufs[0].mData != other[0] || bufs[1].mData != other[1]) {
+            // AU 可能把 mData 换成自己的缓冲：拷回来
+            memcpy(other[0], bufs[0].mData, (size_t)frames * sizeof(float));
+            memcpy(other[1], bufs[1].mData, (size_t)frames * sizeof(float));
+        }
+        processed = true;
+    }
+    if (!processed) return;   // 没装 AU 的 AU 格：旁路，不换缓冲、不乘增益
+    // 格内输出增益（peakLimiter.ceilingDb，024 顺带 (2)）：一阶平滑；目标 1 且已到位时不动
+    float g = fx->post_gain;
+    const float gt = fx->post_gain_target;
+    if (g != 1.0f || gt != 1.0f) {
+        float *o0 = other[0], *o1 = other[1];
+        for (uint32_t i = 0; i < frames; i++) { g += (gt - g) * gain_k; o0[i] *= g; o1[i] *= g; }
+        if (fabsf(g - gt) < 1e-6f) g = gt;
+        fx->post_gain = g;
+    }
+    float *t0 = cur[0], *t1 = cur[1];
+    cur[0] = other[0]; cur[1] = other[1];
+    other[0] = t0; other[1] = t1;
+}
+
+/// RT 侧找格（宿主 / 编号 / 格号越界给 NULL）。
+static inline sw_effect_slot *sw_fx_slot_for(struct sw_mix_ctx *ctx, int32_t target, uint32_t index, int32_t slot) SW_NONBLOCKING {
+    if (slot < 0) return NULL;
+    if (target == SW_FX_TARGET_INPUT) {
+        if (index >= ctx->input_capacity || (uint32_t)slot >= SW_MIX_EFFECTS_PER_INPUT) return NULL;
+        return &ctx->inputs[index].fx[slot];
+    }
+    if (index >= SW_MIX_BUS_COUNT || (uint32_t)slot >= SW_MIX_EFFECTS_PER_BUS) return NULL;
+    return &ctx->buses[index].fx[slot];
+}
+
+// ---------------------------------------------------------------------------
 // 命令应用
 // ---------------------------------------------------------------------------
 
@@ -268,9 +373,38 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
         break;
     case SW_CMD_BUS_GAIN:      if (idx < SW_MIX_BUS_COUNT) ctx->buses[idx].gain_target = c->f0 < 0 ? 0 : c->f0; break;
     case SW_CMD_BUS_MUTE:      if (idx < SW_MIX_BUS_COUNT) ctx->buses[idx].muted = c->i0 != 0; break;
-    case SW_CMD_EFFECT_ENABLE:
-        if (idx < SW_MIX_BUS_COUNT && c->i0 >= 0 && c->i0 < (int)SW_MIX_EFFECTS_PER_BUS) ctx->buses[idx].fx[c->i0].enabled = c->i1 != 0;
+    case SW_CMD_EFFECT_ENABLE: {
+        sw_effect_slot *fx = sw_fx_slot_for(ctx, c->i2, idx, c->i0);
+        if (fx) fx->enabled = c->i1 != 0;
         break;
+    }
+    case SW_CMD_FX_KIND: {
+        sw_effect_slot *fx = sw_fx_slot_for(ctx, c->i2, idx, c->i0);
+        if (fx) fx->kind = c->i1 == SW_FX_KIND_COMPRESSOR ? SW_FX_KIND_COMPRESSOR : SW_FX_KIND_AU;
+        break;
+    }
+    case SW_CMD_FX_PARAM: {
+        sw_effect_slot *fx = sw_fx_slot_for(ctx, c->i2, idx, c->i0);
+        if (!fx) break;
+        sw_compressor *k = &fx->comp;
+        switch (c->i1) {
+        case SW_COMP_THRESHOLD_DB:  k->threshold_db = c->f0; sw_compressor_update_derived(k); break;
+        case SW_COMP_INV_RATIO:     k->inv_ratio = sw_clampf(c->f0, 0.0f, 1.0f); break;
+        case SW_COMP_KNEE_DB:       k->knee_db = c->f0 < 0 ? 0 : c->f0; sw_compressor_update_derived(k); break;
+        case SW_COMP_ALPHA_ATTACK:  k->alpha_attack = sw_clampf(c->f0, 0.0f, 0.999999f); break;
+        case SW_COMP_ALPHA_RELEASE: k->alpha_release = sw_clampf(c->f0, 0.0f, 0.999999f); break;
+        case SW_COMP_MAKEUP_LIN:    k->makeup_lin = c->f0 < 0 ? 0 : c->f0; break;
+        default: break;
+        }
+        break;
+    }
+    case SW_CMD_FX_POST_GAIN: {
+        sw_effect_slot *fx = sw_fx_slot_for(ctx, c->i2, idx, c->i0);
+        if (fx) fx->post_gain_target = c->f0 < 0 ? 0 : c->f0;
+        break;
+    }
+    case SW_CMD_MONITOR_SOURCE: ctx->monitor_source = (c->i0 >= 0 && c->i0 < (int)SW_MIX_BUS_COUNT) ? (uint32_t)c->i0 : SW_BUS_HEADPHONES; break;
+    case SW_CMD_MONITOR_BORROW_MASTER: ctx->borrow_master = c->i0 != 0; break;
     case SW_CMD_MONITOR_MODE:  ctx->monitor_mode = (uint32_t)c->i0; break;
     case SW_CMD_MONITOR_POINT: ctx->monitor_point = c->i0 == SW_MONITOR_POST_DELAY ? SW_MONITOR_POST_DELAY : SW_MONITOR_PRE_DELAY; break;
     case SW_CMD_CROSSFADE: {
@@ -643,8 +777,21 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     slot->st.attached = 1;
     slot->st.primed = slot->primed;
 
-    // 3. 延迟线
-    sw_delay_process(&slot->delay, ch, slot->resampled, slot->delayed, frames);
+    // 2b. 每路效果格（W1-D3）：EQ → 动态，作用在重采样后的信号上；之后的延迟线 / 推子 / 耳机 / ISO tap 都看到效果后的信号
+    //     （效果延迟由集成层从这一路的对齐延迟线里扣）。单声道输入：AU / 压缩器拿两路一样的输入（第二路指向第一路），
+    //     输出的第二路落在空闲的 [1] 暂存里，下游只用 [0]
+    float *fx_cur[SW_MIX_BUS_CHANNELS] = { slot->resampled[0], slot->resampled[1] };
+    float *fx_other[SW_MIX_BUS_CHANNELS] = { slot->fxwork[0], slot->fxwork[1] };
+    for (uint32_t e = 0; e < SW_MIX_EFFECTS_PER_INPUT; e++) {
+        sw_effect_slot *fx = &slot->fx[e];
+        if (!fx->enabled) continue;
+        sw_fx_slot_process(fx, fx_cur, fx_other, ch >= 2 ? NULL : fx_cur[0], frames, slot->fx_sample_time, ctx->gain_smooth_k);
+    }
+    slot->fx_sample_time += frames;
+    const float *pre_delay0 = fx_cur[0], *pre_delay1 = ch >= 2 ? fx_cur[1] : fx_cur[0];
+
+    // 3. 延迟线（输入 = 效果后的信号）
+    sw_delay_process(&slot->delay, ch, fx_cur, slot->delayed, frames);
 
     // 4. 推子：增益 / 静音一阶平滑、AFV（曲线或平滑）、声像（每块线性插到目标）。延迟线前的耳机通路与 AFV 前的 ISO 通路
     //    从同一初值重放同一条递推（确定性，逐位相同），不用临时缓冲（Host 不用多分配）
@@ -707,8 +854,8 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
     if (to_hp) {
         float *hl = ctx->buses[SW_BUS_HEADPHONES].sum[0], *hr = ctx->buses[SW_BUS_HEADPHONES].sum[1];
         const bool pre_delay = ctx->monitor_point == SW_MONITOR_PRE_DELAY;
-        const float *sl = pre_delay ? slot->resampled[0] : slot->delayed[0];
-        const float *sr = ch >= 2 ? (pre_delay ? slot->resampled[1] : slot->delayed[1]) : sl;
+        const float *sl = pre_delay ? pre_delay0 : slot->delayed[0];        // 延迟线前 = 效果后、延迟线前（W1-D3）
+        const float *sr = ch >= 2 ? (pre_delay ? pre_delay1 : slot->delayed[1]) : sl;
         if (solo_active && ctx->monitor_mode == SW_MONITOR_PFL) {
             for (uint32_t n = 0; n < frames; n++) { hl[n] += sl[n]; hr[n] += sr[n]; }
         } else if (!pre_delay) {
@@ -790,42 +937,18 @@ static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t fra
 // 总线：效果链 → 增益 → 表 → 输出
 // ---------------------------------------------------------------------------
 
-static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, float *out_l, float *out_r) SW_NONBLOCKING {
+/// out_l / out_r：这条总线自己的出口平面（NULL 不写）；mirror_l / mirror_r：同一份信号再写一对出口（监听来源 / 借 Master，W1-D3）。
+static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, float *out_l, float *out_r,
+                           float *mirror_l, float *mirror_r) SW_NONBLOCKING {
     sw_bus_state *bus = &ctx->buses[b];
     float *cur[SW_MIX_BUS_CHANNELS] = { bus->sum[0], bus->sum[1] };
     float *other[SW_MIX_BUS_CHANNELS] = { bus->work[0], bus->work[1] };
 
-    // 效果链：EQ → Dynamics → Limiter，各自可旁路；AU 从输入回调拿 cur，写到 other，然后交换
+    // 效果链：三格按 0 → 1 → 2，各自可旁路；每格是 AU（输入回调拿 cur、写 other）或自写压缩器，然后交换（sw_fx_slot_process）
     for (uint32_t e = 0; e < SW_MIX_EFFECTS_PER_BUS; e++) {
         sw_effect_slot *fx = &bus->fx[e];
-        if (!fx->enabled || fx->unit == NULL) continue;
-        fx->in[0] = cur[0]; fx->in[1] = cur[1]; fx->in_frames = frames;
-        AudioUnitRenderActionFlags flags = 0;
-        AudioTimeStamp ts;
-        memset(&ts, 0, sizeof ts);
-        ts.mSampleTime = (Float64)bus->sample_time;
-        ts.mFlags = kAudioTimeStampSampleTimeValid;
-        AudioBufferList *list = &fx->out_list.list;
-        list->mNumberBuffers = 2;
-        AudioBuffer *bufs = list->mBuffers;
-        for (uint32_t c = 0; c < SW_MIX_BUS_CHANNELS; c++) {
-            bufs[c].mNumberChannels = 1;
-            bufs[c].mDataByteSize = (UInt32)(frames * sizeof(float));
-            bufs[c].mData = other[c];
-        }
-        const OSStatus st = sw_rt_audio_unit_render(fx->unit, &flags, &ts, 0, frames, list);
-        if (st != noErr) {
-            // 渲染失败：旁路本格（拷贝），不中断
-            memcpy(other[0], cur[0], (size_t)frames * sizeof(float));
-            memcpy(other[1], cur[1], (size_t)frames * sizeof(float));
-        } else if (bufs[0].mData != other[0] || bufs[1].mData != other[1]) {
-            // AU 可能把 mData 换成自己的缓冲：拷回来
-            memcpy(other[0], bufs[0].mData, (size_t)frames * sizeof(float));
-            memcpy(other[1], bufs[1].mData, (size_t)frames * sizeof(float));
-        }
-        float *t0 = cur[0], *t1 = cur[1];
-        cur[0] = other[0]; cur[1] = other[1];
-        other[0] = t0; other[1] = t1;
+        if (!fx->enabled) continue;
+        sw_fx_slot_process(fx, cur, other, NULL, frames, bus->sample_time, ctx->gain_smooth_k);
     }
     bus->sample_time += frames;
 
@@ -881,9 +1004,11 @@ static void sw_process_bus(struct sw_mix_ctx *ctx, uint32_t b, uint32_t frames, 
         }
     }
 
-    // 写输出
+    // 写输出（自己的出口 + 监听选路要的镜像出口）
     if (out_l) memcpy(out_l, l, (size_t)frames * sizeof(float));
     if (out_r) memcpy(out_r, r, (size_t)frames * sizeof(float));
+    if (mirror_l) memcpy(mirror_l, l, (size_t)frames * sizeof(float));
+    if (mirror_r) memcpy(mirror_r, r, (size_t)frames * sizeof(float));
 
     // 消费者队列
     const float *planes[SW_MIX_BUS_CHANNELS] = { l, r };
@@ -943,9 +1068,25 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
         sw_process_input(ctx, i, frames, host_time, slot_xf[i], slot_xf_end[i] == 0 ? -1.0f : (slot_xf_end[i] == 1 ? 0.0f : 1.0f), solo_active);
     }
 
-    // 4. 总线
-    for (uint32_t b = 0; b < SW_MIX_BUS_COUNT; b++) {
-        sw_process_bus(ctx, b, frames, out ? out[2 * b] : NULL, out ? out[2 * b + 1] : NULL);
+    // 4. 总线 + 出口选路（W1-D3；提案 026 / X09）：
+    //    耳机出口（out 平面 6 / 7）= 有独听时耳机总线（只有独听的路），否则所选总线（Master / A / B；选了耳机总线自己 = 旧行为）；
+    //    借 Master 开着且有独听时 Master 出口（平面 0 / 1）= 耳机总线。只改写哪对平面，消费者队列 / 表 / 总线自身的处理不变，不多拷一块。
+    {
+        const uint32_t ms = ctx->monitor_source;
+        const bool hp_own = solo_active || ms >= SW_BUS_HEADPHONES;    // 耳机出口放耳机总线自己
+        const bool borrow = ctx->borrow_master != 0 && solo_active;    // Master 出口放耳机总线
+        for (uint32_t b = 0; b < SW_MIX_BUS_COUNT; b++) {
+            float *o_l = out ? out[2 * b] : NULL, *o_r = out ? out[2 * b + 1] : NULL;
+            float *m_l = NULL, *m_r = NULL;
+            if (b == SW_BUS_HEADPHONES) {
+                if (!hp_own) { o_l = NULL; o_r = NULL; }
+                if (borrow && out) { m_l = out[2 * SW_BUS_MASTER]; m_r = out[2 * SW_BUS_MASTER + 1]; }
+            } else {
+                if (b == SW_BUS_MASTER && borrow) { o_l = NULL; o_r = NULL; }
+                if (!hp_own && b == ms && out) { m_l = out[2 * SW_BUS_HEADPHONES]; m_r = out[2 * SW_BUS_HEADPHONES + 1]; }
+            }
+            sw_process_bus(ctx, b, frames, o_l, o_r, m_l, m_r);
+        }
     }
 
     // 5. 表快照（seqlock）

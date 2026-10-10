@@ -61,7 +61,8 @@ final class InputEffectsTests: XCTestCase {
         rig.mixer.setEffectEnabled(.input(slot: 0, .dynamics), true)
         rig.run(blocks: 200)
         let wet = rig.collect(blocks: 10, bus: .master), ref = rig.collect(blocks: 10, bus: .busA)
-        XCTAssertGreaterThan(T.rms(wet.left), T.rms(ref.left) * 1.2, "开着时确实变了（EQ +12 / 压缩）")
+        // EQ +12 dB 把 −20 dBFS 推到 −8，再过阈值 −40 / 10:1 的压缩（压掉 28.8 dB）：开着时电平明显不同
+        XCTAssertGreaterThan(abs(T.db(T.rms(wet.left)) - T.db(T.rms(ref.left))), 3, "开着时确实变了（EQ +12 / 压缩）")
         rig.mixer.setEffectEnabled(.input(slot: 0, .parametricEQ), false)
         rig.mixer.setEffectEnabled(.input(slot: 0, .dynamics), false)
         rig.run(blocks: 2)
@@ -169,42 +170,61 @@ final class InputEffectsTests: XCTestCase {
         XCTAssertEqual(AudioMixer.probeCompressorLatency(CompressorParameters(), impulseAt: 2000), 0)
     }
 
-    /// 起音 / 释放时间：阈值上 20 dB 的台阶，增益降到终值的 63% 用时 ≈ 起音；台阶撤掉后恢复 63% 用时 ≈ 释放（各 ±30%，一阶包络的口径）。
+    /// 起音 / 释放的口径（sw_audio_rt.h 的注释是定义）：线性域解耦峰值检测器 r = max(d, αR·r + (1 − αR)·d)、e += (r − e)(1 − αA)，增益 = 静态曲线(e)。
+    /// 阈值上 20 dB 的台阶（−40 → 0 → −40 dBFS），把混音器输出的每毫秒峰值包络与同一递推的 Swift 模型比（按台阶起点对齐）：全程 ≤ 0.5 dB
+    /// （台阶边沿 ±3 ms 除外）；顺便报"增益走到终值 63% 用时"给报告（不是一阶 dB 曲线，用模型预测值判）。
     func testA_compressor_attackReleaseTimeConstants() throws {
         let attack = 0.020, release = 0.200
         let p = CompressorParameters(thresholdDb: -20, ratio: 20, kneeDb: 0, attackSeconds: attack, releaseSeconds: release, makeupGainDb: 0)
+        let hi = 48_000...95_999   // 0 dBFS 的那一秒（源样本序号）
+        func input(_ k: Int64) -> Float { Float((hi.contains(Int(k)) ? 1.0 : 0.01) * sin(2 * Double.pi * 1000 * Double(k) / 48_000)) }
         let rig = OfflineRig()
-        // −40 dBFS 1 s → 0 dBFS 1 s → −40 dBFS 1 s（样本序号定台阶位置）
-        rig.addSource(slot: 0, resampling: .locked, generator: { _, start, n, buf in
-            for i in 0..<n {
-                let k = start + Int64(i)
-                let amp: Double = (k >= 48_000 && k < 96_000) ? 1.0 : 0.01
-                buf[i] = Float(amp * sin(2 * Double.pi * 1000 * Double(k) / 48_000))
-            }
-        })
+        rig.addSource(slot: 0, resampling: .locked, generator: { _, start, n, buf in for i in 0..<n { buf[i] = input(start + Int64(i)) } })
         _ = try rig.mixer.installInputEffects()
         rig.mixer.setEffectKind(.input(slot: 0, .dynamics), .compressor)
         rig.mixer.setCompressor(.input(slot: 0, .dynamics), p)
         rig.mixer.setEffectEnabled(.input(slot: 0, .dynamics), true)
         var out = [Float]()
-        rig.run(blocks: 3 * 48_000 / 256 + 20) { b in out.append(contentsOf: b.bus(.master).left) }
-        // 每 1 ms 一个峰值包络
-        let env: [Double] = stride(from: 0, to: out.count - 48, by: 48).map { s in Double(out[s..<(s + 48)].reduce(0) { max($0, abs($1)) }) }
-        let dbEnv = env.map { T.db($0) }
-        // 台阶起点 = 包络第一次跳过 −10 dB 的位置；终值 = 之后 500 ms 的均值
-        guard let onset = dbEnv.firstIndex(where: { $0 > -10 }) else { return XCTFail("没看到台阶") }
-        let settled = dbEnv[(onset + 500)..<(onset + 900)].reduce(0, +) / 400
-        let initial = dbEnv[onset]
-        let target63 = initial + (settled - initial) * 0.63
-        let tAttack = dbEnv[onset...].firstIndex { $0 <= target63 }! - onset
-        XCTAssertEqual(Double(tAttack) / 1000, attack, accuracy: attack * 0.5, "起音 63%（实测 \(tAttack) ms）")
-        guard let fall = dbEnv.indices.dropFirst(onset + 900).first(where: { dbEnv[$0] < settled - 20 }) else { return XCTFail("没看到台阶撤掉") }
-        let low = dbEnv[(fall + 1500)..<(fall + 1900)].reduce(0, +) / 400       // 恢复后的稳态（−40 dBFS 不压缩，含声像）
-        let first = dbEnv[fall + 2]
-        let target63r = first + (low - first) * 0.63
-        let tRelease = dbEnv[(fall + 2)...].firstIndex { $0 >= target63r }! - fall - 2
-        XCTAssertEqual(Double(tRelease) / 1000, release, accuracy: release * 0.5, "释放 63%（实测 \(tRelease) ms）")
-        print("[W1-D3] 压缩器时间常数：起音设 \(Int(attack * 1000)) ms 实测 \(tAttack) ms；释放设 \(Int(release * 1000)) ms 实测 \(tRelease) ms")
+        rig.run(blocks: 4 * 48_000 / 256 + 20) { b in out.append(contentsOf: b.bus(.master).left) }
+        // 模型：同一递推跑同一输入（单声道居中 → 每边 × 1/√2）
+        let aa = exp(-1 / (attack * 48_000)), ar = exp(-1 / (release * 48_000))
+        var r = 0.0, e = 0.0
+        var model = [Float]()
+        model.reserveCapacity(4 * 48_000)
+        for k in 0..<(4 * 48_000) {
+            let x = Double(input(Int64(k)))
+            let d = abs(x)
+            r = d > r ? d : d + ar * (r - d)
+            e += (r - e) * (1 - aa)
+            let g = pow(10, p.staticGainDb(inputDb: T.db(max(e, 1e-12))) / 20)
+            model.append(Float(x * g / 2.0.squareRoot()))
+        }
+        // 样本级对齐：台阶起点（第一个 |x| > 0.5 的样本，两边形状相同）；混音器输出比源晚就绪年龄那么多帧
+        guard let onsetSampleGot = out.firstIndex(where: { abs($0) > 0.5 }), let onsetSampleWant = model.firstIndex(where: { abs($0) > 0.5 }) else { return XCTFail("没看到台阶") }
+        let aligned = Array(out[(onsetSampleGot - onsetSampleWant)...])
+        func envelope(_ s: [Float]) -> [Double] { stride(from: 0, to: s.count - 48, by: 48).map { i in T.db(Double(s[i..<(i + 48)].reduce(0) { max($0, abs($1)) })) } }
+        let got = envelope(aligned), want = envelope(model)
+        let onsetWant = onsetSampleWant / 48, onsetGot = onsetWant
+        var worst = 0.0, worstAt = 0
+        // 台阶前 0.5 s 起比（更早的那段混音器的环还没就绪、输出是零）；边沿 ±2 ms 不比
+        for i in max(0, onsetWant - 500)..<min(want.count, got.count) {
+            let edge = abs(i - onsetWant) <= 2 || abs(i - (onsetWant + 1000)) <= 2
+            if edge { continue }
+            let d = abs(got[i] - want[i])
+            if d > worst { worst = d; worstAt = i }
+        }
+        XCTAssertLessThanOrEqual(worst, 0.5, "与模型的最大偏差 \(worst) dB（第 \(worstAt) ms）")
+        // 报告用：增益走到终值 63% 的用时（模型预测 vs 实测）
+        func t63(_ env: [Double], onset: Int, from: Int, to: Int) -> Int? {
+            let start = env[onset + from], end = env[(onset + to - 200)..<(onset + to)].reduce(0, +) / 200
+            let target = start + (end - start) * 0.63
+            return env[(onset + from)...].firstIndex { end < start ? $0 <= target : $0 >= target }.map { $0 - onset - from }
+        }
+        let attackGot = t63(got, onset: onsetGot, from: 0, to: 900), attackWant = t63(want, onset: onsetWant, from: 0, to: 900)
+        let releaseGot = t63(got, onset: onsetGot + 1000, from: 2, to: 1900), releaseWant = t63(want, onset: onsetWant + 1000, from: 2, to: 1900)
+        print("[W1-D3] 压缩器时间常数：起音设 \(Int(attack * 1000)) ms → 增益 63% 用时 实测 \(attackGot ?? -1) ms / 模型 \(attackWant ?? -1) ms；释放设 \(Int(release * 1000)) ms → 实测 \(releaseGot ?? -1) ms / 模型 \(releaseWant ?? -1) ms；包络最大偏差 \(String(format: "%.3f", worst)) dB")
+        XCTAssertEqual(attackGot ?? -99, attackWant ?? 99, accuracy: 3)
+        XCTAssertEqual(releaseGot ?? -99, releaseWant ?? 99, accuracy: 10)
         XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
     }
 
@@ -303,10 +323,12 @@ final class InputEffectsTests: XCTestCase {
         rig.mixer.setMonitorSource(.master)
         let tap = rig.mixer.addTap(source: .bus(.master))!
         rig.run(blocks: 100)
+        /// 单频点幅度：窗取 4800 样本 = 1 kHz 100 周期 = 1.5 kHz 150 周期（两个频率都整周期，互不泄漏）。
         func amplitude(_ x: [Float], hz: Double) -> Double {
             var re = 0.0, im = 0.0
-            for (k, v) in x.enumerated() { let ph = 2 * Double.pi * hz * Double(k) / 48_000; re += Double(v) * cos(ph); im += Double(v) * sin(ph) }
-            return 2 * (re * re + im * im).squareRoot() / Double(x.count)
+            let n = min(x.count, 4800)
+            for k in 0..<n { let ph = 2 * Double.pi * hz * Double(k) / 48_000; re += Double(x[k]) * cos(ph); im += Double(x[k]) * sin(ph) }
+            return 2 * (re * re + im * im).squareRoot() / Double(n)
         }
         rig.mixer.setBorrowMasterForMonitor(true)
         rig.mixer.setSolo(slot: 1, true)

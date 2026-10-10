@@ -127,6 +127,58 @@ static void sw_rate_state_init(sw_rate_state *r, const sw_rate_params *p, uint32
     r->ratio = 1.0;
 }
 
+// ---------------------------------------------------------------------------
+// 自写压缩器的非实时侧（提案 024 (b)）与效果格初始化
+// ---------------------------------------------------------------------------
+
+float sw_compressor_alpha(double seconds, uint32_t sample_rate) {
+    if (seconds <= 0 || sample_rate == 0) return 0.0f;
+    return (float)exp(-1.0 / (seconds * (double)sample_rate));
+}
+
+void sw_compressor_init_defaults(sw_compressor *c, uint32_t sample_rate) {
+    memset(c, 0, sizeof *c);
+    c->threshold_db = -20.0f;
+    c->inv_ratio = 0.25f;
+    c->knee_db = 6.0f;
+    c->alpha_attack = sw_compressor_alpha(0.005, sample_rate);
+    c->alpha_release = sw_compressor_alpha(0.1, sample_rate);
+    c->makeup_lin = 1.0f;
+    sw_compressor_update_derived(c);
+}
+
+/// 一格效果的初值：没装 AU、关着、跑 AU、压缩器默认参数、输出增益 1。
+static void sw_fx_slot_init(sw_effect_slot *fx, uint32_t sample_rate) {
+    memset(fx, 0, sizeof *fx);
+    fx->kind = SW_FX_KIND_AU;
+    fx->post_gain = fx->post_gain_target = 1.0f;
+    sw_compressor_init_defaults(&fx->comp, sample_rate);
+}
+
+int sw_compressor_probe_latency(const sw_compressor *params, uint32_t impulse_at, uint32_t frames) {
+    if (!params || frames == 0 || impulse_at >= frames) return -1;
+    sw_compressor c = *params;
+    c.env_release = 0; c.env = 0;
+    float *in = (float *)calloc(frames, sizeof(float));
+    float *out = (float *)calloc(frames, sizeof(float));
+    if (!in || !out) { free(in); free(out); return -1; }
+    in[impulse_at] = 0.25f;
+    for (uint32_t pos = 0; pos < frames; pos += 256u) {
+        const uint32_t n = frames - pos < 256u ? frames - pos : 256u;
+        const float *ip[1] = { in + pos };
+        float *op[1] = { out + pos };
+        sw_compressor_process(&c, ip, op, 1, n);
+    }
+    int peak = -1;
+    float best = 0.0f;
+    for (uint32_t i = 0; i < frames; i++) {
+        const float a = fabsf(out[i]);
+        if (a > best) { best = a; peak = (int)i; }
+    }
+    free(in); free(out);
+    return peak < 0 ? -1 : peak - (int)impulse_at;
+}
+
 static int sw_slot_alloc(sw_mix_ctx *ctx, sw_input_slot *slot) {
     const uint32_t mb = ctx->max_block_frames;
     slot->delay.capacity = sw_pow2_ceil_u32(SW_MIX_MAX_DELAY_FRAMES + mb);
@@ -136,7 +188,8 @@ static int sw_slot_alloc(sw_mix_ctx *ctx, sw_input_slot *slot) {
         slot->resampled[c] = (float *)calloc(mb, sizeof(float));
         slot->delayed[c] = (float *)calloc(mb, sizeof(float));
         slot->post[c] = (float *)calloc(mb, sizeof(float));
-        if (!slot->delay.buf[c] || !slot->resampled[c] || !slot->delayed[c] || !slot->post[c]) return -1;
+        slot->fxwork[c] = (float *)calloc(mb, sizeof(float));
+        if (!slot->delay.buf[c] || !slot->resampled[c] || !slot->delayed[c] || !slot->post[c] || !slot->fxwork[c]) return -1;
         slot->pull[c].slot = slot;
         slot->pull[c].channel = c;
         int err = 0;
@@ -149,13 +202,14 @@ static int sw_slot_alloc(sw_mix_ctx *ctx, sw_input_slot *slot) {
     slot->afv = slot->afv_target = 1.0f;
     slot->pan = slot->pan_target = 0.0f;
     slot->routing = SW_ROUTE_MASTER;
+    for (uint32_t k = 0; k < SW_MIX_EFFECTS_PER_INPUT; k++) sw_fx_slot_init(&slot->fx[k], ctx->sample_rate);
     sw_rate_state_init(&slot->rate, &ctx->rate_defaults, ctx->sample_rate, ctx->default_block_frames);
     return 0;
 }
 
 static void sw_slot_free(sw_input_slot *slot) {
     for (uint32_t c = 0; c < SW_MIX_BUS_CHANNELS; c++) {
-        free(slot->delay.buf[c]); free(slot->resampled[c]); free(slot->delayed[c]); free(slot->post[c]);
+        free(slot->delay.buf[c]); free(slot->resampled[c]); free(slot->delayed[c]); free(slot->post[c]); free(slot->fxwork[c]);
         if (slot->src[c]) src_delete(slot->src[c]);
     }
 }
@@ -174,6 +228,7 @@ sw_mix_ctx *sw_mix_ctx_create(const sw_mix_ctx_config *config) {
     if (ctx->resampler_chunk > ctx->max_block_frames) ctx->resampler_chunk = ctx->max_block_frames;
     ctx->resampler_converter_saved = config->resampler_converter;
     ctx->host_ticks_per_frame = config->host_ticks_per_frame;
+    ctx->monitor_source = SW_BUS_HEADPHONES;   // 耳机出口默认 = 耳机总线自己（W1-D3 之前的行为）；集成层按 AudioState.monitorSource 改
     // 增益 / AFV 目标的一阶平滑：τ = 3 ms（无 zipper 噪声，21 ms 内到 0.1%）
     ctx->gain_smooth_k = (float)(1.0 - exp(-1.0 / (0.003 * (double)ctx->sample_rate)));
     ctx->rate_defaults = config->rate.loop_tau_s > 0 ? config->rate : sw_rate_params_default(ctx->default_block_frames);
@@ -210,6 +265,7 @@ sw_mix_ctx *sw_mix_ctx_create(const sw_mix_ctx_config *config) {
         bus->interleaved = (float *)calloc((size_t)ctx->max_block_frames * SW_MIX_BUS_CHANNELS, sizeof(float));
         if (!bus->interleaved) { sw_mix_ctx_destroy(ctx); return NULL; }
         bus->gain = bus->gain_target = 1.0f;
+        for (uint32_t e = 0; e < SW_MIX_EFFECTS_PER_BUS; e++) sw_fx_slot_init(&bus->fx[e], ctx->sample_rate);
         // 直方图模式：实时线程里不分配（非直方图模式每个 gating block 会 malloc 链表节点）
         bus->meter = ebur128_init(SW_MIX_BUS_CHANNELS, ctx->sample_rate,
                                   EBUR128_MODE_M | EBUR128_MODE_S | EBUR128_MODE_I | EBUR128_MODE_LRA |
@@ -238,9 +294,20 @@ void sw_mix_ctx_destroy(sw_mix_ctx *ctx) {
     free(ctx);
 }
 
-int sw_mix_ctx_install_effect(sw_mix_ctx *ctx, uint32_t bus, uint32_t effect, void *audio_unit) {
-    if (!ctx || bus >= SW_MIX_BUS_COUNT || effect >= SW_MIX_EFFECTS_PER_BUS || !audio_unit) return -1;
-    sw_effect_slot *fx = &ctx->buses[bus].fx[effect];
+/// 找到一格（宿主 + 编号 + 格号越界给 NULL）。Host 侧的那一份；RT 侧 sw_mix.c 有同样的查法。
+static sw_effect_slot *sw_host_fx_slot(sw_mix_ctx *ctx, uint32_t target, uint32_t index, uint32_t slot) {
+    if (!ctx) return NULL;
+    if (target == SW_FX_TARGET_INPUT) {
+        if (index >= ctx->input_capacity || slot >= SW_MIX_EFFECTS_PER_INPUT) return NULL;
+        return &ctx->inputs[index].fx[slot];
+    }
+    if (index >= SW_MIX_BUS_COUNT || slot >= SW_MIX_EFFECTS_PER_BUS) return NULL;
+    return &ctx->buses[index].fx[slot];
+}
+
+int sw_mix_ctx_install_effect_at(sw_mix_ctx *ctx, uint32_t target, uint32_t index, uint32_t slot, void *audio_unit) {
+    sw_effect_slot *fx = sw_host_fx_slot(ctx, target, index, slot);
+    if (!fx || !audio_unit) return -1;
     AURenderCallbackStruct cb;
     cb.inputProc = sw_effect_input_proc;
     cb.inputProcRefCon = fx;
@@ -250,11 +317,33 @@ int sw_mix_ctx_install_effect(sw_mix_ctx *ctx, uint32_t bus, uint32_t effect, vo
     return 0;
 }
 
-void sw_mix_ctx_remove_effect(sw_mix_ctx *ctx, uint32_t bus, uint32_t effect) {
-    if (!ctx || bus >= SW_MIX_BUS_COUNT || effect >= SW_MIX_EFFECTS_PER_BUS) return;
-    sw_effect_slot *fx = &ctx->buses[bus].fx[effect];
+void sw_mix_ctx_remove_effect_at(sw_mix_ctx *ctx, uint32_t target, uint32_t index, uint32_t slot) {
+    sw_effect_slot *fx = sw_host_fx_slot(ctx, target, index, slot);
+    if (!fx) return;
     fx->enabled = 0;
     __atomic_store_n(&fx->unit, (AudioUnit)NULL, __ATOMIC_RELEASE);
+}
+
+int sw_mix_ctx_install_effect(sw_mix_ctx *ctx, uint32_t bus, uint32_t effect, void *audio_unit) {
+    return sw_mix_ctx_install_effect_at(ctx, SW_FX_TARGET_BUS, bus, effect, audio_unit);
+}
+
+void sw_mix_ctx_remove_effect(sw_mix_ctx *ctx, uint32_t bus, uint32_t effect) {
+    sw_mix_ctx_remove_effect_at(ctx, SW_FX_TARGET_BUS, bus, effect);
+}
+
+/// 调用方保证实时线程此刻不 render 这一格（格关着且已确认 / 槽位空闲且 detach 已确认）。
+static void sw_host_fx_reset_state(sw_effect_slot *fx) {
+    AudioUnit u = __atomic_load_n(&fx->unit, __ATOMIC_ACQUIRE);
+    if (u) AudioUnitReset(u, kAudioUnitScope_Global, 0);
+    fx->comp.env_release = 0;
+    fx->comp.env = 0;
+    fx->post_gain = fx->post_gain_target;
+}
+
+void sw_mix_ctx_reset_effect_state(sw_mix_ctx *ctx, uint32_t target, uint32_t index, uint32_t slot) {
+    sw_effect_slot *fx = sw_host_fx_slot(ctx, target, index, slot);
+    if (fx) sw_host_fx_reset_state(fx);
 }
 
 bool sw_mix_ctx_push_command(sw_mix_ctx *ctx, const sw_cmd *cmd) {
@@ -305,6 +394,15 @@ void sw_mix_ctx_prepare_slot(sw_mix_ctx *ctx, uint32_t slot_index) {
     slot->delay.write_pos = 0;
     slot->consumed = 0;
     memset(&slot->st, 0, sizeof slot->st);
+    // W1-D3：两格效果回到"关着、跑 AU、增益 1"，AU / 压缩器状态清零（槽位空闲、detach 已确认时才会被调到：AudioEngine 等确认后才把槽位还给空闲表）
+    for (uint32_t k = 0; k < SW_MIX_EFFECTS_PER_INPUT; k++) {
+        sw_effect_slot *fx = &slot->fx[k];
+        fx->enabled = 0;
+        fx->kind = SW_FX_KIND_AU;
+        fx->post_gain_target = 1.0f;
+        sw_host_fx_reset_state(fx);
+    }
+    slot->fx_sample_time = 0;
 }
 
 uint32_t sw_mix_ctx_input_capacity(const sw_mix_ctx *ctx) { return ctx->input_capacity; }
