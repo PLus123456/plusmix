@@ -8,8 +8,9 @@ import SwitcherEngine
 /// 打戳用 tickTime（节目输出时间线，ISO 音轨的输入来源同样平移 +L）；L = 0 时两者相等，与以前相同。
 /// 30 fps 的输入在 60 fps 节目里同一帧被录两次（与 PGM 里显示它时一样）；这一路还没有任何帧时这一拍没有输出（只计数）。
 ///
-/// 线程：`consume` 在引擎派发线程上被调（一个线程，MetalRenderer 的完成线程），做的事只有一次无锁挑帧 + 一次 `sink.consume`
-/// （Recorder 的 consume 只入队），零分配（RenderedFrame 是值类型）。分支槽的唯一消费者就是这条线程。
+/// 线程：`consume` 在引擎派发线程上被调（MetalRenderer 的完成线程；视频延后 > 0 时是引擎的派发线程，两条线程交接有 acquire / release、
+/// 从不同时调），做的事只有一次无锁挑帧 + 一次 `sink.consume`（Recorder 的 consume 只入队），零分配（RenderedFrame 是值类型）。
+/// 分支槽的唯一消费者就是"当时在派发的那条线程"。
 public final class ISOFrameTap: FrameConsumer, @unchecked Sendable {
     /// 输入编号。
     public let inputNumber: Int

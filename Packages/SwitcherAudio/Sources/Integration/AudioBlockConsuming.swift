@@ -6,6 +6,8 @@ import SwitcherContracts
 /// Recorder / StreamOutput / NDISender 直接实现契约协议，组装方不再需要空扩展。
 /// 线程规则：在泵线程（非实时）上被调，必须立即返回（只拷进自己的有界缓冲）；永远不在音频实时回调里被调。
 /// `hostTime` = 这块首样本的 host time，已按对齐延迟修正到"内容被采集的时刻"，与视频拍点同一时基（PTS 直接用）。
+/// 补偿方式 videoDelay 生效时（W1-B4，提案 028）是节目输出时间线上的时刻 = 采集 + L_m（Master 当前效果链延迟），
+/// 与引擎交出去的 `RenderedFrame.tickTime`（= 拍点 + L）同一条线；audioPTS 或没接视频引擎时就是采集时刻。
 public typealias AudioBlockConsuming = AudioBlockConsumer
 
 /// 消费者从哪里取块。

@@ -222,7 +222,12 @@ public final class Engine: @unchecked Sendable, ProgramClockHandler, RenderSink,
             throw error
         }
         clockStartLag = max(.zero, HostClock.now() - clock.spec.time(of: firstTick))
-        try clock.start(handler: self, firstTick: firstTick, lastTick: lastTick)
+        do {
+            try clock.start(handler: self, firstTick: firstTick, lastTick: lastTick)
+        } catch {
+            videoDelayLine.stop()   // 派发线程已经起了：时钟起不来就收回去，不留一条空转的实时线程
+            throw error
+        }
     }
 
     /// 停引擎：时钟停 → 渲染器 shutdown（完成回调全部到过）→ 延迟队列里剩下的帧派完、派发线程停 → 状态机线程停。
