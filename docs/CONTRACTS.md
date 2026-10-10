@@ -161,7 +161,7 @@ AUNBandEQ 的带宽参数就是这个定义（设计方案 §7 原来对的 AUPa
 | `TransitionState` | {type, durationTicks, progress 0–1, source auto/tbar, startTick, wipe, stinger}；空闲时 type/duration 就是"下一次转场"的选择；wipe / stinger 由 `setTransitionParams` 改（提案 016，转场进行中被拒）；进行中（isActive：auto 从应用命令那一拍到对调前一拍、T-bar 推杆在 (0, 1)）拒收 fade / setTransition / setTransitionParams / autoTransition / setPreview / setProgram，cut（立即完成）与 tbar（接管）照收（提案 023）；`stinger.input` 在 removeInput 删掉那一路时置 nil（P4） | 状态机 | 渲染 | — |
 | `FadeToBlack` | {on 目标, durationTicks, level 当前黑比例, startTick} | 状态机 | 渲染、音频（可选淡出 Master） | — |
 | `OverlayState` | {input?, on 目标, rect, animProgress 0–1, animation, startTick, border?, anchor, previewOn}（提案 010）；`isVisible` | 状态机 | 渲染 | — |
-| `OverlayAnimation` | {kind, durationTicks, slideFrom?}（提案 010：slideFrom nil = 离 rect 最近的边） | 状态机 | 渲染 | — |
+| `OverlayAnimation` | {kind, durationTicks, slideFrom?}（提案 010：slideFrom nil = 离 rect 最近的边）；`OverlayAnimation()` = cut 0 拍不变；**新节目**四路叠加默认 = `OverlayAnimation.defaultFade(for: format)` = fade、round(0.5 s × 帧率) 拍（提案 027，用户 2026-10-10 批）：`MixerState.newShow(format:outputs:)` 建出来就是它，App 的 emptyShow 也调它；老文件的 animation 照读 | 状态机 | 渲染 | — |
 | `OverlayBorder` / `OverlayAnchor` / `OverlayEdge` | {width 占节目高的比例（渲染器钳 0–0.1，界面只给到 0.05，更宽的只能从 API / 节目文件给）, color} / 九宫格锚点 / {left, right, top, bottom}（提案 010） | 同上 | 渲染 | — |
 | `AudioState` | {buses[4] 顺序 = Bus.allCases, afv 总开关, monitorMode, alignmentFrames = 2048, monitorPoint}（提案 007） | 状态机 | 混音、UI | — |
 | `MonitorPoint` | {preDelayLine（默认）, postDelayLine}：耳机 / 监听总线取对齐延迟线之前还是之后（提案 007） | Show / 设置面板 | 集成层填 `AudioEngineConfiguration` | — |

@@ -162,6 +162,15 @@ public struct OverlayAnimation: Hashable, Codable, Sendable {
 
     /// JSON 键名。
     public static let jsonKeys = ["kind", "durationTicks", "slideFrom"]
+
+    /// 新节目四路叠加的默认进出动画时长（秒，提案 027，用户 2026-10-10 批）；按节目帧率换成拍存，见 `defaultFade(for:)`。
+    public static let defaultFadeSeconds = 0.5
+    /// 新节目的默认叠加动画（提案 027）：fade，round(0.5 s × 帧率) 拍（60 / 59.94 → 30、30 / 29.97 → 15、25 → 13、50 → 25、24 → 12）。
+    /// `OverlayAnimation()` 无参默认仍是 cut 0 拍（它不知道帧率；API / 脚本直接构造的不受影响）；已存文件里的 animation 照读不变。
+    /// App 新建节目（emptyShow）、`MixerState.newShow(format:outputs:)` 都用它，三方一致。
+    public static func defaultFade(for format: ProgramFormat) -> OverlayAnimation {
+        OverlayAnimation(kind: .fade, durationTicks: Int((defaultFadeSeconds * format.frameRate.approximateFramesPerSecond).rounded()))
+    }
 }
 
 /// 画中画边框（提案 010）。
@@ -720,6 +729,16 @@ public struct MixerState: Hashable, Codable, Sendable {
         self.overlays = overlays
         self.audio = audio
         self.outputs = outputs
+    }
+
+    /// 新节目的默认状态（提案 027，用户 2026-10-10 批）：`MixerState(format:outputs:)` 再把四路叠加的进出动画设成 `OverlayAnimation.defaultFade(for: format)`
+    /// （淡入淡出 0.5 s，按帧率换拍）；其余字段与 `init` 的默认相同。App 新建节目、API / headless 建新节目都从这里拿，叠加行为三方一致；
+    /// `MixerState()` / `MixerState(format:)` 的默认（cut 0 拍）不变——它们是测试与脚本的"裸状态"。
+    public static func newShow(format: ProgramFormat = .hd1080p60, outputs: [OutputState] = []) -> MixerState {
+        var s = MixerState(format: format, outputs: outputs)
+        let fade = OverlayAnimation.defaultFade(for: format)
+        for i in s.overlays.indices { s.overlays[i].animation = fade }
+        return s
     }
 
     /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复。

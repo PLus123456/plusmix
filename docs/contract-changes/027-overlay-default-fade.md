@@ -20,3 +20,11 @@ SwitcherContracts（MixerState 默认 overlays、工厂、测试 `testContracts_
 ## 怎么迁移
 
 不升 schemaVersion；已存文件里的 animation 照读不变；只影响新建的节目。
+
+## 落地记录（P5 / prompt 99，2026-10-10）
+
+落法：`OverlayAnimation.defaultFadeSeconds = 0.5` + `OverlayAnimation.defaultFade(for: ProgramFormat)`（fade，round(0.5 s × 帧率) 拍：60 / 59.94 → 30、30 / 29.97 → 15、25 → 13、50 → 25、24 → 12）
++ `MixerState.newShow(format:outputs:)`（= `MixerState(format:outputs:)` 再把四路叠加动画设成 defaultFade）。`OverlayAnimation()` 与 `MixerState()` / `MixerState(format:)` 的默认不动
+（它们是几十处测试与脚本的"裸状态"，改了会连带 Render / App 的断言）；App 的 `ShowDocuments.emptyShow` 改调 `MixerState.newShow`（App 胶水 5 行，`OverlaySettingsModel.defaultFadeSeconds` 留着没人读，
+归 101 / G8 顺手清）。headless 的 m0 / g3 / g4 / soak 工厂都显式给了每路叠加的动画（场景夹具），不改。
+用例 `Contracts027Tests.testContracts_newShowOverlayDefaultsToHalfSecondFade`；CONTRACTS.md §2.5 OverlayAnimation 行写明"新节目默认淡入 0.5 s；老文件照读"。`Show.schemaVersion` 不升。
