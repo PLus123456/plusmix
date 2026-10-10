@@ -1,43 +1,68 @@
 # Outputs
 
-The Output menu has six settings pages, one per output kind; the bottom-bar buttons (Record / Stream / Multiview / External / ISO…) are
-shortcuts into them. Every output has a number, a name, a "should be running" switch and its own settings. Runtime numbers
-(frames / bitrate / drops) live only in the status line and the API's `stats`, never in the show file.
+Each kind of output has a page in the "This Show" group of the [Settings](settings.md) window: Overview, Recording, ISO, Streaming, External Display, NDI® Output, Virtual Camera, Multiview Layout.
+The Output menu lists them, the ⚙ buttons in the bottom bar go straight to the right page, and the main buttons and ▴ menus in the bottom bar are the shortcuts for live operation ([Concepts › Bottom-bar buttons](concepts.md#bottom-bar-buttons)).
+
+Every output has a number, a name, a "should be running" switch and its own settings. Each section's title line reads "kind k · Output n" with a name field on the right (press Return or leave the field to rename).
+Runtime numbers (frames / bitrate / drops) live only in the status line, the statistics window and the API's `stats`, never in the show file.
 
 | Kind | Sends | How it starts |
 |---|---|---|
-| Recording | PGM, or one input (ISO) | Record button starts / stops all recordings together; shortcut / API `startRecord` |
-| Streaming | PGM | Stream button; `startStream` |
-| NDI output | PGM / PVW / multiview / one input | the "Send" switch on the NDI page; `setOutputEnabled` |
-| External display | PGM / PVW / multiview / one input (Aux) | External output menu / page; `setOutputEnabled` |
-| Virtual camera | **PGM** | Output › Virtual Camera › Enable; `setOutputEnabled` |
-| Multiview | the multiview picture (for downstream use) | Multiview page / `setOutputEnabled`; the layout is independent of the switch |
+| Recording | PGM, or one input (ISO) | Record in the bottom bar starts / stops them together; ▴ stops a single one; shortcut / API `startRecord` |
+| Streaming | PGM | Stream in the bottom bar, ▴ for a single destination, the switch on each destination; `startStream` |
+| NDI® output | PGM / PVW / multiview / one input | the "Send" switch on the NDI® Output page; `setOutputEnabled` |
+| External display | PGM / PVW / multiview / one input (Aux) | External Display in the bottom bar / toolbar, right-click a monitor › Show Fullscreen On; `setOutputEnabled` |
+| Virtual camera | **PGM** | Output › Virtual Camera › Enable / Disable; `setOutputEnabled` |
+| Multiview | the multiview picture (for downstream use) | Multiview Layout page / `setOutputEnabled`; the layout is independent of the switch |
+
+## 0. Overview
+
+Settings › Overview (Output › Output Overview…): one row per output in the show — kind, name, source, on / off, status, and "Details ›" at the right. Click a row to jump to its settings page and section.
+For recordings "On" means recording; for streams it means it should be live (the status says what is actually happening). The status reads the same statistics as the bottom bar and the control API.
 
 ## 1. Recording
 
-Output › Recording Settings…. Default directory `~/Movies/PlusMix`; a relative directory in the show file lives under it.
+Settings › Recording (⚙ Record › Recording Settings… in the bottom bar, or Output › Recording Settings…). The top of the page says "The bottom bar's Record button records n route(s) together: Recording, Recording 2, ISO 1…"; while recording it says "Recording: changes apply from the next recording."
+
+**Files (shared by all recordings)** — this section edits Recording 1 and the other recordings follow it:
 
 | Item | Notes |
 |---|---|
-| Directory, file name template | `{show}` `{date}` `{time}` `{output}`; default `{show}-{date}-{time}` |
-| File format | Always written as `.mov` first (1 s fragments: a killed process recovers up to the last fragment); for .mp4 enable "remux to MP4 after stop" (the .mov is kept if it fails). The "container .mp4" option on the recording page has no effect in 0.1.0 (the file is still .mov); the next version merges both into one "file format" choice (prompt 87) |
-| Video | H.264 / HEVC / ProRes 422 / 422 HQ / 4444 (hardware), bitrate, keyframe interval, size (default = program) |
-| Audio | AAC (160 kbps default) or PCM; audio = Master bus |
+| Directory | Default `~/Movies/PlusMix`; a relative directory in the show file lives under it. Long paths are shortened in the middle; hover for the full path |
+| File name pattern | `{show}` `{date}` `{time}` `{output}`; default `{show}-{date}-{time}`; an example is shown below. Recordings other than Recording 1 automatically get `-{output}` so names never collide |
+| File format | One choice: **".mov (written in fragments while recording; crash-recoverable)"** or **".mov, converted to .mp4 after stopping"**. Always written as .mov first (fragment by fragment: a killed process recovers up to the last fragment); if converting to .mp4 fails, the .mov is kept. A "container .mp4" written in an old show file has no effect (the page says so); this choice is what's used |
+| Fragment interval | 1 s by default |
 
+**Recording list**: one section per recording, "Recording k · Output n · name":
+
+| Item | Notes |
+|---|---|
+| Take part in recording | "Take part in recording (recorded when you press Record in the bottom bar)": off = the settings stay, but the bottom bar's Record button does not start it |
+| Source | PGM, or one input (its raw picture). PVW and multiview cannot be recording sources |
+| Encoding | Codec (H.264 / HEVC / ProRes 422 / 422 HQ / 4444, hardware), resolution (default = program), bitrate, keyframe interval, audio (AAC or PCM + bitrate); audio = the Master bus |
+| Status | The same wording as the bottom bar |
+| Remove this recording | Greyed out while recording |
+
+- "Add recording" at the bottom: a new recording records PGM; you can switch it to one input and give it its own format (for example a ProRes master plus a small H.264 file).
+- **New recordings get a bitrate based on the program format**: 1080p30 10 Mb/s, 1080p60 18, 1440p60 32, 2160p30 36 (59.94 / 29.97 use the 60 / 30 rows), otherwise about 0.15 bit per pixel per frame rounded (at least 4 Mb/s); audio AAC 256k.
+- **Recording 1** = the first recording whose source is PGM; the ISO routes use its format (below).
+- The Record button in the bottom bar: nothing recording → every route that takes part starts **on the same tick** (a shared start); something recording → stop all (asks first). With no recording in the show at all, one click adds a default one and starts it. ▴ stops a single route.
 - Encoder PTS is the tick time, so the file duration equals ticks × frame duration ([test standard](../../testing/en/README.md) E5); 20 normal stops
   and 10 kills during recording are covered by automated tests.
-- A show can hold several recording outputs (e.g. PGM as H.264 and as ProRes); the button starts them together on the same tick.
 
 ### ISO recording
 
-Output › ISO Recording… (or the ISO… button): each ticked input records its own file (source = that input's raw picture; encoding and
-directory copied from the PGM recording; the file name template gets `{output}` appended).
+Settings › ISO (⚙ Record › ISO Recording… in the bottom bar, or Output › ISO Recording…): a separate file per input.
 
+- At the top: "Format H.264 · 18 Mb/s · .mov (same as Recording 1)" with "Change format…", and the folder with "Change folder…" — **the ISO format and folder follow Recording 1**. When Recording 1 changes, ISO routes that are not recording follow right away; ones that are recording follow after they stop (from the next recording).
+- The table: rows = "PGM · Recording 1" + every input; columns = Rec (checkbox) / Name / Status / Dropped / Folder.
+  Checking an input adds a recording output for it (source = that input's raw picture; the file name pattern includes `{output}`); unchecking removes that ISO route.
+  **Unchecking the PGM row = Recording 1 doesn't take part = record ISO only.** Rows that are recording are locked (stop them to change). Audio-only / image inputs are hidden by default; "Show all inputs (n audio-only / image inputs hidden)" shows them.
 - Started and stopped on the same tick as PGM, sharing the start tick: measured 0.0–0.2 ms between files for the same event (A4 requires ≤ 1 frame).
 - The ISO audio track is that input after its fader and before AFV (recorded even when off air).
 - A 30 fps input recorded into a 60 fps program repeats each frame, on the same grid as PGM.
-- Each input has at most 4 branches (ISO / Aux windows / NDI input sources share them); the UI warns when they run out.
-- The page shows the directory, free space and an estimate of remaining time (sum of all recording bitrates).
+- Each input has at most 4 branches (ISO / Aux external displays / NDI® input sources share them); the UI warns when they run out.
+- The bottom of the page shows the folder, free space and an estimate of remaining time (sum of all recording bitrates).
 
 ### Disk protection
 
@@ -46,90 +71,136 @@ Every second the free space of each recording's volume is checked (external driv
 | Situation | Behaviour |
 |---|---|
 | Free space below 1 GB | Status line warns "recording n: x MB free" |
-| Below the minimum (200 MB by default; `--record-min-free-mb` or the `recordMinimumFreeMB` defaults key — 0.1.0 has no Preferences item for it) | **Only that recording stops**; streaming, rendering and other recordings continue |
-| Volume full / write error | That recording stops and keeps what was written; with a fallback directory (`--record-fallback`) it continues there from the next tick |
+| Below the minimum (200 MB by default; Settings › Advanced › Free space minimum, or the launch argument `--record-min-free-mb`) | **Only that recording stops**; streaming, rendering and other recordings continue. With a fallback folder it moves there and keeps recording |
+| Volume full / write error | That recording stops and keeps what was written; with a fallback folder (Settings › Advanced, or `--record-fallback`) it continues there from the next tick |
 
 Tested with a 50 MB disk image and two 40 Mbps recordings filling it ([test standard](../../testing/en/README.md) S7).
 
 ## 2. Streaming
 
-Output › Streaming Settings…: one output per destination, each with its own encoder and reconnect logic.
+Settings › Streaming (⚙ Stream in the bottom bar, or Output › Streaming Settings…): one output per destination, each with its own encoder and reconnect logic. "Start all / Stop all" at the top of the page (stopping asks too).
+
+Each destination has a section titled "Stream k" with "Output n" and a name field; a "Start / stop" switch at the start of the section (it won't start without a URL; turning it off asks first), and a status line: "Streaming · 5.9 Mb/s · 3 dropped · 1 reconnects".
 
 | Item | Notes |
 |---|---|
-| URL | `rtmp://host/app`, `rtmps://host/app`, `srt://host:port?streamid=…&passphrase=…&latency=…`; the scheme selects the protocol |
-| Key | RTMP: appended as the stream name; SRT: becomes `streamid=<key>` when the URL has none |
-| Video / audio | As for recording (platforms usually want H.264 + AAC with a 2 s keyframe interval: 60 frames at 30 fps, 120 at 60 fps) |
-| Reconnect | Exponential back-off after a drop, retrying forever; the wait between attempts is capped at 30 s by default (the "reconnect limit" on the streaming page is that cap); the first frame after reconnecting is a keyframe |
+| Service | Custom (RTMP / RTMPS), Custom (SRT), WeChat Channels, Douyin, Bilibili, Kuaishou, YouTube, Facebook, Twitch. Services with a fixed ingest (YouTube, Facebook, Twitch) fill in the URL; get the stream key from the platform's dashboard. Platforms that hand out an address per session (WeChat Channels, Douyin, Kuaishou, Bilibili) fill nothing in: copy the "stream URL + stream key" from the platform's live dashboard as the hint says. The show file stores only the full URL; when reopened, the service is recognised from the URL |
+| URL | `rtmp://host/app`, `rtmps://host/app`, `srt://host:port?streamid=…&passphrase=…&latency=…`; the scheme selects the protocol. A `user:pass@` part is masked |
+| Stream key | RTMP: appended as the stream name; SRT: becomes `streamid=<key>` when the URL has none |
+| Authentication… | See [Stream authentication](#stream-authentication) below |
+| Quality | 1080p (6 Mb/s when the program runs at ≥ 48 fps, otherwise 4.5 Mb/s; audio AAC 160k), 720p (3 Mb/s; AAC 128k), Custom. A new destination defaults to the highest tier not above the program (1080p at most, never upscaled); editing the encoding by hand shows "Custom" |
+| Encoding details… | Codec, resolution, bitrate, keyframes (in seconds, 2 s for a new destination, with "= n frames" next to it), audio bitrate, **Max retry interval n s (keeps retrying)** |
+| Same as Stream 1 | Checked by default from the second destination on: quality and encoding follow Stream 1 (URL, key and retry interval don't); both are greyed out while checked |
+| Remove Destination | Greyed out while live |
 
+- "Total upload about n Mb/s (m destinations)" at the bottom of the page: every destination is encoded separately and uses its own share of upload bandwidth, so two destinations need twice as much; leave about twice the total as headroom.
+- **A destination that is live is locked**: service, URL, key, authentication, quality, encoding details and Remove can't be changed; it says "Streaming: URL, key and encoding can be changed after it stops."
+- URL / key edits are committed **when you press Return or leave the field**.
+- **A destination that couldn't start is not locked**: it says "Couldn't start: reason" (e.g. "unsupported address: foo:// (only rtmp:// rtmps:// srt://)", "stream 3 has no URL") and offers "Retry" and "Turn Off This Destination"; fixing the URL / key retries automatically.
+- **Reconnecting**: after a drop it reconnects with exponential back-off and never gives up; "Max retry interval n s" (30 s by default) caps the wait between attempts — it is not a "give up after" limit. The first frame after reconnecting is a keyframe.
 - Destinations are independent: when one loses the network the others drop 0 frames (E7); after a 30 s outage 10 out of 10 reconnects
   succeed within 15 s (E8); the reported "network drops" match real drops within 5 % under bandwidth limits (E9). All of this runs
   automatically against a local MediaMTX with network impairment.
-- The bottom-bar stream button shows e.g. "Stream · reconnecting (attempt n)" (in 0.1.0 it reflects the first destination only and n is successful reconnects + 1, not attempts; a destination that failed to start shows "Stream · idle"); in the API `stats.encoder[].state` is idle / connecting / publishing / backoff / stopping / stopped / failed.
-- Try locally first: `mediamtx scripts/mediamtx.yml`, URL `rtmp://127.0.0.1:1935/live`, any key, then `ffplay rtmp://127.0.0.1:1935/live/<key>`
-  ([Samples › streaming](../../../Samples/README.md#4-直播先在本机试)). RTMP and SRT are tested end to end in this repository; RTMPS is the same path plus TLS.
+
+**The stream status in the bottom bar and toolbar** shows the worst destination: "● Streaming" for a single live destination, "● Streaming 2/3" for several (live / all); when one is reconnecting or couldn't start it reads "Stream · 1 in trouble" (orange; dark red when it couldn't start); with only one destination on it shows that destination's state directly.
+A first connection reads "Connecting" ("Connecting (attempt n)" from the second try); only after a destination has been live does a drop read "Reconnecting (attempt n)" — n is the real attempt count. The tooltip lists "name: state" per destination, reasons for those that couldn't start, with passwords in URLs masked.
+When starting, the status line says "stream n connecting…", and "stream n started" only once it is actually live.
+▴ has one item per destination (click = start / stop / retry just that one); "Stream Status…" currently opens the Streaming page.
+In the API's `stats.encoder[]` the stream `state` is idle / connecting / publishing / backoff / stopping / stopped / failed; a destination that couldn't start reports `failed`.
+
+### Stream authentication
+
+"Authentication…" opens a small form that depends on the URL's protocol:
+
+- **RTMP / RTMPS: user name / password.** This is **Adobe authentication (FMLE compatible)**, used by Wowza, Nimble, FMS and some CDN ingests: the user name and password go into the `user:pass@` part of the URL (masked in the URL field as `rtmp://•••@host/app`),
+  and the connection answers the server's challenge without sending the password in clear. Next to the button it says "Authentication: user xxx (password set)" or "No authentication"; "Clear" removes the whole part.
+- **Self-hosted servers such as MediaMTX, SRS and nginx-rtmp expect a query string after the URL instead**, e.g. MediaMTX: `rtmp://host:1935/live?user=publisher&pass=secret` — type it straight into the URL field.
+  Filling in "Authentication…" has no effect for them: the connection succeeds and publishing is rejected (the system log shows the server's `NetStream.Publish.Unauthorized`). Note that a password in the query string is visible in the URL field.
+- A wrong user name or password: the destination stays "Connecting (attempt n)" and keeps retrying with back-off; the reason is in the system log ("鉴权失败（用户名或密码不对）…" — authentication failed; the streaming engine writes this line in Chinese; see [Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics)). A server that wants another authentication method logs "鉴权方式不支持：…" (method not supported).
+- **SRT: passphrase** (encryption), written into the URL's `passphrase=` parameter; only letters, digits and `- . _ ~`, 10–79 characters (other characters don't work yet); anything else is rejected and not written.
+
+### Try it locally first
+
+```bash
+mediamtx scripts/mediamtx.yml
+```
+
+Start the local server from the repository root (it records what it receives into `mediamtx-recordings/` in the current directory). Use the URL `rtmp://127.0.0.1:1935/s1` with **an empty key** (this configuration only has the paths s1 / s2 / s3 and srt1 for SRT; pushing to any other path stays "Connecting"), then watch:
+
+```bash
+ffplay rtmp://127.0.0.1:1935/s1
+```
+
+For SRT use `srt://127.0.0.1:8890?streamid=publish:srt1`. RTMP and SRT are tested end to end in this repository; RTMPS is the same path plus TLS ([Samples › streaming](../../../Samples/README.md#4-直播先在本机试), Chinese).
 
 ## 3. NDI® output
 
-NDI® is a registered trademark of Vizrt NDI AB.
-
-Output › NDI Output…: one output per sender; the source name is the output's name and appears on the network as **`MACHINE (output name)`**.
+Settings › NDI® Output (Output › NDI® Output Settings…, or ⚙ External Display › NDI® Output Settings… in the bottom bar): one output per sender; the source name is the output's name and appears on the network as **`MACHINE (output name)`**. (NDI® is a registered trademark of Vizrt NDI AB.)
 
 | Item | Notes |
 |---|---|
-| Source | PGM / PVW / multiview / one input (Aux, raw picture). PVW / multiview render an extra picture on demand and may miss a frame or two at the start |
-| Groups | NDI group names (comma separated); empty = the default group `public`. Receivers filter by group |
-| Conversion | NV12 → UYVY on the GPU, the CPU, or automatic (periodically compares both and keeps the cheaper one) |
+| Source | PGM / PVW / multiview / one input (Aux, raw picture: keying / crop / transform not applied). PVW / multiview render an extra picture on demand and may miss a frame or two at the start |
+| Groups | NDI® group names (comma separated); empty = the default group `public`. Receivers filter by group |
+| Conversion | NV12 → UYVY on the GPU, the CPU, or Auto (periodically compares both and keeps the cheaper one) |
 | Audio | PGM / PVW / multiview send Master; an input source sends that input after its fader |
+| Send | Switch: off = stop sending, settings kept |
 
-- Renaming, changing the source or the groups rebuilds the sender (receivers must reselect it); conversion can be switched any time.
-- **SDK missing** (not detected at build time): the output can be added and enabled but nothing is sent; the page says "unavailable (no NDI SDK /
-  initialisation failed)" and `stats.encoder[].state` is `"unavailable"`.
+- Renaming, changing the source or the groups ("Apply name / groups") rebuilds the sender (receivers must reselect it); conversion can be switched any time.
+- **SDK missing** (not detected at build time): the output can be added and enabled but nothing is sent; the status says "Unavailable: no NDI SDK" and `stats.encoder[].state` is `"unavailable"`.
 - SDK present but the sender cannot start (initialise / create failed): `state = "failed"` with the reason in the status line; retried when settings change.
 - `stats.encoder[].connections` is the current receiver count; `bitrate` is the raw UYVY rate (about 2 Gb/s at 1080p60 — normal).
 
-## 4. External output (second display)
+## 4. External display (second display)
 
-Output › External Output…, or the External button (a display × source menu). One external output = one borderless full-screen window on one display.
+One external display = one borderless full-screen window on one display. Ways in:
+
+- External Display in the bottom bar: ⚙ = the routing menu; the main button = all on / off. External Display▾ in the middle of the toolbar and Output › External Display ▸ / Turn On (Off) All External Displays are the same.
+- Right-click the PGM / PVW monitor › Show Fullscreen On ▸: that display now shows this monitor ([Concepts › The main window](concepts.md#the-main-window)).
+- Settings › External Display (Output › External Display Settings…).
+
+**The routing menu**: one **single-choice** section per display (PGM / PVW / Multiview / Input n), ticked = what that display shows; once a display has been set up, its first line is "Off" (nothing on that display, settings kept), and an output that is off is marked "(off)".
+Choosing a source switches that display's output to it and turns it on (other outputs on the same display are turned off), or adds one if the display has none. Below are "Remove n … (state)" and "Turn Off All External Displays", and the last section is "External Display Settings… / NDI® Output Settings…".
+
+**The main button**: some on → turn all off (settings kept); all off → turn all back on as configured; none configured → show PGM full screen on the first non-main display (the main display = the one with the PlusMix main window); no second display → open the routing menu.
+
+**The settings page** starts with "What each display shows": one single choice per display — the same setting as the routing menu. Below it, each output's details: name, enabled, display, source, fall back to the main display when missing, status, remove.
 
 - Source: PGM / PVW / multiview / one input (Aux, full-resolution raw picture).
-- Display absent: by default stays black and waits, leaving the main display alone; "fall back to main display when absent" goes full screen
-  on the main display (covering the UI) — only enable it deliberately.
+- Display absent: by default stays black and waits, leaving the main display alone; "Fall back to the main display when missing" goes full screen on the main display (covering the UI) — only enable it deliberately. Settings › General › Keep external displays on the main display behind the interface keeps an external display window on the main display below the interface.
 - The window takes the latest frame at the display's own refresh; dragging the main window or entering full screen does not touch the render
   thread (missed-frame count stays flat). Esc closes the window.
 - The show file stores display ID and source and restores them; display IDs can change across reboots, so reselect if needed.
 
 ## 5. Virtual camera
 
-Output › Virtual Camera: lets FaceTime, QuickTime, browser meetings etc. use PlusMix as a camera. **It sends PGM** (no source selection).
+Settings › Virtual Camera, or Output › Virtual Camera ▸: lets FaceTime, QuickTime, browser meetings etc. use PlusMix as a camera. **It sends PGM** (no source selection) — the same program frame recording / streaming / NDI® get.
 
 Install once:
 
 1. Build with a Team ID (`DEVELOPMENT_TEAM=<TeamID> make gen build-app`), move PlusMix.app to `/Applications` and launch from there —
    system extensions can only be activated from an App in /Applications.
-2. Output › Virtual Camera › Install / Activate Extension…, then allow it in System Settings › General › Login Items & Extensions
-   (older releases: Privacy & Security). "Check Extension Status" shows the current state.
-3. Output › Virtual Camera › Enable / Disable Virtual Camera Output. Pick the "Switcher" camera in FaceTime / QuickTime › New Movie Recording (in 0.1.0 the device is still named after the code name, Switcher).
+2. Settings › Virtual Camera › Install… (or Output › Virtual Camera › Install / Activate Extension…), then allow it in System Settings › General › Login Items & Extensions
+   (older releases: Privacy & Security). "Check" (in the menu: "Check Extension Status") shows the current state.
+3. Turn on "Enable virtual camera" (or Output › Virtual Camera › Enable / Disable Virtual Camera Output). Pick the **"PlusMix"** camera in FaceTime / QuickTime › New Movie Recording.
 
-- Development builds (no Team ID, ad-hoc signature) cannot activate: the status says signing / entitlement / location requirements are not met
-  (BLOCKED-signing); the App keeps running.
-- Output enabled but the extension not connected: "virtual camera device not found (extension not installed / not activated); n frames dropped",
+- Development builds (no Team ID, ad-hoc signature) cannot activate: the status says "macOS refused the install: it needs a signed release build run from the Applications folder"; the App keeps running.
+- Output enabled but the extension not connected: "Virtual camera device not found (extension not installed / not activated); n frames dropped",
   retried every second; sending starts automatically once connected. With the output off, the other side sees a placeholder (dark gray with a moving white bar).
 - Frame rate follows the program, 1080p NV12; PGM to the receiving process within 3 frames is the design target (verified on signed builds).
 
 ## 6. Multiview
 
-Output › Multiview Layout…; Window › Multiview Window (or the Multiview button) opens the separate window, which can be moved to any screen or made full screen.
+Settings › Multiview Layout (⚙ Multiview in the bottom bar, or Output › Multiview Layout…); the Multiview button in the bottom bar / Window › Multiview Window opens and closes the separate window, which can be moved to any screen or made full screen.
 
 | Item | Notes |
 |---|---|
-| Presets | `pgmPvw+grid` (default: PVW / PGM on top, 4×2 / 6×3 / 8×4 below depending on input count), `pgmPvw+4x2`, `pgmPvw+2x2`, `3x3`, `4x4` |
-| Custom | one source (PGM / PVW / input n) and rectangle per cell; replaces the preset when non-empty |
+| Preset | PVW / PGM + automatic grid (default: PVW / PGM on top, 4×2 / 6×3 / 8×4 below depending on input count), PVW / PGM + 4×2, PVW / PGM + 2×2, 3×3, 4×4 |
+| Cells | With a preset: "Convert preset to custom cells" (copies every cell of the preset) or "Add cell"; with custom cells, edit each one: source (PGM / PVW / input n) + x / y / w / h (fractions of the picture, 0–1, anything outside is clipped) + Remove, then "Add cell / Clear custom cells (use the preset)". While custom cells exist the preset is ignored |
 | Safe area | EBU R95 action-safe 3.5 % / title-safe 5 % on the PGM / PVW cells |
-| Meters | input cells show that input's meter, PGM = Master, PVW = the current PVW input; the readings are the same data as the status line / API |
+| Meters | Input cells show that input's meter, PGM = Master, PVW = the current PVW input; the readings are the same data as the status line / API |
 
 - Every cell has a tally border (red PGM / green PVW) and a name label; audio-only inputs show name + meter.
 - The layout is stored in the show file (settings of the first multiview output) and applies to the multiview window, the thumbnail strip and the
-  "multiview" source of external outputs / NDI.
-- The multiview output's switch only decides whether the multiview picture is sent downstream (NDI / external); the layout does not depend on it,
+  "multiview" source of external displays / NDI®.
+- The multiview output's switch only decides whether the multiview picture is sent downstream (NDI® / external display); the layout does not depend on it,
   so the output that merely carries the layout can stay off.
