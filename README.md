@@ -51,6 +51,7 @@ swift build -c release --package-path Tools/switcher-headless && Tools/switcher-
 | `make lint` | 禁词 / 版本号 / 包约束、依赖方向、目录归属 |
 | `make gate4` | 10 分钟集成场景（V1–V7、A1–A4、E1–E3、E5、C1–C4）并出报告 |
 
+改了 `docs/user/` 之后跑 `python3 docs/tools/build-help.py`，重生成随 App 打包的 HTML 手册（`App/Resources/Help/`，帮助 › PlusMix 使用手册 打开的就是它）。
 单独跑一个包：`swift test --package-path Packages/SwitcherCore`。可选的第三方 SDK：NDI SDK for Apple（默认 `/Library/NDI SDK for Apple`，环境变量 `NDI_SDK_DIR`）、
 DeckLink SDK（`DECKLINK_SDK_DIR` 或 `~/SDKs/DeckLink`）；没有时对应输入 / 输出编成空实现，其他功能不受影响。
 
