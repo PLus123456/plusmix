@@ -110,10 +110,10 @@ Free space is measured on the recording's own volume. A killed process recovers 
 ## 9. Logs and diagnostics
 
 - Help › Export Diagnostics…: settings (without the API token), the last second of statistics, the show file with stream keys removed, the shortcut / MIDI tables and system information; with your consent also crash diagnostics and the last two hours of logs. You can open and check it before sending it. Help › Show Diagnostics Folder shows the bundles already exported.
-- Status-line notices also go to the system log. The last 10 minutes:
+- Status-line notices also go to the system log. The last 10 minutes (the full path `/usr/bin/log` works everywhere: a plain `log` is fine in Terminal, but in scripts or non-interactive zsh it hits zsh's own built-in of the same name and fails with "too many arguments"):
 
 ```bash
-log show --predicate 'process == "PlusMix"' --last 10m --style compact
+/usr/bin/log show --predicate 'process == "PlusMix"' --last 10m --style compact
 ```
 
 - One statistics line per second (`stats.jsonl`, fields in [test standard §7](../../testing/测试标准.md#71-统计字段-statsjsonl), Chinese): launch with `--stats <file>`,
