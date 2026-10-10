@@ -293,7 +293,8 @@ public struct BusState: Hashable, Codable, Sendable {
     public var gainDb: Double
     /// 总线静音。
     public var muted: Bool
-    /// 总线效果链占位（ParametricEQ / DynamicsProcessor / PeakLimiter）。
+    /// 总线效果链（W5-C 起生效）：id 与键表见 `EffectSlot`（parametricEQ / dynamicsProcessor / compressor / peakLimiter）；
+    /// 每条总线最多 3 格，连续的 parametricEQ 格合成一格（≤ 16 段），超出的不装；链顺序 = 处理顺序，enabled = false 的格旁路。
     public var effects: [EffectSlot]
     public init(bus: Bus, gainDb: Double = 0, muted: Bool = false, effects: [EffectSlot] = []) {
         self.bus = bus

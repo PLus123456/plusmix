@@ -19,8 +19,9 @@ public enum Command: Hashable, Codable, Sendable {
     case setTransitionParams(wipe: WipeParams, stinger: StingerParams)
     /// 按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。
     case autoTransition
+    /// 把 PVW 换成该输入（0 = 黑场）；转场进行中被拒（与 autoTransition 同一口径，提案 023）。
     case setPreview(input: Int)
-    /// 直接把 PGM 换成该输入（硬切），PVW 不变。
+    /// 直接把 PGM 换成该输入（硬切），PVW 不变。转场进行中被拒（提案 023）。
     case setProgram(input: Int)
     /// 推杆位置 0–1；到 1 提交（对调并回到 0）。
     case tbar(progress: Double)

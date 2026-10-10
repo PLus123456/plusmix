@@ -333,13 +333,32 @@ public struct InputAudioSettings: Hashable, Codable, Sendable {
     public static let jsonKeys = ["routing", "gainDb", "muted", "solo", "pan", "delayMs", "afv"]
 }
 
-/// 效果链里的一格（占位）。`id` 是效果标识（例如 "parametricEQ"），参数是自由 JSON；具体定义由音频 / 合成会话给。
+/// 效果链里的一格。`id` 是效果标识，`params` 是该 id 的键表（全部 number；缺键 = 默认值、越界钳住，由实现做）。
+/// 链的顺序 = 处理顺序；`enabled = false` 的格旁路。`InputSettings.effects`（每路）与 `BusState.effects`（每总线）同一套键表；
+/// 总线那一半 W5-C（prompt 88）起生效，每路的归 W1-D3（prompt 102）。认不出的 id / 键实现跳过，不报错。
+///
+/// 音频效果的 id 与键（提案 012 C 三个苹果单元 + 提案 024 (b) 的自写压缩器，用户 2026-10-03 批；CONTRACTS.md §2.4 是同一张表）。
+/// 三个苹果单元的键范围 = 引擎钳位 `SwitcherAudio.EffectParameterRanges`（头文件范围 ∩ 本机 AU 的 ParameterInfo，表在 reports/w5-audio-bus-effects.md §1.5），契约不重复；
+/// 024 新加的键范围与默认值在这里定：
+///
+/// | id | 键 |
+/// |---|---|
+/// | `parametricEQ` | `centerHz`、`q`、`gainDb`。一条链里连续多格 = 多段（≤ 16，见下） |
+/// | `dynamicsProcessor` | `thresholdDb`、`headroomDb`、`expansionRatio`、`attackSeconds`、`releaseSeconds`、`overallGainDb`。苹果 AUDynamicsProcessor，没有固定比例（高级项） |
+/// | `compressor` | `thresholdDb`（−60…0 dBFS，默认 −20）、`ratio`（1…20，默认 4，n:1）、`kneeDb`（0…24，默认 6；0 = 硬拐点）、`attackSeconds`（0.0001…0.2，默认 0.005）、`releaseSeconds`（0.01…3，默认 0.1）、`makeupGainDb`（0…24，默认 0）。自写 C 压缩器（024 (b)，W1-D3 实现）：不用前瞻、组延迟按设计 0 帧，实测延迟进 A/V 对齐；与 `dynamicsProcessor` 二选一占同一格 |
+/// | `peakLimiter` | `attackSeconds`、`decaySeconds`、`preGainDb`，另加可选 `ceilingDb`（−20…0 dBFS，默认 0；024 顺带 (2)：AUPeakLimiter 的天花板固定 0 dBFS，实现为同一格内限幅之后的输出增益，不多占格） |
+///
+/// `parametricEQ.q` 的口径（024 顺带 (1)）：经典 Q——带宽 = 增益为峰值一半（dB）处的上下边频之比，BW = 2/ln2 · asinh(1/(2q)) 倍频程
+/// （q = √2 → 1 oct）；AUNBandEQ 的带宽参数就是这个定义（设计方案 §7 原来对的 AUParametricEQ 的 Q 随增益变，不是这个口径）。
+/// 一个 EQ 格（AUNBandEQ）最多 16 段：连续的 `parametricEQ` 格合成一格；每条总线最多 3 格（被别的效果隔开的 EQ 另占一格），超出的不装。
+///
+/// 视频效果格目前没有：`border`（画中画边框）是提案 010 落地前的过渡做法，正式字段是 `OverlayState.border`，搬迁与 reducer 一律清掉（P4 / 019 D）。
 public struct EffectSlot: Hashable, Codable, Sendable {
-    /// 效果标识，例如 "parametricEQ"。
+    /// 效果标识，例如 "parametricEQ"（键表见类型说明）。
     public var id: String
     /// 是否启用。
     public var enabled: Bool
-    /// 效果参数（自由 JSON，占位）。
+    /// 效果参数（按 id 的键表；全部 number）。
     public var params: [String: JSONValue]
     public init(id: String, enabled: Bool = true, params: [String: JSONValue] = [:]) {
         self.id = id
@@ -387,9 +406,9 @@ public struct InputSettings: Hashable, Codable, Sendable {
     public var transform: Transform2D
     /// 音频参数（路由 / 增益 / 静音 / 独听 / 声像 / 延迟补偿）。
     public var audio: InputAudioSettings
-    /// 效果链占位。
+    /// 这一路的效果链（id 与键表见 `EffectSlot`；每路的接线归 W1-D3 / prompt 102，装什么的口径见提案 023 第三节）。
     public var effects: [EffectSlot]
-    /// 抠像占位。
+    /// 抠像（口径见提案 009）。
     public var keyer: KeyerSettings
 
     public init(crop: CropInsets = .none, transform: Transform2D = .identity, audio: InputAudioSettings = InputAudioSettings(),
