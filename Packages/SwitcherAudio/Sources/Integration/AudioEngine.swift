@@ -440,11 +440,12 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         switch event {
         case .inputsChanged(let added, let removed):
             lock.lock()
-            for cfg in added { settingsCache[cfg.number] = cfg.settings.audio; effectsCache[cfg.number] = cfg.settings.effects }
+            // effects 不从这个事件取：事件在 pendingEvents 里排队，可能比 syncSnapshotExtras 已经按最新快照落下去的链还旧
+            // （start 时第一次 pollSnapshot 的全量 inputsChanged 就是这样）；每路 effects 只走 syncSnapshotExtras（永远读最新快照）
+            for cfg in added { settingsCache[cfg.number] = cfg.settings.audio }
             var toApply: [SlotRecord] = []
             for cfg in added where slots[cfg.number] != nil {
                 slots[cfg.number]!.settings = cfg.settings.audio
-                slots[cfg.number]!.effects = cfg.settings.effects
                 toApply.append(slots[cfg.number]!)
             }
             var toRemove: [SlotRecord] = []
@@ -454,7 +455,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
                 if let rec = slots[n], rec.removing == nil { rec.removing = now; toRemove.append(rec) }
             }
             lock.unlock()
-            for rec in toApply { applyEffects(rec, pushSettings: false); applySettings(rec) }
+            for rec in toApply { applySettings(rec) }
             for rec in toRemove { mixer.setAFVGain(slot: rec.slot, 0) }
         case .inputAudioSettings(let n, let s):
             lock.lock()

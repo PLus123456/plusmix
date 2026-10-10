@@ -71,6 +71,17 @@ final class DeviceTests: XCTestCase {
         let mixer = AudioMixer()
         try mixer.installStandardEffects()
         for e in BusEffect.allCases { mixer.setEffectEnabled(.master, e, true) }
+        // W1-D3：每路两格也开着（EQ 一段 + 动态：偶数路自写压缩器、奇数路 DynamicsProcessor），Bus A 的动态格跑压缩器，监听来源 Master
+        _ = try mixer.installInputEffects()
+        for i in 0..<inputs {
+            mixer.effectUnit(.input(slot: i, .parametricEQ))!.setEQBand(0, centerHz: Float(500 * (i + 1)), q: 1.4, gainDb: 2)
+            mixer.setEffectEnabled(.input(slot: i, .parametricEQ), true)
+            if i % 2 == 0 { mixer.setEffectKind(.input(slot: i, .dynamics), .compressor); mixer.setCompressor(.input(slot: i, .dynamics), CompressorParameters(thresholdDb: -24, ratio: 3)) }
+            mixer.setEffectEnabled(.input(slot: i, .dynamics), true)
+        }
+        mixer.setEffectKind(.bus(.busA, .dynamicsProcessor), .compressor)
+        mixer.setEffectEnabled(.busA, .dynamicsProcessor, true)
+        mixer.setMonitorSource(.master)
         let t0 = HostClock.now()
         var sources = [OfflineAudioSource]()
         let table = DeviceTests.sineTable

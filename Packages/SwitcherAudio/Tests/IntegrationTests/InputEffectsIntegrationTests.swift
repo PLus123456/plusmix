@@ -174,7 +174,8 @@ final class InputEffectsIntegrationTests: XCTestCase {
 
     // MARK: - 认不出的 / 装不下的格
 
-    /// 每路只有 EQ（≤ 16 段）和一个动态格：限幅 / 不认识的 id / 第 17 段 / 第二个动态都不装，各记一次日志；重发同一条链不再记。
+    /// 每路只有 EQ（≤ 16 段）和一个动态格：限幅 / 第 17 段 / 第二个动态都不装，各记一次日志；重发同一条链不再记。
+    /// 视频格 `border` 由状态机的 setInputSettings 清掉（P4 的搬迁口径），到不了引擎——引擎也认不出它，这里顺带钉住它确实没来。
     func testInputEffects_unsupportedSlotsIgnoredAndLoggedOnce() async throws {
         let rig = try await EngineRig(state: States.fourInputs(afv: false))
         try rig.addSource(number: 1)
@@ -183,15 +184,24 @@ final class InputEffectsIntegrationTests: XCTestCase {
         chain += [Self.compressor(), FX.dynamics()]
         await setInputEffects(rig, 1, chain)
         await rig.run(seconds: 0.2)
+        let stateEffects = (await rig.sm.state).input(1)!.settings.effects
+        XCTAssertFalse(stateEffects.contains { $0.id == "border" }, "border 格被状态机清掉")
         let fx = try XCTUnwrap(rig.engine.inputEffectsStatus(1))
         XCTAssertTrue(fx.eqEnabled); XCTAssertEqual(fx.eqBands, 16)
         XCTAssertEqual(fx.dynamicsKind, .compressor, "第一个动态占格，第二个（dynamicsProcessor）不装")
-        XCTAssertEqual(fx.ignored, 4, "限幅、border、第 17 段、第二个动态")
+        XCTAssertEqual(fx.ignored, 3, "限幅、第 17 段、第二个动态")
         let notes = rig.engine.effectNotes.filter { $0.contains("输入 1") }
-        XCTAssertEqual(notes.count, 4, "\(notes)")
+        XCTAssertEqual(notes.count, 3, "\(notes)")
+        XCTAssertTrue(notes.contains { $0.contains("peakLimiter") && $0.contains("没有限幅格") })
+        XCTAssertTrue(notes.contains { $0.contains("最多 16 段") })
+        XCTAssertTrue(notes.contains { $0.contains("dynamicsProcessor") && $0.contains("二选一") })
         await setInputEffects(rig, 1, chain)
         await rig.run(seconds: 0.1)
-        XCTAssertEqual(rig.engine.effectNotes.filter { $0.contains("输入 1") }.count, 4)
+        XCTAssertEqual(rig.engine.effectNotes.filter { $0.contains("输入 1") }.count, 3)
+        // 不认识的 id 真到了引擎（不经状态机）也只是不装 + 记一次
+        let plan = InputEffectPlan.parse([EffectSlot(id: "border", params: ["width": .number(0.01)]), FX.eq(1000, gainDb: 1)])
+        XCTAssertEqual(plan.ignored, 1); XCTAssertEqual(plan.bands.count, 1)
+        XCTAssertTrue(plan.notes.contains { $0.message.contains("不认识的效果 id") })
         await rig.shutdown()
     }
 
@@ -264,6 +274,8 @@ final class InputEffectsIntegrationTests: XCTestCase {
         let cap = try rig.capture(.master)
         var lim = FX.limiter(attackSeconds: 0.002, decaySeconds: 0.024, preGainDb: 6)
         lim.params["ceilingDb"] = .number(-6)
+        // 先让输入对齐、出声，再开限幅：AUPeakLimiter 在持续 +6 dB 过载的正弦上遇到对齐那一下的相位跳变会把增益收到 −34 dB 不回来（AU 自身行为，报告 §5）
+        await rig.run(seconds: 1)
         _ = await rig.sm.apply(.setBusEffects(bus: .master, effects: [lim]))
         await rig.run(seconds: 1)
         var start = cap.left.count
@@ -311,6 +323,8 @@ final class InputEffectsIntegrationTests: XCTestCase {
         XCTAssertEqual(hp, busA, "监听 Bus A：耳机出口逐样本 = Bus A")
         // 借 Master：独听输入 2 → Master 出口写耳机总线（1.5 kHz），消费者流仍是 Master（1 kHz）
         rig.engine.borrowMasterForMonitor = true
+        XCTAssertTrue(rig.engine.borrowMasterForMonitor)
+        await rig.run(seconds: 0.1)                       // 状态快照每 50 ms 刷一次
         XCTAssertTrue(rig.engine.status.borrowMasterForMonitor)
         var s2 = (await rig.sm.state).input(2)!.settings; s2.audio.solo = true
         _ = await rig.sm.apply(.setInputSettings(input: 2, settings: s2))
@@ -328,6 +342,7 @@ final class InputEffectsIntegrationTests: XCTestCase {
         await rig.run(seconds: 0.5)
         XCTAssertGreaterThan(IT.db(FX.amplitude(master[...], hz: 1000)), -30, "独听关：出口回到 Master")
         rig.engine.borrowMasterForMonitor = false
+        await rig.run(seconds: 0.1)
         XCTAssertFalse(rig.engine.status.borrowMasterForMonitor)
         XCTAssertEqual(rig.engine.status.realtimeViolations, 0)
         await rig.shutdown()

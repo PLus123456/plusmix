@@ -52,6 +52,21 @@ final class RealtimeTests: XCTestCase {
         for b in Bus.allCases { for e in BusEffect.allCases { rig.mixer.setEffectEnabled(b, e, true) } }
         rig.mixer.effectUnit(.master, .parametricEQ)!.setParametricEQ(centerHz: 2000, q: 1, gainDb: 3)
         rig.mixer.effectUnit(.master, .peakLimiter)!.setLimiter(preGainDb: 3)
+        rig.mixer.setEffectOutputGain(.bus(.master, .peakLimiter), dB: -1)                 // W1-D3：ceilingDb
+        rig.mixer.setEffectKind(.bus(.busA, .dynamicsProcessor), .compressor)                // W1-D3：Bus A 的动态格跑自写压缩器
+        rig.mixer.setCompressor(.bus(.busA, .dynamicsProcessor), CompressorParameters(thresholdDb: -30, ratio: 4))
+        // W1-D3：8 路每路两格全开（EQ 一段 + 动态：偶数路自写压缩器、奇数路 DynamicsProcessor），监听来源 Bus A
+        _ = try rig.mixer.installInputEffects()
+        for i in 0..<8 {
+            rig.mixer.effectUnit(.input(slot: i, .parametricEQ))!.setEQBand(0, centerHz: Float(300 * (i + 1)), q: 1.4, gainDb: 3)
+            rig.mixer.setEffectEnabled(.input(slot: i, .parametricEQ), true)
+            if i % 2 == 0 {
+                rig.mixer.setEffectKind(.input(slot: i, .dynamics), .compressor)
+                rig.mixer.setCompressor(.input(slot: i, .dynamics), CompressorParameters(thresholdDb: -24, ratio: 3))
+            }
+            rig.mixer.setEffectEnabled(.input(slot: i, .dynamics), true)
+        }
+        rig.mixer.setMonitorSource(.busA)
         let taps = [rig.mixer.addTap(source: .bus(.master))!, rig.mixer.addTap(source: .bus(.busA))!,
                     rig.mixer.addTap(source: .bus(.headphones))!, rig.mixer.addTap(source: .input(slot: 2))!]
         let blocks = Int(seconds * 48_000 / 256)
@@ -65,6 +80,7 @@ final class RealtimeTests: XCTestCase {
             // 每 100 块做点"运行期"的事：改增益、切换 AFV、消费队列
             if blk % 100 == 0 {
                 rig.mixer.setGain(slot: blk % 8, dB: Double(-12 + (blk / 100) % 6))
+                rig.mixer.setCompressor(.input(slot: (blk / 100) % 8, .dynamics), CompressorParameters(thresholdDb: Double(-30 + (blk / 100) % 10), ratio: Double(2 + (blk / 100) % 6)))   // W1-D3：运行期改压缩器参数
                 rig.mixer.crossfade(from: (blk / 100) % 8, to: (blk / 100 + 1) % 8, durationBlocks: 30, startHostTime: rig.driver.nextBlockHostTime)
                 for t in taps { while t.pop(into: UnsafePointer(ptrs.withUnsafeMutableBufferPointer { $0.baseAddress! })) != nil {} }
             }
