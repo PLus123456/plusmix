@@ -20,6 +20,8 @@ import SwitcherAudio
 //   4. 每路参数 / 总线 / 监听方式：从状态快照 diff 落到混音命令。总线效果链（W5-C）：`BusState.effects` → 每条总线三个 AU 格
 //      （BusEffectsController：EQ = AUNBandEQ 最多 16 段 / 压缩 / 限幅，链顺序 = 处理顺序，enabled = false 旁路，拓扑只在格数 / id 变时换，
 //      换格时那一格等实时线程确认关格后才换、短暂旁路），效果链延迟在泵里补到总线来源的 PTS 上（见 BusEffects.swift、ConsumerPump）。
+//      补偿方式（W1-B4，提案 028，`configuration.avCompensation`）：videoDelay（默认）= 把 Master 的效果链延迟交给视频引擎（`videoDelay`），
+//      画面晚 L_m 派发、Master 的 PTS 不再前移、其他来源跟着落到节目输出时间线上；audioPTS = W5-C 现状。没接视频引擎时按 audioPTS 走。
 //   5. 消费者：Master / 总线 / ISO 块经泵线程送录制 / 编码；真设备时重采样到 host 时钟（A3）。ISO（AudioTapSource.input）取
 //      推子后、AFV 前（W1-D2），AFV 门控不进 ISO 音轨；.inputProgram 才是含 AFV 的节目信号。
 //   6. Stats.audio 与状态快照（表、对齐、AFV、设备）。
@@ -87,6 +89,12 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private let stopFlag = Atomic<Bool>(false)
     private let controlFinished = DispatchSemaphore(value: 0)
     private let statusBox = Mutex<AudioEngineStatus?>(nil)
+    /// 视频延后（W1-B4）：接上的视频引擎、最近交过去的帧数（nil = 还没交过）。
+    private struct VideoDelayLink {
+        var receiver: (any VideoDelayControl)?
+        var pushedFrames: Int?
+    }
+    private let videoDelayLink = Mutex(VideoDelayLink())
     private var lastStatusAt: HostTime = .zero
     /// 状态快照刷新间隔。
     public var statusInterval = HostDuration(milliseconds: 50)
@@ -219,10 +227,50 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
 
     public func removeConsumer(_ token: AudioConsumerToken) { pump.remove(token) }
 
-    /// 某块 Master 的 PTS：块首样本 host time − 对齐延迟 − Master 效果链现在的延迟（W5-C）。
+    /// 某块 Master 的 PTS：块首样本 host time − 对齐延迟 − Master 效果链现在的延迟（W5-C）；补偿方式 videoDelay 生效时不减效果链延迟
+    /// （节目输出时间线，提案 028）。
     public func programPTS(forBlockHostTime t: HostTime) -> HostTime {
-        t - alignmentDuration - HostDuration(ticks: Int64((Double(effects.latencyFrames(.master)) * mixer.hostTicksPerFrame).rounded()))
+        avCompensationInEffect == .videoDelay ? t - alignmentDuration : t - alignmentDuration - duration(frames: effects.latencyFrames(.master))
     }
+
+    private func duration(frames: Int) -> HostDuration { HostDuration(ticks: Int64((Double(frames) * mixer.hostTicksPerFrame).rounded())) }
+
+    // MARK: 视频延后（W1-B4，提案 028）
+
+    /// 视频延后的设定入口：补偿方式 videoDelay 时，Master 效果链的实测延迟交给它（组装方设成视频引擎：`audioEngine.videoDelay = engine`）。
+    /// 设的那一刻就把当前值交过去，之后每个控制周期看到 Master 的延迟变了再交；换掉 / 摘掉时旧的那个归零。
+    /// nil（没接）时补偿按 audioPTS 走（Master 的 PTS 照 W5-C 前移）——没接线的组装方不会出现文件错位。配置是 audioPTS 时接上也只会交 0。任意线程。
+    public var videoDelay: (any VideoDelayControl)? {
+        get { videoDelayLink.withLock { $0.receiver } }
+        set {
+            let old = videoDelayLink.withLock { link -> (any VideoDelayControl)? in
+                let o = link.receiver
+                link.receiver = newValue
+                link.pushedFrames = nil
+                return o
+            }
+            pump.followVideoDelay.store(configuration.avCompensation == .videoDelay && newValue != nil, ordering: .releasing)
+            if let old, old !== newValue { old.setVideoDelayTarget(.zero) }
+            syncVideoDelay()
+        }
+    }
+
+    /// 实际生效的补偿方式：配置是 videoDelay 且接了视频引擎才是 videoDelay，否则 audioPTS。
+    public var avCompensationInEffect: AVCompensation {
+        configuration.avCompensation == .videoDelay && videoDelay != nil ? .videoDelay : .audioPTS
+    }
+
+    /// 把 Master 当前的效果链延迟（audioPTS 下恒 0）交给视频引擎；没变就不交。控制线程每个周期调，接上时调一次。
+    private func syncVideoDelay() {
+        let frames = avCompensationInEffect == .videoDelay ? effects.latencyFrames(.master) : 0
+        let receiver = videoDelayLink.withLock { link -> (any VideoDelayControl)? in
+            guard let r = link.receiver, link.pushedFrames != frames else { return nil }
+            link.pushedFrames = frames
+            return r
+        }
+        receiver?.setVideoDelayTarget(duration(frames: frames))
+    }
+
 
     // MARK: 总线效果链（W5-C）
 
@@ -335,6 +383,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         }
         for e in events { handle(e, now: now) }
         effects.step()
+        syncVideoDelay()
         applyDeferredGates(now: now)
         maintainAlignment()
         stepFadeToBlack(now: now)
@@ -671,6 +720,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let status = AudioEngineStatus(
             device: device, alignmentFrames: configuration.alignmentFrames, alignmentMs: alignmentDuration.milliseconds(timebase: timebase),
             inputs: inputs, buses: busStatus, afv: afv, monitorMode: mode, monitorPoint: configuration.monitorPoint,
+            avCompensation: avCompensationInEffect, videoDelayFrames: videoDelayLink.withLock { $0.pushedFrames } ?? 0,
             activeTransition: transition.map { "\($0.from)→\($0.to) \($0.source)" }, ftbLevel: level,
             counters: stats.audio, discontinuities: pump.discontinuities, realtimeViolations: stats.rtViolations, tapDrops: stats.tapDrops,
             commandsDropped: stats.commandsDropped + mixer.commandsDropped, blocksRendered: stats.blocksRendered, consumers: consumers, at: now)

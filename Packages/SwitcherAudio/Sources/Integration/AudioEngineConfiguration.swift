@@ -2,6 +2,16 @@ import CoreAudio
 import SwitcherContracts
 import SwitcherAudio
 
+/// A/V 补偿方式（W1-B4，prompt 105；提案 028）：开了压缩 / 限幅的总线比画面晚 L，补在哪一侧。一处开关，两种互斥——不会双重补偿。
+public enum AVCompensation: String, Sendable, CaseIterable {
+    /// 默认：视频延后 L_m（Master 当前效果链的实测延迟，交给视频引擎：画面按 tickTime = 拍点 + L_m 派发），音频 PTS 不再前移——
+    /// 节目输出时间线 = 采集 + L_m：Master 的 PTS = 块首 − 对齐延迟，Bus A / B / 耳机平移 L_m − L_bus，输入来源平移 +L_m。
+    /// 扬声器 / 耳机监听与画面同步；PGM 端到端多 L_m。要组装方把视频引擎接上（`AudioEngine.videoDelay`），没接时按 audioPTS 走。
+    case videoDelay
+    /// W5-C 现状：总线来源的 PTS 前移该总线的效果链延迟，视频不延后——文件 / 流对齐，扬声器 / 耳机监听晚 L。留给 headless 对照。
+    case audioPTS
+}
+
 /// 音频引擎（集成层）的参数。
 public struct AudioEngineConfiguration: Sendable {
     /// 输出设备。
@@ -67,6 +77,8 @@ public struct AudioEngineConfiguration: Sendable {
     public var detectDiscontinuities: Bool = true
     /// 混音器参数（块、槽位数、估计器、时基）。`blockFrames` 会覆盖它的 blockFrames。
     public var mixer = AudioMixerConfiguration()
+    /// A/V 补偿方式（W1-B4）：默认 videoDelay；接上视频引擎（`AudioEngine.videoDelay`）才生效，没接按 audioPTS。
+    public var avCompensation: AVCompensation = .videoDelay
 
     public init() {}
 
