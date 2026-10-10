@@ -145,7 +145,7 @@ final class APIServerTests: XCTestCase {
         // 目录
         let (st6, r6) = try await get(s.baseURL.appending(path: "/api/v1/commands"))
         XCTAssertEqual(st6, 200)
-        XCTAssertEqual((r6["commands"] as? [Any])?.count, 34)
+        XCTAssertEqual((r6["commands"] as? [Any])?.count, 35)   // 提案 026（P5）：setMonitorSource
     }
 
     // MARK: 批量、日志、tally

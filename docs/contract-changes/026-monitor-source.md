@@ -20,3 +20,12 @@ SwitcherContracts（字段、命令、测试、CONTRACTS.md、api.md）；Switch
 ## 怎么迁移
 
 不升 schemaVersion；老 Show / 老快照缺键 = master，与现状（耳机听 Master）一致。
+
+## 落地记录（P5 / prompt 99，2026-10-10）
+
+契约已落地（分支 `p5-contracts`）：`AudioState.monitorSource: Bus = .master`（JSON 键 `monitorSource`，值 = Bus.rawValue，缺键 master，写出总是写全；文件 / API 全量状态里出现 headphones 的按 master 读，认不出的值照 Bus 的解码规则报错）；
+`Command.setMonitorSource(bus:)`（34 → 35 个 case，JSON `{"setMonitorSource":{"bus":1}}`）；reducer：master / busA / busB 生效、headphones 原样返回、相同值原样返回；
+校验器也拒 headphones（HTTP 400，与 setOutputEnabled 对录制 / 推流输出的做法一样——不随拍变的条件入口就拒，`testValidator_agreesWithReducer` 两边一致）；
+CommandCatalog / api.md（参数 bus 0–2，面板上 headphones 该灰掉）；CONTRACTS.md §2.5 / §2.6 / §8。
+用例 `Contracts026Tests`、`ReducerTests.test026_setMonitorSource_rejectsHeadphones_andSameValueUnchanged` + 覆盖表三行、CommandCatalogTests / APIServerTests 的 35、CommandBusTests 的合法 / 非法各一条。
+引擎侧（设备客户端按它取总线送耳机、X09 借 Master 声道）归 102；App 的 `MixerModel.listenBus` 改走命令 / 读快照归 102 之后的 App 会话或 G8 胶水；`ControlAction` 的动作表归 100 或之后的控制会话；VMixCompat 不映射。`Show.schemaVersion` 不升。

@@ -163,7 +163,7 @@ AUNBandEQ 的带宽参数就是这个定义（设计方案 §7 原来对的 AUPa
 | `OverlayState` | {input?, on 目标, rect, animProgress 0–1, animation, startTick, border?, anchor, previewOn}（提案 010）；`isVisible` | 状态机 | 渲染 | — |
 | `OverlayAnimation` | {kind, durationTicks, slideFrom?}（提案 010：slideFrom nil = 离 rect 最近的边）；`OverlayAnimation()` = cut 0 拍不变；**新节目**四路叠加默认 = `OverlayAnimation.defaultFade(for: format)` = fade、round(0.5 s × 帧率) 拍（提案 027，用户 2026-10-10 批）：`MixerState.newShow(format:outputs:)` 建出来就是它，App 的 emptyShow 也调它；老文件的 animation 照读 | 状态机 | 渲染 | — |
 | `OverlayBorder` / `OverlayAnchor` / `OverlayEdge` | {width 占节目高的比例（渲染器钳 0–0.1，界面只给到 0.05，更宽的只能从 API / 节目文件给）, color} / 九宫格锚点 / {left, right, top, bottom}（提案 010） | 同上 | 渲染 | — |
-| `AudioState` | {buses[4] 顺序 = Bus.allCases, afv 总开关, monitorMode, alignmentFrames = 2048, monitorPoint}（提案 007） | 状态机 | 混音、UI | — |
+| `AudioState` | {buses[4] 顺序 = Bus.allCases, afv 总开关, monitorMode, alignmentFrames = 2048, monitorPoint（提案 007）, monitorSource（提案 026：耳机 / 监听总线上听哪条总线，master 默认 / busA / busB；缺键 master；headphones 自己无效，命令被拒、文件里出现按 master 读；独听仍优先；设备客户端按它取总线送耳机归 W1-D3）} | 状态机 | 混音、UI | — |
 | `MonitorPoint` | {preDelayLine（默认）, postDelayLine}：耳机 / 监听总线取对齐延迟线之前还是之后（提案 007） | Show / 设置面板 | 集成层填 `AudioEngineConfiguration` | — |
 | `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`}；kind = multiview 的 enabled = 要不要把多画面 NV12 送给下游，布局与它无关（见下） | 状态机 | 输出实现、UI | — |
 | `OutputSettings` | {source, video?, audio?, record?, stream?, multiview?（010）, display?（013）, extra（各输出会话的附加项，NDI 的 ndi.groups / ndi.conversion 在用）} | Show / 命令 | 编码、录制、推流、多画面、外部显示 | — |
@@ -198,7 +198,7 @@ P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的�
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `Command` | 枚举，34 个 case（对照见 §8；P3 按提案 010 / 012 从 27 加到 33，W3-E2 按提案 016 加 setTransitionParams）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}` | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
+| `Command` | 枚举，35 个 case（对照见 §8；P3 按提案 010 / 012 从 27 加到 33，W3-E2 按提案 016 加 setTransitionParams，P5 按提案 026 加 setMonitorSource）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}` | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
 | `IssuedCommand` | {sequence, issuedAt, command}：命令总线（W2-C）加信封；`issuedAt` = 命令进总线的时刻（服务端 host time，不是客户端发出时刻；提案 003 §C） | 命令总线 | 状态机（按 sequence 严格顺序） | 普通 |
 | `CommandReceipt` | {sequence, appliedTick, applied}；`applied` = 状态真的变了（false = reducer 按规则忽略了它，提案 003 §A；结构性非法的在总线入口就被拒，到不了回执） | 状态机 | 总线、API | 普通 |
 | `MixerReducing` 协议 | `reduce(state, command, at tick)`、`advance(state, to tick)`，纯函数，实现在 W1-B | W1-B | 状态机、Control 的测试 | 纯函数 |
@@ -387,6 +387,7 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 | mute | `.mute(input:on:)` | |
 | — | `.busGain(bus:dB:)`、`.busMute(bus:on:)`、`.setAFV(on:)` | 加的：Master 推子（W2-B）、AFV 总开关（每路的在 `InputAudioSettings.afv`，走 setInputSettings） |
 | — | `.setMonitorMode(mode:)`、`.setBusEffects(bus:effects:)` | 加的（提案 012）：调音台的 PFL / AFL 与总线效果链；监听**点**（延迟线前 / 后）是 `AudioState.monitorPoint`，走 Show，不是命令 |
+| — | `.setMonitorSource(bus:)` | 加的（提案 026，P5）：耳机 / 监听总线上听哪条总线（master / busA / busB），写 `AudioState.monitorSource`；headphones 自己无效——校验器拒（HTTP 400）、reducer 也原样返回；相同值 applied = false；独听仍优先 |
 | startRecord / stopRecord | `.startRecord(output:)` / `.stopRecord(output:)` | output = 录制输出编号；ISO = 同一拍发多条 |
 | startStream(dest) / stopStream | `.startStream(output:)` / `.stopStream(output:)` | dest = 编号为 output 的 stream 输出，url/key 在其设置里 |
 | — | `.setOutputEnabled(output:on:)`、`.renameOutput(output:name:)` | 加的（提案 012）：ndi / externalDisplay / virtualCamera / multiview 的目标开关与改名；record / stream 的 setOutputEnabled 被拒（起停与拍绑定）；multiview 的开关 = 要不要把多画面 NV12 送给下游，布局与它无关 |

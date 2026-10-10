@@ -175,6 +175,10 @@ public struct MixerReducer: MixerReducing {
             s.audio.afv = on
         case .setMonitorMode(let mode):
             s.audio.monitorMode = mode
+        case .setMonitorSource(let bus):
+            // 提案 026：耳机听哪条总线；headphones 自己无效（校验器也拒），原样返回
+            guard bus != .headphones else { return state }
+            s.audio.monitorSource = bus
         case .setBusEffects(let bus, let effects):
             guard let i = Self.busIndex(bus, in: s) else { return state }
             s.audio.buses[i].effects = effects

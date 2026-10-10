@@ -36,6 +36,9 @@ public enum CommandValidator {
             return s.audio.buses.contains { $0.bus == bus } ? nil : "总线 \(bus) 不存在"
         case .setMonitorMode:
             return nil
+        case .setMonitorSource(let bus):
+            // 提案 026：耳机总线不能作自己的监听来源；不随拍变，入口就拒（reducer 对它也原样返回）
+            return bus == .headphones ? "监听来源只能是 master / busA / busB，不能是 headphones" : nil
         case .startRecord(let output), .stopRecord(let output):
             return outputReference(output, kind: .record, name: "录制", in: s)
         case .startStream(let output), .stopStream(let output):

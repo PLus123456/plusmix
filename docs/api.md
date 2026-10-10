@@ -418,6 +418,22 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 }
 ```
 
+#### `setMonitorSource`
+
+耳机 / 监听总线上听哪条总线（master / busA / busB）；headphones 自己无效被拒；独听仍优先；与现状相同的值 applied = false。
+
+| 参数 | 含义 |
+|---|---|
+| `bus` | 0 = master, 1 = busA, 2 = busB（3 = headphones 无效） |
+
+```json
+{
+  "setMonitorSource" : {
+    "bus" : 1
+  }
+}
+```
+
 #### `setBusEffects`
 
 整体替换一条总线的效果链；链顺序 = 处理顺序，enabled = false 的格旁路。
@@ -911,7 +927,8 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
           }
         ],
         "monitorMode" : "afl",
-        "monitorPoint" : "preDelayLine"
+        "monitorPoint" : "preDelayLine",
+        "monitorSource" : 0
       },
       "inputs" : [
         {

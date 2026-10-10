@@ -450,6 +450,10 @@ final class ReducerTests: XCTestCase {
                 $0.overlays[1].previewOn = true },
             Row("setOverlayDecoration 通道越界拒绝", .setOverlayDecoration(channel: 5, border: nil, anchor: .center, previewOn: true)) { _ in },
             Row("setMonitorMode", .setMonitorMode(mode: .pfl)) { $0.audio.monitorMode = .pfl },
+            // 提案 026（P5）：耳机听哪条总线
+            Row("setMonitorSource", .setMonitorSource(bus: .busB)) { $0.audio.monitorSource = .busB },
+            Row("setMonitorSource headphones 拒绝（自己听自己）", .setMonitorSource(bus: .headphones)) { _ in },
+            Row("setMonitorSource 相同值原样返回", .setMonitorSource(bus: .master)) { _ in },
             Row("setBusEffects", .setBusEffects(bus: .busA, effects: [EffectSlot(id: "peakLimiter")])) {
                 $0.audio.buses[Bus.busA.rawValue].effects = [EffectSlot(id: "peakLimiter")] },
             Row("setOutputEnabled 非录制 / 推流", before: { $0.outputs.append(OutputState(number: 3, kind: .ndi, name: "NDI")) },
@@ -489,7 +493,7 @@ final class ReducerTests: XCTestCase {
             XCTAssertEqual(actual, expected, row.name)
             covered.insert(Self.caseName(row.command))
         }
-        XCTAssertEqual(covered.count, Self.allCaseNames.count, "34 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
+        XCTAssertEqual(covered.count, Self.allCaseNames.count, "35 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
     }
 
     func testW1B_reduce_isPureAndDoesNotMutateInput() {
@@ -662,9 +666,34 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(loaded.inputs[1].settings.effects, [], "搬走的效果格清掉")
     }
 
+    // MARK: 提案 026（P5）：耳机听哪条总线
+
+    /// `setMonitorSource`：master / busA / busB 生效、只动 `audio.monitorSource`；headphones 自己无效、原样返回（回执 applied = false）；相同值原样返回。
+    /// 独听（monitorMode + solo）与监听点（monitorPoint）不受它影响。
+    func test026_setMonitorSource_rejectsHeadphones_andSameValueUnchanged() {
+        let s = Self.baseState()
+        XCTAssertEqual(s.audio.monitorSource, .master, "新状态默认听 Master")
+        for bus in [Bus.busA, .busB, .master] {
+            let after = reducer.reduce(s, .setMonitorSource(bus: bus), at: Tick(1))
+            var expected = s
+            expected.audio.monitorSource = bus
+            XCTAssertEqual(after, expected, "\(bus)")
+        }
+        XCTAssertEqual(reducer.reduce(s, .setMonitorSource(bus: .headphones), at: Tick(1)), s, "headphones 拒绝")
+        var onB = s
+        onB.audio.monitorSource = .busB
+        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .headphones), at: Tick(2)), onB, "已经在听 busB 时发 headphones 也不改")
+        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .busB), at: Tick(3)), onB, "相同值原样返回")
+        // 与监听方式 / 监听点互不影响
+        let pfl = reducer.reduce(onB, .setMonitorMode(mode: .pfl), at: Tick(4))
+        XCTAssertEqual(pfl.audio.monitorSource, .busB)
+        XCTAssertEqual(pfl.audio.monitorMode, .pfl)
+        XCTAssertEqual(pfl.audio.monitorPoint, onB.audio.monitorPoint)
+    }
+
     static let allCaseNames = ["cut", "fade", "setTransition", "setTransitionParams", "autoTransition", "setPreview", "setProgram", "tbar", "ftb", "overlay", "setOverlay",
                                "setOverlayDecoration",
-                               "audioGain", "mute", "busGain", "busMute", "setAFV", "setMonitorMode", "setBusEffects",
+                               "audioGain", "mute", "busGain", "busMute", "setAFV", "setMonitorMode", "setMonitorSource", "setBusEffects",
                                "startRecord", "stopRecord", "startStream", "stopStream", "setOutputEnabled", "renameOutput",
                                "setInputSettings", "renameInput", "addInput", "removeInput", "setInputSource",
                                "addOutput", "removeOutput", "setOutputSettings", "loadShow"]
@@ -689,6 +718,7 @@ final class ReducerTests: XCTestCase {
         case .busMute: "busMute"
         case .setAFV: "setAFV"
         case .setMonitorMode: "setMonitorMode"
+        case .setMonitorSource: "setMonitorSource"
         case .setBusEffects: "setBusEffects"
         case .startRecord: "startRecord"
         case .stopRecord: "stopRecord"

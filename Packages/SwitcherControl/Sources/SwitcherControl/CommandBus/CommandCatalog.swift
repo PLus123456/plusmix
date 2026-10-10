@@ -1,7 +1,7 @@
 import Foundation
 import SwitcherContracts
 
-// 命令目录：Command 的 34 个 case 各一条说明和一个样例。docs/api.md 由它生成（switcher-apidoc），
+// 命令目录：Command 的 35 个 case 各一条说明和一个样例。docs/api.md 由它生成（switcher-apidoc），
 // HTTP API 的 GET /api/v1/commands 也返回它。`CommandKind(of:)` 是穷举 switch：契约加 case 这里编译就红，
 // 目录不会悄悄落后（CommandCatalogTests 再钉一遍：每个 kind 都有样例、样例的 JSON 顶层键就是 case 名）。
 // W5-J（01a N1 / N3，04 Q51）：每条命令加类型化参数描述（CommandField：参数名 = JSON 键、类型、可不可空），App 的"选动作"面板按它生成表单；
@@ -11,7 +11,7 @@ import SwitcherContracts
 public enum CommandKind: String, CaseIterable, Sendable, Codable {
     case cut, fade, setTransition, setTransitionParams, autoTransition, setPreview, setProgram, tbar, ftb
     case overlay, setOverlay, setOverlayDecoration
-    case audioGain, mute, busGain, busMute, setAFV, setMonitorMode, setBusEffects
+    case audioGain, mute, busGain, busMute, setAFV, setMonitorMode, setMonitorSource, setBusEffects
     case startRecord, stopRecord, startStream, stopStream, setOutputEnabled, renameOutput
     case setInputSettings, renameInput, addInput, removeInput, setInputSource
     case addOutput, removeOutput, setOutputSettings
@@ -38,6 +38,7 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
         case .busMute: self = .busMute
         case .setAFV: self = .setAFV
         case .setMonitorMode: self = .setMonitorMode
+        case .setMonitorSource: self = .setMonitorSource
         case .setBusEffects: self = .setBusEffects
         case .startRecord: self = .startRecord
         case .stopRecord: self = .stopRecord
@@ -129,7 +130,7 @@ extension CommandKind {
     public var operatorFacing: Bool {
         switch self {
         case .cut, .fade, .setTransition, .autoTransition, .setPreview, .setProgram, .tbar, .ftb, .overlay,
-             .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode,
+             .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setMonitorSource,
              .startRecord, .stopRecord, .startStream, .stopStream, .setOutputEnabled, .renameOutput, .renameInput:
             true
         case .setTransitionParams, .setOverlay, .setOverlayDecoration, .setBusEffects,
@@ -172,6 +173,7 @@ public enum CommandCatalog {
         case .busGain: return [bus, dB]
         case .busMute: return [bus, on]
         case .setMonitorMode: return [CommandField(name: "mode", type: .choice(["afl", "pfl"]))]
+        case .setMonitorSource: return [bus]   // 026：四选一里的 headphones（3）会被拒，面板上该灰掉
         case .setBusEffects: return [bus, CommandField(name: "effects", type: .json("[EffectSlot]"))]
         case .startRecord, .stopRecord: return [CommandField(name: "output", type: .output(kinds: [.record]))]
         case .startStream, .stopStream: return [CommandField(name: "output", type: .output(kinds: [.stream]))]
@@ -232,6 +234,8 @@ public enum CommandCatalog {
             CommandDoc(kind: .setAFV, group: "音频", summary: "音频跟随视频开 / 关。", parameters: [("on", "开 / 关")], example: .setAFV(on: true)),
             CommandDoc(kind: .setMonitorMode, group: "音频", summary: "耳机监听方式：AFL（推子后）/ PFL（推子前）。",
                        parameters: [("mode", "afl / pfl")], example: .setMonitorMode(mode: .pfl)),
+            CommandDoc(kind: .setMonitorSource, group: "音频", summary: "耳机 / 监听总线上听哪条总线（master / busA / busB）；headphones 自己无效被拒；独听仍优先；与现状相同的值 applied = false。",
+                       parameters: [("bus", "0 = master, 1 = busA, 2 = busB（3 = headphones 无效）")], example: .setMonitorSource(bus: .busA)),
             CommandDoc(kind: .setBusEffects, group: "音频", summary: "整体替换一条总线的效果链；链顺序 = 处理顺序，enabled = false 的格旁路。",
                        parameters: [("bus", "0 = master, 1 = busA, 2 = busB, 3 = headphones"),
                                     ("effects", "[{id, enabled, params}]：id 与参数键见 CONTRACTS.md §2.4")],
