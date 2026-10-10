@@ -121,7 +121,7 @@ enum ActionCatalog {
         switch kind {
         case .cut, .fade, .setTransition, .setTransitionParams, .autoTransition, .setPreview, .setProgram, .tbar, .ftb: .switching
         case .overlay, .setOverlay, .setOverlayDecoration: .overlay
-        case .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setBusEffects: .audio
+        case .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setMonitorSource, .setBusEffects: .audio   // setMonitorSource：提案 026（P5）
         case .startRecord, .stopRecord, .startStream, .stopStream, .setOutputEnabled, .renameOutput, .addOutput, .removeOutput, .setOutputSettings: .output
         case .setInputSettings, .renameInput, .addInput, .removeInput, .setInputSource: .input
         case .loadShow: .show
