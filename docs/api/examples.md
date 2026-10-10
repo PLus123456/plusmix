@@ -135,6 +135,6 @@ C 系列测试用的完整客户端（记录快照、按计划发命令、算 C1
 ## 4. 时序上要知道的
 
 - 命令在**下一拍**生效（回执里的 `appliedTick`），从发出到画面变化 ≤ 1 拍 + 网络往返（C1）。
-- 收到 `applied = false` 不用重发：状态机是有意忽略的（例如转场进行中）。
+- 收到 `applied = false` 不用重发：状态机是有意忽略的（例如转场进行中再发转场；**转场进行中的 `setPreview` / `setProgram` 也会被拒**，PVW / PGM 不变）。批量 `[setPreview(n), cut]` 在转场中发：前一条被拒，`cut` 把正在进行的那次转场做完，PGM 落在原来那次的目标上、不是 n。
 - 想在精确的拍点切换：先读 `state.tick`，算好目标拍，提前一点发；或者用场景脚本（`switcher-headless --script`，[scenarios/README.md](../../scenarios/README.md)）。
 - 状态推送是整快照；客户端只保存最新一条即可，重连后第一条就是当前状态。

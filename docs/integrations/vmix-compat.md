@@ -5,7 +5,7 @@
 > 把函数名映射到 PlusMix 自己的命令；和 vMix、StudioCoast 没有任何关系，也不是它的替代品或衍生品。
 > 实现时只读了公开的协议文档和 Companion 模块（MIT 许可）的源码来学接口形状，**没有复制任何代码、文案或素材**。
 > 设计方案 §0 把"兼容 X 的 API"这类描述性用法列为法律灰区，所以（1）它是独立的 SwiftPM target，不进默认产品；
-> （2）**默认关闭**，用户在设置里显式打开（W3-E 的偏好设置页带这段提示）；（3）**发布前问律师**——包括产品文案里能不能出现对方的名字、
+> （2）**默认关闭**，用户在设置里显式打开（App 的 设置 › 远程控制 带这段提示）；（3）**发布前问律师**——包括产品文案里能不能出现对方的名字、
 > XML 根元素等协议字面量算不算商标使用。代码树里按铁律 6 不出现对方的名字（`scripts/lint-rules.sh` 会拦），
 > 唯一的例外是协议规定的 XML 根元素名（提案 [docs/contract-changes/011](../contract-changes/011-lint-exception-compat-protocol-literals.md)，已批：lint 只放行 VMixCompat 目录下带 `lint:allow-protocol-literal` 标记的那一行）。
 > 以上不是法律意见。
@@ -17,8 +17,8 @@
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | **false** | 总开关。关着时 `VMixCompatServer.start()` 什么都不做，两个端口都不监听（有测试钉着） |
-| `host` | 127.0.0.1 | HTTP 与 TCP 共用。库 / headless 可配；**PlusMix App 0.1.0 里固定 127.0.0.1、HTTP 端口固定 8088，偏好设置只能改开关与 TCP 端口**——Companion 在别的机器上时暂时连不上 App 的兼容层（"允许局域网"选项归 prompt 98） |
-| `httpEnabled` / `httpPort` | true / 8088 | HTTP 入口 |
+| `host` | 127.0.0.1 | HTTP 与 TCP 共用。库 / headless 可配（`--compat-listen`）；**PlusMix App**：设置 › 远程控制 里"仅本机 / 允许局域网"二选一（允许局域网 = 0.0.0.0），要具体地址在 设置 › 高级 填 host:TCP 端口；改了要应用并重起引擎 |
+| `httpEnabled` / `httpPort` | true / 8088 | HTTP 入口；App 里 设置 › 远程控制 可改 HTTP 端口 |
 | `tcpEnabled` / `tcpPort` | true / 8099 | TCP 文本协议入口 |
 | `recordOutput` | nil | StartRecording 等操作哪个录制输出；nil = 编号最小的录制输出 |
 | `streamOutput` | nil | StartStreaming 没带 `Value` 时用哪个推流输出；nil = 编号最小的；`Value=k` 选第 k 路（0 起） |

@@ -50,7 +50,7 @@ SUFeedURL / SUPublicEDKey（都非空才 sparkle_configured）、架构、最低
    （尝试打开后大约一小时内才有这个按钮），按提示输登录密码或触控 ID 确认，之后就能正常起。这是预期，记进报告即可。
 3. 输出 → 虚拟摄像头 → 安装 / 激活扩展 → 系统设置允许（扩展显示名 "PlusMix 虚拟摄像头" / "PlusMix Virtual Camera"）→ FaceTime 里选 "PlusMix"
    （摄像头设备名 = `VirtualCameraConstants.deviceName`，改名合入后 G5 改成了产品名）。
-4. 偏好设置 → 更新 → 检查更新…（docs/release/sparkle.md §5 的本地 appcast）。
+4. 设置 › 更新与诊断 → 检查更新…（docs/release/sparkle.md §5 的本地 appcast）。
 5. 帮助 → 导出诊断包… 出一份，打开看没有密钥。
 
 ## 常见错误

@@ -4,9 +4,9 @@
 
 ## 1. 用兼容层（C5）
 
-1. 打开兼容层：设置里的开关（W3-E），或 headless 的兼容层参数（G4 接线）；没接之前用
+1. 打开兼容层：App 的 设置 › 远程控制 › 第三方 API 兼容层（勾"启用兼容层（默认关）"、应用并重起引擎），或 headless 的兼容层参数（G4 接线）；不起 App 也可以用
    `SWITCHER_COMPAT_SERVE_SECONDS=600 swift test --package-path Packages/SwitcherControl --filter testC5_manual`（8 路合成输入，PGM 1 / PVW 2，带拍推进）。
-   兼容层默认只听 127.0.0.1。headless / 库里可以把 host 改成 0.0.0.0；**PlusMix App 0.1.0 里改不了**（偏好设置只有开关与 TCP 端口），Companion 要在另一台机器上连 App，等 prompt 98 的"允许局域网"选项。
+   兼容层默认只听 127.0.0.1。Companion 在另一台机器上时：App 的 设置 › 远程控制 里兼容层选"允许局域网"（= 听 0.0.0.0）、应用并重起引擎，把页上显示的 TCP / HTTP 地址填进 Companion（兼容层没有鉴权，只在可信的网络里这样做）；headless 用 `--compat-listen 0.0.0.0`。
 2. Companion → Connections → 加 "StudioCoast: vMix"（模块作者的命名，这里只是选它）：Target host = 127.0.0.1，TCP port = 8099，API Polling Interval 250 ms。
    连接状态应变绿；Log 里能看到 `Connected Function Socket` 等。它会开三条 TCP 连接、每 3 s PING、每 250 ms 要一次 XML、订阅 ACTS。
 3. 配一页按钮（六项，测试标准 §4 C5）：

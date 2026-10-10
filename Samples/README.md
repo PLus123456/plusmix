@@ -55,17 +55,18 @@ Tools/switcher-headless/.build/release/switcher-headless run --show Samples/even
 
 ## 4. 直播先在本机试
 
-教会样例的直播目的地是 `rtmp://127.0.0.1:1935/live`、密钥 `church`。另开一个终端起本地服务器，再在 App 里按"推流"（或无界面引擎里把该输出的 `enabled` 改成 true）：
+教会样例的直播目的地是 `rtmp://127.0.0.1:1935/s1`、密钥留空——仓库的 `scripts/mediamtx.yml` 只开了 s1 / s2 / s3 / srt1 四个路径，推到别的路径会一直"连接中"。
+在仓库根目录另开一个终端起本地服务器（它把收到的流录进当前目录下的 `mediamtx-recordings/`），再在 App 里按底栏"推流"（或无界面引擎里把该输出的 `enabled` 改成 true）：
 
 ```bash
 mediamtx scripts/mediamtx.yml
 ```
 
 ```bash
-ffplay rtmp://127.0.0.1:1935/live/church
+ffplay rtmp://127.0.0.1:1935/s1
 ```
 
-换成平台时只改地址和密钥（`rtmp://` / `rtmps://` / `srt://` 都行，协议由地址决定），其他不动。
+换成平台时在 设置 › 推流 里选"服务"（YouTube 等入口固定的会替你填地址）、填推流码，其他不动；协议由地址决定（`rtmp://` / `rtmps://` / `srt://`）。
 
 ## 5. 重新生成
 

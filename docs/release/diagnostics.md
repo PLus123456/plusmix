@@ -11,7 +11,7 @@
 - 系统自己的崩溃报告 `~/Library/Logs/DiagnosticReports/PlusMix*.ips`（前缀 = 可执行名 = PRODUCT_NAME） 也会被诊断包收进 crashes/（最近 20 份）。
 - 帮助 → 打开诊断文件夹 直接看目录。
 
-## 诊断包（帮助 → 导出诊断包…；偏好设置 → 更新 里也有按钮）
+## 诊断包（帮助 → 导出诊断包…；设置 › 更新与诊断 里也有按钮）
 
 1. 对话框说明内容，用户选"包含崩溃诊断与日志"或"只导出设置与统计"——这就是同意；取消就什么都不写。
 2. 存储面板选位置（默认 `PlusMix-诊断-yyyyMMdd-HHmm.zip`；zip 里的顶层目录 `PlusMix-diagnostics-<时间>/`）。
