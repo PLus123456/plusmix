@@ -1,0 +1,32 @@
+:root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #ffffff; --line: #d2d2d7; --code-bg: #f2f2f5; --link: #0a66d0; --nav-bg: #f7f7f9; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #f2f2f7; --muted: #a1a1a6; --bg: #1c1c1e; --line: #3a3a3c; --code-bg: #2c2c2e; --link: #5eaaff; --nav-bg: #242426; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.65 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+header.nav { position: sticky; top: 0; background: var(--nav-bg); border-bottom: 1px solid var(--line); z-index: 1; }
+header.nav .inner { max-width: 980px; margin: 0 auto; padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+header.nav .book { font-weight: 600; margin-right: 8px; }
+header.nav a { color: var(--link); text-decoration: none; white-space: nowrap; }
+header.nav a.current { color: var(--fg); font-weight: 600; }
+header.nav .lang { margin-left: auto; }
+main { max-width: 980px; margin: 0 auto; padding: 8px 16px 48px; }
+h1 { font-size: 28px; margin: 24px 0 12px; }
+h2 { font-size: 21px; margin: 32px 0 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+h3 { font-size: 17px; margin: 24px 0 8px; }
+a { color: var(--link); }
+code { font: 13px ui-monospace, "SF Mono", Menlo, monospace; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+pre { background: var(--code-bg); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+.table { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; min-width: 50%; }
+th, td { border: 1px solid var(--line); padding: 6px 10px; vertical-align: top; text-align: left; }
+th { background: var(--nav-bg); }
+th:first-child, td:first-child { min-width: 6.5em; }
+h1, h2, h3, h4, [id] { scroll-margin-top: 64px; }
+img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; }
+blockquote { margin: 12px 0; padding: 4px 14px; border-left: 3px solid var(--line); color: var(--muted); }
+.repo-path { color: var(--muted); font-size: 13px; }
+.quick { margin-top: 32px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.quick h2 { border: none; margin-top: 4px; padding-top: 0; font-size: 17px; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 40px; padding-top: 10px; }

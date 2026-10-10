@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>输出 — PlusMix 使用手册</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="nav"><div class="inner"><span class="book">PlusMix 使用手册</span><a href="index.html">目录</a><a href="concepts.html">概念</a><a href="inputs.html">输入</a><a class="current" href="outputs.html">输出</a><a href="shortcuts.html">快捷键</a><a href="settings.html">设置</a><a href="troubleshooting.html">故障排查</a><a class="lang" href="../en/outputs.html" hreflang="en">English</a></div></header>
+<main>
+<h1 id="输出">输出</h1>
+<p>每种输出在<a href="settings.html">设置</a>窗"本节目"那一组里有一页：输出总览、录制、ISO 分路、推流、外部显示、NDI® 发送、虚拟摄像头、多画面布局；菜单"输出"下面列着这几页，底栏的 ⚙ 直达对应的页，底栏按钮的主体和 ▴ 是现场操作的快捷入口（<a href="concepts.html#底栏按钮">概念 › 底栏按钮</a>）。</p>
+<p>每个输出有编号、名字、"应该在跑"的开关和自己的设置。每一节标题行写"种类 k · 输出 n"，右边是名字框（回车或离开输入框就改名）。运行中的帧数 / 码率 / 丢帧只在状态行、统计窗和 API 的 <code>stats</code> 里，不存进节目文件。</p>
+<div class="table"><table><thead><tr><th>种类</th><th>送什么</th><th>开关怎么起</th></tr></thead><tbody><tr><td>录制</td><td>PGM，或某一路输入（ISO）</td><td>底栏"录制"一起起停；▴ 单路停；快捷键 / API <code>startRecord</code></td></tr><tr><td>推流</td><td>PGM</td><td>底栏"推流"、▴ 单路起停、推流页每段的开关；<code>startStream</code></td></tr><tr><td>NDI® 发送</td><td>PGM / PVW / 多画面 / 某一路输入</td><td>NDI® 发送页的"发送"开关；<code>setOutputEnabled</code></td></tr><tr><td>外部显示</td><td>PGM / PVW / 多画面 / 某一路输入（Aux）</td><td>底栏 / 工具条"外部显示"、监视器右键 › 全屏输出到；<code>setOutputEnabled</code></td></tr><tr><td>虚拟摄像头</td><td><strong>PGM</strong></td><td>输出 › 虚拟摄像头 › 启用 / 停用；<code>setOutputEnabled</code></td></tr><tr><td>多画面</td><td>多画面画面（给下游用）</td><td>多画面布局页 / <code>setOutputEnabled</code>；布局与开关无关</td></tr></tbody></table></div>
+<h2 id="0-输出总览">0. 输出总览</h2>
+<p>设置 › 输出总览（菜单 输出 › 输出总览…）：节目里每个输出一行——种类、名字、来源、开 / 关、状态，最右"详情 ›"。点一行就跳到它的设置页、滚到那一节。录制的"开"= 正在录，推流的"开"= 应该在推（实际情况看状态）。状态和底栏、控制 API 读的是同一份统计。</p>
+<h2 id="1-录制">1. 录制</h2>
+<p>设置 › 录制（底栏 ⚙ 录制 › 录制设置…，或 输出 › 录制设置…）。页顶写着"按底栏「录制」会一起录 n 路：录制、录制 2、ISO 1……"；正在录时写"正在录制：改动从下一次开录起生效。"</p>
+<p><strong>文件（全部录制路共用）</strong>——这一节改的是录制 1，别的录制路跟着它：</p>
+<div class="table"><table><thead><tr><th>项</th><th>说明</th></tr></thead><tbody><tr><td>目录</td><td>默认 <code>~/Movies/PlusMix</code>；节目文件里写相对目录时挂在它下面。路径太长时中间省略，悬停看完整路径</td></tr><tr><td>文件名模板</td><td>支持 <code>{show}</code> <code>{date}</code> <code>{time}</code> <code>{output}</code>，默认 <code>{show}-{date}-{time}</code>；下面一行是示例。录制 1 以外的路自动带 <code>-{output}</code>，不会撞名</td></tr><tr><td>文件格式</td><td>单选：<strong>".mov（边录边存片段，崩溃可恢复）"</strong> 或 <strong>".mov，停止后转 .mp4"</strong>。一律先写 .mov（每个片段一段，进程被杀也能恢复到最后一个片段）；转 .mp4 失败时保留 .mov。老节目文件里写的"容器 .mp4"不起作用（页上会说一句），以这一项为准</td></tr><tr><td>片段间隔</td><td>默认 1 s</td></tr></tbody></table></div>
+<p><strong>录制输出列表</strong>：每一路"录制 k · 输出 n · 名字"：</p>
+<div class="table"><table><thead><tr><th>项</th><th>说明</th></tr></thead><tbody><tr><td>参与录制</td><td>"参与录制（按底栏「录制」时录这一路）"：关掉 = 设置留着，底栏"录制"不起它</td></tr><tr><td>来源</td><td>PGM，或某一路输入（录某一路的原始画面）。PVW / 多画面不能当录制来源</td></tr><tr><td>编码</td><td>编码器（H.264 / HEVC / ProRes 422 / 422 HQ / 4444，硬件编码）、分辨率（默认跟节目）、码率、关键帧间隔、音频（AAC 或 PCM + 码率）；音频 = Master 总线</td></tr><tr><td>状态</td><td>与底栏同一套文字</td></tr><tr><td>删除这一路</td><td>正在录时灰着</td></tr></tbody></table></div>
+<ul><li>页底"添加录制输出"：新加的一路默认录 PGM，可以改成录某一路输入、用自己的格式（例如一路 ProRes 母版、一路 H.264 小文件）。</li><li><strong>新建录制输出的码率跟节目格式</strong>：1080p30 10 Mb/s、1080p60 18、1440p60 32、2160p30 36（59.94 / 29.97 按 60 / 30 那一档），其余按每像素每帧约 0.15 bit 取整（至少 4 Mb/s）；音频 AAC 256k。</li><li><strong>录制 1</strong> = 第一个来源是 PGM 的录制输出；ISO 路的格式跟它走（见下）。</li><li>底栏"录制"：都没在录 → 所有参与录制的路<strong>同一拍</strong>一起开始（起点是同一拍）；有在录的 → 全部停止（先确认）。节目里一个录制输出都没有时，点一下先加一路默认的再开始。▴ 里可以只停某一路。</li><li>编码 PTS 用拍点时刻，录制文件的时长与"拍数 × 帧时长"一致（<span class="repo-ref">测试标准</span><span class="repo-path">（仓库：docs/testing/测试标准.md）</span> E5）；正常停止 20 次、录制中强杀 10 次都有自动测试。</li></ul>
+<h3 id="iso-分路">ISO 分路</h3>
+<p>设置 › ISO 分路（底栏 ⚙ 录制 › ISO 分路录制…，或 输出 › ISO 分路录制…）：给每一路输入单独录一个文件。</p>
+<ul><li>页顶："格式 H.264 · 18 Mb/s · .mov（同录制 1）"带"更改格式…"、目录带"更改目录…"——<strong>ISO 的格式和目录跟录制 1</strong>。改了录制 1，没在录的 ISO 路马上跟，在录的停了再跟（下一次开录生效）。</li><li>表：行 = "PGM · 录制 1" + 每一路输入；列 = 录（勾选框）/ 名称 / 状态 / 丢帧 / 目录。勾一路输入 = 给它加一个录制输出（来源 = 这一路的原始画面，文件名模板带 <code>{output}</code>）；取消 = 删掉那一路 ISO。 <strong>PGM 那一行取消 = 录制 1 不参与 = 只录 ISO</strong>。正在录的行锁着（停了以后才能改）。纯音频 / 图片输入默认收起，"显示全部输入（另有纯音频 / 图片 n 路）"展开。</li><li>与 PGM 同一拍起停、共用起点，所以各文件同一事件的时间差实测 0.0–0.2 ms（<span class="repo-ref">测试标准</span><span class="repo-path">（仓库：docs/testing/测试标准.md）</span> A4 要求 ≤ 1 帧）。</li><li>ISO 文件的音轨 = 该路推子后、AFV 之前的声音（切走了也照录）。</li><li>30 fps 的输入录成 60 fps 节目时每帧重复一次，与 PGM 同一网格。</li><li>每路输入最多 4 个分支（ISO / Aux 外部显示 / NDI® 输入源共用），用完会提示。</li><li>页底写着录制目录、剩余空间和"还能录多久"（按所有录制输出码率之和估）。</li></ul>
+<h3 id="磁盘保护">磁盘保护</h3>
+<p>每秒看一次每路录制的剩余空间（外置盘 / 镜像也算对）：</p>
+<div class="table"><table><thead><tr><th>情况</th><th>行为</th></tr></thead><tbody><tr><td>剩余低于 1 GB</td><td>状态行提示"录制 n：磁盘剩余 x MB"</td></tr><tr><td>剩余低于下限（默认 200 MB；设置 › 高级 › 磁盘下限，或启动参数 <code>--record-min-free-mb</code>）</td><td><strong>只停这一路录制</strong>，提示"低于下限"；推流、画面、别的录制不受影响。设了备用目录就切过去接着录</td></tr><tr><td>写满 / 写入失败</td><td>这一路停并保留已写片段；设了备用录制目录（设置 › 高级，或 <code>--record-fallback</code>）就在下一拍切到备用目录继续录</td></tr></tbody></table></div>
+<p>测过的场景：录到 50 MB 的小镜像、两路 40 Mbps 同时写满（<span class="repo-ref">测试标准</span><span class="repo-path">（仓库：docs/testing/测试标准.md）</span> S7）。</p>
+<h2 id="2-推流">2. 推流</h2>
+<p>设置 › 推流（底栏 ⚙ 推流，或 输出 › 推流设置…）：每个目的地一路输出，各自编码、各自重连。页顶"全部开始 / 全部停止"（停也先问）。</p>
+<p>每个目的地一段，段名"推流 k"、副标题"输出 n"、名字框；段首一个"开始 / 停止"开关（没有地址不让开，关 = 先确认），下面一行状态："推流中 · 5.9 Mb/s · 丢 3 帧 · 重连 1 次"。</p>
+<div class="table"><table><thead><tr><th>项</th><th>说明</th></tr></thead><tbody><tr><td>服务</td><td>自定义（RTMP / RTMPS）、自定义（SRT）、微信视频号、抖音、哔哩哔哩、快手、YouTube、Facebook、Twitch。入口固定的服务（YouTube、Facebook、Twitch）选了就填好地址，推流码去平台后台拿；每场发地址的平台（视频号、抖音、快手、哔哩哔哩）不填，按说明去平台直播后台复制"推流地址 + 推流码"贴进来。节目文件里只存完整地址，重开时按地址认出是哪个服务</td></tr><tr><td>地址</td><td><code>rtmp://host/app</code>、<code>rtmps://host/app</code>、<code>srt://host:port?streamid=…&amp;passphrase=…&amp;latency=…</code>；协议由地址开头决定。地址里的 <code>user:pass@</code> 打码显示</td></tr><tr><td>密钥</td><td>RTMP 拼在地址后面作流名；SRT 没写 <code>streamid</code> 时补成 <code>streamid=密钥</code></td></tr><tr><td>鉴权…</td><td>见下面的<a href="#推流鉴权">推流鉴权</a></td></tr><tr><td>质量</td><td>1080p（节目 ≥ 48 fps 时 6 Mb/s，否则 4.5 Mb/s；音频 AAC 160k）、720p（3 Mb/s；AAC 128k）、自定义。新目的地默认取不高于节目的那一档（最高 1080p，不放大）；手改了编码就显示"自定义"</td></tr><tr><td>编码详情…</td><td>编码器、分辨率、码率、关键帧（按秒，新建时 2 s，旁边写"= n 帧"）、音频码率、<strong>重试间隔最长 n s（一直重试）</strong></td></tr><tr><td>与推流 1 相同</td><td>第 2 个目的地起默认勾着：质量和编码跟着推流 1 改（地址、密钥、重试间隔不跟）；勾着时这两项灰掉</td></tr><tr><td>删除目的地</td><td>在推时灰着</td></tr></tbody></table></div>
+<ul><li>页底"合计上行约 n Mb/s（m 个目的地）"：每个目的地单独编码、各占一份上行，两个目的地就是两倍；上行带宽最好留出一倍余量。</li><li><strong>在推的那一段锁着</strong>：服务、地址、密钥、鉴权、质量、编码详情、删除都改不了，写"正在推流：地址、密钥和编码停止后可改。"</li><li>地址 / 密钥改完<strong>按回车或离开输入框</strong>才提交。</li><li><strong>起不来的那一段不锁</strong>：写"起不来：原因"（例如"不认这种地址：foo://（只支持 rtmp:// rtmps:// srt://）"、"推流 3 没有地址"），给"重试"和"停用这一路"；改好地址 / 密钥会自动重试。</li><li><strong>重连</strong>：断线后指数退避自动重连，一直重试不放弃；"重试间隔最长 n s"（默认 30 s）是两次尝试之间等待的上限，不是"超过就放弃"。重连后第一帧是关键帧。</li><li>多路推流互不影响：一路断网，其他路丢帧 0（E7）；断网 30 s 恢复后 10 次全部重连成功、≤ 15 s（E8）；带宽不够时的"网络丢帧"计数与真实丢帧差 ≤ 5%（E9）。这些都在本地 MediaMTX + 网络损伤下自动测。</li></ul>
+<p><strong>底栏和工具条上的推流状态</strong>按最差的那一路汇总：一个目的地在推写"● 推流中"，多个写"● 推流中 2/3"（在推的路数 / 目的地总数）；有路在重连或起不来写"推流 · 1 路异常"（橙；起不来的是深红）；只开了一路时直接写它的状态。首次连接写"连接中"（第 2 次起"连接中（第 n 次）"），连上过之后断了才写"重连中（第 n 次）"，n 是真实的尝试次数。悬停提示逐路列"名字：状态"，起不来的带原因，地址里的口令打码。开始时状态行提示"推流 n 连接中…"，真正推上了才提示"推流 n 已开始"。 ▴ 里每个目的地一项（点 = 只开 / 只停 / 只重试这一路），"推流状态…"现在打开推流页。 API <code>stats.encoder[]</code> 里推流的 <code>state</code> 是 idle / connecting / publishing / backoff / stopping / stopped / failed；起不来的那一路报 <code>failed</code>。</p>
+<h3 id="推流鉴权">推流鉴权</h3>
+<p>"鉴权…"按地址的协议弹不同的小表：</p>
+<ul><li><strong>RTMP / RTMPS：用户名 / 密码</strong>。这是 <strong>Adobe 鉴权（FMLE 兼容）</strong>，Wowza、Nimble、FMS 和一部分 CDN 入口用它：用户名和密码写进地址的 <code>user:pass@</code> 一段（地址框里打码显示，<code>rtmp://•••@host/app</code>），连接时按挑战应答算，不会把密码明文发出去。鉴权按钮旁写"鉴权：用户 xxx（密码已设）"或"没有鉴权"；"清除"去掉整段。</li><li><strong>MediaMTX、SRS、nginx-rtmp 这类自建服务器要的是地址后面的查询串</strong>，例如 MediaMTX：<code>rtmp://host:1935/live?user=推流用户&amp;pass=密码</code>——直接写在地址框里。填在"鉴权…"里对它们没用：连接会成功、开始推的时候被服务器拒（系统日志里是服务器回的 <code>NetStream.Publish.Unauthorized</code>）。注意查询串里的密码在地址框里是明文的。</li><li>用户名或密码不对：这一路一直"连接中（第 n 次）"、按退避重试；原因写在系统日志里（"鉴权失败（用户名或密码不对）…"，看法见 <a href="troubleshooting.html#9-日志与诊断">故障排查 › 日志与诊断</a>）。服务器要别的鉴权方式时日志写"鉴权方式不支持：…"。</li><li><strong>SRT：passphrase</strong>（加密口令），写进地址的 <code>passphrase=</code> 参数；只能用字母、数字和 <code>- . _ ~</code>，10–79 个字符（别的字符现在推不上），不合格直接报错不写。</li></ul>
+<h3 id="本机先试">本机先试</h3>
+<pre><code class="language-bash">mediamtx scripts/mediamtx.yml</code></pre>
+<p>在仓库根目录起本地服务器（它会把收到的流录进当前目录下的 <code>mediamtx-recordings/</code>）。推流地址填 <code>rtmp://127.0.0.1:1935/s1</code>、<strong>密钥留空</strong>（这份配置只开了 s1 / s2 / s3 和 SRT 的 srt1 四个路径；推到别的路径会一直"连接中"），然后看：</p>
+<pre><code class="language-bash">ffplay rtmp://127.0.0.1:1935/s1</code></pre>
+<p>SRT 用 <code>srt://127.0.0.1:8890?streamid=publish:srt1</code>。RTMP 与 SRT 在本项目里端到端测过；RTMPS 走同一条路，只是加了 TLS（<span class="repo-ref">示例 › 直播</span><span class="repo-path">（仓库：Samples/README.md）</span>）。</p>
+<h2 id="3-ndi-发送">3. NDI® 发送</h2>
+<p>设置 › NDI® 发送（输出 › NDI® 发送设置…，或底栏 ⚙ 外部显示 › NDI® 发送设置…）：每路发送一个输出，源名就是输出的名字，网络上显示为 <strong><code>机器名 (输出名)</code></strong>。（NDI® is a registered trademark of Vizrt NDI AB.）</p>
+<div class="table"><table><thead><tr><th>项</th><th>说明</th></tr></thead><tbody><tr><td>来源</td><td>PGM / PVW / 多画面 / 某一路输入（Aux，原始画面：抠像 / 裁切 / 变换不生效）。PVW / 多画面按需多出一路画面，开头可能缺一两帧</td></tr><tr><td>分组</td><td>NDI® 分组名（逗号分隔），空 = 默认组 <code>public</code>。接收端按分组过滤</td></tr><tr><td>转换</td><td>NV12 → UYVY 的转换用 GPU / CPU / 自动（自动 = 定期比一次，哪个省用哪个）</td></tr><tr><td>音频</td><td>PGM / PVW / 多画面送 Master；某路输入送该路推子后的声音</td></tr><tr><td>发送</td><td>开关：关掉 = 停发，设置留着</td></tr></tbody></table></div>
+<ul><li>改名 / 改来源 / 改分组（"应用名字 / 分组"）会重建发送端（接收方要重新选源），转换方式随时切。</li><li><strong>SDK 不在</strong>（编译时没探测到 NDI SDK for Apple）：输出能加、能开，但不会真的发出去；状态显示"不可用：没有 NDI SDK"，API <code>stats.encoder[]</code> 里这一项 <code>state = "unavailable"</code>。</li><li>SDK 在但起不来（初始化 / 建实例失败）：<code>state = "failed"</code>，状态行有原因；改设置后会重试。</li><li><code>stats.encoder[]</code> 的 <code>connections</code> 是当前接收方数，<code>bitrate</code> 是 UYVY 原始码率（1080p60 约 2 Gb/s，这是正常的）。</li></ul>
+<h2 id="4-外部显示第二块显示器">4. 外部显示（第二块显示器）</h2>
+<p>一路外部显示 = 一块显示器上的无边框全屏窗口。入口：</p>
+<ul><li>底栏"外部显示"：⚙ = 路由菜单；主体 = 全部开 / 关。工具条正中的"外部显示▾"、菜单 输出 › 外部显示 ▸ / 打开（关闭）全部外部显示 是同一套。</li><li>右键 PGM / PVW 监视器 › 全屏输出到 ▸：这块屏改成显示这个监视器（<a href="concepts.html#主窗口">概念 › 主窗口</a>）。</li><li>设置 › 外部显示（输出 › 外部显示设置…）。</li></ul>
+<p><strong>路由菜单</strong>：每块屏一段<strong>单选</strong>（PGM / PVW / 多画面 / 输入 n），打勾 = 这块屏正在显示的源；这块屏已经配过时最上面一行是"关闭"（这块屏不出画面、配置留着），关着的那一路标"（已关）"。点一个源：这块屏已有一路就换源并打开、同屏别的路关掉，没有就加一路。往下是"删除 n …（状态）"和"关闭全部外部显示"，最后一段是"外部显示设置… / NDI® 发送设置…"。</p>
+<p><strong>主体</strong>：有开着的 → 全部关（配置留着）；都关着 → 按原来的配置全部开；一路都没配 → 在第一块非主屏（主屏 = PlusMix 主窗口所在的那块）上全屏显示 PGM；没有第二块屏 → 弹路由菜单。</p>
+<p><strong>设置页</strong>最上面是"每块屏送什么"：每块屏一个单选，与路由菜单是同一份设置。下面是每一路的细项：名字、启用、显示器、来源、显示器不在时退回主屏、状态、删除。</p>
+<ul><li>来源：PGM / PVW / 多画面 / 某一路输入（Aux，全分辨率原始画面）。</li><li>显示器不在时：默认黑着等它回来、不动主屏；"显示器不在时退回主屏"会在主屏全屏（盖住操作界面），只在明确要的时候开。设置 › 常规 › 外部显示在主屏上不盖住主界面 可以让主屏上的外部显示窗垫在主界面下面。</li><li>画面由显示器自己的刷新节拍取最新帧，拖动主窗口、进出全屏都不影响渲染线程（丢帧计数不增）。Esc 关闭窗口。</li><li>节目文件保存显示器 ID 和来源，重新打开时恢复；显示器 ID 重启后可能变，换了就重选一次。</li></ul>
+<h2 id="5-虚拟摄像头">5. 虚拟摄像头</h2>
+<p>设置 › 虚拟摄像头，或菜单 输出 › 虚拟摄像头 ▸：让 FaceTime、QuickTime、浏览器会议等把 PlusMix 当成一台摄像头。<strong>送的是 PGM</strong>（不可选来源），与录制 / 推流 / NDI® 拿的是同一块节目帧。</p>
+<p>安装（一次）：</p>
+<ol><li>用带 Team ID 的签名构建（<code>DEVELOPMENT_TEAM=&lt;TeamID&gt; make gen build-app</code>），把 PlusMix.app 放进 <code>/Applications</code> 再启动——系统扩展只能从 /Applications 里的 App 激活。</li><li>设置 › 虚拟摄像头 › 安装…（或 输出 › 虚拟摄像头 › 安装 / 激活扩展…），然后到 系统设置 › 通用 › 登录项与扩展（旧版本在"隐私与安全性"）里允许。"检查"（菜单里"查询扩展状态"）看当前状态。</li><li>打开"开启虚拟摄像头"（或 输出 › 虚拟摄像头 › 启用 / 停用虚拟摄像头输出）。在 FaceTime / QuickTime 新建影片录制里选 <strong>"PlusMix"</strong> 摄像头。</li></ol>
+<ul><li>开发构建（没有 Team ID、ad-hoc 签名）激活会失败，状态显示"系统不允许安装：需要正式签名的版本，并从"应用程序"文件夹运行"，App 不崩。</li><li>输出开着但扩展没连上：状态"找不到虚拟摄像头设备（扩展未安装 / 未激活）；已丢 n 帧"，每秒重试；连上后自动发。关掉输出后对方看到占位画面（深灰 + 移动白条）。</li><li>帧率跟节目，1080p NV12；从 PGM 到对方进程 ≤ 3 帧是设计目标（签名机器上验证）。</li></ul>
+<h2 id="6-多画面">6. 多画面</h2>
+<p>设置 › 多画面布局（底栏 ⚙ 多画面，或 输出 › 多画面布局…）；底栏"多画面"主体 / 窗口 › 多画面窗口 开关独立窗口，可拖到任何屏、全屏。</p>
+<div class="table"><table><thead><tr><th>项</th><th>说明</th></tr></thead><tbody><tr><td>预设</td><td>PVW / PGM + 按路数自动（默认：上 PVW / PGM，下半按路数 4×2 / 6×3 / 8×4）、PVW / PGM + 4×2、PVW / PGM + 2×2、3×3、4×4</td></tr><tr><td>格子</td><td>用预设时可以"从当前预设转成自定义"（抄出预设每一格的位置）或"添加格子"；有自定义格子时逐格改：来源（PGM / PVW / 输入 n）+ x / y / 宽 / 高（按画面比例 0–1，超出画面的部分裁掉）+ 删除，末尾"添加格子 / 清掉自定义格子（回到预设）"。自定义格子非空时预设不起作用</td></tr><tr><td>安全框</td><td>PGM / PVW 格画 EBU R95 动作安全 3.5% / 字幕安全 5%</td></tr><tr><td>电平表</td><td>输入格画该路的表，PGM 格 = Master、PVW 格 = 当前 PVW 那一路；读数就是状态行 / API 那一份</td></tr></tbody></table></div>
+<ul><li>每格有 tally 边框（红 PGM / 绿 PVW）和名字标签；纯音频输入的格子画名字 + 电平表。</li><li>布局存在节目文件里（第一个多画面输出的设置），对多画面窗口、缩略图条、外部显示 / NDI® 的"多画面"来源都生效。</li><li>多画面输出的"开关"只决定要不要把多画面画面送给下游（NDI® / 外部显示），布局与它无关，只承载布局的那一个可以一直关着。</li></ul>
+<footer>PlusMix 0.1.0 · 本手册由仓库的 docs/user 生成，随 App 一起安装。</footer>
+</main>
+</body>
+</html>

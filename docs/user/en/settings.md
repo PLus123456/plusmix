@@ -62,7 +62,7 @@ Three buttons at the bottom left:
 
 ### Remote Control
 
-Two sections: the **local API** (HTTP / WebSocket, [docs/api](../../api/README.md)) and the **third-party API compatibility layer** (lets existing control-panel configurations work, off by default; [docs/api/vmix-compat.md](../../api/vmix-compat.md) has the legal notice and coverage table; Chinese).
+Two sections: the **local API** (HTTP / WebSocket, [docs/api](../../api/README.md)) and the **third-party API compatibility layer** (lets existing control-panel configurations work, off by default; its legal notice and coverage table are linked from the [local API docs](../../api/README.md); Chinese).
 
 | Item | Local API | Compatibility layer |
 |---|---|---|
