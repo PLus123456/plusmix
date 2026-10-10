@@ -49,7 +49,7 @@ Actions worth knowing:
 
 | Action | Notes |
 |---|---|
-| Preview and transition | Puts the input on PVW, then takes it to PGM with the selected transition (two commands in order; if the first is refused — say a transition is still running — the second isn't sent) |
+| Preview and transition | Puts the input on PVW, then takes it to PGM with the selected transition (two commands in order; if the first is refused — say the input has been removed — the second isn't sent; pressed during a transition, both are ignored by the state machine and nothing changes) |
 | Fade | In seconds (stored as milliseconds), so the length stays the same when the show's frame rate changes. Old tables with Fade in ticks still load and work; the picker shows them as "Fade (in ticks, old)" |
 | All recordings on / off, ISO recordings only, All streams start / stop | PGM and ISO start and stop on the same tick; pressing them **never asks** |
 | Output on / off, All outputs of a kind on / off | One NDI® / external display / virtual camera / multiview output, or every output of one kind |
