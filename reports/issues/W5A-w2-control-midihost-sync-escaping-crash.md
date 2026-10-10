@@ -43,3 +43,12 @@ func sync<T: Sendable>(_ body: @Sendable () -> T) -> T {
 2. 保留非逃逸签名：把闭包放进一个可清空的盒子，块里先取出来跑完、把盒子清空（闭包的最后一个引用在 signal 之前就放掉），再 signal。
 
 验证：在 `SwitcherControlTests` 里加一条压力用例，宿主线程上塞一个慢块，主线程连续 `sync` 上千次（或起停 MIDIController 上百次），Debug 构建不崩；App 侧 `make test-app` 全量里 freshSession 不再偶发崩溃。
+
+## 处理结果（W2-C3 / `w2-control-3`，2026-10-10；待 G8a 合入、KNOWN_ISSUES 由 G8 销号）
+
+- 按改法 2 修了（`MIDIHost.swift`）：闭包放进 `SyncCall`，CF 的块只捕获 `SyncCall`；宿主线程上跑完先清掉闭包、再 `done.signal()`。签名、调用处、返回值、执行线程都不变。
+  没选改法 1：逃逸闭包仍要等块被释放才放掉捕获的 self，`deinit { stop() }` 一类路径将来一改就换成 "deallocated with non-zero retain count"。
+- 原因核实（探针）：窗口是 `done.signal()` 到 run loop `Block_release` 之间；**Release（-O）同样 trap**（只有 `-Ounchecked` 才去掉这条检查），所以正式 App 也会崩。
+  宿主线程醒着（正在处理别的块）时最容易撞上；在 signal 之后人为让宿主线程睡 1 ms，旧写法 Debug / Release 每次必崩，新写法 0 次。
+- 守门用例 `SwitcherControlTests.MIDIHostTests.testC_midiHostSync_stressNoTrap`：宿主线程上有界地排着空块 + 隔 5–10 ms 一个睡 1–5 ms 的慢块，主线程 sync 2000 次 + 起停 MIDIController 200 次。
+  修前独立进程 10 遍 trap 9 遍，修后 30 遍 0 次；App `make test-app` 全量两轮（228 个用例）0 崩、没有新的 PlusMix .ips。细节见 reports/w2-control-3.md。
