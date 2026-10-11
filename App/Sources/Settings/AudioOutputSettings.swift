@@ -216,7 +216,6 @@ struct AudioOutputSettingsSection: View {
             }
             if model.offersBorrowMasterForMonitor {
                 Toggle(L("audioDevice.borrowMaster"), isOn: $model.borrowMasterForMonitor)
-                Text(L("audioDevice.borrowMasterPending")).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Button(L("audioDevice.resetMap")) { model.resetToDeviceDefault() }.disabled(!model.isCustomized)

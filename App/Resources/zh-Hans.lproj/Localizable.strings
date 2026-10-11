@@ -359,7 +359,6 @@
 "audio.transport.usb" = "USB";
 "audio.transport.virtual" = "虚拟设备";
 "audioDevice.borrowMaster" = "监听时临时占用 Master 声道";
-"audioDevice.borrowMasterPending" = "这一版的音频引擎还不会在独听时临时换声道：选上先记下，引擎支持后生效（问题单 W5K-w1-audio-monitor-selected-bus）。现在要听耳机总线，请换一台多声道设备。";
 "audioDevice.busOutput" = "%@ 送到";
 "audioDevice.channelCount" = "这台设备有 %d 个输出声道";
 "audioDevice.deviceLine" = "%@（%d 个输出声道）";

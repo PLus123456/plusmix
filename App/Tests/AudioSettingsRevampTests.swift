@@ -152,7 +152,6 @@ final class AudioDeviceRevampTests: XCTestCase {
         model.selectDevice(.named("耳机"))
         XCTAssertEqual(model.map, BusOutputMap(master: 0), "换到 2 声道设备：这台没有的声道对去掉")
         XCTAssertTrue(model.offersBorrowMasterForMonitor)
-        XCTAssertTrue(L("audioDevice.borrowMasterPending").contains("W5K-w1-audio-monitor-selected-bus"), "写明尚未生效与问题单")
         model.resetToDeviceDefault()
         XCTAssertNil(model.storedMap)
         model.selectDevice(.null)

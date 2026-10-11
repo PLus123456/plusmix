@@ -359,7 +359,6 @@
 "audio.transport.usb" = "USB";
 "audio.transport.virtual" = "Virtual device";
 "audioDevice.borrowMaster" = "Use the Master channels while monitoring";
-"audioDevice.borrowMasterPending" = "This version’s audio engine can’t switch channels while soloing yet: the choice is saved and takes effect once the engine supports it (issue W5K-w1-audio-monitor-selected-bus). To hear the headphone bus today, use a device with more channels.";
 "audioDevice.busOutput" = "%@ goes to";
 "audioDevice.channelCount" = "This device has %d output channels";
 "audioDevice.deviceLine" = "%@ (%d output channels)";

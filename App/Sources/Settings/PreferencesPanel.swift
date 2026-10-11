@@ -243,6 +243,7 @@ final class PreferencesModel: ObservableObject {
         s.audioDevice = audioOutput.device
         s.busOutputMap = audioOutput.storedMap
         s.borrowMasterForMonitor = audioOutput.borrowMasterForMonitor
+        controller.session?.audio.engine.borrowMasterForMonitor = s.borrowMasterForMonitor   // 跑着的引擎当场生效（X09，W1-D3 的 AudioEngine.borrowMasterForMonitor 任意线程可设）
         s.compatLayerEnabled = compatLayerEnabled
         s.compatLayerPort = max(1, min(65535, compatLayerPort))
         let compatHost = compatLayerHost.trimmingCharacters(in: .whitespaces)

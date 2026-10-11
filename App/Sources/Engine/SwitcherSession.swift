@@ -139,6 +139,7 @@ final class SwitcherSession {
         self.engine = engine
         let audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio, busOutputMap: settings.busOutputMap)
         self.audio = audio
+        audio.engine.borrowMasterForMonitor = settings.borrowMasterForMonitor   // X09：独听时 Master 出口放耳机总线（W1-D3 引擎侧；设置页改了由 PreferencesModel.commit 当场再设）
         let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
         if let mediaBaseDirectory { inputs.mediaBaseDirectory = mediaBaseDirectory }
         self.inputs = inputs
