@@ -32,6 +32,15 @@ enum Summarize {
             markdown += "\n本机参考线：V1 avg ≤ \(v1Local) ms（G2 prompt 加的，M5 Max）：实测 \(String(format: "%.3f", summary.renderMs.avg)) ms → \(pass ? "✅" : "❌")\n"
         }
         if p.has("json") {
+            // L1 扣视频延后（测试标准 §3，用户 2026-10-11 定；G8b）：按行算 latency − video_delay_ms，各路 avg 的最大与每秒最大值的最大；原始 l1_* 两键照留
+            let rawLines = try Stats.parse(lines: String(contentsOf: statsURL, encoding: .utf8))
+            var l1NetAvgMax = 0.0, l1NetMaxMax = 0.0
+            for id in Set(rawLines.flatMap { $0.perInput.keys }) {
+                let rows = rawLines.compactMap { l in l.perInput[id].map { ($0.latencyMs - l.videoDelayMs, $0.latencyMaxMs - l.videoDelayMs) } }
+                guard !rows.isEmpty else { continue }
+                l1NetAvgMax = max(l1NetAvgMax, rows.map(\.0).reduce(0, +) / Double(rows.count))
+                l1NetMaxMax = max(l1NetMaxMax, rows.map(\.1).max() ?? 0)
+            }
             let key: [String: Double] = [
                 "lines": Double(summary.lineCount), "duration_s": summary.durationSeconds, "ticks": Double(summary.tickSpan),
                 "v1_avg_ms": summary.renderMs.avg, "v1_p99_ms": summary.renderMs.p99, "v1_max_ms": summary.renderMs.max,
@@ -55,6 +64,8 @@ enum Summarize {
                 "master_lufs_i": summary.masterMeters?.lufsI ?? Stats.AudioCounters.Meters.floorDb,
                 "l1_avg_ms_max": summary.perInput.values.compactMap { $0.latency?.ms.avg }.max() ?? 0,
                 "l1_max_ms": summary.perInput.values.compactMap { $0.latency?.maxMs }.max() ?? 0,
+                "l1_net_avg_ms_max": l1NetAvgMax, "l1_net_max_ms": l1NetMaxMax,
+                "video_delay_ms_avg": summary.videoDelayMs?.avg ?? 0, "video_delay_ms_max": summary.videoDelayMs?.max ?? 0,
             ]
             struct Out: Encodable {
                 var key: [String: Double]

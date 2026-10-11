@@ -51,8 +51,10 @@ rows = [json.loads(l) for l in open(stats, encoding="utf-8") if l.strip()]
 T = 1000 / 60
 warm = 5   # 头 5 s 不算（发现 / 连接 / 到达余量收敛）
 sel = [r for r in rows[warm:] if "2" in r.get("per_input", {})]
-lat = [r["per_input"]["2"]["latency_ms"] for r in sel if r["per_input"]["2"].get("fps", 0) > 0]
-lmax = [r["per_input"]["2"]["latency_max_ms"] for r in sel if r["per_input"]["2"].get("fps", 0) > 0]
+# 测试标准 §3（用户 2026-10-11 定，G8b）：L1 判定扣掉同一行的 video_delay_ms（videoDelay 补偿下编码器入口在视频延后之后），阈值不动；022 之前的文件缺键按 0
+lat = [r["per_input"]["2"]["latency_ms"] - float(r.get("video_delay_ms", 0) or 0) for r in sel if r["per_input"]["2"].get("fps", 0) > 0]
+lmax = [r["per_input"]["2"]["latency_max_ms"] - float(r.get("video_delay_ms", 0) or 0) for r in sel if r["per_input"]["2"].get("fps", 0) > 0]
+vd = [float(r.get("video_delay_ms", 0) or 0) for r in sel]
 fps = [r["per_input"]["2"]["fps"] for r in sel]
 dup = sel[-1]["per_input"]["2"]["dup"] if sel else None
 drop = sel[-1]["per_input"]["2"]["drop"] if sel else None
@@ -73,6 +75,7 @@ md.append("")
 md.append(f"- 做法：headless `--ndi-send \"{name}\"`（W2-D NDISender 发 PGM + Master 音频）→ 同一进程里 W3-A 的 NDIInput 收「机器名 ({name})」，抖动缓冲 J = {J} 帧，"
           f"PGM = 1 号合成源（60 fps 噪声底纹 + 音频），PVW = 2 号 NDI 输入；跑 {seconds} s，去掉头 {warm} s；数字来自 stats.jsonl per_input[\"2\"]（提案 005 的 L1，铁律 4）。")
 md.append(f"- 口径：W3-A 报告 §1.2——NDI 帧 pts = 到达 − 抖动 + J × 帧间隔，L1 含 J 帧的有意缓冲；判 L1 ≤ 3 + J 帧（W3-A 用例同口径），扣掉 J × T 后对 3 帧的余量另报。")
+md.append(f"- 已扣同一行 stats 的 video_delay_ms（测试标准 §3，用户 2026-10-11 定；这次平均 {sum(vd) / len(vd) if vd else 0:.2f} ms、最大 {max(vd) if vd else 0:.2f} ms），阈值数字不动。")
 md.append("")
 md.append("| 指标 | 数值 | 阈值 | 通过 |")
 md.append("|---|---|---|---|")

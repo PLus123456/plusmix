@@ -235,6 +235,38 @@ def main():
         probe_rows.append(f"| {pid} | {K}（{seg} 段） | {fmt(r, 4)} | {dup}（{s.get('duplicateRatio', 0) * 100:.2f}%） | {fmt(exp_dup, 1)} | {drop} | {fmt(exp_drop, 1)} | "
                           f"{out_dup + out_drop} | {s.get('backwardJumps', 0)} | {mark(s.get('passV4'))} |")
 
+    # ---- L1 内部延迟（提案 005 的口径：帧交给第一个消费者 − 入口；G8b 加）----
+    # 测试标准 §3（用户 2026-10-11 定）：videoDelay 补偿下编码器入口在视频延后之后，L1 含当时的 L，判定时扣掉同一行 stats 的 video_delay_ms，阈值（§4：≤ 3 帧，目标 ≤ 2）不动。
+    # 按行算：avg 取各路 (latency_ms − video_delay_ms) 的平均、每秒最大值取 (latency_max_ms − video_delay_ms)；只算在播（fps > 0）的行；022 之前的文件缺键按 0。
+    stats_rows = []
+    for raw in read_text(os.path.join(out, "stats.jsonl")).splitlines():
+        raw = raw.strip()
+        if raw:
+            try:
+                stats_rows.append(json.loads(raw))
+            except ValueError:
+                continue
+    l1_delay_avg = l1_delay_max = None
+    l1_worst_avg = l1_worst_p99 = l1_worst_max = None
+    l1_rows = []
+    if stats_rows:
+        delays = [float(r.get("video_delay_ms", 0) or 0) for r in stats_rows]
+        l1_delay_avg, l1_delay_max = sum(delays) / len(delays), max(delays)
+        for pid_s in sorted({k for r in stats_rows for k in (r.get("per_input") or {})}, key=lambda x: int(x)):
+            net = [(float(p.get("latency_ms", 0)) - d, float(p.get("latency_max_ms", 0)) - d)
+                   for r, d in zip(stats_rows, delays) for p in [(r.get("per_input") or {}).get(pid_s)] if p and float(p.get("fps", 0)) > 0]
+            if not net:
+                continue
+            avg = sum(n[0] for n in net) / len(net)
+            p99 = percentile([n[1] for n in net], 0.99)
+            mx = max(n[1] for n in net)
+            l1_rows.append(f"{pid_s}: avg {avg:.2f} / p99 {p99:.2f} / max {mx:.2f}")
+            l1_worst_avg = avg if l1_worst_avg is None else max(l1_worst_avg, avg)
+            l1_worst_p99 = p99 if l1_worst_p99 is None else max(l1_worst_p99, p99)
+            l1_worst_max = mx if l1_worst_max is None else max(l1_worst_max, mx)
+    l1_ok = l1_worst_avg is not None and l1_worst_avg <= 3 * frame_ms and l1_worst_p99 <= 3 * frame_ms
+    l1_target = l1_ok and l1_worst_avg <= 2 * frame_ms and l1_worst_p99 <= 2 * frame_ms
+
     # ---- V5 ----
     total_frames = probe.get("totalFrames")
     expected_run = round(a.minutes * 60 * program_fps)
@@ -445,6 +477,9 @@ def main():
         ("V6 切换准确性", v6_value, "Cut 恰在第 1000 拍、前后无混合帧；所有 Cut 干净（硬性）", v6_ok, "—"),
         ("V7 转场进度精度", v7_curve_value + "；T-bar " + "；".join(tbar_rows) + (f"；最大映射误差 {tbar_worst * 100:.2f}%" if tbar_worst is not None else ""),
          ("曲线误差 ≤ 1 帧（Fade / Wipe / Zoom）；T-bar 映射误差 ≤ 2%（目标 ≤ 1%）" if cp == "G4" else "曲线误差 ≤ 1 帧；T-bar 映射误差 ≤ 2%（目标 ≤ 1%）"), v7_ok, "—"),
+        ("L1 内部延迟（扣视频延后）", (f"各路 avg 最大 {fmt(l1_worst_avg, 2)} ms（{(l1_worst_avg or 0) / frame_ms:.2f} 帧）/ 每秒最大值的 p99 最大 {fmt(l1_worst_p99, 2)} ms（{(l1_worst_p99 or 0) / frame_ms:.2f} 帧）/ max {fmt(l1_worst_max, 2)} ms；"
+                                   f"已扣同一行 video_delay_ms（平均 {fmt(l1_delay_avg, 2)} / 最大 {fmt(l1_delay_max, 2)} ms）；逐路 ms：{'；'.join(l1_rows)}" + ("（目标档也过）" if l1_target else "")) if l1_rows else "stats.jsonl 没有在播的输入行",
+         "avg 与每秒最大值的 p99 都 ≤ 3 帧（目标 ≤ 2；测试标准 §4，判定按 §3 扣 video_delay_ms）", l1_ok, "—"),
         ("A1 音频断裂", f"超时 + 欠载 = {int(a1)}；泵线程流式不连续检测 {disc if disc is not None else '—'}（信息项，见口径说明）", "0（硬性）", a1 == 0, "—"),
         ("A2 A/V 偏移", (f"整秒闪光 {len(exact)} 对：均值 {a2_mean:+.3f} ms，标准差 {a2_std:.3f}，最大 {a2_max:.3f} ms；全部配对 {av.get('matchedCount')} 对均值 {fmt(av.get('meanMs'))} ms（含 59.94 在播段的假象）" if exact else "没有可配对的闪光 / click"),
          "整秒配对最大绝对值 ≤ 16.7 ms（目标 ≤ 5；音频超前为正）", a2_ok, "—"),

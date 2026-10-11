@@ -278,7 +278,8 @@ def main():
         last_p = next(l["per_input"][n] for l in reversed(lines) if n in (l.get("per_input") or {}))
         inputs[n] = {"fps_avg": sum(fpsv) / len(fpsv), "fps_min": min(fpsv), "zero_seconds": sum(1 for v in fpsv if v == 0),
                      "dup": int(last_p.get("dup", 0)) - int(first_p.get("dup", 0)), "drop": int(last_p.get("drop", 0)) - int(first_p.get("drop", 0)),
-                     "latency_max_ms": max(float(l["per_input"][n].get("latency_max_ms", 0)) for l in lines if n in (l.get("per_input") or {}))}
+                     # L1 扣同一行的 video_delay_ms（测试标准 §3，用户 2026-10-11 定；022 之前的文件缺键按 0）
+                     "latency_max_ms": max(float(l["per_input"][n].get("latency_max_ms", 0)) - float(l.get("video_delay_ms", 0) or 0) for l in lines if n in (l.get("per_input") or {}))}
 
     # MediaMTX：每路收到的字节 → 平均码率、有没有哪一分钟一个字节都没收到。只用"就绪"期间的样本：推流端断开后那一路的计数会归零
     # （停机时推流先断，最后一个样本比第一个小，平均就成了负的——1 小时那次的 s1 就是这样）
@@ -458,7 +459,7 @@ def main():
         w("")
         w("MediaMTX 收到的（每分钟采 API）：" + "；".join(f"{k} 平均 {v['mbps_avg']:.2f} Mb/s，运行中没进字节的分钟 {v['stalled_minutes']}、未就绪 {v['not_ready_in_run']} 次" for k, v in sorted(mtx.items())))
     w("")
-    w("| 输入 | 名字 | fps 均值 / 最低 | fps = 0 的秒数 | 重复 dup | 丢弃 drop | L1 最大 |\n|---|---|---|---|---|---|---|")
+    w("| 输入 | 名字 | fps 均值 / 最低 | fps = 0 的秒数 | 重复 dup | 丢弃 drop | L1 最大（已扣 video_delay_ms） |\n|---|---|---|---|---|---|---|")
     for n, v in inputs.items():
         w(f"| {n} | {in_names.get(n, '')} | {v['fps_avg']:.2f} / {v['fps_min']:.2f} | {v['zero_seconds']} | {v['dup']} | {v['drop']} | {v['latency_max_ms']:.1f} ms |")
     w("")
