@@ -5,14 +5,14 @@ import { SwitcherClient } from "../lib/api-client.js";
 import { commandFor, fpsFrom, keyStyle, svgDataURI, svgKey } from "../lib/tally.js";
 
 const PREFIX = "com.plusmix.switcher.";
-const KINDS = ["cut", "auto", "preview", "program", "tally", "overlay", "record", "stream", "ftb"];
+const KINDS = ["cut", "auto", "slot", "preview", "program", "tally", "overlay", "record", "stream", "ftb"];
 
 const client = new SwitcherClient();
 /** 屏幕上的按钮：id → { action, kind, settings }。 */
 const visible = new Map();
 
 function paint(entry) {
-  const style = keyStyle(entry.kind, client.snapshot, entry.settings, client.connected);
+  const style = keyStyle(entry.kind, client.snapshot, entry.settings, client.connected, fpsFrom(client.clock));
   entry.action.setImage(svgDataURI(svgKey(style))).catch(() => {});
 }
 

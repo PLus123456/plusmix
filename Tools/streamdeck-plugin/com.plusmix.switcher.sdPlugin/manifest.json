@@ -3,7 +3,7 @@
   "Name": "PlusMix",
   "Version": "0.1.0.0",
   "Author": "PlusMix",
-  "Description": "PlusMix 导播台的按钮：切换、转场、叠加、录制、推流、FTB；按钮颜色就是 tally（PGM 红、PVW 绿）。",
+  "Description": "PlusMix 导播台的按钮：切换、转场（含转场 1–4）、叠加、录制、推流、FTB；按钮颜色就是 tally（PGM 红、PVW 绿）。",
   "URL": "https://github.com/PLus123456/plusmix",
   "Category": "PlusMix",
   "CategoryIcon": "imgs/plugin/category-icon",
@@ -34,6 +34,16 @@
       "Icon": "imgs/actions/auto/icon",
       "Tooltip": "按已选转场开始，或指定时长的 Fade",
       "PropertyInspectorPath": "ui/auto.html",
+      "Controllers": ["Keypad"],
+      "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
+      "UserTitleEnabled": false
+    },
+    {
+      "Name": "Transition 1–4",
+      "UUID": "com.plusmix.switcher.slot",
+      "Icon": "imgs/actions/slot/icon",
+      "Tooltip": "执行转场 1–4 之一（或只选中不执行）；颜色跟当前槽：当前槽蓝、执行中红",
+      "PropertyInspectorPath": "ui/slot.html",
       "Controllers": ["Keypad"],
       "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],
       "UserTitleEnabled": false

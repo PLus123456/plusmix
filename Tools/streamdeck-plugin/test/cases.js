@@ -1,5 +1,5 @@
 // 断言用例：node --test 和 JXA 共用。每个用例 run(assert) 只用 assert.equal / deepEqual / ok / match。
-import { COLORS, classifyMessage, commandFor, fpsFrom, inputName, keyStyle, outputOf, svgDataURI, svgKey, tallyFor } from "../com.plusmix.switcher.sdPlugin/lib/tally.js";
+import { COLORS, classifyMessage, commandFor, fpsFrom, inputName, keyStyle, outputOf, slotSublabel, svgDataURI, svgKey, tallyFor } from "../com.plusmix.switcher.sdPlugin/lib/tally.js";
 
 export const snapshot = {
   type: "snapshot",
@@ -91,6 +91,53 @@ export const cases = [
       assert.deepEqual(commandFor("ftb", snapshot, {}, 60), { command: { ftb: { on: true } } });
       assert.deepEqual(commandFor("ftb", { state: { ftb: { on: true } } }, {}, 60), { command: { ftb: { on: false } } });
       assert.ok(commandFor("nope", snapshot, {}, 60).error);
+    },
+  },
+  {
+    name: "转场 1–4（W5-M）：按下 = useTransitionSlot(n, start: true)（选中不执行可选）；颜色跟当前槽：当前槽蓝、执行中红、别的灰；字 = 槽号 + 效果与时长",
+    run(assert) {
+      const wipe = { direction: "leftToRight", softness: 0 };
+      const noStinger = { cutAtTick: 0 };
+      const slots = [
+        { type: "fade", durationTicks: 30, wipe, stinger: noStinger },
+        { type: "wipe", durationTicks: 60, wipe, stinger: noStinger },
+        { type: "zoom", durationTicks: 60, wipe, stinger: noStinger },
+        { type: "stinger", durationTicks: 60, wipe, stinger: noStinger },
+      ];
+      const idle = { state: { ...snapshot.state, transition: { type: "wipe", durationTicks: 60, progress: 0, slots, currentSlot: 2 } } };
+      assert.deepEqual(commandFor("slot", idle, { slot: "2" }, 60), { command: { useTransitionSlot: { slot: 2, start: true } } });
+      assert.deepEqual(commandFor("slot", idle, { slot: "3", mode: "select" }, 60), { command: { useTransitionSlot: { slot: 3, start: false } } }, "选中（不执行）");
+      assert.deepEqual(commandFor("slot", idle, {}, 60), { command: { useTransitionSlot: { slot: 1, start: true } } }, "没设 = 转场 1");
+      assert.ok(commandFor("slot", idle, { slot: "5" }, 60).error, "槽号要在 1–4");
+      assert.deepEqual(commandFor("slot", null, { slot: "4" }, 60), { command: { useTransitionSlot: { slot: 4, start: true } } }, "没收到快照也能发（状态机自己判）");
+      const current = keyStyle("slot", idle, { slot: "2" }, true, 60);
+      assert.equal(current.background, COLORS.slotCurrent, "当前槽：蓝");
+      assert.equal(current.label, "转场 2");
+      assert.equal(current.sublabel, "Wipe → 1s");
+      assert.equal(keyStyle("slot", idle, { slot: "1" }, true, 60).background, COLORS.action, "不是当前槽：灰");
+      assert.equal(keyStyle("slot", idle, { slot: "1" }, true, 60).sublabel, "Fade 0.5s");
+      assert.equal(keyStyle("slot", idle, { slot: "4" }, true, 60).sublabel, "未选输入", "Stinger 槽没选输入");
+      const running = { state: { ...idle.state, transition: { ...idle.state.transition, startTick: 100, progress: 0.3 } } };
+      assert.equal(keyStyle("slot", running, { slot: "2" }, true, 60).background, COLORS.program, "执行中：红");
+      assert.equal(keyStyle("slot", running, { slot: "3" }, true, 60).background, COLORS.action);
+      const loose = { state: { ...idle.state, transition: { type: "fade", durationTicks: 45, progress: 0, slots } } };
+      assert.equal(keyStyle("slot", loose, { slot: "1" }, true, 60).background, COLORS.action, "当前那组不在槽里（没有 currentSlot）：四个都不亮");
+      assert.equal(keyStyle("slot", snapshot, { slot: "2" }, true, 60).sublabel, "", "老版本的快照没有 slots：只写槽号");
+      assert.equal(keyStyle("slot", null, { slot: "3" }, false).background, COLORS.disconnected);
+      assert.equal(keyStyle("slot", null, { slot: "3" }, false).label, "转场 3");
+    },
+  },
+  {
+    name: "slotSublabel：按帧率换秒，放不下 9 个字时只写效果",
+    run(assert) {
+      const wipe = { direction: "diagonal", softness: 0 };
+      assert.equal(slotSublabel({ type: "fade", durationTicks: 90, wipe, stinger: {} }, 60), "Fade 1.5s");
+      assert.equal(slotSublabel({ type: "fade", durationTicks: 45, wipe, stinger: {} }, 60), "Fade", "Fade 0.75s 是 10 个字（按钮小字截到 9 个）：只写效果");
+      assert.equal(slotSublabel({ type: "wipe", durationTicks: 45, wipe, stinger: {} }, 60), "Wipe ↘", "Wipe ↘ 0.75s 放不下：只写效果");
+      assert.equal(slotSublabel({ type: "zoom", durationTicks: 60, wipe, stinger: {} }, 60000 / 1001), "Zoom 1s", "59.94：60 拍 ≈ 1 秒");
+      assert.equal(slotSublabel({ type: "stinger", durationTicks: 60, wipe, stinger: { input: 3, cutAtTick: 10 } }, 60), "Stinger", "Stinger 1s 是 10 个字：只写效果");
+      assert.equal(slotSublabel({ type: "cut", durationTicks: 0, wipe, stinger: {} }, 60), "Cut");
+      assert.equal(slotSublabel(undefined, 60), "");
     },
   },
   {
