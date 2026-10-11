@@ -25,7 +25,7 @@ BRANCH ?= $(shell git symbolic-ref --short -q HEAD 2>/dev/null || echo main)
 EXTRA_LINTS := $(filter-out scripts/lint-rules.sh scripts/check-deps.sh scripts/check-ownership.sh,\
                  $(wildcard scripts/lint-*.sh scripts/check-*.sh))
 
-.PHONY: all gen build test lint clean help build-packages build-tools build-app test-packages test-tools test-app
+.PHONY: all gen build test lint clean help manual build-packages build-tools build-app test-packages test-tools test-app
 
 all: gen build test lint
 
@@ -35,6 +35,7 @@ help:
 	@echo "make test   所有包 swift test + 两个工具跑一次冒烟 + App 的 xcodebuild test"
 	@echo "make lint   scripts/lint-rules.sh + check-deps.sh + check-ownership.sh \$$BRANCH + scripts/{check,lint}-*.sh"
 	@echo "make clean  删掉所有 .build 和生成的工程"
+	@echo "make manual 随包 HTML 手册：docs/user（中英）→ App/Resources/Help/（docs/tools/build-help.py；改了 docs/user 要重跑，make lint 的 scripts/check-help.sh 会查）"
 	@echo "make archive  发布归档：签名 → 校验 → DMG → 公证（W4-B，scripts/release/release.mk；archive-adhoc / release-test / appcast / pin-check 也在那里）"
 
 # ---------- gen ----------
@@ -86,6 +87,12 @@ test-tools:
 test-app: $(XCODEPROJ)/project.pbxproj
 	@echo "== xcodebuild test $(SCHEME)"
 	$(XCB) $(XCB_FLAGS) test
+
+# ---------- 随包 HTML 手册（W4-C2 / prompt 103 给的一行，G8b 挂上；Makefile 里 help 已被用法占用，所以叫 manual）----------
+# docs/user（中英）→ App/Resources/Help/（产物入库，project.yml 的 Help folder reference 把整个目录带进包）；输出确定、文档没变重跑无 diff。
+# 改了 docs/user 忘了重跑：make lint 自动带上的 scripts/check-help.sh（build-help.py --check）会红。
+manual:
+	python3 docs/tools/build-help.py
 
 # ---------- lint ----------
 lint:
