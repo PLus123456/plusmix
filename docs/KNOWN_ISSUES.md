@@ -10,6 +10,7 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 **2026-10-10 用户看完 G7 报告**：main 快进到 g7；12 条拍板全部裁定并落进 prompt / 提案 / 归属（reports/G7.md §7.1 末、落地方案 §8.8）——S1 `MIDIHost.sync` 崩溃新开 prompt 106（W2-C3）；X12 残口归 100；推流鉴权"写进查询串"归 101；W5-I 的三个 extra 标记、W5-K 的监听总线与叠加默认淡入升成契约（提案 025–027 已批，P5 落地）；下一个发的版本号 0.1.1（G8 判，prompt 107）。
 **2026-10-10 G8a**（reports/G8.md §1.1）：`p5-contracts`（已批的 023§1 / 024 (b) / 025 / 026 / 027 进契约，Command 34 → 35；**020 / 021 / 022 / 023 二–五只有提案、等用户批**，100 / 101 要等它们落地）、`w2-control-3`（S1 `MIDIHost.sync` 崩溃已修——下表销号，移到"2026-10-10 G8a 已修"表）、`w1-core-4`（视频延后 L 的引擎 / 渲染器 / Integration / headless；**App 的三行接线待 G8b**，下表新加一行 S2）合入 `g8`，整仓 make test 后等用户点头快进 main。
 **2026-10-11 用户裁定**（看完 reports/G8.md）：main 快进到 g8（f0c33ef）；提案 020 / 021 / 022 / 023 二–五**全批**、按提案默认 → 新 prompt 108（P5-2，`p5-contracts-2`）落地，100 / 101 等它合入；L1 对 videoDelay 的判定扣 `video_delay_ms`（阈值不动）；W1-B4 的 App 接线与开录起点归 G8b 胶水（上表那行 S2 的计划不变）。
+**2026-10-11 G8a-2**（reports/G8.md §1.2）：108 P5-2 合入——020 / 021 / 022 / 023 二–五 / 028 文字进 main，Command 42，Stats.encoder 多 uptime_s / disconnects / last_error / attempt、顶层多 video_delay_ms；整仓 830 用例 0 红、App 228 用例 0 红、headless 16 / 16，main 快进（代码树 97b0634）。
 
 ## 0.1.0 候选（分支 release/0.1 → main；2026-09-28 G5 判不发；2026-10-02 G6 重判不发，阻塞项与归属见 reports/G6.md §7）
 
@@ -125,7 +126,7 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 
 ### 测试与工具（不影响产品，影响谁跑测试）
 
-- 几条依赖窗口 / 时序的用例在机器忙或窗口被盖住时偶发红，单独重跑都过：`DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`、`ExternalTests` 的 `DisplayStatsTests`、App 的 S7 两条与 `ThumbnailRateTests`、NDI 回环两条计时断言、`ThrottleProxyTests`；`ToolbarMenuTests.testUI_inputSettingsMenuTitleNamesInput`（G8a 整仓那一轮 `performActionForItem` 之后没开出输入设置窗、红一次，单独复跑与第二遍全量都绿，原因没查到——再红就单开问题单，reports/G8.md §4.1 第 5 条）。
+- 几条依赖窗口 / 时序的用例在机器忙或窗口被盖住时偶发红，单独重跑都过：`DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits`、`ExternalTests` 的 `DisplayStatsTests`、App 的 S7 两条与 `ThumbnailRateTests`、NDI 回环两条计时断言、`ThrottleProxyTests`；`ToolbarMenuTests.testUI_inputSettingsMenuTitleNamesInput`（G8a 整仓那一轮 `performActionForItem` 之后没开出输入设置窗、红一次，单独复跑与第二遍全量都绿）与同类的 `testUI_toolbarItemsMirrorMenuActions`（P5-2 2026-10-11 02:4x 在本分支和干净 main 上都红、同一断言"关闭全部外部显示"3 s 内没生效；reports/issues/P52-app-toolbar-toggle-external-off-red-on-main.md）——两条都是菜单动作走响应链之后没落地、换个时段又绿，怀疑测试宿主在协作式激活下不是前台（G7 §10 第 12 条）；归 App 会话查，reports/G8.md §10 第 7 条。
 - 七张多画面参考图是 macOS 27 的中文字形，26.x 机器上按 PSNR ≥ 40 dB 看（reports/issues/P4-w3-compositor-multiview-cjk-labels-macos27.md）。
 - L5 的"退步 > 10%"规则在 V3（微秒量级）与 CPU / GPU 上会因运行间起伏误报，绝对下限（`scripts/perf/regression.json` 的 `floor`）等用户定（reports/w4-soak.md §4 第 2 条）。
 - 长稳 / 性能脚本在 Claude 会话（非交互）里不接摄像头、不采 powermetrics、Instruments Leaks 附加不上；在用户终端里跑才是完整负载（reports/w4-soak.md §3）。

@@ -182,15 +182,15 @@ ol.conf li{margin-bottom:4px}
     <div class="step gate">G7<small>已过 · 10-04 · main</small></div><span class="arrow">→</span>
     <div class="wave"><div class="cap">第一拨 · 三路已合入 · 103 随后 rebase</div><div class="s"><b>99</b>P5 契约</div><div class="s"><b>105</b>监听同步</div><div class="s"><b>106</b>MIDI 崩溃修复</div><div class="s"><b>103</b>手册（随后 rebase）</div></div><span class="arrow">→</span>
     <div class="step gate">G8a<small>已过 · 10-11 · main</small></div><span class="arrow">→</span>
-    <div class="wave"><div class="cap">契约二 ‖ 102 · 现在开</div><div class="s"><b>108</b>P5-2 契约（020–023）</div><div class="s"><b>102</b>每路效果 + 监听总线</div></div><span class="arrow">→</span>
-    <div class="step gate">G8a-2<small>合 108 → main</small></div><span class="arrow">→</span>
-    <div class="wave"><div class="cap">第二拨 · 100 → 101 叠分支</div><div class="s"><b>100</b>转场槽</div><div class="s"><b>101</b>播放 / 状态（叠在 100 上）</div></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">契约二 · 已合入 ‖ 102 进行中</div><div class="s"><b>108</b>P5-2 契约（020–023）</div><div class="s"><b>102</b>每路效果 + 监听总线</div></div><span class="arrow">→</span>
+    <div class="step gate">G8a-2<small>已过 · 10-11 · main</small></div><span class="arrow">→</span>
+    <div class="wave"><div class="cap">第二拨 · 现在开 100 → 101 叠分支</div><div class="s"><b>100</b>转场槽</div><div class="s"><b>101</b>播放 / 状态（叠在 100 上）</div></div><span class="arrow">→</span>
     <div class="step gate">G8b<small>全量 · 0.1.1</small></div>
   </div>
 </div>
-<p class="note">灰字是已过的闸门。G8a 2026-10-11 已过（99 / 105 / 106 三路合入，main = f0c33ef）；用户同日批了提案 020 / 021 / 022 / 023 二–五，由 108 P5-2 落地，与 102 并行；100 等 G8a-2 把 108 合进 main 再开（等不及就叠在 p5-contracts-2 头上），101 必须叠在 100 的分支头上（两路都动 App/ 与 Localizable.strings）。</p>
+<p class="note">灰字是已过的闸门。G8a 2026-10-11 凌晨已过（99 / 105 / 106 三路合入）；用户同日批了提案 020 / 021 / 022 / 023 二–五，108 P5-2 当晚落地、上午由 G8a-2 合进 main（97b0634 起，命令 42 条）；**100 现在从 main 开**，101 必须叠在 100 的分支头上（两路都动 App/ 与 Localizable.strings），102 与它们并行。</p>
 
-<div class="callout"><b>现在怎么开（2026-10-11 更新；细则 §8.8）。</b>G8a 已过，main = f0c33ef（含 99 契约、106 MIDIHost 修复、105 视频延后）。现在就开：<b>108 P5-2</b>（020 / 021 / 022 / 023 二–五，从 main 开）与 <b>102</b>（从 main 开、不用叠 105）并行，103 随时 rebase；<b>100 等 108 做完由 G8 合进 main（G8a-2）再开</b>（等不及就叠在 <span class="k">p5-contracts-2</span> 头上、lint 加 --base）；101 叠在 100 上；全量 / gate4 / perf / 长稳同机只跑一个。</div>
+<div class="callout"><b>现在怎么开（2026-10-11 上午更新；细则 §8.8）。</b>G8a 与 G8a-2 都已过，main = 97b0634 起（含 99 / 108 两批契约：Command 42 条、Stats 新字段；106 MIDIHost 修复；105 视频延后）。现在就开：<b>100</b>（从 main 开）；<b>102</b>（从 main 开、不用叠 105，已开的不用 rebase）并行；<b>101 叠在 100 的分支头上</b>（lint 加 <span class="k">--base w5-transition-slots</span>）；103 随时 rebase（docs/api/README.md 的命令数改 42）；全量 / gate4 / perf / 长稳同机只跑一个。</div>
 <div class="tbl"><table>
 <tr><th>拨</th><th>会话</th><th>从哪开</th><th>能同时开的</th><th>不能同时的 / 要等的</th></tr>
 <tr><td><span class="pill p">已合入 · G8a</span></td><td class="id">99 P5 契约</td><td class="mono">main 93f50d9</td><td class="id">—</td><td>已批的 023§1 / 024 / 025 / 026 / 027 进 main（Command 35）；020 / 021 / 022 / 023 二–五写成提案、用户 2026-10-11 全批 → 108</td></tr>
@@ -198,11 +198,11 @@ ol.conf li{margin-bottom:4px}
 <tr><td><span class="pill p">已合入 · G8a</span></td><td class="id">106 W2-C3 MIDIHost 崩溃</td><td class="mono">main 93f50d9</td><td class="id">—</td><td>S1 已修、KNOWN_ISSUES 销号；100 动 MIDI/ 时基于它</td></tr>
 <tr><td><span class="pill w">第一拨起</span></td><td class="id">103 W4-C2 手册</td><td class="mono">main</td><td>任何会话</td><td>100 / 101 合入后 rebase 一次补两节；make help 由 G8 挂</td></tr>
 <tr><td><span class="pill p">闸门 · 已过</span></td><td class="id">G8a（107 前半）</td><td class="mono">g8 → main f0c33ef</td><td>—</td><td>2026-10-11：三路合入 0 冲突 0 胶水，六包 807 用例 0 红、App 两遍；reports/G8.md §1.1</td></tr>
-<tr><td><span class="pill w">契约二 · 现在</span></td><td class="id">108 P5-2 契约落地五</td><td class="mono">main f0c33ef</td><td class="id">102 / 103</td><td>020 / 021 / 022 / 023 二–五按提案默认落地 + 028 契约文字 + Stats video_delay_ms + L1 口径一句；做完告诉 G8 合进 main</td></tr>
-<tr><td><span class="pill g">闸门</span></td><td class="id">G8a-2（107 续）</td><td class="mono">g8 续</td><td>—</td><td>等 108；合 108 → 整仓 make test → 问你后快进 main；之后 100 才开</td></tr>
-<tr><td><span class="pill w">第二拨</span></td><td class="id">100 W5-M 转场槽</td><td class="mono">G8a-2 后的 main（或 p5-contracts-2 的头）</td><td class="id">102</td><td>等 108 落地 020（等不及就叠在 p5-contracts-2 头上、lint 加 --base p5-contracts-2）；101 叠在它上面，分支头别 rebase</td></tr>
+<tr><td><span class="pill p">已合入 · G8a-2</span></td><td class="id">108 P5-2 契约落地五</td><td class="mono">main 30e4659</td><td class="id">—</td><td>020 / 021 / 022 / 023 二–五按提案默认 + 028 文字 + Stats video_delay_ms + L1 口径一句都进 main（Command 42）；与提案不同的四处细节见 reports/p5-contracts-2.md §1 末</td></tr>
+<tr><td><span class="pill p">闸门 · 已过</span></td><td class="id">G8a-2（107 续）</td><td class="mono">g8 → main 97b0634 起</td><td>—</td><td>2026-10-11 上午：合 108 0 冲突 0 胶水，整仓 make test + headless 用例 + api.md 比对；reports/G8.md §1.2</td></tr>
+<tr><td><span class="pill w">第二拨 · 现在</span></td><td class="id">100 W5-M 转场槽</td><td class="mono">main 97b0634 起</td><td class="id">102 / 103</td><td>020 已在 main；101 叠在它上面，分支头别 rebase；X12 残口两行一起做</td></tr>
 <tr><td><span class="pill w">第二拨</span></td><td class="id">101 W5-N 播放 / 状态 / 鉴权写法</td><td class="mono">w5-transition-slots 的头</td><td class="id">102</td><td>等 100 有可叠的分支头；lint 加 <span class="k">--base w5-transition-slots</span></td></tr>
-<tr><td><span class="pill w">现在</span></td><td class="id">102 W1-D3 每路效果 + 026 引擎侧</td><td class="mono">main f0c33ef</td><td class="id">108 / 103 / 100 / 101</td><td>023§1 / 024 / 026 已在 main、105 已合入（不用叠、lint 不加 --base）；A7 / A1 真设备 10 分钟别和 gate4 同时</td></tr>
+<tr><td><span class="pill w">现在</span></td><td class="id">102 W1-D3 每路效果 + 026 引擎侧</td><td class="mono">main f0c33ef 起皆可</td><td class="id">100 / 101 / 103</td><td>023 / 024 / 026 已在 main、105 已合入（不用叠、lint 不加 --base）；108 与它不相交、已开的不用 rebase；A7 / A1 真设备 10 分钟别和 gate4 同时</td></tr>
 <tr><td><span class="pill g">闸门</span></td><td class="id">G8b（107 后半）</td><td class="mono">g8 续</td><td>—</td><td>等 100–103；胶水多两样（W1-B4 的 App 接线三行 + 开录起点按输出时间线）；全量 / gate4 / perf 要机器安静；8 小时长稳你终端跑；全过才改 0.1.1 与 CHANGELOG</td></tr>
 </table></div>
 <p class="note"><b>同机互斥</b>（目录不相交也不能同时跑）：gate4、perf-baseline、8 小时长稳、两个会话的 make test-app 全量、StreamingTests 的 MediaMTX 用例、显示类 / 实时类用例——错开跑，红了先单独复跑。<b>叠分支的 lint</b>：<span class="k">scripts/check-ownership.sh &lt;分支&gt; --base &lt;上一路分支&gt;</span>，否则上一路的改动算成自己的越界。</p>
@@ -401,7 +401,7 @@ ol.conf li{margin-bottom:4px}
 <tr><td class="id">105</td><td>W1-B4 监听同步：按总线效果链的实测延迟把视频延后同样毫秒数（用户 2026-10-03 定）</td><td>SwitcherEngine、SwitcherAudio/Integration（开关）、headless 参数</td><td>G6；现在能开</td><td><span class="pill w">第一拨</span></td><td class="mono">testAV_videoDelayFollowsBusEffectLatency A2 两种模式 ≤ 1 ms</td><td>M</td></tr>
 <tr><td class="id">106</td><td>W2-C3 MIDIHost.sync 偶发崩溃修复（0.1.x 唯一的 S1 崩溃）</td><td>SwitcherControl/MIDI、SwitcherControlTests</td><td>—；现在能开，要在 100 之前合入</td><td><span class="pill w">第一拨</span></td><td class="mono">testC_midiHostSync_stressNoTrap App 全量不崩</td><td>S</td></tr>
 <tr><td class="id">107</td><td>G8 检查点（两段）：G8a 合 99（+ 105 / 106）快进 main → G8b 合 100–103 → 全量 → 0.1.1 放行 + 版本号 + CHANGELOG + make help</td><td>同 G7 + 版本号三处、CHANGELOG.md</td><td>G8a：99 / 105 / 106（2026-10-11 已过）；G8a-2：108；G8b：100–103</td><td><span class="pill g">闸门 · G8a 已过</span></td><td>make test、gate4、perf-baseline、docs/checklists/G8.md</td><td>M</td></tr>
-<tr><td class="id">108</td><td>P5-2 契约落地五：提案 020 转场槽 + FTB 时长、021 文件播放控制、022 输出统计补字段 + attempt / video_delay_ms、023 二–五（container 废弃、effects 只放音频、InputConfig.color + setInputColor、setInputAudio）、028 契约文字与 L1 口径一句（用户 2026-10-11 全批、按提案默认）</td><td>同 99 + EngineCounters 一行</td><td>G8a 快进后的 main f0c33ef；与 102 并行</td><td><span class="pill p">串行 · 契约二</span></td><td>契约用例、命令数 42 的快照、api.md 重生成、整仓 make test</td><td>M</td></tr>
+<tr><td class="id">108</td><td>P5-2 契约落地五：提案 020 转场槽 + FTB 时长、021 文件播放控制、022 输出统计补字段 + attempt / video_delay_ms、023 二–五（container 废弃、effects 只放音频、InputConfig.color + setInputColor、setInputAudio）、028 契约文字与 L1 口径一句（用户 2026-10-11 全批、按提案默认）</td><td>同 99 + EngineCounters 一行</td><td>G8a 快进后的 main f0c33ef；与 102 并行；2026-10-11 由 G8a-2 合入 main</td><td><span class="pill p">串行 · 已合入（G8a-2）</span></td><td>契约用例、命令数 42 的快照、api.md 重生成、整仓 make test</td><td>M</td></tr>
 </table></div>
 <h3>8.4 顺序与规矩</h3>
 <ul>
@@ -410,7 +410,7 @@ ol.conf li{margin-bottom:4px}
   <li>契约后三路（100–102）等 P5（99）合入 main 后再开；P5 等用户批提案 020–023。文档（103）随每批合入 rebase 一次。</li>
   <li>每个会话照旧：只动自己目录、先写红测试、报告五段、不 push 不 merge；App 用例写在 App/Tests/，函数名带上表里的 ID。</li>
   <li>竞品截图在用户本机 <span class="k">vmix-28-guide/</span>（已加进 .gitignore，不入库）；prompt 里"图 NNN"指它；给 App 的文案一律是我们自己的说法（铁律 6）。</li>
-  <li><b>G7 之后的排法（2026-10-10 定，细则 §8.8 与顶部"现在怎么开"）</b>：第一拨 99 / 105 / 106 / 103 从 main 并行开 → G8a 合 99（+ 做完的 105 / 106）快进 main → 第二拨 100 从 main 开、<b>101 叠在 100 的分支头上</b>、102 从 main 开（105 没合入就叠它头上）→ 103 rebase 补 100 / 101 → G8b。<b>2026-10-11 G8a 已过</b>：用户批了 020 / 021 / 022 / 023 二–五 → 插入 108 P5-2（与 102 并行）→ G8a-2 合 108 → 100 才开。</li>
+  <li><b>G7 之后的排法（2026-10-10 定，细则 §8.8 与顶部"现在怎么开"）</b>：第一拨 99 / 105 / 106 / 103 从 main 并行开 → G8a 合 99（+ 做完的 105 / 106）快进 main → 第二拨 100 从 main 开、<b>101 叠在 100 的分支头上</b>、102 从 main 开（105 没合入就叠它头上）→ 103 rebase 补 100 / 101 → G8b。<b>2026-10-11 G8a 已过</b>：用户批了 020 / 021 / 022 / 023 二–五 → 插入 108 P5-2（与 102 并行）→ G8a-2 合 108 → 100 才开。<b>同日上午 G8a-2 已过</b>：108 进 main，100 现在从 main 开。</li>
   <li><b>叠分支的 lint</b>：<span class="k">scripts/check-ownership.sh &lt;分支&gt; --base &lt;上一路分支&gt;</span>；被叠的那一路别 rebase 重写分支头。</li>
   <li><b>同机互斥</b>：gate4 / 8 小时长稳 / perf-baseline 要机器上没有别的引擎与 xcodebuild；StreamingTests、显示类 / 实时类用例几个会话同时跑会互相挤红；两个会话别同时跑 make test-app 全量。</li>
 </ul>
@@ -454,7 +454,7 @@ ol.conf li{margin-bottom:4px}
 </table></div>
 <p class="note">同日另开 106（MIDIHost.sync S1 崩溃修复）与 107（G8 两段式检查点）；全文在 reports/G7.md §7.1 末。</p>
 <h3>8.8 谁等谁、谁能同时</h3>
-<p>见页首"现在怎么开"那张表（同一张，落地方案 §8.8 是原文）。一句话（2026-10-11 更新）：<b>G8a 已过、main = f0c33ef 起；现在开 108 P5-2 与 102（并行）、103 随时 rebase；100 等 G8a-2 把 108 合进 main 再开（或叠在 p5-contracts-2 头上）；101 必须叠在 100 上；全量 / gate4 / perf / 长稳同机只跑一个。</b> 用户 2026-10-11 另定：L1 对 videoDelay 的判定扣 video_delay_ms（阈值不动）；W1-B4 的 App 接线与开录起点归 G8b 胶水；P5 的两处口径照现状。</p>
+<p>见页首"现在怎么开"那张表（同一张，落地方案 §8.8 是原文）。一句话（2026-10-11 上午更新）：<b>G8a 与 G8a-2 都已过、main = 97b0634 起；现在开 100（从 main 开）与 102（并行）、103 随时 rebase；101 必须叠在 100 上；G8b 等 100–103；全量 / gate4 / perf / 长稳同机只跑一个。</b> 用户 2026-10-11 另定：L1 对 videoDelay 的判定扣 video_delay_ms（阈值不动）；W1-B4 的 App 接线与开录起点归 G8b 胶水；P5 的两处口径照现状。</p>
 <h2 id="s9"><span class="num">9</span>Prompt 库</h2>
 <p>每个会话一张卡。"复制 前言 + 本段"会把 00 通用前言拼在前面，直接粘进新会话即可。单独文件在仓库的 docs/plan/prompts/ 目录；本页由 <span class="k">scripts/gen-prompt-page.py</span> 从那里生成，卡片上的状态标签按仓库里分支的状态自动算（{{GENERATED}}）。</p>
 <div class="lib-tools"><button id="openAll">展开全部</button><button id="closeAll">收起全部</button><span class="note">序号是执行顺序；同一个十位数的是同一波次（4x 是 G3 之后的契约落地与续做；85 起是界面对照调研之后的第五波：86–90 止血、91 G6、92–98 骨架改版、99 契约、100–103 契约后与文档、104 G7，见第 8 节）。</span></div>
