@@ -53,10 +53,14 @@ final class InputSettingsModel: ObservableObject {
     }
 
     /// 改一项：本地先改（表单立刻响应），再整体替换发给状态机（reducer 会 clamped）。
+    /// 播放的目标与定位请求（提案 021）以快照为准：格子 / 快捷键 / API 随时在改暂停、发定位，表单里那份可能旧了；整份替换只带上这里能改的 restartOnProgram（W5-N）。
     func update(_ body: (inout InputSettings) -> Void) {
         var s = settings
         body(&s)
         guard s != settings else { return }
+        var playback = config.settings.playback
+        playback.restartOnProgram = s.playback.restartOnProgram
+        s.playback = playback
         settings = s
         pending = s
         pendingSince = Date()
@@ -244,7 +248,11 @@ final class InputSettingsModel: ObservableObject {
         if let f = sourceForm { return f }
         let format = ProgramFormat(width: Int(textureSize.width), height: Int(textureSize.height), frameRate: programFrameRate)
         let f = AddInputFormModel(editing: config, programFormat: format)
-        sourceFormChange = f.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }   // "应用"按钮的可用状态跟着表单变
+        // "应用"按钮的可用状态跟着表单变；表单改完（objectWillChange 在改之前发，下一轮再看）只差播完 / 速率的当场生效
+        sourceFormChange = f.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.applyInPlaceSourceChange() } }
+        }
         sourceForm = f
         return f
     }
@@ -266,6 +274,34 @@ final class InputSettingsModel: ObservableObject {
         } catch {
             sourceError = "\(error)"
         }
+    }
+
+    /// 来源一节的说明（文件输入多一句：只改播完 / 速率当场生效、不重建）。
+    var sourceHint: String {
+        if case .file = config.source { return L("inputSettings.source.changeHint") + L("inputSettings.source.fileInPlaceHint") }
+        return L("inputSettings.source.changeHint")
+    }
+
+    /// 文件输入只改了"播完"/"播放速率"（同一个文件）：当场发 setInputSource——运行表就地改、不重建这一路、位置接着走（W5-N，02 V04）；
+    /// 别的改动（换文件、换类型）照旧等"应用来源"。
+    private func applyInPlaceSourceChange() {
+        guard let form = sourceForm, let source = try? form.model.makeSource(), source != config.source,
+              InputRuntime.inPlaceFileChange(from: config.source, to: source) != nil else { return }
+        send?(.setInputSource(input: number, source: source))
+    }
+
+    // MARK: 播放（文件输入，提案 021）
+
+    /// ▶ / ⏸：按快照里的目标翻（与格子同一条命令）。
+    func togglePaused() { send?(.setPlayback(input: number, paused: !config.settings.playback.paused)) }
+
+    /// 回到开头（seekPlayback 0；暂停中就停在第一帧）。
+    func restartPlayback() { send?(.seekPlayback(input: number, seconds: 0)) }
+
+    /// 是文件输入（"播放"小节只对它出）。
+    var isFileSource: Bool {
+        if case .file = config.source { return true }
+        return false
     }
 
     /// 表单改回当前来源。
@@ -538,7 +574,17 @@ struct InputSettingsView: View {
                 Button(L("inputSettings.source.revert")) { model.revertSource() }.disabled(!model.sourceChanged)
             }
             if !model.sourceError.isEmpty { Text(model.sourceError).foregroundStyle(.red) }
-            Text(L("inputSettings.source.changeHint")).font(.caption).foregroundStyle(.secondary)
+            Text(model.sourceHint).font(.caption).foregroundStyle(.secondary)
+        }
+        if model.isFileSource {
+            Section(L("inputSettings.playback.title")) {
+                HStack {
+                    Button(model.config.settings.playback.paused ? L("inputSettings.playback.play") : L("inputSettings.playback.pause")) { model.togglePaused() }
+                    Button(L("inputSettings.playback.restart")) { model.restartPlayback() }
+                }
+                Toggle(L("inputSettings.playback.restartOnProgram"), isOn: model.bind(\.playback.restartOnProgram))
+                Text(L("inputSettings.playback.hint")).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }

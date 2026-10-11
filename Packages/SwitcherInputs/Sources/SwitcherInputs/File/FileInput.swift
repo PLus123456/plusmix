@@ -114,6 +114,8 @@ public final class FileInput: Input, @unchecked Sendable {
         var anchorPending: Bool
         /// 暂停已由推帧线程落实（位置冻结在它最近推出的那一帧；推帧线程才知道哪一帧是最后推出的，API 线程读它会差一拍）。
         var pauseApplied: Bool
+        /// 本代已经播完（推帧线程按结束动作收了尾：停在末帧 / 黑场）；start / seek 清掉。播完之后再把结束动作改成循环 = 从头来（W5-N）。
+        var reachedEnd = false
     }
 
     /// - Parameters:
@@ -168,10 +170,18 @@ public final class FileInput: Input, @unchecked Sendable {
     public var hasAlpha: Bool { info?.hasAlpha ?? false }
     /// 时长（秒）。
     public var durationSeconds: Double { info?.duration.doubleValue ?? 0 }
-    /// 结束动作（可运行中改）。
+    /// 结束动作（可运行中改）。播完之后（停在末帧 / 黑场）改成循环 = 当场从头接着循环（"到尾从头来"，尾已经到了；W5-N，格子的"循环"开关）；
+    /// 没播完时只换结束动作、位置接着走。
     public var endAction: FileEndAction {
         get { playback.withLock { $0.endAction } }
-        set { playback.withLock { $0.endAction = newValue } }
+        set {
+            let restart = playback.withLock { p -> Bool in
+                let ended = p.reachedEnd && p.endAction != .loop
+                p.endAction = newValue
+                return ended && newValue == .loop
+            }
+            if restart { seek(toMedia: .zero) }
+        }
     }
     /// 播放速率。设置时在下一拍重新锚定。
     public var rate: Double {
@@ -243,6 +253,7 @@ public final class FileInput: Input, @unchecked Sendable {
             p.restartMedia = .zero
             p.version += 1
             p.anchorPending = true
+            p.reachedEnd = false
         }
         hasPushed.store(false, ordering: .relaxed)
         let d = InputThread(name: "file-decode-\(number)", period: nil, qos: QOS_CLASS_USER_INITIATED) { [self] t in
@@ -299,6 +310,7 @@ public final class FileInput: Input, @unchecked Sendable {
             p.restartMedia = target
             p.version += 1
             p.anchorPending = true
+            p.reachedEnd = false
         }
         fileCounters.seeks.add(1, ordering: .relaxed)
     }
@@ -663,6 +675,8 @@ public final class FileInput: Input, @unchecked Sendable {
                     } else if let e = endItem, !ended, position >= e.media {
                         // 末帧显示期结束：按结束动作收尾（loop 的话解码线程不会给哨兵）
                         ended = true
+                        let generation = p.generation
+                        playback.withLock { q in if q.generation == generation { q.reachedEnd = true } }
                         if p.endAction == .black {
                             if black == nil, let b = try? PixelBuffers.make(width: max(info.width, 2), height: max(info.height, 2), format: asset.videoPixelFormat) {
                                 PixelBuffers.fill(black: b)

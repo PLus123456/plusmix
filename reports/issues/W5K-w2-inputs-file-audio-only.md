@@ -12,3 +12,9 @@
       音轨照现在的路径解码、按节目时钟送环（播完动作 / 速率 / 循环照用）；`FileInputCounters` 的视频计数为 0。
       测试：Tests/Fixtures 加一个几秒的 m4a，`FileInputTests` 加"纯音频文件 live、环里有样本、循环回绕"；App 侧 `AddInputRevampTests.testPanels_addInputAcceptsAudioFilesShownAsAudioOnly`
       现在只验到"按纯音频格子画、页上写明"，FileInput 支持之后可以加一条端到端（加 m4a → 调音台条子有表）。
+
+## W5-N（prompt 101）没连带做（2026-10-11）
+
+G7 追加 ④ 写"播放控制若连带做纯音频文件请一并解"，但 101 的目录许可写明 SwitcherInputs/File 只做"播放命令的接线与就地改结束动作 / 速率，**不动解码路径**"：
+支持纯音频要改 `FileAsset.init`（允许没有视频轨）、`decodeLoop`（不建视频那一路）和 `paceLoop`（锚点现在等解码线程给出**视频**首帧才定，纯音频要改成等音频首块），
+都在解码 / 推帧路径上，所以没做，仍归 W2-A 系。W5-N 的格子 ⏮ / ▶⏸ / 🔁 对这类输入是亮的（来源是 .file），但这一路本身是 error，按了没有效果。

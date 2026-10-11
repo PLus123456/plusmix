@@ -11,6 +11,8 @@
 // 没有第二块屏 → 底栏弹这个菜单。全部走命令：外部窗口跟着快照开关（ExternalDisplayManager 只给 enabled 的输出开窗口），节目文件里也就带着它们。
 // 源的名字用 App 的 OutputSource.title；"删除 n …（状态）"里的状态与帧数只读 Stats.display[]（提案 013）。输入那一组（Aux）前面一行说明
 // "Aux = 原始画面（抠像 / 裁切 / 变换不生效）"，每个输入项的提示也是这句（W3-E3；G4 裁定 Aux 画该路原始帧）。
+// "每块屏一路"的规则（哪一路算这块屏的、选源 / 关闭发什么命令）只有一份，在 ExternalDisplayRouting（W5-I 的设置页也用它）；
+// 这里只拼菜单（W5-N 顺带，问题单 G7-w5-app-external-routing-two-implementations）。
 import AppKit
 import SwitcherContracts
 import SwitcherExternal
@@ -31,19 +33,9 @@ final class ExternalOutputMenuBuilder: NSObject {
         self.displayStats = displayStats
     }
 
-    /// 某块屏上的外部显示输出（按编号）。displayID 为 nil 的老输出算在主屏上。
-    static func outputs(on display: DisplayInfo, in state: MixerState) -> [OutputState] {
-        state.outputs.filter { o in
-            guard o.kind == .externalDisplay else { return false }
-            let id = ExternalDisplaySpec(settings: o.settings).displayID
-            return id == display.id || (id == nil && display.isMain)
-        }
-    }
-
-    /// 这块屏的"那一路"：开着的优先，否则编号最小的（老节目里同屏可能有好几路，W5-F 起不再叠）。
+    /// 这块屏的"那一路"：开着的优先，否则编号最小的（老节目里同屏可能有好几路，W5-F 起不再叠）。规则在 ExternalDisplayRouting。
     static func primaryOutput(on display: DisplayInfo, in state: MixerState) -> OutputState? {
-        let list = outputs(on: display, in: state)
-        return list.first(where: \.enabled) ?? list.first
+        ExternalDisplayRouting.primaryOutput(on: display, in: state)
     }
 
     /// 现有的外部显示输出里，显示器 + 源都匹配的那个。
@@ -59,18 +51,8 @@ final class ExternalOutputMenuBuilder: NSObject {
     static func makeOutput(in state: MixerState, displayID: UInt32?, displayName: String, source: OutputSource) -> OutputState {
         let number = (state.outputs.map(\.number).max() ?? 0) + 1
         let spec = ExternalDisplaySpec(displayID: displayID, source: source, fallbackToMain: false)
-        return OutputState(number: number, kind: .externalDisplay, name: autoName(displayName: displayName, source: source, in: state),
+        return OutputState(number: number, kind: .externalDisplay, name: ExternalDisplayRouting.autoName(displayName: displayName, source: source, in: state),
                            enabled: true, settings: spec.outputSettings)
-    }
-
-    /// 菜单起的名字："显示器 · 源"。
-    static func autoName(displayName: String, source: OutputSource, in state: MixerState) -> String {
-        L("externalMenu.outputName", displayName, source.title(in: state))
-    }
-
-    /// 可选的源：PGM / PVW / 多画面 / 各输入。
-    static func sources(in state: MixerState) -> [OutputSource] {
-        [.program, .preview, .multiview] + state.inputs.map { .input(number: $0.number) }
     }
 
     /// 主体按下去发生了什么。
@@ -124,7 +106,7 @@ final class ExternalOutputMenuBuilder: NSObject {
                 menu.addItem(off)
             }
             var auxNoted = false
-            for source in Self.sources(in: state) {
+            for source in ExternalDisplayRouting.sources(in: state) {
                 // 输入那一组（Aux）前面一行说明：外部显示的"输入 n"画的是该路原始画面，抠像 / 裁切 / 变换不生效（G4 裁定、W3-C2 本包自己画输入帧）
                 if source.inputNumber != nil, !auxNoted {
                     menu.addItem(.sectionHeader(title: L("aux.rawPictureNote")))
@@ -198,7 +180,7 @@ final class ExternalOutputMenuBuilder: NSObject {
     @objc private func fullscreenPicked(_ sender: NSMenuItem) {
         guard let pick = sender.representedObject as? Pick, let display = display(for: pick) else { return }
         if let source = pick.source {
-            select(source, on: display, displayName: pick.displayName)
+            select(source, on: display)
         } else {
             turnOff(display)
         }
@@ -221,28 +203,12 @@ final class ExternalOutputMenuBuilder: NSObject {
     /// 选源：这块屏已有输出 = 换源（同一个输出，窗不重开）并打开，同屏别的路关掉；没有 = 加一路。
     @objc private func sourcePicked(_ sender: NSMenuItem) {
         guard let pick = sender.representedObject as? Pick, let source = pick.source, let display = display(for: pick) else { return }
-        select(source, on: display, displayName: pick.displayName)
+        select(source, on: display)
     }
 
-    /// 这块屏改出 source（路由菜单点源、监视器右键"全屏输出到"共用）。
-    private func select(_ source: OutputSource, on display: DisplayInfo, displayName: String) {
-        guard let primary = Self.primaryOutput(on: display, in: state) else {
-            send?(.addOutput(config: Self.makeOutput(in: state, displayID: display.id, displayName: displayName, source: source)))
-            return
-        }
-        if primary.settings.source != source {
-            var settings = primary.settings
-            settings.source = source
-            send?(.setOutputSettings(output: primary.number, settings: settings))
-            // 名字还是菜单起的"显示器 · 旧源"就跟着换（用户改过的名字不动）
-            if primary.name == Self.autoName(displayName: displayName, source: primary.settings.source, in: state) {
-                send?(.renameOutput(output: primary.number, name: Self.autoName(displayName: displayName, source: source, in: state)))
-            }
-        }
-        if !primary.enabled { send?(.setOutputEnabled(output: primary.number, on: true)) }
-        for o in Self.outputs(on: display, in: state) where o.number != primary.number && o.enabled {
-            send?(.setOutputEnabled(output: o.number, on: false))
-        }
+    /// 这块屏改出 source（路由菜单点源、监视器右键"全屏输出到"共用）：有那一路 = 换源并打开、同屏别的路关掉；没有 = 加一路（ExternalDisplayRouting.pick）。
+    private func select(_ source: OutputSource, on display: DisplayInfo) {
+        for c in ExternalDisplayRouting.pick(display: display, source: source, in: state) { send?(c) }
     }
 
     /// 关闭：这块屏不出画面，配置留着。
@@ -252,7 +218,7 @@ final class ExternalOutputMenuBuilder: NSObject {
     }
 
     private func turnOff(_ display: DisplayInfo) {
-        for o in Self.outputs(on: display, in: state) where o.enabled { send?(.setOutputEnabled(output: o.number, on: false)) }
+        for c in ExternalDisplayRouting.pick(display: display, source: nil, in: state) { send?(c) }
     }
 
     @objc private func removeOutput(_ sender: NSMenuItem) {

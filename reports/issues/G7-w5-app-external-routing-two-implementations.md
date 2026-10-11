@@ -8,3 +8,10 @@
 复现步骤：—（代码结构问题，行为一致）。
 严重级：S3（维护）。
 建议改法：菜单改调 `ExternalDisplayRouting`（W5-I 的建议，≤ 50 行）：`ExternalOutputMenuBuilder.primaryOutput / select / turnOff / toggleAll` 换成转调 `ExternalDisplayRouting.pick / off / primary`，菜单只负责拼项；两套用例都留（一套测菜单结构、一套测规则）。G7 没做：检查点不写功能，且不是放行阻塞。
+
+## 处理结果（W5-N / prompt 101，分支 `w5-playback-status`，2026-10-11，2026-10-10 裁定 ④ 的"顺带"）
+
+按建议改了：`ExternalOutputMenuBuilder` 的 `outputs(on:in:)` / `autoName` / `sources` 删掉，`primaryOutput` 转调 `ExternalDisplayRouting.primaryOutput`，
+菜单"点源 / 关闭"与监视器右键"全屏输出到"（`select` / `turnOff`）改成照发 `ExternalDisplayRouting.pick(display:source:in:)` 给的命令；菜单只负责拼项。
+`makeOutput`（主体 toggleAll 在第一块非主屏上开 PGM 用，ExternalOutputAppTests 也在用）留着、名字改调 `ExternalDisplayRouting.autoName`。
+净改 −34 行（13 加 / 47 删）。两套用例都留（BottomBarPopupTests / ExternalOutputAppTests 测菜单，OutputPagesTests.testPanels_M5_… 测规则），全量里都过（reports/w5-playback-status.md §6）。

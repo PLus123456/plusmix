@@ -483,6 +483,45 @@ final class FileInputTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(written, 250, "定位后 1.5 s 该写 ≈ 281 块音频：\(after)")
     }
 
+    // MARK: W5-N：运行中改结束动作 / 速率（就地改，同一个对象接着播）
+
+    /// 01a D5 / 02 V04：格子"循环"开关与输入设置"来源"一节改结束动作 / 速率，都改在跑着的这个 FileInput 上（App 运行表不重建）。
+    /// ① 循环中改成"停在末帧"：播到 599 停住、noSignal、帧槽保留 599；② 播完之后再开循环 = 从头接着循环（结束已经到了，"到尾从头来"当场生效），
+    /// 帧号从 0 起连续、回到 live；③ 运行中把速率改成 2：从新锚点起每拍前进 2 帧。三步都是同一个对象、同一个帧槽。
+    func testInput_fileEndActionChangesInPlace() throws {
+        let timing = makeTiming(.hd1080p60)
+        let slot = LockFreeFrameSlot(capacity: 3)
+        let input = try makeInput(timing: timing, slot: slot, endAction: .loop)
+        defer { input.stop() }
+        try startAndWaitLive(input)
+        let driver = TickDriver(timing: timing)
+        // ① 循环 → 停在末帧（运行中改），再定位到尾巴附近
+        input.endAction = .holdLastFrame
+        XCTAssertEqual(input.endAction, .holdLastFrame)
+        input.seek(toFrame: 590)
+        let tail = picks(driver, slot: slot, from: try anchor(of: input), count: 30)
+        XCTAssertTrue(tail.contains { $0.number == 599 }, "应播到末帧 599：\(tail)")
+        XCTAssertFalse(tail.contains { ($0.number ?? 600) < 590 }, "改成停在末帧后不该再循环回 0：\(tail)")
+        XCTAssertEqual(input.state, .noSignal, "播完停在末帧 = noSignal")
+        for p in tail.suffix(5) { XCTAssertEqual(p.number, 599, "帧槽保留末帧：\(p)") }
+        // ② 播完之后开循环：从头来、帧号从 0 起连续、回到 live
+        input.endAction = .loop
+        XCTAssertEqual(input.endAction, .loop)
+        let restart = try anchor(of: input)
+        let looped = picks(driver, slot: slot, from: restart, count: 20)
+        let numbers = looped.compactMap(\.number)
+        XCTAssertEqual(numbers.first, 0, "播完后开循环应从第 0 帧接着循环：\(looped.prefix(3))")
+        for i in 1..<numbers.count { XCTAssertEqual(numbers[i], numbers[i - 1] + 1, "从头循环后帧号不连续：\(looped)") }
+        XCTAssertEqual(input.state, .live, "重新出帧 = live")
+        // ③ 运行中改速率：新锚点之后每拍前进 2 帧
+        input.rate = 2
+        XCTAssertEqual(input.rate, 2)
+        let fast = picks(driver, slot: slot, from: try anchor(of: input) + 1, count: 20).compactMap(\.number)
+        XCTAssertEqual(fast.count, 20)
+        for i in 1..<fast.count { XCTAssertEqual(fast[i] - fast[i - 1], 2, "速率 2 应每拍前进 2 帧：\(fast)") }
+        XCTAssertEqual(input.fileCountersSnapshot.seeks, 2, "只有那一次定位 + 播完开循环的从头，没有别的重开：\(input.fileCountersSnapshot)")
+    }
+
     // MARK: 错误：文件不存在 → error(文案)
 
     func testFile_missingFile_stateIsErrorWithMessage() throws {

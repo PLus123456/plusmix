@@ -188,7 +188,7 @@ final class OutputPagesTests: XCTestCase {
 
         // 取消跟随：推流 1 再改，推流 2 留着自己的
         page.setStreamFollowsFirst(b, on: false)
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(b).map { !OutputLinkage.followsFirstStream($0, in: session.state) } == true })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(b)?.settings.stream?.followFirst == false }, "读 025 的正式字段 StreamSettings.followFirst")
         XCTAssertFalse(page.streamFollowsFirst(b))
         page.applyStreamQuality(a, id: "720p")
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(a)?.settings.video?.width == 1280 })
@@ -260,7 +260,8 @@ final class OutputPagesTests: XCTestCase {
 
         // PGM 行取消 = 只录 ISO：底栏"录制"只起两路 ISO
         page.setISORow("pgm", on: false)
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(master.number).map(OutputLinkage.isArmed) == false })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(master.number)?.settings.record?.armed == false }, "读 025 的正式字段 RecordSettings.armed")
+        XCTAssertNil(session.state.output(master.number)?.settings.extra["app.record.armed"], "不再写 extra 键")
         XCTAssertEqual(page.isoRows.first?.checked, false)
         wc.bottomBar.record.bodyButton.performClick(nil)   // 92 的分体控件：主体是 record.bodyButton（G7 合并时接）
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders.count == 2 }, "只起 ISO 两路：\(session.outputs.recorders.keys.sorted())")
@@ -270,7 +271,7 @@ final class OutputPagesTests: XCTestCase {
         if AppTest.waitForConfirmation(.stopRecord) != nil { AppTest.answer(.confirm) }
         XCTAssertTrue(AppTest.waitUntil(15) { session.outputs.recorders.isEmpty && !session.state.outputs.contains { $0.kind == .record && $0.enabled } })
         page.setISORow("pgm", on: true)
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(master.number).map(OutputLinkage.isArmed) == true })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(master.number)?.settings.record?.armed == true })
         try? FileManager.default.removeItem(atPath: dir)
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }
@@ -296,7 +297,7 @@ final class OutputPagesTests: XCTestCase {
         XCTAssertEqual(o.settings.source, .program)
         XCTAssertEqual(o.name, "录制 2")
         XCTAssertFalse(o.enabled)
-        XCTAssertTrue(OutputLinkage.isArmed(o))
+        XCTAssertEqual(o.settings.record?.armed, true, "新加的录制路参与录制（025 的正式字段）")
         XCTAssertEqual(o.settings.video?.bitrateBps, 18_000_000)
         XCTAssertEqual(o.settings.audio?.bitrateBps, 256_000)
         XCTAssertEqual(o.settings.record?.directory, master.settings.record?.directory)
@@ -331,7 +332,7 @@ final class OutputPagesTests: XCTestCase {
 
         // 参与录制：关掉第二路 → 底栏"录制"只起录制 1
         page.setRecordArmed(n, on: false)
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(n).map(OutputLinkage.isArmed) == false })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(n)?.settings.record?.armed == false })
         XCTAssertTrue(page.recordPlanLine.contains("1 路"), page.recordPlanLine)
         wc.bottomBar.record.bodyButton.performClick(nil)   // 92 的分体控件：主体是 record.bodyButton（G7 合并时接）
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders.count == 1 }, "\(session.outputs.recorders.keys.sorted())")
@@ -486,7 +487,7 @@ final class OutputPagesTests: XCTestCase {
         XCTAssertEqual(StreamAddress.unmasked("rtmp://•••@live.example.com/app2", original: url), url.replacingOccurrences(of: "/app", with: "/app2"))
         XCTAssertEqual(StreamAddress.unmasked("rtmp://live.example.com/app", original: url), "rtmp://live.example.com/app", "用户把打码段删了 = 去掉账号")
         XCTAssertEqual(StreamAddress.unmasked("rtmp://•••@h/app", original: "rtmp://h/app"), "rtmp://h/app", "原来没账号：去掉记号")
-        XCTAssertEqual(StreamAddress.masked("rtmp://h/app?user=a"), "rtmp://h/app?user=a", "查询串里的不当 userinfo")
+        XCTAssertEqual(StreamAddress.masked("rtmp://h/app?user=a"), "rtmp://h/app?user=•••", "查询串里的不当 userinfo；值照名单打码（2026-10-10 裁定 ①，W5-N 起）")
 
         // 清掉
         XCTAssertNil(model.setStreamAuth(2, user: "", password: ""))

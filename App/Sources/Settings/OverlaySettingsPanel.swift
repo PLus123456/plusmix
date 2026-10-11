@@ -49,8 +49,6 @@ final class OverlaySettingsModel: ObservableObject {
     static let animationKinds: [OverlayAnimationKind] = [.cut, .fade, .slide, .zoom]
     /// 时长的快捷值（秒，I3）。
     static let quickDurations: [Double] = [0.5, 1, 2]
-    /// 新节目四个通道的默认进出动画：淡入 0.5 s（I3）。
-    static let defaultFadeSeconds = 0.5
     /// 从整幅切到画中画时放在哪（右下 1/4）。
     static let defaultPictureInPicture = NormalizedRect.bottomRightQuarter
     static let borderWidthRange = 0.0...0.05

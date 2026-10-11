@@ -48,7 +48,7 @@ final class PowerSettingsModel: ObservableObject {
     }
 }
 
-/// 本机信息（只读，启动时取一次）。G7 合并时改名：96（W5-J）的 PreferencesPanel 里也有一个 MachineInfo，两边同名。
+/// 本机信息（只读，启动时取一次）。G7 合并时改名（96 的 PreferencesPanel 里原来也有一个 MachineInfo，两边同名；那份没人用，W5-N 删了）。
 enum PowerMachineInfo {
     @MainActor
     static let rows: [PowerSettingsModel.MachineRow] = {

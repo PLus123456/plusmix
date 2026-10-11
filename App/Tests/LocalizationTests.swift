@@ -38,6 +38,17 @@ final class LocalizationTests: XCTestCase {
         print("表里有但源码没直接引用的键（动态拼的键在这里，人工看）：\(unused)")
     }
 
+    /// 反向：表里的键都有人用（源码里出现过这个字面串，或是某个动态拼键 `L("前缀.\(…)")` 的展开）。合并之后没人用的键不再越攒越多
+    /// （问题单 G7-w5-app-unused-strings-keys-after-merge；W5-N 顺带删了 36 个，两份表同步）。
+    func testL10n_everyKeyInTableIsReferenced() throws {
+        let root = try AppTest.repoRoot().appendingPathComponent("App/Sources")
+        let refs = try AppTest.localizationReferences(in: root)
+        XCTAssertGreaterThan(refs.prefixes.count, 10, "动态拼的键前缀应能认出一批：\(refs.prefixes.sorted())")
+        let zh = try XCTUnwrap(L10n.table(language: "zh-Hans"))
+        let unused = zh.keys.filter { k in !refs.literals.contains(k) && !refs.prefixes.contains { k.hasPrefix($0) } }.sorted()
+        XCTAssertEqual(unused, [], "表里有、App/Sources 里没人用的键（两份表一起删）")
+    }
+
     func testL10n_noHardcodedChineseInUISources() throws {
         let root = try AppTest.repoRoot().appendingPathComponent("App/Sources")
         let violations = try AppTest.chineseLiteralViolations(in: root)

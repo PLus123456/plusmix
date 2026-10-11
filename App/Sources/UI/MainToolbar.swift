@@ -4,7 +4,7 @@
 // - 打开▾ = 最近打开的节目 + 打开上次退出时的节目 + 清除列表（ShowMenu，与"节目"菜单同一份数据）；设置▾ = 设置窗与各设置页（SettingsMenu）；
 //   ? = 帮助菜单同一份（HelpMenu）；外部显示▾ = 底栏 ⚙ 外部显示的那个路由菜单（ExternalOutputMenuBuilder），主体 = 全部开 / 关（同底栏主体），开着高亮。
 // - 分体按钮与底栏是同一个控件（SplitBarButton，placement = .toolbar：▾ 向下开、左缘对齐整个控件）。工具条上不放 ⚙（▾ 就是它们的菜单）。
-// - 录制 / 推流状态只显示（底栏两个主体按钮的同一份汇总 OutputButtonSummary，铁律 4）；时长等 022 / 101。
+// - 录制 / 推流状态只显示（底栏两个主体按钮的同一份汇总 OutputButtonSummary，铁律 4）；W5-N 起带时长"● 录制 01:02:05"（Stats 的 uptime_s）。
 // - 不放"暂停输入""精简"（A5 / A6：没有这两个功能，不放点了没反应的按钮）。全部按钮 refusesFirstResponder（C9）。
 // - 没有 session（引擎起不来 / 正在换节目）时节目组以外置灰。
 import AppKit
@@ -192,6 +192,7 @@ final class ToolbarOutputStatusView: NSView {
             heightAnchor.constraint(equalToConstant: 24),
         ])
         for l in [recordLabel, streamLabel] {
+            l.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)   // 时长每秒变（W5-N）：等宽数字，宽度不抖
             l.setContentCompressionResistancePriority(.required, for: .horizontal)
             l.lineBreakMode = .byClipping
         }

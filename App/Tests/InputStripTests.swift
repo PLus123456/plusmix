@@ -25,9 +25,12 @@ final class InputStripTests: XCTestCase {
         AppTest.pump(seconds: 0.1)
         let cells = try (1...3).map { try XCTUnwrap(strip.cells[$0]) }
 
-        // 两行常显（Q26 (a)）：第一行 × ｜ 转场 ｜ Cut ｜ 循环；第二行 1–4 ｜ 静音 ｜ ⚙；都在格子里、同一行同一高度、第一行在上
+        // 两行常显（Q26 (a)）：第一行 × ｜ 转场 ｜ Cut ｜ ⏮ ｜ ▶/⏸ ｜ 🔁（W5-N 起后三颗是图标、只对文件输入亮）；第二行 1–4 ｜ 静音 ｜ ⚙；
+        // 都在格子里、同一行同一高度、第一行在上
         for cell in cells {
-            XCTAssertEqual(cell.firstRowButtons.map(\.title), ["×", "转场", "Cut", "循环"])
+            XCTAssertEqual(cell.firstRowButtons.map(\.title), ["×", "转场", "Cut", "", "", ""])
+            XCTAssertEqual(cell.playbackButtons.map { $0.accessibilityLabel() ?? "" },
+                           ["输入 \(cell.number) 回到开头", "输入 \(cell.number) 暂停", "输入 \(cell.number) 循环"])
             XCTAssertEqual(cell.secondRowButtons.map(\.title), ["1", "2", "3", "4", "静音", ""])
             XCTAssertTrue(cell.secondRowButtons.last === cell.gearButton)
             XCTAssertEqual(cell.gearButton.accessibilityLabel(), "输入 \(cell.number) 的设置")
@@ -121,7 +124,7 @@ final class InputStripTests: XCTestCase {
         XCTAssertTrue(cell1.loopButton.isEnabled)
         XCTAssertEqual(cell1.loopButton.bezelColor, Theme.accent, "循环开着 = 高亮")
         XCTAssertFalse(cell2.loopButton.isEnabled)
-        XCTAssertEqual(cell2.loopButton.toolTip, "只对视频文件输入")
+        XCTAssertEqual(cell2.loopButton.toolTip, "只对视频 / 音频文件输入")
         let entry = try XCTUnwrap(session.inputs.entries[1])
         let file = try XCTUnwrap(entry.input as? FileInput)
         let identity = ObjectIdentifier(file), slot = ObjectIdentifier(entry.slot)

@@ -4,6 +4,7 @@
 // 老入口 showPreferences() / showOutputSettings(tab:) / showHotkeyEditor() / showMIDIMapping() 与 xxxWindow 属性照用：返回设置窗里那一页的句柄。
 // 多画面窗口 / 外部显示窗口是 W3-C 的（G4 合并时以 W3-C 的运行表为准）：
 // W5-K（97）加叠加设置窗（一个）与音频设置窗（每条总线 / 每路输入一个）；输入设置 / 叠加设置 / 音频设置窗在前时，没被文本框吃掉的按键照样走快捷键表（X12，forwardHotkeys）。
+// W5-N（101）加推流 / 录制状态面板（一个窗两页）：模型每行 Stats 都喂（窗口关着也记事件），换 session 清空。
 // 多画面 = MainWindowController.multiviewWindow，外部显示窗口 = AuxOutputRuntime.external 跟着快照里的 externalDisplay 输出开关
 // （设置面板 / 菜单加输出 → 开窗口；用户关窗口 → removeOutput）；这里只留 showMultiview 转调。
 import AppKit
@@ -23,6 +24,9 @@ final class PanelCoordinator: NSObject {
     private(set) var audioSettingsWindows: [AudioStrip: AudioSettingsWindowController] = [:]
     /// 统计窗（W5-L，底栏"统计"）。
     private(set) var statsWindow: StatsWindowController?
+    /// 推流 / 录制状态面板（W5-N）。
+    let outputStatus = OutputStatusModel()
+    private(set) var outputStatusWindow: OutputStatusWindowController?
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
     private var session: SwitcherSession?
@@ -50,6 +54,7 @@ final class PanelCoordinator: NSObject {
         audioSettingsWindows.removeAll()
         self.session = session
         linkage.reset()
+        outputStatus.reset()   // 事件记录只属于这一场（W5-N）
         guard let session else { state = MixerState(); return }
         state = session.state
         settingsWindow?.model.rebind()
@@ -59,6 +64,7 @@ final class PanelCoordinator: NSObject {
             guard let self else { return }
             self.settingsWindow?.model.outputs.apply(stats: stats)
             self.statsWindow?.model.apply(stats: stats, state: self.state)
+            self.outputStatus.apply(stats: stats, state: self.state)   // 状态面板关着也喂：事件记录要连着（W5-N）
         }
     }
 
@@ -142,8 +148,9 @@ final class PanelCoordinator: NSObject {
                                         reserveBytes: session?.outputs.minimumFreeBytes ?? 0, aux: session?.aux)
         if let stats = session?.stats { model.apply(stats: stats) }
         model.send = { [weak self] c in self?.session?.send(c) }
-        // 起不来的原因 / 推流正在第几次连接 / 重试（W5-B：推流页那一段写明原因，起不来的路不锁、可以重试或停用）
-        model.routeDetail = { [weak self] n in (self?.session?.outputs.failureReason(output: n), self?.session?.outputs.streamConnectAttempt(output: n)) }
+        // 起不来的原因 / 重试（W5-B：推流页那一段写明原因，起不来的路不锁、可以重试或停用）；第几次连接 W5-N 起读 Stats 的 attempt
+        model.routeFailure = { [weak self] n in self?.session?.outputs.failureReason(output: n) }
+        model.showOutputStatus = { [weak self] page in self?.showOutputStatus(page) }
         model.onRetry = { [weak self] numbers in self?.session?.retryFailedOutputs(numbers) }
         model.refreshRouteDetails()
         // 推流页停一路 / 全部停止：与底栏同一问（W5-B），挂在设置窗上；偏好设置里关了就直接停（W5-I 写在旧的输出设置窗上，G7 合并时搬进 W5-J 的设置窗）
@@ -286,6 +293,21 @@ final class PanelCoordinator: NSObject {
         return w
     }
 
+    /// 推流 / 录制状态面板（W5-N）：停在给的那一页；已开就置前。
+    @discardableResult
+    func showOutputStatus(_ page: OutputStatusModel.Page) -> OutputStatusWindowController? {
+        outputStatus.page = page
+        if let w = outputStatusWindow {
+            w.present()
+            return w
+        }
+        let w = OutputStatusWindowController(model: outputStatus)
+        w.onClose = { [weak self] in self?.outputStatusWindow = nil }
+        outputStatusWindow = w
+        w.present()
+        return w
+    }
+
     /// 统计窗（只读；已开就置前）。
     @discardableResult
     func showStats() -> StatsWindowController {
@@ -321,6 +343,8 @@ final class PanelCoordinator: NSObject {
         audioSettingsWindows.removeAll()
         statsWindow?.close()
         statsWindow = nil
+        outputStatusWindow?.close()
+        outputStatusWindow = nil
         if controller.windowController.isMultiviewWindowVisible { controller.windowController.toggleMultiviewWindow() }
     }
 }

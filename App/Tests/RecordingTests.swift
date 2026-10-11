@@ -20,7 +20,7 @@ final class RecordingTests: XCTestCase {
 
         let clickStart = Date()
         wc.bottomBar.record.bodyButton.performClick(nil)
-        XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.record.bodyButton.title == "● 录制中" }, "应显示录制中：\(wc.bottomBar.record.bodyButton.title)")
+        XCTAssertTrue(AppTest.waitUntil(3) { AppTest.isRunningTitle(wc.bottomBar.record.bodyButton.title, "● 录制") }, "应显示录制中：\(wc.bottomBar.record.bodyButton.title)")
         XCTAssertNotNil(session.outputs.recorders[1], "录制器应在跑")
         while Date().timeIntervalSince(clickStart) < 5 { AppTest.pump(seconds: 0.005) }
         // 停先弹确认（W5-B，停止前确认默认开）；按钮间隔量到点"停止录制"那一刻——stopRecord 在那时才发

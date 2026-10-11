@@ -126,7 +126,11 @@ struct RecordPage: View {
                 Section { Text(note).font(.caption).foregroundStyle(.orange) }
             }
             Section {
-                Text(model.recordPlanLine)
+                HStack {
+                    Text(model.recordPlanLine)
+                    Spacer()
+                    Button(L("outputSettings.record.showStatus")) { model.showOutputStatus?(.record) }   // W5-N：录制状态（时长 / 帧数 / 最后错误）
+                }
             }
             // 全部录制路共用的"文件"一节（K10）：改的是录制 1，其余录制路跟（在录的停了再跟）
             Section(L("outputSettings.record.fileShared")) {
@@ -230,7 +234,7 @@ struct ISOPage: View {
                 let rows = model.isoRows
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                     GridRow {
-                        ForEach(["record", "name", "status", "dropped", "directory"], id: \.self) { c in
+                        ForEach(["record", "name", "status", "duration", "dropped", "directory"], id: \.self) { c in
                             Text(L("outputSettings.iso.column.\(c)")).font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -245,6 +249,7 @@ struct ISOPage: View {
                                 .help(row.locked ? L("outputSettings.iso.lockedHelp") : "")
                             Text(row.title).lineLimit(1)
                             Text(row.status).lineLimit(1)
+                            Text(row.duration).monospacedDigit()
                             Text(row.dropped).monospacedDigit()
                             PathText(path: row.directory.isEmpty ? "—" : row.directory).frame(maxWidth: 200, alignment: .leading)
                         }
@@ -282,6 +287,7 @@ struct StreamPage: View {
                     Button(L("outputSettings.stream.stopAll")) { model.stopAllStreams() }
                         .disabled(!model.streamOutputs.contains(where: \.enabled))
                     Spacer()
+                    Button(L("outputSettings.stream.showStatus")) { model.showOutputStatus?(.stream) }   // W5-N：推流状态面板（L11）
                 }
             }
             ForEach(model.streamOutputs) { output in
@@ -368,6 +374,10 @@ struct StreamDestinationSection: View {
     private var authSummary: String {
         if StreamAddress.scheme(of: savedURL) == "srt" {
             return StreamAddress.srtPassphrase(of: savedURL).isEmpty ? L("outputSettings.stream.auth.none") : L("outputSettings.stream.auth.passphraseSet")
+        }
+        if case .query(let u, let p) = model.streamAuthStyle(number) {
+            guard let c = StreamAddress.queryCredentials(of: savedURL, userParam: u, passParam: p) else { return L("outputSettings.stream.auth.none") }
+            return L("outputSettings.stream.auth.userSetQuery", c.user)
         }
         guard let c = model.streamCredentials(number) else { return L("outputSettings.stream.auth.none") }
         return L("outputSettings.stream.auth.userSet", c.user)
@@ -459,7 +469,7 @@ struct StreamDestinationSection: View {
     }
 }
 
-/// "鉴权…"：RTMP / RTMPS 写地址的 user:pass@（Adobe 鉴权），SRT 写 passphrase。
+/// "鉴权…"：RTMP / RTMPS 两种写法二选一（W5-N，2026-10-10 裁定 ①）——Adobe 写地址的 user:pass@，查询串写 ?user=&pass=（参数名可改）；SRT 写 passphrase。
 struct StreamAuthSheet: View {
     @ObservedObject var model: OutputSettingsModel
     let number: Int
@@ -467,21 +477,38 @@ struct StreamAuthSheet: View {
     @Binding var isPresented: Bool
     @State private var user = ""
     @State private var password = ""
+    @State private var queryStyle = false
+    @State private var userParam = StreamAddress.defaultQueryUserParam
+    @State private var passParam = StreamAddress.defaultQueryPassParam
     @State private var error: String?
+
+    private var style: StreamAddress.AuthStyle { queryStyle ? .query(userParam: userParam, passParam: passParam) : .adobe }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(isSRT ? L("outputSettings.stream.auth.srtTitle") : L("outputSettings.stream.auth.title")).font(.headline)
             Form {
                 if !isSRT {
+                    Picker(L("outputSettings.stream.auth.style"), selection: $queryStyle) {
+                        Text(L("outputSettings.stream.auth.style.adobe")).tag(false)
+                        Text(L("outputSettings.stream.auth.style.query")).tag(true)
+                    }
+                    .pickerStyle(.radioGroup)
                     TextField(L("outputSettings.stream.auth.user"), text: $user)
                     SecureField(L("outputSettings.stream.auth.password"), text: $password)
+                    if queryStyle {
+                        TextField(L("outputSettings.stream.auth.userParam"), text: $userParam)
+                        TextField(L("outputSettings.stream.auth.passParam"), text: $passParam)
+                    }
                 } else {
                     SecureField(L("outputSettings.stream.auth.passphrase"), text: $password)
                 }
             }
-            Text(isSRT ? L("outputSettings.stream.auth.srtHint") : L("outputSettings.stream.auth.hint"))
+            Text(isSRT ? L("outputSettings.stream.auth.srtHint") : queryStyle ? L("outputSettings.stream.auth.style.queryHint") : L("outputSettings.stream.auth.style.adobeHint"))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !isSRT, queryStyle, !passParam.isEmpty, !StreamAddress.isMaskedQueryParam(passParam) {
+                Text(L("outputSettings.stream.auth.notMasked", passParam)).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button(L("outputSettings.stream.auth.clear")) {
@@ -492,7 +519,7 @@ struct StreamAuthSheet: View {
                 Button(L("common.cancel")) { isPresented = false }
                     .keyboardShortcut(.cancelAction)
                 Button(L("outputSettings.stream.auth.save")) {
-                    error = model.setStreamAuth(number, user: user, password: password)
+                    error = model.setStreamAuth(number, user: user, password: password, style: style)
                     if error == nil { isPresented = false }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -504,6 +531,13 @@ struct StreamAuthSheet: View {
             guard let url = model.state.output(number)?.settings.stream?.url else { return }
             if isSRT {
                 password = StreamAddress.srtPassphrase(of: url)
+            } else if case .query(let u, let p) = model.streamAuthStyle(number) {
+                queryStyle = true
+                userParam = u
+                passParam = p
+                let c = StreamAddress.queryCredentials(of: url, userParam: u, passParam: p)
+                user = c?.user ?? ""
+                password = c?.password ?? ""
             } else if let c = model.streamCredentials(number) {
                 user = c.user
                 password = c.password

@@ -7,6 +7,14 @@ import XCTest
 
 @MainActor
 extension AppTest {
+    /// 底栏 / 工具条录制 / 推流主体在录 / 在推时的标题（W5-N 起带时长）："● 录制 00:00:03"、"● 录制 00:00:03（3 路）"、"● 推流 00:01:05（2/3）"。
+    /// prefix 是时长前面那段（"● 录制"），suffix 是时长后面那段（没有就空）。
+    static func isRunningTitle(_ title: String, _ prefix: String, suffix: String = "") -> Bool {
+        guard title.hasPrefix(prefix + " "), title.hasSuffix(suffix) else { return false }
+        let middle = title.dropFirst(prefix.count + 1).dropLast(suffix.count)
+        return middle.range(of: #"^\d{2,}:\d{2}:\d{2}$"#, options: .regularExpression) != nil
+    }
+
     /// 第一次 freshSession 时主窗口的位置（之后每条用例开始时摆回这里）。
     private static var initialMainWindowFrame: NSRect?
 
