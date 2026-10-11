@@ -1,7 +1,7 @@
 import Foundation
 import SwitcherContracts
 
-// 命令目录：Command 的 35 个 case 各一条说明和一个样例。docs/api.md 由它生成（switcher-apidoc），
+// 命令目录：Command 的 42 个 case 各一条说明和一个样例。docs/api.md 由它生成（switcher-apidoc），
 // HTTP API 的 GET /api/v1/commands 也返回它。`CommandKind(of:)` 是穷举 switch：契约加 case 这里编译就红，
 // 目录不会悄悄落后（CommandCatalogTests 再钉一遍：每个 kind 都有样例、样例的 JSON 顶层键就是 case 名）。
 // W5-J（01a N1 / N3，04 Q51）：每条命令加类型化参数描述（CommandField：参数名 = JSON 键、类型、可不可空），App 的"选动作"面板按它生成表单；
@@ -10,10 +10,13 @@ import SwitcherContracts
 /// Command 的 case 名（= JSON 顶层键）。
 public enum CommandKind: String, CaseIterable, Sendable, Codable {
     case cut, fade, setTransition, setTransitionParams, autoTransition, setPreview, setProgram, tbar, ftb
+    case setTransitionSlot, useTransitionSlot, setFTBDuration   // 提案 020（P5-2）
     case overlay, setOverlay, setOverlayDecoration
     case audioGain, mute, busGain, busMute, setAFV, setMonitorMode, setMonitorSource, setBusEffects
+    case setInputAudio   // 提案 023 五（P5-2）
     case startRecord, stopRecord, startStream, stopStream, setOutputEnabled, renameOutput
     case setInputSettings, renameInput, addInput, removeInput, setInputSource
+    case setPlayback, seekPlayback, setInputColor   // 提案 021 / 023 四（P5-2）
     case addOutput, removeOutput, setOutputSettings
     case loadShow
 
@@ -29,6 +32,9 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
         case .setProgram: self = .setProgram
         case .tbar: self = .tbar
         case .ftb: self = .ftb
+        case .setTransitionSlot: self = .setTransitionSlot
+        case .useTransitionSlot: self = .useTransitionSlot
+        case .setFTBDuration: self = .setFTBDuration
         case .overlay: self = .overlay
         case .setOverlay: self = .setOverlay
         case .setOverlayDecoration: self = .setOverlayDecoration
@@ -40,6 +46,7 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
         case .setMonitorMode: self = .setMonitorMode
         case .setMonitorSource: self = .setMonitorSource
         case .setBusEffects: self = .setBusEffects
+        case .setInputAudio: self = .setInputAudio
         case .startRecord: self = .startRecord
         case .stopRecord: self = .stopRecord
         case .startStream: self = .startStream
@@ -51,6 +58,9 @@ public enum CommandKind: String, CaseIterable, Sendable, Codable {
         case .addInput: self = .addInput
         case .removeInput: self = .removeInput
         case .setInputSource: self = .setInputSource
+        case .setPlayback: self = .setPlayback
+        case .seekPlayback: self = .seekPlayback
+        case .setInputColor: self = .setInputColor
         case .addOutput: self = .addOutput
         case .removeOutput: self = .removeOutput
         case .setOutputSettings: self = .setOutputSettings
@@ -108,6 +118,12 @@ public enum CommandFieldType: Hashable, Sendable {
     case choice([String])
     /// 结构体整体（InputSettings / OutputSettings / Show / 效果链……）：只能手写 JSON；值是类型名。
     case json(String)
+    /// 转场槽 1–4（分段；提案 020）。
+    case transitionSlot
+    /// 秒（Double，从文件头算，≥ 0；提案 021 的 seekPlayback）：界面出"秒"输入框，不按帧率换算。
+    case seconds
+    /// 总线路由 {master, busA, busB, headphones} 四个勾选（提案 023 五的 setInputAudio.routing；整体替换）。
+    case busRouting
 }
 
 /// 一个参数的描述。
@@ -130,10 +146,12 @@ extension CommandKind {
     public var operatorFacing: Bool {
         switch self {
         case .cut, .fade, .setTransition, .autoTransition, .setPreview, .setProgram, .tbar, .ftb, .overlay,
-             .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setMonitorSource,
-             .startRecord, .stopRecord, .startStream, .stopStream, .setOutputEnabled, .renameOutput, .renameInput:
+             .useTransitionSlot, .setFTBDuration,
+             .audioGain, .mute, .busGain, .busMute, .setAFV, .setMonitorMode, .setMonitorSource, .setInputAudio,
+             .startRecord, .stopRecord, .startStream, .stopStream, .setOutputEnabled, .renameOutput, .renameInput,
+             .setPlayback, .seekPlayback, .setInputColor:
             true
-        case .setTransitionParams, .setOverlay, .setOverlayDecoration, .setBusEffects,
+        case .setTransitionParams, .setTransitionSlot, .setOverlay, .setOverlayDecoration, .setBusEffects,
              .setInputSettings, .addInput, .removeInput, .setInputSource, .addOutput, .removeOutput, .setOutputSettings, .loadShow:
             false
         }
@@ -162,6 +180,9 @@ public enum CommandCatalog {
         case .setPreview, .setProgram: return [CommandField(name: "input", type: .input(allowsBlack: true))]
         case .tbar: return [CommandField(name: "progress", type: .fraction)]
         case .ftb, .setAFV: return [on]
+        case .setTransitionSlot: return [CommandField(name: "slot", type: .transitionSlot), CommandField(name: "config", type: .json("TransitionSlot"))]
+        case .useTransitionSlot: return [CommandField(name: "slot", type: .transitionSlot), CommandField(name: "start", type: .onOff)]
+        case .setFTBDuration: return [CommandField(name: "ticks", type: .durationTicks)]
         case .overlay: return [channel, on, CommandField(name: "input", type: .input(allowsBlack: false), optional: true)]
         case .setOverlay: return [channel, CommandField(name: "rect", type: .json("NormalizedRect")), CommandField(name: "animation", type: .json("OverlayAnimation"))]
         case .setOverlayDecoration:
@@ -175,6 +196,9 @@ public enum CommandCatalog {
         case .setMonitorMode: return [CommandField(name: "mode", type: .choice(["afl", "pfl"]))]
         case .setMonitorSource: return [bus]   // 026：四选一里的 headphones（3）会被拒，面板上该灰掉
         case .setBusEffects: return [bus, CommandField(name: "effects", type: .json("[EffectSlot]"))]
+        case .setInputAudio:
+            return [input, CommandField(name: "solo", type: .onOff, optional: true), CommandField(name: "afv", type: .onOff, optional: true),
+                    CommandField(name: "routing", type: .busRouting, optional: true)]
         case .startRecord, .stopRecord: return [CommandField(name: "output", type: .output(kinds: [.record]))]
         case .startStream, .stopStream: return [CommandField(name: "output", type: .output(kinds: [.stream]))]
         case .setOutputEnabled: return [CommandField(name: "output", type: .output(kinds: [.ndi, .externalDisplay, .virtualCamera, .multiview])), on]
@@ -184,6 +208,9 @@ public enum CommandCatalog {
         case .addInput: return [CommandField(name: "config", type: .json("InputConfig"))]
         case .removeInput: return [input]
         case .setInputSource: return [input, CommandField(name: "source", type: .json("InputSource"))]
+        case .setPlayback: return [input, CommandField(name: "paused", type: .onOff)]
+        case .seekPlayback: return [input, CommandField(name: "seconds", type: .seconds)]
+        case .setInputColor: return [input, CommandField(name: "color", type: .choice(InputColor.allCases.map(\.rawValue)), optional: true)]
         case .addOutput: return [CommandField(name: "config", type: .json("OutputState"))]
         case .removeOutput: return [anyOutput]
         case .setOutputSettings: return [anyOutput, CommandField(name: "settings", type: .json("OutputSettings"))]
@@ -216,7 +243,17 @@ public enum CommandCatalog {
             CommandDoc(kind: .setPreview, group: "切换", summary: "把 PVW 换成该输入；转场进行中（含 T-bar 推到一半）被拒（applied = false）。", parameters: [("input", "输入编号；0 = 黑场")], example: .setPreview(input: 2)),
             CommandDoc(kind: .setProgram, group: "切换", summary: "直接把 PGM 换成该输入（硬切），PVW 不变；转场进行中被拒（applied = false）。", parameters: [("input", "输入编号；0 = 黑场")], example: .setProgram(input: 3)),
             CommandDoc(kind: .tbar, group: "切换", summary: "推杆位置 0–1；到 1 提交（对调并回到 0）。", parameters: [("progress", "0–1")], example: .tbar(progress: 0.5)),
-            CommandDoc(kind: .ftb, group: "切换", summary: "渐黑开 / 关（显式目标，脚本可重放）；时长用状态里的 ftb.durationTicks。", parameters: [("on", "true = 黑")], example: .ftb(on: true)),
+            CommandDoc(kind: .ftb, group: "切换", summary: "渐黑开 / 关（显式目标，脚本可重放）；时长用状态里的 ftb.durationTicks（改它走 setFTBDuration）。", parameters: [("on", "true = 黑")], example: .ftb(on: true)),
+            CommandDoc(kind: .setTransitionSlot, group: "切换",
+                       summary: "改转场槽 1–4 之一的配置（效果 + 时长 + Wipe / Stinger 参数整体替换），转场进行中也收；改的是当前槽且空闲时当前那组同时按槽重拷，进行中的那一次按开始时的参数走完再重拷；相同配置 applied = false。",
+                       parameters: [("slot", "1–4"), ("config", "{type: cut / fade / wipe / zoom / stinger, durationTicks: 时长（拍，≥ 0），wipe: {direction, softness 0–1}, stinger: {input 或不写, cutAtTick ≥ 0}}")],
+                       example: .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: 60, wipe: WipeParams(direction: .topToBottom, softness: 0.2)))),
+            CommandDoc(kind: .useTransitionSlot, group: "切换",
+                       summary: "选中转场槽 1–4（把槽拷进当前那组、currentSlot = slot）；start = true 同时开始 auto 转场、一拍内原子完成（cut / 时长 0 = 立即对调，Stinger 槽没选输入照常开始）；start = false 只选中给 T-bar / 回车用。转场进行中被拒（applied = false）。",
+                       parameters: [("slot", "1–4"), ("start", "true = 选中并开始；false = 只选中")], example: .useTransitionSlot(slot: 2, start: true)),
+            CommandDoc(kind: .setFTBDuration, group: "切换",
+                       summary: "改 FTB 淡入 / 淡出黑的时长（拍）；渐变进行中电平从当前值按新时长继续走、不跳变；相同值 applied = false；不跟随转场时长。",
+                       parameters: [("ticks", "时长（拍，≥ 0）")], example: .setFTBDuration(ticks: 15)),
             CommandDoc(kind: .overlay, group: "叠加", summary: "开关叠加通道 1–4；input 非 null 时同时换该通道用的输入。",
                        parameters: [("channel", "1–4"), ("on", "开 / 关"), ("input", "输入编号或 null（不换）")], example: .overlay(channel: 1, on: true, input: 4)),
             CommandDoc(kind: .setOverlay, group: "叠加", summary: "改叠加通道的位置尺寸与进出动画。",
@@ -240,6 +277,11 @@ public enum CommandCatalog {
                        parameters: [("bus", "0 = master, 1 = busA, 2 = busB, 3 = headphones"),
                                     ("effects", "[{id, enabled, params}]：id 与参数键见 CONTRACTS.md §2.4")],
                        example: .setBusEffects(bus: .master, effects: [EffectSlot(id: "peakLimiter", params: ["attackSeconds": 0.012, "decaySeconds": 0.024, "preGainDb": 0])])),
+            CommandDoc(kind: .setInputAudio, group: "音频",
+                       summary: "一路的独听 / AFV 参与 / 总线路由，三个参数都可选，不写 = 不动；全不写或全与现状相同 applied = false（替代按快照改一位再 setInputSettings 整体写回）。",
+                       parameters: [("input", "输入编号"), ("solo", "true / false，或不写"), ("afv", "true = 参与 AFV 门控，false = 不跟随视频，或不写"),
+                                    ("routing", "{master, busA, busB, headphones} 整体替换，或不写")],
+                       example: .setInputAudio(input: 1, solo: true, routing: BusRouting(master: true, busA: true))),
             CommandDoc(kind: .startRecord, group: "输出", summary: "开始录制（output 必须是 record 类型的输出）。", parameters: [("output", "输出编号")], example: .startRecord(output: 1)),
             CommandDoc(kind: .stopRecord, group: "输出", summary: "停止录制。", parameters: [("output", "输出编号")], example: .stopRecord(output: 1)),
             CommandDoc(kind: .startStream, group: "输出", summary: "开始推流（output 必须是 stream 类型的输出，url / key 在它的设置里）。", parameters: [("output", "输出编号")], example: .startStream(output: 2)),
@@ -258,6 +300,14 @@ public enum CommandCatalog {
                        summary: "换一路输入的来源（文件路径 / 播完动作 / 屏幕目标 / 帧率 / NDI 源名与带宽 / DeckLink 接口……）；编号、名字、设置、PGM / PVW / 叠加引用全部保留。",
                        parameters: [("input", "输入编号"), ("source", "InputSource；kind 由它推出")],
                        example: .setInputSource(input: 1, source: .ndi(sourceName: "MAC (Cam 1)", bandwidth: .lowest, jitterBufferFrames: 2))),
+            CommandDoc(kind: .setPlayback, group: "输入表", summary: "文件输入播放 / 暂停（paused = true 画面停在当前帧、每拍重推）；不是文件输入被拒；相同值 applied = false。",
+                       parameters: [("input", "文件输入编号"), ("paused", "true = 暂停，false = 播放")], example: .setPlayback(input: 3, paused: true)),
+            CommandDoc(kind: .seekPlayback, group: "输入表",
+                       summary: "文件输入定位到第 seconds 秒（0 = 从头播）：状态里记一次定位请求 (seekTick, seekSeconds)，组装方交给文件输入执行，首帧晚 1–2 拍；不是文件输入 / 负数被拒；同一拍同一位置再发 applied = false。\"切上 PGM 时从头播\"是每路的 settings.playback.restartOnProgram（走 setInputSettings）。",
+                       parameters: [("input", "文件输入编号"), ("seconds", "秒，≥ 0")], example: .seekPlayback(input: 3, seconds: 0)),
+            CommandDoc(kind: .setInputColor, group: "输入表",
+                       summary: "改一路的分类颜色（Finder 标签那六种），不写 = 清掉分类；相同值 applied = false。分类的名字在 Show.layout 里，不走命令。",
+                       parameters: [("input", "输入编号"), ("color", "red / orange / yellow / green / blue / purple，或不写 = 无分类")], example: .setInputColor(input: 1, color: .red)),
             CommandDoc(kind: .addOutput, group: "输出表", summary: "加一个输出；编号已存在则拒绝。settings.extra 里的旧写法（layout / displayID / fallbackToMain）先搬进正式字段 multiview / display，与读节目文件相同。", parameters: [("config", "OutputState：number, kind, name, enabled, settings")], example: .addOutput(config: sampleOutput)),
             CommandDoc(kind: .removeOutput, group: "输出表", summary: "删一个输出。", parameters: [("output", "输出编号")], example: .removeOutput(output: 3)),
             CommandDoc(kind: .setOutputSettings, group: "输出表", summary: "整体替换一个输出的设置；extra 里的旧写法同 addOutput 先搬进正式字段。", parameters: [("output", "输出编号"), ("settings", "OutputSettings 整体")],

@@ -16,6 +16,8 @@ import SwitcherContracts
 /// - P2 起（提案 001 / 002 / 004 / 005）多出的汇总都是可选字段：encoder 的 `delivery`（frames / dropped / reconnects 取末行 − 首行、disk_free_mb 序列、状态）、
 ///   每路的 `latency`（L1 序列 + 全程最大）、`audioDiscontinuities`、`masterMeters`（Master 峰值 / 真峰值 / LUFS 的序列）。
 ///   老基线（baselines/*.json）没有这些键，解码为 nil；与上一版本比较时只比 verdicts 的 primary，不受影响。
+/// - P5-2 起（提案 022）同样可选：`delivery` 多 `uptimeS`（末行）/ `disconnects`（末行 − 首行）/ `lastError`（最后一个非空）/ `lastAttempt`（末行），
+///   顶层多 `videoDelayMs`（video_delay_ms 逐行序列）；022 之前的基线 / stats.jsonl 缺键照解。
 public struct StatsSummary: Hashable, Codable, Sendable {
     /// 一列数的统计。
     public struct Series: Hashable, Codable, Sendable {
@@ -72,6 +74,7 @@ public struct StatsSummary: Hashable, Codable, Sendable {
     }
 
     /// 一个输出的落地 / 传输统计：frames / dropped / reconnects 取末行 − 首行；disk_free_mb 逐行序列；state 取末行与全程出现的状态（行数）。
+    /// 提案 022（可选，老摘要为 nil）：uptimeS = 末行的 uptime_s；disconnects = 末行 − 首行；lastError = 最后一个非空的 last_error（没出过错 = ""）；lastAttempt = 末行的 attempt。
     public struct DeliverySummary: Hashable, Codable, Sendable {
         public var frames: UInt64
         public var dropped: UInt64
@@ -79,6 +82,10 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         public var diskFreeMb: Series
         public var lastState: String
         public var states: [String: Int]
+        public var uptimeS: Double?
+        public var disconnects: UInt64?
+        public var lastError: String?
+        public var lastAttempt: Int?
     }
 
     /// 一个显示类输出的汇总（提案 013）：frames / dropped / undelivered（提案 018）取末行 − 首行；state 取末行与全程出现的状态（行数）。
@@ -131,6 +138,8 @@ public struct StatsSummary: Hashable, Codable, Sendable {
     public var audioDiscontinuities: UInt64?
     /// Master 表读数序列（有 meters 的文件才有）。
     public var masterMeters: MasterMeterSummary?
+    /// video_delay_ms 的逐行序列（提案 022 B2 / 028：监听同步把视频延后的毫秒数；022 之前的文件 / 基线为 nil）。
+    public var videoDelayMs: Series?
     /// RSS 线性拟合斜率（MB / h）；不足两行为 nil。
     public var rssSlopeMbPerHour: Double?
     /// 是否按 §3 S2 丢掉了前 30 min 再拟合。
@@ -147,7 +156,7 @@ public struct StatsSummary: Hashable, Codable, Sendable {
             firstTs = 0; lastTs = 0; durationSeconds = 0; firstTick = 0; lastTick = 0; tickSpan = 0; programFps = 0
             renderMs = Series(values: []); jitterMs = Series(values: []); cpuPct = Series(values: []); gpuPct = Series(values: []); rssMb = Series(values: [])
             missedRender = 0; missedRenderRatio = 0; perInput = [:]; encoders = []; displays = []; audioDropouts = 0; audioUnderruns = 0
-            audioDiscontinuities = nil; masterMeters = nil
+            audioDiscontinuities = nil; masterMeters = nil; videoDelayMs = nil
             rssSlopeMbPerHour = nil; rssFitAfterWarmup = false
             return
         }
@@ -163,6 +172,7 @@ public struct StatsSummary: Hashable, Codable, Sendable {
         cpuPct = Series(values: lines.map(\.cpuPct))
         gpuPct = Series(values: lines.map(\.gpuPct))
         rssMb = Series(values: lines.map(\.rssMb))
+        videoDelayMs = Series(values: lines.map(\.videoDelayMs))
         missedRender = last.missedRender &- first.missedRender
         missedRenderRatio = tickSpan > 0 ? Double(missedRender) / Double(tickSpan) : 0
         audioDropouts = last.audio.dropouts &- first.audio.dropouts
@@ -218,7 +228,11 @@ public struct StatsSummary: Hashable, Codable, Sendable {
                                            dropped: (entries.last?.dropped ?? 0) &- (entries.first?.dropped ?? 0),
                                            reconnects: (entries.last?.reconnects ?? 0) &- (entries.first?.reconnects ?? 0),
                                            diskFreeMb: Series(values: entries.map(\.diskFreeMb)),
-                                           lastState: entries.last?.state ?? "idle", states: states)
+                                           lastState: entries.last?.state ?? "idle", states: states,
+                                           uptimeS: entries.last?.uptimeS ?? 0,
+                                           disconnects: (entries.last?.disconnects ?? 0) &- (entries.first?.disconnects ?? 0),
+                                           lastError: entries.last(where: { !$0.lastError.isEmpty })?.lastError ?? "",
+                                           lastAttempt: entries.last?.attempt ?? 0)
             return EncoderSummary(index: i, skipped: (entries.last?.skipped ?? 0) &- (entries.first?.skipped ?? 0),
                                   bitrate: Series(values: entries.map(\.bitrate)), delivery: delivery)
         }

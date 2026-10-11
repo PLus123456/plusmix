@@ -3,10 +3,15 @@
 // 音频（提案 001 B，P2 落地）：混音回调 → SPSC 环 → 集成层的泵线程（非实时）→ 逐个 AudioBlockConsumer.consumeAudio(...)
 
 /// 一拍渲染完成的产物。`program` 是 NV12（BT.709 limited）IOSurface 背后的 CVPixelBuffer，pts = 拍点时刻（决策 10）。
+///
+/// 时间戳口径（提案 028，用户 2026-10-10 批；W1-B4 的监听同步）：**节目输出时间线** = 内容被采集（拍点）的时刻 + L，L = 为监听同步把视频延后的毫秒数
+///（videoDelay 补偿下 = Master 效果链的实测延迟；audioPTS 补偿、没有效果、或组装方没接视频延后时 L = 0，与以前逐值相同）。
 public struct RenderedFrame: Sendable {
     /// 哪一拍。
     public let tick: Tick
-    /// 这一拍的理想拍点时刻；编码 PTS 用它。
+    /// 这一拍在节目输出时间线上的时刻 = 理想拍点 + 这一帧的视频延后 Lₙ（提案 028）；编码 PTS 用它；**严格递增**（Lₙ 每帧最多改 1/4 拍，不丢不重）。
+    /// `tick` 不变；`program.pts` / `preview.pts` / `multiview.pts` **仍是理想拍点**（画面内容的时刻），`tickTime − program.pts` = 这一帧的 Lₙ。
+    /// 按内容时刻挑输入帧的（ISO 录制的 ISOFrameTap）比 `program.pts`，打戳用 tickTime。
     public let tickTime: HostTime
     /// PGM，inputNumber = 0。
     public let program: Frame
@@ -38,7 +43,8 @@ public struct RenderedFrame: Sendable {
     }
 
     /// V1 口径：拍点时刻 → GPU 完成（ms）。Stats.render_ms 是它在窗口内的平均。
-    public var renderMs: Double { (gpuEnd - tickTime).milliseconds }
+    /// 拍点取 `program.pts`（画面内容的时刻），不取 `tickTime`（提案 028：延后过的帧 tickTime = 拍点 + Lₙ，用它会读出负数）；L = 0 时两者逐值相同。
+    public var renderMs: Double { (gpuEnd - program.pts).milliseconds }
 }
 
 /// 引擎每拍为渲染器准备的输入帧表：下标 = 输入编号。引擎拥有，容量在启动时定，之后每拍复用，零分配。
@@ -110,11 +116,13 @@ public protocol FrameConsumer: AnyObject {
 ///
 /// 规则：`consumeAudio` 在**非实时**的泵线程上被调（把混音回调写进 SPSC 环的块搬出来的那条线程，W2-E 的 AudioEngine 提供），
 /// 实现必须立即返回：只拷进自己的有界缓冲；永远不在音频实时回调里直接调它（铁律 3）。
-/// `planes` 有 channelCount 个指针，每个指向 frameCount 个非交错 float32（48 kHz）；`hostTime` 是块首样本的 host time
-/// （与 `AudioRing.write` 同一口径；集成层已按对齐延迟修正到"内容被采集的时刻"，与视频拍点同一时基，PTS 直接用）。
+/// `planes` 有 channelCount 个指针，每个指向 frameCount 个非交错 float32（48 kHz）；`hostTime` 是块首样本**在节目输出时间线上的时刻**
+///（与 `RenderedFrame.tickTime` 同一条线，提案 028）= 内容被采集的时刻 + L：集成层已按对齐延迟修正到采集时刻，再按补偿方式平移——
+/// videoDelay 下 Master 块不再前移（内容经 Master 效果链本来就晚 L_m），Bus A / B / 耳机块 = 采集 − L_bus + L_m，输入（ISO）块 = 采集 + L_m；
+/// audioPTS 下（W5-C 现状）各来源 = 采集 − 各自效果链的延迟，L = 0。两种方式互斥，不会双重补偿；PTS 直接用，与视频同一时基。
 public protocol AudioBlockConsumer: AnyObject {
     /// 名字（Stats / 日志）。
     var consumerName: String { get }
-    /// 一块：`planes` 有 channelCount 个指针，每个指向 frameCount 个 float；`hostTime` 是块首样本的 host time。
+    /// 一块：`planes` 有 channelCount 个指针，每个指向 frameCount 个 float；`hostTime` 是块首样本在节目输出时间线上的时刻（见类型说明）。
     func consumeAudio(planes: UnsafePointer<UnsafePointer<Float>>, channelCount: Int, frameCount: Int, hostTime: HostTime)
 }

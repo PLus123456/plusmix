@@ -1,8 +1,10 @@
 // 命令（设计方案 §9.1）：UI、快捷键、MIDI、API 都只发命令，不直接改状态。
 
 /// 一条命令的内容。覆盖 §9.1 列出的全部，另加几条后续会话必然要用的（转场选择、总线、输出与叠加的设置）。
-/// 35 个 case（P3 按提案 010 / 012 加了 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、
-/// renameOutput、setInputSource，W3-E2 按提案 016 加了 setTransitionParams，P5 按提案 026 加了 setMonitorSource；对照见 CONTRACTS.md §8）。
+/// 42 个 case（P3 按提案 010 / 012 加了 setOverlayDecoration、setMonitorMode、setBusEffects、setOutputEnabled、
+/// renameOutput、setInputSource，W3-E2 按提案 016 加了 setTransitionParams，P5 按提案 026 加了 setMonitorSource，
+/// P5-2 按提案 020 加了 setTransitionSlot / useTransitionSlot / setFTBDuration、021 加了 setPlayback / seekPlayback、
+/// 023 四 / 五加了 setInputColor / setInputAudio；对照见 CONTRACTS.md §8）。
 /// JSON 形态由 Swift 合成的 Codable 决定：`{"fade":{"durationTicks":30}}`、无参数的是 `{"cut":{}}`；
 /// 快照钉在 SwitcherContractsTests 里，是 HTTP API 的 wire format。
 public enum Command: Hashable, Codable, Sendable {
@@ -26,6 +28,18 @@ public enum Command: Hashable, Codable, Sendable {
     /// 推杆位置 0–1；到 1 提交（对调并回到 0）。
     case tbar(progress: Double)
     case ftb(on: Bool)
+    /// 改转场槽 1–4 之一的配置（提案 020）：只改 `TransitionState.slots[slot − 1]`，**转场进行中也收**（只是改配置）；
+    /// durationTicks 钳 ≥ 0、wipe.softness 钳 0–1、stinger.cutAtTick 钳 ≥ 0（与 016 同口径）；stinger.input 非 nil 时须是存在的输入（校验器拒）；
+    /// 改的若正好是 currentSlot 且没在转场，当前那组同时按槽重拷（T-bar / 回车马上用新配置）；正在转场的那一次按开始时的参数走完，完成那一拍重拷。
+    /// 相同配置原样返回（applied = false）。
+    case setTransitionSlot(slot: Int, config: TransitionSlot)
+    /// 把槽拷进当前那组、`currentSlot = slot`（提案 020）；start = true 同时开始 auto 转场（类型 cut 或时长 0 = 原子对调，与 autoTransition 同口径），
+    /// 一拍内原子完成；start = false 只选中（T-bar / 回车用）。转场进行中被拒（与 setTransition / autoTransition 同口径）；
+    /// start = false 且槽已是当前槽、当前那组与槽相同 → 原样返回。Stinger 槽没选输入照常开始（渲染器对 nil 输入不叠任何东西）。
+    case useTransitionSlot(slot: Int, start: Bool)
+    /// 改 FTB 时长（提案 020）：`ftb.durationTicks = ticks`（存拍，界面按秒填）；FTB 渐变进行中按"当前电平对应的起点"回拨 startTick，电平从当前值按新时长继续走、不跳变；
+    /// 相同值原样返回；ticks < 0 校验器拒。不跟随转场时长（"慢渐黑 + 快切"要并存）。
+    case setFTBDuration(ticks: Int)
 
     // 叠加
     /// 开关叠加通道 1–4；input 非 nil 时同时换通道用的输入。
@@ -50,6 +64,9 @@ public enum Command: Hashable, Codable, Sendable {
     case setMonitorSource(bus: Bus)
     /// 整体替换一条总线的效果链（提案 012）。链顺序 = 处理顺序，`enabled = false` 的格旁路。
     case setBusEffects(bus: Bus, effects: [EffectSlot])
+    /// 一路的独听 / AFV 参与 / 总线路由（提案 023 第五节）：三个参数都可选，**nil = 不动**（JSON 不写键），非 nil 的整体替换该项；
+    /// 输入不存在拒；全是 nil 或全与现状相同 → 原样返回。替代"按快照改一位后 setInputSettings 整体写回"（快照与应用之间别处的改动会被盖掉，W5-J §4）。
+    case setInputAudio(input: Int, solo: Bool? = nil, afv: Bool? = nil, routing: BusRouting? = nil)
 
     // 输出（output = OutputState.number；kind 不匹配的命令被拒）
     case startRecord(output: Int)
@@ -74,7 +91,15 @@ public enum Command: Hashable, Codable, Sendable {
     case removeInput(input: Int)
     /// 换一路输入的来源（提案 012）：编号、名字、设置、PGM / PVW / 叠加引用全部保留，kind 由 source 推出。
     /// 与 removeInput + addInput 的区别就在这里——后者会清掉 PGM / PVW / 叠加对它的引用，直播中不可接受。
+    /// "设循环"也走它（`InputSource.file(endAction: .loop)`）：运行表遇到只有 endAction / rate 变了不重建、交给 FileInput 就地改（101）。
     case setInputSource(input: Int, source: InputSource)
+    /// 文件输入播放 / 暂停（提案 021）：`settings.playback.paused = paused`；相同值原样返回；输入不存在或 kind != file 校验器拒。
+    case setPlayback(input: Int, paused: Bool)
+    /// 文件输入定位（提案 021）：`playback.seekSeconds = seconds`、`playback.seekTick = 这一拍`（从头播 = seconds 0）；
+    /// 同一拍同一位置再发原样返回；输入不存在 / kind != file / seconds 负或非有限校验器拒（reducer 同判、原样返回）。组装方看到 (seekTick, seekSeconds) 变了就对 FileInput 做一次 seek。
+    case seekPlayback(input: Int, seconds: Double)
+    /// 改一路的分类颜色（提案 023 第四节）；nil = 清掉分类；输入不存在拒；相同值原样返回。
+    case setInputColor(input: Int, color: InputColor?)
 
     // 输出表
     /// 编号已存在则拒绝。设置先按 `OutputSettings.migratingLegacyKeys()` 搬过渡键（P4，与 Show.load 同一套规则）。

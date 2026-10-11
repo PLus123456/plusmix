@@ -1,7 +1,7 @@
 # 022 输出统计补字段：`Stats.encoder[].uptime_s` / `disconnects` / `last_error`（顺带：`attempt`、顶层 `video_delay_ms`）
 
 提出会话 / 分支：P5（prompt 99）/ `p5-contracts`；来源 docs/ui-study/01a 第 5 节候选 5、E10 / L11、04 Q13（用户按落地方案 §8.5 默认 (a)）、R7-E6；读数方归 prompt 101（推流状态面板、底栏时长），顺带两项分别来自 W5-B §4 第 1 条（G6 追加）与 prompt 105 交付 4
-状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + 填数方 + StatsWriter / StatsSummary + 测试标准 §7 字段表；App 把起不来的原因填进 last_error 归 101 或 App 胶水；`video_delay_ms` 的填数归 105）
+状态：**已落地**（P5-2 / prompt 108，2026-10-11，提交 9adf144；文字 9ecc22a）。原状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + 填数方 + StatsWriter / StatsSummary + 测试标准 §7 字段表；App 把起不来的原因填进 last_error 归 101 或 App 胶水；`video_delay_ms` 的填数归 105）
 
 ## 改什么
 
@@ -60,3 +60,19 @@
 2. B1 `attempt`——要不要带（底栏"第 n 次"从此读 Stats）。
 3. B2 `video_delay_ms`——要不要在本提案里开字段（105 填数）。
 4. `uptime_s` 的口径：本次运行时长（含重连期间，默认）还是"在推 / 在录"时长（排除退避期）？
+
+## 落地记录（P5-2 / prompt 108，2026-10-11，提交 9adf144）
+
+A 三字段 + B1 `attempt` + B2 顶层 `video_delay_ms` 全落了，四个"请用户定的点"按默认（uptime 含重连期）。`jsonKeys` = `[…, "state", "uptime_s", "disconnects", "last_error", "attempt"]`、顶层末尾 `video_delay_ms`；
+显式 `init(from:)` 缺键 0 / "" / 0，写出写全；`EncoderEntry.init` 四个参数带默认值，`Stats.init` 的 `videoDelayMs` 带默认值，现有调用点一个没改。
+一处比提案多说明的：**`attempt` 在退避期间 = 即将进行的那一次 = failures + 1**（`backoff(attempt: failures)` 里的数 + 1），与 App 底栏原来 `streamConnectAttempt` 的读法一致，connecting(n) = n，两段连续。
+
+填数方：`RecorderCounters.uptimeSeconds / lastError`（`Recorder.counters` 按 startedAt 算，recording / stopping 之外 0；最近一次 `.failed` 的文案，start 清）；
+`StreamOutput`（startedAt / lastError 各一个 Mutex：断线原因、连接失败、建传输层失败、放弃；新加 `statsEntry(counters:previous:windowSeconds:output:)` 让组装方用同一份快照）；
+`StreamCounters.statsEntry` 填 `disconnects` / `attempt`（胶水 4 行）；`NDISendCounters.startedAt / lastError`（SDK 不在 / NDIlib_initialize / NDIlib_send_create 失败的文案；publishing 之外 uptime 0；胶水 13 行）；
+`EngineCounters.swift` 的 `StatsAssembler` 填 `videoDelayMs: counters.videoDelayMs` 一行；headless `EncoderStatsSource` 推流改走 StreamOutput 的快照版 statsEntry、其余透传；
+App `OutputRuntime`：起不来的路把 `failureReason` 填进 `last_error`（`Source.failed(directory:reason:)`，胶水 4 行）；界面改读 uptime_s / disconnects / last_error / attempt 归 101。
+`StatsWriter.sanitized` 把非有限的 uptime_s / video_delay_ms 换 0；`StatsSummary.DeliverySummary` 多可选 `uptimeS / disconnects / lastError / lastAttempt`，顶层多可选 `videoDelayMs` 序列，老基线缺键解 nil（StatsSummary 没有 L1 判定，不用扣）。
+测试标准 §7 字段表加字段与一句含义、§3 L1 行加一句（9ecc22a）；CONTRACTS.md §2.7 一段；Stats.swift 注释。
+用例：`Contracts022Tests`（3 条，含 App 的老 stats.jsonl 照读）、`CodableTests.testP1_stats_jsonKeysSnapshot` / `StatsP2Tests` / `Contracts019Tests` 字面量重生成、
+headless 的 `Contracts022FillTests`（5 条：RecorderCounters / StreamCounters / NDISendCounters 的 statsEntry、NDISender 干跑起一次、StatsSummary 新字段 + 老摘要 + StatsWriter 清洗）。

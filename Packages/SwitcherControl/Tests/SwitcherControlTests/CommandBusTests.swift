@@ -97,7 +97,10 @@ final class CommandBusTests: XCTestCase {
 
     /// 校验器和 reducer 一致：校验器放行的命令，reducer 不会因为"引用不存在"而原样返回；校验器拒绝的，reducer 一定原样返回。
     func testValidator_agreesWithReducer() {
-        let state = TestStates.base()
+        var state = TestStates.base()
+        state.inputs.append(InputConfig(number: 6, name: "片", source: .file(path: "/clip.mov", endAction: .loop, rate: 1)))   // 021：文件输入
+        var legacyShowState = state
+        legacyShowState.transition = TransitionState(type: .wipe, durationTicks: 45, slots: [], currentSlot: nil)   // 020 之前的节目：没有 slots
         let reducer = MixerReducer()
         let legal: [Command] = [
             .cut, .fade(durationTicks: 30), .setTransition(type: .wipe, durationTicks: 10), .autoTransition,
@@ -107,6 +110,13 @@ final class CommandBusTests: XCTestCase {
             .overlay(channel: 4, on: true, input: 2), .setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .fade, durationTicks: 10)),
             .audioGain(input: 1, dB: -6), .mute(input: 2, on: true), .busGain(bus: .master, dB: -3), .busMute(bus: .busA, on: true), .setAFV(on: true),
             .setMonitorSource(bus: .busB),   // 提案 026
+            // P5-2：提案 020 / 021 / 023
+            .setTransitionSlot(slot: 2, config: TransitionSlot(type: .zoom, durationTicks: 20)),
+            .setTransitionSlot(slot: 4, config: TransitionSlot(type: .stinger, durationTicks: 60, stinger: StingerParams(input: 3, cutAtTick: 5))),
+            .useTransitionSlot(slot: 1, start: false), .useTransitionSlot(slot: 4, start: true), .setFTBDuration(ticks: 0), .setFTBDuration(ticks: 10),
+            .setPlayback(input: 6, paused: true), .seekPlayback(input: 6, seconds: 0), .seekPlayback(input: 6, seconds: 12.5),
+            .setInputAudio(input: 1, solo: true), .setInputAudio(input: 2), .setInputColor(input: 1, color: .red), .setInputColor(input: 1, color: nil),
+            .loadShow(show: Show(name: "020 之前", state: legacyShowState)),   // 校验器先搬迁再 validate，否则老节目会被 400 拒
             .startRecord(output: 1), .stopRecord(output: 1), .startStream(output: 2), .stopStream(output: 2),
             .setInputSettings(input: 1, settings: InputSettings()), .renameInput(input: 1, name: "新名"),
             .addInput(config: InputConfig(number: 5, name: "五", source: .synthetic(settings: SyntheticSourceSettings()))), .removeInput(input: 4),
@@ -122,6 +132,13 @@ final class CommandBusTests: XCTestCase {
             .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 9, cutAtTick: 0)),
             .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 0, cutAtTick: 0)),
             .setMonitorSource(bus: .headphones),   // 提案 026：耳机不能听自己
+            // P5-2：提案 020 / 021 / 023
+            .setTransitionSlot(slot: 5, config: TransitionSlot(type: .fade, durationTicks: 1)), .setTransitionSlot(slot: 0, config: TransitionSlot(type: .fade, durationTicks: 1)),
+            .setTransitionSlot(slot: 1, config: TransitionSlot(type: .stinger, durationTicks: 1, stinger: StingerParams(input: 9, cutAtTick: 0))),
+            .useTransitionSlot(slot: 0, start: true), .useTransitionSlot(slot: 5, start: false), .setFTBDuration(ticks: -1),
+            .setPlayback(input: 1, paused: true), .setPlayback(input: 9, paused: true),   // 不是文件输入 / 不存在
+            .seekPlayback(input: 2, seconds: 1), .seekPlayback(input: 6, seconds: -1), .seekPlayback(input: 6, seconds: .nan), .seekPlayback(input: 9, seconds: 0),
+            .setInputAudio(input: 9, solo: true), .setInputColor(input: 9, color: .red),
         ]
         for c in illegal {
             XCTAssertNotNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应拒绝")

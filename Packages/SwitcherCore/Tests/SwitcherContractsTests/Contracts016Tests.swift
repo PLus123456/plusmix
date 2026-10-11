@@ -30,12 +30,15 @@ final class Contracts016Tests: XCTestCase {
                        .setTransitionParams(wipe: WipeParams(direction: .diagonal, softness: 0), stinger: StingerParams(input: nil, cutAtTick: 3)))
     }
 
-    /// 只加命令、不加字段：setTransition 与节目文件里的 transition 一个字节不变，Show.schemaVersion 不升。
+    /// 只加命令、不加字段：setTransition 一个字节不变，Show.schemaVersion 不升。节目文件里的 transition 在 016 时也没变；
+    /// P5-2 按提案 020 给 TransitionState 加了 slots / currentSlot（见 Contracts020Tests），这里只钉 016 当时的那几个键还在、值不变。
     func test016_existingShapesUnchanged() throws {
         XCTAssertEqual(try json(.setTransition(type: .wipe, durationTicks: 20)), #"{"setTransition":{"durationTicks":20,"type":"wipe"}}"#)
         let t = TransitionState(type: .stinger, durationTicks: 40, wipe: WipeParams(direction: .rightToLeft, softness: 0.1), stinger: StingerParams(input: 3, cutAtTick: 12))
-        XCTAssertEqual(String(decoding: try sortedEncoder.encode(t), as: UTF8.self),
-                       #"{"durationTicks":40,"progress":0,"source":"auto","stinger":{"cutAtTick":12,"input":3},"type":"stinger","wipe":{"direction":"rightToLeft","softness":0.1}}"#)
+        let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: try sortedEncoder.encode(t)) as? [String: Any])
+        XCTAssertEqual(obj["durationTicks"] as? Int, 40); XCTAssertEqual(obj["type"] as? String, "stinger"); XCTAssertEqual(obj["source"] as? String, "auto")
+        XCTAssertEqual(obj["stinger"] as? [String: Int], ["cutAtTick": 12, "input": 3])
+        XCTAssertEqual((obj["wipe"] as? [String: Any])?["direction"] as? String, "rightToLeft")
         XCTAssertEqual(Show.currentSchemaVersion, 1)
     }
 }

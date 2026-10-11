@@ -7,7 +7,7 @@ final class Contracts019Tests: XCTestCase {
     func test019_encoderEntryOutputAndConnectionsRoundTrip_missingKeysDecodeToZero() throws {
         let e = Stats.EncoderEntry(output: 3, skipped: 1, bitrate: 1_990_000_000, frames: 160, dropped: 0, diskFreeMb: 0, reconnects: 0, connections: 2, state: "publishing")
         let line = String(decoding: try Stats.lineEncoder.encode(e), as: UTF8.self)
-        XCTAssertEqual(line, #"{"bitrate":1990000000,"connections":2,"disk_free_mb":0,"dropped":0,"frames":160,"output":3,"reconnects":0,"skipped":1,"state":"publishing"}"#)
+        XCTAssertEqual(line, #"{"attempt":0,"bitrate":1990000000,"connections":2,"disconnects":0,"disk_free_mb":0,"dropped":0,"frames":160,"last_error":"","output":3,"reconnects":0,"skipped":1,"state":"publishing","uptime_s":0}"#)
         XCTAssertEqual(try JSONDecoder().decode(Stats.EncoderEntry.self, from: Data(line.utf8)), e)
 
         // 019 之前的文件：没有 output / connections → 0，其余照解（老写法 `EncoderEntry(skipped:bitrate:)` 也是 0）
@@ -23,8 +23,8 @@ final class Contracts019Tests: XCTestCase {
 
         // 写出总是写全：默认值也写 output / connections
         XCTAssertEqual(String(decoding: try Stats.lineEncoder.encode(Stats.EncoderEntry(skipped: 0, bitrate: 0)), as: UTF8.self),
-                       #"{"bitrate":0,"connections":0,"disk_free_mb":0,"dropped":0,"frames":0,"output":0,"reconnects":0,"skipped":0,"state":"idle"}"#)
-        XCTAssertEqual(Stats.EncoderEntry.jsonKeys, ["output", "skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "connections", "state"])
+                       #"{"attempt":0,"bitrate":0,"connections":0,"disconnects":0,"disk_free_mb":0,"dropped":0,"frames":0,"last_error":"","output":0,"reconnects":0,"skipped":0,"state":"idle","uptime_s":0}"#)
+        XCTAssertEqual(Stats.EncoderEntry.jsonKeys, ["output", "skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "connections", "state", "uptime_s", "disconnects", "last_error", "attempt"])   // 022 加了四个
         XCTAssertEqual(Stats.EncoderEntry.jsonKeys.first, Stats.DisplayEntry.jsonKeys.first, "两个数组都以 output 开头，同口径对号")
     }
 }

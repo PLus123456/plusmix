@@ -393,8 +393,11 @@ final class ReducerTests: XCTestCase {
         let show = Show(name: "载入", state: { var s = Self.baseState(); s.program = 3; s.preview = 4; s.transition.progress = 0.5; s.transition.startTick = Tick(1); return s }())
         let rows: [Row] = [
             Row("cut", .cut) { $0.program = 2; $0.preview = 1 },
-            Row("fade", .fade(durationTicks: 12)) { $0.transition.type = .fade; $0.transition.durationTicks = 12; $0.transition.startTick = tick; $0.transition.source = .auto },
-            Row("setTransition", .setTransition(type: .wipe, durationTicks: 15)) { $0.transition.type = .wipe; $0.transition.durationTicks = 15 },
+            Row("fade", .fade(durationTicks: 12)) { $0.transition.type = .fade; $0.transition.durationTicks = 12; $0.transition.startTick = tick; $0.transition.source = .auto
+                                                     $0.transition.currentSlot = nil },   // 020：fade 12 不对应任何槽
+            Row("fade 30 = 槽 1 仍对得上", .fade(durationTicks: 30)) { $0.transition.startTick = tick; $0.transition.source = .auto },   // 020：currentSlot 仍是 1
+            Row("setTransition", .setTransition(type: .wipe, durationTicks: 15)) { $0.transition.type = .wipe; $0.transition.durationTicks = 15; $0.transition.currentSlot = nil },
+            Row("setTransition 与槽 2 相同 → currentSlot 2", .setTransition(type: .wipe, durationTicks: 60)) { $0.transition.type = .wipe; $0.transition.durationTicks = 60; $0.transition.currentSlot = 2 },
             Row("autoTransition", .autoTransition) { $0.transition.startTick = tick },
             Row("setPreview", .setPreview(input: 3)) { $0.preview = 3 },
             Row("setPreview 黑场", .setPreview(input: 0)) { $0.preview = 0 },
@@ -471,17 +474,73 @@ final class ReducerTests: XCTestCase {
 
             // 提案 016：改 Wipe / Stinger 参数
             Row("setTransitionParams", .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12))) {
-                $0.transition.wipe = WipeParams(direction: .topToBottom, softness: 0.2); $0.transition.stinger = StingerParams(input: 3, cutAtTick: 12) },
+                $0.transition.wipe = WipeParams(direction: .topToBottom, softness: 0.2); $0.transition.stinger = StingerParams(input: 3, cutAtTick: 12); $0.transition.currentSlot = nil },
             Row("setTransitionParams 软边钳到 ≤ 1、换底拍钳到 ≥ 0",
                 .setTransitionParams(wipe: WipeParams(direction: .diagonal, softness: 1.5), stinger: StingerParams(input: nil, cutAtTick: -4))) {
-                $0.transition.wipe = WipeParams(direction: .diagonal, softness: 1); $0.transition.stinger = StingerParams(input: nil, cutAtTick: 0) },
+                $0.transition.wipe = WipeParams(direction: .diagonal, softness: 1); $0.transition.stinger = StingerParams(input: nil, cutAtTick: 0); $0.transition.currentSlot = nil },
             Row("setTransitionParams 软边钳到 ≥ 0", .setTransitionParams(wipe: WipeParams(direction: .rightToLeft, softness: -0.3), stinger: StingerParams())) {
-                $0.transition.wipe = WipeParams(direction: .rightToLeft, softness: 0) },
+                $0.transition.wipe = WipeParams(direction: .rightToLeft, softness: 0); $0.transition.currentSlot = nil },
+            Row("setTransitionParams 与槽 1 相同 → currentSlot 仍 1", .setTransitionParams(wipe: WipeParams(), stinger: StingerParams())) { _ in },
             Row("setTransitionParams stinger 输入不存在拒绝",
                 .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 9, cutAtTick: 12))) { _ in },
             Row("setTransitionParams stinger 输入 0 拒绝（0 是黑场，不是输入）", .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 0, cutAtTick: 0))) { _ in },
             Row("setTransitionParams T-bar 推到一半拒绝", before: { $0.transition.progress = 0.4; $0.transition.source = .tbar },
                 .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams())) { _ in },
+
+            // 提案 020（P5-2）：转场槽与 FTB 时长
+            Row("setTransitionSlot 改非当前槽只动槽", .setTransitionSlot(slot: 3, config: TransitionSlot(type: .zoom, durationTicks: 20))) {
+                $0.transition.slots[2] = TransitionSlot(type: .zoom, durationTicks: 20) },
+            Row("setTransitionSlot 改当前槽、空闲时当前那组同时重拷", .setTransitionSlot(slot: 1, config: TransitionSlot(type: .fade, durationTicks: 12))) {
+                $0.transition.slots[0] = TransitionSlot(type: .fade, durationTicks: 12); $0.transition.type = .fade; $0.transition.durationTicks = 12 },
+            Row("setTransitionSlot 钳位（时长 ≥ 0、软边 0–1、换底拍 ≥ 0）",
+                .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: -5, wipe: WipeParams(direction: .diagonal, softness: 2), stinger: StingerParams(input: nil, cutAtTick: -1)))) {
+                $0.transition.slots[1] = TransitionSlot(type: .wipe, durationTicks: 0, wipe: WipeParams(direction: .diagonal, softness: 1), stinger: StingerParams(input: nil, cutAtTick: 0)) },
+            Row("setTransitionSlot 槽越界拒绝", .setTransitionSlot(slot: 5, config: TransitionSlot(type: .fade, durationTicks: 1))) { _ in },
+            Row("setTransitionSlot 槽 0 拒绝", .setTransitionSlot(slot: 0, config: TransitionSlot(type: .fade, durationTicks: 1))) { _ in },
+            Row("setTransitionSlot stinger 输入不存在拒绝", .setTransitionSlot(slot: 4, config: TransitionSlot(type: .stinger, durationTicks: 60, stinger: StingerParams(input: 9, cutAtTick: 0)))) { _ in },
+            Row("setTransitionSlot 相同配置原样返回", .setTransitionSlot(slot: 1, config: TransitionSlot(type: .fade, durationTicks: 30))) { _ in },
+            Row("setTransitionSlot 转场进行中也收（只改槽，当前那组不动）", before: { $0.transition.startTick = Tick(40); $0.transition.progress = 2.0 / 30.0 },
+                .setTransitionSlot(slot: 1, config: TransitionSlot(type: .fade, durationTicks: 12))) { $0.transition.slots[0] = TransitionSlot(type: .fade, durationTicks: 12) },
+            Row("useTransitionSlot 只选中", .useTransitionSlot(slot: 2, start: false)) {
+                $0.transition.type = .wipe; $0.transition.durationTicks = 60; $0.transition.wipe = WipeParams(direction: .leftToRight, softness: 0); $0.transition.stinger = StingerParams(); $0.transition.currentSlot = 2 },
+            Row("useTransitionSlot 选中并开始", .useTransitionSlot(slot: 3, start: true)) {
+                $0.transition.type = .zoom; $0.transition.durationTicks = 60; $0.transition.currentSlot = 3; $0.transition.startTick = tick; $0.transition.source = .auto; $0.transition.progress = 0 },
+            Row("useTransitionSlot Stinger 槽没选输入照常开始", .useTransitionSlot(slot: 4, start: true)) {
+                $0.transition.type = .stinger; $0.transition.durationTicks = 60; $0.transition.currentSlot = 4; $0.transition.startTick = tick; $0.transition.source = .auto },
+            Row("useTransitionSlot 转场进行中拒绝", before: { $0.transition.startTick = Tick(40); $0.transition.progress = 2.0 / 30.0 }, .useTransitionSlot(slot: 2, start: true)) { _ in },
+            Row("useTransitionSlot T-bar 推到一半拒绝", before: { $0.transition.progress = 0.4; $0.transition.source = .tbar }, .useTransitionSlot(slot: 2, start: false)) { _ in },
+            Row("useTransitionSlot 槽越界拒绝", .useTransitionSlot(slot: 0, start: true)) { _ in },
+            Row("useTransitionSlot 已是当前槽且相同 → 原样返回", .useTransitionSlot(slot: 1, start: false)) { _ in },
+            Row("setFTBDuration", .setFTBDuration(ticks: 15)) { $0.ftb.durationTicks = 15 },
+            Row("setFTBDuration 负拒绝", .setFTBDuration(ticks: -1)) { _ in },
+            Row("setFTBDuration 相同值原样返回", .setFTBDuration(ticks: 30)) { _ in },
+
+            // 提案 021（P5-2）：文件输入播放控制（基础状态都是合成源，先加一路文件输入 5）
+            Row("setPlayback", before: { $0.inputs.append(Self.fileInput(5)) }, .setPlayback(input: 5, paused: true)) { $0.inputs[4].settings.playback.paused = true },
+            Row("setPlayback 相同值原样返回", before: { $0.inputs.append(Self.fileInput(5)) }, .setPlayback(input: 5, paused: false)) { _ in },
+            Row("setPlayback 非文件输入拒绝", .setPlayback(input: 1, paused: true)) { _ in },
+            Row("setPlayback 不存在", .setPlayback(input: 9, paused: true)) { _ in },
+            Row("seekPlayback", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: 12.5)) {
+                $0.inputs[4].settings.playback.seekSeconds = 12.5; $0.inputs[4].settings.playback.seekTick = tick },
+            Row("seekPlayback 负数拒绝（校验器同判，与 fade 负时长一样）", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: -3)) { _ in },
+            Row("seekPlayback 0 = 从头", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: 0)) {
+                $0.inputs[4].settings.playback.seekSeconds = 0; $0.inputs[4].settings.playback.seekTick = tick },
+            Row("seekPlayback 同一拍同一位置原样返回", before: { $0.inputs.append(Self.fileInput(5)); $0.inputs[4].settings.playback.seekSeconds = 4; $0.inputs[4].settings.playback.seekTick = tick },
+                .seekPlayback(input: 5, seconds: 4)) { _ in },
+            Row("seekPlayback 非有限拒绝", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: .nan)) { _ in },
+            Row("seekPlayback 非文件输入拒绝", .seekPlayback(input: 2, seconds: 1)) { _ in },
+
+            // 提案 023 四 / 五（P5-2）：分类颜色、细粒度音频
+            Row("setInputColor", .setInputColor(input: 1, color: .red)) { $0.inputs[0].color = .red },
+            Row("setInputColor 清掉", before: { $0.inputs[1].color = .blue }, .setInputColor(input: 2, color: nil)) { $0.inputs[1].color = nil },
+            Row("setInputColor 相同值原样返回", .setInputColor(input: 1, color: nil)) { _ in },
+            Row("setInputColor 不存在", .setInputColor(input: 9, color: .green)) { _ in },
+            Row("setInputAudio 只动 solo", .setInputAudio(input: 1, solo: true)) { $0.inputs[0].settings.audio.solo = true },
+            Row("setInputAudio 三项", .setInputAudio(input: 2, solo: true, afv: false, routing: BusRouting(master: true, busA: true))) {
+                $0.inputs[1].settings.audio.solo = true; $0.inputs[1].settings.audio.afv = false; $0.inputs[1].settings.audio.routing = BusRouting(master: true, busA: true) },
+            Row("setInputAudio 全 nil 原样返回", .setInputAudio(input: 1)) { _ in },
+            Row("setInputAudio 全与现状相同原样返回", .setInputAudio(input: 1, solo: false, afv: true, routing: .masterOnly)) { _ in },
+            Row("setInputAudio 不存在", .setInputAudio(input: 9, solo: true)) { _ in },
         ]
         var covered = Set<String>()
         for row in rows {
@@ -493,7 +552,7 @@ final class ReducerTests: XCTestCase {
             XCTAssertEqual(actual, expected, row.name)
             covered.insert(Self.caseName(row.command))
         }
-        XCTAssertEqual(covered.count, Self.allCaseNames.count, "35 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
+        XCTAssertEqual(covered.count, Self.allCaseNames.count, "42 个 case 每个至少一行：缺 \(Set(Self.allCaseNames).subtracting(covered))")
     }
 
     func testW1B_reduce_isPureAndDoesNotMutateInput() {
@@ -691,11 +750,189 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(pfl.audio.monitorPoint, onB.audio.monitorPoint)
     }
 
-    static let allCaseNames = ["cut", "fade", "setTransition", "setTransitionParams", "autoTransition", "setPreview", "setProgram", "tbar", "ftb", "overlay", "setOverlay",
-                               "setOverlayDecoration",
-                               "audioGain", "mute", "busGain", "busMute", "setAFV", "setMonitorMode", "setMonitorSource", "setBusEffects",
+    // MARK: 提案 020（P5-2）：转场槽 + FTB 时长
+
+    static func fileInput(_ n: Int, restartOnProgram: Bool = false, paused: Bool = false) -> InputConfig {
+        var c = InputConfig(number: n, name: "片 \(n)", source: .file(path: "/clip\(n).mov", endAction: .holdLastFrame, rate: 1))
+        c.settings.playback.restartOnProgram = restartOnProgram
+        c.settings.playback.paused = paused
+        return c
+    }
+
+    /// 进行中改当前槽：进行中的那一次按开始时的参数走完，完成那一拍把当前那组按槽重拷（completeTransition 在 currentSlot 非 nil 时总是重拷，幂等）。
+    func test020_setTransitionSlot_whileActive_recopiesOnCompletion() {
+        let started = reducer.reduce(Self.baseState(), .useTransitionSlot(slot: 2, start: true), at: Tick(10))
+        XCTAssertEqual(started.transition.currentSlot, 2); XCTAssertEqual(started.transition.type, .wipe); XCTAssertEqual(started.transition.durationTicks, 60)
+        let mid = reducer.advance(started, to: Tick(20))
+        XCTAssertTrue(mid.transition.isActive)
+        let changed = reducer.reduce(mid, .setTransitionSlot(slot: 2, config: TransitionSlot(type: .zoom, durationTicks: 20)), at: Tick(20))
+        XCTAssertEqual(changed.transition.slots[1], TransitionSlot(type: .zoom, durationTicks: 20), "槽改了")
+        XCTAssertEqual(changed.transition.type, .wipe); XCTAssertEqual(changed.transition.durationTicks, 60, "进行中的那一次不动")
+        XCTAssertEqual(changed.transition.currentSlot, 2)
+        XCTAssertEqual(reducer.advance(changed, to: Tick(50)).transition.progress, 40.0 / 60.0, accuracy: 1e-12, "按原时长走")
+        XCTAssertEqual(reducer.advance(changed, to: Tick(50)).transition.type, .wipe)
+        let done = reducer.advance(changed, to: Tick(70))
+        XCTAssertFalse(done.transition.isActive)
+        XCTAssertEqual(done.program, 2); XCTAssertEqual(done.preview, 1)
+        XCTAssertEqual(done.transition.currentGroup, TransitionSlot(type: .zoom, durationTicks: 20), "完成那一拍重拷")
+        XCTAssertEqual(done.transition.currentSlot, 2)
+        XCTAssertEqual(reducer.advance(done, to: Tick(71)), done, "重拷幂等")
+        // 空闲时改当前槽：马上重拷
+        let idle = reducer.reduce(done, .setTransitionSlot(slot: 2, config: TransitionSlot(type: .fade, durationTicks: 5)), at: Tick(72))
+        XCTAssertEqual(idle.transition.currentGroup, TransitionSlot(type: .fade, durationTicks: 5))
+        XCTAssertEqual(idle.transition.currentSlot, 2)
+        // T-bar 推到一半改当前槽：只改槽；推到 1 提交那一拍重拷
+        let bar = reducer.reduce(idle, .tbar(progress: 0.4), at: Tick(80))
+        let barChanged = reducer.reduce(bar, .setTransitionSlot(slot: 2, config: TransitionSlot(type: .zoom, durationTicks: 9)), at: Tick(81))
+        XCTAssertEqual(barChanged.transition.currentGroup, TransitionSlot(type: .fade, durationTicks: 5))
+        let committed = reducer.reduce(barChanged, .tbar(progress: 1), at: Tick(82))
+        XCTAssertEqual(committed.transition.currentGroup, TransitionSlot(type: .zoom, durationTicks: 9))
+        XCTAssertEqual(committed.program, 1)
+        // cut 也走 completeTransition：currentSlot 非 nil 就重拷（与槽相同时无感）
+        let cut = reducer.reduce(committed, .cut, at: Tick(83))
+        XCTAssertEqual(cut.transition.currentGroup, committed.transition.currentGroup)
+    }
+
+    /// useTransitionSlot(start: true) 一拍内原子完成：类型 cut 或时长 0 的槽立即对调；Stinger 槽没选输入照常开始；start = false 只选中。
+    func test020_useTransitionSlot_startAtomic_cutSlotCompletesImmediately() {
+        let withCut = reducer.reduce(Self.baseState(), .setTransitionSlot(slot: 3, config: TransitionSlot(type: .cut, durationTicks: 0)), at: Tick(1))
+        let cut = reducer.reduce(withCut, .useTransitionSlot(slot: 3, start: true), at: Tick(2))
+        XCTAssertEqual(cut.program, 2); XCTAssertEqual(cut.preview, 1)
+        XCTAssertFalse(cut.transition.isActive)
+        XCTAssertEqual(cut.transition.currentSlot, 3); XCTAssertEqual(cut.transition.type, .cut)
+        let zero = reducer.reduce(Self.baseState(), .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: 0)), at: Tick(1))
+        XCTAssertEqual(reducer.reduce(zero, .useTransitionSlot(slot: 2, start: true), at: Tick(2)).program, 2, "时长 0 = 原子对调")
+        // 只选中：T-bar 用新类型
+        let selected = reducer.reduce(Self.baseState(), .useTransitionSlot(slot: 3, start: false), at: Tick(3))
+        XCTAssertFalse(selected.transition.isActive)
+        XCTAssertEqual(selected.transition.type, .zoom)
+        XCTAssertEqual(reducer.reduce(selected, .tbar(progress: 0.5), at: Tick(4)).transition.type, .zoom)
+        // 再选同一个槽、当前那组相同 → 原样（applied = false）；start = true 的同一个槽照常开始
+        XCTAssertEqual(reducer.reduce(selected, .useTransitionSlot(slot: 3, start: false), at: Tick(5)), selected)
+        XCTAssertTrue(reducer.reduce(selected, .useTransitionSlot(slot: 3, start: true), at: Tick(5)).transition.isActive)
+    }
+
+    /// 老命令执行后 currentSlot：当前那组不再对应任何槽 → nil；仍与某个槽相同（fade 30 = 槽 1）就留着 / 对上那个槽。
+    func test020_legacyTransitionCommands_updateCurrentSlot() {
+        let s = Self.baseState()
+        XCTAssertEqual(s.transition.currentSlot, 1)
+        XCTAssertEqual(reducer.reduce(s, .fade(durationTicks: 30), at: Tick(1)).transition.currentSlot, 1, "fade 30 = 槽 1")
+        XCTAssertNil(reducer.reduce(s, .fade(durationTicks: 12), at: Tick(1)).transition.currentSlot)
+        XCTAssertEqual(reducer.reduce(s, .setTransition(type: .zoom, durationTicks: 60), at: Tick(1)).transition.currentSlot, 3)
+        XCTAssertNil(reducer.reduce(s, .setTransition(type: .zoom, durationTicks: 61), at: Tick(1)).transition.currentSlot)
+        XCTAssertNil(reducer.reduce(s, .setTransitionParams(wipe: WipeParams(direction: .diagonal, softness: 0), stinger: StingerParams()), at: Tick(1)).transition.currentSlot)
+        // 从 nil 回到槽：useTransitionSlot
+        let off = reducer.reduce(s, .fade(durationTicks: 12), at: Tick(1))
+        let doneOff = reducer.advance(off, to: Tick(20))
+        XCTAssertNil(doneOff.transition.currentSlot, "完成时 currentSlot nil 不重拷")
+        XCTAssertEqual(doneOff.transition.durationTicks, 12)
+        XCTAssertEqual(reducer.reduce(doneOff, .useTransitionSlot(slot: 1, start: false), at: Tick(21)).transition.currentSlot, 1)
+    }
+
+    /// removeInput 清引用的规则扩到 4 个槽：slots[k].stinger.input == input 的置 nil；当前那组照 P4 的规则。
+    func test020_removeInput_clearsStingerReferenceInSlots() {
+        var s = Self.baseState()
+        s.transition.slots[3].stinger.input = 3
+        s.transition.slots[2].stinger.input = 4
+        s.transition.stinger.input = 3
+        let removed = reducer.reduce(s, .removeInput(input: 3), at: Tick(1))
+        XCTAssertNil(removed.transition.slots[3].stinger.input)
+        XCTAssertEqual(removed.transition.slots[2].stinger.input, 4, "指向别的输入的不动")
+        XCTAssertNil(removed.transition.stinger.input)
+        XCTAssertEqual(removed.transition.slots[3].durationTicks, 60, "只动引用")
+    }
+
+    /// setFTBDuration 在 FTB 渐变中：按当前电平对应的起点回拨，电平从当前值按新时长继续走、不跳变；时长 0 立即到位。
+    func test020_setFTBDuration_midFadeContinuesFromCurrentLevel() {
+        let on = reducer.reduce(Self.baseState(), .ftb(on: true), at: Tick(100))   // durationTicks 30
+        let mid = reducer.advance(on, to: Tick(110))
+        XCTAssertEqual(mid.ftb.level, 1.0 / 3.0, accuracy: 1e-12)
+        let slow = reducer.reduce(mid, .setFTBDuration(ticks: 60), at: Tick(110))
+        XCTAssertEqual(slow.ftb.durationTicks, 60)
+        XCTAssertEqual(slow.ftb.level, 1.0 / 3.0, accuracy: 1e-12, "改的那一拍电平不变")
+        XCTAssertEqual(slow.ftb.startTick, Tick(90), "等效起点：110 − round(1/3 × 60)")
+        XCTAssertEqual(reducer.advance(slow, to: Tick(120)).ftb.level, 0.5, accuracy: 1e-12, "按新时长继续走")
+        let black = reducer.advance(slow, to: Tick(150))
+        XCTAssertEqual(black.ftb.level, 1); XCTAssertNil(black.ftb.startTick)
+        // 空闲时只改数字
+        let idle = reducer.reduce(black, .setFTBDuration(ticks: 15), at: Tick(151))
+        XCTAssertEqual(idle.ftb.durationTicks, 15); XCTAssertEqual(idle.ftb.level, 1); XCTAssertNil(idle.ftb.startTick)
+        // 渐变中改成 0：立即到位
+        let instant = reducer.reduce(mid, .setFTBDuration(ticks: 0), at: Tick(110))
+        XCTAssertEqual(instant.ftb.level, 1); XCTAssertNil(instant.ftb.startTick)
+        XCTAssertEqual(reducer.reduce(mid, .setFTBDuration(ticks: 30), at: Tick(110)), mid, "相同值原样返回")
+    }
+
+    /// loadShow 带 020 之前的节目（没有 slots）：reducer 先搬迁再 validate，读得进来、补了出厂槽。
+    func test020_loadShow_migratesSlotsBeforeValidate() {
+        var old = Self.baseState()
+        old.transition = TransitionState(type: .wipe, durationTicks: 45, slots: [], currentSlot: nil)
+        let show = Show(name: "020 之前", state: old)
+        let loaded = reducer.reduce(Self.baseState(), .loadShow(show: show), at: Tick(1))
+        XCTAssertEqual(loaded.transition.slots.count, 4)
+        XCTAssertEqual(loaded.transition.slots[0], TransitionSlot(type: .wipe, durationTicks: 45))
+        XCTAssertEqual(loaded.transition.currentSlot, 1)
+        XCTAssertEqual(loaded, show.migratingLegacyKeys().makeState())
+        var broken = Self.baseState()
+        broken.transition.slots.removeLast()
+        XCTAssertEqual(reducer.reduce(Self.baseState(), .loadShow(show: Show(name: "3 个槽", state: broken)), at: Tick(1)), Self.baseState(), "slots 不是 4 个（且非空）被拒")
+    }
+
+    // MARK: 提案 021（P5-2）：切上 PGM 时从头播
+
+    /// restartOnProgram 的四处 PGM 换人：cut / auto 完成 / T-bar 提交 / setProgram 换成它的那一拍写 seekSeconds = 0、seekTick = 那一拍（auto 完成 = 开始拍 + 时长，逐拍推进与一步到位等价）；
+    /// 换走的那一路不写；PGM 没变不写；restartOnProgram = false 不写；暂停中照样定位、仍暂停。
+    func test021_restartOnProgram_writesSeekZeroWhenInputLandsOnProgram() {
+        var s = Self.baseState()
+        s.inputs.append(Self.fileInput(5, restartOnProgram: true, paused: true))
+        s.inputs.append(Self.fileInput(6, restartOnProgram: false))
+        s.preview = 5
+        // cut
+        let cut = reducer.reduce(s, .cut, at: Tick(100))
+        XCTAssertEqual(cut.program, 5)
+        XCTAssertEqual(cut.inputs[4].settings.playback, PlaybackSettings(paused: true, restartOnProgram: true, seekSeconds: 0, seekTick: Tick(100)), "定位到 0 但仍暂停")
+        XCTAssertEqual(cut.inputs[0].settings.playback, PlaybackSettings(), "换走的那一路不写")
+        // 再 cut 回去：5 号离开 PGM，不写新定位（上一次的留着，直到载入节目或下一次定位）
+        let back = reducer.reduce(cut, .cut, at: Tick(101))
+        XCTAssertEqual(back.inputs[4].settings.playback.seekTick, Tick(100))
+        // auto 完成：开始拍 + 时长
+        var auto = s
+        auto.inputs[4].settings.playback.paused = false
+        let started = reducer.reduce(auto, .fade(durationTicks: 30), at: Tick(200))
+        XCTAssertNil(started.inputs[4].settings.playback.seekTick, "开始那一拍还没换人")
+        let step = reducer.advance(reducer.advance(started, to: Tick(229)), to: Tick(230))
+        let jump = reducer.advance(started, to: Tick(235))
+        XCTAssertEqual(step.inputs[4].settings.playback.seekTick, Tick(230))
+        XCTAssertEqual(jump.inputs[4].settings.playback.seekTick, Tick(230), "一步到位等价")
+        XCTAssertEqual(jump.inputs[4].settings.playback.seekSeconds, 0)
+        XCTAssertEqual(jump.program, 5)
+        // T-bar 提交
+        let bar = reducer.reduce(reducer.reduce(s, .tbar(progress: 0.5), at: Tick(300)), .tbar(progress: 1), at: Tick(301))
+        XCTAssertEqual(bar.program, 5)
+        XCTAssertEqual(bar.inputs[4].settings.playback.seekTick, Tick(301))
+        XCTAssertNil(reducer.reduce(s, .tbar(progress: 0.5), at: Tick(300)).inputs[4].settings.playback.seekTick, "推到一半不算换人")
+        // setProgram
+        let direct = reducer.reduce(s, .setProgram(input: 5), at: Tick(400))
+        XCTAssertEqual(direct.inputs[4].settings.playback.seekTick, Tick(400))
+        XCTAssertEqual(reducer.reduce(direct, .setProgram(input: 5), at: Tick(401)), direct, "PGM 没变：不再写")
+        // restartOnProgram = false：不写
+        var six = s
+        six.preview = 6
+        XCTAssertEqual(reducer.reduce(six, .cut, at: Tick(500)).inputs[5].settings.playback, PlaybackSettings())
+        // 非文件输入上 PGM：playback 不动（别的 kind 照存不读）
+        XCTAssertEqual(reducer.reduce(s, .setProgram(input: 3), at: Tick(600)).inputs[2].settings.playback, PlaybackSettings())
+        // 手发 seekPlayback 走同一条路：同一拍同一位置再发原样返回，换一拍再发生效
+        let seek = reducer.reduce(cut, .seekPlayback(input: 5, seconds: 0), at: Tick(100))
+        XCTAssertEqual(seek, cut, "同一拍同一位置")
+        XCTAssertEqual(reducer.reduce(cut, .seekPlayback(input: 5, seconds: 0), at: Tick(102)).inputs[4].settings.playback.seekTick, Tick(102))
+    }
+
+    static let allCaseNames = ["cut", "fade", "setTransition", "setTransitionParams", "autoTransition", "setPreview", "setProgram", "tbar", "ftb",
+                               "setTransitionSlot", "useTransitionSlot", "setFTBDuration",
+                               "overlay", "setOverlay", "setOverlayDecoration",
+                               "audioGain", "mute", "busGain", "busMute", "setAFV", "setMonitorMode", "setMonitorSource", "setBusEffects", "setInputAudio",
                                "startRecord", "stopRecord", "startStream", "stopStream", "setOutputEnabled", "renameOutput",
-                               "setInputSettings", "renameInput", "addInput", "removeInput", "setInputSource",
+                               "setInputSettings", "renameInput", "addInput", "removeInput", "setInputSource", "setPlayback", "seekPlayback", "setInputColor",
                                "addOutput", "removeOutput", "setOutputSettings", "loadShow"]
 
     static func caseName(_ c: Command) -> String {
@@ -709,6 +946,9 @@ final class ReducerTests: XCTestCase {
         case .setProgram: "setProgram"
         case .tbar: "tbar"
         case .ftb: "ftb"
+        case .setTransitionSlot: "setTransitionSlot"
+        case .useTransitionSlot: "useTransitionSlot"
+        case .setFTBDuration: "setFTBDuration"
         case .overlay: "overlay"
         case .setOverlay: "setOverlay"
         case .setOverlayDecoration: "setOverlayDecoration"
@@ -720,6 +960,7 @@ final class ReducerTests: XCTestCase {
         case .setMonitorMode: "setMonitorMode"
         case .setMonitorSource: "setMonitorSource"
         case .setBusEffects: "setBusEffects"
+        case .setInputAudio: "setInputAudio"
         case .startRecord: "startRecord"
         case .stopRecord: "stopRecord"
         case .startStream: "startStream"
@@ -731,6 +972,9 @@ final class ReducerTests: XCTestCase {
         case .addInput: "addInput"
         case .removeInput: "removeInput"
         case .setInputSource: "setInputSource"
+        case .setPlayback: "setPlayback"
+        case .seekPlayback: "seekPlayback"
+        case .setInputColor: "setInputColor"
         case .addOutput: "addOutput"
         case .removeOutput: "removeOutput"
         case .setOutputSettings: "setOutputSettings"

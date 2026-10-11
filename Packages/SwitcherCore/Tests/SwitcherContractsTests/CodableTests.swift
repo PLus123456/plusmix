@@ -10,11 +10,11 @@ final class CodableTests: XCTestCase {
     /// 键名写死在测试里：与测试标准 §7 那一行逐字一致，改了就红（P2 按提案 001 / 002 / 004 / 005、P3 按提案 013 加了字段，字面量随之更新）。
     func testP1_stats_jsonKeysSnapshot() throws {
         let line = try Samples.stats().jsonLine()
-        XCTAssertEqual(line, #"{"audio":{"discontinuities":2,"dropouts":0,"meters":{"buses":[{"bus":"master","lra":4.5,"lufs_i":-20,"lufs_m":-18.3,"lufs_s":-19.1,"peak_db":[-6.5,-7],"rms_db":[-12,-12.6],"true_peak_db":[-6.2,-6.8]},{"bus":"busA","lra":0,"lufs_i":-120,"lufs_m":-120,"lufs_s":-120,"peak_db":[-120,-120],"rms_db":[],"true_peak_db":[-120,-120]},{"bus":"busB","lra":0,"lufs_i":-120,"lufs_m":-120,"lufs_s":-120,"peak_db":[-120,-120],"rms_db":[],"true_peak_db":[-120,-120]},{"bus":"headphones","lra":3,"lufs_i":-22,"lufs_m":-21,"lufs_s":-21.5,"peak_db":[-9,-9],"rms_db":[],"true_peak_db":[-8.9,-8.9]}],"inputs":{"1":{"peak_db":[-12,-12.5],"rms_db":[-18,-18.5]},"3":{"peak_db":[-120,-120],"rms_db":[]}}},"underruns":1},"cpu_pct":12.5,"display":[{"dropped":0,"frames":36000,"kind":"externalDisplay","output":4,"state":"presenting","undelivered":0},{"dropped":4,"frames":35900,"kind":"virtualCamera","output":5,"state":"publishing","undelivered":1200},{"dropped":1,"frames":21500,"kind":"monitor","output":0,"state":"presenting","undelivered":0}],"encoder":[{"bitrate":6000000,"connections":0,"disk_free_mb":40960.5,"dropped":0,"frames":215990,"output":1,"reconnects":0,"skipped":0,"state":"recording"},{"bitrate":2500000,"connections":0,"disk_free_mb":0,"dropped":12,"frames":215000,"output":2,"reconnects":2,"skipped":3,"state":"publishing"}],"gpu_pct":30,"jitter_ms":0.42,"missed_render":0,"per_input":{"1":{"drop":0,"dup":30,"fps":30,"latency_max_ms":41.7,"latency_ms":33.4},"2":{"drop":1,"dup":0,"fps":60,"latency_max_ms":18.2,"latency_ms":16.7}},"render_ms":1.75,"rss_mb":512.25,"tick":216000,"ts":1757690000.5}"#)
+        XCTAssertEqual(line, #"{"audio":{"discontinuities":2,"dropouts":0,"meters":{"buses":[{"bus":"master","lra":4.5,"lufs_i":-20,"lufs_m":-18.3,"lufs_s":-19.1,"peak_db":[-6.5,-7],"rms_db":[-12,-12.6],"true_peak_db":[-6.2,-6.8]},{"bus":"busA","lra":0,"lufs_i":-120,"lufs_m":-120,"lufs_s":-120,"peak_db":[-120,-120],"rms_db":[],"true_peak_db":[-120,-120]},{"bus":"busB","lra":0,"lufs_i":-120,"lufs_m":-120,"lufs_s":-120,"peak_db":[-120,-120],"rms_db":[],"true_peak_db":[-120,-120]},{"bus":"headphones","lra":3,"lufs_i":-22,"lufs_m":-21,"lufs_s":-21.5,"peak_db":[-9,-9],"rms_db":[],"true_peak_db":[-8.9,-8.9]}],"inputs":{"1":{"peak_db":[-12,-12.5],"rms_db":[-18,-18.5]},"3":{"peak_db":[-120,-120],"rms_db":[]}}},"underruns":1},"cpu_pct":12.5,"display":[{"dropped":0,"frames":36000,"kind":"externalDisplay","output":4,"state":"presenting","undelivered":0},{"dropped":4,"frames":35900,"kind":"virtualCamera","output":5,"state":"publishing","undelivered":1200},{"dropped":1,"frames":21500,"kind":"monitor","output":0,"state":"presenting","undelivered":0}],"encoder":[{"attempt":0,"bitrate":6000000,"connections":0,"disconnects":0,"disk_free_mb":40960.5,"dropped":0,"frames":215990,"last_error":"","output":1,"reconnects":0,"skipped":0,"state":"recording","uptime_s":3600.25},{"attempt":0,"bitrate":2500000,"connections":0,"disconnects":1,"disk_free_mb":0,"dropped":12,"frames":215000,"last_error":"stalled","output":2,"reconnects":2,"skipped":3,"state":"publishing","uptime_s":3583.5}],"gpu_pct":30,"jitter_ms":0.42,"missed_render":0,"per_input":{"1":{"drop":0,"dup":30,"fps":30,"latency_max_ms":41.7,"latency_ms":33.4},"2":{"drop":1,"dup":0,"fps":60,"latency_max_ms":18.2,"latency_ms":16.7}},"render_ms":1.75,"rss_mb":512.25,"tick":216000,"ts":1757690000.5,"video_delay_ms":12.5}"#)
         XCTAssertFalse(line.contains("\n"), "一行一个 JSON")
-        XCTAssertEqual(Stats.jsonKeys, ["ts", "tick", "render_ms", "missed_render", "jitter_ms", "per_input", "encoder", "display", "audio", "rss_mb", "cpu_pct", "gpu_pct"])
+        XCTAssertEqual(Stats.jsonKeys, ["ts", "tick", "render_ms", "missed_render", "jitter_ms", "per_input", "encoder", "display", "audio", "rss_mb", "cpu_pct", "gpu_pct", "video_delay_ms"])   // 022：video_delay_ms
         XCTAssertEqual(Stats.PerInput.jsonKeys, ["fps", "dup", "drop", "latency_ms", "latency_max_ms"])
-        XCTAssertEqual(Stats.EncoderEntry.jsonKeys, ["output", "skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "connections", "state"])
+        XCTAssertEqual(Stats.EncoderEntry.jsonKeys, ["output", "skipped", "bitrate", "frames", "dropped", "disk_free_mb", "reconnects", "connections", "state", "uptime_s", "disconnects", "last_error", "attempt"])   // 022
         XCTAssertEqual(Stats.AudioCounters.jsonKeys, ["dropouts", "underruns", "discontinuities", "meters"])
         XCTAssertEqual(Stats.DisplayEntry.jsonKeys, ["output", "kind", "frames", "dropped", "undelivered", "state"])   // 提案 013，018 加 undelivered
         // 顶层键集合与 jsonKeys 完全一致（没多没少）
@@ -53,9 +53,12 @@ final class CodableTests: XCTestCase {
         XCTAssertEqual(obj["schemaVersion"] as? Int, 1)
         // layout 原样保留（不解释）
         XCTAssertEqual(back.layout.values["mixerVisible"], .bool(true))
-        // Show ↔ MixerState：makeState 清掉瞬态（转场进度、动画进度、startTick）
+        // Show ↔ MixerState：makeState 清掉瞬态（转场进度、动画进度、startTick、文件输入的定位请求——021）
         let state = back.makeState()
-        XCTAssertEqual(state.inputs, show.inputs)
+        XCTAssertEqual(show.inputs[2].settings.playback.seekSeconds, 1.5, "样例里带着定位瞬态，文件照存")
+        var persisted = show.inputs
+        for i in persisted.indices { persisted[i].settings.playback.seekSeconds = nil; persisted[i].settings.playback.seekTick = nil }
+        XCTAssertEqual(state.inputs, persisted, "定位瞬态清掉，其余（含 paused / restartOnProgram / color）不动")
         XCTAssertEqual(state.outputs, show.outputs)
         XCTAssertEqual(state.audio, show.audio)
         XCTAssertEqual(state.program, 1)

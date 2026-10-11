@@ -1,7 +1,7 @@
 # 020 转场槽（转场 1–4 四个可配置槽）+ FTB 时长命令
 
 提出会话 / 分支：P5（prompt 99）/ `p5-contracts`；来源 docs/ui-study/01a 第 5 节候选 1 / 2、04 Q01（用户按落地方案 §8.5 默认 A）、Q07（默认 (a) 跟当前槽）、Q08（默认 (a) 加命令并进 020）、R3a C 附 3、01-菜单逻辑 §3.3；落地方归 prompt 100（W5-M）
-状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + reducer + 校验器 + 目录 / api.md；界面、快捷键 / MIDI、兼容层、Stream Deck 归 100）
+状态：**已落地**（P5-2 / prompt 108，2026-10-11，提交 51e614e；文字 9ecc22a）。原状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + reducer + 校验器 + 目录 / api.md；界面、快捷键 / MIDI、兼容层、Stream Deck 归 100）
 
 ## 改什么
 
@@ -76,3 +76,22 @@ CONTRACTS.md §2.5（TransitionState / TransitionSlot 行、搬迁一节）、§
 2. 进行中改当前槽：完成那一拍重拷（默认）还是直接拒收？
 3. `setFTBDuration` 在 FTB 渐变中：回拨起点不跳变（默认）还是拒收？
 4. 命令数 35 → 38（三条）。若嫌多，`setFTBDuration` 可以并进 `ftb(on:durationTicks:)`——但那会改 `ftb` 的 JSON 形态（W2-C 客户端在用），不建议。
+
+## 落地记录（P5-2 / prompt 108，2026-10-11，提交 51e614e）
+
+按 A / B / C / D 落了，四个"请用户定的点"全按默认（Stinger 槽没选输入照常开始；进行中改当前槽完成那一拍重拷；FTB 渐变中回拨不跳变；三条命令不并进 ftb）。与提案正文不同的三处（都是落地时才看清的细节，不改语义）：
+
+1. **`currentSlot` 的默认不是写死 1，而是"自动对号"**：`TransitionState.init` 不给 currentSlot 时 = 当前那组与某个槽相同就是那个槽，否则 nil。`TransitionState()`（fade 30）= 槽 1，与提案相同；
+   但 `TransitionState(type: .cut, durationTicks: 0)` 这种裸状态（SwitcherInputs 的 harness、headless 的 soak 工厂都在用）= nil——写死 1 的话第一次 cut 完成就会把当前那组重拷成 Fade 0.5 s，脚本从此不再 cut。
+2. **搬迁遇到原来是 cut 的文件**：槽 1 用 Fade 0.5 s（提案写的），但 currentSlot = nil、当前那组仍是 cut（提案写 1）。理由同上：读进来就"察觉不到变化"。非 cut 的文件槽 1 = 原来那组、currentSlot = 1，与提案相同。
+3. **老命令执行后 currentSlot**：提案写"执行后 = nil"；落成"= 当前那组仍对得上的槽（优先原来那个），对不上任何槽才 nil"——`setTransition(fade, 30)` 之后槽 1 的高亮不该灭。`fade` / `setTransition` / `setTransitionParams` 三条都这么做。
+
+其余逐条：`TransitionSlot{type, durationTicks, wipe, stinger}` + `count / indexRange / factoryDefaults(for:)`（秒按帧率 round 换拍，与叠加默认淡入同一算法）+ `jsonKeys`；
+`TransitionState.slots / currentSlot` + 显式 `init(from:)`（缺 slots → []、缺 currentSlot → nil）+ `currentGroup` / `select(slot:)` / `slotIndexMatchingCurrentGroup(preferring:)`；
+`MixerStateError.transitionSlotCount / transitionSlotIndex`，`validate()` 两条不变量；`MixerState.newShow(format:)` 按帧率重算四槽、当前那组 = 槽 1；
+`Show.migratingLegacyKeys()` 补槽 + 清槽里悬空的 Stinger 引用；reducer：`setTransitionSlot`（进行中也收、钳位同 016、改当前槽空闲时重拷）、`useTransitionSlot`（进行中拒、start 一拍内原子完成）、
+`setFTBDuration`（渐变中 `equivalentStart` 回拨、0 立即到位）、`completeTransition` 按 currentSlot 幂等重拷（cut / auto 完成 / T-bar 提交都走它）、`removeInput` 清四个槽的引用；
+校验器：槽号 1…4、Stinger 引用、FTB 负时长入口就拒，**loadShow 改成先 `migratingLegacyKeys()` 再 validate**；目录三条（`setTransitionSlot` 归"高级：手写 JSON"，`CommandFieldType.transitionSlot` 四段）→ docs/api.md；
+CONTRACTS.md §2.5 / §2.6 / §2.8 / §8；Samples 的四槽非默认值；`test016_existingShapesUnchanged` 改成只钉 016 当时那几个键（TransitionState 的 JSON 多了 slots / currentSlot）。
+用例：`Contracts020Tests`（6 条）、`ReducerTests.test020_*`（6 条）+ 覆盖表 20 行、CommandBusTests 合法 / 非法各 6 条、CommandCatalogTests 字段描述。
+界面 / 快捷键 / 兼容层 / Stream Deck 归 100；SwitcherRender 没动一个字节。

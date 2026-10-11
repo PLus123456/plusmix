@@ -23,6 +23,15 @@ public enum CommandValidator {
             return nil
         case .setPreview(let input), .setProgram(let input):
             return inputReference(input, in: s)
+        case .setTransitionSlot(let slot, let config):
+            // 提案 020：槽号与 Stinger 引用入口就拒；"进行中"由 reducer 定（它进行中也收）
+            if !TransitionSlot.indexRange.contains(slot) { return "转场槽必须是 1…\(TransitionSlot.count)：\(slot)" }
+            if let input = config.stinger.input, s.input(input) == nil { return "Stinger 用的输入 \(input) 不存在" }
+            return nil
+        case .useTransitionSlot(let slot, _):
+            return TransitionSlot.indexRange.contains(slot) ? nil : "转场槽必须是 1…\(TransitionSlot.count)：\(slot)"
+        case .setFTBDuration(let ticks):
+            return ticks < 0 ? "FTB 时长不能为负：\(ticks)" : nil
         case .overlay(let channel, _, let input):
             if let r = overlayChannel(channel) { return r }
             if let input, s.input(input) == nil { return "输入 \(input) 不存在" }
@@ -30,8 +39,14 @@ public enum CommandValidator {
         case .setOverlay(let channel, _, _), .setOverlayDecoration(let channel, _, _, _):
             return overlayChannel(channel)
         case .audioGain(let input, _), .mute(let input, _), .setInputSettings(let input, _), .renameInput(let input, _),
-             .removeInput(let input), .setInputSource(let input, _):
+             .removeInput(let input), .setInputSource(let input, _), .setInputAudio(let input, _, _, _), .setInputColor(let input, _):
             return s.input(input) == nil ? "输入 \(input) 不存在" : nil
+        case .setPlayback(let input, _):
+            return fileInputReference(input, in: s)
+        case .seekPlayback(let input, let seconds):
+            // 提案 021：只对文件输入；秒数负 / 非有限入口就拒
+            if let r = fileInputReference(input, in: s) { return r }
+            return seconds.isFinite && seconds >= 0 ? nil : "定位秒数必须是 ≥ 0 的有限数：\(seconds)"
         case .busGain(let bus, _), .busMute(let bus, _), .setBusEffects(let bus, _):
             return s.audio.buses.contains { $0.bus == bus } ? nil : "总线 \(bus) 不存在"
         case .setMonitorMode:
@@ -61,9 +76,15 @@ public enum CommandValidator {
             default: return nil
             }
         case .loadShow(let show):
-            do { try show.makeState().validate() } catch { return "节目文件不合法：\(error)" }
+            // 先搬迁再 validate（提案 020）：020 之前的节目没有 slots，裸状态 validate 不过；reducer 也是先搬迁，两边判得一致
+            do { try show.migratingLegacyKeys().makeState().validate() } catch { return "节目文件不合法：\(error)" }
             return nil
         }
+    }
+
+    private static func fileInputReference(_ number: Int, in s: MixerState) -> String? {
+        guard let input = s.input(number) else { return "输入 \(number) 不存在" }
+        return input.kind == .file ? nil : "输入 \(number)「\(input.name)」不是文件输入（\(input.kind)）"
     }
 
     private static func inputReference(_ number: Int, in s: MixerState) -> String? {

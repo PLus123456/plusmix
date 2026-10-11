@@ -3,10 +3,10 @@ import XCTest
 import SwitcherContracts
 @testable import SwitcherControl
 
-/// 命令目录：35 个 case 一个不少、JSON 顶层键就是 case 名、docs/api.md 与生成器同步。
+/// 命令目录：42 个 case 一个不少、JSON 顶层键就是 case 名、docs/api.md 与生成器同步。
 final class CommandCatalogTests: XCTestCase {
     func testCatalog_coversEveryCommandCase_andWireKeyIsCaseName() throws {
-        XCTAssertEqual(CommandKind.allCases.count, 35, "契约 Command 有 35 个 case（CONTRACTS.md §2.6；P3 按提案 010 / 012 从 27 加到 33，提案 016 加 setTransitionParams，提案 026 加 setMonitorSource）")
+        XCTAssertEqual(CommandKind.allCases.count, 42, "契约 Command 有 42 个 case（CONTRACTS.md §2.6；P3 按提案 010 / 012 从 27 加到 33，提案 016 加 setTransitionParams，提案 026 加 setMonitorSource，P5-2 按 020 / 021 / 023 加 7 条）")
         for kind in CommandKind.allCases {
             let doc = CommandCatalog.entry(for: kind)
             XCTAssertEqual(CommandKind(of: doc.example), kind, "\(kind) 的样例不是它自己")
@@ -51,6 +51,19 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(CommandCatalog.entry(for: .busMute).fields, [CommandField(name: "bus", type: .bus), CommandField(name: "on", type: .onOff)])
         XCTAssertEqual(CommandCatalog.entry(for: .audioGain).fields.last?.type, .decibels(min: -96, max: 24))
         XCTAssertEqual(CommandCatalog.entry(for: .setMonitorMode).fields, [CommandField(name: "mode", type: .choice(["afl", "pfl"]))])
+        // P5-2：提案 020 / 021 / 023 的七条
+        XCTAssertEqual(CommandCatalog.entry(for: .useTransitionSlot).fields, [CommandField(name: "slot", type: .transitionSlot), CommandField(name: "start", type: .onOff)])
+        XCTAssertEqual(CommandCatalog.entry(for: .setTransitionSlot).fields, [CommandField(name: "slot", type: .transitionSlot), CommandField(name: "config", type: .json("TransitionSlot"))])
+        XCTAssertFalse(CommandKind.setTransitionSlot.operatorFacing, "config 是结构体 → 高级：手写 JSON")
+        XCTAssertEqual(CommandCatalog.entry(for: .setFTBDuration).fields, [CommandField(name: "ticks", type: .durationTicks)])
+        XCTAssertEqual(CommandCatalog.entry(for: .setPlayback).fields, [CommandField(name: "input", type: .input(allowsBlack: false)), CommandField(name: "paused", type: .onOff)])
+        XCTAssertEqual(CommandCatalog.entry(for: .seekPlayback).fields, [CommandField(name: "input", type: .input(allowsBlack: false)), CommandField(name: "seconds", type: .seconds)])
+        XCTAssertEqual(CommandCatalog.entry(for: .setInputAudio).fields,
+                       [CommandField(name: "input", type: .input(allowsBlack: false)), CommandField(name: "solo", type: .onOff, optional: true),
+                        CommandField(name: "afv", type: .onOff, optional: true), CommandField(name: "routing", type: .busRouting, optional: true)])
+        XCTAssertEqual(CommandCatalog.entry(for: .setInputColor).fields,
+                       [CommandField(name: "input", type: .input(allowsBlack: false)), CommandField(name: "color", type: .choice(InputColor.allCases.map(\.rawValue)), optional: true)])
+        XCTAssertTrue([CommandKind.useTransitionSlot, .setFTBDuration, .setPlayback, .seekPlayback, .setInputAudio, .setInputColor].allSatisfy { $0.operatorFacing })
     }
 
     func testCatalog_generatedMarkdownMatchesCommittedDocsApiMd() throws {

@@ -831,12 +831,12 @@ final class OutputRuntime {
             case .record:
                 let directory = output.settings.record?.directory ?? ShowDocuments.defaultRecordDirectory
                 if let e = recorders[n] { sources.append((n, .recorder(e.recorder))) }
-                else if failed[n] != nil, output.enabled { sources.append((n, .failed(directory: directory))) }   // 起不来：报 failed（W5-B，原来报 idle / 录制器的 idle）
+                else if let why = failed[n], output.enabled { sources.append((n, .failed(directory: directory, reason: why))) }   // 起不来：报 failed（W5-B，原来报 idle / 录制器的 idle）；原因进 last_error（022）
                 else if let r = finishedRecorders[n] { sources.append((n, .recorder(r))) }
                 else { sources.append((n, .idleRecord(directory: directory))) }
             case .stream:
                 if let e = streams[n] { sources.append((n, .stream(e.stream))) }
-                else if failed[n] != nil, output.enabled { sources.append((n, .failed(directory: nil))) }   // 起不来：报 failed（原来报 idle，按钮显示"推流 · idle"）
+                else if let why = failed[n], output.enabled { sources.append((n, .failed(directory: nil, reason: why))) }   // 起不来：报 failed（原来报 idle，按钮显示"推流 · idle"）；原因进 last_error（022）
                 else if let s = finishedStreams[n] { sources.append((n, .stream(s))) }
                 else { sources.append((n, .idle)) }
             case .ndi:
@@ -875,8 +875,8 @@ final class EncoderStatsSource: @unchecked Sendable {
         case ndi(NDISender)
         case idleRecord(directory: String)
         case idle
-        /// 起不来的录制 / 推流（enabled 仍为真）：state = failed；录制带目录（报所在卷的剩余）。
-        case failed(directory: String?)
+        /// 起不来的录制 / 推流（enabled 仍为真）：state = failed；录制带目录（报所在卷的剩余）；reason 进 last_error（提案 022）。
+        case failed(directory: String?, reason: String?)
     }
 
     private struct Slot {
@@ -937,9 +937,9 @@ final class EncoderStatsSource: @unchecked Sendable {
                     out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, diskFreeMb: Double(free) / 1_048_576, state: "idle"))
                 case .idle:
                     out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, state: "idle"))
-                case .failed(let directory):
+                case .failed(let directory, let reason):
                     let free = directory.map { Double(DiskGuard.freeBytes(for: URL(fileURLWithPath: $0, isDirectory: true))) / 1_048_576 } ?? 0
-                    out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, diskFreeMb: free, state: "failed"))
+                    out.append(Stats.EncoderEntry(output: list[i].output, skipped: 0, bitrate: 0, diskFreeMb: free, state: "failed", lastError: reason ?? ""))
                 }
                 list[i].at = now
             }

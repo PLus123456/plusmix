@@ -53,7 +53,7 @@ final class StatsP2Tests: XCTestCase {
         XCTAssertEqual(Set(audio.keys), Set(Stats.AudioCounters.jsonKeys))
         let meters = try XCTUnwrap(audio["meters"] as? [String: Any])
         XCTAssertEqual(Set(meters.keys), Set(Stats.AudioCounters.Meters.jsonKeys))
-        XCTAssertEqual(line, #"{"audio":{"discontinuities":0,"dropouts":0,"meters":{"buses":[],"inputs":{}},"underruns":1},"cpu_pct":1,"display":[],"encoder":[{"bitrate":6000000,"connections":0,"disk_free_mb":0,"dropped":0,"frames":0,"output":0,"reconnects":0,"skipped":2,"state":"idle"}],"gpu_pct":0,"jitter_ms":0,"missed_render":0,"per_input":{"1":{"drop":0,"dup":3,"fps":30,"latency_max_ms":0,"latency_ms":0}},"render_ms":1,"rss_mb":1,"tick":1,"ts":1}"#)
+        XCTAssertEqual(line, #"{"audio":{"discontinuities":0,"dropouts":0,"meters":{"buses":[],"inputs":{}},"underruns":1},"cpu_pct":1,"display":[],"encoder":[{"attempt":0,"bitrate":6000000,"connections":0,"disconnects":0,"disk_free_mb":0,"dropped":0,"frames":0,"last_error":"","output":0,"reconnects":0,"skipped":2,"state":"idle","uptime_s":0}],"gpu_pct":0,"jitter_ms":0,"missed_render":0,"per_input":{"1":{"drop":0,"dup":3,"fps":30,"latency_max_ms":0,"latency_ms":0}},"render_ms":1,"rss_mb":1,"tick":1,"ts":1,"video_delay_ms":0}"#)
     }
 
     /// 表读数的嵌套形态（提案 004 逐字）：bus meter / input meter 的键名、inputs 以输入编号为键、Bus.name、dB 换算的下限。

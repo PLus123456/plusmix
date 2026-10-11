@@ -60,7 +60,7 @@ public final class EngineCounters: @unchecked Sendable {
         return v == Int64.min ? nil : Tick(v)
     }
     /// 当前视频延后（最近派发的那一帧的 Lₙ = tickTime − 拍点；W1-B4，提案 028）。运行量：界面 / API 要看就读它；
-    /// 进 Stats 是提案 022 顺带的顶层 `video_delay_ms`（P5 开字段之后在 `StatsAssembler.make` 里填 `videoDelayMs` 这一个数）。
+    /// 进 Stats 是提案 022 顺带的顶层 `video_delay_ms`（P5-2 开了字段，`StatsAssembler.make` 填 `videoDelayMs` 这一个数）。
     public var videoDelayApplied: HostDuration { HostDuration(ticks: videoDelayAppliedTicksValue.load(ordering: .acquiring)) }
     /// 同上，毫秒。
     public var videoDelayMs: Double { videoDelayApplied.milliseconds }
@@ -207,6 +207,7 @@ final class StatsAssembler: @unchecked Sendable {
                      rssMb: ProcessMetrics.residentMB(),
                      cpuPct: cpuPct,
                      gpuPct: gpuPct,   // GPU 占用没有公开 API（powermetrics 要 root），由外部 provider 灌入，否则 0
-                     display: display) // 提案 013：显示类输出，组装方（App）供数，headless 没有就是空数组
+                     display: display, // 提案 013：显示类输出，组装方（App）供数，headless 没有就是空数组
+                     videoDelayMs: counters.videoDelayMs)   // 提案 022 B2 / 028：当前视频延后（W1-B4）
     }
 }

@@ -65,7 +65,8 @@ enum AudioOutputChoice {
 }
 
 /// 把录制器的计数变成 Stats.encoder 的项（每个录制器一项，顺序 = 传入顺序：PGM 录制器在前、ISO 录制器在后）：
-/// skipped / frames / dropped / disk_free_mb / state 按提案 001 / 002 由 `RecorderCounters.statsEntry` 填，bitrate 按上次采样以来的窗口算。
+/// skipped / frames / dropped / disk_free_mb / state 按提案 001 / 002 由 `RecorderCounters.statsEntry` 填，bitrate 按上次采样以来的窗口算；
+/// 022 的 uptime_s / last_error / disconnects / attempt 由各自的 statsEntry 带出来（录制器计数里带、推流由 StreamOutput 填、NDI 由计数快照带），这里透传。
 /// 只在 Stats 采样线程上被调。
 final class EncoderStatsSource: @unchecked Sendable {
     private let recorders: [Recorder]
@@ -124,8 +125,8 @@ final class EncoderStatsSource: @unchecked Sendable {
             }
             for (i, stream) in streams.enumerated() {
                 let window = previous[i].map { max((now - $0.at).seconds, 1e-3) } ?? 1
-                entries.append(snapshots[i].statsEntry(previous: previous[i]?.counters, windowSeconds: window,
-                                                        encoderSkipped: stream.videoEncoder.counters.skipped, output: streamOutputs[i]))
+                // 022：uptime_s / last_error 只有 StreamOutput 知道，用同一份快照算（快照也当下一窗口的起点）
+                entries.append(stream.statsEntry(counters: snapshots[i], previous: previous[i]?.counters, windowSeconds: window, output: streamOutputs[i]))
             }
         }
         return entries

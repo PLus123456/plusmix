@@ -13,9 +13,14 @@ import SwitcherContracts
 // preview 并回到空闲。Cut 是原子换号，没有中间态。T-bar：progress = 推杆位置，≥ 1 提交。
 //
 // 转场进行中（`TransitionState.isActive` = progress > 0 || startTick != nil：auto 从应用命令那一拍到对调前一拍，T-bar 推杆在 (0, 1)，
-// 拉回 0 = 取消、不算）拒收 fade / setTransition / setTransitionParams / autoTransition / setPreview / setProgram，原样返回（回执 applied = false）；
-// cut（立即完成）与 tbar（接管）照收。setPreview / setProgram 是 W5-E 按 Q66 (a) 加的：渲染器转场中按当前的 program 画底、按当前的
+// 拉回 0 = 取消、不算）拒收 fade / setTransition / setTransitionParams / autoTransition / setPreview / setProgram / useTransitionSlot，原样返回（回执 applied = false）；
+// cut（立即完成）与 tbar（接管）照收；setTransitionSlot 进行中也收（只改槽）。setPreview / setProgram 是 W5-E 按 Q66 (a) 加的：渲染器转场中按当前的 program 画底、按当前的
 // preview 画切进来的画面，中途换掉就是 PGM 上的跳变。
+//
+// 转场槽（提案 020，P5-2）：`completeTransition` 在 currentSlot 非 nil 时总是把当前那组按槽重拷（幂等）——进行中改了当前槽的，完成那一拍生效；
+// fade / setTransition / setTransitionParams 执行后 currentSlot = 当前那组仍对得上的槽（优先原来那个），对不上任何槽 → nil。
+// 文件播放（提案 021）：reducer 只记状态（paused / 一次定位请求 (seekTick, seekSeconds)），真正的 pause / seek 由组装方交给 FileInput；
+// 新 PGM 那一路若 restartOnProgram，四处换人（cut / auto 完成 / T-bar 提交 / setProgram）在同一拍写定位 0，与手发 seekPlayback(0) 同一条路。
 
 /// `MixerReducing` 的实现。
 public struct MixerReducer: MixerReducing {
@@ -30,7 +35,8 @@ public struct MixerReducer: MixerReducing {
             let d = s.transition.durationTicks
             let k = tick - start
             if d <= 0 || k >= Int64(d) {
-                Self.completeTransition(&s)
+                // 完成拍 = 开始拍 + 时长（不是 advance 的目标拍）：逐拍推进与一步到位得到同一个 seekTick（021）
+                Self.completeTransition(&s, at: d <= 0 ? start : start + d)
             } else {
                 s.transition.progress = k <= 0 ? 0 : Double(k) / Double(d)
             }
@@ -68,11 +74,28 @@ public struct MixerReducer: MixerReducing {
         return tick - k
     }
 
-    static func completeTransition(_ s: inout MixerState) {
+    static func completeTransition(_ s: inout MixerState, at tick: Tick) {
+        let previousProgram = s.program
         swap(&s.program, &s.preview)
         s.transition.progress = 0
         s.transition.startTick = nil
         s.transition.source = .auto
+        // 020：当前那组对应某个槽时按槽重拷（进行中改了当前槽的在这里生效；相同时无感，幂等）
+        if let slot = s.transition.currentSlot { s.transition.select(slot: slot) }
+        // 021：新 PGM 那一路"切上 PGM 时从头播"
+        if s.program != previousProgram { Self.restartIfNeeded(&s, input: s.program, at: tick) }
+    }
+
+    /// 021：这一路是文件输入且 restartOnProgram → 写一次定位 0（seekTick = 这一拍）。别的 kind 照存不读，不碰。
+    private static func restartIfNeeded(_ s: inout MixerState, input: Int, at tick: Tick) {
+        guard let i = inputIndex(input, in: s), s.inputs[i].kind == .file, s.inputs[i].settings.playback.restartOnProgram else { return }
+        s.inputs[i].settings.playback.seekSeconds = 0
+        s.inputs[i].settings.playback.seekTick = tick
+    }
+
+    /// 020：老命令改了当前那组之后，currentSlot = 仍对得上的槽（优先原来那个），对不上 → nil。
+    private static func refreshCurrentSlot(_ s: inout MixerState) {
+        s.transition.currentSlot = s.transition.slotIndexMatchingCurrentGroup(preferring: s.transition.currentSlot)
     }
 
     // MARK: reduce
@@ -82,16 +105,18 @@ public struct MixerReducer: MixerReducing {
         switch command {
         // 切换
         case .cut:
-            Self.completeTransition(&s)
+            Self.completeTransition(&s, at: tick)
         case .fade(let d):
             guard !s.transition.isActive, d >= 0 else { return state }
             s.transition.type = .fade
             s.transition.durationTicks = d
+            Self.refreshCurrentSlot(&s)
             Self.startAuto(&s, at: tick)
         case .setTransition(let type, let d):
             guard !s.transition.isActive, d >= 0 else { return state }
             s.transition.type = type
             s.transition.durationTicks = d
+            Self.refreshCurrentSlot(&s)
         case .setTransitionParams(var wipe, var stinger):
             guard !s.transition.isActive else { return state }
             if let input = stinger.input, !Self.inputExists(input, in: s) { return state }
@@ -99,6 +124,36 @@ public struct MixerReducer: MixerReducing {
             stinger.cutAtTick = max(stinger.cutAtTick, 0)
             s.transition.wipe = wipe
             s.transition.stinger = stinger
+            Self.refreshCurrentSlot(&s)
+        case .setTransitionSlot(let slot, var config):
+            // 020：只改槽，转场进行中也收；钳位与 016 同口径；改的是当前槽且空闲 → 当前那组同时重拷（进行中的在完成那一拍重拷）
+            guard TransitionSlot.indexRange.contains(slot), slot - 1 < s.transition.slots.count else { return state }
+            if let input = config.stinger.input, !Self.inputExists(input, in: s) { return state }
+            config.durationTicks = max(config.durationTicks, 0)
+            config.wipe.softness = min(max(config.wipe.softness, 0), 1)
+            config.stinger.cutAtTick = max(config.stinger.cutAtTick, 0)
+            guard s.transition.slots[slot - 1] != config else { return state }
+            s.transition.slots[slot - 1] = config
+            if s.transition.currentSlot == slot, !s.transition.isActive { s.transition.currentGroup = config }
+        case .useTransitionSlot(let slot, let start):
+            // 020：转场进行中被拒（与 setTransition / autoTransition 同口径）；只选中且已是当前槽、当前那组相同 → 原样
+            guard !s.transition.isActive, TransitionSlot.indexRange.contains(slot), slot - 1 < s.transition.slots.count else { return state }
+            if !start, s.transition.currentSlot == slot, s.transition.currentGroup == s.transition.slots[slot - 1] { return state }
+            s.transition.select(slot: slot)
+            if start { Self.startAuto(&s, at: tick) }
+        case .setFTBDuration(let ticks):
+            // 020：渐变进行中按当前电平对应的起点回拨，电平从当前值按新时长继续走；0 = 立即到位
+            guard ticks >= 0, ticks != s.ftb.durationTicks else { return state }
+            s.ftb.durationTicks = ticks
+            if s.ftb.startTick != nil {
+                if ticks <= 0 {
+                    s.ftb.level = s.ftb.on ? 1 : 0
+                    s.ftb.startTick = nil
+                } else {
+                    s.ftb.startTick = Self.equivalentStart(currentLevel: s.ftb.level, duration: ticks, at: tick, rising: s.ftb.on)
+                    s = advance(s, to: tick)
+                }
+            }
         case .autoTransition:
             guard !s.transition.isActive else { return state }
             Self.startAuto(&s, at: tick)
@@ -107,11 +162,13 @@ public struct MixerReducer: MixerReducing {
             s.preview = input
         case .setProgram(let input):
             guard !s.transition.isActive, Self.isValidReference(input, in: s) else { return state }
+            let previous = s.program
             s.program = input
+            if input != previous { Self.restartIfNeeded(&s, input: input, at: tick) }   // 021
         case .tbar(let progress):
             let p = min(max(progress, 0), 1)
             if p >= 1 {
-                Self.completeTransition(&s)
+                Self.completeTransition(&s, at: tick)
             } else {
                 s.transition.source = .tbar
                 s.transition.progress = p
@@ -182,6 +239,12 @@ public struct MixerReducer: MixerReducing {
         case .setBusEffects(let bus, let effects):
             guard let i = Self.busIndex(bus, in: s) else { return state }
             s.audio.buses[i].effects = effects
+        case .setInputAudio(let input, let solo, let afv, let routing):
+            // 023 五：nil = 不动；全 nil 或全与现状相同 → 状态不变（回执 applied = false）
+            guard let i = Self.inputIndex(input, in: s) else { return state }
+            if let solo { s.inputs[i].settings.audio.solo = solo }
+            if let afv { s.inputs[i].settings.audio.afv = afv }
+            if let routing { s.inputs[i].settings.audio.routing = routing }
 
         // 输出
         case .startRecord(let output):
@@ -227,10 +290,25 @@ public struct MixerReducer: MixerReducing {
             for k in s.overlays.indices where s.overlays[k].input == input { s.overlays[k].input = nil }
             // Stinger 引用与叠加同口径（P4）：留着悬空的话，带着它的 setTransitionParams（App 改 Wipe 参数也带）会被整条拒掉
             if s.transition.stinger.input == input { s.transition.stinger.input = nil }
+            // 020：四个槽里的 Stinger 引用同样清
+            for k in s.transition.slots.indices where s.transition.slots[k].stinger.input == input { s.transition.slots[k].stinger.input = nil }
         case .setInputSource(let input, let source):
             // 编号 / 名字 / 设置 / PGM / PVW / 叠加引用全部保留；kind 由 source 推出，不另存
             guard let i = Self.inputIndex(input, in: s) else { return state }
             s.inputs[i].source = source
+        case .setPlayback(let input, let paused):
+            // 021：只对文件输入；相同值状态不变
+            guard let i = Self.inputIndex(input, in: s), s.inputs[i].kind == .file else { return state }
+            s.inputs[i].settings.playback.paused = paused
+        case .seekPlayback(let input, let seconds):
+            // 021：一次定位请求 = (seekTick, seekSeconds)；负数 / 非有限与校验器同判、原样返回（setInputSettings 整体带进来的负值才钳 0）；同一拍同一位置再发状态不变
+            guard let i = Self.inputIndex(input, in: s), s.inputs[i].kind == .file, seconds.isFinite, seconds >= 0 else { return state }
+            s.inputs[i].settings.playback.seekSeconds = seconds
+            s.inputs[i].settings.playback.seekTick = tick
+        case .setInputColor(let input, let color):
+            // 023 四：分类颜色；相同值状态不变
+            guard let i = Self.inputIndex(input, in: s) else { return state }
+            s.inputs[i].color = color
 
         // 输出表（进来的设置先按 Show.load 同一套规则搬过渡键（P4）：API 客户端直接带 extra["layout"] 的不会静默变成默认布局）
         case .addOutput(let config):
@@ -259,7 +337,7 @@ public struct MixerReducer: MixerReducing {
 
     private static func startAuto(_ s: inout MixerState, at tick: Tick) {
         if s.transition.type == .cut || s.transition.durationTicks <= 0 {
-            completeTransition(&s)
+            completeTransition(&s, at: tick)
         } else {
             s.transition.source = .auto
             s.transition.progress = 0

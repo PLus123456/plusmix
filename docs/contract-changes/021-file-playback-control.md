@@ -1,7 +1,7 @@
 # 021 文件输入的播放控制：播放 / 暂停 / 定位（从头 = 定位 0）+ 每路"切上 PGM 时从头播"
 
 提出会话 / 分支：P5（prompt 99）/ `p5-contracts`；来源 docs/ui-study/01a 第 5 节候选 3、D5、04 Q11（用户按落地方案 §8.5 默认 (a) v1 最小集）、R8-E3、R7-E4；接线归 prompt 101（W5-N）
-状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + reducer + 校验器 + 目录 / api.md；FileInput 接线、格子按钮、就地改结束动作归 101）
+状态：**已落地**（P5-2 / prompt 108，2026-10-11，提交 51e614e；文字 9ecc22a）。原状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + reducer + 校验器 + 目录 / api.md；FileInput 接线、格子按钮、就地改结束动作归 101）
 
 ## 改什么
 
@@ -73,3 +73,17 @@ CONTRACTS.md §2.4（InputSettings 行、PlaybackSettings 一段）、§2.6（�
 1. 两条命令（`setPlayback` / `seekPlayback`）而不是四条——可接受？
 2. `restartOnProgram` 作为可选每路字段要不要带（Q11 (a) 里的"+ 可选每路'切上 PGM 时从头播'开关"）；带的话按 B 的规则由 reducer 在换人那一拍写定位。
 3. "设循环"不加命令、走 `setInputSource`（101 做就地改）——可接受？
+
+## 落地记录（P5-2 / prompt 108，2026-10-11，提交 51e614e）
+
+按 A / B / C / D 落了，三个"请用户定的点"全按默认（两条命令、带 restartOnProgram、循环走 setInputSource）。与提案正文不同的一处：
+
+- **`seekPlayback` 的负秒数 reducer 不钳 0、而是原样返回**（提案 B 表写 `max(0, seconds)`）：校验器拒负数 / 非有限（HTTP 400），而 `CommandBusTests.testValidator_agreesWithReducer` 钉死"校验器拒的 reducer 一定原样返回"，
+  两边要一致；`InputSettings.clamped()` 对 `setInputSettings` 整体带进来的负 seekSeconds 仍钳 0。
+
+其余逐条：`PlaybackSettings{paused, restartOnProgram, seekSeconds?, seekTick?}`（显式 `init(from:)` 缺键默认、`{}` 合法、nil 不写键、`jsonKeys`）；`InputSettings.playback`（显式 `init(from:)` 缺键默认、`jsonKeys`、`clamped()` 钳 seekSeconds ≥ 0）；
+`MixerState.resetTransientState()` 清每路的 seekSeconds / seekTick（makeState 载入节目时走它）；`setPlayback` / `seekPlayback`（kind != file 校验器拒、reducer 同判）；
+reducer 在四处 PGM 换人写定位 0：cut / `setProgram`（换成它那一拍）/ T-bar 提交（那一拍）/ auto 完成（**开始拍 + 时长**，不是 advance 的目标拍，逐拍推进与一步到位得到同一个 seekTick）；换走的那一路、PGM 没变、PVW 预览不写；
+目录两条（`CommandFieldType.seconds` = 秒输入框、不按帧率换算）→ docs/api.md；CONTRACTS.md §2.4 一段 / §2.6 / §8。
+用例：`Contracts021Tests`（3 条）、`ReducerTests.test021_restartOnProgram_writesSeekZeroWhenInputLandsOnProgram` + 覆盖表 10 行、CommandBusTests 合法 3 / 非法 6。
+FileInput 接线、格子按钮、就地改结束动作归 101；Hotkeys / MIDI 动作归 100 之后；VMixCompat 的 PlayPause 一族归兼容层会话。

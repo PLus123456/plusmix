@@ -65,11 +65,13 @@ public struct StreamCounters: Hashable, Sendable {
     /// 生成 Stats.encoder 的一项：skipped 用本路编码器的 E1 计数，bitrate 由与上一次快照的发送字节差算；
     /// 提案 001 + 002（P2 落地）：frames = framesSent、dropped = networkDropped（E9）、reconnects = reconnects、state = state.name、disk_free_mb = 0。
     /// output = 这路推流在 MixerState.outputs 里的编号（提案 019；组装方给，不给 = 0）；connections 推流写 0。
+    /// 提案 022：disconnects = 本结构的 disconnects；attempt = 这一轮第几次尝试（connecting(n) = n，backoff 期间 = 即将进行的那一次 = failures + 1，与 App 底栏的读法一致；在推 / 空闲 / 停止 / failed = 0）。
     public func statsEntry(previous: StreamCounters?, windowSeconds: Double, encoderSkipped: UInt64, output: Int = 0) -> Stats.EncoderEntry {
         let delta = bytesSent &- (previous?.bytesSent ?? 0)
         let bitrate = windowSeconds > 0 ? Double(delta) * 8 / windowSeconds : 0
+        let attempt: Int = { switch state { case .connecting(let a): return a; case .backoff(let a, _): return a + 1; default: return 0 } }()
         return Stats.EncoderEntry(output: output, skipped: encoderSkipped, bitrate: bitrate, frames: framesSent, dropped: networkDropped, diskFreeMb: 0,
-                                  reconnects: reconnects, state: state.name)
+                                  reconnects: reconnects, state: state.name, disconnects: disconnects, attempt: attempt)
     }
 }
 

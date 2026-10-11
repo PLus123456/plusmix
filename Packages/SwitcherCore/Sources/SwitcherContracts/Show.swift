@@ -120,7 +120,7 @@ public struct Show: Hashable, Codable, Sendable {
         return try migrate(from: try fileDecoder.decode(JSONValue.self, from: data), schemaVersion: version)
     }
 
-    /// 过渡键 → 正式字段的一次性搬迁（提案 010 / 013；`schemaVersion` 不升，全部字段带默认值），顺带清掉老版本留下的死数据（P4）。
+    /// 过渡键 → 正式字段的一次性搬迁（提案 010 / 013；`schemaVersion` 不升，全部字段带默认值），顺带清掉老版本留下的死数据（P4）；020 的转场槽补齐也在这里。
     /// 幂等：正式字段已经有值的不动；搬完清掉旧键，写出只写正式字段。放在这里是为了 App / headless / 测试读同一份；
     /// 状态机对 loadShow（整份）与 addOutput / setOutputSettings（`OutputSettings.migratingLegacyKeys()`）进来的数据也先搬（P4），
     /// 所以状态机里的状态不会再有输出的过渡键；setInputSettings / addInput 带进来的 border 格不搬（没有叠加通道的上下文），存盘再读时清掉。
@@ -147,6 +147,38 @@ public struct Show: Hashable, Codable, Sendable {
         }
         if let n = show.mixer.transition.stinger.input, !show.inputs.contains(where: { $0.number == n }) {
             show.mixer.transition.stinger.input = nil
+        }
+        // 转场槽（提案 020）：020 之前的文件没有 slots → 按节目帧率补出厂四槽，槽 1 换成文件里原来那组（原来是 cut 的槽 1 用 Fade 0.5 s）；
+        // currentSlot = 当前那组对得上的槽（原来那组进了槽 1 就是 1；cut 对不上任何槽 → nil，当前那组仍是 cut，行为不变）。
+        // 有 slots 没 currentSlot 的照 nil。四个槽里指向不存在输入的 stinger.input 置 nil（P4 清当前那组悬空引用的规则扩到槽）。幂等。
+        if show.mixer.transition.slots.isEmpty {
+            var slots = TransitionSlot.factoryDefaults(for: show.mixer.format)
+            let group = show.mixer.transition.currentGroup
+            if group.type != .cut { slots[0] = group }
+            show.mixer.transition.slots = slots
+            show.mixer.transition.currentSlot = show.mixer.transition.slotIndexMatchingCurrentGroup()
+        }
+        for k in show.mixer.transition.slots.indices {
+            if let n = show.mixer.transition.slots[k].stinger.input, !show.inputs.contains(where: { $0.number == n }) {
+                show.mixer.transition.slots[k].stinger.input = nil
+            }
+        }
+        return show
+    }
+
+    /// 提案 023 第四节：W5-H 存在 `layout["inputCategories"]`（`{"<输入编号>": "<颜色>"}`）里的分类 → 各路 `InputConfig.color`。
+    /// 有键按原值搬（认不出的颜色 / 不存在的编号跳过；正式字段已有值的不动），搬完删键；名字键 `inputCategoryNames` 留在 layout（(a)，契约不解释）；幂等。
+    /// **不在 `migratingLegacyKeys()` 里自动调**（与 025 同一做法）：现在的 App 还在读写 layout 键，并进去会在 App 切换之前把分类清掉；
+    /// App 切换时在 Show.load 后调一次、读写切到字段（归 100 之后的 App 会话或 G8 胶水），之后可以并进 `migratingLegacyKeys()`。
+    public func migratingLegacyInputCategories() -> Show {
+        var show = self
+        guard let raw = show.layout.values[InputConfig.legacyCategoriesLayoutKey] else { return show }
+        show.layout.values.removeValue(forKey: InputConfig.legacyCategoriesLayoutKey)
+        guard case .object(let entries) = raw else { return show }
+        for (key, value) in entries {
+            guard let number = Int(key), case .string(let name) = value, let color = InputColor(rawValue: name),
+                  let i = show.inputs.firstIndex(where: { $0.number == number }), show.inputs[i].color == nil else { continue }
+            show.inputs[i].color = color
         }
         return show
     }

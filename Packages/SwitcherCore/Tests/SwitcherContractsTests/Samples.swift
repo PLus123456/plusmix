@@ -11,10 +11,12 @@ enum Samples {
                                       pan: -0.5, delayMs: 120, afv: false)   // 每路 AFV 开关（P3）：非默认值
         s1.effects = [EffectSlot(id: "parametricEQ", enabled: true, params: ["band1Hz": 1000, "band1Gain": -3])]
         s1.keyer = KeyerSettings(enabled: true, keyColor: RGB8(red: 0, green: 255, blue: 0), tolerance: 0.25, softness: 0.1, spillSuppression: 0.4)
+        var s3 = InputSettings()
+        s3.playback = PlaybackSettings(paused: true, restartOnProgram: true, seekSeconds: 1.5, seekTick: Tick(1200))   // 提案 021：非默认值
         return [
-            InputConfig(number: 1, name: "机位 1", source: .camera(uniqueID: "0x1234-uvc"), settings: s1),
+            InputConfig(number: 1, name: "机位 1", source: .camera(uniqueID: "0x1234-uvc"), settings: s1, color: .red),   // 提案 023 四：分类颜色
             InputConfig(number: 2, name: "屏幕", source: .screen(target: .display(id: 1), frameRate: .fps30, captureAudio: true), settings: InputSettings()),
-            InputConfig(number: 3, name: "片头", source: .file(path: "/Movies/intro.mov", endAction: .holdLastFrame, rate: 1), settings: InputSettings()),
+            InputConfig(number: 3, name: "片头", source: .file(path: "/Movies/intro.mov", endAction: .holdLastFrame, rate: 1), settings: s3),
             InputConfig(number: 4, name: "台标", source: .image(path: "/Pictures/logo.png"), settings: InputSettings()),
             InputConfig(number: 5, name: "SDI", source: .decklink(deviceID: "peid:1234567890", connection: .hdmi), settings: InputSettings()),
             InputConfig(number: 6, name: "远端", source: .ndi(sourceName: "STUDIO (Cam A)", bandwidth: .lowest, jitterBufferFrames: 2), settings: InputSettings()),
@@ -68,7 +70,12 @@ enum Samples {
         s.program = 1
         s.preview = 2
         s.transition = TransitionState(type: .wipe, durationTicks: 45, progress: 0.5, source: .auto, startTick: Tick(1000),
-                                       wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12))
+                                       wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12),
+                                       slots: [TransitionSlot(type: .fade, durationTicks: 15),   // 提案 020：非出厂的四槽，当前那组 = 槽 2
+                                               TransitionSlot(type: .wipe, durationTicks: 45, wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12)),
+                                               TransitionSlot(type: .zoom, durationTicks: 20),
+                                               TransitionSlot(type: .stinger, durationTicks: 90, stinger: StingerParams(input: 4, cutAtTick: 30))],
+                                       currentSlot: 2)
         s.ftb = FadeToBlack(on: true, durationTicks: 15, level: 0.4, startTick: Tick(990))
         s.overlays[0] = OverlayState(input: 4, on: true, rect: NormalizedRect(x: 0.05, y: 0.8, width: 0.9, height: 0.15), animProgress: 1,
                                      animation: OverlayAnimation(kind: .slide, durationTicks: 20, slideFrom: .right), startTick: nil,
@@ -87,18 +94,21 @@ enum Samples {
         return show
     }
 
-    /// P2 之后每个新字段都填非默认值（latency、frames / dropped / disk_free_mb / reconnects / state、discontinuities / meters）。
+    /// P2 之后每个新字段都填非默认值（latency、frames / dropped / disk_free_mb / reconnects / state、discontinuities / meters；022 的 uptime_s / disconnects / last_error / video_delay_ms）。
     static func stats() -> Stats {
         Stats(ts: 1_757_690_000.5, tick: Tick(216_000), renderMs: 1.75, missedRender: 0, jitterMs: 0.42,
               perInput: [1: Stats.PerInput(fps: 30, dup: 30, drop: 0, latencyMs: 33.4, latencyMaxMs: 41.7),
                          2: Stats.PerInput(fps: 60, dup: 0, drop: 1, latencyMs: 16.7, latencyMaxMs: 18.2)],
-              encoder: [Stats.EncoderEntry(output: 1, skipped: 0, bitrate: 6_000_000, frames: 215_990, dropped: 0, diskFreeMb: 40_960.5, reconnects: 0, state: "recording"),
-                        Stats.EncoderEntry(output: 2, skipped: 3, bitrate: 2_500_000, frames: 215_000, dropped: 12, diskFreeMb: 0, reconnects: 2, connections: 0, state: "publishing")],
+              encoder: [Stats.EncoderEntry(output: 1, skipped: 0, bitrate: 6_000_000, frames: 215_990, dropped: 0, diskFreeMb: 40_960.5, reconnects: 0, state: "recording",
+                                           uptimeS: 3600.25),
+                        Stats.EncoderEntry(output: 2, skipped: 3, bitrate: 2_500_000, frames: 215_000, dropped: 12, diskFreeMb: 0, reconnects: 2, connections: 0, state: "publishing",
+                                           uptimeS: 3583.5, disconnects: 1, lastError: "stalled")],   // 022：在推时 attempt = 0
               audio: Stats.AudioCounters(dropouts: 0, underruns: 1, discontinuities: 2, meters: meters()),
               rssMb: 512.25, cpuPct: 12.5, gpuPct: 30,
               display: [Stats.DisplayEntry(output: 4, kind: "externalDisplay", frames: 36_000, dropped: 0, state: "presenting"),
                         Stats.DisplayEntry(output: 5, kind: "virtualCamera", frames: 35_900, dropped: 4, undelivered: 1_200, state: "publishing"),
-                        Stats.DisplayEntry(output: 0, kind: "monitor", frames: 21_500, dropped: 1, state: "presenting")])
+                        Stats.DisplayEntry(output: 0, kind: "monitor", frames: 21_500, dropped: 1, state: "presenting")],
+              videoDelayMs: 12.5)
     }
 
     /// 四条总线（顺序 = Bus.allCases）+ 两路输入的表读数；A / B 总线静音（下限 −120）。
@@ -138,6 +148,10 @@ enum Samples {
             .setProgram(input: 3),
             .tbar(progress: 0.75),
             .ftb(on: true),
+            .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: 45, wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 3, cutAtTick: 12))),   // 提案 020
+            .useTransitionSlot(slot: 3, start: true),
+            .useTransitionSlot(slot: 1, start: false),
+            .setFTBDuration(ticks: 15),
             .overlay(channel: 2, on: true, input: 4),
             .overlay(channel: 3, on: false, input: nil),
             .setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .zoom, durationTicks: 12)),
@@ -152,6 +166,8 @@ enum Samples {
             .setMonitorMode(mode: .pfl),
             .setMonitorSource(bus: .busA),   // 提案 026
             .setBusEffects(bus: .busB, effects: [EffectSlot(id: "dynamicsProcessor", enabled: false, params: ["thresholdDb": -12, "expansionRatio": 2])]),
+            .setInputAudio(input: 1, solo: true, afv: false, routing: BusRouting(master: true, busA: true)),   // 提案 023 五
+            .setInputAudio(input: 2),   // 全 nil = 不动
             .startRecord(output: 1),
             .stopRecord(output: 1),
             .startStream(output: 2),
@@ -164,6 +180,10 @@ enum Samples {
             .removeInput(input: 8),
             .setInputSource(input: 6, source: .ndi(sourceName: "STUDIO (Cam B)", bandwidth: .audioOnly, jitterBufferFrames: 0)),
             .setInputSource(input: 5, source: .decklink(deviceID: "peid:42", connection: .opticalSDI)),
+            .setPlayback(input: 3, paused: true),   // 提案 021
+            .seekPlayback(input: 3, seconds: 0),
+            .setInputColor(input: 1, color: .red),   // 提案 023 四
+            .setInputColor(input: 2, color: nil),
             .addOutput(config: outputs()[1]),
             .removeOutput(output: 2),
             .setOutputSettings(output: 1, settings: outputs()[0].settings),
@@ -182,6 +202,9 @@ enum Samples {
         case .setProgram: "setProgram"
         case .tbar: "tbar"
         case .ftb: "ftb"
+        case .setTransitionSlot: "setTransitionSlot"
+        case .useTransitionSlot: "useTransitionSlot"
+        case .setFTBDuration: "setFTBDuration"
         case .overlay: "overlay"
         case .setOverlay: "setOverlay"
         case .setOverlayDecoration: "setOverlayDecoration"
@@ -193,6 +216,7 @@ enum Samples {
         case .setMonitorMode: "setMonitorMode"
         case .setMonitorSource: "setMonitorSource"
         case .setBusEffects: "setBusEffects"
+        case .setInputAudio: "setInputAudio"
         case .startRecord: "startRecord"
         case .stopRecord: "stopRecord"
         case .startStream: "startStream"
@@ -204,11 +228,14 @@ enum Samples {
         case .addInput: "addInput"
         case .removeInput: "removeInput"
         case .setInputSource: "setInputSource"
+        case .setPlayback: "setPlayback"
+        case .seekPlayback: "seekPlayback"
+        case .setInputColor: "setInputColor"
         case .addOutput: "addOutput"
         case .removeOutput: "removeOutput"
         case .setOutputSettings: "setOutputSettings"
         case .loadShow: "loadShow"
         }
     }
-    static let commandCaseCount = 35   // 提案 026：setMonitorSource
+    static let commandCaseCount = 42   // 提案 026：setMonitorSource → 35；P5-2：020（+3）、021（+2）、023 四 / 五（+2）→ 42
 }

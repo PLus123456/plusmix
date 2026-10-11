@@ -67,12 +67,17 @@ public struct RecorderCounters: Hashable, Sendable {
     public var audioFramesDroppedTimeout: UInt64 = 0
     /// 编码器计数。
     public var encoder = EncoderCounters()
+    /// 本次运行时长（秒；提案 022 的 uptime_s）：`Recorder.counters` 按 start 那一刻算，recording / stopping 之外 = 0。
+    public var uptimeSeconds: Double = 0
+    /// 最近一次错误的文案（提案 022 的 last_error）：`State.failed(String)` 的文案，下一次 start 清；空串 = 没出过错。
+    public var lastError: String = ""
     public init() {}
 
     /// Stats.encoder 的一项（提案 001 / 002，P2 落地）：skipped / bitrate 来自编码器计数（`EncoderCounters.statsEntry`）；
     /// frames = videoFrames（写进文件的）；dropped = videoFramesRejected（writer 不接的）；disk_free_mb = diskFreeBytes / 2^20（与 rss_mb 同口径）；
     /// reconnects = 0；state 由录制器给（`Recorder.State.statsName`：idle / recording / stopping / stopped / failed）；
-    /// output = 这路录制在 MixerState.outputs 里的编号（提案 019；组装方给，不给 = 0 = 不知道）。
+    /// output = 这路录制在 MixerState.outputs 里的编号（提案 019；组装方给，不给 = 0 = 不知道）；
+    /// uptime_s / last_error = 本结构的 `uptimeSeconds` / `lastError`（提案 022），disconnects / attempt 录制恒 0。
     public func statsEntry(previous: RecorderCounters?, windowSeconds: Double, state: String, output: Int = 0) -> Stats.EncoderEntry {
         var e = encoder.statsEntry(previous: previous?.encoder, windowSeconds: windowSeconds)
         e.output = output
@@ -81,6 +86,10 @@ public struct RecorderCounters: Hashable, Sendable {
         e.diskFreeMb = Double(diskFreeBytes) / 1_048_576
         e.reconnects = 0
         e.state = state
+        e.uptimeS = uptimeSeconds
+        e.lastError = lastError
+        e.disconnects = 0
+        e.attempt = 0
         return e
     }
 }
