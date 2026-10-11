@@ -12,6 +12,14 @@ enum StreamAddress {
     /// 地址框里代替 userinfo 的记号。
     static let maskToken = "•••"
 
+    enum AuthStyle: Equatable {
+        case adobe
+        case query(userParam: String, passParam: String)
+    }
+    static let defaultQueryUserParam = "user"
+    static let defaultQueryPassParam = "pass"
+    static func queryCredentials(of url: String, userParam: String, passParam: String) -> StreamDestination.Credentials? { nil }
+
     /// scheme 之后、authority 里最后一个 @ 之前的那段（userinfo 原文，含百分号转义）的范围；没有为 nil。
     static func userinfoRange(in url: String) -> Range<String.Index>? {
         guard let schemeEnd = url.range(of: "://") else { return nil }

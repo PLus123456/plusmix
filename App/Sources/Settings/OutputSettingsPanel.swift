@@ -39,6 +39,8 @@ final class OutputSettingsModel: ObservableObject {
     @Published private(set) var failures: [Int: String] = [:]
     @Published private(set) var attempts: [Int: Int] = [:]
     var send: ((Command) -> Void)?
+    /// 打开推流 / 录制状态面板（W5-N；PanelCoordinator 接）。
+    var showOutputStatus: ((OutputStatusModel.Page) -> Void)?
     /// 一路起不来的原因 + 推流正在第几次连接（PanelCoordinator 接到 session 的运行表）。
     var routeDetail: ((Int) -> (failure: String?, attempt: Int?))?
     /// 重试起不来的那几路（session.retryFailedOutputs）。

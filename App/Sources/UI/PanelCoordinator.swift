@@ -23,6 +23,9 @@ final class PanelCoordinator: NSObject {
     private(set) var audioSettingsWindows: [AudioStrip: AudioSettingsWindowController] = [:]
     /// 统计窗（W5-L，底栏"统计"）。
     private(set) var statsWindow: StatsWindowController?
+    /// 推流 / 录制状态面板（W5-N）。
+    let outputStatus = OutputStatusModel()
+    private(set) var outputStatusWindow: OutputStatusWindowController?
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
     private var session: SwitcherSession?
@@ -285,6 +288,9 @@ final class PanelCoordinator: NSObject {
         w.present()
         return w
     }
+
+    @discardableResult
+    func showOutputStatus(_ page: OutputStatusModel.Page) -> OutputStatusWindowController? { nil }
 
     /// 统计窗（只读；已开就置前）。
     @discardableResult

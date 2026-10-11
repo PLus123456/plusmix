@@ -160,6 +160,7 @@ extension OutputSettingsModel {
         let locked: Bool
         let status: String
         let dropped: String
+        var duration: String = "—"
         let directory: String
     }
 
@@ -356,6 +357,13 @@ extension OutputSettingsModel {
     }
 
     // 鉴权（L10）
+
+    func streamAuthStyle(_ number: Int) -> StreamAddress.AuthStyle { .adobe }
+
+    @discardableResult
+    func setStreamAuth(_ number: Int, user: String, password: String, style: StreamAddress.AuthStyle) -> String? {
+        setStreamAuth(number, user: user, password: password)
+    }
 
     func streamCredentials(_ number: Int) -> StreamDestination.Credentials? {
         state.output(number)?.settings.stream.flatMap(StreamAddress.credentials(of:))

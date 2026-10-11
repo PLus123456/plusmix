@@ -268,6 +268,9 @@ final class InputSettingsModel: ObservableObject {
         }
     }
 
+    /// 来源一节的说明。
+    var sourceHint: String { L("inputSettings.source.changeHint") }
+
     /// 表单改回当前来源。
     func revertSource() {
         guard let form = sourceForm else { return }

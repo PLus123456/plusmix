@@ -56,6 +56,8 @@ struct OutputButtonSummary: Equatable {
 
     enum Kind { case record, stream }
 
+    static func durationText(_ seconds: Double) -> String { "" }
+
     static func stream(_ routes: [OutputRouteStatus]) -> OutputButtonSummary { summarize(routes, kind: .stream) }
     static func record(_ routes: [OutputRouteStatus]) -> OutputButtonSummary { summarize(routes, kind: .record) }
 

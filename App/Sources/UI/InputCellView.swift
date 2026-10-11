@@ -37,6 +37,8 @@ final class InputCellView: NSView {
     let transitionButton: NSButton
     let cutButton: NSButton
     let loopButton: NSButton
+    let playButton: NSButton
+    let restartButton: NSButton
     // 第二行
     let overlayButtons: [NSButton]
     let muteButton: NSButton
@@ -80,6 +82,8 @@ final class InputCellView: NSView {
         transitionButton = Self.cellButton(L("cell.transition"))
         cutButton = Self.cellButton(L("cell.cut"))
         loopButton = Self.cellButton(L("cell.loop"))
+        playButton = Self.cellButton("▶")
+        restartButton = Self.cellButton("⟲")
         overlayButtons = (1...MixerState.overlayCount).map { k in
             let b = Self.cellButton("\(k)")
             b.tag = k
