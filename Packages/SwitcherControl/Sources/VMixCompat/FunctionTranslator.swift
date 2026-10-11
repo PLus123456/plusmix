@@ -20,11 +20,43 @@ public enum FunctionTranslator {
         let ctx = Context(request: request, state: state, frameRate: frameRate, configuration: configuration)
         let n = request.name.lowercased()
 
+        // ---- 转场槽（提案 020，W5-M）：Transition1–4 = 执行转场 n；SetTransitionEffect1–4 / SetTransitionDuration1–4 = 改转场 n 的效果 / 时长 ----
+        if let slot = Self.slotNumber(n, prefix: "transition") {
+            return FunctionPlan(name: "Transition\(slot)", commands: [.useTransitionSlot(slot: slot, start: true)])
+        }
+        if let slot = Self.slotNumber(n, prefix: "settransitioneffect") {
+            let name = "SetTransitionEffect\(slot)"
+            let value = try ctx.required("Value")
+            guard let type = Self.transitionType(named: value) else {
+                if FunctionCatalog.upstreamTransitionEffects.contains(where: { $0.lowercased() == value.lowercased() }) {
+                    throw CompatError(code: .notImplemented, message: "\(name): transition effect \(value) is not implemented (Cut, Fade, Wipe, Zoom, Stinger)")
+                }
+                throw CompatError(code: .badParameter, message: "\(name): unknown effect \(value) (Cut, Fade, Wipe, Zoom, Stinger)")
+            }
+            var config = try ctx.slot(slot, function: name)
+            config.type = type
+            return FunctionPlan(name: name, commands: [.setTransitionSlot(slot: slot, config: config)])
+        }
+        if let slot = Self.slotNumber(n, prefix: "settransitionduration") {
+            let name = "SetTransitionDuration\(slot)"
+            let ticks = try ctx.durationTicks(parameter: "Value")
+            var config = try ctx.slot(slot, function: name)
+            config.durationTicks = ticks
+            return FunctionPlan(name: name, commands: [.setTransitionSlot(slot: slot, config: config)])
+        }
+
         // ---- 切换 ----
         switch n {
         case "cut":
             var commands: [Command] = []
-            if let input = try ctx.optionalInput() { commands.append(.setPreview(input: input)) }
+            if let input = try ctx.optionalInput() {
+                // 转场进行中（T-bar 推到一半也算）：setPreview 会被拒、cut 会把正在进行的那次做完，PGM 落不到点名的这一路——整条不发、直接回错误
+                // （问题单 W5E-w3-control2-compat-cut-input-mid-transition 的 (a)，W5-M 定）。不带 Input 的 Cut 照旧把当前转场做完。
+                guard !state.transition.isActive else {
+                    throw CompatError(code: .notConfigured, message: "Cut: a transition is in progress; Cut with Input= is refused until it finishes (Cut without Input completes it)")
+                }
+                commands.append(.setPreview(input: input))
+            }
             commands.append(.cut)
             return FunctionPlan(name: "Cut", commands: commands)
         case "fade", "wipe", "zoom":
@@ -40,24 +72,15 @@ public enum FunctionTranslator {
             }
             return FunctionPlan(name: n.capitalized, commands: commands)
         case "stinger1":
+            // 槽落地后 Stinger 输入设在槽里（转场列 ▾ 菜单）：执行第一个选了输入的 Stinger 槽；没有这种槽时照旧用当前那组的 stinger 输入
+            // （API 的 setTransitionParams 设的）。都没有 = 没配好。
+            if let index = state.transition.slots.firstIndex(where: { $0.type == .stinger && $0.stinger.input != nil }) {
+                return FunctionPlan(name: "Stinger1", commands: [.useTransitionSlot(slot: index + 1, start: true)])
+            }
             guard state.transition.stinger.input != nil else {
                 throw CompatError(code: .notConfigured, message: "Stinger1: no stinger input is configured")
             }
             return FunctionPlan(name: "Stinger1", commands: [.setTransition(type: .stinger, durationTicks: state.transition.durationTicks), .autoTransition])
-        case "transition1":
-            return FunctionPlan(name: "Transition1", commands: [.autoTransition])
-        case "settransitioneffect1":
-            let value = try ctx.required("Value")
-            guard let type = Self.transitionType(named: value) else {
-                if FunctionCatalog.upstreamTransitionEffects.contains(where: { $0.lowercased() == value.lowercased() }) {
-                    throw CompatError(code: .notImplemented, message: "SetTransitionEffect1: transition effect \(value) is not implemented (Cut, Fade, Wipe, Zoom, Stinger)")
-                }
-                throw CompatError(code: .badParameter, message: "SetTransitionEffect1: unknown effect \(value) (Cut, Fade, Wipe, Zoom, Stinger)")
-            }
-            return FunctionPlan(name: "SetTransitionEffect1", commands: [.setTransition(type: type, durationTicks: state.transition.durationTicks)])
-        case "settransitionduration1":
-            let ticks = try ctx.durationTicks(parameter: "Value")
-            return FunctionPlan(name: "SetTransitionDuration1", commands: [.setTransition(type: state.transition.type, durationTicks: ticks)])
         case "setfader":
             let v = try ctx.double("Value", range: 0...255)
             return FunctionPlan(name: "SetFader", commands: [.tbar(progress: v / 255)])
@@ -209,6 +232,14 @@ public enum FunctionTranslator {
         }
     }
 
+    /// "transition3" + 前缀 "transition" → 3：前缀后面恰好是 1–4 一位数字才算（别的交给上层判 unknown / notImplemented）。
+    static func slotNumber(_ lowered: String, prefix: String) -> Int? {
+        guard lowered.hasPrefix(prefix) else { return nil }
+        let rest = lowered.dropFirst(prefix.count)
+        guard rest.count == 1, let n = Int(rest), TransitionSlot.indexRange.contains(n) else { return nil }
+        return n
+    }
+
     /// "overlayinput3off" → (3, "off")；数字后面的后缀可以为空。数字不合法给 nil（交给上层判 unknown / notImplemented）。
     static func overlayParts(_ lowered: String) -> (Int, String)? {
         let rest = lowered.dropFirst("overlayinput".count)
@@ -268,6 +299,14 @@ public enum FunctionTranslator {
                 throw CompatError(code: .badParameter, message: "\(request.name): missing parameter \(key)")
             }
             return Int((ms / 1000 * frameRate.framesPerSecond.doubleValue).rounded())
+        }
+
+        /// 转场 n 现在的配置（节目文件 / 状态机保证恰好 4 个槽；万一缺了回 NotConfigured）。
+        func slot(_ index: Int, function: String) throws(CompatError) -> TransitionSlot {
+            guard index - 1 < state.transition.slots.count else {
+                throw CompatError(code: .notConfigured, message: "\(function): transition \(index) does not exist in this show")
+            }
+            return state.transition.slots[index - 1]
         }
 
         func recordOutput() throws(CompatError) -> OutputState {

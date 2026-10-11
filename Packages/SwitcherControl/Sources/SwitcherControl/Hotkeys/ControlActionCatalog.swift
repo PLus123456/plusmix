@@ -61,7 +61,7 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
         case .busRoute: return [input, CommandField(name: "bus", type: .bus), mode]
         case .busMuteSwitch: return [CommandField(name: "bus", type: .bus), mode]
         case .ui: return [CommandField(name: "name", type: .text)]
-        case .transitionSlot, .selectTransitionSlot: return []   // 红灯轮的桩
+        case .transitionSlot, .selectTransitionSlot: return [CommandField(name: "slot", type: .transitionSlot)]
         }
     }
 
@@ -81,7 +81,7 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
         case .inputAFV, .busRoute, .solo: [.setInputSettings]
         case .busMuteSwitch: [.busMute]
         case .ui: []
-        case .transitionSlot, .selectTransitionSlot: []   // 红灯轮的桩
+        case .transitionSlot, .selectTransitionSlot: [.useTransitionSlot]
         }
     }
 
@@ -89,12 +89,11 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
     public var group: String {
         switch self {
         case .command: "命令"
-        case .toggleFTB, .fadeMs, .previewAndTransition: "切换"
+        case .toggleFTB, .fadeMs, .previewAndTransition, .transitionSlot, .selectTransitionSlot: "切换"
         case .toggleOverlay, .overlayInput, .overlaysOff: "叠加"
         case .toggleMute, .toggleAFV, .inputAFV, .busRoute, .solo, .busMuteSwitch: "音频"
         case .toggleRecord, .toggleStream, .recordAll, .recordISO, .streamAll, .outputSwitch, .outputKindSwitch: "输出"
         case .ui: "界面"
-        case .transitionSlot, .selectTransitionSlot: ""   // 红灯轮的桩
         }
     }
 }
