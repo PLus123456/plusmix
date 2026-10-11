@@ -12,7 +12,7 @@ final class HonestUITests: XCTestCase {
 
     func testUI_effectChainMarkedNotEffectiveUntilSupported() throws {
         XCTAssertTrue(AudioEffectsSupport.busEffectsApplied, "总线效果 W5-C（88）已接进混音器；G6 合并时翻（W5-C 报告 §5 第 8 条）")
-        XCTAssertFalse(AudioEffectsSupport.inputEffectsApplied, "每路效果还没接（102 接上时翻）")
+        XCTAssertTrue(AudioEffectsSupport.inputEffectsApplied, "每路效果 W1-D3（102）已接进混音器；G8b 合并时翻（reports/w1-audio-3.md §1.4）")
         // 总线条"效果 (n)"：没接上时计数不亮
         XCTAssertEqual(MixerModel.busEffectsButtonTitle(count: 2, applied: false), "效果")
         XCTAssertEqual(MixerModel.busEffectsButtonTitle(count: 2, applied: true), "效果 (2)", "接上之后照常显示计数")
@@ -31,7 +31,7 @@ final class HonestUITests: XCTestCase {
         let w = try XCTUnwrap(AppTest.controller.panels.showInputSettings(input: 1))
         defer { AppTest.controller.panels.closeAll() }
         XCTAssertEqual(InputSettingsModel.Section.effects.title, "音频效果")
-        XCTAssertEqual(w.model.effectsBanner, "效果尚未作用到声音（本版本）")
+        XCTAssertNil(w.model.effectsBanner, "每路效果已接（102）：输入设置的效果页不再有横幅")
 
         // 对外文字按实情：不再说"停用的格旁路"（引擎根本不读效果链）
         for lang in ["zh-Hans", "en"] {

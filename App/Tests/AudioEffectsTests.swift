@@ -10,7 +10,7 @@ final class AudioEffectsTests: XCTestCase {
 
     func testAudioEffects_busEffectsAppliedInputEffectsNotYet() {
         XCTAssertTrue(AudioEffectsSupport.busEffectsApplied, "W5-C 接好了四条总线的效果链")
-        XCTAssertFalse(AudioEffectsSupport.inputEffectsApplied, "每路效果格要动 C 热路径（W1-D3 / prompt 102），之前仍标尚未生效")
+        XCTAssertTrue(AudioEffectsSupport.inputEffectsApplied, "W1-D3（102）接好了每路两格（EQ + 动态，C 热路径）；G8b 合并时翻")
     }
 
     /// 界面上每个滑块的范围 ⊆ 引擎的钳位范围：界面上拖得到的值送进 AU 时不会再被钳（界面值 = AU 值）。

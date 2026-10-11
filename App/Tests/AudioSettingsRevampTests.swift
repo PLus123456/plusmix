@@ -51,7 +51,7 @@ final class AudioSettingsRevampTests: XCTestCase {
         // 输入的窗：没有限幅页；均衡 / 压缩页挂"效果尚未作用到声音"（每路 102 之前）；改动走 setInputSettings
         let wi = try XCTUnwrap(panels.showAudioSettings(.input(1)))
         XCTAssertEqual(wi.model.pages, [.general, .eq, .compressor])
-        XCTAssertEqual(wi.model.effectsBanner, "效果尚未作用到声音（本版本）")
+        XCTAssertNil(wi.model.effectsBanner, "每路效果已接（102）：不挂横幅")
         wi.model.setCompressorEnabled(true)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.effects.contains { $0.id == AudioEffectParams.dynamicsProcessorID } == true })
         XCTAssertEqual(session.state.input(1)?.settings.audio.gainDb, 0, "只换效果链，别的音频设置不动")
