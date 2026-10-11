@@ -25,3 +25,11 @@ HTTP 批量的文档那半归 API 文档的会话（`Packages/SwitcherControl/So
 - (b) 转场中改翻译成 `[cut, setProgram(n)]`：cut 先做完当前转场，setProgram 再硬切到 n（同一拍应用时画面直接是 n；但会多一条 cut 事件，AFV 看到两次切换）；
 - (c) 维持现状，在 docs/api/vmix-compat.md 与 docs/integrations/vmix-compat.md 写明"转场进行中 Cut 带 Input 只会做完当前转场"。
 HTTP 批量那半：APIDocument / docs/api.md 的批量例子旁加一句"转场进行中 setPreview 被拒，看回执"即可。
+
+## 处理结果（W5-M / prompt 100，分支 `w5-transition-slots`，2026-10-11）
+
+三选一定 **(a)**：转场进行中（`state.transition.isActive`，T-bar 推到一半也算）带 `Input=` 的 `Cut` 直接回 `NotConfigured`（HTTP 409，TCP `FUNCTION ER NotConfigured: Cut: a transition is in progress; …`），**一条命令都不发**；不带 Input 的 `Cut` 照旧把当前转场做完；空闲时照旧"先放 PVW 再切"。
+`Input=` 引用不存在的输入仍先报 `InputNotFound`。没选 (b)：多一次 cut 事件、AFV / tally 会看到两次切换，录像里可能闪一帧中间画面；没选 (c)：回 OK 而 PGM 不是点名的那一路，客户端察觉不到。
+`Fade / Wipe / Zoom` 带 Input 在转场中整组被状态机忽略、回 "(no change)"，没有半截执行，维持现状。
+代码：`Packages/SwitcherControl/Sources/VMixCompat/FunctionTranslator.swift`（`case "cut"`）；用例：`FunctionTranslatorTests.testC5_cutWithInputDuringTransitionIsRefused`、`HTTPTests.testC5_http_transitionSlotsAndCutDuringTransition`（Fade 进行中发 `Cut&Input=3` → 409、总线序号不变、Wipe 做完 PGM = 原 PVW）。
+**还剩 HTTP 批量那半**：`Packages/SwitcherControl/Sources/SwitcherControl/API/APIDocument.swift` 与 docs/api.md 的批量例子旁加一句"转场进行中 setPreview 被拒，看回执"——API/ 与 docs/ 都不在 W5-M 的目录，留给下一个碰 API 文档的会话（docs 部分并进 W5M-w4-docs-2-transition-slots-docs.md）。

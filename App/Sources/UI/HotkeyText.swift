@@ -67,7 +67,7 @@ enum HotkeyText {
 enum HotkeyMatch {
     static func cut(_ a: ControlAction) -> Bool { if case .command(.cut) = a { return true }; return false }
     static func fade(_ a: ControlAction) -> Bool { if case .command(.fade) = a { return true }; return false }
-    /// 按已选转场执行（回车的默认绑定）。
+    /// 执行当前转场（= 当前槽；回车的默认绑定）。
     static func auto(_ a: ControlAction) -> Bool { if case .command(.autoTransition) = a { return true }; return false }
     static func ftb(_ a: ControlAction) -> Bool {
         if case .toggleFTB = a { return true }

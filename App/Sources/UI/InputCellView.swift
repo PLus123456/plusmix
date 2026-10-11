@@ -366,7 +366,7 @@ final class InputCellView: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? { contextMenu() }
 
-    /// 右键菜单：送到 PVW / Cut 到 PGM / 按已选转场送上 PGM / Overlay ▸ / 分类 ▸ / 静音 ─ 设置… / 换来源… / 重命名… ─ 删除输入 n。
+    /// 右键菜单：送到 PVW / Cut 到 PGM / 按当前转场送上 PGM / Overlay ▸ / 分类 ▸ / 静音 ─ 设置… / 换来源… / 重命名… ─ 删除输入 n。
     /// 前三项与格子按钮同一口径（转场进行中灰；已在 PGM 上的 Cut / 转场灰；已在 PVW 上的"送到 PVW"灰）。分类 ▸ 的名字跟标签走（categoryTitles）。
     func contextMenu() -> NSMenu {
         let menu = NSMenu()

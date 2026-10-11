@@ -11,3 +11,10 @@
 `window.keyHandler = { [weak self] event in self?.handleRecordingKey(event) ?? false }`
 改成先录键、不吃再交快捷键表：`{ [weak self] event in (self?.handleRecordingKey(event) ?? false) || (self?.controller.session?.control.handleKey(event) ?? false) }`
 （录键中要截键，所以 `handleRecordingKey` 在前；`controller` 是 `SettingsModel` 持有的 AppController，和 PanelCoordinator.forwardHotkeys 同一口径）。补一条用例：设置窗在前按空格 → `hotkeys.counters.handled` +1、PGM 换人；快捷键页录键时按空格 → 录进去、不切。
+
+## 处理结果（W5-M / prompt 100，分支 `w5-transition-slots`，2026-10-11）
+
+按问题单的改法修了：`App/Sources/Settings/SettingsWindow.swift` 的 `PanelWindow.keyHandler` 先 `handleRecordingKey`（快捷键页录键中截键），
+不吃再交 `model.controller.session?.control.handleKey`（`SettingsModel.controller` 从 private 改成 internal，与 `PanelCoordinator.forwardHotkeys` 同一口径）。
+用例 `TransitionColumnTests.testUI_settingsWindowForwardsHotkeys`：设置窗停在常规页、窗口在前按空格 → PGM 换人、`hotkeys.counters.handled` +1；
+快捷键页录键中按空格 → 录进那一行（keyText = space）、PGM 不变、handled 不加。文本框里打字照旧被文本框吃掉（窗口的 keyDown 只收没人要的键）。
