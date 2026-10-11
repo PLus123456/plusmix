@@ -94,6 +94,6 @@
 | `make test-app` 第 1 遍（12:00） | 235 条 = 227 过、6 跳、**2 红**：InputStripTests 的 transitionGuard / contextMenuComplete 断言老文案"按已选转场送上 PGM（Fade · 2 秒）"——G7 追加 ③ 定成当前槽后括号里写当前槽，改期望（bdd5c3b），单跑 InputStripTests 11/11 |
 | `make test-app` 第 2 遍（12:08） | **235 条 = 229 过、6 跳、0 红**（`xcrun xcresulttool get test-results summary --path .build/DerivedData/Logs/Test/Test-Switcher-2026.10.11_12-08-30-+0800.xcresult`）；6 跳：键盘导航没开（C9）、摄像头权限、虚拟摄像头签名、空闲探针（要设环境变量）、ISO A4 / 推流 10 s 两条缺 release frameprobe |
 | 补编 `swift build -c release --package-path Tools/frameprobe` 后单跑 ISO A4 / 推流 10 s | 2 / 2 过（负载 5.4，同机当时别的会话也在编） |
-| `make lint BRANCH=w5-transition-slots`（12:1x，含报告与问题单的提交之后再跑一次） | 见下一行 |
+| `make lint BRANCH=w5-transition-slots`（报告与问题单提交之后） | 全绿：禁词 / 版本 0.1.0 / Package 约束 / 依赖方向 8 包 / 归属 48 个文件都在范围内（App/、SwitcherControl 的 Hotkeys / VMixCompat / Tests、Tools/streamdeck-plugin、本报告、reports/issues/ 三张）/ check-links 178 个 Markdown / check-rt-symbols |
 
 App 用例数 228 → 235：TransitionColumnTests 8 → 14（86 的四条按槽改写 + 新七条，另三条不变）、ActionPickerTests +1；TransitionPanelTests 3 条按槽改写、数不变。
