@@ -85,7 +85,7 @@ enum FieldValue: Hashable, Sendable {
     case input(InputRef)
     /// 时长（秒；durationTicks 按节目帧率换拍、durationMs 换毫秒）。
     case seconds(Double)
-    /// W5-M 红灯轮的桩：总线路由。
+    /// 总线路由（setInputAudio.routing，提案 023 五；W5-M 补的勾选控件）。
     case routing(BusRouting)
 }
 
@@ -133,18 +133,28 @@ enum ActionCatalog {
     /// 开关 / 组合动作归到哪一组（同 ControlActionKind.group）。
     static func group(of kind: ControlActionKind) -> ActionGroup {
         switch kind {
-        case .toggleFTB, .fadeMs, .previewAndTransition: .switching
+        case .toggleFTB, .fadeMs, .previewAndTransition, .transitionSlot, .selectTransitionSlot: .switching   // 后两类：转场槽（W5-M）
         case .toggleOverlay, .overlayInput, .overlaysOff: .overlay
         case .toggleMute, .toggleAFV, .inputAFV, .busRoute, .solo, .busMuteSwitch: .audio
         case .toggleRecord, .toggleStream, .recordAll, .recordISO, .streamAll, .outputSwitch, .outputKindSwitch: .output
         case .ui: .ui
-        case .command, .transitionSlot, .selectTransitionSlot: .show   // W5-M 红灯轮的桩
+        case .command: .show
         }
     }
 
-    /// W5-M 红灯轮的桩：槽号控件的选项。
-    struct SlotChoice: Hashable { let slot: Int; let title: String }
-    static func slotChoices(state: MixerState?) -> [SlotChoice] { [] }
+    /// 槽号控件的一项（W5-M）："转场 2 · Wipe → 1 秒"（没有节目时只写"转场 2"）。
+    struct SlotChoice: Hashable {
+        let slot: Int
+        let title: String
+    }
+
+    /// 槽号控件的选项：四个槽现在的效果与时长（原来借叠加通道的"1 2 3 4"四段，看不出哪个槽是什么）。
+    static func slotChoices(state: MixerState?) -> [SlotChoice] {
+        TransitionSlot.indexRange.map { n in
+            guard let state, n - 1 < state.transition.slots.count else { return SlotChoice(slot: n, title: L("slot.name", n)) }
+            return SlotChoice(slot: n, title: SlotText.menuTitle(n, state.transition.slots[n - 1], rate: state.format.frameRate))
+        }
+    }
 
     static func actionEntry(_ kind: ControlActionKind) -> ActionEntry {
         let emits = kind.emits.map(\.rawValue)
@@ -262,12 +272,12 @@ enum ActionCatalog {
             case .output(let kinds): if let o = state?.outputs.first(where: { kinds.isEmpty || kinds.contains($0.kind) }) { v[f.name] = .int(o.number) }
             case .outputKind(let kinds): if let k = kinds.first { v[f.name] = .string(k.rawValue) }
             case .bus: v[f.name] = .int(Bus.master.rawValue)
-            case .onOff: v[f.name] = .bool(true)
+            case .onOff: if !f.optional { v[f.name] = .bool(true) }   // 可选的（setInputAudio 的独听 / AFV）默认"不改"
             case .switchMode: v[f.name] = .string(SwitchMode.toggle.rawValue)
             case .durationTicks, .durationMs: v[f.name] = .seconds(f.name == "durationMs" ? 1 : 0.5)
             case .seconds: v[f.name] = .seconds(0)   // 021：从头
             case .transitionSlot: v[f.name] = .int(1)   // 020
-            case .busRouting: break   // 023 五：可选，不填 = 不动（勾选控件归 100）
+            case .busRouting: break   // 023 五：可选，不填 = 不动（勾选控件见 ActionFieldsForm）
             case .transitionType: v[f.name] = .string(TransitionType.fade.rawValue)
             case .fraction: v[f.name] = .double(0.5)
             case .decibels(let lo, let hi): v[f.name] = .double(f.name == "minDb" ? -60 : (f.name == "maxDb" ? min(12, hi) : max(lo, min(0, hi))))
@@ -303,7 +313,7 @@ enum ActionCatalog {
         case (.input(.preview), .inputRef): return "preview"
         case (.input(.program), .inputRef): return "program"
         case (.input, _): return nil
-        case (.routing, _): return nil   // W5-M 红灯轮的桩
+        case (.routing(let r), _): return ["master": r.master, "busA": r.busA, "busB": r.busB, "headphones": r.headphones]
         case (.int(let n), _): return n
         case (.double(let d), _): return d
         case (.bool(let b), _): return b
@@ -334,7 +344,11 @@ enum ActionCatalog {
             return (raw as? Double).map { .seconds($0) } ?? (raw as? Int).map { .seconds(Double($0)) }
         case .outputKind, .switchMode, .transitionType, .text, .choice:
             return (raw as? String).map { .string($0) }
-        case .json, .busRouting:
+        case .busRouting:
+            guard let d = raw as? [String: Any] else { return nil }
+            func flag(_ k: String) -> Bool { (d[k] as? Bool) ?? false }
+            return .routing(BusRouting(master: flag("master"), busA: flag("busA"), busB: flag("busB"), headphones: flag("headphones")))
+        case .json:
             return nil
         }
     }

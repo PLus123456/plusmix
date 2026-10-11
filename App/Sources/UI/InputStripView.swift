@@ -242,23 +242,19 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         return cell
     }
 
-    /// "按已选转场送上 PGM（…）"括号里那段：Cut 只写 Cut，其余"类型 · 时长 秒"。类型 / 时长 / 帧率不变就用上次拼好的。
+    /// "按当前转场送上 PGM（…）"括号里那段：当前槽"转场 2 · Wipe → 1 秒"（W5-M：格子上的"转场"= 执行当前槽，与回车 / T-bar 同一个；
+    /// 当前那组不在槽里时只写效果与时长）。当前槽 / 当前那组 / 帧率不变就用上次拼好的。
     private func transitionLabel(_ state: MixerState) -> String {
-        let key = TransitionLabelKey(type: state.transition.type, ticks: state.transition.durationTicks, fps: state.format.frameRate.nominalFramesPerSecond)
+        let key = TransitionLabelKey(slot: state.transition.currentSlot, group: state.transition.currentGroup, rate: state.format.frameRate)
         if key == transitionLabelKey { return transitionLabelText }
         transitionLabelKey = key
-        if key.type == .cut {
-            transitionLabelText = L("transition.type.cut")
-        } else {
-            let seconds = Double(key.ticks) / Double(max(key.fps, 1))
-            transitionLabelText = L("cell.transition.label", L("transition.type.\(key.type.rawValue)"), TransitionPanelView.secondsText(seconds))
-        }
+        transitionLabelText = SlotText.current(state.transition, rate: state.format.frameRate)
         return transitionLabelText
     }
     private struct TransitionLabelKey: Equatable {
-        let type: TransitionType
-        let ticks: Int
-        let fps: Int
+        let slot: Int?
+        let group: TransitionSlot
+        let rate: FrameRate
     }
     private var transitionLabelKey: TransitionLabelKey?
     private var transitionLabelText = ""

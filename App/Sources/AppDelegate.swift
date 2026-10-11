@@ -7,7 +7,7 @@
 //   节目      新建 / 打开… / 打开最近 ▸（同名带上级目录名，V-24）/ 打开上次退出时的节目 / ─ / 保存 / 另存为…
 //   编辑      （不变）
 //   输入      添加输入… ⌘I / 按类型添加 ▸ / 输入 N「名字」设置… ⇧⌘I（标题写出是 PVW 上哪一路，PVW 空时灰，O4）
-//   切换      SwitchMenuController（O1：Cut / 执行当前转场 / 五种类型 / FTB / Overlay ▸，右列的键只显示）
+//   切换      SwitchMenuController（O1：Cut / 执行当前转场 / 转场 1–4（点了就做，W5-M）/ FTB / Overlay ▸，右列的键只显示）
 //   输出      录制 ▸ / 推流 ▸ / 外部显示 ▸ / 全部外部显示开·关 / 多画面窗口 / 虚拟摄像头 ▸ / ─ / 七个输出设置页（▸ 的几个和底栏 ▴ / ⚙ 同一份菜单）
 //   窗口      最小化 / 缩放 / ─ / 调音台 / 多画面 / 统计 / ─ / 锁定界面（W5-L：= 底栏右组的"统计"与锁，规则 5；锁着时打勾，菜单栏不受锁影响、从这里也能解锁）
 //   帮助      PlusMix 使用手册 / 快捷键一览 / ─ / 导出诊断包… / 打开诊断文件夹（O3；工具条"?"弹同一份）
@@ -269,16 +269,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: 切换（O1；只发命令，开关看快照）
 
     @objc func transitionCut(_ sender: Any?) { controller.session?.send(.cut) }
-    /// 执行当前转场：按状态里的类型与时长（= 回车的默认绑定）。
+    /// 执行当前转场 = 当前槽（当前那组就是它的配置；= 回车的默认绑定）。
     @objc func transitionAuto(_ sender: Any?) { controller.session?.send(.autoTransition) }
-    /// 选 T-bar 和回车用哪种：只发 setTransition（时长不变、不执行；转场进行中状态机会拒，菜单项那时是灰的）。
-    @objc func pickTransitionType(_ sender: Any?) {
-        guard let s = controller.session, !s.state.transition.isActive,
-              let raw = (sender as? NSMenuItem)?.representedObject as? String, let type = TransitionType(rawValue: raw) else { return }
-        s.send(.setTransition(type: type, durationTicks: s.state.transition.durationTicks))
+    /// 转场 n（W5-M，点了就做）：与转场列的主体同一条路（Stinger 槽没选输入时先在转场列弹出它的输入选择、不执行，X18）。
+    @objc func transitionSlot(_ sender: Any?) {
+        guard controller.session != nil, let n = (sender as? NSMenuItem)?.tag else { return }
+        controller.windowController.transitionPanel.executeSlot(n)
     }
-    /// W5-M 红灯轮的桩：转场 n。
-    @objc func transitionSlot(_ sender: Any?) {}
     @objc func transitionFTB(_ sender: Any?) {
         guard let s = controller.session else { return }
         s.send(.ftb(on: !s.state.ftb.on))
@@ -438,8 +435,8 @@ extension AppDelegate: NSMenuItemValidation {
             return !controller.documents.recentURLs.isEmpty
         case #selector(transitionCut(_:)), #selector(transitionAuto(_:)), #selector(transitionFTB(_:)), #selector(transitionOverlay(_:)), #selector(showOverlaySettings(_:)):
             return session != nil
-        case #selector(pickTransitionType(_:)):
-            return session.map { !$0.state.transition.isActive } ?? false
+        case #selector(transitionSlot(_:)):
+            return session.map { !$0.state.transition.isActive } ?? false   // 转场进行中状态机会忽略
         case #selector(toggleExternalDisplays(_:)):
             let (title, enabled) = externalToggleTitle(session?.state)
             if menuItem.title != title { menuItem.title = title }

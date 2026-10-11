@@ -1,7 +1,7 @@
 // 输入缩略图格子：标题条（编号、分类色点、名字、tally 色）、缩略图（多画面纹理里这一路的格子，切掉渲染器画在格子底部的名字条——名字只在标题条出现一次，
 // W3-E3；≤ 24 fps；W5-H 起显示框按裁切后的比例，上下不再留黑边，03 V-23）、两行按钮（W5-H，01a D4 / D6 / D7，04 Q26 (a) 两行常显）：
-//   第一行 ×（删除：在 PGM / PVW / 叠加 / Stinger / ISO 录制上先确认，87 的口径，Q06 (a)）｜ 转场（按已选转场送上 PGM = setPreview + autoTransition，
-//          用转场列当前那组类型 / 时长，Q39）｜ Cut（setProgram，直切、不经过 PVW）｜ 循环（只对文件输入：setInputSource 只改结束动作，运行表不重建）
+//   第一行 ×（删除：在 PGM / PVW / 叠加 / Stinger / ISO 录制上先确认，87 的口径，Q06 (a)）｜ 转场（按当前转场送上 PGM = setPreview + autoTransition，
+//          W5-M 起 = 当前槽，与回车 / T-bar 同一个，Q39）｜ Cut（setProgram，直切、不经过 PVW）｜ 循环（只对文件输入：setInputSource 只改结束动作，运行表不重建）
 //   第二行 Overlay 1–4 ｜ 静音（没有声音的输入灰着并说明，D7）｜ ⚙（这一路的输入设置，D6）
 // 点缩略图 = 选 PVW，Shift 点 = 直切 PGM（保留）。**转场进行中**（快照 transition.isActive，T-bar 推到一半也算；90 报告 §5 第 1 条）："转场 / Cut"置灰，
 // 点缩略图也不发命令、状态行说一句——reducer 已经拒收这两条，界面不发是因为"setPreview + autoTransition"这类组合在转场中前一条被拒、后一条会把正在进行的
@@ -488,7 +488,7 @@ final class InputCellView: NSView {
         send?(.setPreview(input: number))
     }
 
-    /// 转场：按已选转场送上 PGM（Q39：转场列当前那组类型 / 时长）= 先送 PVW 再 autoTransition；已在 PVW 上就只 autoTransition。
+    /// 转场：按当前转场送上 PGM（Q39；W5-M 起 = 当前槽，转场列 T-bar 那一行写着的那个）= 先送 PVW 再 autoTransition；已在 PVW 上就只 autoTransition。
     @objc private func transitionPressed() {
         guard !blockedByTransition(), switching?.onProgram != true else { return }
         if !tally.preview { send?(.setPreview(input: number)) }

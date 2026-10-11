@@ -46,7 +46,7 @@ final class SettingsModel: ObservableObject {
     weak var window: NSWindow? {
         didSet { preferences.presentingWindow = window }
     }
-    private unowned let controller: AppController
+    unowned let controller: AppController
     /// 输出页的模型怎么建（PanelCoordinator 给：接当前 session 的命令、运行表、Stats）。
     private let makeOutputs: (OutputSettingsModel.Tab) -> OutputSettingsModel
     /// 当前 session 的 MIDI 控制器（learn、来源列表）。
@@ -365,7 +365,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.setFrameAutosaveName(Self.autosaveName)
         super.init(window: window)
         window.delegate = self
-        window.keyHandler = { [weak self] event in self?.handleRecordingKey(event) ?? false }
+        // 先给快捷键页录键；不是录键就交快捷键表（X12 残口：设置窗在前时空格 / 数字照样切，与输入 / 叠加 / 音频设置窗同一口径）
+        window.keyHandler = { [weak self] event in
+            guard let self else { return false }
+            return self.handleRecordingKey(event) || (self.model.controller.session?.control.handleKey(event) ?? false)
+        }
         model.window = window
     }
 
