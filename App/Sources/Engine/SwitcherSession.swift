@@ -140,6 +140,8 @@ final class SwitcherSession {
         let audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio, busOutputMap: settings.busOutputMap)
         self.audio = audio
         audio.engine.borrowMasterForMonitor = settings.borrowMasterForMonitor   // X09：独听时 Master 出口放耳机总线（W1-D3 引擎侧；设置页改了由 PreferencesModel.commit 当场再设）
+        renderer.displayDelayProvider = { engine.videoDelayApplied }   // W1-B4（G8b 接）：显示源给"拍点 + L 已到期"的那一帧（提案 028，监听同步）
+        audio.engine.videoDelay = engine                               // Master 效果链的实测延迟 → 引擎（videoDelay 补偿；不接 = audioPTS，监听比画面晚 L）
         let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
         if let mediaBaseDirectory { inputs.mediaBaseDirectory = mediaBaseDirectory }
         self.inputs = inputs

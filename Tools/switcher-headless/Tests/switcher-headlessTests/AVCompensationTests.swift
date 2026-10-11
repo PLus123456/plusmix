@@ -23,9 +23,9 @@ final class AVCompensationTests: XCTestCase {
 
     /// prompt 105 的 testA2_videoDelayMode_recordingStaysAligned：M0 节目（1 号 = 30 fps 合成源带 click，在 PGM 上）、Master 限幅起音 30 ms（1440 帧），
     /// 两种补偿方式各录 12 s，frameprobe av 整秒配对 ≤ 1 ms，两种方式的均值差 ≤ 1 ms（不双重补偿）。
-    /// videoDelay 那一份：开录起点仍是拍点 t0（RecordingStart(clock:tick:)，提案 028 第 3 条用户定"只写进报告"），视频按拍点 + 30 ms 打戳，
-    /// 所以视频轨从 30 ms 开始、AVFoundation 读出来 0 时刻多一帧黑（空 edit）；frameprobe 按"第一帧 = 第 startTick 拍"推拍号，
-    /// 照它的口径给 startTick = −round(30 ms × 60) = −2（文件第一帧在第 0 拍之前 1.8 拍）。文件里每一对闪光 / click 本身都对齐。
+    /// videoDelay 那一份：开录起点按节目输出时间线（G8b 接的：RecordingStart(tick:tickTime: 拍点 + 当时的 videoDelayTarget)，提案 028 第 3 条），
+    /// 视频按拍点 + 30 ms 打戳、文件时间 0 = 拍点 + 30 ms，所以视频轨从 0 开始、没有空 edit，frameprobe 按默认 startTick = 0 推拍号就对。
+    /// 文件里每一对闪光 / click 本身都对齐。
     func testA2_videoDelayMode_recordingStaysAligned() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-w1b4-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -50,10 +50,9 @@ final class AVCompensationTests: XCTestCase {
             XCTAssertEqual(session.engine.counters.videoDelayOverflow, 0)
             var probe = FrameProbe.Options()
             if mode == .videoDelay {
-                probe.startTick = -Int64((0.030 * 60).rounded())
                 let frames = try await FrameProbe.frames(record).frames
                 let first = try XCTUnwrap(frames.first { $0.inputID != nil }, "有图案的第一帧")
-                XCTAssertEqual(first.ptsSeconds, 0.030, accuracy: 0.0005, "videoDelay：视频轨从拍点 + 30 ms 开始（开录起点仍是拍点）")
+                XCTAssertEqual(first.ptsSeconds, 0, accuracy: 0.0005, "videoDelay：开录起点按输出时间线（拍点 + 30 ms），视频轨从 0 开始、没有空 edit")
             }
             let out = try await FrameProbe.av(record, options: probe)
             let on = out.av.onSecond

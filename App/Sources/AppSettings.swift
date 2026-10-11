@@ -19,6 +19,7 @@
 // compatLayerHost / compatLayerHTTPPort（兼容层"仅本机 / 允许局域网"与 HTTP 端口，原来写死 127.0.0.1 / 8088，X33）；reminder* 四个键（主窗口提醒条，N02 / Q50）。
 import Foundation
 import SwitcherControl
+import SwitcherEngine
 import SwitcherExternal
 import SwitcherRender
 import SwitcherTally
@@ -133,6 +134,8 @@ struct AppSettings: Equatable, Sendable {
     var rendererOptions: MetalRendererOptions {
         var o = MetalRendererOptions()
         o.overlaysInPreview = overlaysInPreview
+        o.videoDelayHeadroom = EngineOptions().videoDelay.maxDelay   // W1-B4（G8b 接）：引擎最多把帧压 35 ms 再派发，NV12 输出环加深 4 个（不加深会被延迟队列扣满、退回池子分配）
+        o.displayDelayHistory = true                                 // 监视器 / 外部显示 / 多画面跟着延后：多留 3 格合成目标（1080p ≈ 75 MB）；三样要和 displayDelayProvider / audio.engine.videoDelay 一起接
         return o
     }
 

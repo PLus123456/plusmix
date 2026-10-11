@@ -462,8 +462,14 @@ final class HeadlessSession: @unchecked Sendable {
         for input in inputs { try input.start() }
         for input in otherInputs { try input.start() }
         for entry in audioInputs { try entry.source.start() }
-        if let rec = recorder { try rec.start(at: RecordingStart(clock: spec, tick: .zero)) }
-        for (iso, _) in isoRecorders { try iso.start(at: RecordingStart(clock: spec, tick: .zero)) }
+        // W1-B4 / 提案 028（G8b 接的）：开录起点按节目输出时间线 = 拍点 + L，两轨都从文件时间 0 起（原来起点是拍点，L > 0 时视频轨从 L 开始、AVFoundation 在 0…L 读出一帧黑）。
+        // L 由音频引擎在第一个控制周期量出 Master 效果链延迟后交给引擎（videoDelayTarget；audioPTS 下恒 0），这里等它跑完第一个周期（≤ 200 ms）再读；
+        // 第一帧的 Lₙ 就是那时的设定值（VideoDelayLine.start 不从 0 爬）。
+        let firstCycleDeadline = HostTime.now() + HostDuration(milliseconds: 200)
+        while audioEngine.controlCycles == 0 && HostTime.now() < firstCycleDeadline { try await Task.sleep(nanoseconds: 2_000_000) }
+        let recordingStart = RecordingStart(tick: .zero, tickTime: spec.time(of: .zero) + engine.videoDelayTarget)
+        if let rec = recorder { try rec.start(at: recordingStart) }
+        for (iso, _) in isoRecorders { try iso.start(at: recordingStart) }
         // 预告停止边界（W1-E2 `setStopTick`）：总拍数一开始就知道。stop(atTick:) 要是等引擎停了才调，边界之前送到的越界音频块已经写进文件
         // （G4 第一次 10 分钟跑音轨多 49 ms ≈ 对齐延迟 + 一块：块 PTS 比实时晚 42.67 ms，引擎停时录制器还没收到含边界的块，
         // 之后到的块没有边界可比就照写）。预告之后录制器按块 PTS 裁到边界；Ctrl-C 提前停时 stop(atTick:) 会把边界改早（没有越界内容时允许）。

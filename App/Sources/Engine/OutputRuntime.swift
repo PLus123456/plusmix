@@ -360,7 +360,7 @@ final class OutputRuntime {
         guard let clock else { return }   // 引擎还没起：等 start 后的 reconcile
         let applied = outputs.map { commandTicks.take(output: $0.number) }
         let startTick = startPlanner.plan(batch: applied, clock: clock, now: .now())
-        let start = RecordingStart(clock: clock, tick: startTick)
+        let start = RecordingStart(tick: startTick, tickTime: clock.time(of: startTick) + engine.videoDelayApplied)   // 开录起点按节目输出时间线（提案 028：拍点 + 当时的视频延后 L），两轨都从 0 起、没有空 edit（G8b）
         // 建录制器（主线程：算路径、分支槽、音轨）
         var prepared: [(OutputState, Recorder, LockFreeFrameSlot?)] = []
         var usedURLs = Set(recorders.values.map(\.url))
@@ -563,7 +563,7 @@ final class OutputRuntime {
         var cfg = entry.recorder.configuration
         cfg.url = url
         let rec = Recorder(configuration: cfg)
-        let start = RecordingStart(clock: clock, tick: boundary)
+        let start = RecordingStart(tick: boundary, tickTime: clock.time(of: boundary) + engine.videoDelayApplied)
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try rec.start(at: start)
