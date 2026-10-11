@@ -56,6 +56,10 @@ targets:
       - path: App/Sources
       - path: App/Resources
         optional: true
+        excludes:
+          - Help                             # W4-C2：Help/ 走下面那条 folder reference，不在这里按单个文件进包（否则三个 index.html 撞名）
+      - path: App/Resources/Help             # W4-C2：随包 HTML 手册（docs/tools/build-help.py 从 docs/user 生成）；folder reference 整个目录原样进包，zh-Hans/ 与 en/ 的 index.html 不撞名
+        type: folder
     settings:
       base:
         PRODUCT_NAME: PlusMix                # W4-D：产品名（用户 2026-09-28 定）→ PlusMix.app / CFBundleName / 可执行名；target / scheme / 模块仍叫代码名 Switcher

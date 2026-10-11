@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PlusMix User Guide</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="nav"><div class="inner"><span class="book">PlusMix User Guide</span><a class="current" href="index.html">Contents</a><a href="concepts.html">Concepts</a><a href="inputs.html">Inputs</a><a href="outputs.html">Outputs</a><a href="shortcuts.html">Shortcuts</a><a href="settings.html">Settings</a><a href="troubleshooting.html">Troubleshooting</a><a class="lang" href="../zh-Hans/index.html" hreflang="zh-Hans">中文</a></div></header>
+<main>
+<h1 id="plusmix-user-manual">PlusMix User Manual</h1>
+<p>PlusMix (code name Switcher: the modules and command-line tools keep that name) is a multi-camera production switcher that runs natively on Apple Silicon Macs: numbered inputs, Program / Preview monitors, Cut / Fade / Wipe / Zoom / Stinger transitions, four overlay channels, four audio buses, and outputs to recording, streaming, NDI® (NDI® is a registered trademark of Vizrt NDI AB), a second display, a virtual camera and a multiview. This manual is for operators. How it works inside is in the <span class="repo-ref">design spec</span><span class="repo-path"> (repository: docs/spec/导播台设计方案.md)</span> (Chinese); how it is verified is in <span class="repo-ref">testing</span><span class="repo-path"> (repository: docs/testing/en/README.md)</span>.</p>
+<p>The interface is described as it looks after the 0.1.x redesign (toolbar, three-part bottom bar, a single Settings window…); for the old 0.1.0 interface see <span class="repo-ref">docs/ui-study/03</span><span class="repo-path"> (repository: docs/ui-study/03-目视检查.md)</span> (Chinese).</p>
+<p>中文版（以中文为准）：<a href="../zh-Hans/index.html">../README.md</a>.</p>
+<h2 id="contents">Contents</h2>
+<div class="table"><table><thead><tr><th>Page</th><th>What it covers</th></tr></thead><tbody><tr><td><a href="concepts.html">Concepts</a></td><td>PGM / PVW, inputs, transitions, T-bar, FTB, overlay channels, buses, outputs, tally, show files, ticks; the main window (toolbar, monitors, transition column, mixer, input strip, bottom bar, status line), the menu bar, reminders / statistics / interface lock</td></tr><tr><td><a href="inputs.html">Inputs</a></td><td>The Add Input panel; how to connect each of the eight input kinds; the input strip and cells; per-input settings; known devices</td></tr><tr><td><a href="outputs.html">Outputs</a></td><td>Overview, recording (ISO, disk protection), streaming (service presets, quality, authentication), NDI® output, external display, virtual camera, multiview</td></tr><tr><td><a href="shortcuts.html">Shortcuts</a></td><td>Default keyboard table, editing it and the action picker, hotkeys.json, MIDI mapping, Stream Deck / Companion / tally</td></tr><tr><td><a href="settings.html">Settings</a></td><td>The single Settings window: This Show / This Mac pages, when changes apply, export / import / restore defaults, remote control, tally, performance &amp; power, advanced; launch arguments</td></tr><tr><td><a href="troubleshooting.html">Troubleshooting</a></td><td>Permissions, no signal, disk, streaming (connecting / reconnecting / couldn't start / authentication), NDI® / DeckLink / virtual camera, picture and sound, interface, API, logs and diagnostics</td></tr></tbody></table></div>
+<p>See also: <span class="repo-ref">sample shows</span><span class="repo-path"> (repository: Samples/README.md)</span> (church / classroom / event, run out of the box; Chinese), <span class="repo-ref">local API</span><span class="repo-path"> (repository: docs/api/README.md)</span> (scripting, control panels), <span class="repo-ref">control panels and tally</span><span class="repo-path"> (repository: docs/integrations/README.md)</span>.</p>
+<p>Help › PlusMix User Guide in the app opens this manual (web pages installed with the app, in Chinese or English to match the interface language).</p>
+<h2 id="first-run">First run</h2>
+<ol><li>Build and open (Xcode required; see the repository <span class="repo-ref">README</span><span class="repo-path"> (repository: README.md)</span>):</li></ol>
+<pre><code class="language-bash">make gen build-app &amp;&amp; open .build/DerivedData/Build/Products/Debug/PlusMix.app</code></pre>
+<ol start="2"><li>Show › Open… (or Open in the toolbar) and pick <code>Samples/event/event.switcher.json</code>: four synthetic cameras, a multiview and four ISO recordings, all configured.</li><li>Press <code>2</code> to put input 2 on Preview, <code>Space</code> to cut, <code>Return</code> to run the selected transition (Fade by default), <code>F</code> to fade to black; or click Transition or Cut on a cell.</li><li>Click <strong>Record</strong> in the bottom bar to record into <code>~/Movies/PlusMix/活动/</code>; click again to stop (it asks first).</li><li>Input › Add Input… (⌘I) to connect your camera. macOS asks for camera / microphone access the first time; screen recording access must be granted manually in System Settings (<a href="troubleshooting.html#1-permissions">Troubleshooting › Permissions</a>).</li></ol>
+<h2 id="version-and-language">Version and language</h2>
+<p>This manual matches PlusMix 0.1.x (see the status in the repository <span class="repo-ref">README</span><span class="repo-path"> (repository: README.md)</span>). The interface is available in Simplified Chinese and English and follows the system language (Settings › General › Language overrides it after reopening the app). Menu names below use the English interface; the Chinese names are in the Chinese pages.</p>
+<section class="quick"><h2 id="app">Opened from the app</h2><ul><li id="ndi">NDI® runtime / SDK missing, no NDI® sources: <a href="inputs.html#ndi-receive">Inputs › NDI® receive</a></li><li id="decklink">DeckLink driver / SDK: <a href="inputs.html#decklink">Inputs › DeckLink</a></li></ul></section>
+<footer>PlusMix 0.1.0 · Generated from docs/user in the repository and installed with the app.</footer>
+</main>
+<script>(function () { var m = {"ndi": "inputs.html#ndi-receive", "decklink": "inputs.html#decklink"}; var h = decodeURIComponent(location.hash.slice(1)); if (m[h]) location.replace(m[h]); })();</script>
+</body>
+</html>

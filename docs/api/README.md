@@ -12,7 +12,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 
 ## 1. 地址与鉴权
 
-- App：偏好设置 › 本地 API（默认开，`127.0.0.1:8765`）；启动参数 `--api-listen host:port`、`--api-token <token>`、`--no-api`。
+- App：设置 › 远程控制 › 本地 API（默认开，`127.0.0.1:8765`）："谁能连"选仅本机 / 允许局域网（= `0.0.0.0`），端口、Token，页上显示别的机器该连的地址；要具体地址在 设置 › 高级 填 host:port；改了点窗口底部"应用并重起引擎"。启动参数 `--api-listen host:port`、`--api-token <token>`、`--no-api`（只管这一次运行）。
 - 无界面引擎：`switcher-headless run … --api [--api-listen 0.0.0.0:8765] [--api-token <token>]`。
 - 鉴权默认关。设了 token 之后每个请求带 `Authorization: Bearer <token>`，WebSocket 也可以用 `?token=<token>`，否则 401。
 - 只在需要时监听 `0.0.0.0`：API 能改任何状态，没有 token 就等于局域网里谁都能切你的节目。
@@ -43,7 +43,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 ```
 
 - `sequence`：全局序号，严格递增、无空洞；`appliedTick`：命令生效的拍（切换永远落在拍点边界），`appliedTickTime` 是那一拍的理想时刻。
-- `applied = false`：状态机按规则忽略了它（转场进行中再发 fade、FTB 目标已相同、mute 已是该值……），状态原样，**仍是 200**。
+- `applied = false`：状态机按规则忽略了它（转场进行中再发 fade、**转场进行中的 `setPreview` / `setProgram`**（T-bar 推到一半也算进行中）、FTB 目标已相同、mute 已是该值……），状态原样，**仍是 200**。回执不说原因：要区分"转场中被拒"看快照的 `transition.isActive`。
 - 批量按顺序执行、sequence 连续（`setPreview` + `cut` 一次发就是一次"选 + 切"）；第 `index` 条被拒时 `400 {"error", "index", "receipts": [前面已生效的]}`。
 
 ### 错误
@@ -70,7 +70,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
   批量 `{"id": 8, "commands": [...]}` → `{"type": "receipts", "id": 8, "receipts": [...]}`。
 - 慢客户端：服务端每连接缓冲有限，跟不上时丢旧快照（下一条仍是完整状态）。
 
-给外部 tally 设备用的只读流（`ws://host:8766/tally`、`GET /tally`，默认监听所有网卡）在 [docs/integrations/tally.md](../integrations/tally.md)。
+给外部 tally 设备用的只读流（`ws://host:8766/tally`、`GET /tally`，默认监听所有网卡；App 里在 设置 › Tally 打开，默认关）在 [docs/integrations/tally.md](../integrations/tally.md)。
 
 ## 5. `stats`：每秒一行的统计
 
@@ -93,6 +93,20 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 
 老文件缺键时按 0 / "idle" / 空解；写出总是写全。字段的正式口径与阈值在 [测试标准](../testing/测试标准.md)。
 
-## 6. 版本
+## 6. 几条命令的现行口径
+
+[命令参考](../api.md) 由代码生成，只写命令的形态；下面几条是实现上的口径，写代码时会碰到：
+
+- **转场进行中**（`transition.isActive`，T-bar 推到一半也算）`setPreview` / `setProgram` 被忽略（`applied = false`，PVW / PGM 不变）；`cut` 立即完成正在进行的转场。
+- **`setBusEffects`（总线效果链）已作用到声音**：
+  - 链的顺序 = 处理顺序；连续的 `parametricEQ` 合成一格（一格最多 16 段），`dynamicsProcessor`、`peakLimiter` 各占一格；每条总线最多 3 格（被别的效果隔开的 EQ 另占一格）。超出 3 格的、认不出的 `id` 不装（同一条只记一次日志）。
+  - `enabled = false` = 旁路（输出逐样本等于输入），参数留着。
+  - `parametricEQ.q` 是经典 Q（半增益处的带宽，q = √2 ≈ 1 个倍频程）。
+  - 参数超出范围被钳：EQ 频率 20…23520 Hz、增益 −96…+24 dB、q 0.1826…28.85；压缩阈值 −40…20 dB、起音 0.001…0.2 s；限幅起音 0.001…0.03 s、衰减 0.001…0.04 s。
+  - 开了压缩 / 限幅的总线多 5–35 ms 处理延迟（压缩恒 256 帧 = 5.3 ms，限幅 = 起音时长）；录制 / 推流 / NDI® 拿到的音频 PTS 已经扣掉这段延迟，音画对齐不变；本机扬声器 / 耳机的实时监听会晚这么多。
+- **每路输入的效果链**（`setInputSettings` 的 `settings.effects`）这一版存进节目、**不作用到声音**。
+- **起不来的录制 / 推流路**：`stats.encoder[]` 里那一项报 `failed`（不是 `idle`）；原因只在 App 的界面提示和日志里。
+
+## 7. 版本
 
 `hello.version` / `state.version` = PlusMix 版本（0.1.0）。API 路径带 `v1`；字段只加不删，加字段不升版本号，客户端按键名读、忽略不认识的键。

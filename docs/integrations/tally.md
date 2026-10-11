@@ -14,7 +14,13 @@ try await tally.start()                                              // tally.bo
 await tally.stop(); await publisher.stop()
 ```
 
-默认 0.0.0.0:8766（API 端口 + 1）：tally 设备通常在局域网另一台机器上，流是只读的、不收命令，所以不像 API 那样默认只听本机。谁起它：0.1.0 里只有 `switcher-headless --tally-port 8766` 会起 TallyServer，PlusMix App 不起（App 的依赖里没有 SwitcherTally；App 内的开关归 prompt 98）。
+默认 0.0.0.0:8766（API 端口 + 1）：tally 设备通常在局域网另一台机器上，流是只读的、不收命令，所以不像 API 那样默认只听本机。
+
+谁起它：
+
+- **PlusMix App**：设置 › Tally 的"提供只读 tally 流"（**默认关**）。端口没单独设 = API 端口 + 1（8766）；打开即听 0.0.0.0。页上两行只读地址（`ws://<本机局域网 IP>:<端口>/tally`、`http://…/tally`）带"复制"，下面是连接数（WS 订阅数）。
+  开关与端口即时生效，不用重起引擎；启动参数 `--tally-port <N>` 与 headless 同名（给了就开）。停机顺序 tally → API → 引擎。macOS 防火墙开着时第一次打开会弹"允许传入连接"，要点允许。
+- **无界面引擎**：`switcher-headless run … --tally-port 8766`。
 
 ## 协议
 

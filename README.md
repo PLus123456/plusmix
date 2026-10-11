@@ -5,7 +5,8 @@ T-bar、FTB、四个叠加通道、四条音频总线，输出到录制（含 IS
 Swift 6（严格并发）+ Metal，macOS 15+，Apache-2.0。
 代码名 Switcher：模块（`Switcher*`）、命令行工具（`switcher-headless` / `frameprobe`）、scheme、bundle id（`com.plusmix.switcher`）仍叫这个名字；界面、`PlusMix.app` 与发布产物用产品名 PlusMix。
 
-**状态**：0.1.0 第一版功能已全部合入，检查点 G2–G4 的自动化门槛通过（[测试报告索引](docs/testing/README.md)），发布门槛 G5（8 小时长稳、设备矩阵、签名与公证）还没跑。
+**状态**：0.1.0 第一版功能已全部合入，之后又做了一轮界面改版（工具条、三段式底栏、一个设置窗……，0.1.x）。检查点 G2–G7 的自动化门槛通过（[测试报告索引](docs/testing/README.md)），
+但还没有发布版：发布门槛 G5 / G7 判了不发（8 小时长稳复验、一个已知崩溃、签名与公证没做完，见 [已知问题](docs/KNOWN_ISSUES.md)）。
 现在能用来干活，但请先在自己的设备上按 [测试标准](docs/testing/测试标准.md) 验一遍。
 
 ## 一分钟上手
@@ -46,10 +47,11 @@ swift build -c release --package-path Tools/switcher-headless && Tools/switcher-
 |---|---|
 | `make gen` | XcodeGen 由 `project.yml` 生成 `Switcher.xcodeproj`（不入库）。真实签名：`DEVELOPMENT_TEAM=你的TeamID make gen`（虚拟摄像头的系统扩展必须这样签） |
 | `make build` | 六个包、两个命令行工具、App 全部编译 |
-| `make test` | 包的 `swift test`（0.1.0：703 个用例）、工具冒烟、App 的 `xcodebuild test`（81 个） |
+| `make test` | 包的 `swift test`（G7 时 777 个用例）、工具冒烟、App 的 `xcodebuild test`（228 个） |
 | `make lint` | 禁词 / 版本号 / 包约束、依赖方向、目录归属 |
 | `make gate4` | 10 分钟集成场景（V1–V7、A1–A4、E1–E3、E5、C1–C4）并出报告 |
 
+改了 `docs/user/` 之后跑 `python3 docs/tools/build-help.py`，重生成随 App 打包的 HTML 手册（`App/Resources/Help/`，帮助 › PlusMix 使用手册 打开的就是它）。
 单独跑一个包：`swift test --package-path Packages/SwitcherCore`。可选的第三方 SDK：NDI SDK for Apple（默认 `/Library/NDI SDK for Apple`，环境变量 `NDI_SDK_DIR`）、
 DeckLink SDK（`DECKLINK_SDK_DIR` 或 `~/SDKs/DeckLink`）；没有时对应输入 / 输出编成空实现，其他功能不受影响。
 
@@ -82,6 +84,6 @@ scripts/                   lint、依赖方向、目录归属检查，gate 脚�
 - 提交前 `make lint` 和相关包的 `swift test` 要绿；改公共契约（`SwitcherContracts` 的公开类型、JSON 字段名）先在 [docs/contract-changes/](docs/contract-changes/README.md) 写提案。
 - 产品文案、代码、界面里不出现竞品的名字、图标、文案和默认快捷键表（`make lint` 会扫）；唯一例外是第三方 API 兼容层的模块名，它的法律说明见 [docs/api/vmix-compat.md](docs/api/vmix-compat.md)。
 - 设备实测结果比代码更缺人手：按 [设备兼容性表](docs/testing/设备兼容性.md) 的模板提交。
-- 报 bug 附上 `stats.jsonl` 和能复现的节目文件（[故障排查 §8](docs/user/故障排查.md#8-日志与诊断)）。
+- 报 bug 附上 `stats.jsonl` 和能复现的节目文件（[故障排查 §9](docs/user/故障排查.md#9-日志与诊断)）。
 
 这个仓库由多个 AI 辅助会话按 [docs/plan/](docs/plan/导播台落地方案.md) 的分工推进，每个会话只动 [docs/OWNERSHIP.md](docs/OWNERSHIP.md) 里划给它的目录；仓库约定在 [CLAUDE.md](CLAUDE.md)。

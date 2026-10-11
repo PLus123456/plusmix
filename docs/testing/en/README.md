@@ -43,6 +43,8 @@ The first runs unit / component tests of the six packages, the two tools and the
 | G2 | 2026-09-15 | Core loop: 8 synthetic inputs → compositor → H.264 → .mov, 10 min + 60 min | Pass (one item waived by the reference-line rule) — [reports/G2.md](../../../reports/G2.md) |
 | G3 | 2026-09-18 | Switching, audio, outputs, control; network impairment E7–E9 | Pass: 18 of 19 automatic items, E2 not applicable to that scene; E7–E9 3 / 3 — [reports/G3.md](../../../reports/G3.md) |
 | G4 | 2026-09-20 → 27 | Inputs phase 2, overlays, five transitions, keyer, multiview, external output, virtual camera, ISO | Automatic items pass (latest run 20 / 20) — [reports/G4.md](../../../reports/G4.md); manual and BLOCKED items in the checklist |
-| G5 | pending | Release gate: 8 h soak, device matrix, performance regression, known-issues list | — |
+| G5 | 2026-09-28 | Release gate: 8 h soak, device matrix, performance regression, known-issues list | **0.1.0 not released**: the 8 h soak failed S2 (file-input leak, fixed, re-run pending), one S1 and half the device matrix missing, notarisation / update feed BLOCKED (account) — [reports/G5.md](../../../reports/G5.md) |
+| G6 | 2026-10-02 | Fifth wave, stop-gap fixes (visual, live safety, bus effects, stream authentication, refusing PVW / PGM changes mid-transition) | **0.1.0 still not released**; L2 automatic items 20 / 20 — [reports/G6.md](../../../reports/G6.md) |
+| G7 | 2026-10-04 → 10-10 | Fifth wave, interface redesign (bottom bar, toolbar, input strip, output pages, Settings window, panels, sleep / tally / remote control / reminders / statistics / lock) | **0.1.0 not released, 0.1.1 not recommended yet** (MIDIHost.sync crash, 8 h re-run, signing…); six packages 777 tests and App 228 tests with 0 failures, L2 20 / 20 — [reports/G7.md](../../../reports/G7.md) |
 
 Reports are in Chinese. The [device compatibility table](../设备兼容性.md) collects community results (model, firmware, macOS, passed items).
