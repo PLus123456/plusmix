@@ -18,6 +18,8 @@
 import Foundation
 import AudioToolbox
 import SwitcherContracts
+import CSwitcherAudioRT
+import CSwitcherAudioHost
 
 /// 一格里装的 AU 种类（W5-C）。
 public enum EffectKind: String, Hashable, Sendable, CaseIterable {
@@ -27,13 +29,17 @@ public enum EffectKind: String, Hashable, Sendable, CaseIterable {
     case parametricEQ
     case dynamicsProcessor
     case peakLimiter
+    /// 自写 C 压缩器（提案 024 (b)，W1-D3）：不是 AudioUnit，格的 kind = `EffectSlotKind.compressor`；与 dynamicsProcessor 二选一占同一格。
+    case compressor
 
-    var subtype: OSType {
+    /// 对应的苹果 AU 子类型；压缩器不是 AU → nil。
+    var subtype: OSType? {
         switch self {
         case .nBandEQ: kAudioUnitSubType_NBandEQ
         case .parametricEQ: kAudioUnitSubType_ParametricEQ
         case .dynamicsProcessor: kAudioUnitSubType_DynamicsProcessor
         case .peakLimiter: kAudioUnitSubType_PeakLimiter
+        case .compressor: nil
         }
     }
 }
@@ -80,6 +86,16 @@ public enum EffectParameterRanges {
             "attackSeconds": 0.001...0.03,                                        // 头文件 0.001…0.03，27 上报 0.0005…0.03
             "decaySeconds": 0.001...0.04,                                         // 头文件 0.001…0.06，27 上报 0.001…0.04
             "preGainDb": -40...40,
+            "ceilingDb": -20...0,                                                 // 024 顺带 (2)：同一格内限幅之后的输出增益（契约定的范围，不是 AU 参数）
+        ],
+        // 自写压缩器（提案 024 (b)，契约 docs/CONTRACTS.md §2.4 定的范围；不是 AU，范围就是算法接受的范围）
+        "compressor": [
+            "thresholdDb": -60...0,
+            "ratio": 1...20,
+            "kneeDb": 0...24,
+            "attackSeconds": 0.0001...0.2,
+            "releaseSeconds": 0.01...3,
+            "makeupGainDb": 0...24,
         ],
     ]
 
@@ -99,9 +115,8 @@ public enum EffectParameterRanges {
 
 /// 一格效果的 AudioUnit 包装。只在控制线程（或实时线程没在跑时）上调。
 public final class EffectUnit: @unchecked Sendable {
-    public let bus: Bus
-    /// 格号（装在哪一格；`makeEffectUnit` 时定，`attachEffectUnit` 照它装）。
-    public let effect: BusEffect
+    /// 装在哪里（总线某格 / 某路输入某格；`makeEffectUnit` 时定，`attachEffectUnit` 照它装）。W1-D3。
+    public let location: EffectLocation
     /// AU 种类。
     public let kind: EffectKind
     public let unit: AudioUnit
@@ -111,8 +126,19 @@ public final class EffectUnit: @unchecked Sendable {
     /// 上次设过的参数值：同值不重设（推子拖动时一条链整条重发，大部分参数没变）。
     private var lastValues: [AudioUnitParameterID: Float] = [:]
 
-    init(bus: Bus, effect: BusEffect, kind: EffectKind, unit: AudioUnit, bandCount: Int) {
-        self.bus = bus; self.effect = effect; self.kind = kind; self.unit = unit; self.bandCount = bandCount
+    init(location: EffectLocation, kind: EffectKind, unit: AudioUnit, bandCount: Int) {
+        self.location = location; self.kind = kind; self.unit = unit; self.bandCount = bandCount
+    }
+
+    /// 总线格的 AU：哪条总线（输入格的 AU 调它是编程错误）。
+    public var bus: Bus {
+        guard case .bus(let b, _) = location else { preconditionFailure("输入格的 AU 没有总线：\(location)") }
+        return b
+    }
+    /// 总线格的 AU：格号。
+    public var effect: BusEffect {
+        guard case .bus(_, let e) = location else { preconditionFailure("输入格的 AU 没有总线格号：\(location)") }
+        return e
     }
 
     deinit {
@@ -166,10 +192,13 @@ public final class EffectUnit: @unchecked Sendable {
 public enum EffectChainError: Error, CustomStringConvertible {
     case componentNotFound(EffectKind)
     case osStatus(String, OSStatus)
+    /// 这种效果不是 AudioUnit（自写压缩器走 `setEffectKind(.compressor)`，不建 AU）。
+    case notAnAudioUnit(EffectKind)
     public var description: String {
         switch self {
         case .componentNotFound(let e): "找不到 AudioUnit：\(e)"
         case .osStatus(let what, let st): "\(what) 失败：OSStatus \(st)"
+        case .notAnAudioUnit(let e): "\(e) 不是 AudioUnit，不能建实例"
         }
     }
 }
@@ -195,14 +224,20 @@ extension AudioMixer {
     /// 建一个 AU 并 initialize，但不挂进混音器（W5-C：准备好再换格，换格那一格旁路的时间里不做实例化）。
     /// NBandEQ 固定建 16 段、全部旁路、类型参数式（0）；其他种类用 AU 默认参数，调用方随后设参数。
     public func makeEffectUnit(_ kind: EffectKind, bus: Bus, slot: BusEffect) throws -> EffectUnit {
-        var desc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: kind.subtype,
+        try makeEffectUnit(kind, at: .bus(bus, slot))
+    }
+
+    /// 同上，位置可以是输入格（W1-D3）。自写压缩器不是 AU（`EffectChainError.notAnAudioUnit`）。
+    public func makeEffectUnit(_ kind: EffectKind, at location: EffectLocation) throws -> EffectUnit {
+        guard let subtype = kind.subtype else { throw EffectChainError.notAnAudioUnit(kind) }
+        var desc = AudioComponentDescription(componentType: kAudioUnitType_Effect, componentSubType: subtype,
                                              componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
         guard let comp = AudioComponentFindNext(nil, &desc) else { throw EffectChainError.componentNotFound(kind) }
         var instance: AudioUnit?
         var st = AudioComponentInstanceNew(comp, &instance)
         guard st == noErr, let unit = instance else { throw EffectChainError.osStatus("AudioComponentInstanceNew", st) }
         let bands = kind == .nBandEQ ? EffectParameterRanges.nBandEQMaxBands : 1
-        let eu = EffectUnit(bus: bus, effect: slot, kind: kind, unit: unit, bandCount: bands)
+        let eu = EffectUnit(location: location, kind: kind, unit: unit, bandCount: bands)
         var fmt = AudioMixer.busStreamFormat
         let fmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         st = AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &fmt, fmtSize)
@@ -235,9 +270,23 @@ extension AudioMixer {
     /// 前提（调用方保证）：这一格是关着的，并且关格命令已被实时线程应用（`commandsApplied` ≥ 关格时的 `commandsPushed`），
     /// 或者实时线程没在跑——否则实时线程可能正 render 旧 AU。
     public func attachEffectUnit(_ eu: EffectUnit) throws {
-        let st = installEffect(eu.bus, eu.effect, unit: eu.unit)
+        let st = installEffect(at: eu.location, unit: eu.unit)
         guard st == noErr else { throw EffectChainError.osStatus("SetRenderCallback", st) }
         storeEffectUnit(eu)
+    }
+
+    /// 装一个已配置的 AudioUnit 到某格（总线或输入；W1-D3）；本函数装上输入回调。前提同 `attachEffectUnit`。
+    public func installEffect(at location: EffectLocation, unit: AudioUnit) -> OSStatus {
+        OSStatus(sw_mix_ctx_install_effect_at(context, UInt32(location.cTarget), UInt32(location.cIndex), UInt32(location.cSlot), UnsafeMutableRawPointer(unit)))
+    }
+
+    /// 为某格（总线或输入）建并 initialize 指定种类的 AU，装到混音上下文；已装过的先卸下重建。只能在实时线程未跑、或该格关闭且已确认时调。
+    @discardableResult
+    public func installEffect(at location: EffectLocation, kind: EffectKind) throws -> EffectUnit {
+        let eu = try makeEffectUnit(kind, at: location)
+        removeEffectUnit(at: location)
+        try attachEffectUnit(eu)
+        return eu
     }
 
     /// 为一条总线的一格创建并 initialize 该格默认种类的 AU（EQ 格 = NBandEQ），装到混音上下文。已装过的先卸下重建。
@@ -250,10 +299,7 @@ extension AudioMixer {
     /// 同上，指定 AU 种类。
     @discardableResult
     public func installEffect(_ bus: Bus, _ effect: BusEffect, kind: EffectKind) throws -> EffectUnit {
-        let eu = try makeEffectUnit(kind, bus: bus, slot: effect)
-        removeEffectUnit(bus, effect)
-        try attachEffectUnit(eu)
-        return eu
+        try installEffect(at: .bus(bus, effect), kind: kind)
     }
 
     /// 四条总线 × 三格全部建好（默认布局；都处于关闭 / 旁路状态，开关用 setEffectEnabled）。
@@ -261,16 +307,20 @@ extension AudioMixer {
         for bus in Bus.allCases { for e in BusEffect.allCases { try installEffect(bus, e) } }
     }
 
-    /// 某格的 AU 包装。
-    public func effectUnit(_ bus: Bus, _ effect: BusEffect) -> EffectUnit? { effectUnitsStorage[bus.rawValue * 3 + Int(effect.rawValue)] }
+    /// 某总线格的 AU 包装。
+    public func effectUnit(_ bus: Bus, _ effect: BusEffect) -> EffectUnit? { effectUnit(.bus(bus, effect)) }
+    /// 某格（总线 / 输入）的 AU 包装。
+    public func effectUnit(_ location: EffectLocation) -> EffectUnit? { effectUnitsStorage[location] }
 
-    /// 卸下并销毁某格（先在上下文里摘掉，实时线程不再 render 它）。前提同 attachEffectUnit。
-    public func removeEffectUnit(_ bus: Bus, _ effect: BusEffect) {
-        removeEffect(bus, effect)
-        effectUnitsStorage[bus.rawValue * 3 + Int(effect.rawValue)] = nil
+    /// 卸下并销毁某总线格（先在上下文里摘掉，实时线程不再 render 它）。前提同 attachEffectUnit。
+    public func removeEffectUnit(_ bus: Bus, _ effect: BusEffect) { removeEffectUnit(at: .bus(bus, effect)) }
+    /// 卸下并销毁某格（总线 / 输入）。前提同 attachEffectUnit。
+    public func removeEffectUnit(at location: EffectLocation) {
+        sw_mix_ctx_remove_effect_at(context, UInt32(location.cTarget), UInt32(location.cIndex), UInt32(location.cSlot))
+        effectUnitsStorage[location] = nil
     }
 
-    private func storeEffectUnit(_ eu: EffectUnit) { effectUnitsStorage[eu.bus.rawValue * 3 + Int(eu.effect.rawValue)] = eu }
+    private func storeEffectUnit(_ eu: EffectUnit) { effectUnitsStorage[eu.location] = eu }
 }
 
 // MARK: - 常用参数的类型化入口（值先钳到 EffectParameterRanges）
@@ -296,7 +346,7 @@ extension EffectUnit {
             setParameter(kParametricEQParam_CenterFreq, f)
             setParameter(kParametricEQParam_Q, min(max(q, 0.1), 20))
             setParameter(kParametricEQParam_Gain, enabled ? min(max(gainDb, -20), 20) : 0)
-        case .dynamicsProcessor, .peakLimiter:
+        case .dynamicsProcessor, .peakLimiter, .compressor:
             return
         }
     }

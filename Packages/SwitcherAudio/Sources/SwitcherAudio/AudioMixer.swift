@@ -247,8 +247,8 @@ public final class AudioMixer: @unchecked Sendable {
     private var pendingRelease: [(sequence: UInt64, ring: any AudioRing)] = []
     private var taps: [Int: AudioBlockTap] = [:]
     private var pendingTapRelease: [(sequence: UInt64, tap: AudioBlockTap)] = []
-    /// 12 格效果的 AU 包装（下标 = 总线 × 3 + 格）。
-    var effectUnitsStorage: [Int: EffectUnit] = [:]
+    /// 效果格的 AU 包装：总线 4 × 3 格 + 每路输入 2 格（W1-D3），按位置存。
+    var effectUnitsStorage: [EffectLocation: EffectUnit] = [:]
     /// 命令入队失败（队列满）的次数。
     public private(set) var commandsDropped: UInt64 = 0
 
@@ -271,7 +271,7 @@ public final class AudioMixer: @unchecked Sendable {
 
     deinit {
         // 先摘效果（AU 在上下文之后销毁也行，但顺序清楚些），再销毁上下文
-        for (_, eu) in effectUnitsStorage { sw_mix_ctx_remove_effect(context, UInt32(eu.bus.rawValue), UInt32(eu.effect.rawValue)) }
+        for (loc, _) in effectUnitsStorage { sw_mix_ctx_remove_effect_at(context, UInt32(loc.cTarget), UInt32(loc.cIndex), UInt32(loc.cSlot)) }
         effectUnitsStorage.removeAll()
         sw_mix_ctx_destroy(context)
         for (_, tap) in taps { sw_block_queue_destroy(tap.queue) }
@@ -307,6 +307,12 @@ public final class AudioMixer: @unchecked Sendable {
         var c = sw_cmd()
         c.type = UInt32(type.rawValue); c.index = Int32(index); c.i0 = i0; c.i1 = i1; c.i2 = i2; c.f0 = f0; c.u0 = u0; c.ptr = ptr
         return c
+    }
+
+    /// 同模块其他文件（Compressor.swift）入队用。
+    @discardableResult
+    func pushCommand(_ type: sw_cmd_type, index: Int = 0, i0: Int32 = 0, i1: Int32 = 0, i2: Int32 = 0, f0: Float = 0) -> UInt64 {
+        push(cmd(type, index: index, i0: i0, i1: i1, i2: i2, f0: f0))
     }
 
     /// 已入队 / 已应用的命令数。
@@ -366,8 +372,10 @@ public final class AudioMixer: @unchecked Sendable {
         return back + p
     }
 
-    /// 摘掉槽位上的输入。环对象在实时线程确认之后才释放（这里只入队）。
-    public func detach(slot: Int) {
+    /// 摘掉槽位上的输入。环对象在实时线程确认之后才释放（这里只入队）。返回 detach 命令的序号：`commandsApplied` ≥ 它 = 实时线程不再碰这个槽位
+    /// （W1-D3：集成层等到这一刻才复位该槽位的效果格并把槽位还给空闲表）。
+    @discardableResult
+    public func detach(slot: Int) -> UInt64 {
         lock.lock()
         let ring = rings.removeValue(forKey: slot)
         lock.unlock()
@@ -375,6 +383,7 @@ public final class AudioMixer: @unchecked Sendable {
         if let ring {
             lock.lock(); pendingRelease.append((seq, ring)); lock.unlock()
         }
+        return seq
     }
 
     /// 槽位上的环。
@@ -418,9 +427,7 @@ public final class AudioMixer: @unchecked Sendable {
     public func setBusGain(_ bus: Bus, linear: Float) { push(cmd(SW_CMD_BUS_GAIN, index: bus.rawValue, f0: linear)) }
     public func setBusGain(_ bus: Bus, dB: Double) { setBusGain(bus, linear: Float(pow(10, dB / 20))) }
     public func setBusMuted(_ bus: Bus, _ muted: Bool) { push(cmd(SW_CMD_BUS_MUTE, index: bus.rawValue, i0: muted ? 1 : 0)) }
-    public func setEffectEnabled(_ bus: Bus, _ effect: BusEffect, _ on: Bool) {
-        push(cmd(SW_CMD_EFFECT_ENABLE, index: bus.rawValue, i0: effect.rawValue, i1: on ? 1 : 0))
-    }
+    public func setEffectEnabled(_ bus: Bus, _ effect: BusEffect, _ on: Bool) { setEffectEnabled(.bus(bus, effect), on) }
     public func setMonitorMode(_ mode: MonitorMode) { push(cmd(SW_CMD_MONITOR_MODE, i0: mode == .pfl ? 1 : 0)) }
     /// 耳机总线取每路输入延迟线前（默认，低延迟监听）还是延迟线后（与节目同刻）的信号。W1-D2。
     public func setMonitorPoint(_ point: MonitorPoint) { push(cmd(SW_CMD_MONITOR_POINT, i0: point.rawValue)) }

@@ -57,6 +57,9 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         var lastReprimes: UInt64 = 0
         var afvGain: Float = 1
         var removing: HostTime?
+        /// 这一路的效果链（契约 `InputSettings.effects`，W1-D3）与已打开的格的延迟之和（帧，从对齐延迟线里扣）。
+        var effects: [EffectSlot] = []
+        var effectLatencyFrames = 0
         init(number: Int, slot: Int, ring: any AudioRing, hints: AudioInputHints, settings: InputAudioSettings) {
             self.number = number; self.slot = slot; self.ring = ring; self.hints = hints; self.settings = settings
         }
@@ -66,11 +69,23 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private let pump: ConsumerPump
     /// 总线效果链（W5-C）。
     private let effects: BusEffectsController
+    /// 每路效果格（W1-D3）：引擎创建时按最大输入数预建两格 AU。
+    private let inputEffects: InputEffectsController
+    /// 效果链日志（总线 / 每路共用，每条只记一次）。
+    private let noteLog = EffectNoteLog()
     private let timebase: MachTimebase
     private let lock = NSLock()
     private var slots: [Int: SlotRecord] = [:]
     private var freeSlots: [Int]
+    /// 摘掉的槽位：detach 命令被实时线程确认之后才还给 freeSlots（那之前实时线程可能还在 render 它的效果格）。W1-D3。
+    private var pendingFreeSlots: [(sequence: UInt64, slot: Int)] = []
     private var settingsCache: [Int: InputAudioSettings] = [:]
+    /// 每路 effects 的最近快照（桥不发 effects 事件，控制线程自己 diff；没注册的输入也记着，注册时直接用）。
+    private var effectsCache: [Int: [EffectSlot]] = [:]
+    /// 监听来源（提案 026，`AudioState.monitorSource`）：快照里的值与已推给混音器的值。
+    private var monitorSource: Bus = .master
+    private var monitorSourcePushed: Bus?
+    private let borrowMaster = Atomic<Bool>(false)
     private var buses: [BusState] = Bus.allCases.map { BusState(bus: $0) }
     private var afvOn = false
     private var monitorMode: MonitorMode = .afl
@@ -143,9 +158,13 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let latency = EffectLatencyTimeline()
         pump = ConsumerPump(mixer: mixer, alignment: alignmentDuration, latency: latency, resample: resample,
                             detectDiscontinuities: cfg.detectDiscontinuities, period: cfg.pumpPeriod, tapCapacity: cfg.tapCapacityBlocks, timebase: timebase)
-        effects = BusEffectsController(mixer: mixer, timeline: latency)
+        effects = BusEffectsController(mixer: mixer, timeline: latency, notes: noteLog)
+        inputEffects = try InputEffectsController(mixer: mixer, notes: noteLog)   // 预建 2 × 槽位数个 AU（W1-D3；成本见 inputEffectsPrebuild）
         mixer.setMonitorPoint(cfg.monitorPoint)
     }
+
+    /// 每路效果格预建了几个 AU、用了多久（报告用）。
+    public var inputEffectsPrebuild: (units: Int, seconds: Double) { inputEffects.prebuild }
 
     deinit {
         if started.load(ordering: .acquiring) { stopSync() }
@@ -169,6 +188,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let latest = bridge?.lastSeenState ?? stateMachine.publisher.latest?.state
         let settings = settingsCache[number] ?? latest?.input(number)?.settings.audio ?? InputAudioSettings()
         let rec = SlotRecord(number: number, slot: slot, ring: ring, hints: hints, settings: settings)
+        rec.effects = effectsCache[number] ?? latest?.input(number)?.settings.effects ?? []
         if let s = latest {
             rec.afvGain = AudioProgramGate.gains(for: s)[number] ?? (s.audio.afv && settings.afv ? 0 : 1)
         } else {
@@ -190,6 +210,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         lock.unlock()
         mixer.attach(ring: ring, toSlot: slot, resampling: hints.sameClockAsOutput ? .bypass : .estimated,
                      targetFrames: targetFrames, targetAgeFrames: targetAge)
+        applyEffects(rec, pushSettings: false)   // 先把两格落好（延迟算进对齐口径），再推增益 / 静音 / 延迟
         applySettings(rec)
         mixer.setAFVGain(slot: slot, rec.afvGain)
     }
@@ -276,8 +297,13 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
 
     /// 一条总线效果链的现场（三格装了什么、开没开、延迟、换格记录）。任意线程。
     public func effectsStatus(_ bus: Bus) -> AudioEngineStatus.BusEffects { effects.status(bus) }
-    /// 效果链记过的日志（钳了的参数、没装上的格），每条只记一次。任意线程。
-    public var effectNotes: [String] { effects.notes }
+    /// 效果链记过的日志（钳了的参数、没装上的格、压缩器实测延迟 ≠ 自报），总线与每路共用，每条只记一次。任意线程。
+    public var effectNotes: [String] { noteLog.notes }
+    /// 某路输入两格效果的现场（W1-D3）；没注册为 nil。任意线程。
+    public func inputEffectsStatus(_ number: Int) -> AudioEngineStatus.InputEffects? {
+        guard let slot = slot(forInput: number) else { return nil }
+        return inputEffects.status(slot: slot)
+    }
 
     // MARK: 生命周期
 
@@ -289,6 +315,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         bridge = b
         await b.attach()
         b.pollSnapshot()
+        syncSnapshotExtras()
         switch output {
         case .null(let d): try d.start()
         case .device(let d): try d.start()
@@ -346,8 +373,10 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let all = Array(slots.values)
         slots.removeAll()
         freeSlots = Array((0..<mixer.inputCapacity).reversed())
+        pendingFreeSlots.removeAll()
         lock.unlock()
         for rec in all { mixer.detach(slot: rec.slot) }
+        for rec in all { inputEffects.reset(slot: rec.slot) }   // 设备 / 驱动已停，实时线程不在跑
     }
 
     public var isRunning: Bool { started.load(ordering: .acquiring) }
@@ -375,7 +404,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     /// 读快照 diff → 处理事件 → 对齐维护 → FTB 斜坡 → 到期的摘除 → 状态快照。
     public func runControlCycle(now: HostTime = .now()) {
         controlCycles &+= 1
-        bridge?.pollSnapshot()
+        if bridge?.pollSnapshot() == true { syncSnapshotExtras() }   // 桥不发的两样（每路 effects、monitorSource）自己 diff
         let events = pendingEvents.withLock { list -> [AudioControlEvent] in
             let out = list
             list.removeAll(keepingCapacity: true)
@@ -388,6 +417,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         maintainAlignment()
         stepFadeToBlack(now: now)
         finishRemovals(now: now)
+        reapFreedSlots()
         if now - lastStatusAt >= statusInterval || lastStatusAt == .zero {
             lastStatusAt = now
             refreshStatus(now: now)
@@ -410,6 +440,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         switch event {
         case .inputsChanged(let added, let removed):
             lock.lock()
+            // effects 不从这个事件取：事件在 pendingEvents 里排队，可能比 syncSnapshotExtras 已经按最新快照落下去的链还旧
+            // （start 时第一次 pollSnapshot 的全量 inputsChanged 就是这样）；每路 effects 只走 syncSnapshotExtras（永远读最新快照）
             for cfg in added { settingsCache[cfg.number] = cfg.settings.audio }
             var toApply: [SlotRecord] = []
             for cfg in added where slots[cfg.number] != nil {
@@ -419,6 +451,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             var toRemove: [SlotRecord] = []
             for n in removed {
                 settingsCache.removeValue(forKey: n)
+                effectsCache.removeValue(forKey: n)
                 if let rec = slots[n], rec.removing == nil { rec.removing = now; toRemove.append(rec) }
             }
             lock.unlock()
@@ -530,7 +563,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         lock.lock()
         let s = rec.settings
         let muted = s.muted || !rec.aligned
-        let delay = rec.alignmentDelayFrames + s.delayMs * AudioFormat.sampleRate / 1000
+        let delay = rec.alignmentDelayFrames + s.delayMs * AudioFormat.sampleRate / 1000   // alignmentDelayFrames 已扣掉这一路效果格的延迟（W1-D3）
         let slot = rec.slot
         lock.unlock()
         mixer.setGain(slot: slot, dB: s.gainDb)
@@ -554,6 +587,59 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         effects.apply(b)
     }
 
+    // MARK: 每路效果格与监听来源（W1-D3）
+
+    /// 2 声道设备上"独听时临时占用 Master 声道"（X09）：开着且有独听时 Master 出口放耳机总线；录制 / 推流拿的 Master 不受影响。
+    /// 本机设置（`AppSettings.borrowMasterForMonitor`），组装方建引擎后设一次。任意线程。
+    public var borrowMasterForMonitor: Bool {
+        get { borrowMaster.load(ordering: .relaxed) }
+        set {
+            borrowMaster.store(newValue, ordering: .relaxed)
+            mixer.setBorrowMasterForMonitor(newValue)
+        }
+    }
+
+    /// 桥不发的两样（提案 026 的 monitorSource、每路 effects）：快照变了（或刚起）就自己 diff。控制线程 / start。
+    private func syncSnapshotExtras() {
+        guard let state = bridge?.lastSeenState else { return }
+        lock.lock()
+        let ms = state.audio.monitorSource
+        let pushMonitor = monitorSourcePushed != ms
+        monitorSource = ms
+        if pushMonitor { monitorSourcePushed = ms }
+        var toApply: [SlotRecord] = []
+        for cfg in state.inputs where effectsCache[cfg.number] != cfg.settings.effects {
+            effectsCache[cfg.number] = cfg.settings.effects
+            if let rec = slots[cfg.number] { rec.effects = cfg.settings.effects; toApply.append(rec) }
+        }
+        lock.unlock()
+        // 契约：headphones 自己无效（reducer 拒收，文件里出现按 master 读）；监听"耳机总线自己"这一旧行为不再有入口
+        if pushMonitor { mixer.setMonitorSource(ms == .headphones ? .master : ms) }
+        for rec in toApply { applyEffects(rec) }
+    }
+
+    /// 这一路的 effects 落到它的两格；已打开的格的延迟变了就重算对齐延迟线（效果在延迟线之前：延迟线少这么多）并重推延迟。
+    /// 控制线程或组装方线程（InputEffectsController 与混音器各有自己的锁）。
+    private func applyEffects(_ rec: SlotRecord, pushSettings: Bool = true) {
+        lock.lock()
+        let fx = rec.effects, slot = rec.slot, number = rec.number
+        lock.unlock()
+        let latency = inputEffects.apply(slot: slot, inputNumber: number, effects: fx)
+        lock.lock()
+        let changed = latency != rec.effectLatencyFrames
+        rec.effectLatencyFrames = latency
+        if changed, rec.aligned { recomputeAlignment(rec) }
+        lock.unlock()
+        if changed, pushSettings { applySettings(rec) }
+    }
+
+    /// 对齐延迟线 = 对齐延迟 − 就绪年龄 − 这一路效果格的延迟（效果在延迟线之前；W1-D3）；补不齐的部分记 residualFrames。调用方持锁。
+    private func recomputeAlignment(_ rec: SlotRecord) {
+        let ageFrames = Int(rec.ageSetpoint.rounded())
+        rec.alignmentDelayFrames = max(0, configuration.alignmentFrames - ageFrames - rec.effectLatencyFrames)
+        rec.residualFrames = max(0, ageFrames + rec.effectLatencyFrames - configuration.alignmentFrames)
+    }
+
     // MARK: 对齐维护
 
     /// 读混音器统计：新就绪的槽位按年龄设对齐延迟并放音；掉出就绪的重新静音等它回来。
@@ -575,16 +661,13 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
                 let needs = !rec.aligned || st.reprimes != rec.lastReprimes
                 lock.unlock()
                 guard needs else { continue }
-                let age = st.ageSetpoint
-                let ageFrames = Int(age.rounded())
-                let delay = max(0, configuration.alignmentFrames - ageFrames)
                 lock.lock()
-                rec.ageSetpoint = age
-                rec.alignmentDelayFrames = delay
-                rec.residualFrames = max(0, ageFrames - configuration.alignmentFrames)
+                rec.ageSetpoint = st.ageSetpoint
+                recomputeAlignment(rec)
                 rec.lastReprimes = st.reprimes
                 rec.aligned = true
                 let s = rec.settings
+                let delay = rec.alignmentDelayFrames
                 lock.unlock()
                 // 先设延迟再取消对齐静音：两条命令在同一块开始时应用，静音平滑（3 ms）从延迟已经跳好的那一刻开始起
                 mixer.setDelay(slot: rec.slot, frames: delay + s.delayMs * AudioFormat.sampleRate / 1000)
@@ -625,12 +708,26 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let wait = blockDuration * max(1, configuration.removalFadeBlocks)
         lock.lock()
         let due = slots.values.filter { rec in rec.removing.map { now - $0 >= wait } ?? false }
-        for rec in due {
-            slots.removeValue(forKey: rec.number)
-            freeSlots.append(rec.slot)
-        }
+        for rec in due { slots.removeValue(forKey: rec.number) }
         lock.unlock()
-        for rec in due { mixer.detach(slot: rec.slot) }
+        // 槽位要等 detach 被实时线程确认才还给空闲表（W1-D3：复位效果格的 AU / 压缩器状态不能和 render 并发）
+        for rec in due {
+            let seq = mixer.detach(slot: rec.slot)
+            lock.lock(); pendingFreeSlots.append((seq, rec.slot)); lock.unlock()
+        }
+    }
+
+    /// detach 已被实时线程应用的槽位：清这一路效果格的记录（C 侧状态由下次 attach 前的 prepare_slot 复位），还给空闲表。每个控制周期调。
+    private func reapFreedSlots() {
+        lock.lock()
+        guard !pendingFreeSlots.isEmpty else { lock.unlock(); return }
+        let applied = mixer.commandsApplied
+        let done = pendingFreeSlots.filter { $0.sequence <= applied }.map(\.slot)
+        pendingFreeSlots.removeAll { $0.sequence <= applied }
+        lock.unlock()
+        guard !done.isEmpty else { return }
+        for s in done { inputEffects.reset(slot: s) }
+        lock.lock(); freeSlots.append(contentsOf: done); lock.unlock()
     }
 
     // MARK: 状态与统计
@@ -679,7 +776,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let meters = mixer.meters
         lock.lock()
         let records = slots.values.sorted { $0.number < $1.number }
-        let afv = afvOn, mode = monitorMode, level = ftbLevel, transition = activeTransition, busStates = buses
+        let afv = afvOn, mode = monitorMode, level = ftbLevel, transition = activeTransition, busStates = buses, monitor = monitorSource
         lock.unlock()
         func dB(_ v: Float) -> Double { 20 * log10(Double(max(v, 1e-6))) }
         let inputs: [AudioEngineStatus.InputStatus] = records.map { rec in
@@ -690,7 +787,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
                                                  alignmentDelayFrames: rec.alignmentDelayFrames, residualFrames: rec.residualFrames,
                                                  userDelayMs: rec.settings.delayMs, ratio: st?.ratio ?? 1,
                                                  underrunBlocks: st?.underrunBlocks ?? 0, reprimes: st?.reprimes ?? 0, afvGain: rec.afvGain,
-                                                 peakDb: (m?.peak ?? [0, 0]).map(dB), rmsDb: m?.rmsDb ?? [-120, -120], removing: rec.removing != nil)
+                                                 peakDb: (m?.peak ?? [0, 0]).map(dB), rmsDb: m?.rmsDb ?? [-120, -120], removing: rec.removing != nil,
+                                                 effects: inputEffects.status(slot: rec.slot))
         }
         let busStatus: [AudioEngineStatus.BusStatus] = Bus.allCases.map { b in
             let m = meters[b]
@@ -720,6 +818,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         let status = AudioEngineStatus(
             device: device, alignmentFrames: configuration.alignmentFrames, alignmentMs: alignmentDuration.milliseconds(timebase: timebase),
             inputs: inputs, buses: busStatus, afv: afv, monitorMode: mode, monitorPoint: configuration.monitorPoint,
+            monitorSource: monitor, borrowMasterForMonitor: borrowMaster.load(ordering: .relaxed),
             avCompensation: avCompensationInEffect, videoDelayFrames: videoDelayLink.withLock { $0.pushedFrames } ?? 0,
             activeTransition: transition.map { "\($0.from)→\($0.to) \($0.source)" }, ftbLevel: level,
             counters: stats.audio, discontinuities: pump.discontinuities, realtimeViolations: stats.rtViolations, tapDrops: stats.tapDrops,

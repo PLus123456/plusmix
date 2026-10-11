@@ -38,6 +38,26 @@ public struct AudioEngineStatus: Sendable {
         public var rmsDb: [Double]
         /// 正在摘除（淡出中）。
         public var removing: Bool
+        /// 这一路的两格效果（W1-D3）。
+        public var effects: InputEffects
+    }
+    /// 一路输入两格效果的现场（W1-D3）：EQ（≤ 16 段）→ 动态（compressor / dynamicsProcessor 二选一）；延迟从这一路的对齐延迟线里扣。
+    public struct InputEffects: Hashable, Sendable {
+        public var eqEnabled: Bool
+        /// 装进 EQ 格的段数（契约链里的 parametricEQ 格数，≤ 16）。
+        public var eqBands: Int
+        /// 链里的动态格种类：`.compressor` / `.dynamicsProcessor`；nil = 没有。
+        public var dynamicsKind: EffectKind?
+        public var dynamicsEnabled: Bool
+        /// 已打开的格的延迟之和（帧）：从这一路的对齐延迟线里扣掉（`InputStatus.alignmentDelayFrames` 已经少了它）。
+        public var latencyFrames: Int
+        /// 压缩器冲激法实测的延迟（帧）；没装压缩器为 nil。按设计 0；≠ 自报时按量到的记并记日志。
+        public var compressorMeasuredLatencyFrames: Int?
+        /// 契约链里没装上的格数（限幅、认不出的 id、第 17 段起、第二个动态）。
+        public var ignored: Int
+
+        public static let none = InputEffects(eqEnabled: false, eqBands: 0, dynamicsKind: nil, dynamicsEnabled: false, latencyFrames: 0,
+                                              compressorMeasuredLatencyFrames: nil, ignored: 0)
     }
     /// 一条总线的表。
     public struct BusStatus: Hashable, Sendable {
@@ -74,9 +94,11 @@ public struct AudioEngineStatus: Sendable {
         public var removals: Int
         /// 最近一次换格那一格最多旁路了几块（上界 = 关格命令入队到开格命令入队之间混音器渲染的块数 + 1：两条命令都在入队后的下一块开头应用）。
         public var lastBypassBlocks: Int?
+        /// 装着压缩器时它冲激法实测的延迟（帧，W1-D3；按设计 0，≠ 自报时按量到的记并记日志）；没装为 nil。
+        public var compressorMeasuredLatencyFrames: Int?
 
         public static let empty = BusEffects(latencyFrames: 0, slots: [nil, nil, nil], enabled: [false, false, false], ignored: 0, pendingSwaps: 0,
-                                             installs: 0, swaps: 0, removals: 0, lastBypassBlocks: nil)
+                                             installs: 0, swaps: 0, removals: 0, lastBypassBlocks: nil, compressorMeasuredLatencyFrames: nil)
     }
     /// 输出设备。
     public struct DeviceStatus: Hashable, Sendable {
@@ -117,6 +139,10 @@ public struct AudioEngineStatus: Sendable {
     public var monitorMode: MonitorMode
     /// 耳机取延迟线前 / 后（W1-D2）。混音器侧的那个 `MonitorPoint`（契约里的同名类型见提案 007）。
     public var monitorPoint: SwitcherAudio.MonitorPoint
+    /// 耳机出口放哪条总线（提案 026，`AudioState.monitorSource`，W1-D3 落到混音器）：master / busA / busB；有独听时总是独听的路。
+    public var monitorSource: Bus
+    /// 2 声道设备上"独听时临时占用 Master 声道"（X09）：开着且有独听时 Master 出口放耳机总线；本机设置，组装方按 `AppSettings.borrowMasterForMonitor` 设。
+    public var borrowMasterForMonitor: Bool
     /// 实际生效的 A/V 补偿方式（W1-B4）：配置是 videoDelay 且接了视频引擎才是 videoDelay。
     public var avCompensation: AVCompensation
     /// 最近交给视频引擎的视频延后（帧 @48 k；audioPTS 或没接时 0）。引擎那边实际在用的值（slew 过程中可能还没到）看 `Engine.videoDelayApplied`。

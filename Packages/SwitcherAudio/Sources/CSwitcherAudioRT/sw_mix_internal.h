@@ -21,6 +21,22 @@ typedef struct sw_delay_line {
     uint32_t delay_frames;   ///< 当前延迟（帧）；命令改，块边界生效
 } sw_delay_line;
 
+/// 一格效果：装着的 AudioUnit（kind = AU；NULL = 旁路）或自写压缩器（kind = COMPRESSOR，状态内嵌、预分配）。总线三格与每路两格同一种结构（W1-D3）。
+typedef struct sw_effect_slot {
+    AudioUnit unit;               ///< NULL = 未装（Host 原子换指针）
+    uint8_t   enabled;            ///< 命令改，块边界生效
+    uint8_t   kind;               ///< sw_fx_kind（命令改）
+    sw_compressor comp;           ///< 自写压缩器（提案 024 (b)）：参数由命令改，状态只在 RT 写；Host 只在该格不被 render 时复位
+    float     post_gain_target;   ///< 格内输出增益（peakLimiter.ceilingDb）目标（线性，默认 1）
+    float     post_gain;          ///< 一阶平滑后的当前值
+    const float *in[SW_MIX_BUS_CHANNELS]; ///< 输入回调交给 AU 的指针
+    uint32_t  in_frames;
+    struct {
+        AudioBufferList list;     ///< mNumberBuffers = 2
+        AudioBuffer     second;
+    } out_list;
+} sw_effect_slot;
+
 struct sw_input_slot;
 
 /// libsamplerate 回调上下文（每声道一个）：记录"已交给重采样器"的帧序号。
@@ -65,6 +81,9 @@ typedef struct sw_input_slot {
     uint64_t consumed;            ///< 已消费（已交给重采样器 / bypass 已读）的帧序号；发布成 ring->read_index
     double   input_pos;           ///< 重采样器 sinc 中心的输入位置（帧，含小数）：每块按 frames / ratio 积分，
                                   ///< 再钳到 [handed − 半长 − 块, handed − 半长]（libsamplerate 取样时的确定关系）
+    sw_effect_slot fx[SW_MIX_EFFECTS_PER_INPUT]; ///< W1-D3：EQ → 动态，重采样之后、延迟线之前（延迟线 / 推子 / 耳机 / ISO 都看到效果后的信号）
+    float *fxwork[SW_MIX_BUS_CHANNELS];    ///< 效果链乒乓（与 resampled 交替；单声道输入 [1] 当第二路暂存）
+    uint64_t fx_sample_time;               ///< 每路效果格的 AU 渲染时间戳（帧）
     sw_delay_line delay;
     float gain_target, gain;      ///< 线性增益（静音时目标 0）
     float pan_target, pan;        ///< −1 … 1
@@ -87,18 +106,6 @@ typedef struct sw_input_slot {
     float *post[SW_MIX_BUS_CHANNELS];      ///< 推子后（增益 / 静音 / AFV / 声像）立体声
     const float *zeros;                    ///< 欠载时交给重采样器的零块（ctx 共享）
 } sw_input_slot;
-
-/// 一格效果（AudioUnit）。
-typedef struct sw_effect_slot {
-    AudioUnit unit;               ///< NULL = 未装
-    uint8_t   enabled;
-    const float *in[SW_MIX_BUS_CHANNELS]; ///< 输入回调交给 AU 的指针
-    uint32_t  in_frames;
-    struct {
-        AudioBufferList list;     ///< mNumberBuffers = 2
-        AudioBuffer     second;
-    } out_list;
-} sw_effect_slot;
 
 /// 一条总线。
 typedef struct sw_bus_state {
@@ -170,6 +177,8 @@ struct sw_mix_ctx {
     uint32_t meter_interval_frames;
     uint32_t monitor_mode;
     uint32_t monitor_point;       ///< sw_monitor_point：耳机取延迟线前（0，calloc 的默认）/ 后。W1-D2
+    uint32_t monitor_source;      ///< 耳机出口放哪条总线（0…2），SW_BUS_HEADPHONES = 耳机总线自己（旧行为；Host 创建时置它）。提案 026，W1-D3
+    uint32_t borrow_master;       ///< 1 = 有独听时 Master 出口放耳机总线（X09）。W1-D3
     double   host_ticks_per_frame;
     float    gain_smooth_k;       ///< 增益 / AFV 一阶平滑每样本系数 1 − exp(−1 / (τ · fs))，τ = 3 ms，创建时算好
     sw_rate_params rate_defaults;

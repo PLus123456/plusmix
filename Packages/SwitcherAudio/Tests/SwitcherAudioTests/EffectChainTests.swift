@@ -149,7 +149,9 @@ final class EffectChainTests: XCTestCase {
     func testEffects_attachPreparedUnitAfterInitialize() throws {
         let rig = makeRig(hz: 1000, dbfs: -30)
         rig.run(blocks: 50)
-        for kind in EffectKind.allCases {
+        // 自写压缩器不是 AU（W1-D3）：makeEffectUnit 要报 notAnAudioUnit
+        XCTAssertThrowsError(try rig.mixer.makeEffectUnit(.compressor, bus: .master, slot: .dynamicsProcessor))
+        for kind in EffectKind.allCases where kind.subtype != nil {
             let eu = try rig.mixer.makeEffectUnit(kind, bus: .master, slot: .dynamicsProcessor)
             XCTAssertTrue(eu.initialized)
             XCTAssertEqual(eu.effect, .dynamicsProcessor)
@@ -158,6 +160,7 @@ final class EffectChainTests: XCTestCase {
             case .parametricEQ: eu.setParametricEQ(centerHz: 1000, q: 1, gainDb: 6)
             case .dynamicsProcessor: eu.setDynamics(thresholdDb: 0, headroomDb: 5, overallGainDb: 6)
             case .peakLimiter: eu.setLimiter(attack: 0.002, decay: 0.024, preGainDb: 6)
+            case .compressor: continue
             }
             rig.mixer.setEffectEnabled(.master, .dynamicsProcessor, false)
             rig.run(blocks: 2)

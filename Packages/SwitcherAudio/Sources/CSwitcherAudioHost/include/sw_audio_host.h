@@ -55,6 +55,22 @@ void sw_mix_ctx_destroy(sw_mix_ctx *ctx);
 int sw_mix_ctx_install_effect(sw_mix_ctx *ctx, uint32_t bus, uint32_t effect, void *audio_unit);
 /// 卸下（不销毁 unit）。
 void sw_mix_ctx_remove_effect(sw_mix_ctx *ctx, uint32_t bus, uint32_t effect);
+/// 同上，宿主可选（W1-D3）：target = sw_fx_target（总线 index = 总线号、格 0…2；输入 index = 槽位、格 0…1）。
+int  sw_mix_ctx_install_effect_at(sw_mix_ctx *ctx, uint32_t target, uint32_t index, uint32_t slot, void *audio_unit);
+void sw_mix_ctx_remove_effect_at(sw_mix_ctx *ctx, uint32_t target, uint32_t index, uint32_t slot);
+/// 复位一格的内部状态（AudioUnitReset + 压缩器包络清零 + 输出增益跳到目标）。只能在实时线程不会 render 它时调：
+/// 格关着且关格命令已被确认，或所在输入槽位空闲（detach 已确认）。W1-D3。
+void sw_mix_ctx_reset_effect_state(sw_mix_ctx *ctx, uint32_t target, uint32_t index, uint32_t slot);
+
+// ---- 自写压缩器的非实时侧（提案 024 (b)）----
+
+/// 默认参数（阈值 −20 dB、4:1、拐点 6 dB、起音 5 ms、释放 100 ms、补偿 0 dB）+ 派生量，状态清零。
+void sw_compressor_init_defaults(sw_compressor *c, uint32_t sample_rate);
+/// 时间常数 → 一阶系数 exp(−1 / (seconds · sample_rate))（控制线程算，命令送进回调）。
+float sw_compressor_alpha(double seconds, uint32_t sample_rate);
+/// 冲激法量组延迟：用 params 的参数（状态清零）处理 frames 帧（静音里第 impulse_at 帧一个 0.25 的冲激，按 256 帧分块），
+/// 返回输出峰值所在帧 − impulse_at；输出全零返回 −1。非实时线程调，不碰任何在跑的格。
+int  sw_compressor_probe_latency(const sw_compressor *params, uint32_t impulse_at, uint32_t frames);
 
 /// 入队一条命令（控制线程；多个控制线程要自己串行）。队列满返回 false 并累计 commands_dropped。
 bool sw_mix_ctx_push_command(sw_mix_ctx *ctx, const sw_cmd *cmd);

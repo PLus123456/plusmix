@@ -66,12 +66,23 @@ bool sw_audio_ring_host_time_of(const sw_audio_ring *ring, uint64_t frame_index,
 #define SW_MIX_MAX_DELAY_MS      500u  ///< 延迟补偿上限（契约 InputAudioSettings.delayRangeMs）
 #define SW_MIX_MAX_DELAY_FRAMES  24000u ///< 500 ms @ 48 kHz
 #define SW_MIX_EFFECTS_PER_BUS   3u    ///< EQ → Dynamics → Limiter
+#define SW_MIX_EFFECTS_PER_INPUT 2u    ///< 每路输入两格：EQ → 动态（W1-D3，prompt 102）；重采样之后、延迟线之前
 #define SW_MIX_MAX_TAPS          8u    ///< 消费者队列（编码 / 录制 / 表线程 / 测试）上限
 #define SW_MIX_CMD_CAPACITY      256u  ///< 命令队列容量（2 的幂）
 #define SW_MIX_MAX_CROSSFADES    8u    ///< 同时进行的 AFV 交叉淡变上限
 
 enum sw_bus { SW_BUS_MASTER = 0, SW_BUS_A = 1, SW_BUS_B = 2, SW_BUS_HEADPHONES = 3 };
 enum sw_effect { SW_EFFECT_EQ = 0, SW_EFFECT_DYNAMICS = 1, SW_EFFECT_LIMITER = 2 };
+/// 每路输入的两格（W1-D3）：顺序固定 EQ → 动态；动态格里是苹果 DynamicsProcessor 还是自写压缩器由 sw_fx_kind 定。
+enum sw_input_effect { SW_INPUT_EFFECT_EQ = 0, SW_INPUT_EFFECT_DYNAMICS = 1 };
+/// 效果格的宿主（W1-D3 起效果类命令的 i2）：总线（index = 总线号，格 0…2）或输入槽位（index = 槽位，格 0…1）。0 = 总线，老命令兼容。
+enum sw_fx_target { SW_FX_TARGET_BUS = 0, SW_FX_TARGET_INPUT = 1 };
+/// 一格里跑什么：装着的 AudioUnit（NULL = 旁路），或自写 C 压缩器（提案 024 (b)）。运行期切换只改这一位，不动拓扑。
+enum sw_fx_kind { SW_FX_KIND_AU = 0, SW_FX_KIND_COMPRESSOR = 1 };
+/// 自写压缩器的参数编号（SW_CMD_FX_PARAM 的 i1）。时间常数在控制线程算成一阶系数再送进来（expf 不进回调）。
+enum sw_comp_param {
+    SW_COMP_THRESHOLD_DB = 0, SW_COMP_INV_RATIO = 1, SW_COMP_KNEE_DB = 2, SW_COMP_ALPHA_ATTACK = 3, SW_COMP_ALPHA_RELEASE = 4, SW_COMP_MAKEUP_LIN = 5,
+};
 enum sw_monitor_mode { SW_MONITOR_AFL = 0, SW_MONITOR_PFL = 1 };
 /// 耳机总线从每路输入的哪一点取信号（W1-D2）：延迟线之前 = 不带对齐延迟 / 延迟补偿的低延迟监听（默认），之后 = 与节目同刻。
 enum sw_monitor_point { SW_MONITOR_PRE_DELAY = 0, SW_MONITOR_POST_DELAY = 1 };
@@ -161,6 +172,37 @@ typedef struct sw_mix_stats {
 } sw_mix_stats;
 
 // ============================================================================
+// 2b. 自写压缩器（提案 024 (b)，W1-D3）：总线三格里的 1 号格与每路输入的动态格共用这一份实现
+// ============================================================================
+
+/// 前馈压缩器，不用前瞻、组延迟按设计 0 帧（装格 / 改参数时控制线程用 sw_compressor_probe_latency 冲激法复核）。
+/// 检测器：立体声联动（取两路 |x| 的较大者）的"解耦峰值检测器"——释放级 r = max(d, αR·r + (1 − αR)·d)（瞬时起音、指数释放），
+/// 再过一级起音一阶平滑 e += (r − e)(1 − αA)；稳态正弦的包络 ≈ 峰值（1 kHz / 释放 100 ms 时纹波 0.04 dB），静态曲线因此对得上 R:1。
+/// 增益计算在 dB 域（Giannoulis / Massberg / Reiss 2012 的静态曲线）：阈值 T、比例 R、拐点宽 W：
+///   over = x − T；over > W/2：y = T + over / R；|over| ≤ W/2：y = x + (1/R − 1)(over + W/2)² / (2W)；over < −W/2：y = x；增益 = y − x（≤ 0）+ 补偿。
+/// 每样本一次 log2f + exp2f（libm 纯函数，check-rt-symbols 的允许清单内）；包络低于拐点下沿时不进 log。
+/// 字段由命令在块边界改（RT 线程写），时间常数的一阶系数在控制线程算好（sw_compressor_alpha）。
+typedef struct sw_compressor {
+    float threshold_db;     ///< 阈值（dBFS，峰值口径）
+    float inv_ratio;        ///< 1 / 比例（1…20 → 1…0.05）
+    float knee_db;          ///< 拐点宽度 W（dB），0 = 硬拐点
+    float alpha_attack;     ///< exp(−1 / (起音 · fs))
+    float alpha_release;    ///< exp(−1 / (释放 · fs))
+    float makeup_lin;       ///< 补偿增益（线性）
+    float knee_lo_lin;      ///< 10^((T − W/2) / 20)：包络不超过它时增益恒 = 补偿（不进 log）
+    float env_release;      ///< 状态：释放级（线性峰值）
+    float env;              ///< 状态：起音平滑后的包络（线性）
+} sw_compressor;
+
+/// 跑一块。in / out 各 channels 个平面（1 或 2；可同址）；两路共用一个增益。
+void sw_compressor_process(sw_compressor *c, const float *const *in, float *const *out, uint32_t channels, uint32_t frames) SW_NONBLOCKING;
+/// 阈值 / 拐点改了之后重算 knee_lo_lin（命令应用处与 Host 初始化都调；exp2f 在允许清单内）。
+static inline void sw_compressor_update_derived(sw_compressor *c) SW_NONBLOCKING {
+    const float lo_db = c->threshold_db - 0.5f * c->knee_db;
+    c->knee_lo_lin = exp2f(lo_db * 0.166096404744368f);   // 10^(dB/20) = 2^(dB · log2(10) / 20)
+}
+
+// ============================================================================
 // 3. 命令（控制线程 → 实时线程，SPSC 队列，块开始时全部应用）
 // ============================================================================
 
@@ -181,7 +223,7 @@ enum sw_cmd_type {
     SW_CMD_INPUT_RESAMPLE,    ///< index=槽位 i0=sw_resample_mode
     SW_CMD_BUS_GAIN,          ///< index=总线 f0=线性增益
     SW_CMD_BUS_MUTE,          ///< index=总线 i0=0/1
-    SW_CMD_EFFECT_ENABLE,     ///< index=总线 i0=效果序号 i1=0/1
+    SW_CMD_EFFECT_ENABLE,     ///< index=宿主编号 i0=格 i1=0/1 i2=sw_fx_target（0 = 总线：老用法；1 = 输入槽位，W1-D3）
     SW_CMD_MONITOR_MODE,      ///< i0=sw_monitor_mode
     SW_CMD_CROSSFADE,         ///< i0=from 槽位(−1 无) i1=to 槽位(−1 无) i2=时长（帧，≥ 1；W1-D2 前是块） u0=起始 host time
     SW_CMD_TAP_ATTACH,        ///< index=tap 序号 ptr=sw_block_queue* i0=来源（0…3 总线；SW_TAP_INPUT_BASE / SW_TAP_INPUT_PRE_AFV_BASE + 槽位）
@@ -189,6 +231,12 @@ enum sw_cmd_type {
     SW_CMD_RESET_METERS,      ///< 清 peak_max / 积分响度
     SW_CMD_RESET_STATS,       ///< 清计数（不清 blocks_rendered）
     SW_CMD_MONITOR_POINT,     ///< i0=sw_monitor_point（耳机总线取延迟线前 / 后；W1-D2）
+    // ---- W1-D3（prompt 102）起 ----
+    SW_CMD_FX_KIND,           ///< index=宿主编号 i0=格 i1=sw_fx_kind i2=sw_fx_target：这一格跑 AU 还是自写压缩器（只改指向，不动拓扑）
+    SW_CMD_FX_PARAM,          ///< index=宿主编号 i0=格 i1=sw_comp_param i2=sw_fx_target f0=值（压缩器参数；阈值 / 拐点改了顺手重算 knee_lo_lin）
+    SW_CMD_FX_POST_GAIN,      ///< index=宿主编号 i0=格 i2=sw_fx_target f0=线性：格内输出增益（peakLimiter.ceilingDb，渲染完乘系数，一阶平滑）
+    SW_CMD_MONITOR_SOURCE,    ///< i0=总线号：耳机出口（out 平面 6 / 7）放这条总线（0 Master / 1 A / 2 B）；3 = 耳机总线自己（旧行为，默认）。有独听时总是耳机总线（提案 026）
+    SW_CMD_MONITOR_BORROW_MASTER, ///< i0=0/1：开着且有独听时 Master 出口（out 平面 0 / 1）放耳机总线（2 声道设备上听独听，X09）；消费者队列不受影响
 };
 
 typedef struct sw_cmd {
