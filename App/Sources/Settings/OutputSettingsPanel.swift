@@ -35,14 +35,13 @@ final class OutputSettingsModel: ObservableObject {
     /// 推流页"添加目的地"的地址框要拿焦点（W5-F，L1：没有目的地时点底栏推流主体）；视图拿到就清掉。requests 是累计次数（测试看）。
     @Published var pendingAddDestinationFocus = false
     private(set) var addDestinationFocusRequests = 0
-    /// 起不来的录制 / 推流 → 原因；推流正在第几次连接（运行表，refreshRouteDetails 时取；W5-B）。
+    /// 起不来的录制 / 推流 → 原因（运行表，refreshRouteDetails 时取；W5-B）。第几次连接 W5-N 起读 Stats.encoder 的 attempt（提案 022 B1）。
     @Published private(set) var failures: [Int: String] = [:]
-    @Published private(set) var attempts: [Int: Int] = [:]
     var send: ((Command) -> Void)?
     /// 打开推流 / 录制状态面板（W5-N；PanelCoordinator 接）。
     var showOutputStatus: ((OutputStatusModel.Page) -> Void)?
-    /// 一路起不来的原因 + 推流正在第几次连接（PanelCoordinator 接到 session 的运行表）。
-    var routeDetail: ((Int) -> (failure: String?, attempt: Int?))?
+    /// 一路起不来的原因（PanelCoordinator 接到 session 的运行表）。
+    var routeFailure: ((Int) -> String?)?
     /// 重试起不来的那几路（session.retryFailedOutputs）。
     var onRetry: (([Int]) -> Void)?
     /// 新建录制输出的默认目录。
@@ -93,16 +92,13 @@ final class OutputSettingsModel: ObservableObject {
         refreshRouteDetails()
     }
 
-    /// 重新取一遍录制 / 推流各路起不来的原因与连接次数（快照 / Stats 来的时候，或点了重试之后）。
+    /// 重新取一遍录制 / 推流各路起不来的原因（快照 / Stats 来的时候，或点了重试之后）。
     func refreshRouteDetails() {
-        var f: [Int: String] = [:], a: [Int: Int] = [:]
+        var f: [Int: String] = [:]
         for o in state.outputs where o.kind == .record || o.kind == .stream {
-            guard let d = routeDetail?(o.number) else { continue }
-            if let failure = d.failure { f[o.number] = failure }
-            if let attempt = d.attempt { a[o.number] = attempt }
+            if let failure = routeFailure?(o.number) { f[o.number] = failure }
         }
         if f != failures { failures = f }
-        if a != attempts { attempts = a }
     }
 
     /// 扩展的 bundle ID（安装器用的那个）。
@@ -320,8 +316,7 @@ final class OutputSettingsModel: ObservableObject {
     func streamStatus(output number: Int) -> String {
         guard let o = state.output(number) else { return "" }
         if o.enabled, let failure = failures[number] { return L("outputSettings.stream.statusFailed", failure) }
-        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number)
-        let route = OutputRouteStatus(number: number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0, attempt: attempts[number])
+        let route = OutputRouteStatus(output: o, entry: OutputRuntime.encoderEntry(encoderStats, forOutput: number))
         return OutputButtonSummary.routeState(route, kind: .stream).text
     }
 

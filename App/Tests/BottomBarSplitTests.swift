@@ -161,7 +161,7 @@ final class BottomBarSplitTests: XCTestCase {
         ])
         let rows = StreamMenuRow.rows(state: state, encoder: [Stats.EncoderEntry(output: 2, skipped: 0, bitrate: 6_020_000, frames: 900, state: "publishing"),
                                                                Stats.EncoderEntry(output: 3, skipped: 0, bitrate: 0, state: "failed")],
-                                      detail: { $0 == 3 ? (failure: "地址的协议 foo 不认", attempt: nil) : (failure: nil, attempt: nil) })
+                                      failure: { $0 == 3 ? "地址的协议 foo 不认" : nil })
         XCTAssertEqual(rows.map(\.title), ["主平台 · 推流中 · 6.02 Mb/s", "备用 · 起不来", "推流 3 · 未开"])
         XCTAssertEqual(rows.map(\.check), [.on, .mixed, .off], "勾 = 在推；开着但没推起来 = 横杠；没开 = 空")
         XCTAssertEqual(rows.map(\.click), [.stop, .retry, .start], "点 = 只起停这一路；起不来的那一路 = 单路重试")

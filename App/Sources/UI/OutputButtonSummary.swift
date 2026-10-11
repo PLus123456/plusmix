@@ -1,6 +1,8 @@
 // 底栏录制 / 推流主体按钮的文案、颜色与提示（W5-B：02 X02 / X11，01a L4 / L13 / K11）。纯函数，测试直接喂。
-// 输入是每一路的：目标开关（快照里的 enabled）、Stats.encoder 里那一项的 state / frames（铁律 4，同一行 Stats）、起不来的原因（OutputRuntime 的 failed 表）、
-// 推流正在第几次连接（StreamOutput 的状态机——Stats.encoder 只有成功重连次数 reconnects，没有尝试次数，见报告 §4）。
+// 输入是每一路的：目标开关（快照里的 enabled）、Stats.encoder 里那一项的 state / frames / attempt / uptime_s（铁律 4，同一行 Stats；
+// W5-N 起"第几次连接"读 022 的 attempt、不再读 App 的运行表，G6 追加 ②）、起不来的原因（OutputRuntime 的 failed 表）。
+// W5-N（01a E10）：在录 / 在推时标题带时长"● 录制 01:02:05"，时长 = Stats.encoder[].uptime_s（多路取最长那一路），不在 App 里自己计时；
+// 工具条右组、录制 ▴、ISO 表、状态面板读同一份。
 // 汇总口径：
 //   - 没有一路开着 → "推流" / "录制"；
 //   - 有一路起不来 / 失败（红）或在重连、首连已失败过（橙）→ 只有一路开着时直接写它的状态（"推流 · 重连中（第 2 次）"），多路写"推流 · k 路异常"，
@@ -9,6 +11,7 @@
 //   - 其余（刚开、首连第 1 次、封口中）→ "推流 · 连接中" 之类，颜色同"开着"。
 // state 一律查本地化表（"推流 · idle"这类原样英文不再出现）；首次连接叫"连接中"，连上过之后才叫"重连中"，次数是真实的尝试次数。
 import AppKit
+import SwitcherContracts
 
 /// 一路录制 / 推流在按钮眼里的样子。
 struct OutputRouteStatus: Equatable {
@@ -20,10 +23,20 @@ struct OutputRouteStatus: Equatable {
     var state: String?
     /// Stats.encoder 里这一路的 frames（推流：交给网络的帧数，> 0 = 连上过）。
     var frames: UInt64 = 0
-    /// 推流：正在 / 即将进行第几次连接（从 1 起，StreamOutput 的 connecting / backoff；不在连为 nil）。
+    /// 推流：正在 / 即将进行第几次连接（从 1 起，Stats.encoder 的 attempt（提案 022 B1）；不在连为 nil）。
     var attempt: Int? = nil
     /// 起不来的原因（没有地址 / 地址不认 / 建不起来 / 录制起不来……）；nil = 没有。
     var failure: String? = nil
+    /// 这一路本次运行的时长（秒，Stats.encoder 的 uptime_s，提案 022）；没有这一项为 0。
+    var uptime: Double = 0
+}
+
+extension OutputRouteStatus {
+    /// 快照里的一路 + Stats.encoder 里它那一项（按 output 对号）+ 起不来的原因：state / frames / attempt / uptime 全读 Stats（W5-N）。
+    init(output o: OutputState, entry: Stats.EncoderEntry?, failure: String? = nil) {
+        self.init(number: o.number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0,
+                  attempt: entry.flatMap { $0.attempt > 0 ? $0.attempt : nil }, failure: failure, uptime: entry?.uptimeS ?? 0)
+    }
 }
 
 /// 有多糟：off（没开）< live（在推 / 在录）< pending（刚开、首连、封口中）< warning（重连中、首连已失败过）< error（起不来 / 失败）。
@@ -56,7 +69,11 @@ struct OutputButtonSummary: Equatable {
 
     enum Kind { case record, stream }
 
-    static func durationText(_ seconds: Double) -> String { "" }
+    /// 时长"hh:mm:ss"（向下取整到秒；超过一天小时数照写、不绕回；负数 / 非有限按 0）。底栏、工具条、录制 ▴、ISO 表、状态面板共用。
+    static func durationText(_ seconds: Double) -> String {
+        let total = seconds.isFinite && seconds > 0 ? Int(seconds.rounded(.down)) : 0
+        return String(format: "%02d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
+    }
 
     static func stream(_ routes: [OutputRouteStatus]) -> OutputButtonSummary { summarize(routes, kind: .stream) }
     static func record(_ routes: [OutputRouteStatus]) -> OutputButtonSummary { summarize(routes, kind: .record) }
@@ -118,12 +135,14 @@ struct OutputButtonSummary: Equatable {
             let hint = kind == .stream && enabled.contains(where: { $0.failure != nil }) ? "\n" + L("bottom.tip.retryHint") : ""
             return OutputButtonSummary(title: title, toolTip: tip + hint, severity: worst)
         }
+        // 时长：在录 / 在推的路里最长的那一路（同一拍起的几路差不到一秒；推流的 uptime 含重连期，提案 022 默认口径）
+        let duration = durationText(live.map(\.uptime).max() ?? 0)
         switch kind {
         case .stream where !live.isEmpty:
-            let title = routes.count == 1 ? L("bottom.streaming") : L("bottom.streamingMany", live.count, routes.count)
+            let title = routes.count == 1 ? L("bottom.streamingTime", duration) : L("bottom.streamingTimeMany", duration, live.count, routes.count)
             return OutputButtonSummary(title: title, toolTip: tip, severity: .live)
         case .record where live.count == enabled.count:
-            let title = enabled.count > 1 ? L("bottom.recordingMany", enabled.count) : L("bottom.recording")
+            let title = enabled.count > 1 ? L("bottom.recordingTimeMany", duration, enabled.count) : L("bottom.recordingTime", duration)
             return OutputButtonSummary(title: title, toolTip: tip, severity: .live)
         default:
             // 都还在路上（刚开 / 首连 / 封口中）：写第一路还没到的状态

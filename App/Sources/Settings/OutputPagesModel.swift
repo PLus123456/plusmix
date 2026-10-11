@@ -102,14 +102,20 @@ extension OutputSettingsModel {
     func isRecordArmed(_ number: Int) -> Bool { state.output(number).map(OutputLinkage.isArmed) ?? false }
 
     func setRecordArmed(_ number: Int, on: Bool) {
-        updateOutput(number) { $0.extra[OutputLinkage.armedKey] = on ? nil : .bool(false) }
+        updateOutput(number) { s in
+            var r = s.record ?? RecordSettings(directory: self.defaultRecordDirectory)
+            r.armed = on
+            s.record = r
+        }
     }
 
     /// 改来源：选某路输入的路标"自己的格式"，留在录制页（不变成跟录制 1 的 ISO 路）。
     func setRecordSource(_ number: Int, _ source: OutputSource) {
         updateOutput(number) { s in
             s.source = source
-            s.extra[OutputLinkage.ownFormatKey] = source.inputNumber == nil ? nil : .bool(true)
+            var r = s.record ?? RecordSettings(directory: self.defaultRecordDirectory)
+            r.ownFormat = source.inputNumber != nil
+            s.record = r
         }
     }
 
@@ -125,8 +131,7 @@ extension OutputSettingsModel {
     /// 某一路录制的状态："未录" / "录制中" / "起不来"……（与底栏同一套文字，读 Stats.encoder）。
     func recordStatus(output number: Int) -> String {
         guard let o = state.output(number) else { return "" }
-        let entry = OutputRuntime.encoderEntry(encoderStats, forOutput: number)
-        let route = OutputRouteStatus(number: number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0, failure: failures[number])
+        let route = OutputRouteStatus(output: o, entry: OutputRuntime.encoderEntry(encoderStats, forOutput: number), failure: failures[number])
         return OutputButtonSummary.routeState(route, kind: .record).text
     }
 
@@ -159,8 +164,9 @@ extension OutputSettingsModel {
         let checked: Bool
         let locked: Bool
         let status: String
+        /// 时长（W5-N，E10）：这一路录制的 Stats.encoder uptime_s（底栏 / 录制 ▴ 同一份）；没在录为 "—"。
+        let duration: String
         let dropped: String
-        var duration: String = "—"
         let directory: String
     }
 
@@ -175,14 +181,16 @@ extension OutputSettingsModel {
         var rows: [ISORow] = []
         if let m = OutputLinkage.recordMaster(in: state) {
             rows.append(ISORow(id: "pgm", output: m.number, input: nil, title: L("outputSettings.iso.pgmRow", m.name), checked: OutputLinkage.isArmed(m),
-                               locked: m.enabled, status: recordStatus(output: m.number), dropped: droppedText(m.number), directory: m.settings.record?.directory ?? ""))
+                               locked: m.enabled, status: recordStatus(output: m.number), duration: durationText(m.number), dropped: droppedText(m.number),
+                               directory: m.settings.record?.directory ?? ""))
         }
         for input in state.inputs {
             let iso = ISORoutes.isoRecord(in: state, input: input.number)
             if iso == nil, !isoShowAllInputs, Self.isCollapsedByDefault(input) { continue }
             rows.append(ISORow(id: "input-\(input.number)", output: iso?.number, input: input.number, title: L("outputSettings.iso.input", input.number, input.name),
                                checked: iso != nil, locked: iso?.enabled ?? false, status: iso.map { recordStatus(output: $0.number) } ?? "—",
-                               dropped: iso.map { droppedText($0.number) } ?? "—", directory: iso?.settings.record?.directory ?? ""))
+                               duration: iso.map { durationText($0.number) } ?? "—", dropped: iso.map { droppedText($0.number) } ?? "—",
+                               directory: iso?.settings.record?.directory ?? ""))
         }
         return rows
     }
@@ -190,6 +198,12 @@ extension OutputSettingsModel {
     /// 收起了几路（纯音频 / 图片、没有 ISO 路）。
     var isoHiddenInputCount: Int {
         state.inputs.filter { Self.isCollapsedByDefault($0) && ISORoutes.isoRecord(in: state, input: $0.number) == nil }.count
+    }
+
+    /// 在录（recording / stopping）的路写 uptime_s 的 hh:mm:ss，其余 "—"（Stats 里 idle / stopped / failed 的 uptime 是 0，写 00:00:00 像是录了 0 秒）。
+    private func durationText(_ number: Int) -> String {
+        guard let e = OutputRuntime.encoderEntry(encoderStats, forOutput: number), e.state == "recording" || e.state == "stopping" else { return "—" }
+        return OutputButtonSummary.durationText(e.uptimeS)
     }
 
     private func droppedText(_ number: Int) -> String {
@@ -348,7 +362,7 @@ extension OutputSettingsModel {
     func setStreamFollowsFirst(_ number: Int, on: Bool) {
         let leader = OutputLinkage.streamLeader(in: state)
         updateOutput(number) { s in
-            s.extra[OutputLinkage.streamFollowKey] = .bool(on)
+            s.stream?.followFirst = on
             if on, let leader, leader.number != number {
                 s.video = leader.settings.video
                 s.audio = leader.settings.audio
@@ -356,13 +370,11 @@ extension OutputSettingsModel {
         }
     }
 
-    // 鉴权（L10）
+    // 鉴权（L10；W5-N 加查询串写法，2026-10-10 裁定 ①）
 
-    func streamAuthStyle(_ number: Int) -> StreamAddress.AuthStyle { .adobe }
-
-    @discardableResult
-    func setStreamAuth(_ number: Int, user: String, password: String, style: StreamAddress.AuthStyle) -> String? {
-        setStreamAuth(number, user: user, password: password)
+    /// 这个目的地现在的鉴权写法（按地址认：有 user:pass@ = Adobe，查询串里有账号参数 = 查询串）。
+    func streamAuthStyle(_ number: Int) -> StreamAddress.AuthStyle {
+        StreamAddress.authStyle(of: state.output(number)?.settings.stream?.url ?? "")
     }
 
     func streamCredentials(_ number: Int) -> StreamDestination.Credentials? {
@@ -372,21 +384,31 @@ extension OutputSettingsModel {
     /// 地址框显示的地址（user:pass@ 打码）。
     func maskedStreamURL(_ number: Int) -> String { StreamAddress.masked(state.output(number)?.settings.stream?.url ?? "") }
 
-    /// "鉴权…"写回：RTMP / RTMPS 写 userinfo，SRT 写 passphrase。返回错误文案（nil = 写好了）。
+    /// "鉴权…"写回：RTMP / RTMPS 按写法写 userinfo（Adobe）或查询串（参数名照给的），两种写法互斥——写一种时另一种的账号去掉；
+    /// SRT 写 passphrase（写法不看）。返回错误文案（nil = 写好了）。
     @discardableResult
-    func setStreamAuth(_ number: Int, user: String, password: String) -> String? {
+    func setStreamAuth(_ number: Int, user: String, password: String, style: StreamAddress.AuthStyle = .adobe) -> String? {
         guard !isStreamLocked(number), let url = state.output(number)?.settings.stream?.url else { return L("outputSettings.stream.lockedNote") }
         let next: String
-        do {
+        do throws(StreamAddress.EditError) {
             if StreamAddress.scheme(of: url) == "srt" {
                 next = try StreamAddress.withSRTPassphrase(url, passphrase: password)
             } else {
-                next = try StreamAddress.withCredentials(url, user: user, password: password)
+                switch style {
+                case .adobe:
+                    // 先去掉查询串里的账号（也会去掉 userinfo），再写 user:pass@
+                    let cleared = try StreamAddress.withQueryCredentials(url, user: "", password: "", userParam: StreamAddress.defaultQueryUserParam,
+                                                                         passParam: StreamAddress.defaultQueryPassParam)
+                    next = try StreamAddress.withCredentials(cleared, user: user, password: password)
+                case .query(let userParam, let passParam):
+                    next = try StreamAddress.withQueryCredentials(url, user: user, password: password, userParam: userParam, passParam: passParam)
+                }
             }
         } catch {
             switch error {
             case .invalidPassphrase: return L("outputSettings.stream.auth.badPassphrase")
             case .notRTMP, .invalidURL: return L("outputSettings.stream.auth.badURL")
+            case .invalidParamName: return L("outputSettings.stream.auth.badParamName")
             }
         }
         guard next != url else { return nil }
@@ -412,7 +434,7 @@ extension OutputSettingsModel {
         if let leader = OutputLinkage.streamLeader(in: state) {
             settings.video = leader.settings.video ?? settings.video
             settings.audio = leader.settings.audio ?? settings.audio
-            settings.extra[OutputLinkage.streamFollowKey] = .bool(true)
+            settings.stream?.followFirst = true
         }
         return settings
     }

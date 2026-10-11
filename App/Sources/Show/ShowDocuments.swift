@@ -57,8 +57,14 @@ final class ShowDocuments {
 
     // MARK: 文件
 
+    /// 文件里读进来的节目在交给 session 之前要做的事：录制 / 推流的 enabled 清掉（见上）；提案 025 的三个旧 extra 键搬进正式字段、搬完删键
+    /// （W5-N，2026-10-10 裁定 ③；契约把搬迁做成独立函数、不并进 Show.load，reports/p5-contracts.md §4 第 1 条）。
+    static func prepared(_ show: Show) -> Show {
+        stoppingOutputs(show).migratingLegacyAppFlags()
+    }
+
     func load(from url: URL) throws -> Show {
-        let show = Self.stoppingOutputs(try store.load(from: url))
+        let show = Self.prepared(try store.load(from: url))
         currentURL = url
         noteRecent(url)
         return show
@@ -114,6 +120,6 @@ final class ShowDocuments {
     var hasAutosave: Bool { FileManager.default.fileExists(atPath: autosaveURL.path) }
 
     func loadAutosave() -> Show? {
-        (try? store.load(from: autosaveURL)).map(Self.stoppingOutputs)
+        (try? store.load(from: autosaveURL)).map(Self.prepared)
     }
 }

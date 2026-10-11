@@ -32,29 +32,8 @@ final class PlaybackStatusTests: XCTestCase {
         return url
     }
 
-    /// 分支槽里新到的帧（按 sequence 去重）：帧号（解不出为 nil）+ pts。不持有 Frame（解码器的像素池要复用），当场解。
-    private struct Sample: CustomStringConvertible {
-        let number: Int?
-        let pts: HostTime
-        var description: String { "#\(number.map(String.init) ?? "?")@\(pts.ticks)" }
-    }
-
-    private func sample(_ slot: LockFreeFrameSlot, seconds: Double) -> [Sample] {
-        var out: [Sample] = []
-        var last: UInt64?
-        let end = HostClock.now() + HostDuration(milliseconds: seconds * 1000)
-        while HostClock.now() < end {
-            if let f = slot.latest(atOrBefore: HostClock.now() + HostDuration(milliseconds: 1000)), f.sequence != last {
-                last = f.sequence
-                out.append(Sample(number: TestPattern.decode(pixelBuffer: f.pixelBuffer)?.frameNumber.map(Int.init), pts: f.pts))
-            }
-            usleep(1000)
-        }
-        return out
-    }
-
     /// 一串样本里第一次往回跳（帧号比前一个小）之后的那一帧号；没有往回跳为 nil。
-    private func firstAfterJumpBack(_ samples: [Sample]) -> Int? {
+    private func firstAfterJumpBack(_ samples: [PlaybackSample]) -> Int? {
         let numbers = samples.compactMap(\.number)
         guard numbers.count > 1 else { return nil }
         for i in 1..<numbers.count where numbers[i] < numbers[i - 1] { return numbers[i] }
@@ -80,8 +59,8 @@ final class PlaybackStatusTests: XCTestCase {
 
     // MARK: - 1. 文件播放控制（D5 / V04）
 
-    /// 格子第一行 × ｜ 转场 ｜ Cut ｜ ▶/⏸ ｜ ⟲ ｜ 循环：后三颗只对文件输入亮（合成源灰着写原因）。
-    /// ⏸ = setPlayback(paused: true)：画面停在这一帧，**pts 仍每拍刷新**（每拍一帧新的、帧号不变）；▶ 接着播；⟲ = seekPlayback(0)：首帧帧号 0。
+    /// 格子第一行 × ｜ 转场 ｜ Cut ｜ ⏮ ｜ ▶/⏸ ｜ 🔁：后三颗只对文件输入亮（合成源灰着写原因）。
+    /// ⏸ = setPlayback(paused: true)：画面停在这一帧，**pts 仍每拍刷新**（每拍一帧新的、帧号不变）；▶ 接着播；⏮（prompt 写 ⟲）= seekPlayback(0)：首帧帧号 0。
     /// 右键"切上 PGM 时从头播"= restartOnProgram：切到别处再切回来，首帧又是 0。从头到尾**输入对象是同一个**（运行表不重建）。
     func testUI_fileCellPlayPauseRestart() throws {
         let fixture = try patternMov()
@@ -92,9 +71,9 @@ final class PlaybackStatusTests: XCTestCase {
         XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live, "文件输入应 live")
         XCTAssertTrue(AppTest.waitUntil(3) { self.strip.cells[1] != nil && self.strip.cells[2] != nil })
         let cell1 = try XCTUnwrap(strip.cells[1]), cell2 = try XCTUnwrap(strip.cells[2])
-        // 按钮：第一行六颗，▶/⏸、⟲、循环只对文件输入亮
+        // 按钮：第一行六颗 × ｜ 转场 ｜ Cut ｜ ⏮ ｜ ▶/⏸ ｜ 🔁，后三颗只对文件输入亮
         XCTAssertEqual(cell1.firstRowButtons.map(ObjectIdentifier.init),
-                       [cell1.removeButton, cell1.transitionButton, cell1.cutButton, cell1.playButton, cell1.restartButton, cell1.loopButton].map(ObjectIdentifier.init))
+                       [cell1.removeButton, cell1.transitionButton, cell1.cutButton, cell1.restartButton, cell1.playButton, cell1.loopButton].map(ObjectIdentifier.init))
         for b in [cell1.playButton, cell1.restartButton, cell1.loopButton] {
             XCTAssertTrue(b.isEnabled)
             XCTAssertTrue(b.refusesFirstResponder, "空格仍是 Cut")
@@ -109,8 +88,13 @@ final class PlaybackStatusTests: XCTestCase {
         let file = try XCTUnwrap(entry.input as? FileInput)
         let identity = ObjectIdentifier(file)
         let branch = try XCTUnwrap(session.inputs.openBranch(input: 1), "给测试开一个分支槽")
-        defer { session.inputs.releaseBranch(branch, input: 1) }
-        let running = sample(branch, seconds: 0.3).compactMap(\.number)
+        let sampler = SlotSampler(branch)
+        defer {
+            _ = sampler.stop()
+            session.inputs.releaseBranch(branch, input: 1)
+        }
+        AppTest.pump(seconds: 0.3)
+        let running = sampler.samples(since: 0).compactMap(\.number)
         XCTAssertGreaterThan(running.count, 10, "播放中每拍一帧：\(running)")
 
         // ⏸：快照里 paused、跑着的 FileInput 暂停；按钮换成 ▶、高亮
@@ -125,7 +109,9 @@ final class PlaybackStatusTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(1) { cell1.playButton.accessibilityLabel() == "输入 1 播放" }, "暂停中：按钮是 ▶")
         XCTAssertNotNil(cell1.playButton.bezelColor, "暂停中高亮（画面是停住的）")
         AppTest.pump(seconds: 0.15)
-        let paused = sample(branch, seconds: 0.5)
+        let pauseMark = sampler.count
+        AppTest.pump(seconds: 0.5)
+        let paused = sampler.samples(since: pauseMark)
         print("暂停：\(paused.count) 帧，帧号 \(Set(paused.compactMap(\.number)))")
         XCTAssertGreaterThanOrEqual(paused.count, 24, "暂停后仍每拍推一帧（0.5 s ≈ 30 拍）：\(paused)")
         XCTAssertEqual(Set(paused.compactMap(\.number)).count, 1, "暂停后帧号不变：\(paused)")
@@ -141,15 +127,19 @@ final class PlaybackStatusTests: XCTestCase {
         cell1.playButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.input(1)?.settings.playback.paused == false && !file.isPaused })
         XCTAssertTrue(AppTest.waitUntil(1) { cell1.playButton.accessibilityLabel() == "输入 1 暂停" })
-        let resumed = sample(branch, seconds: 0.3).compactMap(\.number)
+        let resumeMark = sampler.count
+        AppTest.pump(seconds: 0.3)
+        let resumed = sampler.samples(since: resumeMark).compactMap(\.number)
         XCTAssertGreaterThan(Set(resumed).count, 5, "继续播放：帧号在走：\(resumed)")
         if let held = heldNumber, let first = resumed.first { XCTAssertGreaterThanOrEqual(first, held, "从停住的帧接着走，不是从头：\(held) → \(resumed)") }
 
-        // ⟲：seekPlayback(0)，首帧帧号 0
+        // ⏮：seekPlayback(0)，首帧帧号 0
         AppTest.pump(seconds: 0.3)
+        let restartMark = max(0, sampler.count - 1)   // 带上点之前的最后一帧：定位期间不推帧，标记之后的第一帧可能就是 0
         cell1.restartButton.performClick(nil)
-        let afterRestart = sample(branch, seconds: 0.6)
-        XCTAssertEqual(session.state.input(1)?.settings.playback.seekSeconds, 0, "⟲ = seekPlayback(0)")
+        AppTest.pump(seconds: 0.6)
+        let afterRestart = sampler.samples(since: restartMark)
+        XCTAssertEqual(session.state.input(1)?.settings.playback.seekSeconds, 0, "⏮ = seekPlayback(0)")
         XCTAssertEqual(firstAfterJumpBack(afterRestart), 0, "从头后首帧帧号 0：\(afterRestart)")
 
         // 右键：播放控制四项（文件输入才有）；"切上 PGM 时从头播"打勾 = restartOnProgram
@@ -166,8 +156,10 @@ final class PlaybackStatusTests: XCTestCase {
         AppTest.pump(seconds: 0.5)
         session.send(.setProgram(input: 2))
         AppTest.pump(seconds: 0.3)
+        let programMark = max(0, sampler.count - 1)
         session.send(.setProgram(input: 1))
-        let afterProgram = sample(branch, seconds: 0.6)
+        AppTest.pump(seconds: 0.6)
+        let afterProgram = sampler.samples(since: programMark)
         XCTAssertEqual(firstAfterJumpBack(afterProgram), 0, "切上 PGM 时从头播：首帧帧号 0：\(afterProgram)")
         XCTAssertEqual(ObjectIdentifier(session.inputs.entries[1]!.input as AnyObject), identity, "输入对象从头到尾是同一个（不重建）")
     }
@@ -248,10 +240,10 @@ final class PlaybackStatusTests: XCTestCase {
         model.apply(stats: stats(ts: 1_008, [rec, main, backup("publishing", frames: 300, uptime: 8.4, error: "连接断了：connection reset by peer")]), state: state)
         model.apply(stats: stats(ts: 1_009, [rec, main, backup("publishing", frames: 360, uptime: 9.4, error: "连接断了：connection reset by peer")]), state: state)
         let texts = model.events(for: .stream).map(\.text)
-        XCTAssertEqual(texts, ["备用 · 连接中", "备用 · 推流中", "备用 · 断开：连接断了：connection reset by peer", "备用 · 重连中（第 1 次）", "备用 · 重连上"],
-                       "事件由状态变化推出：\(texts)")
+        XCTAssertEqual(texts, ["主平台 · 推流中", "备用 · 连接中", "备用 · 推流中", "备用 · 断开：连接断了：connection reset by peer", "备用 · 重连中（第 1 次）", "备用 · 重连上"],
+                       "事件由状态变化推出（第一次看到在跑的路记一条当前状态；状态不变不记）：\(texts)")
         let times = model.events(for: .stream).map(\.time)
-        XCTAssertEqual(times.map { $0.timeIntervalSince1970 }, [1_000, 1_001, 1_005, 1_006, 1_008], "事件时间 = 那一行 Stats 的 ts")
+        XCTAssertEqual(times.map { $0.timeIntervalSince1970 }, [1_000, 1_000, 1_001, 1_005, 1_006, 1_008], "事件时间 = 那一行 Stats 的 ts")
         XCTAssertEqual(model.events(for: .record).map(\.text), ["录制 · 录制中"], "录制页同理（第一次看到就记一条）")
         XCTAssertEqual(model.streamRows.first { $0.number == 3 }?.uptime, "00:00:09")
 
@@ -323,7 +315,9 @@ final class PlaybackStatusTests: XCTestCase {
             Stats.EncoderEntry(output: 1, skipped: 0, bitrate: 18_000_000, frames: 1, state: "recording", uptimeS: 65),
             Stats.EncoderEntry(output: 2, skipped: 0, bitrate: 18_000_000, frames: 1, state: "recording", uptimeS: 64.9),
         ]))
-        XCTAssertEqual(pages.isoRows.map(\.duration), ["00:01:05", "—"], "PGM 行 = 录制 1 的 uptime；输入 1 这行的 ISO 路要等在录（编号 2 / 3 不是 isoRecord 时为 —）")
+        XCTAssertEqual(pages.isoRows.map(\.duration), ["00:01:05", "00:01:04"], "PGM 行 = 录制 1 的 uptime；输入 1 这行 = 它的 ISO 路（输出 2）的 uptime")
+        pages.apply(stats: stats(ts: 1_003, [Stats.EncoderEntry(output: 1, skipped: 0, bitrate: 0, frames: 1, state: "stopped")]))
+        XCTAssertEqual(pages.isoRows.map(\.duration), ["—", "—"], "没在录写 —（不写 00:00:00）")
         XCTAssertEqual(OutputButtonSummary.durationText(0), "00:00:00")
         XCTAssertEqual(OutputButtonSummary.durationText(59.99), "00:00:59")
         XCTAssertEqual(OutputButtonSummary.durationText(-3), "00:00:00")
@@ -459,5 +453,59 @@ final class PlaybackStatusTests: XCTestCase {
         XCTAssertEqual(fresh.stream?.followFirst, true, "第 2 个起新建的目的地默认跟推流 1")
         for o in model.state.outputs { XCTAssertTrue(o.settings.extra.isEmpty, "写也不再用 extra：\(o.name) \(o.settings.extra)") }
         XCTAssertTrue(fresh.extra.isEmpty)
+    }
+}
+
+/// 分支槽里新到的一帧（按 sequence 去重）：帧号（解不出为 nil）+ pts。不持有 Frame（解码器的像素池要复用），当场解。
+struct PlaybackSample: CustomStringConvertible, Sendable {
+    let number: Int?
+    let pts: HostTime
+    var description: String { "#\(number.map(String.init) ?? "?")@\(pts.ticks)" }
+}
+
+/// 分支槽的采样线程：主线程要 pump 事件循环让快照落到运行表上（定位 / 暂停都在那儿生效），采样放在另一条线程——它是这个分支槽唯一的消费者，
+/// 每 0.5 ms 看一次最新一帧，新的（sequence 变了）就当场解帧号记下。点按钮之前就在采，"定位后的第一帧"不会因为主线程忙别的而漏掉。
+final class SlotSampler: @unchecked Sendable {
+    private let slot: LockFreeFrameSlot
+    private let lock = NSLock()
+    private var list: [PlaybackSample] = []
+    private var running = true
+    private var stopped = false
+    private let done = DispatchSemaphore(value: 0)
+
+    init(_ slot: LockFreeFrameSlot) {
+        self.slot = slot
+        let thread = Thread { [self] in self.loop() }
+        thread.qualityOfService = .userInteractive
+        thread.start()
+    }
+
+    private func loop() {
+        var last: UInt64?
+        while lock.withLock({ running }) {
+            if let f = slot.latest(atOrBefore: HostClock.now() + HostDuration(milliseconds: 1000)), f.sequence != last {
+                last = f.sequence
+                let sample = PlaybackSample(number: TestPattern.decode(pixelBuffer: f.pixelBuffer)?.frameNumber.map(Int.init), pts: f.pts)
+                lock.withLock { list.append(sample) }
+            }
+            usleep(500)
+        }
+        done.signal()
+    }
+
+    /// 到现在为止采了多少帧（当作"从这里往后"的标记）。
+    var count: Int { lock.withLock { list.count } }
+
+    /// 标记之后采到的帧。
+    func samples(since mark: Int) -> [PlaybackSample] { lock.withLock { Array(list[min(mark, list.count)...]) } }
+
+    /// 停下采样线程（可重复调）。
+    func stop() -> [PlaybackSample] {
+        let wait = lock.withLock { () -> Bool in
+            defer { running = false; stopped = true }
+            return !stopped
+        }
+        if wait { done.wait() }
+        return lock.withLock { list }
     }
 }

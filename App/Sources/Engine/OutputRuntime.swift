@@ -307,16 +307,6 @@ final class OutputRuntime {
         return nil
     }
 
-    /// 推流正在 / 即将进行第几次连接（从 1 起；在推 / 没在跑为 nil）。Stats.encoder 里只有成功重连次数，没有尝试次数（见报告 §4），底栏按钮从这里读。
-    func streamConnectAttempt(output number: Int) -> Int? {
-        guard let e = streams[number] else { return nil }
-        switch e.stream.state {
-        case .connecting(let attempt): return attempt
-        case .backoff(let failures, _): return failures + 1
-        default: return nil
-        }
-    }
-
     /// 每行 Stats（主线程）：推流第一次报 publishing 时提示"已开始"（X37：start() 之后先提示"连接中"，连上才算开始）。
     func noteStats(_ stats: Stats) {
         for (n, e) in streams where !e.announced && !e.stopping {

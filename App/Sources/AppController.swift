@@ -241,7 +241,8 @@ final class AppController {
 
     /// 未保存判定的口径：比"节目内容"——Show 去掉现场操作与界面摆放之后剩下的部分（报告 §1 有这张表）。
     /// 不算改动：界面布局（窗口位置 / 面板开关；W5-H 起 layout 里的输入分类两个键除外——它们是节目内容，023 后进 InputConfig）、节目名（跟文件名走）、录制 / 推流的开关（运行目标，打开文件时本来就清掉）、PGM / PVW 选哪路、
-    /// 转场进度 / T-bar / 起始拍、FTB 开没开与进度、叠加通道开没开 / 放哪路 / 动画进度。
+    /// 转场进度 / T-bar / 起始拍、FTB 开没开与进度、叠加通道开没开 / 放哪路 / 动画进度、文件输入的暂停与定位请求（提案 021 的 paused / seek*，W5-N：
+    /// 播放 / 暂停 / 回到开头是现场操作；"切上 PGM 时从头播"是设置，算改动）。
     /// 算改动：输入表与每路设置（含推子、静音、路由、延迟、效果、抠像）、输出表与设置（含 NDI / 外部显示 / 虚拟摄像头 / 多画面的开关）、
     /// 转场类型 / 时长 / Wipe / Stinger 参数、FTB 时长、叠加的位置 / 动画 / 边框 / 锚点 / PVW 预览、四总线的增益 / 静音 / 效果、AFV、监听、节目格式、对齐延迟 / 监听点。
     static func documentContent(_ show: Show) -> Show {
@@ -261,6 +262,11 @@ final class AppController {
             s.mixer.overlays[i].input = nil
             s.mixer.overlays[i].animProgress = 0
             s.mixer.overlays[i].startTick = nil
+        }
+        for i in s.inputs.indices {
+            s.inputs[i].settings.playback.paused = false
+            s.inputs[i].settings.playback.seekSeconds = nil
+            s.inputs[i].settings.playback.seekTick = nil
         }
         return s
     }

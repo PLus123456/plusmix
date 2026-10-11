@@ -7,6 +7,9 @@
 // （两次采样之间输出表变了、或一行顺序颠倒的 Stats 也对得准）。
 // W5-F（01a E9 / 03 V-22）：节目格式写短"1080p60 / 1080p59.94"（非 16:9 写全宽高"1080×1920p30"）；字段名一律走本地化表、统一语言
 // （原来"fps / render"是英文、其余是中文；GPU / CPU 是通用缩写，两种语言都写它）。
+// W5-N（02 X28）：码率分开写"录制 x · 推流 y"——原来只取第一个在跑的，录制和推流同时开时推流码率看不到；多路时各给最差（码率最低）的那一路，
+// 退避中（码率 0）的推流也算在跑、就是最差的。跳帧给录制 / 推流里最多的那一路，标签按实际含义写"编码滞后跳帧"（E1：编码跟不上、编码之前跳过的帧，
+// 累计；设计方案 §10 写的"编码器占用"这里没有，不冒充）。NDI 的原始码率（约 2 Gb/s）不进这两项；只有 NDI 在发时跳帧才看它。
 import Foundation
 import SwitcherContracts
 
@@ -22,16 +25,21 @@ enum StatusLineFormatter {
         return Double(current.tick.rawValue - previous.tick.rawValue) / (current.ts - previous.ts)
     }
 
-    /// 真在跑的编码器（录制 recording / stopping，推流 publishing / connecting / backoff，NDI publishing）：不是 idle / stopped / unavailable 的项。
-    /// kinds = 输出编号 → 类型（快照里的 outputs）：给了就按每项的 `output` 查类型，先找录制 / 推流；都没在跑才退到第一个在跑的
-    /// （NDI，或表里没有的编号——输出刚删、这行 Stats 还是上一秒的）；nil = 不分类型，第一个在跑的。
-    static func activeEncoder(in stats: Stats, kinds: [Int: OutputKind]? = nil) -> Stats.EncoderEntry? {
+    /// 在跑的录制 / 推流项（X28）：kinds 给了按输出类型分；没给（老调用 / 测试）按 state 认——recording / stopping 算录制，
+    /// publishing / connecting / backoff 算推流（这时分不出 NDI）。
+    static func runningEncoders(in stats: Stats, kinds: [Int: OutputKind]?) -> (record: [Stats.EncoderEntry], stream: [Stats.EncoderEntry], other: [Stats.EncoderEntry]) {
         func running(_ e: Stats.EncoderEntry) -> Bool { !["idle", "stopped", "unavailable"].contains(e.state) }
-        let runningEntries = stats.encoder.filter(running)
-        if let kinds, let e = runningEntries.first(where: { kinds[$0.output].map { $0 != .ndi } ?? false }) {
-            return e
+        var record: [Stats.EncoderEntry] = [], stream: [Stats.EncoderEntry] = [], other: [Stats.EncoderEntry] = []
+        for e in stats.encoder where running(e) {
+            let kind: OutputKind?
+            if let kinds { kind = kinds[e.output] } else { kind = ["recording", "stopping"].contains(e.state) ? .record : .stream }
+            switch kind {
+            case .record?: record.append(e)
+            case .stream?: stream.append(e)
+            default: other.append(e)
+            }
         }
-        return runningEntries.first
+        return (record, stream, other)
     }
 
     static func fields(current: Stats, previous: Stats?, format: ProgramFormat, kinds: [Int: OutputKind]? = nil) -> [Field] {
@@ -42,13 +50,12 @@ enum StatusLineFormatter {
         out.append(Field(label: L("status.gpu"), value: String(format: "%.0f%%", current.gpuPct)))
         out.append(Field(label: L("status.cpu"), value: String(format: "%.0f%%", current.cpuPct)))
         out.append(Field(label: L("status.missed"), value: "\(current.missedRender)"))
-        if let e = activeEncoder(in: current, kinds: kinds) {
-            out.append(Field(label: L("status.encoderSkipped"), value: "\(e.skipped)"))
-            out.append(Field(label: L("status.bitrate"), value: bitrateText(e.bitrate)))
-        } else {
-            out.append(Field(label: L("status.encoderSkipped"), value: "—"))
-            out.append(Field(label: L("status.bitrate"), value: "—"))
-        }
+        let running = runningEncoders(in: current, kinds: kinds)
+        let encoders = running.record + running.stream
+        let skipped = (encoders.isEmpty ? running.other : encoders).map(\.skipped).max()
+        out.append(Field(label: L("status.encoderLagSkipped"), value: skipped.map { "\($0)" } ?? "—"))
+        out.append(Field(label: L("status.recordBitrate"), value: running.record.map(\.bitrate).min().map(bitrateText) ?? "—"))
+        out.append(Field(label: L("status.streamBitrate"), value: running.stream.map(\.bitrate).min().map(bitrateText) ?? "—"))
         if let e = current.encoder.first(where: { $0.diskFreeMb > 0 }) {
             out.append(Field(label: L("status.disk"), value: diskText(megabytes: e.diskFreeMb)))
         } else {

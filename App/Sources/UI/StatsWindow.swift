@@ -150,7 +150,7 @@ final class StatsWindowModel: ObservableObject {
     /// 输出的状态文案：录制 / 推流与底栏 ▴ 同一套（OutputButtonSummary.routeState），其余按显示类的状态表。
     private static func stateText(_ e: Stats.EncoderEntry, output: OutputState?) -> String {
         if let output, output.kind == .record || output.kind == .stream {
-            let route = OutputRouteStatus(number: output.number, name: output.name, enabled: output.enabled, state: e.state, frames: e.frames)
+            let route = OutputRouteStatus(output: output, entry: e)
             return OutputButtonSummary.routeState(route, kind: output.kind == .record ? .record : .stream).text
         }
         return e.state == "unavailable" ? L("statsWindow.state.unavailable") : OutputStatusText.displayState(e.state)

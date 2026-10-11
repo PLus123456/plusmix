@@ -1,7 +1,10 @@
 // 输入缩略图格子：标题条（编号、分类色点、名字、tally 色）、缩略图（多画面纹理里这一路的格子，切掉渲染器画在格子底部的名字条——名字只在标题条出现一次，
 // W3-E3；≤ 24 fps；W5-H 起显示框按裁切后的比例，上下不再留黑边，03 V-23）、两行按钮（W5-H，01a D4 / D6 / D7，04 Q26 (a) 两行常显）：
 //   第一行 ×（删除：在 PGM / PVW / 叠加 / Stinger / ISO 录制上先确认，87 的口径，Q06 (a)）｜ 转场（按当前转场送上 PGM = setPreview + autoTransition，
-//          W5-M 起 = 当前槽，与回车 / T-bar 同一个，Q39）｜ Cut（setProgram，直切、不经过 PVW）｜ 循环（只对文件输入：setInputSource 只改结束动作，运行表不重建）
+//          W5-M 起 = 当前槽，与回车 / T-bar 同一个，Q39）｜ Cut（setProgram，直切、不经过 PVW）｜ ⏮ 回到开头 ｜ ▶/⏸ ｜ 🔁 循环
+//          （后三颗 W5-N 起是图标、只对文件输入亮，01a D5 / 04 Q11 (a)：⏮ = seekPlayback(0)，暂停中就停在第一帧；▶/⏸ = setPlayback，暂停中 ▶ 高亮，
+//          播完不循环时 ▶ = 从头播；循环 = setInputSource 只改结束动作、关 = 停在最后一帧（2026-10-10 裁定 ②）；运行表都不重建这一路）。
+//          最小格子 160 pt 放六颗：文字的"循环"固有宽 36 pt，放不下，和播放两颗一起做成 20 pt 的图标；转场 / Cut 平分剩下的（约 30 pt）。
 //   第二行 Overlay 1–4 ｜ 静音（没有声音的输入灰着并说明，D7）｜ ⚙（这一路的输入设置，D6）
 // 点缩略图 = 选 PVW，Shift 点 = 直切 PGM（保留）。**转场进行中**（快照 transition.isActive，T-bar 推到一半也算；90 报告 §5 第 1 条）："转场 / Cut"置灰，
 // 点缩略图也不发命令、状态行说一句——reducer 已经拒收这两条，界面不发是因为"setPreview + autoTransition"这类组合在转场中前一条被拒、后一条会把正在进行的
@@ -37,13 +40,17 @@ final class InputCellView: NSView {
     let transitionButton: NSButton
     let cutButton: NSButton
     let loopButton: NSButton
+    /// ▶ / ⏸（W5-N）：播着显示 ⏸，暂停中 / 播完显示 ▶。
     let playButton: NSButton
+    /// ⏮ 回到开头（W5-N）。
     let restartButton: NSButton
     // 第二行
     let overlayButtons: [NSButton]
     let muteButton: NSButton
     let gearButton: NSButton
-    var firstRowButtons: [NSButton] { [removeButton, transitionButton, cutButton, loopButton] }
+    var firstRowButtons: [NSButton] { [removeButton, transitionButton, cutButton, restartButton, playButton, loopButton] }
+    /// 文件播放控制的三颗（只对文件输入亮）。
+    var playbackButtons: [NSButton] { [restartButton, playButton, loopButton] }
     var secondRowButtons: [NSButton] { overlayButtons + [muteButton, gearButton] }
     /// 纯音频输入的占位（W3-E2 / W2-A2 口径：没有画面，画话筒 + 名字 + 电平表，不显示成"无信号"的黑块）。
     private let audioPlaceholder = NSStackView()
@@ -81,9 +88,9 @@ final class InputCellView: NSView {
         removeButton = Self.cellButton("×")
         transitionButton = Self.cellButton(L("cell.transition"))
         cutButton = Self.cellButton(L("cell.cut"))
-        loopButton = Self.cellButton(L("cell.loop"))
-        playButton = Self.cellButton("▶")
-        restartButton = Self.cellButton("⟲")
+        loopButton = Self.iconButton("repeat")
+        playButton = Self.iconButton("pause.fill")
+        restartButton = Self.iconButton("backward.end.fill")
         overlayButtons = (1...MixerState.overlayCount).map { k in
             let b = Self.cellButton("\(k)")
             b.tag = k
@@ -108,6 +115,10 @@ final class InputCellView: NSView {
         transitionButton.action = #selector(transitionPressed)
         cutButton.action = #selector(cutPressed)
         loopButton.action = #selector(loopPressed)
+        loopButton.setAccessibilityLabel(L("cell.loop.a11y", config.number))
+        playButton.action = #selector(playPressed)
+        restartButton.action = #selector(restartPressed)
+        restartButton.setAccessibilityLabel(L("cell.restart.a11y", config.number))
         for b in overlayButtons {
             b.action = #selector(overlayPressed(_:))
             b.setAccessibilityLabel(L("cell.overlay.a11y", b.tag))
@@ -183,10 +194,12 @@ final class InputCellView: NSView {
             secondRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             secondRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight),
             secondRow.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.rowInset),
-            // 第一行：× 窄，其余三颗等宽；第二行：1–4 与 ⚙ 窄，静音吃剩下的
+            // 第一行：× 与三颗图标窄，转场 / Cut 等宽吃剩下的；第二行：1–4 与 ⚙ 窄，静音吃剩下的
             removeButton.widthAnchor.constraint(equalToConstant: 22),
             cutButton.widthAnchor.constraint(equalTo: transitionButton.widthAnchor),
-            loopButton.widthAnchor.constraint(equalTo: transitionButton.widthAnchor),
+            restartButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
+            playButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
+            loopButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             gearButton.widthAnchor.constraint(equalToConstant: 22),
         ] + overlayButtons.map { $0.widthAnchor.constraint(equalToConstant: 20) })
         let leading = nameLabel.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 6)
@@ -204,6 +217,16 @@ final class InputCellView: NSView {
         b.controlSize = .mini
         b.font = NSFont.systemFont(ofSize: 10)
         b.refusesFirstResponder = true
+        return b
+    }
+
+    /// 第一行的图标按钮宽（⏮ / ▶⏸ / 🔁）。
+    static let iconButtonWidth: CGFloat = 20
+
+    private static func iconButton(_ symbol: String) -> NSButton {
+        let b = cellButton("")
+        b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        b.imagePosition = .imageOnly
         return b
     }
 
@@ -239,17 +262,47 @@ final class InputCellView: NSView {
             let silence = Self.silenceReason(config)
             muteButton.isEnabled = silence == nil
             muteButton.toolTip = silence ?? L("cell.mute.tip")
-            let isFile: Bool
-            if case .file = config.source { isFile = true } else { isFile = false }
-            loopButton.isEnabled = isFile
-            loopButton.toolTip = isFile ? L("cell.loop.tip") : L("cell.loop.onlyFile")
+            for b in playbackButtons { b.isEnabled = isFile }
+            loopButton.toolTip = isFile ? L("cell.loop.tip") : L("cell.playback.onlyFile")
+            restartButton.toolTip = isFile ? L("cell.restart.tip") : L("cell.playback.onlyFile")
         }
         Theme.setHighlighted(loopButton, isLooping)
         if runtime != self.runtime || configChanged {
             self.runtime = runtime
             updateStatus()
         }
+        updatePlayButton()
     }
+
+    private var isFile: Bool {
+        if case .file = config.source { return true }
+        return false
+    }
+
+    /// 文件播完了（不循环、跑着的那个已经 noSignal：停在末帧 / 黑场）——▶ 这时 = 从头播。
+    private var hasEnded: Bool { isFile && !isLooping && runtime == .noSignal }
+
+    /// ▶ / ⏸ 怎么画：暂停中 / 播完 = ▶（暂停中高亮：画面是停住的）；播着 = ⏸。没变就不动（快照 ≤ 60 Hz，92 的坑）。
+    private func updatePlayButton() {
+        let key = PlayKey(isFile: isFile, paused: config.settings.playback.paused, ended: hasEnded)
+        guard key != playKey else { return }
+        playKey = key
+        let showsPlay = key.paused || key.ended
+        playButton.image = NSImage(systemSymbolName: showsPlay ? "play.fill" : "pause.fill", accessibilityDescription: nil)
+        playButton.setAccessibilityLabel(L(showsPlay ? "cell.play.a11y" : "cell.pause.a11y", number))
+        playButton.toolTip = !key.isFile ? L("cell.playback.onlyFile") : key.paused ? L("cell.play.tip") : key.ended ? L("cell.playEnded.tip") : L("cell.pause.tip")
+        Theme.setHighlighted(playButton, key.isFile && key.paused)
+    }
+
+    private struct PlayKey: Equatable {
+        var isFile: Bool
+        var paused: Bool
+        var ended: Bool
+    }
+    private var playKey: PlayKey?
+
+    /// ▶ / ⏸ 现在画的是 ▶（暂停中或播完；测试看）。
+    var playButtonShowsPlay: Bool { playKey.map { $0.paused || $0.ended } ?? false }
 
     /// 切换相关的状态（每个快照由输入条给）：PGM 是哪一路、转场是否在进行、当前那组转场怎么写（"Fade · 0.5 秒" / "Cut"）。没变就不动按钮。
     func applySwitching(program: Int, transitionActive: Bool, transitionLabel: String) {
@@ -405,6 +458,16 @@ final class InputCellView: NSView {
         menu.addItem(.action(L("mixer.mute"), enabled: silence == nil, state: config.settings.audio.muted ? .on : .off, toolTip: silence) { [weak self] in
             self?.mutePressed()
         })
+        if isFile {
+            // 文件播放控制（W5-N）：与第一行三颗同一个动作，外加"切上 PGM 时从头播"（restartOnProgram，随节目存）
+            menu.addItem(.separator())
+            let playTitle = config.settings.playback.paused || hasEnded ? L("cell.menu.play") : L("cell.menu.pause")
+            menu.addItem(.action(playTitle) { [weak self] in self?.playPressed() })
+            menu.addItem(.action(L("cell.menu.restart")) { [weak self] in self?.restartPressed() })
+            menu.addItem(.action(L("cell.menu.loop"), state: isLooping ? .on : .off, toolTip: L("cell.loop.tip")) { [weak self] in self?.loopPressed() })
+            menu.addItem(.action(L("cell.menu.restartOnProgram"), state: config.settings.playback.restartOnProgram ? .on : .off,
+                                 toolTip: L("cell.menu.restartOnProgram.tip")) { [weak self] in self?.toggleRestartOnProgram() })
+        }
         menu.addItem(.separator())
         menu.addItem(.action(L("cell.menu.settings")) { [weak self] in self?.settingsPressed() })
         menu.addItem(.action(L("cell.menu.changeSource"), toolTip: L("cell.menu.changeSource.tip")) { [weak self] in
@@ -503,6 +566,32 @@ final class InputCellView: NSView {
     @objc private func cutPressed() {
         guard !blockedByTransition(), switching?.onProgram != true else { return }
         send?(.setProgram(input: number))
+    }
+
+    /// ▶ / ⏸（提案 021）：暂停中 → 继续（setPlayback false）；播完不循环 → 从头播（seekPlayback 0）；播着 → 暂停（setPlayback true，画面停在这一帧、每拍仍推）。
+    @objc private func playPressed() {
+        guard isFile else { return }
+        if config.settings.playback.paused {
+            send?(.setPlayback(input: number, paused: false))
+        } else if hasEnded {
+            send?(.seekPlayback(input: number, seconds: 0))
+        } else {
+            send?(.setPlayback(input: number, paused: true))
+        }
+    }
+
+    /// ⏮ 回到开头：seekPlayback(0)。播着就从头播，暂停中就停在第一帧（定位与暂停各管各的，提案 021）。
+    @objc private func restartPressed() {
+        guard isFile else { return }
+        send?(.seekPlayback(input: number, seconds: 0))
+    }
+
+    /// "切上 PGM 时从头播"（restartOnProgram，提案 021）：没有单独的命令，整份设置替换（setInputSettings）只翻这一项。
+    private func toggleRestartOnProgram() {
+        guard isFile else { return }
+        var s = config.settings
+        s.playback.restartOnProgram.toggle()
+        send?(.setInputSettings(input: number, settings: s))
     }
 
     /// 循环：只改结束动作（开 = loop，关 = 停在最后一帧），走 setInputSource——运行表看到"只有结束动作变了"不重建这一路（InputRuntime.reconcile）。

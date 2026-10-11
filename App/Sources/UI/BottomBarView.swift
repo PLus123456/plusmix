@@ -3,10 +3,12 @@
 // 下一行是状态行（StatusBarView：窗口最底一行、全宽，左边 1 Hz 读 Stats，右端提示文字 / 本机信息，E9）。
 // 每个输出都是分体按钮（SplitBarButton，docs/ui-study/01-菜单逻辑.md §1 规则 1）：⚙ = 这件事的设置，主体 = 执行 / 开关，▴ = 快捷菜单（朝上开，BottomBarPopup）。
 // - 录制（K1 / K2 / K3）：⚙ 菜单"录制设置… / ISO 分路录制…"（单独的"ISO…"按钮去掉）；主体照旧 PGM + ISO 同一拍一起起停（有意保留，测试标准 A4 的前提）；
-//   ▴ 每个录制输出一行（名字 · 状态，读 Stats.encoder 按 output 对号），点 = 只停这一路（不给中途单独开始），末尾"全部停止"。
+//   ▴ 每个录制输出一行（名字 · 状态 · 时长，读 Stats.encoder 按 output 对号；时长 = uptime_s，W5-N），点 = 只停这一路（不给中途单独开始），末尾"全部停止"、
+//   "录制状态…"（W5-N 的状态面板停在录制页）。
 // - 推流（L1 / L2）：⚙ = 输出设置 › 推流；主体维持 W5-B 的口径（都没开 → 全起；有起不来的 → 只重试它们；否则停全部，先确认）；没有目的地时主体不灰，
 //   点了打开推流页、焦点放在"添加目的地"；▴ = 全部开始 / 全部停止 ｜ 每个目的地一项（✓ = 在推，标题 = 名字 · 状态 · 码率，点 = 只起停这一路，起不来的那一路 = 重试）｜
-//   推流设置… / 推流状态…（状态面板归 101，先指向推流页）；菜单栏"输出 › 推流 ▸"用同一份（streamMenu）。
+//   推流设置… / 推流状态…（W5-N 起开推流 / 录制状态面板，原来指向推流页）；菜单栏"输出 › 推流 ▸"用同一份（streamMenu）。
+// - W5-N（E10）：录制 / 推流主体在录 / 在推时写"● 录制 01:02:05"（Stats.encoder[].uptime_s；数字用等宽数字，每秒变也不挤动别的按钮）。
 // - 外部显示（M1–M4）：⚙ = 路由菜单（每块屏单选，ExternalOutputMenuBuilder），主体 = 全部外部显示一起开 / 关、配置保留（开着高亮）；一路都没配时第一次点 =
 //   在第一块非主屏上开 PGM，没有第二块屏就弹路由菜单（MainWindowController 接）。
 // - 多画面（E3）：⚙ = 多画面布局页，主体 = 窗口开 / 关（开着高亮）。添加输入（G1）：主体 = 添加面板停在上次的类型，▴ = 八种类型直达 + 最近添加的来源。
@@ -40,8 +42,10 @@ final class BottomBarView: NSView {
     }
     /// 停录制 / 停推流之前要不要先问（AppController 读偏好设置；W5-B）。
     var shouldConfirmStop: () -> Bool = { true }
-    /// 一路起不来的原因 + 推流正在第几次连接（session 的运行表；W5-B）。
-    var routeDetail: ((Int) -> (failure: String?, attempt: Int?))?
+    /// 一路起不来的原因（session 的运行表；W5-B）。推流正在第几次连接 W5-N 起读 Stats.encoder 的 attempt（提案 022 B1，G6 追加 ②），不再问运行表。
+    var routeFailure: ((Int) -> String?)?
+    /// 打开推流 / 录制状态面板（W5-N；▴ 里的"推流状态… / 录制状态…"）。
+    var onOutputStatus: ((OutputStatusModel.Page) -> Void)?
     /// 重试起不来的那几路（session.retryFailedOutputs）。
     var onRetryOutputs: (([Int]) -> Void)?
 
@@ -98,6 +102,8 @@ final class BottomBarView: NSView {
         addInput.bodyButton.keyEquivalentModifierMask = [.command]
         addInput.bodyButton.toolTip = L("bottom.addInputTip")
 
+        // 时长每秒变：等宽数字，标题宽度不跟着数字抖（底栏 / 工具条都按它排）
+        for b in [record.bodyButton, stream.bodyButton] { b.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular) }
         record.gearAction = .menu { [weak self] in self?.recordGearMenu() }
         record.bodyAction = { [weak self] in self?.recordPressed() }
         record.menuAction = .menu { [weak self] in self?.recordMenu() }
@@ -194,12 +200,9 @@ final class BottomBarView: NSView {
         multiview.setBodyHighlighted(open)
     }
 
-    /// 一路在按钮眼里的样子：目标开关（快照）+ Stats.encoder 那一项 + 起不来的原因 / 正在第几次连接（运行表）。
+    /// 一路在按钮眼里的样子：目标开关（快照）+ Stats.encoder 那一项（state / frames / attempt / uptime）+ 起不来的原因（运行表）。
     private func routeStatus(_ o: OutputState) -> OutputRouteStatus {
-        let entry = encoderEntry(forOutput: o.number)
-        let detail = routeDetail?(o.number)
-        return OutputRouteStatus(number: o.number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0,
-                                 attempt: detail?.attempt, failure: detail?.failure)
+        OutputRouteStatus(output: o, entry: encoderEntry(forOutput: o.number), failure: routeFailure?(o.number))
     }
 
     /// 每个快照（≤ 60 Hz）都会调：标题 / 提示没变就不重设——重设标题会把白字的 attributedTitle 冲掉、按钮重算尺寸、整窗下一次画之前重新布局，
@@ -290,7 +293,8 @@ final class BottomBarView: NSView {
         return menu
     }
 
-    /// 录制 ▴（K3）：每个录制输出一行"名字 · 状态"，点 = 只停这一路（先确认）；没开的路灰着——录制中途不给单独开始（一起开始的那批才同拍，A4）；末尾"全部停止"。
+    /// 录制 ▴（K3）：每个录制输出一行"名字 · 状态"（在录的加时长，Stats 的 uptime_s，E10），点 = 只停这一路（先确认）；没开的路灰着——录制中途不给单独开始
+    /// （一起开始的那批才同拍，A4）；末尾"全部停止"与"录制状态…"（W5-N）。
     func recordMenu() -> NSMenu {
         let menu = Self.menu(L("bottom.record"))
         let records = state.outputs.filter { $0.kind == .record }
@@ -300,12 +304,15 @@ final class BottomBarView: NSView {
             let s = OutputButtonSummary.routeState(route, kind: .record)
             let tip = !o.enabled ? L("recordMenu.noSingleStart") : route.failure.map { L("recordMenu.tip.failed", $0) } ?? L("recordMenu.tip.stop")
             let number = o.number
-            menu.addItem(.action(L("recordMenu.item", o.name, s.text), enabled: o.enabled, state: s.severity.menuState(enabled: o.enabled), toolTip: tip) { [weak self] in
+            let title = s.severity == .live ? L("recordMenu.itemTime", o.name, s.text, OutputButtonSummary.durationText(route.uptime)) : L("recordMenu.item", o.name, s.text)
+            menu.addItem(.action(title, enabled: o.enabled, state: s.severity.menuState(enabled: o.enabled), toolTip: tip) { [weak self] in
                 self?.stopRoutes([number], kind: .stopRecord)
             })
         }
         menu.addItem(.separator())
         menu.addItem(.action(L("recordMenu.stopAll"), enabled: records.contains(where: \.enabled)) { [weak self] in self?.stopRoutes(nil, kind: .stopRecord) })
+        menu.addItem(.separator())
+        menu.addItem(.action(L("recordMenu.status")) { [weak self] in self?.onOutputStatus?(.record) })
         return menu
     }
 
@@ -313,7 +320,7 @@ final class BottomBarView: NSView {
     func streamMenu() -> NSMenu {
         let menu = Self.menu(L("bottom.stream"))
         let streams = state.outputs.filter { $0.kind == .stream }
-        let rows = StreamMenuRow.rows(state: state, encoder: encoderStates) { [weak self] n in self?.routeDetail?(n) ?? (failure: nil, attempt: nil) }
+        let rows = StreamMenuRow.rows(state: state, encoder: encoderStates) { [weak self] n in self?.routeFailure?(n) }
         menu.addItem(.action(L("streamMenu.startAll"), enabled: rows.contains { $0.click != .stop }) { [weak self] in self?.startAllStreams() })
         menu.addItem(.action(L("streamMenu.stopAll"), enabled: streams.contains(where: \.enabled)) { [weak self] in self?.stopRoutes(nil, kind: .stopStream) })
         menu.addItem(.separator())
@@ -326,7 +333,7 @@ final class BottomBarView: NSView {
         }
         menu.addItem(.separator())
         menu.addItem(.action(L("menu.output.stream")) { [weak self] in self?.onOutputSettings?(.stream) })
-        menu.addItem(.action(L("streamMenu.status")) { [weak self] in self?.onOutputSettings?(.stream) })   // 推流状态面板归 101，先指向推流页
+        menu.addItem(.action(L("streamMenu.status")) { [weak self] in self?.onOutputStatus?(.stream) })   // W5-N：推流 / 录制状态面板（原来先指向推流页）
         return menu
     }
 
@@ -344,7 +351,7 @@ final class BottomBarView: NSView {
     private func startAllStreams() {
         let streams = state.outputs.filter { $0.kind == .stream }
         for s in streams where !s.enabled { send?(.startStream(output: s.number)) }
-        let failed = streams.filter { $0.enabled && routeDetail?($0.number).failure != nil }.map(\.number)
+        let failed = streams.filter { $0.enabled && routeFailure?($0.number) != nil }.map(\.number)
         if !failed.isEmpty { onRetryOutputs?(failed) }
         updateButtons()
     }
@@ -385,7 +392,7 @@ final class BottomBarView: NSView {
             return
         }
         // 起不来的路按运行表认（不看 1 Hz 的 Stats：刚自动重试好的路，上一行 Stats 里可能还是 failed）
-        let failed = running.filter { routeDetail?($0.number).failure != nil }
+        let failed = running.filter { routeFailure?($0.number) != nil }
         if !failed.isEmpty {
             onRetryOutputs?(failed.map(\.number))
             updateButtons()
@@ -467,12 +474,10 @@ struct StreamMenuRow: Equatable {
     var toolTip: String?
 
     @MainActor
-    static func rows(state: MixerState, encoder: [Stats.EncoderEntry], detail: (Int) -> (failure: String?, attempt: Int?)) -> [StreamMenuRow] {
+    static func rows(state: MixerState, encoder: [Stats.EncoderEntry], failure: (Int) -> String?) -> [StreamMenuRow] {
         state.outputs.filter { $0.kind == .stream }.map { o in
             let entry = OutputRuntime.encoderEntry(encoder, forOutput: o.number)
-            let d = detail(o.number)
-            let route = OutputRouteStatus(number: o.number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0,
-                                          attempt: d.attempt, failure: d.failure)
+            let route = OutputRouteStatus(output: o, entry: entry, failure: failure(o.number))
             let s = OutputButtonSummary.routeState(route, kind: .stream)
             let title: String
             if s.severity == .live, let bitrate = entry?.bitrate, bitrate > 0 {
@@ -480,9 +485,9 @@ struct StreamMenuRow: Equatable {
             } else {
                 title = L("streamMenu.item", o.name, s.text)
             }
-            let click: Click = !o.enabled ? .start : (d.failure != nil ? .retry : .stop)
+            let click: Click = !o.enabled ? .start : (route.failure != nil ? .retry : .stop)
             var tip: [String] = []
-            if o.enabled, let failure = d.failure { tip.append(L("streamMenu.tip.failed", failure)) }
+            if o.enabled, let failure = route.failure { tip.append(L("streamMenu.tip.failed", failure)) }
             // 地址只给打过码的（user:pass@ / passphrase / streamid / key 等换成 <redacted>，G6 追加 ①）
             if let url = o.settings.stream?.url, !url.isEmpty { tip.append(L("streamMenu.tip.address", StreamURLRedaction.redact(url: url))) }
             switch click {

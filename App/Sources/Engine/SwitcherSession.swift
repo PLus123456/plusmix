@@ -339,8 +339,10 @@ final class SwitcherSession {
         let inputsChanged = !newState.inputs.map(\.number).elementsEqual(state.inputs.map(\.number))
             || !newState.inputs.map(\.source).elementsEqual(state.inputs.map(\.source))
         let outputsChanged = newState.outputs != state.outputs
+        // 文件输入的播放目标 / 定位请求（提案 021）：变了就对到跑着的 FileInput 上（不重建；W5-N）
+        let playbackChanged = !newState.inputs.map(\.settings.playback).elementsEqual(state.inputs.map(\.settings.playback))
         state = newState
-        if inputsChanged { inputs.reconcile(newState, timing: programTiming()) }
+        if inputsChanged { inputs.reconcile(newState, timing: programTiming()) } else if playbackChanged { inputs.applyPlayback(newState) }
         // 输入表变了也让输出运行表看一眼：源是输入 n 的 NDI 发送要跟着那一路换 tee（运行表其余部分幂等）
         if outputsChanged || inputsChanged { outputs.reconcile(newState) }
         if outputsChanged || inputsChanged { aux.reconcile(newState) }
