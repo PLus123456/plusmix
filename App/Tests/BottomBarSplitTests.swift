@@ -262,14 +262,15 @@ final class BottomBarSplitTests: XCTestCase {
                       "全部停止 = 全部目的地都停（含起不来的）")
         XCTAssertNil(session.outputs.failureReason(output: 3), "停用了就不算起不来")
 
-        // 同一份菜单挂在菜单栏"输出 › 推流 ▸"；⚙ = 推流页、"推流设置… / 推流状态…"也指向推流页（101 之前）
+        // 同一份菜单挂在菜单栏"输出 › 推流 ▸"；⚙ / "推流设置…" = 推流页，"推流状态…" W5-N 起开推流 / 录制状态面板（原来也指向推流页）
         let outputMenu = try XCTUnwrap(NSApp.mainMenu?.items.first { $0.title == "输出" }?.submenu)
         AppTest.delegate.menuNeedsUpdate(outputMenu)
         let streamItem = try XCTUnwrap(outputMenu.items.first { $0.title == "推流" && $0.submenu != nil }, "菜单栏 输出 › 推流 ▸：\(outputMenu.items.map(\.title))")
         XCTAssertEqual(streamItem.submenu?.items.map(\.title), bar.streamMenu().items.map(\.title), "和底栏 ▴ 同一份菜单")
         let menu5 = bar.streamMenu()
         perform(menu5, try item(menu5, "推流状态…"))
-        XCTAssertEqual(controller.panels.outputSettingsWindow?.model.tab, .stream)
+        XCTAssertTrue(AppTest.waitUntil(2) { controller.panels.outputStatusWindow?.window?.isVisible == true }, "推流状态… = 状态面板")
+        XCTAssertEqual(controller.panels.outputStatus.page, .stream)
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }
 
@@ -294,14 +295,18 @@ final class BottomBarSplitTests: XCTestCase {
                       "三路都在录：\(records.map { bar.encoderEntry(forOutput: $0.number)?.state ?? "-" })")
         let menu = bar.recordMenu()
         let rows = menu.items.filter { $0.title.contains(" · ") }
-        XCTAssertEqual(rows.map(\.title), ["录制 · 录制中", "ISO 2 · 录制中", "ISO 3 · 录制中"], "每个录制输出一行：名字 · 状态（Stats.encoder 按 output 对号）")
+        // W5-N（E10）：在录的行再加时长（Stats 的 uptime_s）："名字 · 状态 · 00:00:01"
+        XCTAssertEqual(rows.map { $0.title.components(separatedBy: " · ").prefix(2).joined(separator: " · ") }, ["录制 · 录制中", "ISO 2 · 录制中", "ISO 3 · 录制中"],
+                       "每个录制输出一行：名字 · 状态（Stats.encoder 按 output 对号）")
+        XCTAssertTrue(rows.allSatisfy { ($0.title.components(separatedBy: " · ").last ?? "").range(of: #"^\d{2}:\d{2}:\d{2}$"#, options: .regularExpression) != nil },
+                      "在录的行带时长：\(rows.map(\.title))")
         XCTAssertTrue(rows.allSatisfy { $0.state == .on && $0.isEnabled })
-        XCTAssertEqual(menu.items.last?.title, "全部停止", "末尾“全部停止”")
+        XCTAssertEqual(menu.items.filter { !$0.isSeparatorItem }.suffix(2).map(\.title), ["全部停止", "录制状态…"], "末尾“全部停止”与“录制状态…”（W5-N）")
         XCTAssertFalse(menu.items.contains { $0.title.contains("开始") }, "不给中途单独开始：\(menu.items.map(\.title))")
 
         // 点 ISO 2 = 只停这一路（先问，写明是哪一路）
         let iso2 = try XCTUnwrap(ISORoutes.isoRecord(in: session.state, input: 2))
-        perform(menu, try item(menu, "ISO 2 · 录制中"))
+        perform(menu, try XCTUnwrap(menu.items.first { $0.title.hasPrefix("ISO 2 · 录制中") }))
         let ask = try XCTUnwrap(AppTest.waitForConfirmation(.stopRecord), "停这一路先问")
         XCTAssertEqual(ask.request.title, "确定停止录制（1 路）？")
         XCTAssertTrue(ask.request.message.contains("ISO 2"), ask.request.message)
@@ -318,7 +323,7 @@ final class BottomBarSplitTests: XCTestCase {
         let stoppedRow = try XCTUnwrap(menu2.items.first { $0.title.hasPrefix("ISO 2 · ") })
         XCTAssertEqual(stoppedRow.title, "ISO 2 · 未开")
         XCTAssertEqual(stoppedRow.state, .off)
-        XCTAssertTrue(AppTest.waitUntil(3) { bar.record.bodyButton.title == "● 录制中（2 路）" }, bar.record.bodyButton.title)
+        XCTAssertTrue(AppTest.waitUntil(3) { AppTest.isRunningTitle(bar.record.bodyButton.title, "● 录制", suffix: "（2 路）") }, bar.record.bodyButton.title)
 
         // 全部停止：剩下的两路一起停（先问）
         perform(menu2, try item(menu2, "全部停止"))
@@ -569,11 +574,11 @@ final class BottomBarSplitTests: XCTestCase {
         // 统一语言（V-22）：中文界面里字段名都是中文（GPU / CPU 是通用缩写）；英文界面里没有中文
         let a = Stats(ts: 100, tick: Tick(600), renderMs: 1, missedRender: 0, jitterMs: 0, perInput: [:], encoder: [],
                       audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 100, cpuPct: 10, gpuPct: 20)
-        XCTAssertEqual(StatusLineFormatter.fields(current: a, previous: nil, format: .hd1080p5994).map(\.label), ["节目", "帧率", "渲染", "GPU", "CPU", "丢帧", "编码跳帧", "码率", "磁盘"])
+        XCTAssertEqual(StatusLineFormatter.fields(current: a, previous: nil, format: .hd1080p5994).map(\.label), ["节目", "帧率", "渲染", "GPU", "CPU", "丢帧", "编码滞后跳帧", "录制", "推流", "磁盘"])
         L10n.languageOverride = "en"
         let enLabels = StatusLineFormatter.fields(current: a, previous: nil, format: .hd1080p5994).map(\.label)
         L10n.languageOverride = "zh-Hans"
-        XCTAssertEqual(enLabels, ["Program", "FPS", "Render", "GPU", "CPU", "Dropped", "Enc. skipped", "Bitrate", "Disk"])
+        XCTAssertEqual(enLabels, ["Program", "FPS", "Render", "GPU", "CPU", "Dropped", "Enc. lag skips", "Rec", "Stream", "Disk"])
 
         // 右端：平时是本机信息（机型 · 内存，不进 Stats）；有提示时显示提示，过几秒回到本机信息
         let machine = StatusBarView.machineInfo

@@ -47,8 +47,8 @@ final class ISOAppTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders.count == 3 }, "三路录制器都应起来：\(session.outputs.recorders.keys.sorted())")
         let starts = Set(session.outputs.recorders.values.map { $0.start.tick })
         XCTAssertEqual(starts.count, 1, "同一起始拍：\(session.outputs.recorders.mapValues { $0.start.tick })")
-        XCTAssertTrue(AppTest.waitUntil(5) { wc.bottomBar.record.bodyButton.title.hasPrefix("● 录制中") }, wc.bottomBar.record.bodyButton.title)
-        XCTAssertEqual(wc.bottomBar.record.bodyButton.title, "● 录制中（3 路）")
+        XCTAssertTrue(AppTest.waitUntil(5) { AppTest.isRunningTitle(wc.bottomBar.record.bodyButton.title, "● 录制", suffix: "（3 路）") },
+                      wc.bottomBar.record.bodyButton.title)
         print("ISO 起：起始拍 \(starts)，rec.start 批耗时 \(String(format: "%.1f", session.outputs.lastStartCost.milliseconds)) ms")
         AppTest.pump(seconds: 8)
         wc.bottomBar.record.bodyButton.performClick(nil)

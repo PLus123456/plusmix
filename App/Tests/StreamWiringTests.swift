@@ -34,7 +34,7 @@ final class StreamWiringTests: XCTestCase {
         defer { token.invalidate() }
         wc.bottomBar.stream.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.outputs.first { $0.kind == .stream }?.enabled == true }, "按钮应发 startStream")
-        XCTAssertTrue(AppTest.waitUntil(12) { wc.bottomBar.stream.bodyButton.title == "● 推流中" }, "应连上并显示推流中：\(wc.bottomBar.stream.bodyButton.title)")
+        XCTAssertTrue(AppTest.waitUntil(12) { AppTest.isRunningTitle(wc.bottomBar.stream.bodyButton.title, "● 推流") }, "应连上并显示推流中：\(wc.bottomBar.stream.bodyButton.title)")
         // W5-B（X37）：起的时候提示"连接中"，连上（Stats 报 publishing）之后才提示"已开始"
         XCTAssertTrue(AppTest.waitUntil(3) { notices.contains("推流 2 已开始") }, "\(notices)")
         XCTAssertEqual(notices.filter { $0.hasPrefix("推流 2") }.prefix(2), ["推流 2 连接中…", "推流 2 已开始"])

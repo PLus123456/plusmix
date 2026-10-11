@@ -1685,7 +1685,7 @@
 "outputStatus.waiting" = "等待统计…";
 "outputStatus.events" = "事件";
 "outputStatus.noEvents" = "还没有事件。";
-"outputStatus.hint" = "数字全读统计（与 API、stats.jsonl 同一份）；事件由每秒一次的统计里状态的变化推出，一秒内来回的看不到。";
+"outputStatus.hint" = "数字全读统计（与 API 读的是同一份）；事件由每秒一次的统计里状态的变化推出，一秒内来回的看不到。";
 "outputStatus.showLogs" = "显示日志…";
 "outputStatus.showLogsTip" = "打开诊断文件夹（帮助 › 打开诊断文件夹），推流 / 录制的日志在里面";
 "outputStatus.noStreams" = "没有推流目的地。";

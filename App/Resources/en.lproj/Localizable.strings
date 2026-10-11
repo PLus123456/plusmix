@@ -1685,7 +1685,7 @@
 "outputStatus.waiting" = "Waiting for stats…";
 "outputStatus.events" = "Events";
 "outputStatus.noEvents" = "No events yet.";
-"outputStatus.hint" = "All numbers come from the stats (the same data as the API and stats.jsonl); events are derived from state changes in the once-a-second stats, so changes that come and go within a second are not shown.";
+"outputStatus.hint" = "All numbers come from the stats (the same data the API reads); events are derived from state changes in the once-a-second stats, so changes that come and go within a second are not shown.";
 "outputStatus.showLogs" = "Show Logs…";
 "outputStatus.showLogsTip" = "Opens the diagnostics folder (Help › Open Diagnostics Folder) with the stream / recording logs";
 "outputStatus.noStreams" = "No stream destinations.";

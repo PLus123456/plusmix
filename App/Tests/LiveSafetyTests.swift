@@ -31,7 +31,7 @@ final class LiveSafetyTests: XCTestCase {
         let asked = ConfirmationCenter.shared.askedCount[.stopRecord] ?? 0
         bar.record.bodyButton.performClick(nil)
         XCTAssertNil(ConfirmationCenter.shared.pending(), "开始录制不问")
-        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[1] != nil && bar.record.bodyButton.title == "● 录制中" }, bar.record.bodyButton.title)
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[1] != nil && AppTest.isRunningTitle(bar.record.bodyButton.title, "● 录制") }, bar.record.bodyButton.title)
 
         // 停：先弹 sheet，确认之前不发 stopRecord；取消 = 照录
         bar.record.bodyButton.performClick(nil)
@@ -362,26 +362,27 @@ final class LiveSafetyTests: XCTestCase {
 
     // MARK: 3. 失败的推流路与按钮状态（X02 / L4 / L13 / K11 / X11 / X37 / X38）
 
-    private func route(_ n: Int, _ enabled: Bool, _ state: String?, frames: UInt64 = 0, attempt: Int? = nil, failure: String? = nil) -> OutputRouteStatus {
-        OutputRouteStatus(number: n, name: "推流 \(n)", enabled: enabled, state: state, frames: frames, attempt: attempt, failure: failure)
+    private func route(_ n: Int, _ enabled: Bool, _ state: String?, frames: UInt64 = 0, attempt: Int? = nil, failure: String? = nil, uptime: Double = 0) -> OutputRouteStatus {
+        OutputRouteStatus(number: n, name: "推流 \(n)", enabled: enabled, state: state, frames: frames, attempt: attempt, failure: failure, uptime: uptime)
     }
 
     func testUI_streamButtonAggregatesWorstState() {
-        let pub1 = route(1, true, "publishing", frames: 600), pub2 = route(2, true, "publishing", frames: 600)
+        // W5-N（E10）：在推的标题带时长（Stats 的 uptime_s，多路取最长的那一路）
+        let pub1 = route(1, true, "publishing", frames: 600, uptime: 65), pub2 = route(2, true, "publishing", frames: 600, uptime: 30)
         var s = OutputButtonSummary.stream([route(1, false, "idle")])
         XCTAssertEqual(s.title, "推流")
         XCTAssertEqual(s.severity, .off)
         s = .stream([pub1])
-        XCTAssertEqual(s.title, "● 推流中", "单个目的地")
+        XCTAssertEqual(s.title, "● 推流 00:01:05", "单个目的地")
         XCTAssertEqual(s.severity, .live)
         s = .stream([pub1, pub2, route(3, false, "idle")])
-        XCTAssertEqual(s.title, "● 推流中 2/3", "三个目的地两个在推（第三个没开）")
+        XCTAssertEqual(s.title, "● 推流 00:01:05（2/3）", "三个目的地两个在推（第三个没开）")
         XCTAssertEqual(s.severity, .live)
         s = .stream([pub1, pub2, route(3, true, "publishing", frames: 600)])
-        XCTAssertEqual(s.title, "● 推流中 3/3")
+        XCTAssertEqual(s.title, "● 推流 00:01:05（3/3）")
         // 首连第 1 次 = 正常的"连接中"，不算异常；n/m 只数在推的
         s = .stream([pub1, route(2, true, "connecting", attempt: 1)])
-        XCTAssertEqual(s.title, "● 推流中 1/2")
+        XCTAssertEqual(s.title, "● 推流 00:01:05（1/2）")
         XCTAssertEqual(s.severity, .live)
         // 一路在重连（连上过、正在第 2 次重连）→ 橙，"1 路异常"，提示里列各路
         s = .stream([pub1, pub2, route(3, true, "backoff", frames: 900, attempt: 3)])
@@ -410,10 +411,10 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "connecting", frames: 5, attempt: 4)]).title, "推流 · 重连中（第 3 次）")
         XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "idle", failure: "推流 1 没有地址")]).title, "推流 · 起不来", "原来显示“推流 · idle”")
         XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "idle", failure: "推流 1 没有地址")]).severity, .error)
-        // 录制同一套：PGM + 两路 ISO 都在录 →"● 录制中（3 路）"；一路起不来 → 红
-        let rec = { (n: Int) in OutputRouteStatus(number: n, name: "录制 \(n)", enabled: true, state: "recording") }
-        XCTAssertEqual(OutputButtonSummary.record([rec(1)]).title, "● 录制中")
-        XCTAssertEqual(OutputButtonSummary.record([rec(1), rec(2), rec(3)]).title, "● 录制中（3 路）")
+        // 录制同一套：PGM + 两路 ISO 都在录 →"● 录制 00:00:03（3 路）"（时长取最长那一路）；一路起不来 → 红
+        let rec = { (n: Int) in OutputRouteStatus(number: n, name: "录制 \(n)", enabled: true, state: "recording", uptime: Double(n)) }
+        XCTAssertEqual(OutputButtonSummary.record([rec(1)]).title, "● 录制 00:00:01")
+        XCTAssertEqual(OutputButtonSummary.record([rec(1), rec(2), rec(3)]).title, "● 录制 00:00:03（3 路）")
         let recFailed = OutputButtonSummary.record([rec(1), rec(2), OutputRouteStatus(number: 3, name: "ISO 3", enabled: true, state: "idle", failure: "分支用完了")])
         XCTAssertEqual(recFailed.title, "录制 · 1 路异常")
         XCTAssertEqual(recFailed.severity, .error)

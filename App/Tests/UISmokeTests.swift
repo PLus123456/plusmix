@@ -107,12 +107,12 @@ final class UISmokeTests: XCTestCase {
         wc.mixerPanel.model.setBusMute(.master, on: true)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.buses[0].muted })
 
-        // 12. 录制 / 推流按钮：录制按钮发 startRecord → Recorder 真起来（Stats.encoder[i].state = recording → "● 录制中"）→ stopRecord →
+        // 12. 录制 / 推流按钮：录制按钮发 startRecord → Recorder 真起来（Stats.encoder[i].state = recording → "● 录制 00:00:0n"，W5-N 起带时长）→ stopRecord →
         //     封口后按钮回"录制"、文件落在测试宿主的临时录制目录；推流没有输出就置灰
         XCTAssertTrue(wc.bottomBar.record.bodyButton.isEnabled)
         wc.bottomBar.record.bodyButton.performClick(nil)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.outputs.first { $0.kind == .record }?.enabled == true }, "录制按钮应发 startRecord")
-        XCTAssertTrue(AppTest.waitUntil(3) { wc.bottomBar.record.bodyButton.title == "● 录制中" }, "Stats 报 recording 后应显示录制中：\(wc.bottomBar.record.bodyButton.title)")
+        XCTAssertTrue(AppTest.waitUntil(3) { AppTest.isRunningTitle(wc.bottomBar.record.bodyButton.title, "● 录制") }, "Stats 报 recording 后应显示录制中：\(wc.bottomBar.record.bodyButton.title)")
         wc.bottomBar.record.bodyButton.performClick(nil)
         XCTAssertNotNil(AppTest.waitForConfirmation(.stopRecord), "停止前先确认（W5-B）")
         AppTest.answer(.confirm)
