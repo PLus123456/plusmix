@@ -11,7 +11,6 @@
 // W5-L（98）：远程控制页 = RemoteControlSection（API / 兼容层"仅本机 / 允许局域网" + 可访问地址）、Tally / 性能与电源 / 提醒三节各自即时生效、只写自己的键（AppController.updateSettings(_:saving:)），G7 合并时挂进 96 的对应页。
 import AppKit
 import Combine   // bindAudioOutput：订阅 W5-K 音频设备模型的改动（G7 合并时加）
-import Metal
 import SwiftUI
 import SwitcherContracts
 import SwitcherControl
@@ -635,22 +634,6 @@ struct PerformancePage: View {
         }
         .formStyle(.grouped)
     }
-}
-
-/// 这台机器的只读信息。
-enum MachineInfo {
-    static func sysctl(_ name: String) -> String {
-        var size = 0
-        guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return "—" }
-        var buffer = [CChar](repeating: 0, count: size)
-        guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return "—" }
-        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-    }
-    static var model: String { sysctl("hw.model") }
-    static var chip: String { sysctl("machdep.cpu.brand_string") }
-    static var gpu: String { MTLCreateSystemDefaultDevice()?.name ?? "—" }
-    static var memory: String { L("settings.performance.memoryValue", Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)) }
-    static var system: String { ProcessInfo.processInfo.operatingSystemVersionString }
 }
 
 /// 本机 › 更新与诊断。

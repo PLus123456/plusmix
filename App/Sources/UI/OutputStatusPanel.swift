@@ -202,7 +202,7 @@ struct OutputStatusView: View {
                 if let delay = model.videoDelayText { Text(delay).font(.caption).foregroundStyle(.secondary) }
                 Text(L("outputStatus.hint")).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button(OutputStatusModel.showLogsTitle) { model.showLogs?() }
+                Button(L("outputStatus.showLogs")) { model.showLogs?() }
                     .help(L("outputStatus.showLogsTip"))
             }
         }

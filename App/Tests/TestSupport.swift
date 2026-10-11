@@ -515,6 +515,21 @@ extension AppTest {
         return keys
     }
 
+    /// 源码里可能当键用的引用（反向检查"表里的键都有人用"）：所有不带空白 / 引号 / 反斜杠的字符串字面量，与动态拼键的前缀
+    /// （`L("addInput.kind.\(kind.rawValue)")` → "addInput.kind."）。比 `localizationKeysUsed` 宽：三目、数组里写的键也算。
+    static func localizationReferences(in directory: URL) throws -> (literals: Set<String>, prefixes: Set<String>) {
+        let literal = try NSRegularExpression(pattern: #""([^"\\\s]+)""#)
+        let dynamic = try NSRegularExpression(pattern: #""([A-Za-z0-9_.]+\.)\\\("#)
+        var literals = Set<String>(), prefixes = Set<String>()
+        for file in try swiftFiles(in: directory) {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            let range = NSRange(text.startIndex..., in: text)
+            for m in literal.matches(in: text, range: range) { if let r = Range(m.range(at: 1), in: text) { literals.insert(String(text[r])) } }
+            for m in dynamic.matches(in: text, range: range) { if let r = Range(m.range(at: 1), in: text) { prefixes.insert(String(text[r])) } }
+        }
+        return (literals, prefixes)
+    }
+
     /// 写死在字符串字面量里的中文（CJK）文案；注释、日志 / 断言行、带 `// l10n-exempt` 标记的行不算。
     /// 标记在整行（剥行尾注释之前）找——W3-E4 之前是剥完注释再找，标记又总写在行尾注释里，所以从来不起作用（reports/w3-outputs-4.md §5 第 6 条）。
     static func chineseLiteralViolations(in directory: URL) throws -> [String] {

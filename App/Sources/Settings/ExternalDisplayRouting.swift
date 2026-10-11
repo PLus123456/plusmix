@@ -3,7 +3,7 @@
 // - 每块屏的"那一路" = 这块屏上开着的那一路，没有开着的就取编号最小的（老节目里同屏可能有好几路）；displayID 为 nil 的老输出算主屏的；
 // - 选一个源：这块屏已有那一路 = 换源（setOutputSettings，窗口不重开）并打开，同屏别的开着的路关掉；没有 = addOutput 一路新的（名字"显示器 · 源"）；
 // - 选"关闭"：这块屏开着的路都关掉（setOutputEnabled false），配置留着。
-// 这里只给命令，不碰界面；G7 合并 92 时菜单的同名静态函数可以改成调这里（报告 §5）。
+// 这里只给命令，不碰界面；底栏 / 工具条 / 菜单栏的外部显示菜单（ExternalOutputMenuBuilder）W5-N 起也转调这里，规则只有这一份。
 import Foundation
 import SwitcherContracts
 import SwitcherExternal

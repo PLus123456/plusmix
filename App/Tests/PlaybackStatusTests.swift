@@ -32,6 +32,14 @@ final class PlaybackStatusTests: XCTestCase {
         return url
     }
 
+    /// 第 0 帧比定位请求那一拍晚几拍：第 0 帧的拍点 = pts + 半帧相位提前量（FileInput 的口径），换算成**引擎时钟**的拍号再减请求那一拍
+    /// （reducer 的 seekTick 是引擎的拍号；`programTiming()` 给新输入的时钟以"现在 + 3 拍"为 0 拍，拍号不是一套，不能直接比）。没看到第 0 帧为 nil。
+    private func ticksUntilFrameZero(_ samples: [PlaybackSample], request tick: Tick?, session: SwitcherSession) -> Int64? {
+        guard let tick, let spec = session.engine.clock?.spec, let zero = samples.first(where: { $0.number == 0 }) else { return nil }
+        let tickTime = zero.pts + session.programTiming().frameDuration / 2
+        return spec.tick(at: tickTime).rawValue - tick.rawValue
+    }
+
     /// 一串样本里第一次往回跳（帧号比前一个小）之后的那一帧号；没有往回跳为 nil。
     private func firstAfterJumpBack(_ samples: [PlaybackSample]) -> Int? {
         let numbers = samples.compactMap(\.number)
@@ -141,6 +149,8 @@ final class PlaybackStatusTests: XCTestCase {
         let afterRestart = sampler.samples(since: restartMark)
         XCTAssertEqual(session.state.input(1)?.settings.playback.seekSeconds, 0, "⏮ = seekPlayback(0)")
         XCTAssertEqual(firstAfterJumpBack(afterRestart), 0, "从头后首帧帧号 0：\(afterRestart)")
+        let restartDelay = ticksUntilFrameZero(afterRestart, request: session.state.input(1)?.settings.playback.seekTick, session: session)
+        print("⏮：定位请求那一拍之后第 \(restartDelay.map(String.init) ?? "?") 拍出第 0 帧")
 
         // 右键：播放控制四项（文件输入才有）；"切上 PGM 时从头播"打勾 = restartOnProgram
         let menu = cell1.contextMenu()
@@ -161,6 +171,8 @@ final class PlaybackStatusTests: XCTestCase {
         AppTest.pump(seconds: 0.6)
         let afterProgram = sampler.samples(since: programMark)
         XCTAssertEqual(firstAfterJumpBack(afterProgram), 0, "切上 PGM 时从头播：首帧帧号 0：\(afterProgram)")
+        let programDelay = ticksUntilFrameZero(afterProgram, request: session.state.input(1)?.settings.playback.seekTick, session: session)
+        print("切上 PGM 时从头播：切换那一拍之后第 \(programDelay.map(String.init) ?? "?") 拍出第 0 帧")
         XCTAssertEqual(ObjectIdentifier(session.inputs.entries[1]!.input as AnyObject), identity, "输入对象从头到尾是同一个（不重建）")
     }
 
@@ -193,6 +205,26 @@ final class PlaybackStatusTests: XCTestCase {
         XCTAssertEqual(ObjectIdentifier(session.inputs.entries[1]!.input as AnyObject), identity, "没点应用之前不动")
         model.applySource()
         XCTAssertTrue(AppTest.waitUntil(3) { session.inputs.entries[1].map { ObjectIdentifier($0.input as AnyObject) != identity } ?? false }, "路径变了要重建")
+    }
+
+    /// 三档格子宽（160 / 200 / 256）里第一行六颗都放得下：转场 / Cut 的字不被截（按钮宽 ≥ 字宽 + 6）、⏮ ▶ 🔁 各 20 pt、最后一颗不出格子。
+    func testUI_fileCellButtonsFitSmallestCell() throws {
+        let cell = InputCellView(config: InputConfig(number: 1, name: "pattern", source: .file(path: "/tmp/w5n.mov", endAction: .loop, rate: 1)))
+        for size in ThumbnailSize.allCases {
+            let thumb = (size.width * 9 / 16).rounded()
+            cell.setSize(width: size.width, thumbnailHeight: thumb)
+            cell.frame = NSRect(x: 0, y: 0, width: size.width, height: InputCellView.height(thumbnailHeight: thumb))
+            cell.layoutSubtreeIfNeeded()
+            let frames = cell.firstRowButtons.map { $0.convert($0.bounds, to: cell) }
+            print("格子 \(Int(size.width)) pt 第一行：\(frames.map { Int($0.width.rounded()) })")
+            for b in [cell.transitionButton, cell.cutButton] {
+                let text = (b.title as NSString).size(withAttributes: [.font: b.font ?? NSFont.systemFont(ofSize: 10)]).width
+                XCTAssertGreaterThanOrEqual(b.frame.width, text + 6, "\(Int(size.width)) pt：“\(b.title)”放得下")
+            }
+            for b in cell.playbackButtons { XCTAssertEqual(b.frame.width, InputCellView.iconButtonWidth, accuracy: 0.5) }
+            XCTAssertLessThanOrEqual(frames.last!.maxX, size.width - 3.5, "\(Int(size.width)) pt：最后一颗不出格子")
+            for (a, b) in zip(frames, frames.dropFirst()) { XCTAssertLessThanOrEqual(a.maxX, b.minX + 0.5, "不重叠") }
+        }
     }
 
     // MARK: - 2. 推流 / 录制状态面板（L11 / V11）
@@ -306,6 +338,23 @@ final class PlaybackStatusTests: XCTestCase {
         ]))
         XCTAssertEqual(bar.record.bodyButton.title, "● 录制 00:01:05（3 路）")
         XCTAssertEqual(bar.stream.bodyButton.title, "● 推流 25:00:01（2/3）", "超过一天小时数照写，不绕回")
+        // 最长的两颗标题在最小窗口宽（1100 pt）下：左组最后一颗（多画面）和右组第一颗（叠加）之间还留着 ≥ 16 pt（底栏的约束），不挤不叠
+        let wide = BottomBarView(frame: NSRect(x: 0, y: 0, width: AppTest.minimumMainWindowSize.width, height: Theme.bottomBarHeight))
+        wide.apply(state: state)
+        wide.apply(stats: stats(ts: 1_002, [
+            Stats.EncoderEntry(output: 1, skipped: 0, bitrate: 18_000_000, frames: 1, state: "recording", uptimeS: 36_000),
+            Stats.EncoderEntry(output: 2, skipped: 0, bitrate: 18_000_000, frames: 1, state: "recording", uptimeS: 36_000),
+            Stats.EncoderEntry(output: 3, skipped: 0, bitrate: 18_000_000, frames: 1, state: "recording", uptimeS: 36_000),
+            Stats.EncoderEntry(output: 5, skipped: 0, bitrate: 6_000_000, frames: 60, state: "publishing", uptimeS: 36_000),
+            Stats.EncoderEntry(output: 6, skipped: 0, bitrate: 6_000_000, frames: 60, state: "publishing", uptimeS: 36_000),
+        ]))
+        wide.layoutSubtreeIfNeeded()
+        let leftEnd = wide.multiview.convert(wide.multiview.bounds, to: wide).maxX
+        let rightStart = wide.overlayButton.convert(wide.overlayButton.bounds, to: wide).minX
+        print("底栏 1100 pt、最长标题：左组到 \(Int(leftEnd)) pt，右组从 \(Int(rightStart)) pt 起（录制 \(Int(wide.record.frame.width)) pt、推流 \(Int(wide.stream.frame.width)) pt）")
+        XCTAssertEqual(wide.record.bodyButton.title, "● 录制 10:00:00（3 路）")
+        XCTAssertGreaterThanOrEqual(rightStart - leftEnd, 16, "最小窗口里左右两组不挤")
+        XCTAssertGreaterThanOrEqual(wide.record.bodyButton.frame.width, wide.record.bodyButton.intrinsicContentSize.width - 0.5, "录制主体的字没被压缩")
         // 录制 ▴：每一行"名字 · 状态 · 时长"
         let rows = bar.recordMenu().items.filter { $0.action != nil && !$0.title.hasPrefix("全部") && !$0.title.hasSuffix("…") }.map(\.title)
         XCTAssertEqual(rows, ["录制 · 录制中 · 00:01:05", "ISO 1 · 录制中 · 00:01:04", "ISO 2 · 录制中 · 00:01:04"])
