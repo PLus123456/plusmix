@@ -463,10 +463,18 @@ final class HeadlessSession: @unchecked Sendable {
         for input in otherInputs { try input.start() }
         for entry in audioInputs { try entry.source.start() }
         // W1-B4 / 提案 028（G8b 接的）：开录起点按节目输出时间线 = 拍点 + L，两轨都从文件时间 0 起（原来起点是拍点，L > 0 时视频轨从 L 开始、AVFoundation 在 0…L 读出一帧黑）。
-        // L 由音频引擎在第一个控制周期量出 Master 效果链延迟后交给引擎（videoDelayTarget；audioPTS 下恒 0），这里等它跑完第一个周期（≤ 200 ms）再读；
-        // 第一帧的 Lₙ 就是那时的设定值（VideoDelayLine.start 不从 0 爬）。
-        let firstCycleDeadline = HostTime.now() + HostDuration(milliseconds: 200)
-        while audioEngine.controlCycles == 0 && HostTime.now() < firstCycleDeadline { try await Task.sleep(nanoseconds: 2_000_000) }
+        // L 由音频引擎装好 Master 效果链、实时线程确认之后量出、在控制周期里交给引擎（videoDelayTarget；audioPTS 下恒 0）——这里等它装完
+        // （装上的格数 ≥ 契约链解析出的组数、没有在换的格）再过两个控制周期（syncVideoDelay 跑过）才读；等不到（最晚 t0 − 150 ms 或 1.5 s）就按当时的值。
+        // 第一帧的 Lₙ 就是那时的设定值（VideoDelayLine.start 不从 0 爬）。只等第一个周期不够：第一次跑时效果还没确认，录出来仍从 L 开始。
+        let masterGroups = BusEffectPlan.parse(show.audio.buses[Bus.master.rawValue].effects).groups.count
+        let settleDeadline = min(t0 - HostDuration(milliseconds: 150), HostClock.now() + HostDuration(milliseconds: 1500))
+        var settledAtCycle: UInt64?
+        while HostClock.now() < settleDeadline {
+            if let fx = audioEngine.status.buses.first(where: { $0.bus == .master })?.effects, fx.pendingSwaps == 0, fx.slots.compactMap({ $0 }).count >= masterGroups {
+                if let c = settledAtCycle { if audioEngine.controlCycles >= c + 2 { break } } else { settledAtCycle = audioEngine.controlCycles }
+            }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
         let recordingStart = RecordingStart(tick: .zero, tickTime: spec.time(of: .zero) + engine.videoDelayTarget)
         if let rec = recorder { try rec.start(at: recordingStart) }
         for (iso, _) in isoRecorders { try iso.start(at: recordingStart) }

@@ -140,7 +140,7 @@ final class SwitcherSession {
         let audio = AudioRuntime(stateMachine: stateMachine, device: settings.audioDevice, audioState: initial.audio, busOutputMap: settings.busOutputMap)
         self.audio = audio
         audio.engine.borrowMasterForMonitor = settings.borrowMasterForMonitor   // X09：独听时 Master 出口放耳机总线（W1-D3 引擎侧；设置页改了由 PreferencesModel.commit 当场再设）
-        renderer.displayDelayProvider = { engine.videoDelayApplied }   // W1-B4（G8b 接）：显示源给"拍点 + L 已到期"的那一帧（提案 028，监听同步）
+        renderer.displayDelayProvider = { [weak engine] in engine?.videoDelayApplied ?? .zero }   // W1-B4（G8b 接）：显示源给"拍点 + L 已到期"的那一帧（提案 028）；弱引用：引擎持有渲染器，强捕获成环、换 session 不释放
         audio.engine.videoDelay = engine                               // Master 效果链的实测延迟 → 引擎（videoDelay 补偿；不接 = audioPTS，监听比画面晚 L）
         let inputs = InputRuntime(engine: engine, factory: inputFactory, audio: audio)
         if let mediaBaseDirectory { inputs.mediaBaseDirectory = mediaBaseDirectory }
@@ -305,6 +305,7 @@ final class SwitcherSession {
         await engine.stop()   // 只预热没起的引擎也在这里放掉渲染器与状态机线程（Engine.stop 自己认）
         stopSequence.append(.engine)
         await audio.stop()
+        audio.engine.videoDelay = nil   // 解开 Engine ↔ AudioEngine 的环（engine.audioStatsProvider 捕获音频引擎、音频引擎持有视频引擎）：不解则换 session 两边都不释放，AudioWiringTests 20 轮起停 RSS 每轮 +29 MB
         await control.finish()
         stage = .idle
     }
