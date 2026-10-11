@@ -103,6 +103,10 @@ public enum ControlAction: Hashable, Sendable {
     case busMuteSwitch(bus: Bus, mode: SwitchMode)
     /// 界面动作（显示 / 隐藏调音台、多画面窗口……，Q53）：只在 App 里派发，不进 CommandCatalog、不进总线；名字由 App 定。
     case ui(name: String)
+    /// 执行转场 n（W5-M，提案 020 的槽 1–4）。
+    case transitionSlot(slot: Int)
+    /// 选中转场 n、不执行（W5-M）。
+    case selectTransitionSlot(slot: Int)
 
     /// 按当前状态解析成命令（按顺序逐条进总线）；引用不存在的通道 / 输入 / 输出、或没什么要变的，返回空数组。
     public func resolve(in state: MixerState) -> [Command] {
@@ -163,6 +167,8 @@ public enum ControlAction: Hashable, Sendable {
             return [.busMute(bus: bus, on: mode.target(current: muted))]
         case .ui:
             return []   // App 自己派发（HotkeyDispatcher / MIDIController 交给它设的 handler）
+        case .transitionSlot, .selectTransitionSlot:
+            return []   // 红灯轮的桩
         }
     }
 
@@ -191,7 +197,7 @@ public enum ControlAction: Hashable, Sendable {
 
 extension ControlAction: Codable {
     // 手写 Codable：合成的会把无标签的 command 编成 {"command": {"_0": …}}；这里 command 直接嵌 Command 的 JSON。
-    private enum Arg: String, CodingKey { case channel, input, output, durationMs, mode, kind, bus, name }
+    private enum Arg: String, CodingKey { case channel, input, output, durationMs, mode, kind, bus, name, slot }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: ControlActionKind.self)
@@ -232,6 +238,8 @@ extension ControlAction: Codable {
         case .solo: self = .solo(input: try arg(.input), mode: try mode())
         case .busMuteSwitch: self = .busMuteSwitch(bus: try arg(.bus), mode: try mode())
         case .ui: self = .ui(name: try arg(.name))
+        case .transitionSlot: self = .transitionSlot(slot: try arg(.slot))
+        case .selectTransitionSlot: self = .selectTransitionSlot(slot: try arg(.slot))
         }
     }
 
@@ -271,6 +279,7 @@ extension ControlAction: Codable {
             try n.encode(bus, forKey: .bus)
             try n.encode(mode, forKey: .mode)
         case .ui(let name): try n.encode(name, forKey: .name)
+        case .transitionSlot(let slot), .selectTransitionSlot(let slot): try n.encode(slot, forKey: .slot)
         }
     }
 }
