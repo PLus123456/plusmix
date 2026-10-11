@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Switcher 转场 1–4</title>
+  <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="转场">
+    <sdpi-select setting="slot" default="1">
+      <option value="1">转场 1</option>
+      <option value="2">转场 2</option>
+      <option value="3">转场 3</option>
+      <option value="4">转场 4</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="按下">
+    <sdpi-select setting="mode" default="run">
+      <option value="run">执行（选中并开始）</option>
+      <option value="select">只选中（之后 T-bar 和回车用它，不执行）</option>
+    </sdpi-select>
+  </sdpi-item>
+  <hr />
+  <sdpi-item label="Switcher 地址">
+    <sdpi-textfield setting="host" global placeholder="127.0.0.1" default="127.0.0.1"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="API 端口">
+    <sdpi-textfield setting="port" global placeholder="8765" default="8765" pattern="[0-9]*"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Token（可空）">
+    <sdpi-password setting="token" global></sdpi-password>
+  </sdpi-item>
+</body>
+</html>

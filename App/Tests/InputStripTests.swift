@@ -44,12 +44,12 @@ final class InputStripTests: XCTestCase {
             XCTAssertTrue(cell.isFlipped ? row1[0].maxY <= row2[0].minY : row1[0].minY >= row2[0].maxY, "第一行在第二行上面")
             for b in cell.firstRowButtons + cell.secondRowButtons { XCTAssertTrue(b.refusesFirstResponder, "\(b.title) 不抢焦点（空格仍是 Cut）") }
         }
-        // PGM 上那一路：转场 / Cut 没意义，灰着并说明；其余两路可点，提示写当前那组转场（Q39：用转场列当前那组）
+        // PGM 上那一路：转场 / Cut 没意义，灰着并说明；其余两路可点，提示写当前转场（Q39；W5-M 起 = 当前槽，这里 Fade 2 秒不在任何槽里，只写效果与时长）
         XCTAssertFalse(cells[0].transitionButton.isEnabled)
         XCTAssertFalse(cells[0].cutButton.isEnabled)
         XCTAssertEqual(cells[0].transitionButton.toolTip, "已经在 PGM 上")
         XCTAssertTrue(cells[1].transitionButton.isEnabled && cells[1].cutButton.isEnabled)
-        XCTAssertEqual(cells[2].transitionButton.toolTip, "按已选转场送上 PGM（Fade · 2 秒）")
+        XCTAssertEqual(cells[2].transitionButton.toolTip, "按当前转场送上 PGM（Fade 2 秒）")
         XCTAssertEqual(cells[2].cutButton.toolTip, "直切到 PGM（不经过 PVW）")
 
         // 3 号点"转场" = setPreview(3) + autoTransition（按当前类型 / 时长），两条都来源 ui、按顺序
@@ -81,7 +81,7 @@ final class InputStripTests: XCTestCase {
         XCTAssertEqual(wc.bottomBar.displayedNotice, "转场进行中：等这次转场做完再改 PVW / PGM")
         // 右键菜单里同样的三项也灰着
         let menu = cells[1].contextMenu()
-        for title in ["送到 PVW", "Cut 到 PGM", "按已选转场送上 PGM（Fade · 2 秒）"] {
+        for title in ["送到 PVW", "Cut 到 PGM", "按当前转场送上 PGM（Fade 2 秒）"] {
             XCTAssertEqual(menu.items.first { $0.title == title }?.isEnabled, false, "转场进行中右键“\(title)”应灰")
         }
 
@@ -385,7 +385,7 @@ final class InputStripTests: XCTestCase {
         let cell = try XCTUnwrap(strip.cells[2])
         let menu = cell.contextMenu()
         XCTAssertEqual(menu.items.map { $0.isSeparatorItem ? "─" : $0.title },
-                       ["送到 PVW", "Cut 到 PGM", "按已选转场送上 PGM（Fade · 0.5 秒）", "Overlay", "分类", "静音", "─",
+                       ["送到 PVW", "Cut 到 PGM", "按当前转场送上 PGM（转场 1 · Fade 0.5 秒）", "Overlay", "分类", "静音", "─",
                         "设置…", "换来源…", "重命名…", "─", "删除输入 2"])
         XCTAssertEqual(menu.items.first { $0.title == "换来源…" }?.toolTip, "直接打开输入设置的“来源”一节；换来源会重建这一路（文件从头播）")
         XCTAssertEqual(menu.items.first { $0.title == "静音" }?.isEnabled, false, "无声合成源：静音灰")
@@ -405,7 +405,7 @@ final class InputStripTests: XCTestCase {
         XCTAssertEqual(cell.contextMenu().items.first { $0.title == "Overlay" }?.submenu?.items[1].state, .on)
         try fire(cell.contextMenu().items.first { $0.title == "Overlay" }?.submenu?.items[1])
         XCTAssertTrue(AppTest.waitUntil(2) { !session.state.overlays[1].on })
-        // 送到 PVW / Cut 到 PGM / 按已选转场送上 PGM
+        // 送到 PVW / Cut 到 PGM / 按当前转场送上 PGM
         let cell1 = try XCTUnwrap(strip.cells[1])
         XCTAssertEqual(cell1.contextMenu().items.first { $0.title == "Cut 到 PGM" }?.isEnabled, false, "已在 PGM 上")
         try fire(cell1.contextMenu().items.first { $0.title == "送到 PVW" })
@@ -415,8 +415,8 @@ final class InputStripTests: XCTestCase {
         session.send(.setTransition(type: .cut, durationTicks: 30))
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.type == .cut })
         AppTest.pump(seconds: 0.05)
-        let quick = cell1.contextMenu().items.first { $0.title.hasPrefix("按已选转场送上 PGM") }
-        XCTAssertEqual(quick?.title, "按已选转场送上 PGM（Cut）")
+        let quick = cell1.contextMenu().items.first { $0.title.hasPrefix("按当前转场送上 PGM") }
+        XCTAssertEqual(quick?.title, "按当前转场送上 PGM（Cut）", "当前那组是 API 给的 Cut（不在槽里）：只写 Cut")
         try fire(quick)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.program == 1 })
         // 换来源… = 输入设置窗、直接停在"来源"一节；设置… = 同一扇窗

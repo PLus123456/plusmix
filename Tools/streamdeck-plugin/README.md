@@ -6,11 +6,11 @@
 ```
 Tools/streamdeck-plugin/
 ├── com.plusmix.switcher.sdPlugin/    Stream Deck 加载的插件目录
-│   ├── manifest.json                 9 个动作：cut / auto / preview / program / tally / overlay / record / stream / ftb
+│   ├── manifest.json                 10 个动作：cut / auto / slot（转场 1–4）/ preview / program / tally / overlay / record / stream / ftb
 │   ├── bin/plugin.js                 入口：@elgato/streamdeck（官方 SDK）+ 本地 API 客户端；每次快照重画所有可见按钮
 │   ├── lib/api-client.js             WS 客户端：快照缓存、时钟、发命令等回执、断线 2 s 重连
 │   ├── lib/tally.js                  纯函数：快照 → 按钮样式（颜色 / 文字 / SVG）、按下 → Command JSON
-│   ├── ui/*.html                     设置面板（sdpi-components v4）：输入编号 / 叠加通道 / 输出编号 / 转场时长 + 全局的地址 / 端口 / token
+│   ├── ui/*.html                     设置面板（sdpi-components v4）：输入编号 / 叠加通道 / 输出编号 / 转场时长 / 转场槽 + 全局的地址 / 端口 / token
 │   └── imgs/                         PNG 图标（scripts/gen-icons.py 生成）
 ├── test/cases.js                     纯函数的断言用例；test/tally.test.js 用 node --test 跑
 ├── scripts/run-jxa.sh                没有 Node 时用 macOS 自带的 JavaScriptCore 跑同一批用例
@@ -38,7 +38,8 @@ npx streamdeck pack com.plusmix.switcher.sdPlugin    # 出 .streamDeckPlugin 安
 | 动作 | 按下 | 颜色 |
 |---|---|---|
 | Cut | `cut` | 固定 |
-| Auto / Fade | `autoTransition`，或设置成 Fade + 时长 → `fade(durationTicks)`（毫秒按 hello 里的帧率换算） | 转场进行中变红 |
+| Auto / Fade | `autoTransition`（= 执行当前转场槽），或设置成 Fade + 时长 → `fade(durationTicks)`（毫秒按 hello 里的帧率换算） | 转场进行中变红 |
+| Transition 1–4 | `useTransitionSlot(slot, start: true)`：执行转场 n（选中并开始）；设置成"只选中"时 `start: false`（之后 T-bar 和回车用它） | 跟当前槽：当前槽蓝、它执行中红、别的灰；小字 = 槽的效果与时长（"Wipe → 1s"，Stinger 没选输入写"未选输入"） |
 | Preview | `setPreview(input)` | 这路的 tally：红 = PGM、绿 = PVW、灰 = 都不在 |
 | Program | `setProgram(input)`（直切，PVW 不变） | 同上 |
 | Tally | 只显示；按下 = `setPreview(input)` | 同上 |

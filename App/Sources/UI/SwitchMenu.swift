@@ -1,7 +1,7 @@
 // 菜单栏"切换"（W5-G，01a O1，docs/ui-study/01-菜单逻辑.md §5）：只放现场操作——
-//   Cut ／ 执行当前转场（类型 · 时长）／ ─ ／ 五种类型 ／ ─ ／ FTB（✓ = 开着）／ Overlay ▸ 1–4（✓ = 开着，标题带输入名）。
-// 五种类型是"T-bar 和回车用哪种"（与转场列 T-bar 上方那行的菜单同一口径：选 = 只发 setTransition、不执行，当前的打勾，转场进行中灰着；
-// 契约的五种都列、含 Cut，用户 2026-10-03 定）；"执行当前转场"按它和当前时长做。槽落地之后（100）这一段换成"转场 1–4"。
+//   Cut ／ 执行当前转场（转场 2 · Wipe → 1 秒）／ ─ ／ 转场 1–4（标题带效果与时长）／ ─ ／ FTB（✓ = 开着）／ Overlay ▸ 1–4（✓ = 开着，标题带输入名）。
+// 转场 1–4（W5-M，prompt 100；用户 2026-10-10 裁定"转场项点了就做"）= 执行这个槽（与转场列的主体同一条路：Stinger 槽没选输入时先弹输入选择、不执行，X18），
+// 当前槽打勾，转场进行中灰着（状态机会忽略）。原来那五种"只选不执行"的类型撤掉了，只选不执行留在转场列每个槽 ▾ 里的"用于 T-bar（不执行）"。
 // 右列的键从当前快捷键表反查（MenuKeyColumn：只显示、不设 keyEquivalent，HotkeyDispatcher 是唯一的触发口）；
 // 快捷键… / MIDI 映射… 挪到 App 菜单"设置…"下（F3）。
 // 项在菜单建的时候建好、打开时（menuNeedsUpdate）就地改标题 / 勾 / 右列；动作是 nil target 的 AppDelegate 方法（validateMenuItem 管灰不灰）。
@@ -16,7 +16,8 @@ final class SwitchMenuController: NSObject, NSMenuDelegate {
     let overlayMenu = NSMenu(title: "Overlay")
     let cutItem = NSMenuItem(title: "Cut", action: #selector(AppDelegate.transitionCut(_:)), keyEquivalent: "")
     let autoItem = NSMenuItem(title: "", action: #selector(AppDelegate.transitionAuto(_:)), keyEquivalent: "")
-    let typeItems: [NSMenuItem]
+    /// 转场 1–4（tag = 槽号）。
+    let slotItems: [NSMenuItem]
     let ftbItem = NSMenuItem(title: "FTB", action: #selector(AppDelegate.transitionFTB(_:)), keyEquivalent: "")
     let overlayItems: [NSMenuItem]
     /// 当前快照（没有 session 为 nil）与快捷键表：AppController 给。
@@ -24,9 +25,9 @@ final class SwitchMenuController: NSObject, NSMenuDelegate {
     var hotkeyTable: () -> HotkeyTable = { .default }
 
     override init() {
-        typeItems = TransitionPanelView.tbarTypes.map { type in
-            let item = NSMenuItem(title: L("transition.type.\(type.rawValue)"), action: #selector(AppDelegate.pickTransitionType(_:)), keyEquivalent: "")
-            item.representedObject = type.rawValue
+        slotItems = TransitionSlot.indexRange.map { n in
+            let item = NSMenuItem(title: L("slot.name", n), action: #selector(AppDelegate.transitionSlot(_:)), keyEquivalent: "")
+            item.tag = n
             return item
         }
         overlayItems = (1...MixerState.overlayCount).map { channel in
@@ -40,8 +41,7 @@ final class SwitchMenuController: NSObject, NSMenuDelegate {
         menu.addItem(cutItem)
         menu.addItem(autoItem)
         menu.addItem(.separator())
-        menu.addItem(.sectionHeader(title: L("transition.tbarTypeMenu.header")))
-        for item in typeItems { menu.addItem(item) }
+        for item in slotItems { menu.addItem(item) }
         menu.addItem(.separator())
         menu.addItem(ftbItem)
         let overlay = NSMenuItem(title: "Overlay", action: nil, keyEquivalent: "")
@@ -58,27 +58,21 @@ final class SwitchMenuController: NSObject, NSMenuDelegate {
         let state = state()
         let table = hotkeyTable()
         func keys(_ match: (ControlAction) -> Bool) -> String? { HotkeyText.keys(in: table, matching: match) }
-        let current = state?.transition
-        let autoTitle: String
-        if let current, current.type != .cut {
-            let fps = Double(state?.format.frameRate.nominalFramesPerSecond ?? 60)
-            autoTitle = L("menu.switch.auto", L("transition.type.\(current.type.rawValue)"),
-                          TransitionPanelView.secondsText(Double(current.durationTicks) / max(fps, 1)))
-        } else {
-            autoTitle = current == nil ? L("menu.switch.autoNoShow") : L("menu.switch.autoCut")
-        }
-        for (item, type) in zip(typeItems, TransitionPanelView.tbarTypes) {
-            item.state = current?.type == type ? .on : .off
-        }
-        ftbItem.state = state?.ftb.on == true ? .on : .off
+        let rate = state?.format.frameRate ?? .fps60
+        let autoTitle = state.map { L("menu.switch.autoSlot", SlotText.current($0.transition, rate: rate)) } ?? L("menu.switch.autoNoShow")
         var rows: [MenuKeyColumn.Row] = [
             .init(item: cutItem, title: "Cut", keys: keys(HotkeyMatch.cut)),
             .init(item: autoItem, title: autoTitle, keys: keys(HotkeyMatch.auto)),
             .init(item: ftbItem, title: "FTB", keys: keys(HotkeyMatch.ftb)),
         ]
-        rows += zip(typeItems, TransitionPanelView.tbarTypes).map { item, type in
-            .init(item: item, title: L("transition.type.\(type.rawValue)"), keys: keys(HotkeyMatch.selectType(type)))
+        for item in slotItems {
+            let n = item.tag
+            let slots = state?.transition.slots ?? []
+            let title = n - 1 < slots.count ? SlotText.menuTitle(n, slots[n - 1], rate: rate) : L("slot.name", n)
+            item.state = state?.transition.currentSlot == n ? .on : .off
+            rows.append(.init(item: item, title: title, keys: keys(HotkeyMatch.slot(n))))
         }
+        ftbItem.state = state?.ftb.on == true ? .on : .off
         MenuKeyColumn.apply(rows)
         var overlayRows: [MenuKeyColumn.Row] = []
         for (index, item) in overlayItems.enumerated() {

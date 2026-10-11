@@ -50,6 +50,11 @@ final class StatusXMLTests: XCTestCase {
         XCTAssertEqual(try doc.text("/*/overlays/overlay[1]"), "", "没输入 = 空元素")
         XCTAssertEqual(try doc.attribute("/*/transitions/transition[1]", "effect"), "Fade")
         XCTAssertEqual(try doc.attribute("/*/transitions/transition[1]", "duration"), "500", "30 拍 @60 = 500 ms")
+        // 转场槽（W5-M）：四个槽各一项，number = 槽号（Transition1–4 / SetTransitionEffect1–4 按它对应）
+        XCTAssertEqual(try doc.nodes("/*/transitions/transition").count, 4)
+        XCTAssertEqual(try (1...4).map { try doc.attribute("/*/transitions/transition[\($0)]", "number") }, ["1", "2", "3", "4"])
+        XCTAssertEqual(try (1...4).map { try doc.attribute("/*/transitions/transition[\($0)]", "effect") }, ["Fade", "Wipe", "Zoom", "Stinger"], "出厂四槽")
+        XCTAssertEqual(try (1...4).map { try doc.attribute("/*/transitions/transition[\($0)]", "duration") }, ["500", "1000", "1000", "1000"])
         XCTAssertEqual(try doc.attribute("/*/audio/master", "volume"), "100")
         XCTAssertEqual(try doc.attribute("/*/audio/master", "muted"), "False")
         XCTAssertEqual(try doc.attribute("/*/audio/master", "headphonesVolume"), "100")
@@ -68,7 +73,9 @@ final class StatusXMLTests: XCTestCase {
         state.overlays[0].animProgress = 1
         state.ftb.on = true
         state.ftb.level = 1
-        state.transition = TransitionState(type: .wipe, durationTicks: 90)
+        state.transition.slots[0] = TransitionSlot(type: .wipe, durationTicks: 90)
+        state.transition.slots[2] = TransitionSlot(type: .cut, durationTicks: 0)
+        state.transition.select(slot: 1)
         state.audio.buses[0].gainDb = -6.0206
         state.audio.buses[0].muted = true
         state.inputs[1].settings.audio.muted = true
@@ -85,6 +92,9 @@ final class StatusXMLTests: XCTestCase {
         XCTAssertEqual(try doc.text("/*/fadeToBlack"), "True")
         XCTAssertEqual(try doc.attribute("/*/transitions/transition[1]", "effect"), "Wipe")
         XCTAssertEqual(try doc.attribute("/*/transitions/transition[1]", "duration"), "1500")
+        XCTAssertEqual(try doc.attribute("/*/transitions/transition[3]", "effect"), "Cut", "每个槽写自己的配置")
+        XCTAssertEqual(try doc.attribute("/*/transitions/transition[3]", "duration"), "0")
+        XCTAssertEqual(try doc.attribute("/*/transitions/transition[2]", "effect"), "Wipe", "没动的槽是出厂值")
         XCTAssertEqual(try doc.attribute("/*/audio/master", "volume"), "50")
         XCTAssertEqual(try doc.attribute("/*/audio/master", "muted"), "True")
         XCTAssertEqual(try doc.input(2, "muted"), "True")

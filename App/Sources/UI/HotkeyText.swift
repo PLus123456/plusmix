@@ -36,7 +36,7 @@ enum HotkeyText {
     }
 
     /// 表里绑到某个动作的组合键（按表里的顺序，停用的行不算），连成"空格、⇧C"；修饰键相同的连号数字（3 个及以上）写成"⌥1–⌥4"
-    /// （W5-J：默认表的 ⌥1–⌥4 在转场槽落地前都是"执行当前转场"）。没有返回 nil。
+    /// （W5-J：转场槽落地前默认表的 ⌥1–⌥4 都是"执行当前转场"；W5-M 起各绑各的槽，自己改的表也可能把连号绑到同一个动作上）。没有返回 nil。
     static func keys(in table: HotkeyTable, matching match: (ControlAction) -> Bool) -> String? {
         let combos = table.bindings.filter { $0.enabled && match($0.action) }.map(\.key)
         guard !combos.isEmpty else { return nil }
@@ -67,7 +67,7 @@ enum HotkeyText {
 enum HotkeyMatch {
     static func cut(_ a: ControlAction) -> Bool { if case .command(.cut) = a { return true }; return false }
     static func fade(_ a: ControlAction) -> Bool { if case .command(.fade) = a { return true }; return false }
-    /// 按已选转场执行（回车的默认绑定）。
+    /// 执行当前转场（= 当前槽；回车的默认绑定）。
     static func auto(_ a: ControlAction) -> Bool { if case .command(.autoTransition) = a { return true }; return false }
     static func ftb(_ a: ControlAction) -> Bool {
         if case .toggleFTB = a { return true }
@@ -81,10 +81,11 @@ enum HotkeyMatch {
             return false
         }
     }
-    /// 只改"下一次转场"的类型（不执行）：setTransition 到这种类型（时长不论）。
-    static func selectType(_ type: TransitionType) -> (ControlAction) -> Bool {
+    /// 执行转场 n（W5-M）：控制层的"执行转场 n"，或直接包一条 useTransitionSlot(n, start: true)。
+    static func slot(_ n: Int) -> (ControlAction) -> Bool {
         { a in
-            if case .command(.setTransition(let t, _)) = a { return t == type }
+            if case .transitionSlot(let s) = a { return s == n }
+            if case .command(.useTransitionSlot(let s, true)) = a { return s == n }
             return false
         }
     }

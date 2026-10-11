@@ -274,7 +274,8 @@ final class MIDIMappingModel: ObservableObject {
     static func describe(_ action: MIDIAction) -> String { ActionText.summary(action) }
 
     static let sampleActions: [MIDIAction] = [.tbar, .inputGain(input: 1, minDb: -60, maxDb: 12), .busGain(bus: .master, minDb: -60, maxDb: 12), .action(.toggleFTB),
-                                              .action(.previewAndTransition(input: 2)), .action(.ui(name: UIAction.toggleMultiviewWindow.rawValue))]
+                                              .action(.previewAndTransition(input: 2)), .action(.ui(name: UIAction.toggleMultiviewWindow.rawValue)),
+                                              .action(.transitionSlot(slot: 3))]
 }
 
 struct MIDIMappingView: View {

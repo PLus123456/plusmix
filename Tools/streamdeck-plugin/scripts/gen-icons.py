@@ -80,6 +80,7 @@ RED, GREEN, AMBER, BLUE, GREY, DARK, WHITE = (214, 40, 40), (42, 157, 59), (224,
 ACTIONS = {
     "cut": two_tone(GREEN, RED),
     "auto": two_tone(GREEN, AMBER),
+    "slot": rounded(DARK, ring=(BLUE, 0.18)),
     "preview": rounded(GREEN),
     "program": rounded(RED),
     "tally": rounded(DARK, ring=(RED, 0.18)),

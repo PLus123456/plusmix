@@ -167,12 +167,13 @@ final class PanelTests: XCTestCase {
             }, verify: { session.state.audio.buses[0].effects.first?.id == AudioEffectParams.peakLimiterID },
                describe: { "\(session.state.audio.buses[0].effects)" }))
 
-        // W3-E2：切换面板的参数…（setTransitionParams，提案 016；不在转场中就立刻发）
+        // W3-E2：切换面板的参数…（W5-M 起按槽编辑、发 setTransitionSlot；转场 1 是当前槽，当前那组同时按槽重拷）
         cases.append(Case(name: "切换面板：Wipe 参数（上 → 下、软边 0.2）", change: {
                 let m = wc.transitionPanel.params
+                m.slot = 1
                 m.setWipeDirection(.topToBottom)
                 m.setWipeSoftness(0.2)
-            }, verify: { session.state.transition.wipe == WipeParams(direction: .topToBottom, softness: 0.2) },
+            }, verify: { session.state.transition.wipe == WipeParams(direction: .topToBottom, softness: 0.2) && session.state.transition.slots[0].wipe == session.state.transition.wipe },
                describe: { "\(session.state.transition.wipe)" }))
         cases.append(Case(name: "切换面板：Stinger 参数（2 号、第 12 拍换底）", change: {
                 let m = wc.transitionPanel.params

@@ -280,16 +280,18 @@ final class ToolbarMenuTests: XCTestCase {
 
         let menu = try menu("切换")
         refresh(menu)
-        // Cut ／ 执行当前转场（类型 · 时长）／ ─ ／ 五种类型（T-bar 与回车用，只选不执行）／ ─ ／ FTB ／ Overlay ▸
-        // 默认表 W5-J 起有 ⌥1–⌥4（转场槽落地前 = 执行当前转场）与 ⌃1–⌃4（叠加开关）：右列照实写，连号写成"⌥1–⌥4"
-        XCTAssertEqual(rows(menu), ["Cut | 空格", "执行当前转场（Fade · 0.5 秒） | 回车、⌥1–⌥4", "—", "# T-bar 和回车用（只选，不执行）",
-                                    "Cut", "Fade", "Wipe", "Zoom", "Stinger", "—", "FTB | F", "Overlay ▸"])
+        // Cut ／ 执行当前转场（转场 n · 效果 时长）／ ─ ／ 转场 1–4（标题带效果与时长，点了就做，W5-M）／ ─ ／ FTB ／ Overlay ▸
+        // 默认表：回车 = 执行当前转场、⌥1–⌥4 = 执行转场 1–4（W5-M 起各绑各的槽）、⌃1–⌃4 = 叠加开关：右列照实写
+        XCTAssertEqual(rows(menu), ["Cut | 空格", "执行当前转场（转场 1 · Fade 0.5 秒） | 回车", "—",
+                                    "转场 1 · Fade 0.5 秒 | ⌥1", "转场 2 · Wipe → 1 秒 | ⌥2", "转场 3 · Zoom 1 秒 | ⌥3", "转场 4 · Stinger（未设） | ⌥4",
+                                    "—", "FTB | F", "Overlay ▸"])
         XCTAssertFalse(menu.items.contains { ["快捷键…", "MIDI 映射…"].contains(MenuKeyColumn.title(of: $0)) }, "快捷键 / MIDI 映射挪出了“切换”")
         let cut = try item(menu, "Cut")
         let auto = menu.items[1]
-        let typeItems = menu.items.filter { $0.action == #selector(AppDelegate.pickTransitionType(_:)) }
-        XCTAssertEqual(typeItems.map { MenuKeyColumn.title(of: $0) }, ["Cut", "Fade", "Wipe", "Zoom", "Stinger"])
-        XCTAssertEqual(typeItems.filter { $0.state == .on }.map { MenuKeyColumn.title(of: $0) }, ["Fade"], "当前类型打勾")
+        let slotItems = menu.items.filter { $0.action == #selector(AppDelegate.transitionSlot(_:)) }
+        XCTAssertEqual(slotItems.map(\.tag), [1, 2, 3, 4])
+        XCTAssertEqual(slotItems.filter { $0.state == .on }.map(\.tag), [1], "当前槽打勾")
+        XCTAssertFalse(menu.items.contains { $0.action == NSSelectorFromString("pickTransitionType:") }, "只选不执行的五种类型撤掉了（2026-10-10 裁定）")
         let ftb = try item(menu, "FTB")
         let overlay = try XCTUnwrap(try item(menu, "Overlay").submenu)
         refresh(overlay)
@@ -311,7 +313,8 @@ final class ToolbarMenuTests: XCTestCase {
         refresh(menu)
         refresh(overlay)
         XCTAssertEqual(MenuKeyColumn.keys(of: cut), "C", "Cut 的键跟着表变：\(rows(menu))")
-        XCTAssertEqual(MenuKeyColumn.keys(of: auto), "回车、⌥1–⌥4")
+        XCTAssertEqual(MenuKeyColumn.keys(of: auto), "回车")
+        XCTAssertEqual(MenuKeyColumn.keys(of: slotItems[1]), "⌥2")
         XCTAssertEqual(MenuKeyColumn.keys(of: overlay.items[0]), "⌥⇧1", "Overlay 1 的键：\(rows(overlay))")
         XCTAssertEqual(MenuKeyColumn.keys(of: overlay.items[1]), "⌃2", "Overlay 2 没动")
 
@@ -331,22 +334,24 @@ final class ToolbarMenuTests: XCTestCase {
         XCTAssertEqual(session.control.hotkeys.counters.handled, handled + 1)
         XCTAssertEqual(session.commandsSent, uiSent, "菜单那一路没发")
 
-        // 菜单项自己点：选类型只改设置、不执行（与 T-bar 上方那行同一口径）；执行当前转场 = 按当前类型与时长做；FTB / Overlay 是开关、勾 = 开着
-        let wipe = typeItems[2]
+        // 菜单项自己点：转场 n = 执行这个槽（点了就做，2026-10-10 裁定）；执行当前转场 = 按当前槽做；FTB / Overlay 是开关、勾 = 开着
+        let wipe = slotItems[1]
         refresh(menu)
         XCTAssertTrue(AppTest.delegate.validateMenuItem(wipe))
+        let sinceSlot = session.control.bus.recentEntries().last?.sequence ?? 0
         perform(menu, wipe)
-        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.type == .wipe }, "选 Wipe = setTransition")
-        AppTest.pump(seconds: 0.2)
-        XCTAssertFalse(session.state.transition.isActive, "只选、不执行")
-        XCTAssertEqual(session.state.program, 2)
-        refresh(menu)
-        XCTAssertEqual(MenuKeyColumn.title(of: auto), "执行当前转场（Wipe · 0.5 秒）", "标题写出类型与时长")
-        XCTAssertEqual(typeItems.filter { $0.state == .on }.map { MenuKeyColumn.title(of: $0) }, ["Wipe"])
-        perform(menu, auto)
-        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.isActive }, "执行当前转场")
-        XCTAssertFalse(AppTest.delegate.validateMenuItem(wipe), "转场进行中不能改类型（状态机会拒）")
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.isActive && session.state.transition.type == .wipe }, "转场 2 = 执行 Wipe")
+        XCTAssertEqual(session.control.bus.recentEntries().filter { $0.sequence > sinceSlot && $0.source == .ui }.map(\.command),
+                       [.useTransitionSlot(slot: 2, start: true)], "一条命令选中并开始")
+        XCTAssertFalse(AppTest.delegate.validateMenuItem(wipe), "转场进行中四个槽都灰（状态机会忽略）")
         XCTAssertTrue(AppTest.waitUntil(3) { !session.state.transition.isActive && session.state.program == 1 }, "Wipe 做完，PGM = 原 PVW（1）")
+        refresh(menu)
+        XCTAssertEqual(MenuKeyColumn.title(of: auto), "执行当前转场（转场 2 · Wipe → 1 秒）", "标题写出当前槽、效果与时长")
+        XCTAssertEqual(slotItems.filter { $0.state == .on }.map(\.tag), [2])
+        XCTAssertTrue(AppTest.delegate.validateMenuItem(wipe))
+        perform(menu, auto)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.isActive && session.state.transition.type == .wipe }, "执行当前转场 = 转场 2")
+        XCTAssertTrue(AppTest.waitUntil(3) { !session.state.transition.isActive && session.state.program == 2 }, "再做一次 Wipe，PGM = 2")
         perform(menu, ftb)
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.ftb.on })
         refresh(menu)

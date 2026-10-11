@@ -62,8 +62,9 @@ final class AccessibilityTests: XCTestCase {
         for strip in [AudioStrip.bus(.master), .input(1)] {
             check("音频设置 · \(strip)", panels.showAudioSettings(strip)?.window?.contentView)
         }
-        wc.transitionPanel.paramsButton.performClick(nil)   // W3-E2：转场参数弹出面板
+        wc.transitionPanel.showSlotParams(slot: 2)   // W3-E2：转场参数弹出面板（W5-M 起在每个槽的 ▾ 里，按槽编辑）
         check("转场参数", wc.transitionPanel.paramsPopoverContentView)
+        wc.transitionPanel.closeSlotParams()
         panels.closeAll()
 
         // 纯 SwiftUI 的窗口在 AppKit 层可能一个控件都没有（MIDI 映射），只要求总数 > 0（主窗口 + 调音台的竖推子）且主窗口 > 0

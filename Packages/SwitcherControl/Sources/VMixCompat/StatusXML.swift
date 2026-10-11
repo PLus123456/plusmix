@@ -45,8 +45,14 @@ public enum StatusXML {
         out += "<preview>\(state.preview)</preview>\n"
         out += "<active>\(state.program)</active>\n"
         out += "<fadeToBlack>\(bool(state.ftb.on))</fadeToBlack>\n"
-        let ms = Int((Double(state.transition.durationTicks) * 1000 / frameRate.framesPerSecond.doubleValue).rounded())
-        out += "<transitions>\n<transition number=\"1\" effect=\"\(effectName(state.transition.type))\" duration=\"\(ms)\" />\n</transitions>\n"
+        // 转场槽 1–4 各一项（W5-M：Transition1–4 / SetTransitionEffect1–4 按槽号对应）；万一没有槽（没经搬迁的裸状态）只写当前那组
+        out += "<transitions>\n"
+        let slots = state.transition.slots.isEmpty ? [state.transition.currentGroup] : state.transition.slots
+        for (i, slot) in slots.enumerated() {
+            let ms = Int((Double(slot.durationTicks) * 1000 / frameRate.framesPerSecond.doubleValue).rounded())
+            out += "<transition number=\"\(i + 1)\" effect=\"\(effectName(slot.type))\" duration=\"\(ms)\" />\n"
+        }
+        out += "</transitions>\n"
 
         let records = state.outputs.filter { $0.kind == .record }
         let streams = state.outputs.filter { $0.kind == .stream }.sorted { $0.number < $1.number }

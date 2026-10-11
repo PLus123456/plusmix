@@ -6,6 +6,9 @@ import SwitcherContracts
 // 总线路由 / 独听 / 总线静音、叠加全关、"选进 PVW 并按已选转场执行"、"叠加 N 换成输入 X 并开"）、按毫秒存的 Fade、按下时才定的输入（当前 PVW / PGM）、
 // 界面动作（只在 App 里派发，不进总线）。resolve 返回命令数组：组合动作按顺序逐条进总线（前一条被拒就不发后面的）。
 // JSON 只加新键，旧的 hotkeys.json / midi.json 照读（旧的整数输入 = 编号）。
+// W5-M（prompt 100，01a N6）：转场槽的两类动作——执行转场 n（useTransitionSlot(n, start: true)，一拍内选中并开始）、选中转场 n（start: false，
+// 只换 T-bar / 回车用的当前槽）。回车仍是 autoTransition = 执行当前槽（当前那组就是当前槽的配置，提案 020）。Stinger 槽没选输入照常执行
+// （契约默认；只有屏幕上的按钮按 X18 先弹输入选择）。
 
 /// 按下时才定的输入（N3）。JSON：整数 = 编号；"preview" / "program" = 按下那一刻 PVW / PGM 上的那一路（黑场 = 解析不出，这条动作不发）。
 public enum InputRef: Hashable, Sendable, ExpressibleByIntegerLiteral {
@@ -103,6 +106,10 @@ public enum ControlAction: Hashable, Sendable {
     case busMuteSwitch(bus: Bus, mode: SwitchMode)
     /// 界面动作（显示 / 隐藏调音台、多画面窗口……，Q53）：只在 App 里派发，不进 CommandCatalog、不进总线；名字由 App 定。
     case ui(name: String)
+    /// 执行转场 n（槽 1–4，提案 020）：选中并同一拍开始 auto 转场；转场进行中被状态机忽略（与 autoTransition 同口径）。
+    case transitionSlot(slot: Int)
+    /// 选中转场 n、不执行：之后 T-bar / 回车按这个槽走。
+    case selectTransitionSlot(slot: Int)
 
     /// 按当前状态解析成命令（按顺序逐条进总线）；引用不存在的通道 / 输入 / 输出、或没什么要变的，返回空数组。
     public func resolve(in state: MixerState) -> [Command] {
@@ -163,6 +170,12 @@ public enum ControlAction: Hashable, Sendable {
             return [.busMute(bus: bus, on: mode.target(current: muted))]
         case .ui:
             return []   // App 自己派发（HotkeyDispatcher / MIDIController 交给它设的 handler）
+        case .transitionSlot(let slot):
+            guard TransitionSlot.indexRange.contains(slot) else { return [] }
+            return [.useTransitionSlot(slot: slot, start: true)]
+        case .selectTransitionSlot(let slot):
+            guard TransitionSlot.indexRange.contains(slot) else { return [] }
+            return [.useTransitionSlot(slot: slot, start: false)]
         }
     }
 
@@ -191,7 +204,7 @@ public enum ControlAction: Hashable, Sendable {
 
 extension ControlAction: Codable {
     // 手写 Codable：合成的会把无标签的 command 编成 {"command": {"_0": …}}；这里 command 直接嵌 Command 的 JSON。
-    private enum Arg: String, CodingKey { case channel, input, output, durationMs, mode, kind, bus, name }
+    private enum Arg: String, CodingKey { case channel, input, output, durationMs, mode, kind, bus, name, slot }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: ControlActionKind.self)
@@ -232,6 +245,8 @@ extension ControlAction: Codable {
         case .solo: self = .solo(input: try arg(.input), mode: try mode())
         case .busMuteSwitch: self = .busMuteSwitch(bus: try arg(.bus), mode: try mode())
         case .ui: self = .ui(name: try arg(.name))
+        case .transitionSlot: self = .transitionSlot(slot: try arg(.slot))
+        case .selectTransitionSlot: self = .selectTransitionSlot(slot: try arg(.slot))
         }
     }
 
@@ -271,6 +286,7 @@ extension ControlAction: Codable {
             try n.encode(bus, forKey: .bus)
             try n.encode(mode, forKey: .mode)
         case .ui(let name): try n.encode(name, forKey: .name)
+        case .transitionSlot(let slot), .selectTransitionSlot(let slot): try n.encode(slot, forKey: .slot)
         }
     }
 }

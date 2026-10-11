@@ -11,6 +11,7 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
     case outputSwitch, outputKindSwitch, recordAll, recordISO, streamAll
     case inputAFV, busRoute, solo, busMuteSwitch
     case ui
+    case transitionSlot, selectTransitionSlot
 
     public init(of action: ControlAction) {
         switch action {
@@ -35,6 +36,8 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
         case .solo: self = .solo
         case .busMuteSwitch: self = .busMuteSwitch
         case .ui: self = .ui
+        case .transitionSlot: self = .transitionSlot
+        case .selectTransitionSlot: self = .selectTransitionSlot
         }
     }
 
@@ -58,6 +61,7 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
         case .busRoute: return [input, CommandField(name: "bus", type: .bus), mode]
         case .busMuteSwitch: return [CommandField(name: "bus", type: .bus), mode]
         case .ui: return [CommandField(name: "name", type: .text)]
+        case .transitionSlot, .selectTransitionSlot: return [CommandField(name: "slot", type: .transitionSlot)]
         }
     }
 
@@ -77,6 +81,7 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
         case .inputAFV, .busRoute, .solo: [.setInputSettings]
         case .busMuteSwitch: [.busMute]
         case .ui: []
+        case .transitionSlot, .selectTransitionSlot: [.useTransitionSlot]
         }
     }
 
@@ -84,7 +89,7 @@ public enum ControlActionKind: String, CaseIterable, Sendable, CodingKey {
     public var group: String {
         switch self {
         case .command: "命令"
-        case .toggleFTB, .fadeMs, .previewAndTransition: "切换"
+        case .toggleFTB, .fadeMs, .previewAndTransition, .transitionSlot, .selectTransitionSlot: "切换"
         case .toggleOverlay, .overlayInput, .overlaysOff: "叠加"
         case .toggleMute, .toggleAFV, .inputAFV, .busRoute, .solo, .busMuteSwitch: "音频"
         case .toggleRecord, .toggleStream, .recordAll, .recordISO, .streamAll, .outputSwitch, .outputKindSwitch: "输出"

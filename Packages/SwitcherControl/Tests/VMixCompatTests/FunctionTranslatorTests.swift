@@ -65,7 +65,17 @@ final class FunctionTranslatorTests: XCTestCase {
         XCTAssertEqual(error("Stinger1")?.code, .notConfigured, "没配 stinger 输入")
         var withStinger = TestStates.base()
         withStinger.transition.stinger.input = 4
-        XCTAssertEqual(try plan("Stinger1", state: withStinger), [.setTransition(type: .stinger, durationTicks: 30), .autoTransition])
+        XCTAssertEqual(try plan("Stinger1", state: withStinger), [.setTransition(type: .stinger, durationTicks: 30), .autoTransition],
+                       "没有配好的 Stinger 槽时，照旧用当前那组的 stinger 输入（API 的 setTransitionParams 设的）")
+        // 转场槽（W5-M）：Stinger 输入设在槽里（转场列 ▾ 菜单）——Stinger1 = 执行第一个选了输入的 Stinger 槽
+        var slotted = TestStates.base()
+        slotted.transition.slots[3].stinger.input = 3
+        XCTAssertEqual(try plan("Stinger1", state: slotted), [.useTransitionSlot(slot: 4, start: true)], "出厂槽 4 是 Stinger，选了输入就用它")
+        slotted.transition.slots[1] = TransitionSlot(type: .stinger, durationTicks: 40, stinger: StingerParams(input: 4, cutAtTick: 10))
+        XCTAssertEqual(try plan("Stinger1", state: slotted), [.useTransitionSlot(slot: 2, start: true)], "按槽号找第一个")
+        var unset = TestStates.base()
+        unset.transition.slots[0] = TransitionSlot(type: .stinger, durationTicks: 30)
+        XCTAssertEqual(error("Stinger1", state: unset)?.code, .notConfigured, "Stinger 槽都没选输入")
     }
 
     func testC5_previewAndProgramSelection() throws {
@@ -90,13 +100,19 @@ final class FunctionTranslatorTests: XCTestCase {
     }
 
     func testC5_transitionSlotAndFader() throws {
-        XCTAssertEqual(try plan("Transition1"), [.autoTransition])
-        XCTAssertEqual(error("Transition2")?.code, .notImplemented, "只有一个转场槽")
-        XCTAssertEqual(try plan("SetTransitionEffect1 Value=Wipe"), [.setTransition(type: .wipe, durationTicks: 30)])
-        XCTAssertEqual(try plan("SetTransitionEffect1 Value=Cut"), [.setTransition(type: .cut, durationTicks: 30)])
+        // 转场槽落地（W5-M）：Transition1 = 执行转场 1（原来 = autoTransition，只有一个槽），SetTransitionEffect1 / Duration1 改槽 1
+        let s = TestStates.base()
+        XCTAssertEqual(try plan("Transition1"), [.useTransitionSlot(slot: 1, start: true)])
+        var wipe1 = s.transition.slots[0]
+        wipe1.type = .wipe
+        XCTAssertEqual(try plan("SetTransitionEffect1 Value=Wipe"), [.setTransitionSlot(slot: 1, config: wipe1)])
+        var cut1 = s.transition.slots[0]
+        cut1.type = .cut
+        XCTAssertEqual(try plan("SetTransitionEffect1 Value=Cut"), [.setTransitionSlot(slot: 1, config: cut1)])
         XCTAssertEqual(error("SetTransitionEffect1 Value=Fly")?.code, .notImplemented)
-        XCTAssertEqual(try plan("SetTransitionDuration1 Value=1000"), [.setTransition(type: .fade, durationTicks: 60)])
-        XCTAssertEqual(error("SetTransitionDuration2 Value=1000")?.code, .notImplemented)
+        var long1 = s.transition.slots[0]
+        long1.durationTicks = 60
+        XCTAssertEqual(try plan("SetTransitionDuration1 Value=1000"), [.setTransitionSlot(slot: 1, config: long1)])
         XCTAssertEqual(try plan("SetFader Value=255"), [.tbar(progress: 1)])
         XCTAssertEqual(try plan("SetFader Value=0"), [.tbar(progress: 0)])
         let half = try XCTUnwrap(try plan("SetFader Value=128").first)
@@ -104,6 +120,92 @@ final class FunctionTranslatorTests: XCTestCase {
         XCTAssertEqual(p, 128.0 / 255.0, accuracy: 1e-9)
         XCTAssertEqual(error("SetFader Value=300")?.code, .badParameter)
         XCTAssertEqual(error("SetFader")?.code, .badParameter)
+    }
+
+    /// Transition1–4 = 执行转场 1–4（提案 020 的槽，W5-M）：一条 useTransitionSlot(n, start: true)，一拍内选中并开始；
+    /// 转场进行中再发由状态机忽略（"(no change)"，HTTPTests 走一遍）；Stinger 槽没选输入照常执行（与快捷键同口径，只有屏幕上的按钮拦，X18）。
+    func testC5_transition2ExecutesSlot() throws {
+        for n in 1...4 {
+            XCTAssertEqual(try plan("Transition\(n)"), [.useTransitionSlot(slot: n, start: true)], "Transition\(n) = 执行转场 \(n)")
+            XCTAssertTrue(FunctionCatalog.implemented.map(\.name).contains("Transition\(n)"), "Transition\(n) 在实现表里")
+            XCTAssertFalse(FunctionCatalog.knownUnimplemented.contains("Transition\(n)"), "Transition\(n) 不再列为未实现")
+        }
+        XCTAssertEqual(try plan("transition2"), [.useTransitionSlot(slot: 2, start: true)], "函数名不分大小写")
+        XCTAssertEqual(try FunctionTranslator.plan(XCTUnwrap(FunctionRequest(commandLine: "transition2")), state: TestStates.base(), frameRate: fps,
+                                                   configuration: config).name, "Transition2", "应答回显规范写法")
+        var busy = TestStates.base()
+        busy.transition.startTick = Tick(5)
+        busy.transition.progress = 0.3
+        XCTAssertEqual(try plan("Transition3", state: busy), [.useTransitionSlot(slot: 3, start: true)], "翻译不看进行中（状态机判，回 no change）")
+        XCTAssertEqual(error("Transition5")?.code, .notImplemented, "只有 4 个槽")
+        XCTAssertEqual(error("Transition0")?.code, .notImplemented)
+    }
+
+    /// SetTransitionEffect1–4 / SetTransitionDuration1–4 = 改转场 n 的效果 / 时长（setTransitionSlot，槽里别的字段原样带上）；
+    /// 效果名只收我们有的五种（Cut / Fade / Wipe / Zoom / Stinger），上游别的效果 NotImplemented、谁都没有的名字 BadParameter。
+    func testC5_setTransitionEffect3MapsToSlot() throws {
+        let s = TestStates.base()
+        var zoomToWipe = s.transition.slots[2]
+        XCTAssertEqual(zoomToWipe.type, .zoom, "出厂槽 3 = Zoom 1 s")
+        zoomToWipe.type = .wipe
+        XCTAssertEqual(try plan("SetTransitionEffect3 Value=Wipe"), [.setTransitionSlot(slot: 3, config: zoomToWipe)])
+        for (name, type) in [("Cut", TransitionType.cut), ("Fade", .fade), ("zoom", .zoom), ("Stinger", .stinger), ("WIPE", .wipe)] {
+            var c = s.transition.slots[2]
+            c.type = type
+            XCTAssertEqual(try plan("SetTransitionEffect3 Value=\(name)"), [.setTransitionSlot(slot: 3, config: c)], name)
+        }
+        for upstream in ["Fly", "Merge", "Slide", "CubeZoom", "WipeReverse", "VerticalWipe"] {
+            let e = error("SetTransitionEffect3 Value=\(upstream)")
+            XCTAssertEqual(e?.code, .notImplemented, upstream)
+            XCTAssertTrue(e?.message.contains("SetTransitionEffect3") ?? false, "文案点名函数：\(e?.message ?? "nil")")
+        }
+        XCTAssertEqual(error("SetTransitionEffect3 Value=Sparkle")?.code, .badParameter, "谁都没有的效果名")
+        XCTAssertEqual(error("SetTransitionEffect3")?.code, .badParameter, "缺 Value")
+        // 槽里的 Wipe / Stinger 参数、时长原样带上，只换效果
+        var custom = TestStates.base()
+        custom.transition.slots[2] = TransitionSlot(type: .zoom, durationTicks: 50, wipe: WipeParams(direction: .diagonal, softness: 0.2),
+                                                    stinger: StingerParams(input: 3, cutAtTick: 7))
+        var expected = custom.transition.slots[2]
+        expected.type = .stinger
+        XCTAssertEqual(try plan("SetTransitionEffect3 Value=Stinger", state: custom), [.setTransitionSlot(slot: 3, config: expected)])
+        // 时长：毫秒按帧率换拍，只改时长
+        var slot4 = s.transition.slots[3]
+        slot4.durationTicks = 120
+        XCTAssertEqual(try plan("SetTransitionDuration4 Value=2000"), [.setTransitionSlot(slot: 4, config: slot4)])
+        var slot2 = s.transition.slots[1]
+        slot2.durationTicks = 45
+        XCTAssertEqual(try plan("SetTransitionDuration2 Value=750"), [.setTransitionSlot(slot: 2, config: slot2)])
+        XCTAssertEqual(error("SetTransitionDuration2 Value=-1")?.code, .badParameter)
+        XCTAssertEqual(error("SetTransitionDuration2")?.code, .badParameter, "缺 Value")
+        // 目录：1–4 都在实现表、不在"已知未实现"；5 起按前缀族算上游有、这里没有
+        for n in 1...4 {
+            for base in ["SetTransitionEffect", "SetTransitionDuration"] {
+                XCTAssertTrue(FunctionCatalog.implemented.map(\.name).contains("\(base)\(n)"), "\(base)\(n)")
+                XCTAssertFalse(FunctionCatalog.knownUnimplemented.contains("\(base)\(n)"), "\(base)\(n)")
+            }
+        }
+        XCTAssertEqual(error("SetTransitionEffect5 Value=Fade")?.code, .notImplemented)
+        XCTAssertEqual(error("SetTransitionDuration5 Value=500")?.code, .notImplemented)
+    }
+
+    /// 转场进行中（T-bar 推到一半也算）带 Input 的 Cut 直接回 NotConfigured，一条都不发：W5-E 之后 setPreview 在转场中被拒，
+    /// 而 cut 会把正在进行的那次做完，PGM 落在原来那次的目标、不是点名的那一路（问题单 W5E-w3-control2-compat-cut-input-mid-transition 的 (a)）。
+    /// 不带 Input 的 Cut 照旧把当前转场做完；空闲时照旧"先放 PVW 再切"。
+    func testC5_cutWithInputDuringTransitionIsRefused() throws {
+        var busy = TestStates.base()
+        busy.transition.startTick = Tick(10)
+        busy.transition.progress = 0.4
+        let e = error("Cut Input=3", state: busy)
+        XCTAssertEqual(e?.code, .notConfigured)
+        XCTAssertEqual(e?.httpStatus, 409)
+        XCTAssertTrue(e?.wireText.hasPrefix("NotConfigured: Cut") ?? false, e?.wireText ?? "nil")
+        XCTAssertEqual(try plan("Cut", state: busy), [.cut], "不带 Input：照旧把当前转场做完")
+        var tbar = TestStates.base()
+        tbar.transition.source = .tbar
+        tbar.transition.progress = 0.5
+        XCTAssertEqual(error("Cut Input=3", state: tbar)?.code, .notConfigured, "T-bar 推到一半也算进行中")
+        XCTAssertEqual(try plan("Cut Input=3"), [.setPreview(input: 3), .cut], "空闲时照旧")
+        XCTAssertEqual(error("Cut Input=9", state: busy)?.code, .inputNotFound, "输入不存在仍先报输入不存在")
     }
 
     // MARK: 叠加

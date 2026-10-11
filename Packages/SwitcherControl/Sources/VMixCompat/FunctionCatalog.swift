@@ -17,14 +17,11 @@ public enum FunctionCatalog {
     /// 已实现的函数（规范写法；匹配时不分大小写）。
     public static let implemented: [FunctionDoc] = {
         var docs: [FunctionDoc] = [
-            FunctionDoc("Cut", ["Input?"], "PGM / PVW 对调；带 Input 先把它放到 PVW 再切"),
+            FunctionDoc("Cut", ["Input?"], "PGM / PVW 对调；带 Input 先把它放到 PVW 再切（转场进行中带 Input 回 NotConfigured，不带 Input 把当前转场做完）"),
             FunctionDoc("Fade", ["Duration? (ms, 默认 500)", "Input?"], "Fade 转场"),
             FunctionDoc("Wipe", ["Duration?", "Input?"], "Wipe 转场（选类型 + 开始）"),
             FunctionDoc("Zoom", ["Duration?", "Input?"], "Zoom 转场"),
-            FunctionDoc("Stinger1", [], "Stinger 转场（要先设好 stinger 输入）"),
-            FunctionDoc("Transition1", [], "按已选的转场类型 / 时长开始（Auto）"),
-            FunctionDoc("SetTransitionEffect1", ["Value (Cut|Fade|Wipe|Zoom|Stinger)"], "选转场类型"),
-            FunctionDoc("SetTransitionDuration1", ["Value (ms)"], "选转场时长"),
+            FunctionDoc("Stinger1", [], "执行第一个选了输入的 Stinger 转场槽（都没选时用当前那组的 stinger 输入；都没有 = NotConfigured）"),
             FunctionDoc("SetFader", ["Value (0–255)"], "T-bar 位置"),
             FunctionDoc("PreviewInput", ["Input"], "选 PVW"),
             FunctionDoc("SetPreviewInput", ["Input"], "同 PreviewInput"),
@@ -69,6 +66,14 @@ public enum FunctionCatalog {
             FunctionDoc("BusXAudioOff", ["Value (A|B)"], "静音"),
             FunctionDoc("OverlayInputAllOff", [], "关掉全部叠加通道"),
         ]
+        // 转场槽 1–4（提案 020，W5-M）
+        for k in 1...4 {
+            docs += [
+                FunctionDoc("Transition\(k)", [], "执行转场 \(k)：选中并开始（之后 T-bar / 回车也用它）"),
+                FunctionDoc("SetTransitionEffect\(k)", ["Value (Cut|Fade|Wipe|Zoom|Stinger)"], "改转场 \(k) 的效果（槽里的时长 / Wipe / Stinger 参数不动）"),
+                FunctionDoc("SetTransitionDuration\(k)", ["Value (ms)"], "改转场 \(k) 的时长"),
+            ]
+        }
         for k in 1...4 {
             docs += [
                 FunctionDoc("OverlayInput\(k)", ["Input?"], "叠加 \(k) 开关：同一路已开着 → 关，否则开并换成 Input"),
@@ -93,9 +98,6 @@ public enum FunctionCatalog {
             // 转场
             "Slide", "Fly", "CrossZoom", "FlyRotate", "Cube", "CubeZoom", "VerticalWipe", "VerticalSlide", "Merge", "WipeReverse", "SlideReverse",
             "VerticalWipeReverse", "VerticalSlideReverse", "BarnDoor", "RollerDoor", "AlphaFade", "QuickPlay",
-            "Transition2", "Transition3", "Transition4",
-            "SetTransitionEffect2", "SetTransitionEffect3", "SetTransitionEffect4",
-            "SetTransitionDuration2", "SetTransitionDuration3", "SetTransitionDuration4",
             // 输出
             "StartStopMultiCorder", "StartMultiCorder", "StopMultiCorder", "StartStopExternal", "StartExternal", "StopExternal",
             "Fullscreen", "FullscreenOff", "FullscreenOn", "StartSRTOutput", "StopSRTOutput", "StartStopSRTOutput",

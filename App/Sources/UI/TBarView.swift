@@ -1,27 +1,42 @@
-// T-bar：自绘 NSView。拖动手柄发 tbar(progress)（0 = 底，1 = 顶）；松手时到顶就提交（发 tbar(1)，状态机对调）并回弹到底，
-// 没到顶就停在原位（真推杆的行为）。不拖的时候跟着快照走（auto 转场时能看到它自己往上走）。
+// T-bar：自绘 NSView，横放（W5-M，04 Q05 (a)：与参考、界面稿同一方向；原来竖放是 W2-B 的取舍）。左 = 0、右 = 1。
+// 拖动手柄发 tbar(progress)；松手时过 97% 就提交（发 tbar(1)，状态机对调）并回弹到最左，没过就停在原位（真推杆的行为）。
+// 不拖的时候跟着快照走（auto 转场时能看到它自己往右走）。MIDI 推子不经过这里，照旧到两端换向（MIDIMapper.TBarMapper）。
+// 可见的左右边就是视图的左右边（轨道铺满整宽、把手在 0 时左边贴左沿、在 1 时右边贴右沿），转场列按 86 的口径对齐（8…列宽 − 8）。
 import AppKit
 import SwitcherContracts
 
 @MainActor
 final class TBarView: NSView {
-    /// 拖动时每次位置变化都调（去重后）；松手到顶时最后一次是 1。
+    /// 拖动时每次位置变化都调（去重后）；松手过 97% 时最后一次是 1。
     var onProgress: ((Double) -> Void)?
     /// 当前显示的位置 0–1。
     private(set) var progress: Double = 0 {
-        didSet { needsDisplay = true }
+        didSet {
+            needsDisplay = true
+            setAccessibilityValue(NSNumber(value: progress))
+        }
     }
     private(set) var isDragging = false
     private var grabOffset: CGFloat = 0
     private var springTimer: Timer?
     /// 松手时视为"到顶"的阈值。
     static let commitThreshold = 0.97
-    static let handleHeight: CGFloat = 22
+    /// 把手的宽（横放：竖的小条）。
+    static let handleWidth: CGFloat = 14
+    /// 视图高（固定；列里多出来的高度不给它）。
+    static let height: CGFloat = 28
+    static let trackHeight: CGFloat = 6
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
+        setAccessibilityElement(true)
+        setAccessibilityRole(.slider)
+        setAccessibilityLabel("T-bar")
+        setAccessibilityValue(NSNumber(value: 0))
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
     }
 
     @available(*, unavailable)
@@ -29,33 +44,34 @@ final class TBarView: NSView {
 
     override var isFlipped: Bool { false }
     override var acceptsFirstResponder: Bool { false }
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Self.height) }
 
     /// 快照来了：不在拖动就把位置同步到转场进度（空闲 = 0）。
     func apply(state: MixerState) {
         guard !isDragging, springTimer == nil else { return }
-        progress = state.transition.isActive ? state.transition.progress : 0
+        let p = state.transition.isActive ? state.transition.progress : 0
+        if p != progress { progress = p }
     }
 
     // MARK: 几何
 
+    /// 把手中心能走的范围（行程 = 宽 − 把手宽）。
+    private var travel: CGFloat { max(1, bounds.width - Self.handleWidth) }
+
+    /// 推杆在 p 时把手的位置。
+    func handleFrame(at p: Double) -> NSRect {
+        NSRect(x: CGFloat(min(max(p, 0), 1)) * travel, y: 2, width: Self.handleWidth, height: max(1, bounds.height - 4))
+    }
+
+    /// 把手现在的位置（测试量左右边）。
+    var handleFrame: NSRect { handleFrame(at: progress) }
+
     private var trackRect: NSRect {
-        let inset: CGFloat = Self.handleHeight / 2 + 4
-        return NSRect(x: bounds.midX - 3, y: inset, width: 6, height: max(1, bounds.height - 2 * inset))
+        NSRect(x: 0, y: bounds.midY - Self.trackHeight / 2, width: bounds.width, height: Self.trackHeight)
     }
 
-    /// 把手与列里的按钮同宽（W5-A：原来左右各缩 6，比按钮窄 12）。
-    private var handleRect: NSRect {
-        let track = trackRect
-        let y = track.minY + CGFloat(progress) * track.height
-        return NSRect(x: 0, y: y - Self.handleHeight / 2, width: bounds.width, height: Self.handleHeight)
-    }
-
-    /// 把手的位置（测试量左右边）。
-    var handleFrame: NSRect { handleRect }
-
-    private func progress(forY y: CGFloat) -> Double {
-        let track = trackRect
-        return Double(min(max((y - track.minY) / track.height, 0), 1))
+    private func progress(forX x: CGFloat) -> Double {
+        Double(min(max((x - Self.handleWidth / 2) / travel, 0), 1))
     }
 
     // MARK: 画
@@ -66,21 +82,21 @@ final class TBarView: NSView {
         let track = trackRect
         Theme.divider.setFill()
         NSBezierPath(roundedRect: track, xRadius: 3, yRadius: 3).fill()
-        // 已推过的部分
-        let filled = NSRect(x: track.minX, y: track.minY, width: track.width, height: CGFloat(progress) * track.height)
+        // 已推过的部分（从左沿到把手中心）
+        let handle = handleFrame
+        let filled = NSRect(x: track.minX, y: track.minY, width: handle.midX - track.minX, height: track.height)
         Theme.accent.setFill()
         NSBezierPath(roundedRect: filled, xRadius: 3, yRadius: 3).fill()
-        // 刻度：0 / 25 / 50 / 75 / 100
+        // 刻度：0 / 25 / 50 / 75 / 100（把手中心走到的位置）
         Theme.dimText.setFill()
         for k in 0...4 {
-            let y = track.minY + track.height * CGFloat(k) / 4
-            NSRect(x: track.minX - 5, y: y - 0.5, width: track.width + 10, height: 1).fill()
+            let x = Self.handleWidth / 2 + travel * CGFloat(k) / 4
+            NSRect(x: x - 0.5, y: track.minY - 4, width: 1, height: track.height + 8).fill()
         }
-        let handle = handleRect
         (isDragging ? NSColor.white : NSColor(white: 0.8, alpha: 1)).setFill()
         NSBezierPath(roundedRect: handle, xRadius: 4, yRadius: 4).fill()
         Theme.windowBackground.setFill()
-        NSRect(x: handle.minX + 6, y: handle.midY - 1, width: handle.width - 12, height: 2).fill()
+        NSRect(x: handle.midX - 1, y: handle.minY + 5, width: 2, height: handle.height - 10).fill()
     }
 
     // MARK: 鼠标
@@ -90,11 +106,11 @@ final class TBarView: NSView {
         springTimer?.invalidate()
         springTimer = nil
         isDragging = true
-        if handleRect.contains(p) {
-            grabOffset = p.y - (trackRect.minY + CGFloat(progress) * trackRect.height)
+        if handleFrame.contains(p) {
+            grabOffset = p.x - handleFrame.midX
         } else {
             grabOffset = 0
-            update(progress: progress(forY: p.y))
+            update(progress: progress(forX: p.x))
         }
         needsDisplay = true
     }
@@ -102,14 +118,14 @@ final class TBarView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard isDragging else { return }
         let p = convert(event.locationInWindow, from: nil)
-        update(progress: progress(forY: p.y - grabOffset))
+        update(progress: progress(forX: p.x - grabOffset))
     }
 
     override func mouseUp(with event: NSEvent) {
         finishDrag()
     }
 
-    /// 松手：到顶就提交（tbar(1)）并回弹，否则停在原位。
+    /// 松手：过 97% 就提交（tbar(1)）并回弹，否则停在原位。
     private func finishDrag() {
         guard isDragging else { return }
         isDragging = false
@@ -129,7 +145,7 @@ final class TBarView: NSView {
         onProgress?(quantized)
     }
 
-    /// 提交后回弹到底（约 150 ms）。
+    /// 提交后回弹到最左（约 150 ms）。
     private func springBack() {
         let start = Date()
         let from = progress

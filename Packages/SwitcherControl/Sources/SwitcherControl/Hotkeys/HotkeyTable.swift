@@ -3,7 +3,7 @@ import SwitcherContracts
 
 // 快捷键表（设计方案 §9.4）：JSON，存在节目文件之外的用户配置（~/Library/Application Support/PlusMix/hotkeys.json）。
 // 默认表（与 W2-B 硬编码的一致）：数字 → PVW（0 = 10 号），Shift + 数字 → PGM，空格 Cut，回车 Auto（按已选转场，默认 Fade 30 拍），F 键 FTB 开关；
-// W5-J 按 04 Q29 补：⌥1–⌥4 = 执行转场 1–4（转场槽 100 落地之前先绑"执行当前转场"，= 回车）、⌃1–⌃4 = 叠加 1–4 开关；
+// W5-J 按 04 Q29 补：⌥1–⌥4 = 执行转场 1–4（W5-M 起接到转场槽；之前先绑的是"执行当前转场"，= 回车）、⌃1–⌃4 = 叠加 1–4 开关；
 // 录制 / 推流不给默认键（快捷键一律不弹确认，误按一个键就停录 / 停推）。⌃1–⌃4 与系统"切换到桌面 1–4"同键，那几项系统默认关着
 // （本机实测，reports/w5-app-settings-actions.md §2），用户在系统设置里打开后这几个键会先被系统拿走。
 // 自己定的表，不照抄别人的（铁律 6）。
@@ -88,10 +88,10 @@ public struct HotkeyTable: Hashable, Codable, Sendable {
             b.append(HotkeyBinding(key: KeyCombo(key: digit, modifiers: [.shift]), action: .command(.setProgram(input: n)), note: "直切 PGM \(n) 号"))
         }
         b.append(HotkeyBinding(key: KeyCombo(key: "space"), action: .command(.cut), note: "Cut"))
-        b.append(HotkeyBinding(key: KeyCombo(key: "return"), action: .command(.autoTransition), note: "按已选转场执行（默认 Fade 30 拍）"))
+        b.append(HotkeyBinding(key: KeyCombo(key: "return"), action: .command(.autoTransition), note: "执行当前槽（T-bar 也用它；新节目是转场 1 · Fade 0.5 秒）"))
         b.append(HotkeyBinding(key: KeyCombo(key: "f"), action: .toggleFTB, note: "FTB 开关"))
         for n in 1...4 {
-            b.append(HotkeyBinding(key: KeyCombo(key: String(n), modifiers: [.option]), action: .command(.autoTransition), note: "执行转场 \(n)（转场槽落地前 = 执行当前转场）"))
+            b.append(HotkeyBinding(key: KeyCombo(key: String(n), modifiers: [.option]), action: .transitionSlot(slot: n), note: "执行转场 \(n)"))
         }
         for n in 1...4 {
             b.append(HotkeyBinding(key: KeyCombo(key: String(n), modifiers: [.control]), action: .toggleOverlay(channel: n), note: "叠加 \(n) 开关"))

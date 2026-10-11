@@ -131,7 +131,7 @@ final class ControlActionTests: XCTestCase {
         XCTAssertFalse(String(decoding: try midi.jsonData(), as: UTF8.self).contains("\"enabled\""))
     }
 
-    /// 默认表（Q29）：录制 / 推流一律不给默认键（快捷键不弹确认，误按就停录）；⌥1–⌥4 = 执行转场（100 之前先绑"执行当前类型"）、
+    /// 默认表（Q29）：录制 / 推流一律不给默认键（快捷键不弹确认，误按就停录）；⌥1–⌥4 = 执行转场 1–4（100 落地转场槽）、
     /// ⌃1–⌃4 = 叠加 1–4 开关；原有的数字 / ⇧数字 / 空格 / 回车 / F 不变、不冲突。
     func testHotkeys_defaultTableHasNoRecordOrStreamKeys() {
         let t = HotkeyTable.default
@@ -156,7 +156,7 @@ final class ControlActionTests: XCTestCase {
             }
         }
         for n in 1...4 {
-            XCTAssertEqual(t.action(for: KeyCombo(key: String(n), modifiers: [.option])), .command(.autoTransition), "⌥\(n) = 执行当前转场（100 改成转场 \(n)）")
+            XCTAssertEqual(t.action(for: KeyCombo(key: String(n), modifiers: [.option])), .transitionSlot(slot: n), "⌥\(n) = 执行转场 \(n)")
             XCTAssertEqual(t.action(for: KeyCombo(key: String(n), modifiers: [.control])), .toggleOverlay(channel: n), "⌃\(n) = 叠加 \(n) 开关")
         }
         XCTAssertEqual(t.action(for: KeyCombo("1")!), .command(.setPreview(input: 1)))
@@ -250,13 +250,14 @@ final class ControlActionTests: XCTestCase {
             .overlaysOff, .outputSwitch(output: 6, mode: .toggle), .outputKindSwitch(kind: .externalDisplay, mode: .on), .recordAll(mode: .off),
             .recordISO(mode: .toggle), .streamAll(mode: .on), .inputAFV(input: 2, mode: .off), .busRoute(input: 1, bus: .headphones, mode: .on),
             .solo(input: .program, mode: .toggle), .busMuteSwitch(bus: .master, mode: .toggle), .ui(name: "toggleMixer"), .toggleMute(input: .preview),
+            .transitionSlot(slot: 1), .selectTransitionSlot(slot: 4),
         ]
         let table = HotkeyTable(bindings: actions.enumerated().map { i, a in HotkeyBinding(key: KeyCombo(key: "f\(i + 1)"), action: a) })
         let data = try table.jsonData()
         XCTAssertEqual(try HotkeyTable.load(from: data), table)
         let text = String(decoding: data, as: UTF8.self)
         for key in ["fadeMs", "previewAndTransition", "overlayInput", "overlaysOff", "outputSwitch", "outputKindSwitch", "recordAll", "recordISO",
-                    "streamAll", "inputAFV", "busRoute", "solo", "busMuteSwitch", "\"ui\""] {
+                    "streamAll", "inputAFV", "busRoute", "solo", "busMuteSwitch", "\"ui\"", "\"transitionSlot\"", "selectTransitionSlot"] {
             XCTAssertTrue(text.contains(key), "JSON 里有 \(key)")
         }
         XCTAssertTrue(text.contains("\"input\" : \"program\""), "当前 PGM 写成字符串：\(text)")
@@ -337,7 +338,7 @@ final class ControlActionTests: XCTestCase {
             .fadeMs(durationMs: 500), .previewAndTransition(input: 3), .overlayInput(channel: 1, input: .preview), .overlaysOff,
             .outputSwitch(output: 6, mode: .toggle), .outputKindSwitch(kind: .ndi, mode: .on), .recordAll(mode: .toggle), .recordISO(mode: .on),
             .streamAll(mode: .off), .inputAFV(input: 1, mode: .toggle), .busRoute(input: 1, bus: .busA, mode: .on), .solo(input: 2, mode: .off),
-            .busMuteSwitch(bus: .master, mode: .toggle), .ui(name: "toggleMixer"),
+            .busMuteSwitch(bus: .master, mode: .toggle), .ui(name: "toggleMixer"), .transitionSlot(slot: 2), .selectTransitionSlot(slot: 3),
         ]
         XCTAssertEqual(Set(samples.map(ControlActionKind.init(of:))), Set(ControlActionKind.allCases).subtracting([.command]), "每种都有样本")
         for a in samples {

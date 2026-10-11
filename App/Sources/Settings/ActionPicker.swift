@@ -194,6 +194,9 @@ enum ActionText {
         switch (field.type, value) {
         case (_, .input(let ref)): return input(ref, state: state)
         case (.overlayChannel, .int(let n)): return L("actionPicker.value.channel", n)
+        case (.transitionSlot, .int(let n)):
+            guard let state, n >= 1, n - 1 < state.transition.slots.count else { return L("slot.name", n) }
+            return L("actionPicker.value.slotNamed", n, SlotText.description(state.transition.slots[n - 1], rate: state.format.frameRate))
         case (.output, .int(let n)): return output(n, state: state)
         case (.outputKind, .string(let s)): return L("actionPicker.value.outputKind.\(s)")
         case (.bus, .int(let b)): return Bus(rawValue: b).map { L("bus.\($0.name)") } ?? "\(b)"
@@ -208,7 +211,14 @@ enum ActionText {
         case (_, .int(let n)): return "\(n)"
         case (_, .double(let d)): return String(format: "%g", d)
         case (_, .bool(let b)): return b ? L("actionPicker.value.on") : L("actionPicker.value.off")
+        case (_, .routing(let r)): return routing(r)
         }
+    }
+
+    /// 总线路由写成"Master + Bus A"（一条都不送写"不送任何总线"）。
+    static func routing(_ r: BusRouting) -> String {
+        let names = Bus.allCases.filter { r[$0] }.map { L("bus.\($0.name)") }
+        return names.isEmpty ? L("actionPicker.value.routingNone") : names.joined(separator: " + ")
     }
 
     static func input(_ ref: InputRef, state: MixerState?) -> String {
@@ -360,11 +370,15 @@ struct ActionFieldsForm: View {
                 Text(L("actionPicker.value.currentProgram")).tag(Optional(InputRef.program))
                 ForEach(inputs, id: \.number) { i in Text(L("actionPicker.value.inputNamed", i.number, i.name)).tag(Optional(InputRef.number(i.number))) }
             }
-        case .overlayChannel, .transitionSlot:   // 叠加通道 1–4 / 转场槽 1–4（020）都是四段
+        case .overlayChannel:   // 叠加通道 1–4：四段
             Picker(label, selection: intBinding(f, 1)) {
                 ForEach(1...MixerState.overlayCount, id: \.self) { Text("\($0)").tag($0) }
             }
             .pickerStyle(.segmented)
+        case .transitionSlot:   // 转场槽 1–4（020）：列出每个槽现在的效果与时长（W5-M）
+            Picker(label, selection: intBinding(f, 1)) {
+                ForEach(ActionCatalog.slotChoices(state: model.state()), id: \.slot) { Text($0.title).tag($0.slot) }
+            }
         case .output(let kinds):
             Picker(label, selection: intBinding(f, 0)) {
                 ForEach(model.state()?.outputs.filter { kinds.isEmpty || kinds.contains($0.kind) } ?? [], id: \.number) { o in
@@ -378,6 +392,13 @@ struct ActionFieldsForm: View {
         case .bus:
             Picker(label, selection: intBinding(f, 0)) {
                 ForEach(Bus.allCases, id: \.self) { b in Text(L("bus.\(b.name)")).tag(b.rawValue) }
+            }
+            .pickerStyle(.segmented)
+        case .onOff where f.optional:   // 可选的开关（setInputAudio 的独听 / AFV）：不改 / 开 / 关
+            Picker(label, selection: optionalBoolBinding(f)) {
+                Text(L("actionPicker.value.keep")).tag(Optional<Bool>.none)
+                Text(L("actionPicker.value.on")).tag(Optional(true))
+                Text(L("actionPicker.value.off")).tag(Optional(false))
             }
             .pickerStyle(.segmented)
         case .onOff:
@@ -408,9 +429,34 @@ struct ActionFieldsForm: View {
             Picker(label, selection: stringBinding(f, options.first ?? "")) {
                 ForEach(options, id: \.self) { Text($0).tag($0) }
             }
-        case .json, .busRouting:   // busRouting（023 五）的勾选控件归 100
+        case .busRouting:   // 023 五的总线路由（W5-M 补的控件）：先勾"改总线路由"，再勾送哪几条；不勾 = 不动
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(L("actionPicker.routing.change"), isOn: Binding(get: { routingValue(f) != nil },
+                                                                      set: { model.values[f.name] = $0 ? .routing(routingValue(f) ?? .masterOnly) : nil }))
+                if let routing = routingValue(f) {
+                    HStack {
+                        ForEach(Bus.allCases, id: \.self) { bus in
+                            Toggle(L("bus.\(bus.name)"), isOn: Binding(get: { routing[bus] }, set: { on in
+                                var r = routingValue(f) ?? routing
+                                r[bus] = on
+                                model.set(f.name, .routing(r))
+                            }))
+                        }
+                    }
+                }
+            }
+        case .json:
             EmptyView()
         }
+    }
+
+    private func routingValue(_ f: CommandField) -> BusRouting? {
+        if case .routing(let r)? = model.values[f.name] { return r }
+        return nil
+    }
+    private func optionalBoolBinding(_ f: CommandField) -> Binding<Bool?> {
+        Binding(get: { if case .bool(let v)? = model.values[f.name] { return v }; return nil },
+                set: { v in if let v { model.set(f.name, .bool(v)) } else { model.values[f.name] = nil } })
     }
 
     private var inputs: [InputConfig] { model.state()?.inputs ?? [] }

@@ -1,5 +1,7 @@
 // 纯函数：快照 → 按钮样式 / 按下 → 命令。不碰 Stream Deck SDK 也不碰网络，node --test 和 JXA（scripts/run-jxa.sh）都能跑。
 // 颜色按设计方案 §1.1 / 落地方案决策 3：PGM 红、PVW 绿（广播惯例）。
+// 转场 1–4（W5-M，提案 020 的槽）：按下 = useTransitionSlot(n, start: true)（设置成"选中"时 start: false）；颜色跟当前槽——
+// 当前槽（T-bar / 回车用的）蓝、它正在执行红、别的灰；字 = "转场 n" + 槽的效果与时长。
 
 export const COLORS = {
   off: "#2b2b2b",
@@ -10,6 +12,7 @@ export const COLORS = {
   stream: "#1f6fe0",
   ftb: "#111111",
   action: "#3a3a3a",
+  slotCurrent: "#3d85f2",
   disconnected: "#555555",
   text: "#ffffff",
 };
@@ -50,11 +53,30 @@ function num(value, fallback) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
 }
 
+/** 秒数写法：最多两位小数、去掉末尾的 0（0.5 / 1 / 0.75），与 App 的时长分段同一口径。 */
+function secondsText(seconds) {
+  return (Math.round(seconds * 100) / 100).toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+const SLOT_EFFECTS = { fade: "Fade", wipe: "Wipe", zoom: "Zoom", stinger: "Stinger", cut: "Cut" };
+const WIPE_ARROWS = { leftToRight: "→", rightToLeft: "←", topToBottom: "↓", bottomToTop: "↑", diagonal: "↘" };
+
+/** 转场槽按钮的小字："Fade 0.5s" / "Wipe → 1s" / "Cut" / "未选输入"（Stinger 没选输入）；9 个字放不下就只写效果。秒按帧率换。 */
+export function slotSublabel(slot, fps) {
+  if (!slot) return "";
+  if (slot.type === "cut") return "Cut";
+  if (slot.type === "stinger" && (!slot.stinger || slot.stinger.input == null)) return "未选输入";
+  let effect = SLOT_EFFECTS[slot.type] || String(slot.type);
+  if (slot.type === "wipe" && slot.wipe && WIPE_ARROWS[slot.wipe.direction]) effect += " " + WIPE_ARROWS[slot.wipe.direction];
+  const text = `${effect} ${secondsText((slot.durationTicks || 0) / (fps || 60))}s`;
+  return Array.from(text).length <= 9 ? text : effect;
+}
+
 /**
- * 一个按钮此刻该长什么样。kind：cut / auto / preview / program / tally / overlay / record / stream / ftb。
- * 返回 { background, label, sublabel, border }。
+ * 一个按钮此刻该长什么样。kind：cut / auto / slot / preview / program / tally / overlay / record / stream / ftb。
+ * 返回 { background, label, sublabel, border }。fps 只有转场槽的小字要用（毫秒 → 秒），不给按 60。
  */
-export function keyStyle(kind, snapshot, settings, connected) {
+export function keyStyle(kind, snapshot, settings, connected, fps) {
   const s = settings || {};
   if (!connected) return { background: COLORS.disconnected, label: labelFor(kind, s), sublabel: "未连接", border: null };
   const state = (snapshot && snapshot.state) || {};
@@ -65,6 +87,14 @@ export function keyStyle(kind, snapshot, settings, connected) {
       const t = state.transition || {};
       const active = t.startTick != null || (t.progress || 0) > 0;
       return { background: active ? COLORS.program : COLORS.action, label: "AUTO", sublabel: s.mode === "fade" ? `${num(s.durationMs, 500)} ms` : t.type || "", border: null };
+    }
+    case "slot": {
+      const n = num(s.slot, 1);
+      const t = state.transition || {};
+      const active = t.startTick != null || (t.progress || 0) > 0;
+      const current = t.currentSlot === n;
+      const background = current ? (active ? COLORS.program : COLORS.slotCurrent) : COLORS.action;
+      return { background, label: `转场 ${n}`, sublabel: slotSublabel((t.slots || [])[n - 1], fps), border: null };
     }
     case "preview":
     case "program":
@@ -110,6 +140,7 @@ function labelFor(kind, s) {
     case "stream": return "LIVE";
     case "ftb": return "FTB";
     case "auto": return "AUTO";
+    case "slot": return `转场 ${num(s.slot, 1)}`;
     default: return "CUT";
   }
 }
@@ -129,6 +160,11 @@ export function commandFor(kind, snapshot, settings, fps) {
         return { command: { fade: { durationTicks: ticks } } };
       }
       return { command: { autoTransition: {} } };
+    case "slot": {
+      const n = num(s.slot, 1);
+      if (n < 1 || n > 4) return { error: "转场槽要在 1–4" };
+      return { command: { useTransitionSlot: { slot: n, start: s.mode !== "select" } } };
+    }
     case "preview": {
       const input = num(s.input, 0);
       return input ? { command: { setPreview: { input } } } : { error: "没设输入编号" };
