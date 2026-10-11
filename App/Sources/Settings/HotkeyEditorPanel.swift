@@ -227,6 +227,7 @@ final class HotkeyEditorModel: ObservableObject {
         .recordAll(mode: .toggle), .recordISO(mode: .on), .streamAll(mode: .off), .inputAFV(input: 1, mode: .toggle),
         .busRoute(input: 1, bus: .busA, mode: .on), .solo(input: .program, mode: .toggle), .busMuteSwitch(bus: .master, mode: .toggle),
         .ui(name: UIAction.toggleMixer.rawValue), .command(.setInputSettings(input: 1, settings: InputSettings())),
+        .transitionSlot(slot: 2), .selectTransitionSlot(slot: 3), .command(.useTransitionSlot(slot: 4, start: true)),
     ]
 }
 

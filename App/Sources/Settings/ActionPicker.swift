@@ -208,6 +208,7 @@ enum ActionText {
         case (_, .int(let n)): return "\(n)"
         case (_, .double(let d)): return String(format: "%g", d)
         case (_, .bool(let b)): return b ? L("actionPicker.value.on") : L("actionPicker.value.off")
+        case (_, .routing): return ""   // W5-M 红灯轮的桩
         }
     }
 

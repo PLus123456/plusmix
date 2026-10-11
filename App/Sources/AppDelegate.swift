@@ -277,6 +277,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               let raw = (sender as? NSMenuItem)?.representedObject as? String, let type = TransitionType(rawValue: raw) else { return }
         s.send(.setTransition(type: type, durationTicks: s.state.transition.durationTicks))
     }
+    /// W5-M 红灯轮的桩：转场 n。
+    @objc func transitionSlot(_ sender: Any?) {}
     @objc func transitionFTB(_ sender: Any?) {
         guard let s = controller.session else { return }
         s.send(.ftb(on: !s.state.ftb.on))

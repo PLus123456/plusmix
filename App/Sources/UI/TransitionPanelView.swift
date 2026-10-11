@@ -67,6 +67,21 @@ final class TransitionPanelView: NSView {
     /// 最近一次从这一列弹出的菜单（模态；测试开着时量位置、量完 cancelTracking）。
     private(set) var activeMenu: NSMenu?
 
+    // W5-M 红灯轮：转场槽的新接口先只给签名（四个槽按钮还没放进列里、菜单是空的），行为照旧
+    let slotButtons: [ColumnSplitButton] = (1...4).map { _ in ColumnSplitButton(title: "", menuLabel: "") }
+    let ftbSplit = ColumnSplitButton(title: "FTB", menuLabel: "")
+    let tbarHeader = Theme.label("T-bar", size: NSFont.systemFontSize(for: .small), color: Theme.dimText)
+    var tbarSlotButton: NSButton { tbarTypeButton }
+    var tbarSlotText: String { tbarTypeButton.title }
+    var isTbarSlotHighlighted: Bool { isTbarTypeHighlighted }
+    func slotMenu(slot: Int) -> NSMenu { NSMenu() }
+    func stingerInputMenu(slot: Int) -> NSMenu { NSMenu() }
+    func tbarSlotMenu() -> NSMenu { tbarTypeMenu() }
+    func ftbMenu() -> NSMenu { NSMenu() }
+    func applyCustomFTBDuration(seconds: Double) {}
+    func showSlotParams(slot: Int) { paramsPressed() }
+    func closeSlotParams() { paramsPopover?.close() }
+
     override init(frame: NSRect) {
         cutButton = Theme.button("Cut", target: nil, action: nil)
         fadeButton = Theme.toggleButton("Fade", target: nil, action: nil)

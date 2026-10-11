@@ -12,6 +12,8 @@ final class TransitionParamsModel: ObservableObject {
     /// 还没进快照的参数（面板上先显示它）。
     @Published private(set) var pending: (wipe: WipeParams, stinger: StingerParams)?
     var send: ((Command) -> Void)?
+    /// W5-M 红灯轮的桩：编辑的是哪个槽。
+    var slot = 1
     /// 已经发出去、等快照回来的时刻（等太久就放弃，面板回到快照的值）。
     private var sentAt: Date?
 

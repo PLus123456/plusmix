@@ -52,6 +52,8 @@ final class TBarView: NSView {
 
     /// 把手的位置（测试量左右边）。
     var handleFrame: NSRect { handleRect }
+    /// W5-M 红灯轮的桩：推杆在 progress 时把手的位置。
+    func handleFrame(at progress: Double) -> NSRect { handleRect }
 
     private func progress(forY y: CGFloat) -> Double {
         let track = trackRect

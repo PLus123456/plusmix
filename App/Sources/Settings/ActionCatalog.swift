@@ -85,6 +85,8 @@ enum FieldValue: Hashable, Sendable {
     case input(InputRef)
     /// 时长（秒；durationTicks 按节目帧率换拍、durationMs 换毫秒）。
     case seconds(Double)
+    /// W5-M 红灯轮的桩：总线路由。
+    case routing(BusRouting)
 }
 
 @MainActor
@@ -136,9 +138,13 @@ enum ActionCatalog {
         case .toggleMute, .toggleAFV, .inputAFV, .busRoute, .solo, .busMuteSwitch: .audio
         case .toggleRecord, .toggleStream, .recordAll, .recordISO, .streamAll, .outputSwitch, .outputKindSwitch: .output
         case .ui: .ui
-        case .command: .show
+        case .command, .transitionSlot, .selectTransitionSlot: .show   // W5-M 红灯轮的桩
         }
     }
+
+    /// W5-M 红灯轮的桩：槽号控件的选项。
+    struct SlotChoice: Hashable { let slot: Int; let title: String }
+    static func slotChoices(state: MixerState?) -> [SlotChoice] { [] }
 
     static func actionEntry(_ kind: ControlActionKind) -> ActionEntry {
         let emits = kind.emits.map(\.rawValue)
@@ -297,6 +303,7 @@ enum ActionCatalog {
         case (.input(.preview), .inputRef): return "preview"
         case (.input(.program), .inputRef): return "program"
         case (.input, _): return nil
+        case (.routing, _): return nil   // W5-M 红灯轮的桩
         case (.int(let n), _): return n
         case (.double(let d), _): return d
         case (.bool(let b), _): return b

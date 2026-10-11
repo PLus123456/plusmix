@@ -173,6 +173,69 @@ final class ActionPickerTests: XCTestCase {
         XCTAssertEqual(note.builtMIDIAction, .action(.overlaysOff))
     }
 
+    /// W5-M（prompt 100 交付 3）：执行转场 n / 选中转场 n（不执行）进"切换"组；槽号控件列出四个槽现在的效果与时长；
+    /// setInputAudio 的总线路由有了勾选控件（P5-2 留下的空视图；可选，不填 = 不动）。
+    func testUI_actionPickerTransitionSlotsAndBusRouting() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let p = picker { session.state }
+        p.group = .switching
+        let ids = p.visibleEntries.map(\.id)
+        XCTAssertTrue(ids.contains("action.transitionSlot") && ids.contains("action.selectTransitionSlot"), "两类槽动作在“切换”组：\(ids)")
+        let run = try XCTUnwrap(p.entry(id: "action.transitionSlot"))
+        XCTAssertEqual(run.title, "执行转场")
+        XCTAssertEqual(run.apiKey, "transitionSlot → useTransitionSlot")
+        XCTAssertEqual(try XCTUnwrap(p.entry(id: "action.selectTransitionSlot")).title, "选中转场（不执行）")
+        p.select("action.transitionSlot")
+        XCTAssertEqual(p.selected?.fields.map(\.type), [.transitionSlot])
+        XCTAssertEqual(p.values["slot"], .int(1), "默认转场 1")
+        p.set("slot", .int(3))
+        XCTAssertEqual(p.builtAction, .transitionSlot(slot: 3))
+        XCTAssertEqual(p.preview, ["useTransitionSlot（slot: 3, start: true）"], "按下时发一条：选中并开始")
+        XCTAssertEqual(ActionText.summary(.transitionSlot(slot: 3), state: session.state), "执行转场 · 转场 3（Zoom 1 秒）")
+        XCTAssertEqual(ActionText.summary(.transitionSlot(slot: 3)), "执行转场 · 转场 3", "没有快照时只写槽号")
+        p.select("action.selectTransitionSlot")
+        p.set("slot", .int(2))
+        XCTAssertEqual(p.builtAction, .selectTransitionSlot(slot: 2))
+        XCTAssertEqual(p.preview, ["useTransitionSlot（slot: 2, start: false）"])
+        // 槽号控件的选项：四个槽现在的效果与时长（原来借的是叠加通道的"1 2 3 4"四段）
+        XCTAssertEqual(ActionCatalog.slotChoices(state: session.state).map(\.title),
+                       ["转场 1 · Fade 0.5 秒", "转场 2 · Wipe → 1 秒", "转场 3 · Zoom 1 秒", "转场 4 · Stinger（未设）"])
+        XCTAssertEqual(ActionCatalog.slotChoices(state: nil).map(\.title), ["转场 1", "转场 2", "转场 3", "转场 4"])
+        // 打开时定位到当前动作；包一条 useTransitionSlot 命令的也照常定位
+        let located = picker(current: .selectTransitionSlot(slot: 4)) { session.state }
+        XCTAssertEqual(located.selectedID, "action.selectTransitionSlot")
+        XCTAssertEqual(located.group, .switching)
+        XCTAssertEqual(located.values["slot"], .int(4))
+        XCTAssertEqual(located.builtAction, .selectTransitionSlot(slot: 4))
+        let wrapped = picker(current: .command(.useTransitionSlot(slot: 2, start: true))) { session.state }
+        XCTAssertEqual(wrapped.selectedID, "command.useTransitionSlot")
+        XCTAssertEqual(wrapped.values["slot"], .int(2))
+        XCTAssertEqual(wrapped.builtAction, .command(.useTransitionSlot(slot: 2, start: true)))
+
+        // setInputAudio：总线路由四个勾，可选（不填 = 不动）
+        p.select("command.setInputAudio")
+        XCTAssertEqual(p.selected?.group, .audio)
+        XCTAssertEqual(p.selected?.fields.map(\.type), [.input(allowsBlack: false), .onOff, .onOff, .busRouting])
+        p.set("input", .input(.number(2)))
+        XCTAssertEqual(p.builtAction, .command(.setInputAudio(input: 2)), "三个可选参数都不填 = 都不动")
+        p.set("routing", .routing(BusRouting(master: true, busA: true)))
+        XCTAssertEqual(p.builtAction, .command(.setInputAudio(input: 2, routing: BusRouting(master: true, busA: true))))
+        XCTAssertEqual(p.preview.count, 1)
+        XCTAssertTrue(p.preview[0].hasPrefix("setInputAudio"), p.preview[0])
+        let routingField = try XCTUnwrap(p.selected?.fields.last)
+        XCTAssertEqual(ActionText.value(routingField, .routing(BusRouting(master: true, busA: true)), state: session.state), "Master + Bus A")
+        XCTAssertEqual(ActionText.value(routingField, .routing(BusRouting(master: false)), state: session.state), "不送任何总线")
+        p.values["routing"] = nil
+        XCTAssertEqual(p.builtAction, .command(.setInputAudio(input: 2)), "清掉路由 = 不动")
+        // 读回：路由与独听
+        let audio = picker(current: .command(.setInputAudio(input: 1, solo: true, routing: BusRouting(master: false, busB: true)))) { session.state }
+        XCTAssertEqual(audio.selectedID, "command.setInputAudio")
+        XCTAssertEqual(audio.values["routing"], .routing(BusRouting(master: false, busB: true)))
+        XCTAssertEqual(audio.values["solo"], .bool(true))
+        XCTAssertEqual(audio.builtAction, .command(.setInputAudio(input: 1, solo: true, routing: BusRouting(master: false, busB: true))), "原样拼回")
+    }
+
     /// 快捷键表（N5）：每行"启用"勾（停用的行存进表、不派发）、复制行（键空着）、搜索；行上的动作是一句话摘要；动作没选存不了。
     func testUI_hotkeyTableSearchDuplicateAndEnable() throws {
         let session = try AppTest.freshSession()
