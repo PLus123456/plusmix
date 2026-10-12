@@ -22,7 +22,7 @@ npx streamdeck pack com.plusmix.switcher.sdPlugin    # 发布：出 com.plusmix.
 |---|---|---|---|
 | Cut | — | PGM / PVW 对调 | 固定 |
 | Auto / Fade | 方式（Auto = 执行 PlusMix 里的当前转场槽；Fade + 毫秒） | `autoTransition` 或 `fade` | 转场进行中红 |
-| 转场 1–4 | 转场（1–4）、按下（执行 = 选中并开始；只选中 = 之后 T-bar 和回车用它，不执行） | `useTransitionSlot(slot, start: true / false)`；没选输入的 Stinger 槽这一版照常执行（一次延迟的硬切），先在 PlusMix 的槽里选好输入 | 跟当前槽：当前槽蓝、它正在执行红、别的灰；大字"转场 n"，小字 = 槽的效果与时长（"Wipe → 1s"，9 个字放不下只写效果，Stinger 没选输入写"未选输入"） |
+| Transition 1–4 | 转场（1–4）、按下（执行 = 选中并开始；只选中 = 之后 T-bar 和回车用它，不执行） | `useTransitionSlot(slot, start: true / false)`；没选输入的 Stinger 槽这一版照常执行（画面立刻硬切、等满时长才算切完），先在 PlusMix 的槽里选好输入 | 跟当前槽：当前槽蓝、它正在执行红、别的灰；大字"转场 n"，小字 = 槽的效果与时长（"Wipe → 1s"，9 个字放不下只写效果，Stinger 没选输入写"未选输入"） |
 | Preview | 输入编号 | 选到 PVW | 这路的 tally：红 PGM / 绿 PVW / 灰；转场中红底绿边 |
 | Program | 输入编号 | 直切 PGM（PVW 不变） | 同上 |
 | Tally | 输入编号 | 只看；按下 = 选到 PVW | 同上 |

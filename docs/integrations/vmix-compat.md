@@ -103,7 +103,7 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 | Cut | Input? | `.cut`；带 Input 先 `.setPreview` 再 `.cut`（旧 PGM 进 PVW，与对方一致）。**转场进行中（T-bar 推到一半也算）带 Input → 409 NotConfigured、一条都不发**（这时 PVW 改不了，`.cut` 会把正在进行的那次做完、落不到点名的那一路）；不带 Input 照旧把当前转场做完 |
 | Fade / Wipe / Zoom | Duration?（ms，默认 500）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition`（改的是当前那组，之后它可能对不上任何转场槽） |
 | Stinger1 | | 执行**第一个选了输入的 Stinger 转场槽**（`.useTransitionSlot(k, start: true)`）；没有这种槽时用当前那组的 stinger 输入（`.setTransition(.stinger)` + `.autoTransition`）；都没有 → NotConfigured |
-| Transition1–4 | | `.useTransitionSlot(n, start: true)`：执行转场 n（一拍内选中并开始，之后 T-bar / 回车也用它）；转场进行中 → `OK TransitionN (no change)`。转场 n 是没选输入的 Stinger 槽时这一版照常执行（一次延迟的硬切）。Transition5 起 → NotImplemented |
+| Transition1–4 | | `.useTransitionSlot(n, start: true)`：执行转场 n（一拍内选中并开始，之后 T-bar / 回车也用它）；转场进行中 → `OK TransitionN (no change)`。转场 n 是没选输入的 Stinger 槽时这一版照常执行（画面立刻硬切、等满时长才算切完）。Transition5 起 → NotImplemented |
 | SetTransitionEffect1–4 | Value=Cut/Fade/Wipe/Zoom/Stinger（不分大小写） | `.setTransitionSlot(n, 槽 n 只换效果)`：时长、Wipe 方向 / 软边、Stinger 输入 / 换底拍原样带上；只改设置、不执行，转场进行中也收（进行中的那一次照原样走完）。对方的其他效果名 → NotImplemented，谁都没有的名字 → BadParameter |
 | SetTransitionDuration1–4 | Value=ms | `.setTransitionSlot(n, 槽 n 只换时长)`：毫秒按节目帧率换拍（2000 ms @60 = 120 拍）；只改设置、不执行 |
 | SetFader | Value=0–255 | `.tbar(v/255)` |
@@ -145,6 +145,6 @@ SetGain（内部只有一个增益）、SetVolumeFade、声道混音器、音频
 ## 8. 已知限制
 
 - XML 里没有"转场进行中"，Companion 的 PGM 反馈在转场那几十帧只亮旧 PGM（TALLY 订阅和外部 tally 流没这个问题）。
-- 输入的 `state` 恒 Running、`position` / `duration` 恒 0、`loop` 恒 False：兼容层没映射文件播放（PlusMix 自己有暂停 / 回到开头 / 循环，见[用户手册 · 输入](../user/输入.md#播放)；对方的 Play / Pause / Restart / SetPosition 回 NotImplemented）。
+- 输入的 `state` 恒 Running（编号空洞处补的 Blank 占位写 Paused）、`position` / `duration` 恒 0、`loop` 恒 False：兼容层没映射文件播放（PlusMix 自己有暂停 / 回到开头 / 循环，见[用户手册 · 输入](../user/输入.md#播放)；对方的 Play / Pause / Restart / SetPosition 回 NotImplemented）。
 - 没有鉴权（对方的 TCP 协议也没有）；默认只听 127.0.0.1，开到局域网前想清楚。
 - 每条 TCP 连接的推送缓冲 64 条快照，慢客户端丢旧的；ACTS 事件按"上次看到的状态 → 这次"算差，中间被合并的来回不会都发（收敛到最终状态）。

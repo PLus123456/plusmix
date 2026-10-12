@@ -55,3 +55,63 @@
   悬停提示与辅助功能标签是全的。和格子上"Transition"截成"Transit…"（W4C2-w5-app-cell-buttons-truncated-in-english.md，KNOWN_ISSUES S3）同一类。
 - 建议：英文这一行写短（"T1 · Fade 0.5 s ▾"，或只写效果与时长、槽号靠左边的竖条），或这一行让出组标题的宽度。
 - 手册：en/concepts.md T-bar 组一条照实写了截尾。
+
+## 7. ⇧1–⇧0（直切 PGM）用实体键盘按不出来——**S2**，影响默认快捷键表
+
+- 现象：默认表里 `shift+1` … `shift+0`（直切 PGM）按实体键盘不触发。`KeyCombo(event:)` 用 `charactersIgnoringModifiers` 当键名，注释写"Shift+1 仍是 '1'"，
+  但 AppKit 的 charactersIgnoringModifiers 只忽略 ⇧ **以外**的修饰键：⇧1 得到的是 ⇧ 打出来的字符（美式键盘 `!`；本机拼音输入法下是全角 `！`），组合成 `shift+!`，对不上表里的 `shift+1`。
+  ⌥ / ⌃ 被忽略，所以 ⌥1–⌥4、⌃1–⌃4、⌃⌥3 照常；⇧ 加字母得到大写字母、`normalizedKey` 转小写，也照常。手写 JSON 的任何 `shift+数字 / 符号` 都同样按不出来；
+  在设置 › 快捷键里"录键"录下的是 `shift+!`，那一行能用（同一个转换）。App 用例都用合成事件、直接给 charactersIgnoringModifiers = "1"，没覆盖到。
+- 证据：草稿区探针用 `CGEvent(keyboardEventSource:virtualKey:keyDown:)` 造 kVK_ANSI_1 + ⇧、转 `NSEvent(cgEvent:)`（不投递事件）：`⇧1 → ignoringModifiers="！"`、`⌥1 → "1"`、`⌃1 → "1"`、`⌃⌥4 → "4"`、`⇧A → "A"`。
+  **没有在实体键盘上按过**，L3 清单人工确认时请按一次 ⇧2。
+- 代码：`Packages/SwitcherControl/Sources/SwitcherControl/Hotkeys/KeyCombo.swift` 的 `init?(event:)`。
+- 建议：有 ⇧ 且是数字 / 符号键时按 keyCode 取未加 ⇧ 的字符（`kVK_ANSI_0…9` 等键码表，或 `UCKeyTranslate` 不带 shift 再取一次），表里的 `shift+1` 就能对上；加一条用 CGEvent 造真实事件的用例。
+- 手册：快捷键 / shortcuts 默认表 ⇧1–⇧0 一行与表下"⇧1–⇧0 在实体键盘上对不上"一条（绕法：逐行重录键）、hotkeys.json 写法一条；示例里原来的 `alt+shift+3`（W4-C2 写的）也按不出来，换成了 `ctrl+alt+3`。
+
+## 8. 推流的"最后错误"与日志带着 Swift 枚举的原样
+
+- 现象：状态窗"最后错误"、`stats.encoder[].last_error`、系统日志写的是 `连接失败：connectFailed("鉴权失败（用户名或密码不对）：…")`——`StreamTransportError` 没有自定义 description，`"\(error)"` 把 case 名和引号一起带出来。
+- 代码：`Packages/SwitcherOutputs/Sources/Streaming/StreamOutput.swift:396`、`:403`–`:404`，`StreamTransport.swift:32`–`:37`。
+- 建议：给 `StreamTransportError` 加 `CustomStringConvertible`（connectFailed / sendFailed 只取那段字符串），日志与 last_error 都干净；111（W2-D4）正改这一块，可以顺手。
+- 手册：输出 / outputs 状态窗"最后错误"一条、鉴权一节、故障排查推流一行照实写了整行的样子。
+
+## 9. 查询串鉴权只认几个固定的参数名
+
+- 现象：鉴权表"用户名参数 / 密码参数"可以改成任意名字（SRS、nginx-rtmp 按回调规矩），写是写进去了；但重新读地址（`StreamAddress.authStyle(of:)`）只认 `user / username / usr` 与 `pass / password / pwd / passwd`：
+  用了别的名字，按钮旁写"没有鉴权"、再打开小表停在 Adobe 且框是空的；之后存 Adobe 写法只去掉认得的那几个名字（`OutputPagesModel.setStreamAuth` 的 `.adobe` 分支），自定义名字的账号留在地址里，两种写法并存。
+- 代码：`App/Sources/Settings/StreamAddress.swift:29`–`:40`、`App/Sources/Settings/OutputPagesModel.swift:398`–`:402`、`OutputPagesViews.swift:374`–`:384`。
+- 建议：把用过的参数名存下来（节目里只有地址：可以按"地址里有两个值都打码的参数"认），或认写法时也认上一次表里用的名字；换写法时按表里的名字去掉。
+- 手册：输出 / outputs 鉴权一节"限制"一条。
+
+## 10. T-bar 推到一半改了当前槽、再拉回 0，当前那组不按槽重拷
+
+- 现象：`setTransitionSlot` 改当前槽时只在空闲才拷进当前那组（`MixerReducer` 的 setTransitionSlot 分支），转场进行中改的靠 `completeTransition` 那一拍重拷；
+  T-bar 拉回 0 不走 `completeTransition`（`tbar(p < 1)` 只改进度），于是 T-bar 那一行显示新设置，下一次回车 / T-bar 仍按旧设置走，做完那一次才拷上。
+- 代码：`Packages/SwitcherCore/Sources/SwitcherEngine/State/MixerReducer.swift`（setTransitionSlot / tbar / completeTransition）。契约文字（提案 020）只写了"完成那一拍重拷"。
+- 建议：T-bar 回到 0（进度归零、回到空闲）时也按 currentSlot 重拷一次（幂等），或改契约文字写明这个例外——改 reducer 口径要走提案。
+- 手册：概念 / concepts 转场槽一节"例外"一句。
+
+## 11. 状态行把起不来（failed）的推流算成"在跑"
+
+- 现象：状态行"推流"取在跑的路里码率最低的；`StatusLineFormatter.runningEncoders` 只排除 idle / stopped / unavailable，failed 的那一项（`OutputRuntime` 给起不来的路填的）码率 0，于是写"推流 0 b/s"；
+  推流 / 录制状态窗把 failed 当没在跑（码率写 —），两处不一致。
+- 代码：`App/Sources/UI/StatusLineFormatter.swift:28`–`:31`、`App/Sources/UI/OutputStatusPanel.swift:124`。
+- 建议：状态行也排除 failed（或在那一项旁写"起不来"）。
+- 手册：概念 / concepts 状态行一条照实写"起不来的推流码率是 0"。
+
+## 12. 几条英文文案与界面 / 行为对不上（只有英文错）
+
+| 键 | 现在 | 问题 |
+|---|---|---|
+| `slot.stingerMenu.header` | "Transition %d · Stinger: choose an input first (it runs once chosen)" | 读起来像"选了就执行"；实际选输入只改槽、要再点一次主体才执行（中文"选了才执行"没问题）。建议 "…choose an input first, then click again to run it" |
+| `outputStatus.showLogsTip` | "…(Help › Open Diagnostics Folder)…" | 英文菜单项叫 "Show Diagnostics Folder"（`menu.help.showDiagnosticsFolder`）；内容不对的问题见第 1 条 |
+| `inputSettings.source.fileInPlaceHint` | "…changing only “At End” or “Speed”…" | 表单上的字是 "At end" / "Playback rate"（`addInput.file.endAction` / `addInput.file.rate`） |
+
+## 13. 其余小口径
+
+- **Adobe 写法的按钮摘要**固定写"（密码已设）/ (password set)"，不看密码是不是空的（`OutputPagesViews.swift:382`–`:383`）。
+- **界面一改效果链就整条重写**（`EffectChainEditor.slots`，`App/Sources/Settings/AudioEffectParams.swift`）：main 上会丢掉 API 设的 `peakLimiter.ceilingDb`，并把 API 写进来的 `compressor`、第 4 段起的 EQ 挪到链尾——
+  总线上链的顺序就是处理顺序，挪出去的 EQ 还可能成了第 4 格、装不上。112（W5-O 第 6 项）之后压缩器与天花板认得了，第 4 段起的 EQ 与别的认不出的格挪到链尾的问题还在（请 112 复核）。
+- **Stream Deck 设置面板文案没跟上**：`ui/auto.html:11` 仍写"按 Switcher 里已选的转场（Auto）"、`manifest.json` 的 Auto 提示"按已选转场开始"（现在 = 执行当前转场槽）；
+  `ui/slot.html` 的标题与"Switcher 地址"用的是代号 Switcher，不是产品名 PlusMix（`Tools/streamdeck-plugin/` 归 112 的目录）。
+- **英文 T-bar 行截尾**见第 6 条；**推流状态窗 / 统计窗不转发按键**见第 2 条。

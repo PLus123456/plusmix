@@ -39,7 +39,7 @@ Connections 加 "vMix" 类型的连接，Target host = PlusMix 所在机器，TC
 | Tally / Status 反馈：Program、Preview、Overlay、Recording、Streaming、FTB | ✅ | 由 XML 轮询 + TALLY / ACTS 订阅驱动；转场进行中 XML 只报旧 PGM（TALLY 订阅正确） |
 | Overlay 5–8、Overlay zoom、Preview overlay | ❌ NotImplemented | PlusMix 只有四个叠加通道、没有"叠加预览"概念 |
 | Transition 5 起、Stinger 2–8、对方的其他转场效果（Slide / Fly / Merge / CubeZoom …） | ❌ NotImplemented | PlusMix 只有四个转场槽 |
-| 文件播放（Play / Pause / Restart / Set position） | ❌ NotImplemented | PlusMix 自己有暂停 / 回到开头 / 循环（`setPlayback` / `seekPlayback`），兼容层还没映射 |
+| 文件播放（Play / Pause / Restart / Set position） | ❌ NotImplemented | PlusMix 自己有暂停 / 回到开头（`setPlayback` / `seekPlayback`）和循环（`setInputSource` 改播完动作），兼容层还没映射 |
 | External / MultiCorder / Fullscreen / SRT output 开关、Snapshot、SetOutput 2–4 | ❌ NotImplemented | 外部显示的开关命令 setOutputEnabled 2026-09-23 起已有，映射还没做：要先定 External / Fullscreen 各对应哪种输出、同类有多个时用哪一个（docs/ui-study/02 V14） |
 | Audio auto（AFV per input）、Bus solo、Send to master、Set gain、Volume fade、声道混音器、音频插件 | ❌ NotImplemented | AFV 在 PlusMix 里是全局开关 + 每路标志（每路 afv 只在全局开关打开时生效），映射有损，暂不映射 |
 | Title / List / Replay / PTZ / Browser / Video call / Virtual set / 数据源 / 脚本等整族 | ❌ NotImplemented | 第一版没有这些功能 |

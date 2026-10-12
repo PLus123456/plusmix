@@ -92,7 +92,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 | `display[]` | 每个显示类输出一项（`output` 编号，主界面监视器用 0）：`kind` ∈ externalDisplay / virtualCamera / multiviewWindow / monitor；`frames` 已呈现 / 已送出累计；`dropped` 在呈现 / 发布时没赶上的；`undelivered` 不在呈现 / 发布（显示器不在、扩展没连上、窗口收起）时没送出去的；`state` ∈ idle / presenting / noDisplay / waitingExtension / publishing / stopped / failed |
 | `audio{dropouts, underruns, discontinuities, meters}` | 输出回调超时累计、缓冲欠载累计、Master 流上相邻样本跳变 > 0.5 满幅的次数（流式启发式，信息项）；`meters.buses[{bus, peak_db, rms_db, true_peak_db, lufs_m, lufs_s, lufs_i, lra}]`（顺序 master / busA / busB / headphones，dB 下限 −120）、`meters.inputs{n: {peak_db, rms_db}}` |
 | `rss_mb`、`cpu_pct`、`gpu_pct` | 进程常驻内存、进程 CPU、GPU 利用率（IOKit Device Utilization） |
-| `video_delay_ms` | 采样那一刻为监听同步把视频延后的毫秒数（= Master 效果链的实测延迟；没开压缩 / 限幅为 0）。瞬时值，不累计 |
+| `video_delay_ms` | 采样那一刻为监听同步把视频延后的毫秒数（= Master 效果链的实测延迟；没开压缩 / 限幅为 0，无界面引擎 `--av-compensation audioPTS` 或组装方没接视频延后时也是 0）。瞬时值，不累计 |
 
 老文件缺键时按 0 / "idle" / 空解；写出总是写全。字段的正式口径与阈值在 [测试标准](../testing/测试标准.md)。
 
@@ -102,8 +102,8 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 
 - **转场进行中**（`transition.isActive`，T-bar 推到一半也算）`setPreview` / `setProgram` 被忽略（`applied = false`，PVW / PGM 不变）；`cut` 立即完成正在进行的转场。
 - **转场槽**：`useTransitionSlot {slot, start}` 选中槽 n（`start: true` 同一拍开始 auto 转场 = 界面上点"转场 n"、⌥n；`false` = 只给 T-bar / 回车用），转场进行中被忽略；
-  `setTransitionSlot` 改槽的整份配置，**转场进行中也收**（进行中的那一次按开始时的参数走完）；`autoTransition` / T-bar 用的是当前那组 = 当前槽（`transition.currentSlot`）。
-  老命令 `fade` / `setTransition` / `setTransitionParams` 改的是当前那组，之后 `currentSlot` = 仍对得上的槽，对不上为 null。没选输入的 Stinger 槽 `start: true` 这一版照常开始（一次延迟的硬切）。
+  `setTransitionSlot` 改槽的整份配置，**转场进行中也收**（进行中的那一次按开始时的参数走完）；`autoTransition` / T-bar 用的是当前那组 = 当前槽（`transition.currentSlot`；对不上任何槽时快照里没有这个键）。
+  老命令 `fade` / `setTransition` / `setTransitionParams` 改的是当前那组，之后 `currentSlot` = 仍对得上的槽，对不上就没有这个键。没选输入的 Stinger 槽 `start: true` 这一版照常开始（画面第 1 拍就硬切，状态机要等满时长才对调 PGM / PVW）。
 - **文件播放**：`setPlayback {input, paused}` 暂停 / 继续（画面停在那一帧，仍每拍出帧）；`seekPlayback {input, seconds}` 定位（暂停中定位就停在那一帧）；
   `settings.playback.restartOnProgram` 开着的文件输入在被切上 PGM 的那一拍从头播（首帧晚几拍）。只对文件输入有意义。
 - **`setBusEffects`（总线效果链）已作用到声音**：
@@ -111,11 +111,11 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
   - `enabled = false` = 旁路（输出逐样本等于输入），参数留着。
   - `parametricEQ.q` 是经典 Q（半增益处的带宽，q = √2 ≈ 1 个倍频程）。
   - 参数超出范围被钳：EQ 频率 20…23520 Hz、增益 −96…+24 dB、q 0.1826…28.85；`dynamicsProcessor` 阈值 −40…20 dB、起音 0.001…0.2 s；限幅起音 0.001…0.03 s、衰减 0.001…0.04 s、`ceilingDb` −20…0（`compressor` 的范围见下）。
-  - 开了压缩 / 限幅的总线多 5–35 ms 处理延迟（`dynamicsProcessor` 恒 256 帧 = 5.3 ms，`compressor` 0，限幅 = 起音时长）。Master 的这段延迟（`video_delay_ms`）由**视频一起延后**来对齐：引擎按拍点 + 延迟派发画面，录制 / 推流 / NDI® 与 App 的监视器 / 外部显示 / 多画面都晚同样毫秒数，音频 PTS 不动、本机监听与画面同步（App 与无界面引擎的默认；无界面引擎 `--av-compensation audioPTS` 改回旧做法：音频 PTS 前移、画面不动、监听晚这么多）。Bus A / B 的延迟不补。
+  - 开了压缩 / 限幅的总线多出处理延迟，最多约 35 ms（`dynamicsProcessor` 恒 256 帧 = 5.3 ms，`compressor` 0，限幅 = 起音时长 1–30 ms）。Master 的这段延迟（`video_delay_ms`）由**视频一起延后**来对齐：引擎按拍点 + 延迟派发画面，录制 / 推流 / NDI® 与 App 的监视器 / 外部显示 / 多画面都晚同样毫秒数，音频 PTS 不动、本机监听与画面同步（App 与无界面引擎的默认；无界面引擎 `--av-compensation audioPTS` 改回旧做法：音频 PTS 前移、画面不动、监听晚这么多）。Bus A / B 的延迟不补。
 - **每路输入的效果链**（`setInputSettings` 的 `settings.effects`）**已作用到声音**：所有 `parametricEQ` 合成一格（最多 16 段，多的不装）+ 一个动态格（`compressor` 或 `dynamicsProcessor`，第二个不装），处理顺序固定先 EQ 后动态、与链里的先后无关；
   `peakLimiter` 与认不出的 `id` 每路不装（各记一次日志）。效果在这一路的对齐延迟线之前，延迟从这一路的对齐延迟里扣，节目时间线与 PTS 不动。
 - **`compressor`**（自写压缩器，总线与每路都能装、与 `dynamicsProcessor` 二选一占同一格）：`thresholdDb`（−60…0）、`ratio`（1…20，n:1）、`kneeDb`（0…24，0 = 硬拐点）、`attackSeconds`（0.0001…0.2）、`releaseSeconds`（0.01…3）、`makeupGainDb`（0…24）；
-  不用前瞻、按设计 0 延迟（装格 / 改参数时实测，量到的进对齐）；起音 / 释放是线性域峰值包络的一阶时间常数（不是 dB 域增益走到 63% 的时间，4:1 以上后者约为前者的一半）。App 的压缩页仍写 `dynamicsProcessor`。
+  不用前瞻、按设计 0 延迟（装格 / 改参数时实测，量到的进对齐）；起音 / 释放是线性域峰值包络的一阶时间常数（不是 dB 域增益走到 63% 的时间；两者差多少看信号超过阈值多少，超 20 dB 时后者约为前者的一半）。App 的压缩页仍写 `dynamicsProcessor`。
 - **监听同步**：见上面总线那一条；录制文件从这条延后的输出时间线的 0 起（开头没有黑帧）。
 - **起不来的录制 / 推流路**：`stats.encoder[]` 里那一项报 `failed`（不是 `idle`），原因在那一项的 `last_error`（App 的界面提示与日志里也有）。
 

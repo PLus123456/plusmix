@@ -11,13 +11,15 @@ Not while the Statistics window, the Stream / Recording Status window or the mul
 | Key | Action |
 |---|---|
 | `1` … `9`, `0` | Put input 1–10 on PVW (`0` = input 10) |
-| `⇧1` … `⇧0` | Cut input 1–10 straight to PGM (PVW unchanged) |
+| `⇧1` … `⇧0` | Cut input 1–10 straight to PGM (PVW unchanged). **Known issue: may not fire from a real keyboard** — see below the table |
 | `Space` | Cut |
 | `Return` | Run the current transition slot (the T-bar uses it too; Transition 1 · Fade 0.5 s in a new show) |
 | `F` | FTB on / off |
 | `⌥1` … `⌥4` | Run Transition 1–4 (selects that slot and starts it at once; Return and the T-bar use it afterwards; [Concepts › Transition slots](concepts.md#transition-slots)) |
 | `⌃1` … `⌃4` | Overlay 1–4 on / off (switch only, the input is not changed: a channel without an input shows nothing) |
 
+- **⇧1–⇧0 don't match a real keyboard**: when you press ⇧1 the system hands PlusMix the character Shift produces (`!` on a US keyboard, a full-width `！` with the Pinyin input source), while the table says `shift+1`, so these rows do nothing.
+  Workaround: re-record those rows one by one with "Record" in Settings › Shortcuts (that stores something like `shift+!`, which then works), or use the Cut button on the cells. ⌥1–⌥4 and ⌃1–⌃4 are not affected.
 - **Recording and streaming have no default keys**: stopping them from a hotkey never asks, so one stray key would stop the show. Add them yourself if you want ([Editing the table](#editing-the-table)), e.g. with "All recordings on / off".
 - **The interface lock has no default shortcut**: use the lock at the far right of the bottom bar, or Window › Lock Interface.
 - On a Mac that saved a shortcut table before (`hotkeys.json`), ⌥1–⌥4 are still "Run Current Transition" from the old table (that is how the old default table was saved; it isn't upgraded automatically): click "Reset to Defaults" in Settings › Shortcuts for the new table (re-add your own rows afterwards).
@@ -76,10 +78,10 @@ The table is stored outside the show file in `~/Library/Application Support/Plus
     {"key": "return", "action": {"command": {"autoTransition": {}}}},
     {"key": "f", "action": {"toggleFTB": {}}},
     {"key": "alt+2", "action": {"transitionSlot": {"slot": 2}}, "note": "run transition 2"},
-    {"key": "alt+shift+4", "action": {"selectTransitionSlot": {"slot": 4}}, "note": "select transition 4, don't run"},
+    {"key": "ctrl+alt+4", "action": {"selectTransitionSlot": {"slot": 4}}, "note": "select transition 4, don't run"},
     {"key": "ctrl+1", "action": {"toggleOverlay": {"channel": 1}}, "note": "overlay 1 on / off"},
     {"key": "g", "action": {"fadeMs": {"durationMs": 750}}, "note": "0.75 s fade"},
-    {"key": "alt+shift+3", "action": {"previewAndTransition": {"input": 3}}},
+    {"key": "ctrl+alt+3", "action": {"previewAndTransition": {"input": 3}}},
     {"key": "m", "action": {"ui": {"name": "toggleMixer"}}, "note": "show / hide the mixer"},
     {"key": "cmd+alt+r", "action": {"recordAll": {"mode": "toggle"}}, "note": "all recordings (never asks)", "enabled": false}
   ]
@@ -88,6 +90,7 @@ The table is stored outside the show file in `~/Library/Application Support/Plus
 
 - Combination syntax `ctrl+alt+shift+cmd+<key>` in any order; `⌘⌥⌃⇧` prefixes and the long names `command / option / control` are accepted.
   The key is a single letter / digit / symbol or a named key: `space, return, escape, tab, delete, forwarddelete, up, down, left, right, home, end, pageup, pagedown, f1 … f20`.
+  With ⇧ on a digit or symbol key, `<key>` must be the character Shift produces (it depends on the keyboard layout: ⇧1 is `!` on a US keyboard) — `shift+1` can't be pressed (⇧ with a letter is written with the letter as usual); the easy way is "Record" in Settings › Shortcuts.
 - Actions: `{"command": {<command>}}` (command JSON is the API's, [API reference](../../api.md), Chinese), or the switch / compound actions below. A switch's `mode` is `"on"` / `"off"` / `"toggle"` (missing = toggle);
   an input can be a number or `"preview"` / `"program"` (whatever is on PVW / PGM at the moment of the press).
 - `"enabled": false` is written only on disabled rows; no key = enabled. Old files load unchanged.

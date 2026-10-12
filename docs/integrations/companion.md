@@ -65,7 +65,7 @@ companion-module-switcher/
 | 录制 / 推流中 | `snapshot.state.outputs[].enabled`（kind record / stream） |
 | FTB | `snapshot.state.ftb.on` |
 | 转场中 | `snapshot.state.transition.startTick != null || progress > 0` |
-| 当前转场槽 | `snapshot.state.transition.currentSlot`（1–4，对不上任何槽时为 null）；四个槽在 `transition.slots` |
+| 当前转场槽 | `snapshot.state.transition.currentSlot`（1–4；对不上任何槽时快照里没有这个键）；四个槽在 `transition.slots` |
 
 要点：整快照每拍最多一条、幂等，模块只需保存最近一条；断线重连后第一条就是当前状态；命令回执里 `applied == false` 表示状态机按规则忽略了（已是目标状态），不是错误。
 Stream Deck 插件（[stream-deck.md](stream-deck.md)）的 `lib/tally.js` 已经把"快照 → 颜色"和"按下 → 命令"写成纯函数，Companion 模块可以直接搬。

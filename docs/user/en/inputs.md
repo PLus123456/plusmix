@@ -99,16 +99,17 @@ Anything AVFoundation decodes (H.264 / HEVC / ProRes in .mov / .mp4 …).
 
 ### Playback
 
-The last three buttons in the first row of a video-file cell, its right-click menu and the "Playback" section under Input Settings › Source are one set of actions (on other inputs the three buttons are greyed out with the tooltip "Video / audio file inputs only"):
+The last three buttons in the first row of a video-file cell, its right-click menu and the "Playback" section under Input Settings › Source are one set of actions (on other inputs the three buttons are greyed out with the tooltip "Video / audio file inputs only");
+with one difference: ▶ / ⏸ in the settings window's Playback section only looks at paused / not paused and doesn't know "finished" — to play a finished file from the start there, click "⏮ Back to Start".
 
 | Button | What it does |
 |---|---|
 | ⏮ Back to start | Plays from the start if playing; holds the first frame if paused (still paused) |
-| ⏸ / ▶ | While playing it shows ⏸: click = **pause**, the picture holds this frame (frames keep coming every tick, the cell doesn't say "no signal"); while paused it shows ▶, highlighted: click = carry on from where it stopped; when it has finished (loop off) it shows ▶: click = play from the start |
+| ⏸ / ▶ | While playing it shows ⏸: click = **pause**, the picture holds this frame (frames keep coming every tick, the cell doesn't say "no signal"); while paused it shows ▶, highlighted: click = carry on from where it stopped; when it has finished (loop off) it shows ▶: click = play from the start. A finished file holding its last frame (or gone to black) shows "No signal" on the cell; a paused one doesn't |
 | 🔁 Loop | On = loop (highlighted); **off = hold the last frame at the end**. For black at the end, set "At end" to "Black" in Input Settings › Source (applies at once). Turning loop on after the file has finished and is holding its last frame = it starts over and keeps looping right away |
 
 - **Restart When Taken to PGM** (ticked in the right-click menu, or Input Settings › Source › Playback): the input plays from the start on the tick it goes to PGM (Cut, transition done, T-bar at the end, API `setProgram`); previewing it on PVW doesn't restart it.
-  The first frame lands a few ticks after the switch (about 3 ticks measured, 50 ms at 60p) — during those ticks PGM shows the frame the input was holding; taken to PGM while paused = back to the first frame, still paused. The setting is saved with the show (changing it counts as unsaved).
+  The first frame lands a few ticks after the switch (about 3 ticks measured in the app, 50 ms at 60p; the "1–2 ticks" in the UI hints counts only the engine's seek) — during those ticks PGM holds the input's last frame from before the switch; taken to PGM while paused = back to the first frame, still paused. The setting is saved with the show (changing it counts as unsaved).
 - Pausing and going back to the start are live operation and do not count as unsaved changes; a new file or "Apply Source" rebuilds the input and plays from the start.
 - The commands are `setPlayback` and `seekPlayback` ([API reference](../../api.md), Chinese); hotkeys / MIDI can bind them ("File play / pause" and "Seek file / restart" in the Inputs group of the action picker).
 
