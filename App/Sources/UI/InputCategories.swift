@@ -1,63 +1,61 @@
 // 输入分类（W5-H，01a D1 / 04 Q14）：输入条左端"全部 + 六色"标签，点 = 只显示这一类（与搜索叠加），右键标签改名；格子右键"分类 ▸"（无 + 六色），
 // 格子标题条上画一个色点。六色用 Finder 标签同一套（红 / 橙 / 黄 / 绿 / 蓝 / 紫）。
 //
-// 数据放哪（Q14 默认）：颜色以后进 InputConfig（提案 023 的 color 一节，P5 落地）；**落地之前先存 Show.layout**（契约写明原样存取、键由 App 定），
-// 键名固定成下面两个，023 落地后迁移一次：
-//   "inputCategories"     = { "<输入编号>": "<颜色>" }，颜色是 Color 的 rawValue（"red" / "orange" / "yellow" / "green" / "blue" / "purple"）；没分类的编号不写
-//   "inputCategoryNames"  = { "<颜色>": "<名字>" }，只写起过名的颜色
-// 两个键都没内容时整个键不写（不往节目文件里写空对象）。它们算节目内容（AppController.documentContent 不剥掉，改了算未保存）；
-// 删掉一路时它的分类跟着清（编号以后给别的输入用时不继承）。API / 多画面 / 兼容层看不到分类，要等 023。
+// 数据放哪：**颜色是每路输入的 `InputConfig.color`**（提案 023 第四节，P5-2 落进契约；W5-O 起 App 读写它）——改分类发 `setInputColor`，
+// 快照回来格子跟着变（API / 脚本改的也一样），API 全量状态、多画面、Stream Deck 读同一份；删掉一路颜色跟着它的配置没了（编号再给别的输入用不继承）。
+// **名字**（"红色 = 机位"）只是界面标签，留在 Show.layout（023 四 (a)，契约不解释）：
+//   "inputCategoryNames"  = { "<颜色>": "<名字>" }，只写起过名的颜色；没起名时整个键不写
+// W5-H 原来把颜色也存在 layout 的 "inputCategories" = { "<输入编号>": "<颜色>" }（InputConfig.legacyCategoriesLayoutKey）：老节目打开时由
+// ShowDocuments.prepared 调 `Show.migratingLegacyInputCategories()` 搬一次（读文件、读 LastSession 两处，同 101 对 025 的做法），搬完删键。
+// 名字键算节目内容（AppController.documentContent 不剥掉，改名算未保存）。
 import AppKit
 import SwitcherContracts
 
-struct InputCategories: Equatable {
-    enum Color: String, CaseIterable {
-        case red, orange, yellow, green, blue, purple
+/// 分类的颜色就是契约里的 InputColor（rawValue = W5-H 存进 layout 的值）；界面上的叫法 / 画色在这里。
+extension InputColor {
+    /// 没起名时的叫法（"红色"）。
+    var defaultTitle: String { L("category.color.\(rawValue)") }
 
-        /// 没起名时的叫法（"红色"）。
-        var defaultTitle: String { L("category.color.\(rawValue)") }
-
-        @MainActor var nsColor: NSColor {
-            switch self {
-            case .red: .systemRed
-            case .orange: .systemOrange
-            case .yellow: .systemYellow
-            case .green: .systemGreen
-            case .blue: .systemBlue
-            case .purple: .systemPurple
-            }
-        }
-
-        /// 色块上写字用黑还是白（黄 / 橙 / 绿底压白字对比不够）。
-        @MainActor var textColor: NSColor {
-            switch self {
-            case .yellow, .orange, .green: .black
-            case .red, .blue, .purple: .white
-            }
+    @MainActor var nsColor: NSColor {
+        switch self {
+        case .red: .systemRed
+        case .orange: .systemOrange
+        case .yellow: .systemYellow
+        case .green: .systemGreen
+        case .blue: .systemBlue
+        case .purple: .systemPurple
         }
     }
+
+    /// 色块上写字用黑还是白（黄 / 橙 / 绿底压白字对比不够）。
+    @MainActor var textColor: NSColor {
+        switch self {
+        case .yellow, .orange, .green: .black
+        case .red, .blue, .purple: .white
+        }
+    }
+}
+
+struct InputCategories: Equatable {
+    typealias Color = InputColor
 
     enum Keys {
-        static let assignments = "inputCategories"
+        /// 起过名的颜色 → 名字（Show.layout 里唯一的分类键）。
         static let names = "inputCategoryNames"
         /// 节目内容里算数的 layout 键（AppController.documentContent 留着它们）。
-        static let all = [assignments, names]
+        static let all = [names]
     }
 
-    /// 输入编号 → 颜色（没分类的不在里面）。
+    /// 输入编号 → 颜色（没分类的不在里面）：快照里各路的 InputConfig.color。
     var assignments: [Int: Color] = [:]
     /// 起过名的颜色 → 名字。
     var names: [Color: String] = [:]
 
     init() {}
 
-    /// 从 Show.layout 读；认不出的条目跳过（别的版本写的、手改坏的）。
-    init(layout values: [String: JSONValue]) {
-        if case .object(let map)? = values[Keys.assignments] {
-            for (key, value) in map {
-                if let number = Int(key), case .string(let raw) = value, let color = Color(rawValue: raw) { assignments[number] = color }
-            }
-        }
+    /// 颜色读各路的 InputConfig.color，名字读 Show.layout（认不出的条目跳过：别的版本写的、手改坏的）。
+    init(inputs: [InputConfig], layout values: [String: JSONValue]) {
+        assignments = Self.assignments(of: inputs)
         if case .object(let map)? = values[Keys.names] {
             for (key, value) in map {
                 if let color = Color(rawValue: key), case .string(let name) = value, !name.isEmpty { names[color] = name }
@@ -65,10 +63,15 @@ struct InputCategories: Equatable {
         }
     }
 
-    /// 写回 Show.layout 的键值（空的键删掉）。
+    /// 快照里各路的颜色。
+    static func assignments(of inputs: [InputConfig]) -> [Int: Color] {
+        var out: [Int: Color] = [:]
+        for input in inputs { if let color = input.color { out[input.number] = color } }
+        return out
+    }
+
+    /// 名字写回 Show.layout（没起过名就删键）。颜色不在 layout 里（走 setInputColor）。
     func write(into values: inout [String: JSONValue]) {
-        values[Keys.assignments] = assignments.isEmpty ? nil
-            : .object(Dictionary(uniqueKeysWithValues: assignments.map { ("\($0.key)", JSONValue.string($0.value.rawValue)) }))
         values[Keys.names] = names.isEmpty ? nil
             : .object(Dictionary(uniqueKeysWithValues: names.map { ($0.key.rawValue, JSONValue.string($0.value)) }))
     }
@@ -79,13 +82,6 @@ struct InputCategories: Equatable {
     /// 辅助功能名：颜色总是在（读屏的人分得清是哪一个），起过名再带名字。
     func accessibilityTitle(of color: Color) -> String {
         names[color].map { L("category.a11yNamed", color.defaultTitle, $0) } ?? color.defaultTitle
-    }
-
-    /// 只留还在的输入；有清掉的返回 true。
-    mutating func prune(keeping numbers: Set<Int>) -> Bool {
-        let before = assignments.count
-        assignments = assignments.filter { numbers.contains($0.key) }
-        return assignments.count != before
     }
 }
 

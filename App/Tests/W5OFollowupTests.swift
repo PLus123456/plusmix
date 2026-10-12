@@ -2,6 +2,7 @@
 import AppKit
 import XCTest
 import SwitcherContracts
+import SwitcherEngine
 import SwitcherExternal
 @testable import Switcher
 
@@ -175,5 +176,90 @@ final class W5OFollowupTests: XCTestCase {
         launched.save(to: all)
         XCTAssertEqual(all.object(forKey: AppSettings.Keys.tallyPort) as? Int, 9911)
         XCTAssertEqual(all.string(forKey: AppSettings.Keys.apiListen), "127.0.0.1:9900")
+    }
+
+    // MARK: 5. 分类颜色切到 InputConfig.color（提案 023 四的 App 侧；名字留 Show.layout）
+
+    /// 格子右键"分类 ▸"发 setInputColor（颜色进 InputConfig.color，API 全量状态里看得到），layout 里不再有 "inputCategories"；
+    /// 别的客户端（API / 脚本）改的颜色格子跟着快照变；分类名字仍存 layout "inputCategoryNames"。
+    func testW5O5_categoryColorLivesInInputConfig() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 3)
+        AppTest.pump(seconds: 0.1)
+        let strip = AppTest.controller.windowController.inputStrip
+        func pick(_ number: Int, _ title: String) throws {
+            let cell = try XCTUnwrap(strip.cells[number])
+            let submenu = try XCTUnwrap(cell.contextMenu().items.first { $0.title == "分类" }?.submenu)
+            let item = try XCTUnwrap(submenu.items.first { $0.title == title })
+            _ = item.target?.perform(item.action, with: item)
+        }
+        try pick(1, "红色")
+        try pick(2, "蓝色")
+        XCTAssertEqual(strip.cells[1]?.categoryColor, .red, "格子马上有色点（不等快照）")
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.input(1)?.color == .red && session.state.input(2)?.color == .blue },
+                      "颜色走 setInputColor 进 InputConfig.color：\(session.state.inputs.map(\.color))")
+        XCTAssertNil(session.state.input(3)?.color)
+        XCTAssertNil(session.layout.values[InputConfig.legacyCategoriesLayoutKey], "layout 里不再存分类")
+        XCTAssertTrue(AppTest.waitUntil(2) { AppTest.controller.isDocumentEdited }, "改分类算未保存的改动")
+        // API 全量状态里看得到（多画面 / Stream Deck / 脚本都读这一份）
+        let port = try XCTUnwrap(session.control.apiServer?.boundPort)
+        let reply = try AppTest.http("GET", "http://127.0.0.1:\(port)/api/v1/state" + AppTest.tokenQuery(session))
+        let state = try XCTUnwrap(reply.json?["state"] as? [String: Any], reply.text)
+        let inputs = try XCTUnwrap(state["inputs"] as? [[String: Any]])
+        XCTAssertEqual(inputs.first { $0["number"] as? Int == 1 }?["color"] as? String, "red")
+        XCTAssertNil(inputs.first { $0["number"] as? Int == 3 }?["color"], "没分类不写键")
+        // 别的客户端改的：格子跟着快照
+        session.send(.setInputColor(input: 3, color: .green))
+        XCTAssertTrue(AppTest.waitUntil(2) { strip.cells[3]?.categoryColor == .green }, "外部改的颜色格子跟上")
+        try pick(1, "无")
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.input(1)?.color == nil && strip.cells[1]?.categoryColor == nil }, "无 = 清掉")
+        // 名字留在 layout
+        AppTest.controller.windowController.renameCategory(.blue, to: "嘉宾")
+        XCTAssertEqual(session.layout.values[InputCategories.Keys.names], .object(["blue": .string("嘉宾")]))
+        XCTAssertEqual(strip.categoryBar.button(for: .blue).title, "嘉宾")
+        // 删掉一路：颜色跟着这一路的配置没了，编号再给别的输入用不继承
+        session.send(.removeInput(input: 2))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.input(2) == nil })
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 2)))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(2) != nil })
+        AppTest.pump(seconds: 0.1)
+        XCTAssertNil(session.state.input(2)?.color)
+        XCTAssertNil(strip.cells[2]?.categoryColor, "新的一路 2 没分类")
+    }
+
+    /// 老节目（W5-H 存在 layout "inputCategories" 里）打开时搬一次：读文件、读 LastSession 两处都走 ShowDocuments.prepared → Show.migratingLegacyInputCategories()；
+    /// 搬完 layout 里没有那个键，名字键留着；认不出的颜色 / 不存在的编号跳过；刚打开不算未保存。
+    func testW5O5_legacyLayoutCategoriesMigrateOnLoad() throws {
+        _ = try AppTest.freshSession()
+        var legacy = ShowDocuments.emptyShow(recordDirectory: FileManager.default.temporaryDirectory.path)
+        for n in 1...3 { legacy.inputs.append(AppTest.syntheticConfig(number: n)) }
+        legacy.layout = ShowLayout(values: [
+            InputConfig.legacyCategoriesLayoutKey: .object(["1": .string("red"), "3": .string("purple"), "2": .string("nope"), "9": .string("green")]),
+            InputCategories.Keys.names: .object(["red": .string("机位")]),
+        ])
+        // 读 LastSession（另一个 ShowDocuments，不碰测试宿主共用的那一份）
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/w5o-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let docs = ShowDocuments(defaults: AppTest.controller.defaults, recordDirectory: dir.path, autosaveURL: dir.appendingPathComponent("LastSession.switcher.json"))
+        docs.autosave(legacy)
+        let restored = try XCTUnwrap(docs.loadAutosave())
+        XCTAssertEqual(restored.inputs.map(\.color), [.red, nil, .purple], "LastSession 读进来就搬")
+        XCTAssertNil(restored.layout.values[InputConfig.legacyCategoriesLayoutKey])
+        XCTAssertEqual(restored.layout.values[InputCategories.Keys.names], .object(["red": .string("机位")]), "名字键留着")
+        // 读文件（打开节目）：走 App 的整条路
+        let url = dir.appendingPathComponent("分类老节目.switcher.json")
+        try ShowStore().save(legacy, to: url)
+        let done = AppTest.expectationBox()
+        Task { await AppTest.controller.openShow(url: url); done.value = true }
+        XCTAssertTrue(AppTest.waitUntil(15) { done.value && AppTest.controller.session?.isRunning == true })
+        let session = try XCTUnwrap(AppTest.controller.session)
+        XCTAssertEqual(session.state.inputs.map(\.color), [.red, nil, .purple])
+        XCTAssertNil(session.layout.values[InputConfig.legacyCategoriesLayoutKey])
+        let strip = AppTest.controller.windowController.inputStrip
+        XCTAssertTrue(AppTest.waitUntil(2) { strip.cells[1]?.categoryColor == .red && strip.cells[3]?.categoryColor == .purple })
+        XCTAssertNil(strip.cells[2]?.categoryColor)
+        XCTAssertEqual(strip.categoryBar.button(for: .red).title, "机位")
+        XCTAssertFalse(AppTest.controller.isDocumentEdited, "打开时搬迁不算改动")
     }
 }

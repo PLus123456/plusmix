@@ -58,9 +58,11 @@ final class ShowDocuments {
     // MARK: 文件
 
     /// 文件里读进来的节目在交给 session 之前要做的事：录制 / 推流的 enabled 清掉（见上）；提案 025 的三个旧 extra 键搬进正式字段、搬完删键
-    /// （W5-N，2026-10-10 裁定 ③；契约把搬迁做成独立函数、不并进 Show.load，reports/p5-contracts.md §4 第 1 条）。
+    /// （W5-N，2026-10-10 裁定 ③；契约把搬迁做成独立函数、不并进 Show.load，reports/p5-contracts.md §4 第 1 条）；
+    /// 提案 023 四：W5-H 存在 layout "inputCategories" 里的分类颜色搬进各路 InputConfig.color、搬完删键，名字键留着（W5-O，同一做法）。
+    /// 读文件（load）与读 LastSession（loadAutosave）都走这里。
     static func prepared(_ show: Show) -> Show {
-        stoppingOutputs(show).migratingLegacyAppFlags()
+        stoppingOutputs(show).migratingLegacyAppFlags().migratingLegacyInputCategories()
     }
 
     func load(from url: URL) throws -> Show {
