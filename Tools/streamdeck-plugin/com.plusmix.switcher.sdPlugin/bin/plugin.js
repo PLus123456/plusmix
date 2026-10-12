@@ -2,7 +2,7 @@
 // 对着本地 API（docs/api.md）：WS /api/v1/events 收快照，连接上发命令。连接参数（host / port / token）是全局设置，任一按钮的设置面板都能改。
 import streamDeck, { SingletonAction } from "@elgato/streamdeck";
 import { SwitcherClient } from "../lib/api-client.js";
-import { commandFor, fpsFrom, keyStyle, svgDataURI, svgKey } from "../lib/tally.js";
+import { commandFor, fpsFrom, keyStyle, pressFeedback, svgDataURI, svgKey } from "../lib/tally.js";
 
 const PREFIX = "com.plusmix.switcher.";
 const KINDS = ["cut", "auto", "slot", "preview", "program", "tally", "overlay", "record", "stream", "ftb"];
@@ -44,18 +44,19 @@ class SwitcherAction extends SingletonAction {
   async onKeyDown(ev) {
     const entry = visible.get(ev.action.id) || { action: ev.action, kind: this.kind, settings: ev.payload.settings || {} };
     const { command, error } = commandFor(this.kind, client.snapshot, entry.settings, fpsFrom(client.clock));
+    let outcome;
     if (error) {
-      streamDeck.logger.warn(`${this.kind}: ${error}`);
-      await ev.action.showAlert();
-      return;
+      outcome = { error };
+    } else {
+      try {
+        outcome = { receipt: await client.send(command) };
+      } catch (e) {
+        outcome = { error: e.message };   // 被拒（例如没选输入的 Stinger 槽，提案 029）/ 没连上 / 超时
+      }
     }
-    try {
-      const receipt = await client.send(command);
-      if (receipt.applied === false) streamDeck.logger.info(`${this.kind}: 状态机忽略了这条命令（已是目标状态）`);
-    } catch (e) {
-      streamDeck.logger.warn(`${this.kind}: ${e.message}`);
-      await ev.action.showAlert();
-    }
+    const fb = pressFeedback(this.kind, outcome);
+    if (fb.log) streamDeck.logger[fb.level](fb.log);
+    if (fb.alert) await ev.action.showAlert();
   }
 }
 

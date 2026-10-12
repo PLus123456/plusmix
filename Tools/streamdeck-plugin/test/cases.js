@@ -1,5 +1,5 @@
 // 断言用例：node --test 和 JXA 共用。每个用例 run(assert) 只用 assert.equal / deepEqual / ok / match。
-import { COLORS, classifyMessage, commandFor, fpsFrom, inputName, keyStyle, outputOf, slotSublabel, svgDataURI, svgKey, tallyFor } from "../com.plusmix.switcher.sdPlugin/lib/tally.js";
+import { COLORS, classifyMessage, commandFor, fpsFrom, inputName, keyStyle, outputOf, pressFeedback, slotSublabel, svgDataURI, svgKey, tallyFor } from "../com.plusmix.switcher.sdPlugin/lib/tally.js";
 
 export const snapshot = {
   type: "snapshot",
@@ -155,6 +155,20 @@ export const cases = [
       assert.equal(svgDataURI("ab"), "data:image/svg+xml;base64,YWI=");
       assert.equal(svgDataURI("a"), "data:image/svg+xml;base64,YQ==");
       assert.equal(svgDataURI("abc"), "data:image/svg+xml;base64,YWJj");
+    },
+  },
+  {
+    name: "pressFeedback（W5-O / 提案 029）：命令被拒（WS error = HTTP 400 那一类，例如执行没选输入的 Stinger 槽）→ 闪警告；状态机忽略只记日志；成功不响",
+    run(assert) {
+      const rejected = pressFeedback("slot", { error: "转场 4 是 Stinger、还没选输入" });
+      assert.equal(rejected.alert, true, "收到 400 → showAlert");
+      assert.equal(rejected.level, "warn");
+      assert.match(rejected.log, /转场 4 是 Stinger、还没选输入/);
+      const ignored = pressFeedback("slot", { receipt: { applied: false } });
+      assert.equal(ignored.alert, false, "已是目标状态：不闪");
+      assert.equal(ignored.level, "info");
+      assert.deepEqual(pressFeedback("slot", { receipt: { applied: true, sequence: 3 } }), { alert: false, level: null, log: null });
+      assert.equal(pressFeedback("preview", { error: "没设输入编号" }).alert, true, "本地就判出来的错误同样闪");
     },
   },
   {
