@@ -41,7 +41,7 @@ PY
   整秒一一对应、谁也不缺，iso3 那个在 **500.000021 s（样本 24000001，峰值 1.12）**。是平局让它没被任何闪光选中：499.5 s 的闪光配了近 20 µs 的 499.000021，
   500.95 s 的配了 501.000021——上面的"592 个 vs 593 个"数的是配对里**用到的** click（`perFile[*].clickCount` 五个都是 599）。检测本身是逐样本滑的 1 ms 能量窗，
   没有按整秒或按 48 样本对齐的窗边；加了一条用例钉住（click 起点在 48 样本网格的 48 个相位上都按样本精确找到）。以锚取 click 之后 iso3 用到的 click 592 → 593，与别的文件一样。
-- **建议 4 重算了**（本分支 release frameprobe，命令与 gate4.sh 那一步相同：`frameprobe av out.mov out.iso1–4.mov --fps 60.0`，2 分 51 秒）：
+- **建议 4 重算了**（本分支 release frameprobe，命令与 gate4.sh 那一步相同：`frameprobe av out.mov out.iso1–4.mov --fps 60.0`，release 约 3 分钟）：
   A4 判定口径 **click 极差最大 0.187 ms**（事件 #1，[2] +0.104 / [3] −0.083 ms；与 G7 / W1-D3 那轮的 0.188 一样）、闪光极差 0.000、`passA4` true；
   半秒事件 10 个（#491–#500），含半秒的最大值也是 0.187 ms；与 G8 的原 JSON 比，只有这 10 个事件里 iso3 那一格变了（999.979 → 0.021 ms），其余 590 个事件逐值相同。
   不带 `--waive` 的 `scripts/gate3-report.py`（没改）用新 JSON 出 G8 的运行报告：rc 0、A4 行"click 时刻极差最大 0.187 ms ✅"（只在 scratchpad 里出，不入库）。
