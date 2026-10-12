@@ -4,16 +4,16 @@
 发现于：W5-O（prompt 112，分支 `w5-app-followups`）——每做完一项在这里补一条；做法与用例见 reports/w5-app-followups.md §1 / §2
 严重级：S3（文档与实现对不上：手册还在警告已经修掉的行为）
 
-每条：改了什么（提交号）→ 手册里哪几处要改（路径:行号按 main 22ff4d9）。
+每条：改了什么（提交号）→ 手册里哪几处要改（路径:行号按 main 22ff4d9）。分支 2026-10-12 中午起叠在 110 的 `p5-contracts-3`（9af1bf0）上（rebase 过，提交号是 rebase 之后的）。
 
-## 1. 外部显示 Esc 只关不删；设置页按钮改名"删除这一路"（S2，提交 03f4d25）
+## 1. 外部显示 Esc 只关不删；设置页按钮改名"删除这一路"（S2，提交 976b365）
 
 - 现在：外部显示窗口里按 Esc = 这一路 `enabled = false`（窗口收起，显示器 / 来源配置留着），与路由菜单里这块屏的"关闭"同一条命令；再点源按原配置开回来。
   设置 › 外部显示 每路底下的按钮从"关闭这路 / Close"改成 **"删除这一路 / Remove This Output"**（做的仍是删，与录制页同字、与路由菜单"删除 n …"同口径，都不问）；只关用这一节顶上的"启用"开关。
 - 手册：`docs/user/输出.md:165`（"最后是'关闭这路'按钮——它删掉这一路和它的设置……"→ 按钮名改"删除这一路"，警告可删）、`docs/user/输出.md:169`（"在外部显示窗口里按 Esc 也是删掉这一路"→ 改回"Esc 关闭这一路（配置留着）"）；
   英文 `docs/user/en/outputs.md:168`、`:173` 同。G4 / G7 清单写的"Esc 关闭窗口"现在对了（清单归检查点，不用改）。
 
-## 2. 设置页只写自己改的键，启动参数不再被存成本机设置（S2，提交 03f4d25）
+## 2. 设置页只写自己改的键，启动参数不再被存成本机设置（S2，提交 976b365）
 
 - 现在：常规 / 音频设备 / 远程控制 / 高级 页（以及 Tally 页）改一项只写那一项的键；`--no-api` / `--api-listen` / `--api-token` / `--audio-device` / `--record-min-free-mb` /
   `--record-fallback` / `--tally-port` 带进来的值只管这一次运行、不再顺手存下。监听地址 host:port 是一个键：只改了一半（例如远程控制页只换"仅本机 / 允许局域网"）时另一半按本机存的。
@@ -21,10 +21,17 @@
 - 手册：`docs/user/设置.md:113` 那句加粗的警告（"但这次运行里在设置窗改了……也会一起存下——带着启动参数跑的时候别改这几页"）删掉，改成"启动参数只管这一次运行，设置窗里改的项照常存"；
   英文 `docs/user/en/settings.md:113` 同。若别处写了 `defaults delete com.plusmix.switcher <键>` 这个绕法（KNOWN_ISSUES 那行的绕法列），手册里也一并删。
 
-  补（提交 7d3a0a3，安全复核）：只写变了的键时有一个例外——这次改动**放开**了 API（打开、或换成非本机地址），存下来的会是"开着 + 非本机 + 没令牌"，
+  补（提交 30667ff，安全复核）：只写变了的键时有一个例外——这次改动**放开**了 API（打开、或换成非本机地址），存下来的会是"开着 + 非本机 + 没令牌"，
   而内存里（页上看到的）有 `--api-token` 带进来的令牌：令牌跟着存（不然下次不带参数起就是局域网上没鉴权的 API）。手册"设置窗只存改了的那一项"后面可加半句"（放开到局域网时页上的令牌一起存）"。
 
-## 4. 没选输入的 Stinger 槽从外部执行被拒的提示（提案 029；P5-3 落契约，W5-O 做提示，提交 4ad412d + 25adb29）
+## 3. 监听菜单四项都能选（提案 026，用户 2026-10-12 允许 headphones；P5-3 落契约，W5-O 接菜单，提交 b20f21d）
+
+- 现在：Master 条耳机图标的"监听"菜单四项单选：**Master / Bus A / Bus B / 耳机总线**（耳机总线 = 只听每路送耳机的那一条；不再写"（现在）"，也没有灰着的那三项）。
+  选了发 `setMonitorSource`（与 API 同一条命令），勾跟着快照的 `audio.monitorSource`（API 改的也跟上）；新节目默认听 Master。独听 / PFL / AFL 时总是听独听的那一路。
+- 手册：`docs/user/概念.md:165`"这一版耳机里只能听耳机总线；'听 Master / Bus A / Bus B'列在那里但灰着（要音频引擎支持）"→ 按上面改；英文 concepts 对应一句同。
+  docs/api 里 `setMonitorSource` 的 bus 取值（0–3，含 headphones）P5-3 已重生成。**这一项要等 110 一起合。**
+
+## 4. 没选输入的 Stinger 槽从外部执行被拒的提示（提案 029；P5-3 落契约，W5-O 做提示，提交 ff8c526 + b81c2ac + b20f21d）
 
 - 现在：⌥1–⌥4 / 回车 / 格子"转场"执行一个**效果 = Stinger、还没选输入**的槽 → 状态机 / 校验器拒（P5-3），状态行一句"转场 n 是 Stinger、还没选输入——在转场列 ▾ 里选一路"
   （当前那组不对应槽时"当前转场是 Stinger、还没选输入——…"）；兼容层 `Transition n` 对这种槽回 **409 `NotConfigured: Transition n: …`**（与 `Stinger1` 没配好同口径）；
@@ -32,14 +39,14 @@
 - 手册：概念 / 转场一节里"Stinger 槽没选输入照常执行（= 延迟硬切）"之类的句子（若有）改成"被拒并提示"；快捷键页 ⌥1–⌥4 一行可加"Stinger 槽没选输入时不执行、状态行提示"；
   兼容层文档 Transition1–4 一行加"Stinger 槽没选输入回 409 NotConfigured"。**这一项要等 110 一起合**（契约那一半在 P5-3）。
 
-## 5. 输入分类颜色存进 InputConfig.color（提案 023 四，提交 57bb817）
+## 5. 输入分类颜色存进 InputConfig.color（提案 023 四，提交 4d9a090）
 
 - 现在：格子右键"分类 ▸"发 `setInputColor`，颜色是每路输入的 `InputConfig.color`——API 全量状态（`state.inputs[].color`）看得到，API / 脚本改的颜色格子也跟上；
   分类**名字**仍存节目文件的 layout（`inputCategoryNames`）。老节目（颜色在 layout 的 `inputCategories` 里）打开 / 从 LastSession 恢复时自动搬一次，打开不算未保存。
 - 手册：`docs/user/输入.md:129`"这一版分类只在 App 里，API、多画面、控制面板看不到"→ 改成"颜色进节目里每路输入的配置（API 的全量状态里是 `color`），名字只在 App 里"；
   多画面标签色点、Stream Deck 按钮颜色**还没做**（归各自会话），别写成已有。docs/api 若列 InputConfig 字段，`color` 那行照契约写。
 
-## 6. 压缩器简单模式（提案 024 (b)）与限幅天花板（提交 f8e1e41）
+## 6. 压缩器简单模式（提案 024 (b)）与限幅天花板（提交 b8a29fc）
 
 - 现在：音频设置窗 › 压缩 页顶上选类型：**压缩器（阈值 + 比例）**（新开默认，自写压缩器 `compressor`：阈值 −60…0、比例 1…20 : 1、补偿 0…24 dB，"高级"里拐点 0…24 dB、
   起音 0.1–200 ms、释放 10 ms–3 s；不用前瞻、不给这条加延迟，页上"延迟自测：0 帧（0.00 ms）"是引擎装上时用冲激法量的）或**动态处理器（阈值 + 压缩量）**（原来那个，
@@ -47,7 +54,7 @@
 - 手册：`docs/user/概念.md:153`"压缩器没有固定比例……；限幅器的天花板固定 0 dBFS"与 `:176`–`:177` 的表格（压缩 / 限幅两行）按上面改；
   `docs/user/故障排查.md:85` 与 `概念.md:152` 的"压缩 / 限幅有 5–35 ms 处理延迟"——压缩器（新）不加延迟，动态处理器 / 限幅器照旧，句子分开写。
 
-## 8. S3 一批（提交 25adb29）
+## 8. S3 一批（提交 b81c2ac + 9c922a6）
 
 - **只改总线声道对算待应用**：`docs/user/设置.md:62`"只改声道对时这个按钮不亮……下次起引擎才用上"→ 改成"改了声道对也记成待应用、点'应用并重起引擎'用上"；
   `设置.md:21` 的"需重起引擎"列表里"音频设备"可写成"音频设备 / 声道"。借 Master 声道当场生效、不用重起（G8b 起就是这样）。
@@ -63,7 +70,7 @@
 - **英文格子 Transition**：没换字，第一行 Transition / Cut 按标题宽度分，中档 / 大档不再截成 "Transiti…"（小档 160 宽仍可能截，按钮有提示）：en/inputs.md 的格子表不用改，
   英文主窗口截图重拍时可以看到全字。
 
-## 7. 兼容层 X51：31 个上游真有的函数名回 501（提交 18d5b45）
+## 7. 兼容层 X51：31 个上游真有的函数名回 501（提交 94ff3be）
 
 - 现在：ActivatorRefresh、AudioChannelMatrixApplyPreset、AudioMixerShowHide、StreamingSetKey / URL / Username / Password、ChangeCountdown、SuspendCountdown、ResumeRender、
   AutoPause / AutoPlay / AutoPlayFirst / AutoPlayNext / AutoRestart 一族 12 个、ColourCorrectionAuto / Reset、MoveMultiViewOverlay、NDISelectSourceByName / ByIndex、
