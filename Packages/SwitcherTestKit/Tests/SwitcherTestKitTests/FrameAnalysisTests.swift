@@ -389,6 +389,12 @@ final class FrameAnalysisTests: XCTestCase {
         let allHalf = FrameAnalysis.avMulti(files: (0..<2).map { a4File("h\($0)", flashTicks: (1..<6).map { $0 * 60 + 30 }) })
         XCTAssertEqual(allHalf.halfSecondEventCount, 5)
         XCTAssertNil(allHalf.passA4)
+        // 判的是"离半秒 ±1 帧"，不是"离锚 ≥ 0.5 s − 1 帧"：配对窗放大到 1 s、那一秒的 click 缺了，闪光离锚 0.7 s 也不算半秒
+        var gap = (0..<2).map { a4File("g\($0)", flashTicks: [3 * 60 + 18]) }   // 闪光 3.3 s
+        for i in gap.indices { gap[i].clicks.removeAll { abs($0.timeSeconds - 3) < 0.01 } }
+        let wide = FrameAnalysis.avMulti(files: gap, maxMatchSeconds: 1.0)
+        XCTAssertEqual(wide.events.map { $0.clickTimes[0] ?? -1 }, [4])
+        XCTAssertEqual(wide.events.map(\.halfSecond), [false])
     }
 
     /// W1-A5 交付 3：G8 里 iso3"第 500 s 的 click 没检出"其实检出了——探针（只读音轨、同一个 ClickDetector）五个文件都是 599 个 click、

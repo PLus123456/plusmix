@@ -689,7 +689,7 @@ public enum FrameAnalysis {
             } else if let f = flashes.compactMap({ $0 }).first {
                 reference = (f, f.rounded())
             }
-            let half = reference.map { abs($0.flash - $0.click) >= 0.5 - frameDurationSeconds - 1e-9 } ?? false
+            let half = reference.map { abs(abs($0.flash - $0.click) - 0.5) <= frameDurationSeconds + 1e-9 } ?? false
             let fv = flashes.compactMap { $0 }, cv = clicks.compactMap { $0 }
             let fs = fv.count >= 2 ? (fv.max()! - fv.min()!) * 1000 : nil
             let cs = cv.count >= 2 ? (cv.max()! - cv.min()!) * 1000 : nil
