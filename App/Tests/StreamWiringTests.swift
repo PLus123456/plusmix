@@ -76,4 +76,26 @@ final class StreamWiringTests: XCTestCase {
         XCTAssertEqual(undecodable, 0)
         XCTAssertEqual(dup, 0, "60 fps 合成源 → 60 fps 节目不该有重复帧")
     }
+
+    /// W2-D4：推流鉴权失败（本地 MediaMTX 开鉴权、查询串密码错）→ 第一次就停：状态行一句 notice.streamAuthFailed；底栏深红（W5-B）；
+    /// Stats 那一项 failed / attempt 0 / last_error = 推流模块那一句（状态面板事件"失败：原因"读它，W5-N）；不再重连。
+    func testStream_authFailedStopsWithStatusLineNotice() throws {
+        try MediaMTXHarness.requireAvailable()
+        let auth = ["MTX_AUTHINTERNALUSERS_0_USER": "pub", "MTX_AUTHINTERNALUSERS_0_PASS": "secret", "MTX_AUTHINTERNALUSERS_0_PERMISSIONS_0_ACTION": "publish",
+                    "MTX_AUTHINTERNALUSERS_1_USER": "any", "MTX_AUTHINTERNALUSERS_1_IPS": "127.0.0.1", "MTX_AUTHINTERNALUSERS_1_PERMISSIONS_0_ACTION": "api"]
+        let mtx = try MediaMTXHarness(recordDir: FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/stream-auth-failed"), environment: auth)
+        defer { mtx.stop() }
+        let session = try AppTest.freshSession()
+        let bar = AppTest.controller.windowController.bottomBar
+        session.send(.addOutput(config: OutputState(number: 2, kind: .stream, name: "推流", enabled: false, settings: OutputSettings(
+            source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: StreamSettings(url: mtx.rtmpURL("s1") + "?user=pub&pass=wrong")))))
+        session.send(.startStream(output: 2))
+        let notice = "推流 2 鉴权失败（用户名或密码不对），已停止：在推流页改对后点底栏「推流」重试"
+        XCTAssertTrue(AppTest.waitUntil(10) { session.lastNotice == notice }, "状态行：\(session.lastNotice ?? "")")
+        let e = bar.encoderEntry(forOutput: 2)
+        XCTAssertEqual([e?.state, e?.lastError], ["failed", "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed"])
+        XCTAssertEqual(e?.attempt, 0)
+        XCTAssertEqual(bar.streamSummary.severity, .error, "底栏深红：\(bar.streamSummary.title)")
+        XCTAssertEqual(session.outputs.streams[2]?.stream.counters.connectAttempts, 1, "鉴权失败不重连")
+    }
 }
