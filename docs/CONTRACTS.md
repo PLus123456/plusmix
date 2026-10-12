@@ -210,7 +210,7 @@ currentSlot = 当前那组（type / durationTicks / wipe / stinger）对应哪�
 - **没选输入的 Stinger 不执行（提案 029，用户 2026-10-12 定，P5-3 落地）**：判定只有一条 `TransitionSlot.isStingerWithoutInput`（type = stinger 且 stinger.input = nil；出厂槽 4 就是）。
   `useTransitionSlot(slot, start: true)` 遇到这种槽、`autoTransition` 遇到要执行的当前那组是这种（当前槽是这种槽，**或 setTransition / setTransitionParams 直接给的、currentSlot = nil 的也算**——否则从这条路绕过去还是一次延迟硬切）：
   校验器 HTTP 400（文案"转场 n 是 Stinger、还没选输入"，当前那组不对应槽时"当前转场是 Stinger、还没选输入"）、reducer 原样返回（applied = false；不选中、不开始）。
-  这两个条件只随命令变（槽的配置 / 空闲时的当前那组），所以入口就拒，与 `setMonitorSource` 当时的做法一样、`testValidator_agreesWithReducer` 两边一致；autoTransition 在转场**进行中**校验器不判（本来就由 reducer 忽略，完成那一拍当前那组还可能按槽重拷）。
+  这两个条件只随命令变（槽的配置 / 空闲时的当前那组），所以入口就拒（与 `setOutputEnabled` 对录制 / 推流输出的做法一样），`testValidator_agreesWithReducer` 两边一致；autoTransition 在转场**进行中**校验器不判（本来就由 reducer 忽略，完成那一拍当前那组还可能按槽重拷）。
   不受影响：`useTransitionSlot(start: false)`（只选中，之后 T-bar 用）、`cut`（原子对调，不看类型）、`fade`（总是 Fade）、`tbar`。**T-bar 推这样的当前那组（P5-3 核对）**：reducer 照收（progress = 推杆位置、source = tbar，到 1 提交、拉回 0 取消，与别的类型同一条路）；
   渲染器（`TransitionRenderer.stingerShowsNewUnder`）在 round(progress × durationTicks) ≥ max(cutAtTick, 1) 时把底换成 PVW、不叠任何东西——即推过换底拍对应的那一格画面就整个换成新画面，拉回去又换回旧的；cutAtTick ≥ durationTicks 时推的过程中不换、到 1 提交才换；durationTicks = 0 时一推就换。
   控制层 / 兼容层 / Stream Deck 的提示（feedback、Transition n → 409、showAlert）归 W5-O（prompt 112）；App 界面三处本来就先弹输入选择（X18），不变。
