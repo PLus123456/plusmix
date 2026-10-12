@@ -146,6 +146,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     // 提案 022：start 成功那一刻（uptime_s 的起点）与最近一次错误文案（断线 / 连接失败 / 放弃；下一次 start 清）
     private let startedAt = Mutex<HostTime?>(nil)
     private let lastError = Mutex<String>("")
+    // W2-D4：停在 failed 的类型化原因（下一次 start 清）
+    private let failureReason = Mutex<StreamFailure?>(nil)
 
     /// 用 VideoToolbox 编码器。
     public convenience init(configuration: Configuration, transportFactory: any StreamTransportFactory) throws {
@@ -200,6 +202,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     public var isRunning: Bool { stateLock.withLock { running } }
     /// 最近一次退出发布循环的原因（诊断）。
     public var lastExitReasonDescription: String { lastExitReason.withLock { $0 } }
+    /// 停在 failed 的原因（类型化，W2-D4：服务器拒绝鉴权 / 超过尝试次数）；没停在 failed 为 nil，下一次 start() 清。
+    public var failure: StreamFailure? { failureReason.withLock { $0 } }
 
     /// Stats.encoder[i] 的一项：skipped = 本路编码器的 E1 计数；bitrate = 窗口内交给传输层的 bit/s；
     /// frames / dropped / reconnects / state / disconnects / attempt 按提案 001 / 002 / 022（`StreamCounters.statsEntry`）；

@@ -173,6 +173,16 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         try? await connection.close()
     }
 
+    /// 服务器回的状态是不是"拒绝鉴权"（W2-D4）；不是返回 nil。
+    static func authFailure(code: String, description: String) -> StreamAuthFailure? {
+        nil
+    }
+
+    /// 服务器回的状态 → StreamTransportError（W2-D4）。
+    static func error(code: String, description: String, phase: String) -> StreamTransportError {
+        .connectFailed(phase)
+    }
+
     /// HaishinKit 的错误 → 日志里看得懂的一句：服务器拒绝时给它的 code / description（鉴权失败单独点明），其余原样；地址一律打码。
     static func describe(_ error: any Error) -> String {
         if case RTMPConnection.Error.requestFailed(let response) = error, let status = response.status {

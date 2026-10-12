@@ -89,7 +89,7 @@ public enum StreamState: Hashable, Sendable, CustomStringConvertible {
     case stopping
     /// 已停止。
     case stopped
-    /// 放弃（超过最大尝试次数）。
+    /// 放弃：超过最大尝试次数，或服务器拒绝鉴权（W2-D4，第一次就停）。参数是给人看的原因（= last_error）；类型化的原因见 `StreamOutput.failure`。
     case failed(String)
 
     /// 不带参数的状态名（提案 002 的 Stats.encoder[i].state 用它）：idle / connecting / publishing / backoff / stopping / stopped / failed。
@@ -116,6 +116,14 @@ public enum StreamState: Hashable, Sendable, CustomStringConvertible {
         case .failed(let m): return "failed(\(m))"
         }
     }
+}
+
+/// 推流停在 failed 的原因（类型化，W2-D4）：`StreamOutput.failure`。App 按它给提示，不按 `StreamState.failed` 里的文字匹配。
+public enum StreamFailure: Hashable, Sendable {
+    /// 服务器拒绝鉴权：第一次就停、不退避重试。
+    case authentication(StreamAuthFailure)
+    /// 连续连不上，超过 `ReconnectPolicy.maxAttempts`。
+    case retriesExhausted
 }
 
 /// 原子计数器（发送 Task / 编码器回调线程写，任意线程读）。`snapshot()` 逐字段 relaxed 读，够统计用。

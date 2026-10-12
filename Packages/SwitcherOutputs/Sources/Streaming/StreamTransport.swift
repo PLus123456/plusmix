@@ -28,12 +28,38 @@ public enum StartAlignment: Hashable, Sendable {
     case nearestPacket(prerollPackets: Int)
 }
 
+/// 服务器拒绝鉴权的原因（W2-D4）。类型化：StreamOutput 按它"第一次就停在 failed、不再退避重试"（重试密码也不会自己变对，
+/// 每次还白打服务器几个连接），App 按它给提示——都不按错误文字匹配。传输层从协议字段认：RTMP 的状态码，加上 Adobe 那套写在描述里的 reason / authmod 参数。
+public enum StreamAuthFailure: Hashable, Sendable {
+    /// 用户名或密码不对：Adobe 挑战的应答被拒（connect 回 NetConnection.Connect.Rejected，描述里 reason=authfailed）。
+    case badCredentials
+    /// 用户名不对：Adobe 第 2 轮服务器回 reason=nosuchuser。
+    case noSuchUser
+    /// publish 被拒：NetStream.Publish.Unauthorized（MediaMTX 一类按查询串 ?user=&pass= 鉴权的服务器，账号不对或没给）。
+    case publishUnauthorized
+    /// 服务器要 Adobe 鉴权、地址里没写账号（connect 回 Rejected，描述里有 authmod=adobe、没有 reason）。
+    case credentialsRequired
+    /// 服务器要的鉴权方式不支持（authmod=llnw，Limelight）。
+    case unsupportedMethod
+
+    /// last_error / 日志那一句的开头（后面接"：" + 服务器回的原文）。
+    public var summary: String {
+        switch self {
+        case .badCredentials, .noSuchUser, .publishUnauthorized: return "鉴权失败（用户名或密码不对）"
+        case .credentialsRequired: return "鉴权失败（服务器要用户名和密码，地址里没写）"
+        case .unsupportedMethod: return "鉴权失败（服务器要的鉴权方式不支持）"
+        }
+    }
+}
+
 /// 传输层错误。
 public enum StreamTransportError: Swift.Error, Equatable {
     case connectFailed(String)
     case connectTimedOut
     case notConnected
     case sendFailed(String)
+    /// 服务器拒绝鉴权（W2-D4）。message = "鉴权失败（用户名或密码不对）：<服务器回的状态码与描述>"（打过码、不带密码），StreamOutput 原样写进 last_error。
+    case authenticationFailed(StreamAuthFailure, message: String)
 }
 
 /// 协议层抽象：连接 + 封装，接已编码样本。StreamOutput 的发送 Task 串行调用（一次只有一个 await 在途）。

@@ -115,6 +115,49 @@ final class StreamAuthMediaMTXTests: XCTestCase {
         try pushAndCheck(o, scene: scene, mtx: mtx, path: "s1", ticks: 600)
     }
 
+    /// W2-D4（查询串密码错）：开鉴权的 MediaMTX、地址 ?user=mtxpub&pass=错的 → 第一次就停在 failed。MediaMTX 先随机等 0–4 s 才回
+    /// NetStream.Publish.Unauthorized（比 HaishinKit 的 publish 请求超时 3 s 晚的那一次也得认出来）；之后照喂 10 s 帧，MediaMTX 日志里
+    /// 始终只有这 1 个连接（原来按退避 1、2、4 s 会再连 3 次）；Stats 项 state = failed、attempt 0、dropped 0、
+    /// last_error = "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed"（不带密码）。
+    /// 改对密码之后（新的 StreamOutput——App 的"点底栏重试"也是新对象）照常推上、last_error 空。
+    func testE_streamAuth_mediamtxQueryWrongPassword_failsFirstTimeNoRetry() throws {
+        let mtx = try startInstance(test: "auth-query-wrong", auth: true)
+        let scene = try StreamScene()
+        let o = try scene.makeOutput(name: "auth-query-wrong", url: mtx.rtmpURL("s1") + "?user=\(Self.mtxUser)&pass=wrong-\(Self.mtxPass)")
+        outputs = [o]
+        let t0 = Date()
+        try o.start()
+        XCTAssertTrue(waitUntil(timeout: 6) { if case .failed = o.state { return true } else { return false } }, "\(o.state)")
+        print("查询串密码错：\(String(format: "%.2f", Date().timeIntervalSince(t0))) s 进 failed")
+        let before = o.counters
+        try scene.feed(outputs: [o], ticks: 0..<600)
+        let c = o.counters, e = o.statsEntry(previous: nil, windowSeconds: 1)
+        print("查询串密码错：\(e.lastError)；\(c)")
+        XCTAssertEqual(c.connectAttempts, 1, "鉴权失败不重试")
+        XCTAssertEqual(Self.connectionsOpened(mtx), 1, "MediaMTX 10 s 里只见过 1 个连接")
+        XCTAssertEqual(o.failure, .authentication(.publishUnauthorized))
+        XCTAssertEqual([e.state, e.lastError], ["failed", "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed"])
+        XCTAssertEqual(e.attempt, 0)
+        XCTAssertEqual(e.dropped, 0, "没推上过：不算网络丢帧")
+        XCTAssertEqual(c.framesReceived, before.framesReceived, "failed 之后喂的帧不进编码器")
+        o.stop()
+        XCTAssertEqual(o.state, .stopped)
+        // 改对密码：新对象照常推上
+        let fixed = try scene.makeOutput(name: "auth-query-fixed", url: mtx.rtmpURL("s1") + "?user=\(Self.mtxUser)&pass=\(Self.mtxPass)")
+        outputs.append(fixed)
+        try fixed.start()
+        XCTAssertTrue(waitUntil(timeout: 10) { fixed.state == .publishing }, "\(fixed.state)")
+        XCTAssertEqual(fixed.statsEntry(previous: nil, windowSeconds: 1).lastError, "")
+        XCTAssertNil(fixed.failure)
+        fixed.stop()
+    }
+
+    /// MediaMTX 日志里 RTMP 连接"opened"的行数（服务器那边看见几次连接）。
+    private static func connectionsOpened(_ mtx: MediaMTXInstance) -> Int {
+        let log = (try? String(contentsOf: mtx.recordDir.appendingPathComponent("mediamtx-\(mtx.rtmpPort).log"), encoding: .utf8)) ?? ""
+        return log.split(separator: "\n").filter { $0.contains("[RTMP] [conn") && $0.hasSuffix("opened") }.count
+    }
+
     /// 服务器 connect 阶段不要鉴权（MediaMTX 不开鉴权）时地址带 user:pass@：第 1 轮就被接受，交给 HaishinKit 的是不带 userinfo 的地址，照常推。
     /// 推 6 s：MediaMTX 连上之后约 3 s 才认出音视频两轨、开始录（之前的照样从头录进去），推 2 s 就停的话它一个文件都不写。
     func testE_streamAuth_userinfoToServerWithoutConnectAuth_publishes() throws {
