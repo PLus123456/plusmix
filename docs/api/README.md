@@ -87,7 +87,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 | `jitter_ms` | 窗口内渲染线程唤醒时刻 − 理想拍点的最大值（V3） |
 | `per_input{n: {fps, dup, drop, latency_ms, latency_max_ms}}` | 每路输入：窗口内推入帧数 / 秒；同一帧被合成两次以上的累计；到达但从未被合成的累计；窗口内内部延迟（入口打戳 → 交给第一个消费者）的平均 / 最大毫秒 |
 | `encoder[]` | 每个编码类输出一项：`output`（输出编号，0 = 填数方没给）、`skipped`（编码器跟不上而丢的帧，E1）、`bitrate`（窗口平均 bit/s）、`frames`（写进文件 / 交给传输层的帧累计）、`dropped`（编码后落地前丢的：录制 = 写入器不接的，推流 = 网络丢帧 E9，NDI = 队列满丢的）、`disk_free_mb`（录制目录所在卷剩余 MB，非录制 0）、`reconnects`（推流重连成功次数）、`connections`（NDI 当前接收方数，其余 0）、`state`；
-`uptime_s`（这一路本次运行了多少秒，从开始那一刻算，推流含握手 / 退避 / 重连期间；idle / stopped / failed 为 0）、`disconnects`（推流连上之后掉线的次数累计，录制 / NDI 为 0；断了没连回来的只在这里看得出）、`last_error`（最近一次错误的原文，空 = 没出过错，下一次开始时清空）、`attempt`（推流这一轮连接是第几次尝试，从 1 起；在推 / 空闲 / 停止时 0）——App 的底栏时长、"连接中 / 重连中（第 n 次）"和推流 / 录制状态窗都读这几个 |
+`uptime_s`（这一路本次运行了多少秒，从开始那一刻算，推流含握手 / 退避 / 重连期间；idle / stopped / failed 为 0）、`disconnects`（推流连上之后掉线的次数累计，录制 / NDI 为 0；断了没连回来的只在这里看得出）、`last_error`（最近一次错误的原文，空 = 没出过错，下一次开始时清空）、`attempt`（推流这一轮连接是第几次尝试，从 1 起；在推 / 空闲 / 停止 / failed 时 0）——App 的底栏时长、"连接中 / 重连中（第 n 次）"和推流 / 录制状态窗都读这几个 |
 | `encoder[].state` | 录制 idle / recording / stopping / stopped / failed；推流 idle / connecting / publishing / backoff / stopping / stopped / failed；NDI publishing / idle / **unavailable**（SDK 不在）/ **failed**（SDK 在但起不来） |
 | `display[]` | 每个显示类输出一项（`output` 编号，主界面监视器用 0）：`kind` ∈ externalDisplay / virtualCamera / multiviewWindow / monitor；`frames` 已呈现 / 已送出累计；`dropped` 在呈现 / 发布时没赶上的；`undelivered` 不在呈现 / 发布（显示器不在、扩展没连上、窗口收起）时没送出去的；`state` ∈ idle / presenting / noDisplay / waitingExtension / publishing / stopped / failed |
 | `audio{dropouts, underruns, discontinuities, meters}` | 输出回调超时累计、缓冲欠载累计、Master 流上相邻样本跳变 > 0.5 满幅的次数（流式启发式，信息项）；`meters.buses[{bus, peak_db, rms_db, true_peak_db, lufs_m, lufs_s, lufs_i, lra}]`（顺序 master / busA / busB / headphones，dB 下限 −120）、`meters.inputs{n: {peak_db, rms_db}}` |
@@ -119,6 +119,8 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 - **监听同步**：见上面总线那一条；录制文件从这条延后的输出时间线的 0 起（开头没有黑帧）。
 - **`setMonitorSource {bus}`**：耳机出口放哪条总线——`0` Master（默认）/ `1` Bus A / `2` Bus B / `3` 耳机总线自己（提案 026 追加、P5-3 起允许，只听各路"送耳机"的那些；之前的版本回 400）；调音台里有独听时耳机出口总是放独听的路。快照里是 `audio.monitorSource`。
 - **起不来的录制 / 推流路**：`stats.encoder[]` 里那一项报 `failed`（不是 `idle`），原因在那一项的 `last_error`（App 的界面提示与日志里也有）。
+- **推流被服务器拒绝鉴权**：被拒的那一次就停在 `failed`（`attempt` 0），不按退避重试；`last_error` 以 `鉴权失败（用户名或密码不对）`、`鉴权失败（服务器要用户名和密码，地址里没写）` 或 `鉴权失败（服务器要的鉴权方式不支持）` 开头，冒号后面是服务器回的原文（不带密码；地址里写了 Adobe 账号而服务器要 Limelight 时是一句"服务器要 Limelight（authmod=llnw）"）。
+  改对之后要重新开始这一路：App 里先 `stopStream`，等 `stats.encoder[]` 里这一路不再是 `failed` 再 `startStream`（两条紧挨着发，App 按 60 Hz 看快照、可能看不到中间那一下，就什么也不做），或点底栏推流主体；改设置本身不会让它重试。其余连不上 / 断线照旧在 `connecting` / `backoff` 之间一直重试。
 
 ## 7. 版本
 

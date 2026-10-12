@@ -74,6 +74,8 @@
 - 代码：`Packages/SwitcherOutputs/Sources/Streaming/StreamOutput.swift:396`、`:403`–`:404`，`StreamTransport.swift:32`–`:37`。
 - 建议：给 `StreamTransportError` 加 `CustomStringConvertible`（connectFailed / sendFailed 只取那段字符串），日志与 last_error 都干净；111（W2-D4）正改这一块，可以顺手。
 - 手册：输出 / outputs 状态窗"最后错误"一条、鉴权一节、故障排查推流一行照实写了整行的样子。
+- **111（w2-stream-4，0dd3e4a）之后**：服务器拒绝鉴权那一种已经是干净的一句（`鉴权失败（用户名或密码不对）：<服务器原文>`，传输层自己拼好、不经 `"\(error)"`）；
+  连不上 / 断线照旧是 `连接失败：connectFailed("…")` / `断线：sendFailed("…")` 这样的原样，本条剩这一半。手册的鉴权部分已按 111 改（`w4-docs-3` 跟 111 的那个提交），状态窗"最后错误"一条拿连不上当带枚举原样的例子。
 
 ## 9. 查询串鉴权只认几个固定的参数名
 
@@ -124,3 +126,14 @@
 - 代码：`App/Sources/UI/AddInputSheet.swift`（112 分支 d38cbf5 的 :503 附近按横幅类型选小字）、两份 strings 的 `addInput.addNote.*`。
 - 建议：SDK 没编进来的两种换一句"加上后一直显示错误（这一版不支持）"或不给"添加"小字。
 - 手册：输入 / inputs"横幅"下面那句注明了这两种时小字不成立。
+
+## 15. 推流鉴权失败停下之后（111 合入后），推流页与编码详情的两句文案不成立
+
+- 现象（main + 111 0dd3e4a）：服务器拒绝鉴权、推流停在 failed 后，`OutputRuntime.failureReason` 对它返回"推流 n 不再重连：…"，推流页那一段于是按"起不来"显示——不锁、写"起不来：…"、给"重试 / 停用这一路"，
+  并且照样显示红字 `outputSettings.stream.failedHint`"改好地址 / 密钥（回车或离开输入框）会自动重试；也可以先停用这一路。"——对这一种不成立：推流对象还在运行表的 `streams` 里，
+  `reconcile` 只对 `failed` 表里的路做"设置变了就重试"（`retryAfterSettingsChange`），改地址 / 账号什么都不发生，要点"重试"或底栏主体（状态行那句提示本身说的是"改对后点底栏「推流」重试"，是对的）。
+  另：编码详情 `outputSettings.stream.reconnect`"重试间隔最长 n s（一直重试）"在鉴权失败时也不再是"一直"。
+- 代码：`App/Sources/Settings/OutputPagesViews.swift:398`–`:404`（红字与两个按钮）、`App/Sources/Engine/OutputRuntime.swift` 的 `reconcile` / `retryAfterSettingsChange` / `failureReason`、两份 strings 的 `outputSettings.stream.failedHint` / `outputSettings.stream.reconnect`。
+- 建议：红字按原因分两句（起不来那一类照旧；鉴权停下的写"改对后点「重试」"），或让鉴权停下的那一路也走"设置变了就重试"；编码详情括号里补"鉴权失败除外"。
+  同一处还有 111 报告 §4 第 1 条交用户定的"底栏写'起不来'、状态窗写'失败'"——改字时一起定。
+- 手册：输出 / outputs"起不来的那一段不锁"一条、"推流鉴权"一节、故障排查推流鉴权一行照实写了"改好不会自动重试，点'重试'"。
