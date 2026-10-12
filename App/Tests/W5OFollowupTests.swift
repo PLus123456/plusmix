@@ -78,6 +78,7 @@ final class W5OFollowupTests: XCTestCase {
         let savedSettings = controller.settings
         addTeardownBlock { @MainActor in
             AppTest.controller.panels.closeAll()
+            AppTest.pump(seconds: 0.1)   // 音频设备模型的提交是异步的：落地之后再还原
             for (key, value) in saved {
                 if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
             }
@@ -134,8 +135,9 @@ final class W5OFollowupTests: XCTestCase {
 
     /// AppSettings.save(to:changedFrom:)：只写与内存里那份不同的键；监听地址 host:port 是一个键，只变了一半时另一半按本机存的（--api-listen 带进来的那一半不存）。
     func testW5O2_saveChangedKeysKeepsStoredHalfOfListenAddress() throws {
-        let suite = "com.plusmix.switcher.tests.w5o-\(UUID().uuidString)"
+        let suite = "com.plusmix.switcher.tests.w5o-scratch"   // 固定名字、用前用后都清（UUID 名会在 ~/Library/Preferences 留一堆小 plist）
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set("127.0.0.1:8765", forKey: AppSettings.Keys.apiListen)
         let launched = AppSettings.load(arguments: ["--api-listen", "127.0.0.1:9900", "--tally-port", "9911"], defaults: defaults)
@@ -159,6 +161,7 @@ final class W5OFollowupTests: XCTestCase {
         // 下次不带参数起就成了局域网上没令牌的 API。存下来的会是"开着 + 非本机 + 没令牌"时，令牌跟着存
         let tokenSuite = suite + ".token"
         let tokenDefaults = try XCTUnwrap(UserDefaults(suiteName: tokenSuite))
+        tokenDefaults.removePersistentDomain(forName: tokenSuite)
         defer { tokenDefaults.removePersistentDomain(forName: tokenSuite) }
         let withToken = AppSettings.load(arguments: ["--api-token", "from-command-line"], defaults: tokenDefaults)
         var unrelated = withToken
@@ -174,7 +177,8 @@ final class W5OFollowupTests: XCTestCase {
         XCTAssertEqual(reloaded.apiConfiguration?.host, "0.0.0.0")
         XCTAssertEqual(reloaded.apiConfiguration?.token, "from-command-line", "下次不带参数起：局域网 + 令牌")
         // 整份写回（导入 / 恢复默认后重读、用例还原）照旧写全部
-        let all = UserDefaults(suiteName: suite + ".all")!
+        let all = try XCTUnwrap(UserDefaults(suiteName: suite + ".all"))
+        all.removePersistentDomain(forName: suite + ".all")
         defer { all.removePersistentDomain(forName: suite + ".all") }
         launched.save(to: all)
         XCTAssertEqual(all.object(forKey: AppSettings.Keys.tallyPort) as? Int, 9911)
@@ -398,15 +402,18 @@ final class W5OFollowupTests: XCTestCase {
         let saved = controller.settings
         addTeardownBlock { @MainActor in
             AppTest.controller.panels.closeAll()
+            AppTest.pump(seconds: 0.1)   // 音频设备模型的提交是异步的：落地之后再还原
             AppTest.controller.updateSettings(saved)
         }
         controller.panels.showSettings(page: .audioDevice)
         let prefs = try XCTUnwrap(controller.panels.settingsWindow).model.preferences
-        XCTAssertNil(session.settings.busOutputMap, "测试宿主起引擎时没带映射")
+        let running = session.settings.busOutputMap   // 测试宿主一般是 nil（跟设备默认）；按跑着的这份比
+        XCTAssertEqual(prefs.audioOutput.storedMap, running)
         XCTAssertFalse(prefs.pendingRestart.contains(.audioDevice))
-        prefs.audioOutput.setPair(.busA, first: 0)
+        let busB = prefs.audioOutput.map.busB
+        prefs.audioOutput.setPair(.busB, first: busB == 4 ? 6 : 4)
         XCTAssertTrue(AppTest.waitUntil(2) { prefs.pendingRestart.contains(.audioDevice) }, "只改声道对：待应用（\(prefs.pendingRestart)）")
-        prefs.audioOutput.resetToDeviceDefault()
+        if running == nil { prefs.audioOutput.resetToDeviceDefault() } else { prefs.audioOutput.setPair(.busB, first: running?.busB) }
         XCTAssertTrue(AppTest.waitUntil(2) { !prefs.pendingRestart.contains(.audioDevice) }, "改回跟跑着的一样：不再待应用")
         prefs.audioOutput.borrowMasterForMonitor = true
         XCTAssertTrue(AppTest.waitUntil(2) { session.audio.engine.borrowMasterForMonitor }, "借 Master 当场落到跑着的引擎")
@@ -573,5 +580,70 @@ final class W5OFollowupTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(cell.cutButton.frame.width + 0.5, cell.cutButton.intrinsicContentSize.width, "\(size)：Cut 也放得下")
             cell.removeFromSuperview()
         }
+    }
+
+    // MARK: 4. 没选输入的 Stinger 槽从外部执行被拒的提示（提案 029；拒收本身在 P5-3）
+
+    /// ⌥4（出厂槽 4 = Stinger、没选输入）被拒：状态行"转场 4 是 Stinger、还没选输入——在转场列 ▾ 里选一路"，转场没开始；
+    /// 当前槽是这种槽时按格子上的"转场"（界面命令通道）同一句。选了输入之后照常执行。
+    func testW5O4_stingerSlotRefusalShowsStatusLineNotice() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 3)
+        XCTAssertTrue(session.state.transition.slots[3].isStingerWithoutInput, "出厂槽 4")
+        let expected = L("feedback.stingerSlotWithoutInput", 4)
+        XCTAssertEqual(expected, "转场 4 是 Stinger、还没选输入——在转场列 ▾ 里选一路")
+        let bar = AppTest.controller.windowController.bottomBar
+        XCTAssertTrue(session.control.hotkeys.handle(try XCTUnwrap(KeyCombo("alt+4"))))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.lastNotice == expected }, "\(session.lastNotice ?? "nil")")
+        XCTAssertEqual(bar.displayedNotice, expected, "状态行")
+        XCTAssertFalse(session.state.transition.isActive, "没执行")
+        // 格子"转场" = 执行当前槽：当前槽选成 4 再按
+        session.send(.useTransitionSlot(slot: 4, start: false))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.currentSlot == 4 })
+        session.send(.setProgram(input: 1))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.program == 1 })
+        AppTest.pump(seconds: 0.1)
+        bar.showNotice("")
+        let cell = try XCTUnwrap(AppTest.controller.windowController.inputStrip.cells[2])
+        cell.transitionButton.performClick(nil)
+        XCTAssertTrue(AppTest.waitUntil(2) { bar.displayedNotice == expected }, "格子转场被拒：\(bar.displayedNotice)")
+        XCTAssertFalse(session.state.transition.isActive)
+        XCTAssertEqual(session.state.program, 1, "PGM 没换")
+        // 选了输入：照常执行
+        var slot4 = session.state.transition.slots[3]
+        slot4.stinger.input = 3
+        session.send(.setTransitionSlot(slot: 4, config: slot4))
+        XCTAssertTrue(AppTest.waitUntil(2) { !session.state.transition.slots[3].isStingerWithoutInput })
+        XCTAssertTrue(session.control.hotkeys.handle(try XCTUnwrap(KeyCombo("alt+4"))))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.isActive || session.state.program == 2 }, "选了输入：执行")
+    }
+
+    // MARK: 3. 监听菜单接 setMonitorSource（提案 026，2026-10-12 允许 headphones；问题单 W1D3-app-monitor-source-and-input-effects-wiring 第 1 条）
+
+    /// Master 条的"监听"菜单四项都能选：Master / Bus A / Bus B / 耳机总线（= monitorSource .headphones，只听每路送耳机的那一条；不再叫"（现在）"）。
+    /// 选了发 setMonitorSource，菜单的勾读快照 audio.monitorSource（API 改的也跟上），引擎的耳机出口跟着换（AudioEngineStatus.monitorSource）。
+    func testW5O3_listenMenuSendsSetMonitorSourceIncludingHeadphones() throws {
+        let session = try AppTest.freshSession()
+        let model = AppTest.controller.windowController.mixerPanel.model
+        XCTAssertTrue(MixerModel.listenToOtherBusSupported)
+        XCTAssertEqual(MixerModel.listenBuses, [.master, .busA, .busB, .headphones])
+        XCTAssertEqual(MixerModel.listenBuses.map(MixerModel.listenTitle), ["Master", "Bus A", "Bus B", "耳机总线"])
+        XCTAssertEqual(model.listenBus, .master, "新节目默认听 Master（提案 026）")
+        for bus in [Bus.busA, .busB, .headphones, .master] {
+            XCTAssertTrue(model.listen(bus))
+            XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.monitorSource == bus && model.listenBus == bus }, "\(bus)：\(session.state.audio.monitorSource)")
+            XCTAssertTrue(AppTest.waitUntil(2) { session.audio.status.monitorSource == bus }, "引擎耳机出口跟着换：\(bus)")
+        }
+        // API / 脚本改的：菜单的勾跟上
+        session.send(.setMonitorSource(bus: .headphones))
+        XCTAssertTrue(AppTest.waitUntil(2) { model.listenBus == .headphones })
+        // 再选当前那一项：不发（不在状态行冒"命令被忽略"）
+        let sent = session.control.commandsSent
+        XCTAssertTrue(model.listen(.headphones))
+        AppTest.pump(seconds: 0.1)
+        XCTAssertEqual(session.control.commandsSent, sent)
+        model.listen(.master)
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.monitorSource == .master })
+        XCTAssertEqual(session.control.bus.counters.rejected, 0, "headphones 不再被拒（P5-3）")
     }
 }

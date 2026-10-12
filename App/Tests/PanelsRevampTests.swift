@@ -383,12 +383,15 @@ final class PanelsRevampTests: XCTestCase {
         let session = try AppTest.freshSession()
         let controller = AppTest.controller
         defer {
-            // 还原：本机设置不带声道映射（别的用例按设备默认映射断言）
+            // 还原：本机设置不带声道映射（别的用例按设备默认映射断言）。先关窗、让设置模型挂在主队列上的那次提交落地再还原（W5-O：
+            // 音频设备模型的改动经 receive(on: main) 异步提交，原来还原在前、提交在后，把"测试耳机 2 出"与 {master: 0} 写回了本机设置）
+            controller.panels.closeAll()
+            AppTest.pump(seconds: 0.1)
             var s = controller.settings
             s.busOutputMap = nil
             s.borrowMasterForMonitor = false
+            s.audioDevice = .null
             controller.updateSettings(s)
-            controller.panels.closeAll()
         }
         let p = controller.panels.showPreferences()
         let audio = p.model.audioOutput

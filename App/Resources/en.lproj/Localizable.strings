@@ -857,9 +857,8 @@
 "mixer.inputFader" = "Input %d fader";
 "mixer.inputSettings" = "Input Settings…";
 "mixer.listen" = "Listen";
-"mixer.listen.headphones" = "Headphone bus (current)";
-"mixer.listen.unsupportedHeader" = "Needs audio engine support (next version)";
-"mixer.listenHelp" = "Which bus you hear in the headphones. In this version the headphones carry the headphone bus only (solo / PFL / AFL live there); listening to Master / Bus A / Bus B needs audio engine support.";
+"mixer.listen.headphones" = "Headphone bus";
+"mixer.listenHelp" = "Which bus you hear in the headphones: Master / Bus A / Bus B, or the headphone bus itself (only what each input sends to the headphones). Solo / PFL / AFL always takes over.";
 "mixer.loudness.heading" = "%@ loudness";
 "mixer.loudness.hint" = "EBU R128, updated every second; integrated loudness counts from engine start.";
 "mixer.loudness.integrated" = "Integrated";

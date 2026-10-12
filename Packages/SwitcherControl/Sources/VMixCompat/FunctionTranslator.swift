@@ -24,7 +24,7 @@ public enum FunctionTranslator {
         if let slot = Self.slotNumber(n, prefix: "transition") {
             // 提案 029：没选输入的 Stinger 槽不执行（状态机 / 校验器也拒）——回 409，与 Stinger1 没配好同口径，把原因说清楚（W5-O）
             let config = try ctx.slot(slot, function: "Transition\(slot)")
-            if config.type == .stinger, config.stinger.input == nil {
+            if config.isStingerWithoutInput {
                 throw CompatError(code: .notConfigured, message: "Transition\(slot): transition \(slot) is a Stinger with no input; pick an input for it first (transition column ▾)")
             }
             return FunctionPlan(name: "Transition\(slot)", commands: [.useTransitionSlot(slot: slot, start: true)])

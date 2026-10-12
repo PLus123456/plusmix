@@ -112,10 +112,17 @@ final class AudioSettingsRevampTests: XCTestCase {
 
     func testPanels_masterListenAndLoudnessDetails() {
         let model = MixerModel()
-        XCTAssertFalse(MixerModel.listenToOtherBusSupported, "耳机听所选总线要音频引擎支持（问题单 W5K-w1-audio-monitor-selected-bus）")
-        XCTAssertFalse(model.listen(.master), "引擎不支持：不换")
-        XCTAssertEqual(model.listenBus, .headphones)
+        // W5-O：引擎（W1-D3）与契约（026，P5-3 允许 headphones）都支持了，四项都能选，发 setMonitorSource（App 里的整条见 testW5O3_listenMenuSendsSetMonitorSourceIncludingHeadphones）
+        XCTAssertTrue(MixerModel.listenToOtherBusSupported)
+        XCTAssertEqual(MixerModel.listenBuses, [.master, .busA, .busB, .headphones])
+        XCTAssertEqual(model.listenBus, .master, "读快照的 monitorSource（新节目默认 Master）")
+        XCTAssertFalse(model.listen(.busA), "没接 session：发不出去")
+        var sent: [Command] = []
+        model.send = { sent.append($0) }
         XCTAssertTrue(model.listen(.headphones))
+        XCTAssertEqual(sent, [.setMonitorSource(bus: .headphones)])
+        XCTAssertTrue(model.listen(.master))
+        XCTAssertEqual(sent.count, 1, "已经是 Master：不发")
         // 响度详情读 Stats（1 Hz）
         let master = Stats.AudioCounters.BusMeter(bus: "master", peakDb: [-6, -7], truePeakDb: [-1.24, -2], lufsM: -21.04, lufsS: -23.0, lufsI: -24.46, lra: 5.2)
         let silent = Stats.AudioCounters.BusMeter(bus: "busA", peakDb: [-120, -120], truePeakDb: [-120, -120], lufsM: -120, lufsS: -120, lufsI: -120, lra: 0)

@@ -243,19 +243,23 @@ final class MixerModel: ObservableObject {
         return L("audioDevice.noHeadphoneChannels")
     }
 
-    // MARK: 监听这条（J7；引擎侧要 W1-D 系支持）
+    // MARK: 监听这条（J7；提案 026 的 setMonitorSource，W1-D3 引擎 + P5-3 允许 headphones，W5-O 接上）
 
-    /// 耳机里现在听的是哪条总线：引擎只有耳机总线自己（独听 / PFL / AFL 都在它上面）。
-    private(set) var listenBus: Bus = .headphones
-    /// 能不能让耳机听别的总线（Master / Bus A / Bus B）：要音频引擎支持，这一版还不能（问题单 W5K-w1-audio-monitor-selected-bus）。
-    static let listenToOtherBusSupported = false
+    /// 耳机里现在听的是哪条总线：快照的 audio.monitorSource（新节目默认 Master；API 改的也从这里来）。有独听 / PFL / AFL 时引擎总是听独听的那一路。
+    var listenBus: Bus { state.audio.monitorSource }
+    /// 菜单里的四项（顺序）：Master / Bus A / Bus B / 耳机总线（= 耳机总线自己：只听每路送耳机的那一条，提案 026 用户 2026-10-12 允许）。
+    static let listenBuses: [Bus] = [.master, .busA, .busB, .headphones]
+    /// 能不能让耳机听别的总线：引擎（W1-D3）与契约（026）都支持了（原来只能听耳机总线自己，菜单那三项灰着）。
+    static let listenToOtherBusSupported = true
 
-    /// 选耳机里听哪条总线；引擎不支持的不换，返回 false（菜单里那几项本来就灰着、写了原因）。
+    static func listenTitle(_ bus: Bus) -> String { bus == .headphones ? L("mixer.listen.headphones") : L("bus.\(bus.name)") }
+
+    /// 选耳机里听哪条总线：发 setMonitorSource（契约命令，与 API 同一条），菜单的勾等快照回来再变。已经是它就不发（不在状态行冒"命令被忽略"）。
+    /// 没接 session 时返回 false。
     @discardableResult
     func listen(_ bus: Bus) -> Bool {
-        guard bus == .headphones || Self.listenToOtherBusSupported else { return false }
-        listenBus = bus
-        objectWillChange.send()
+        guard let send else { return false }
+        if bus != listenBus { send(.setMonitorSource(bus: bus)) }
         return true
     }
 }
@@ -591,12 +595,12 @@ struct MixerBusStrip: View {
     private var masterExtras: some View {
         HStack(spacing: 2) {
             Menu {
-                Button(L("mixer.listen.headphones")) { model.listen(.headphones) }
-                Section(L("mixer.listen.unsupportedHeader")) {
-                    ForEach([Bus.master, .busA, .busB], id: \.self) { bus in
-                        Button(L("bus.\(bus.name)")) { model.listen(bus) }.disabled(!MixerModel.listenToOtherBusSupported)
-                    }
+                // 四项单选、勾在快照的 monitorSource 上（W5-O）
+                Picker(L("mixer.listen"), selection: Binding(get: { model.listenBus }, set: { model.listen($0) })) {
+                    ForEach(MixerModel.listenBuses, id: \.self) { bus in Text(MixerModel.listenTitle(bus)).tag(bus) }
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
             } label: {
                 Image(systemName: "headphones")
             }

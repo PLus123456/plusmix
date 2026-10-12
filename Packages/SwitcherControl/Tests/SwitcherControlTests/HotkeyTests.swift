@@ -216,6 +216,53 @@ final class HotkeyTests: XCTestCase {
         XCTAssertEqual(got.withLock { $0 }.count, 2)
     }
 
+    /// W5-O（prompt 112 第 4 项，提案 029）：⌥n / 回车执行"效果 = Stinger、还没选输入"的槽被校验器拒（P5-3）——派发器把这件事交给 App 的
+    /// feedback handler（状态行"转场 n 是 Stinger、还没选输入——在转场列 ▾ 里选一路"）；只选中（start: false）照常；选了输入之后照常执行。
+    func testW5O4_stingerSlotWithoutInputRejectedWithFeedback() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        let ready = await waitUntil { f.stateMachine.publisher.latest != nil }
+        XCTAssertTrue(ready)
+        let base = try XCTUnwrap(f.stateMachine.publisher.latest?.state)
+        XCTAssertTrue(base.transition.slots[3].isStingerWithoutInput, "出厂槽 4 = Stinger、没选输入")
+        let d = HotkeyDispatcher(bus: f.bus)
+        let got = Mutex<[ControlFeedback]>([])
+        d.setFeedbackHandler { fb in got.withLock { $0.append(fb) } }
+
+        // ⌥4 = 执行转场 4 → 校验器拒（400 那一类）→ 反馈带槽号
+        do { _ = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("alt+4"))); XCTFail("应被拒") } catch let r as CommandRejection {
+            XCTAssertTrue(r.reason.contains("转场 4 是 Stinger"), r.reason)
+        }
+        XCTAssertEqual(got.withLock { $0 }, [.stingerWithoutInput(slot: 4)])
+        var state = await f.stateMachine.state
+        XCTAssertFalse(state.transition.isActive, "没执行")
+        // 异步入口（真按键走这条）：一样给反馈
+        XCTAssertTrue(d.handle(try XCTUnwrap(KeyCombo("alt+4"))))
+        let async = await waitUntil { got.withLock { $0 }.count == 2 }
+        XCTAssertTrue(async)
+        // 回车（autoTransition）：当前槽选成 4（只选中照常）再按 → 同样拒、同一句
+        _ = try await f.bus.submit(.useTransitionSlot(slot: 4, start: false), source: .ui)
+        state = await f.stateMachine.state
+        XCTAssertEqual(state.transition.currentSlot, 4, "只选中照常")
+        do { _ = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("return"))); XCTFail("应被拒") } catch is CommandRejection {}
+        XCTAssertEqual(got.withLock { $0 }.last, .stingerWithoutInput(slot: 4))
+        // 别的拒绝不说（只记计数）
+        let before = got.withLock { $0 }.count
+        d.table = HotkeyTable(bindings: [HotkeyBinding(key: try XCTUnwrap(KeyCombo("9")), action: .command(.setPreview(input: 9)))])
+        do { _ = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("9"))); XCTFail("应被拒") } catch is CommandRejection {}
+        XCTAssertEqual(got.withLock { $0 }.count, before, "输入不存在：不给这句")
+        // 给槽 4 选了输入：照常执行
+        d.table = .default
+        var slot4 = state.transition.slots[3]
+        slot4.stinger.input = 3
+        _ = try await f.bus.submit(.setTransitionSlot(slot: 4, config: slot4), source: .ui)
+        let receipts = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("alt+4")))
+        XCTAssertEqual(receipts.map(\.applied), [true])
+        state = await f.stateMachine.state
+        XCTAssertTrue(state.transition.isActive, "选了输入：执行")
+        XCTAssertEqual(got.withLock { $0 }.count, before)
+    }
+
     #if canImport(AppKit)
     func testHotkey_keyComboFromNSEvent() {
         func event(_ chars: String, keyCode: UInt16, flags: NSEvent.ModifierFlags = []) -> NSEvent {

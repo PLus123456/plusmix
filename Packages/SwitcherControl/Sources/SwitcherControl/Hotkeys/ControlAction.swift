@@ -206,18 +206,16 @@ public enum ControlAction: Hashable, Sendable {
         let t = state.transition
         switch command {
         case .useTransitionSlot(let slot, true):
-            guard slot >= 1, slot - 1 < t.slots.count, isStingerWithoutInput(t.slots[slot - 1]) else { return nil }
+            guard slot >= 1, slot - 1 < t.slots.count, t.slots[slot - 1].isStingerWithoutInput else { return nil }
             return .stingerWithoutInput(slot: slot)
         case .autoTransition:
-            guard !t.isActive, isStingerWithoutInput(t.currentGroup) else { return nil }
+            // 与校验器同口径（P5-3）：按要执行的当前那组判，对应槽时带槽号
+            guard !t.isActive, t.currentGroup.isStingerWithoutInput else { return nil }
             return .stingerWithoutInput(slot: t.currentSlot)
         default:
             return nil
         }
     }
-
-    /// 没选输入的 Stinger（与契约的 TransitionSlot.isStingerWithoutInput 同一判定，提案 029）。
-    private static func isStingerWithoutInput(_ slot: TransitionSlot) -> Bool { slot.type == .stinger && slot.stinger.input == nil }
 
     /// outputSwitch / outputKindSwitch 管的四类（录制 / 推流有自己的起停命令，setOutputEnabled 对它们会被拒）。
     public static let switchableKinds: [OutputKind] = [.ndi, .externalDisplay, .virtualCamera, .multiview]

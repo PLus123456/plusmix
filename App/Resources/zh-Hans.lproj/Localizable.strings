@@ -857,9 +857,8 @@
 "mixer.inputFader" = "输入 %d 推子";
 "mixer.inputSettings" = "输入设置…";
 "mixer.listen" = "监听";
-"mixer.listen.headphones" = "耳机总线（现在）";
-"mixer.listen.unsupportedHeader" = "要音频引擎支持（下一版）";
-"mixer.listenHelp" = "耳机里听哪条总线。这一版耳机里只能听耳机总线（独听 / PFL / AFL 都在它上面）；听 Master / Bus A / Bus B 要音频引擎支持。";
+"mixer.listen.headphones" = "耳机总线";
+"mixer.listenHelp" = "耳机里听哪条总线：Master / Bus A / Bus B，或耳机总线自己（只听每路送耳机的那一条）。独听 / PFL / AFL 时总是听独听的那一路。";
 "mixer.loudness.heading" = "%@ 响度";
 "mixer.loudness.hint" = "EBU R128，每秒更新；积分从引擎启动算起。";
 "mixer.loudness.integrated" = "积分";
