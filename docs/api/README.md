@@ -111,7 +111,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
   - `enabled = false` = 旁路（输出逐样本等于输入），参数留着。
   - `parametricEQ.q` 是经典 Q（半增益处的带宽，q = √2 ≈ 1 个倍频程）。
   - 参数超出范围被钳：EQ 频率 20…23520 Hz、增益 −96…+24 dB、q 0.1826…28.85；`dynamicsProcessor` 阈值 −40…20 dB、起音 0.001…0.2 s；限幅起音 0.001…0.03 s、衰减 0.001…0.04 s、`ceilingDb` −20…0（`compressor` 的范围见下）。
-  - 开了压缩 / 限幅的总线多出处理延迟，最多约 35 ms（`dynamicsProcessor` 恒 256 帧 = 5.3 ms，`compressor` 0，限幅 = 起音时长 1–30 ms）。Master 的这段延迟（`video_delay_ms`）由**视频一起延后**来对齐：引擎按拍点 + 延迟派发画面，录制 / 推流 / NDI® 与 App 的监视器 / 外部显示 / 多画面都晚同样毫秒数，音频 PTS 不动、本机监听与画面同步（App 与无界面引擎的默认；无界面引擎 `--av-compensation audioPTS` 改回旧做法：音频 PTS 前移、画面不动、监听晚这么多）。Bus A / B 的延迟不补。
+  - 开了压缩 / 限幅的总线多出处理延迟（`dynamicsProcessor` 恒 256 帧 = 5.3 ms，`compressor` 0，每个限幅 = 它的起音 1–30 ms；一格动态 + 一格限幅——界面做得出来的链——最多约 35 ms，API 在一条链上放几个 `peakLimiter` 时延迟相加，视频延后最多只补 35 ms）。Master 的这段延迟（`video_delay_ms`）由**视频一起延后**来对齐：引擎按拍点 + 延迟派发画面，录制 / 推流 / NDI® 与 App 的监视器 / 外部显示 / 多画面都晚同样毫秒数，音频 PTS 不动、本机监听与画面同步（App 与无界面引擎的默认；无界面引擎 `--av-compensation audioPTS` 改回旧做法：音频 PTS 前移、画面不动、监听晚这么多）。Bus A / B 的延迟不补。
 - **每路输入的效果链**（`setInputSettings` 的 `settings.effects`）**已作用到声音**：所有 `parametricEQ` 合成一格（最多 16 段，多的不装）+ 一个动态格（`compressor` 或 `dynamicsProcessor`，第二个不装），处理顺序固定先 EQ 后动态、与链里的先后无关；
   `peakLimiter` 与认不出的 `id` 每路不装（各记一次日志）。效果在这一路的对齐延迟线之前，延迟从这一路的对齐延迟里扣，节目时间线与 PTS 不动。
 - **`compressor`**（自写压缩器，总线与每路都能装、与 `dynamicsProcessor` 二选一占同一格）：`thresholdDb`（−60…0）、`ratio`（1…20，n:1）、`kneeDb`（0…24，0 = 硬拐点）、`attackSeconds`（0.0001…0.2）、`releaseSeconds`（0.01…3）、`makeupGainDb`（0…24）；
