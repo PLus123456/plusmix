@@ -89,12 +89,16 @@ final class StreamWiringTests: XCTestCase {
         let bar = AppTest.controller.windowController.bottomBar
         session.send(.addOutput(config: OutputState(number: 2, kind: .stream, name: "推流", enabled: false, settings: OutputSettings(
             source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: StreamSettings(url: mtx.rtmpURL("s1") + "?user=pub&pass=wrong")))))
+        AppTest.pump(seconds: 1.2)   // 先让状态面板见过这一路（第一次见到就是 failed 的话事件只记"失败"）
         session.send(.startStream(output: 2))
         let notice = "推流 2 鉴权失败（用户名或密码不对），已停止：在推流页改对后点底栏「推流」重试"
         XCTAssertTrue(AppTest.waitUntil(10) { session.lastNotice == notice }, "状态行：\(session.lastNotice ?? "")")
         let e = bar.encoderEntry(forOutput: 2)
         XCTAssertEqual([e?.state, e?.lastError], ["failed", "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed"])
         XCTAssertEqual(e?.attempt, 0)
+        let events = AppTest.controller.panels.outputStatus.events.map(\.text)
+        XCTAssertTrue(events.contains("推流 · 失败：" + (e?.lastError ?? "-")), "状态面板事件（W5-N）：\(events)")
+        print("鉴权失败：底栏「\(bar.streamSummary.title)」提示「\(bar.streamSummary.toolTip ?? "")」；面板事件 \(events)")
         XCTAssertEqual(bar.streamSummary.severity, .error, "底栏深红：\(bar.streamSummary.title)")
         XCTAssertEqual(session.outputs.streams[2]?.stream.counters.connectAttempts, 1, "鉴权失败不重连")
     }
