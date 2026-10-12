@@ -22,7 +22,7 @@ For recordings "On" means recording; for streams it means it should be live (the
 
 ## 1. Recording
 
-Settings › Recording (⚙ Record › Recording Settings… in the bottom bar, or Output › Recording Settings…). The top of the page says "The bottom bar's Record button records n route(s) together: Recording, Recording 2, ISO 1…"; while recording it says "Recording: changes apply from the next recording."
+Settings › Recording (⚙ Record › Recording Settings… in the bottom bar, or Output › Recording Settings…). The top of the page says "The bottom bar's Record button records n route(s) together: Recording, Recording 2, ISO 1…", with "Recording Status…" on the right of that line (the Recording page of the [Stream / Recording Status window](#stream--recording-status-window)); while recording it says "Recording: changes apply from the next recording."
 
 **Files (shared by all recordings)** — this section edits Recording 1 and the other recordings follow it:
 
@@ -47,6 +47,7 @@ Settings › Recording (⚙ Record › Recording Settings… in the bottom bar, 
 - **New recordings get a bitrate based on the program format**: 1080p30 10 Mb/s, 1080p60 18, 1440p60 32, 2160p30 36 (59.94 / 29.97 use the 60 / 30 rows), otherwise about 0.15 bit per pixel per frame rounded (at least 4 Mb/s); audio AAC 256k.
 - **Recording 1** = the first recording whose source is PGM; the ISO routes use its format (below).
 - The Record button in the bottom bar: nothing recording → every route that takes part starts **on the same tick** (a shared start); something recording → stop all (asks first). With no recording in the show at all, one click adds a default one and starts it. ▴ stops a single route.
+- While recording, the bottom bar / toolbar show the running time "● REC 01:02:05" ("● REC 00:14:22 (3)" for three routes together), and ▴ shows each route as "name · Recording · 01:02:05"; the time is how long that route has been recording according to the statistics, the longest route wins.
 - Encoder PTS is the tick time, so the file duration equals ticks × frame duration ([test standard](../../testing/en/README.md) E5); 20 normal stops
   and 10 kills during recording are covered by automated tests.
 
@@ -55,7 +56,7 @@ Settings › Recording (⚙ Record › Recording Settings… in the bottom bar, 
 Settings › ISO (⚙ Record › ISO Recording… in the bottom bar, or Output › ISO Recording…): a separate file per input.
 
 - At the top: "Format H.264 · 18 Mb/s · .mov (same as Recording 1)" with "Change format…", and the folder with "Change folder…" — **the ISO format and folder follow Recording 1**. When Recording 1 changes, ISO routes that are not recording follow right away; ones that are recording follow after they stop (from the next recording).
-- The table: rows = "PGM · Recording 1" + every input; columns = Rec (checkbox) / Name / Status / Dropped / Folder.
+- The table: rows = "PGM · Recording 1" + every input; columns = Rec (checkbox) / Name / Status / Duration / Dropped / Folder. "Duration" shows hh:mm:ss while recording (the PGM row = Recording 1, an input row = its ISO route) and "—" otherwise.
   Checking an input adds a recording output for it (source = that input's raw picture; the file name pattern includes `{output}`); unchecking removes that ISO route.
   **Unchecking the PGM row = Recording 1 doesn't take part = record ISO only.** Rows that are recording are locked (stop them to change). Audio-only / image inputs are hidden by default; "Show all inputs (n audio-only / image inputs hidden)" shows them.
 - Started and stopped on the same tick as PGM, sharing the start tick: measured 0.0–0.2 ms between files for the same event (A4 requires ≤ 1 frame).
@@ -78,14 +79,14 @@ Tested with a 50 MB disk image and two 40 Mbps recordings filling it ([test stan
 
 ## 2. Streaming
 
-Settings › Streaming (⚙ Stream in the bottom bar, or Output › Streaming Settings…): one output per destination, each with its own encoder and reconnect logic. "Start all / Stop all" at the top of the page (stopping asks too).
+Settings › Streaming (⚙ Stream in the bottom bar, or Output › Streaming Settings…): one output per destination, each with its own encoder and reconnect logic. "Start all / Stop all" at the top of the page (stopping asks too), with "Stream Status…" on the right (opens the [Stream / Recording Status window](#stream--recording-status-window)).
 
 Each destination has a section titled "Stream k" with "Output n" and a name field; a "Start / stop" switch at the start of the section (it won't start without a URL; turning it off asks first), and a status line: "Streaming · 5.9 Mb/s · 3 dropped · 1 reconnects".
 
 | Item | Notes |
 |---|---|
 | Service | Custom (RTMP / RTMPS), Custom (SRT), WeChat Channels, Douyin, Bilibili, Kuaishou, YouTube, Facebook, Twitch. Services with a fixed ingest (YouTube, Facebook, Twitch) fill in the URL; get the stream key from the platform's dashboard. Platforms that hand out an address per session (WeChat Channels, Douyin, Kuaishou, Bilibili) fill nothing in: copy the "stream URL + stream key" from the platform's live dashboard as the hint says. The show file stores only the full URL; when reopened, the service is recognised from the URL only for the fixed-ingest services (YouTube, Facebook, Twitch) and Bilibili — WeChat Channels, Douyin and Kuaishou destinations come back as "Custom (RTMP / RTMPS)" (the URL is unchanged and streaming is not affected) |
-| URL | `rtmp://host/app`, `rtmps://host/app`, `srt://host:port?streamid=…&passphrase=…&latency=…`; the scheme selects the protocol. A `user:pass@` part is masked |
+| URL | `rtmp://host/app`, `rtmps://host/app`, `srt://host:port?streamid=…&passphrase=…&latency=…`; the scheme selects the protocol. A `user:pass@` part and password-like query parameters (user, pass, key, token…) are masked as •••; while editing, leaving a masked part as it is keeps the original value |
 | Stream key | RTMP: appended as the stream name; SRT: becomes `streamid=<key>` when the URL has none |
 | Authentication… | See [Stream authentication](#stream-authentication) below |
 | Quality | 1080p (6 Mb/s when the program runs at ≥ 48 fps, otherwise 4.5 Mb/s; audio AAC 160k), 720p (3 Mb/s; AAC 128k), Custom. A new destination defaults to the highest tier not above the program (1080p at most, never upscaled); editing the encoding by hand shows "Custom" |
@@ -103,22 +104,45 @@ Each destination has a section titled "Stream k" with "Output n" and a name fiel
   succeed within 15 s (E8); the reported "network drops" match real drops within 5 % under bandwidth limits (E9). All of this runs
   automatically against a local MediaMTX with network impairment.
 
-**The stream status in the bottom bar and toolbar** shows the worst destination: with a single destination in the show it reads "● Streaming" while live; with several, "● Streaming 2/3" (live / all — "1/3" even when only one is live); when one is reconnecting, still not connected from the second attempt on, or couldn't start, it reads "Stream · 1 in trouble" (orange; dark red when it couldn't start), and with only one destination on it shows that destination's state directly (e.g. "Stream · Reconnecting (attempt 2)").
+**The stream status in the bottom bar and toolbar** shows the worst destination and the running time while live: with a single destination in the show it reads "● LIVE 00:10:00"; with several, "● LIVE 00:10:00 (2/3)" (live / all — "1/3" even when only one is live);
+the time comes from the statistics (how long that destination has been streaming, counted from its start, reconnects included), the longest one wins. When one is reconnecting, still not connected from the second attempt on, or couldn't start, it reads "Stream · 1 in trouble" (orange; dark red when it couldn't start), and with only one destination on it shows that destination's state directly (e.g. "Stream · Reconnecting (attempt 2)").
 A first connection reads "Connecting" ("Connecting (attempt n)" from the second try); only after a destination has been live does a drop read "Reconnecting (attempt n)" — n is the real attempt count. The tooltip lists "name: state" per destination, reasons for those that couldn't start, with passwords in URLs masked.
 When starting, the status line says "Stream n connecting…", and "Stream n is live" only once it actually is.
-▴ has one item per destination (click = start / stop / retry just that one); "Stream Status…" currently opens the Streaming page.
+▴ has one item per destination (click = start / stop / retry just that one); "Stream Status…" opens the Stream / Recording Status window.
 In the API's `stats.encoder[]` the stream `state` is idle / connecting / publishing / backoff / stopping / stopped / failed; a destination that couldn't start reports `failed`.
+
+### Stream / Recording Status window
+
+A separate window ("Stream / Recording Status") with two pages, Stream and Recording. Open it from "Stream Status…" in the bottom bar's Stream ▴, "Recording Status…" at the end of the Record ▴ (Output › Stream ▸ / Record ▸ in the menu bar are the same two menus), "Stream Status…" at the top of the Streaming page or "Recording Status…" at the top of the Recording page. It opens on the page of the entry you used, or comes to the front if it is already open.
+
+| Page | One row per route, columns |
+|---|---|
+| Stream | Name / State / Bitrate / Dropped / Reconnects (times it came back after a drop) / Duration / Disconnects (drops after being connected) / Last error |
+| Recording | Name / State / Duration / Bitrate / Frames / Dropped / Free space / Last error |
+
+- All numbers come from the statistics (`stats.encoder[]`, the same data as the API and the status line); the window computes nothing of its own. A route that is off shows "Off", with "—" for bitrate and duration; reconnecting / couldn't-start states are orange / red.
+- **Last error**: the line the streaming / recording code wrote the last time this route failed, word for word (cleared on the next start), e.g. "鉴权失败（用户名或密码不对）：…" for a wrong password (the streaming engine writes these in Chinese); passwords in URLs are masked.
+- **Events** below: timed state changes, newest first — Connecting → Streaming → Disconnected: reason → Reconnecting (attempt n) → Reconnected / Stopped / Failed: reason. They are derived from the once-a-second statistics, so changes that come and go within a second are not shown;
+  **they are recorded while the window is closed too**, cleared when you open another show or the engine restarts, and the last 500 are kept.
+- At the bottom, "**Video delayed n ms**" appears only while the picture is delayed for monitor sync (a compressor / limiter on Master, see [Concepts › Audio](concepts.md#audio)); it is `video_delay_ms` from the statistics.
+- "**Show Logs…**" = Help › Show Diagnostics Folder. That folder holds the crash / hang reports macOS delivers; the streaming / recording logs are **not in it** (the button's tooltip says they are, which is wrong): use the system log, see [Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics).
+- Hotkeys are not handled while this window is in front (click the main window first).
 
 ### Stream authentication
 
-"Authentication…" opens a small form that depends on the URL's protocol:
+"Authentication…" opens a small form that depends on the URL's protocol; **it can't be changed while the destination's switch is on** (the section is locked) — turn the switch off first:
 
-- **RTMP / RTMPS: user name / password.** This is **Adobe authentication (FMLE compatible)**, used by Wowza, Nimble, FMS and some CDN ingests: the user name and password go into the `user:pass@` part of the URL (masked in the URL field as `rtmp://•••@host/app`),
-  and the connection answers the server's challenge without sending the password in clear. Next to the button it says "Authentication: user xxx (password set)" or "No authentication"; "Clear" in the sheet only empties the user name and password fields; the part is removed from the URL when you click "Save".
-- **Self-hosted servers such as MediaMTX, SRS and nginx-rtmp expect a query string after the URL instead**, e.g. MediaMTX: `rtmp://host:1935/live?user=publisher&pass=secret` — type it straight into the URL field.
-  Filling in "Authentication…" has no effect for them: the connection succeeds and publishing is rejected (the system log shows the server's `NetStream.Publish.Unauthorized`). Note that a password in the query string is visible in the URL field.
-- A wrong user name or password: the destination stays "Connecting (attempt n)" and keeps retrying with back-off; it is locked while its switch is on, so turn the switch off before correcting it; the reason is in the system log ("鉴权失败（用户名或密码不对）…" — authentication failed; the streaming engine writes this line in Chinese; see [Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics)). A server that wants another authentication method logs "鉴权方式不支持：…" (method not supported).
+- **RTMP / RTMPS**: the form "RTMP authentication (user name / password)" starts with "Method", one of two:
+  - **Adobe (user:pass@)**: for Wowza, Nimble, FMS and some authenticated CDN ingests (Adobe authentication, FMLE compatible). The user name and password go into the `user:pass@` part of the URL and the connection answers the server's challenge without sending the password in clear;
+    the URL field shows `rtmp://•••@host/app`, and next to the button it says "Authentication: user xxx (password set)".
+  - **Query string (?user=&pass=)**: for self-hosted servers such as MediaMTX, SRS and nginx-rtmp, written after the URL as `?user=…&pass=…`. Two more fields, "User parameter / Password parameter", default to MediaMTX's `user` / `pass`;
+    for SRS and nginx-rtmp use the names your server's auth hook expects (letters, digits and `- . _ ~` only; the two must differ). The values are masked in the URL field (`?user=•••&pass=•••`), and next to the button it says "Auth (query string): user xxx".
+    If the password parameter's name is not on the masking list (user, pass, password, pwd, key, token, secret, passphrase, streamid, auth, response), the form warns that the password will be shown in the address field and in logs.
+  - The two methods are **exclusive**: saving one removes the other's credentials from the URL; saving with an empty user name removes both (no authentication). Other URL parameters are kept.
+  - The wrong method doesn't work: with the Adobe method, MediaMTX and the like accept the connection and then reject the publish (`NetStream.Publish.Unauthorized`).
+  - "Clear" only empties the user name and password fields; the URL changes when you click "Save". Without authentication it says "No authentication".
 - **SRT: passphrase** (encryption), written into the URL's `passphrase=` parameter; only letters, digits and `- . _ ~`, 10–79 characters (other characters don't work yet); anything else is rejected and not written.
+- **A wrong user name or password**: the destination keeps retrying with back-off ("Connecting (attempt n)", waiting at most "Max retry interval n s" between attempts); the [status window](#stream--recording-status-window)'s "Last error" and events give the reason ("鉴权失败…", authentication failed; "鉴权方式不支持：…" when the server wants a method that isn't supported), and so does the system log ([Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics)).
 
 ### Try it locally first
 
@@ -165,12 +189,12 @@ Choosing a source switches that display's output to it and turns it on (other ou
 
 **The main button**: some on → turn all off (settings kept); all off → turn all back on as configured; none configured → show PGM full screen on the first non-main display (the main display = the one with the PlusMix main window); no second display → open the routing menu.
 
-**The settings page** starts with "What each display shows": one single choice per display — the same setting as the routing menu. Below it, each output's details: name, enabled, display, source, fall back to the main display when missing, status, and finally a "Close" button — it **removes this output and its settings** (like "Remove n …" in the routing menu); to blank a display only for a while, use that display's "Off" in the routing menu or the main button.
+**The settings page** starts with "What each display shows": one single choice per display — the same setting as the routing menu. Below it, each output's details: name, enabled, display, source, fall back to the main display when missing, status, and finally a "Remove This Output" button — it **removes this output and its settings** (like "Remove n …" in the routing menu; nothing is asked); to blank a display only for a while, turn off "Enabled" at the top of that section, or use that display's "Off" in the routing menu or the main button.
 
 - Source: PGM / PVW / multiview / one input (Aux, full-resolution raw picture).
 - Display absent: by default stays black and waits, leaving the main display alone; "Fall back to the main display when missing" goes full screen on the main display (covering the UI) — only enable it deliberately. Settings › General › Keep external displays on the main display behind the interface keeps an external display window on the main display below the interface.
 - The window takes the latest frame at the display's own refresh; dragging the main window or entering full screen does not touch the render
-  thread (missed-frame count stays flat). **Pressing Esc in an external display window also removes that output** (like "Close"; its settings are not kept).
+  thread (missed-frame count stays flat). Pressing Esc in an external display window turns that output off (like "Off" in the routing menu: the window goes away, the display / source settings are kept, and choosing a source again turns it back on as configured).
 - The show file stores display ID and source and restores them; display IDs can change across reboots, so reselect if needed.
 
 ## 5. Virtual camera

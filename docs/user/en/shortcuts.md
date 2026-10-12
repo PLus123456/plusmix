@@ -5,20 +5,22 @@ Stream Deck, Companion and scripts can be mixed freely and always agree on the s
 
 ## Default shortcut table
 
-Active while the main window is in front (not while typing in a text field); also while the Input Settings, Overlay Settings or Audio Settings windows are in front. In this version the Settings window does not pass keys on (click the main window, then press the key).
+Active while the main window is in front (not while typing in a text field); also while the Settings, Input Settings, Overlay Settings or Audio Settings windows are in front (while Settings › Shortcuts is recording a key, the key goes into that row and switches nothing).
+Not while the Statistics window, the Stream / Recording Status window or the multiview window is in front: click the main window, then press the key.
 
 | Key | Action |
 |---|---|
 | `1` … `9`, `0` | Put input 1–10 on PVW (`0` = input 10) |
 | `⇧1` … `⇧0` | Cut input 1–10 straight to PGM (PVW unchanged) |
 | `Space` | Cut |
-| `Return` | Run the current transition (selected type / duration; Fade 30 ticks by default) |
+| `Return` | Run the current transition slot (the T-bar uses it too; Transition 1 · Fade 0.5 s in a new show) |
 | `F` | FTB on / off |
-| `⌥1` … `⌥4` | Run transition 1–4 (in this version all four = run the current transition, like Return) |
+| `⌥1` … `⌥4` | Run Transition 1–4 (selects that slot and starts it at once; Return and the T-bar use it afterwards; [Concepts › Transition slots](concepts.md#transition-slots)) |
 | `⌃1` … `⌃4` | Overlay 1–4 on / off (switch only, the input is not changed: a channel without an input shows nothing) |
 
 - **Recording and streaming have no default keys**: stopping them from a hotkey never asks, so one stray key would stop the show. Add them yourself if you want ([Editing the table](#editing-the-table)), e.g. with "All recordings on / off".
 - **The interface lock has no default shortcut**: use the lock at the far right of the bottom bar, or Window › Lock Interface.
+- On a Mac that saved a shortcut table before (`hotkeys.json`), ⌥1–⌥4 are still "Run Current Transition" from the old table (that is how the old default table was saved; it isn't upgraded automatically): click "Reset to Defaults" in Settings › Shortcuts for the new table (re-add your own rows afterwards).
 - `⌃1`–`⌃4` are also the system's "Switch to Desktop 1–4": if those are turned on in System Settings › Keyboard › Keyboard Shortcuts › Mission Control, the system takes these keys first. `⌥1`–`⌥4` are not used by the system.
 - Help › Keyboard Shortcuts generates a page from the **current** table (key / action / note) and opens it in your browser — handy to print for the desk; after editing the table, click it again for the new version.
 
@@ -41,7 +43,8 @@ Opens from a row's action button:
 
 - A search field at the top (you can type straight away; it searches action names, descriptions and API key names across groups); groups on the left: Switching / Overlays / Audio / Outputs / Inputs / Show / Interface / All / Recent.
 - One line per action on the right: our name, a one-line description and the API key name in small print (compound actions list what they send, e.g. "previewAndTransition → setPreview + autoTransition").
-- Below it a form built from the action's parameters: an input is a menu ("Input 3 “name”") plus "Current PVW / Current PGM" (whatever is on PVW / PGM at the moment of the press); durations are in seconds (0.5 / 1 / 2 + custom); overlay channels 1–4; outputs only list the kinds that fit; one of the four buses; switches have three segments: on / off / toggle.
+- Below it a form built from the action's parameters: an input is a menu ("Input 3 “name”") plus "Current PVW / Current PGM" (whatever is on PVW / PGM at the moment of the press); durations are in seconds (0.5 / 1 / 2 + custom); overlay channels 1–4; a transition slot is a menu listing the four slots' current effect and duration ("Transition 3 · Zoom 1 s"); outputs only list the kinds that fit; one of the four buses; switches have three segments: on / off / toggle;
+  optional switches (solo and "Audio follows video" in "Input solo / AFV / routing") have three segments "Keep / On / Off", "Keep" by default; for bus routing, tick "Change bus routing" first, then the buses it feeds (Master / Bus A / Bus B / Headphones) — unticked = routing unchanged.
 - At the bottom "What a press sends now:" — the commands computed from the current show, exactly what goes onto the command bus when the key is pressed.
 - By default only operator actions are listed. Whole-replacement commands (show / input settings / output settings) and adding / removing inputs and outputs need "Show whole-replacement commands (advanced)" or "Advanced: Write JSON…" (checked before saving).
 
@@ -49,7 +52,9 @@ Actions worth knowing:
 
 | Action | Notes |
 |---|---|
-| Preview and transition | Puts the input on PVW, then takes it to PGM with the selected transition (two commands in order; if the first is refused — say the input has been removed — the second isn't sent; pressed during a transition, both are ignored by the state machine and nothing changes) |
+| Run transition / Select transition (don't run) | In the Switching group. Run transition n = select that slot and start it at once (one command; Return and the T-bar use it afterwards, like ⌥n); Select transition n = only make it the current slot, nothing runs (like "Use for T-bar" in the slot's ▾). The summary reads e.g. "Run transition · Transition 3 (Zoom 1 s)". Ignored by the state machine during a transition |
+| Input solo / AFV / routing | In the Audio group (`setInputAudio`): changes only the items you set (solo, audio follows video, bus routing); anything left at "Keep" and all other settings stay as they are |
+| Preview and transition | Puts the input on PVW, then takes it to PGM with the current transition slot (two commands in order; if the first is refused — say the input has been removed — the second isn't sent; pressed during a transition, both are ignored by the state machine and nothing changes) |
 | Fade | In seconds (stored as milliseconds), so the length stays the same when the show's frame rate changes. Old tables with Fade in ticks still load and work; the picker shows them as "Fade (in ticks, old)" |
 | All recordings on / off, ISO recordings only, All streams start / stop | PGM and ISO start and stop on the same tick; pressing them **never asks** |
 | Output on / off, All outputs of a kind on / off | One NDI® / external display / virtual camera / multiview output, or every output of one kind |
@@ -70,6 +75,8 @@ The table is stored outside the show file in `~/Library/Application Support/Plus
     {"key": "space", "action": {"command": {"cut": {}}}, "note": "Cut"},
     {"key": "return", "action": {"command": {"autoTransition": {}}}},
     {"key": "f", "action": {"toggleFTB": {}}},
+    {"key": "alt+2", "action": {"transitionSlot": {"slot": 2}}, "note": "run transition 2"},
+    {"key": "alt+shift+4", "action": {"selectTransitionSlot": {"slot": 4}}, "note": "select transition 4, don't run"},
     {"key": "ctrl+1", "action": {"toggleOverlay": {"channel": 1}}, "note": "overlay 1 on / off"},
     {"key": "g", "action": {"fadeMs": {"durationMs": 750}}, "note": "0.75 s fade"},
     {"key": "alt+shift+3", "action": {"previewAndTransition": {"input": 3}}},
@@ -89,6 +96,7 @@ The table is stored outside the show file in `~/Library/Application Support/Plus
 | Action | JSON |
 |---|---|
 | FTB / AFV on / off | `{"toggleFTB": {}}`, `{"toggleAFV": {}}` |
+| Run transition n / select transition n (don't run) | `{"transitionSlot": {"slot": 2}}`, `{"selectTransitionSlot": {"slot": 4}}` (`slot` 1–4; any other number sends nothing) |
 | Overlay on / off / put an input on it / all off | `{"toggleOverlay": {"channel": 1}}`, `{"overlayInput": {"channel": 2, "input": "preview"}}`, `{"overlaysOff": {}}` |
 | Mute on / off | `{"toggleMute": {"input": 2}}` |
 | Start / stop one recording / stream | `{"toggleRecord": {"output": 1}}`, `{"toggleStream": {"output": 2}}` |
@@ -129,7 +137,7 @@ Devices unplugged and plugged back are picked up again; devices connected while 
 
 ## Stream Deck, Companion, tally, scripts
 
-- **Stream Deck**: official-SDK plugin (button = command, button colour = tally); install and button table in [docs/integrations/stream-deck.md](../../integrations/stream-deck.md) (Chinese).
+- **Stream Deck**: official-SDK plugin (button = command, button colour = tally; the "Transition 1–4" button runs or just selects a slot and is coloured after the current slot); install and button table in [docs/integrations/stream-deck.md](../../integrations/stream-deck.md) (Chinese).
 - **Bitfocus Companion**: via the local API (Generic HTTP / WebSocket modules) in [API examples](../../api/examples.md#3-companion); via the third-party
   compatibility layer with an existing panel configuration in [docs/integrations/companion.md](../../integrations/companion.md).
   When Companion runs on another machine, set the compatibility layer to "Allow local network" in Settings › Remote Control, apply and restart the engine, and enter the address shown on that page in Companion.

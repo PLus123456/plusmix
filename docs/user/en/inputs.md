@@ -89,13 +89,28 @@ ScreenCaptureKit: a whole display, a single window, or all windows of one applic
 
 Anything AVFoundation decodes (H.264 / HEVC / ProRes in .mov / .mp4 …).
 
-- Frames follow the **program clock** (clock slave); playback rate is adjustable; at the end: hold last frame / loop / black.
+- Frames follow the **program clock** (clock slave); playback rate is adjustable; at the end: hold last frame / loop / black. Pause, back to start and restart-when-taken-to-PGM are under [Playback](#playback) below.
 - The panel keeps "Recent" files (up to 10, newest first; click to fill in, double-click to add; a file that is gone is greyed out as "(missing)"); once a file is chosen its information is shown, e.g. "H.264 · 1920×1080 · 60 fps · 0:10" (no audio and alpha are mentioned too).
 - The audio track goes through this input's fader / buses / AFV like any other input.
 - **Audio-only files** (mp3 / wav / m4a / aac): the open panel accepts them, the information reads "Audio only · …" and the cell is drawn as audio-only; but **in this version the file input still needs a video track**, so the input then shows "没有视频轨" ("no video track").
-- **The Loop button on the cell** lights up only for video files: one click changes just the "At end" setting (on = loop, off = hold last frame) and playback continues without restarting. **Turning loop off = hold the last frame at the end**; to go to black at the end, set "At end" to "Black" in Input Settings › Source and click "Apply Source" (changing only "At end" doesn't rebuild either; playback continues).
+- **Changing only "At end" or "Playback rate" applies at once without rebuilding**: the cell's 🔁 button or these two fields in Input Settings › Source keep playback going (no restart, no drop-out) and don't need "Apply Source"; only a new file or type needs "Apply Source" (the input is rebuilt, the picture drops out briefly and plays from the start).
 - If the file is missing when the input is added (the cell shows "文件不存在：…", "file not found"): once the file is in place, remove the input and add it again, or reopen the show — unlike images, video files are not picked up by themselves.
 - The path is stored in the show file; relative paths are relative to the show file's directory (for a show that has never been saved, `~/Movies/PlusMix`; [Samples › relative paths](../../../Samples/README.md#2-相对路径), Chinese).
+
+### Playback
+
+The last three buttons in the first row of a video-file cell, its right-click menu and the "Playback" section under Input Settings › Source are one set of actions (on other inputs the three buttons are greyed out with the tooltip "Video / audio file inputs only"):
+
+| Button | What it does |
+|---|---|
+| ⏮ Back to start | Plays from the start if playing; holds the first frame if paused (still paused) |
+| ⏸ / ▶ | While playing it shows ⏸: click = **pause**, the picture holds this frame (frames keep coming every tick, the cell doesn't say "no signal"); while paused it shows ▶, highlighted: click = carry on from where it stopped; when it has finished (loop off) it shows ▶: click = play from the start |
+| 🔁 Loop | On = loop (highlighted); **off = hold the last frame at the end**. For black at the end, set "At end" to "Black" in Input Settings › Source (applies at once). Turning loop on after the file has finished and is holding its last frame = it starts over and keeps looping right away |
+
+- **Restart When Taken to PGM** (ticked in the right-click menu, or Input Settings › Source › Playback): the input plays from the start on the tick it goes to PGM (Cut, transition done, T-bar at the end, API `setProgram`); previewing it on PVW doesn't restart it.
+  The first frame lands a few ticks after the switch (about 3 ticks measured, 50 ms at 60p) — during those ticks PGM shows the frame the input was holding; taken to PGM while paused = back to the first frame, still paused. The setting is saved with the show (changing it counts as unsaved).
+- Pausing and going back to the start are live operation and do not count as unsaved changes; a new file or "Apply Source" rebuilds the input and plays from the start.
+- The commands are `setPlayback` and `seekPlayback` ([API reference](../../api.md), Chinese); hotkeys / MIDI can bind them ("File play / pause" and "Seek file / restart" in the Inputs group of the action picker).
 
 ## Image
 
@@ -150,14 +165,15 @@ The strip across the middle of the main window. Its header, left to right:
 
 ### Cells
 
-One cell per input: a title bar (number, name, category dot; red background on PGM, green on PVW), the thumbnail (all cells are the same height, taken from the multiview cell's aspect ratio and never taller than 16:9; no black bars) and two rows of buttons:
+One cell per input: a title bar (number, name, category dot; red background on PGM, green on PVW), the thumbnail (all cells are the same height, taken from the multiview cell's aspect ratio and never taller than 16:9; no black bars) and two rows of buttons.
+First row × | Transition | Cut | ⏮ | ▶⏸ | 🔁, second row 1 2 3 4 | Mute | ⚙:
 
 | Button | What it does |
 |---|---|
 | × | Remove this input. If it is on PGM / PVW / a visible overlay channel / the Stinger / an ISO recording in progress, it asks first and lists what happens ("It's on PGM: PGM will go black"…); otherwise it is removed at once. This can't be undone |
-| Transition | Takes this input to PGM with the transition type and duration currently selected in the transition column (it is put on PVW first if it isn't there). The tooltip names the current one, e.g. "Take to PGM with the selected transition (Fade · 0.5 s)" |
+| Transition | Takes this input to PGM with the **current transition slot** (it is put on PVW first if it isn't there) — the same slot Return, the T-bar and Run Current Transition use ([Concepts › Transition slots](concepts.md#transition-slots)). The tooltip names it, e.g. "Take to PGM with the current transition (Transition 1 · Fade 0.5 s)" |
 | Cut | Cut straight to PGM (skips PVW) |
-| Loop | Video files only: loop on / off (see [Video file](#video-file)) |
+| ⏮ ▶⏸ 🔁 | Back to start / pause·play / loop, lit only for video files (greyed out on other inputs); see [Video file › Playback](#playback) |
 | 1 2 3 4 | Put this input on overlay channel n and show it; if it is already showing there = hide. Right-click = Overlay Settings… |
 | Mute | Mute / unmute this input; greyed out for inputs without sound (images, screen capture without audio, a synthetic source without audio), the tooltip says why |
 | ⚙ | This input's settings (also right-click › Settings…) |
@@ -165,7 +181,8 @@ One cell per input: a title bar (number, name, category dot; red background on P
 - **Click a thumbnail** = put it on PVW; **Shift-click** = cut it straight to PGM.
 - **During a transition** (a half-pulled T-bar counts) Transition and Cut are greyed out and clicking or Shift-clicking a thumbnail does nothing; the status line says "Transition in progress: PVW / PGM can change after it finishes" —
   the state machine refuses PVW / PGM changes during a transition (see [Concepts › How a switch happens](concepts.md#how-a-switch-happens)). Transition / Cut are also greyed out on the input that is already on PGM.
-- **Right-click menu**: Send to PVW / Cut to PGM / Take to PGM with the selected transition (type · duration) / Overlay ▸ 1–4 / Category ▸ / Mute — Settings… / Change Source… (opens the Source section of the input settings) / Rename… — Remove Input n.
+- The six buttons fit even in the smallest cell (160 pt wide): ⏮ ▶⏸ 🔁 are 20 pt icons and Transition / Cut share the rest. In the English UI "Transition" is cut short ("Transiti…" in medium cells, shorter in small ones) — a known issue; the tooltip has the full text.
+- **Right-click menu**: Send to PVW / Cut to PGM / Take to PGM with the current transition (Transition 1 · Fade 0.5 s) / Overlay ▸ 1–4 / Category ▸ / Mute — [video file inputs add four items: Play (or Pause) / Back to Start / Loop (ticked) / Restart When Taken to PGM (ticked) —] Settings… / Change Source… (opens the Source section of the input settings) / Rename… — Remove Input n.
 
 ### Dropping files
 
@@ -188,8 +205,8 @@ One window per input, several can be open; hotkeys keep switching the program wh
 | Keyer | Enable keyer, key colour, "Pick from picture" (click the picture at the bottom right; the average of the 3×3 pixels around that point becomes the key colour), tolerance, edge softness, spill suppression, Restore defaults; applies wherever the input appears (PGM, transitions, overlays, PVW, multiview) |
 | Crop & position | Crop on four edges (%), scale, horizontal / vertical offset, rotation, flip horizontally / vertically; numbers can be typed next to the sliders, every item has a reset (↺), and each group can be reset; "Copy position / Paste position" copies crop and position between inputs |
 | Audio | Bus sends, gain, mute, solo (to headphones), pan, audio delay compensation (ms, 0–500, sound only), **Follow video (AFV)** (the same switch as on the mixer strip; has no effect while AFV is off in the mixer header), Reset gain / pan / delay |
-| Audio effects | Per-input audio effect slots (order = processing order); in this version they **can be edited but don't affect the sound yet**, as the banner "Effects don't affect the sound yet (this version)" says |
-| Source | Change type / device / file / source name / end action / rate; "Apply Source" rebuilds the input from the new source (the picture drops out briefly, files restart; a change to "At end" alone doesn't rebuild, playback continues), "Revert" discards changes not yet applied; "Apply Source" is greyed out while nothing has changed |
+| Audio effects | Parametric EQ (up to 3 bands), compressor ("Use compressor": threshold / Headroom / expansion ratio / attack / release / output gain), limiter; changes **affect this input's sound immediately** (the same settings as this input's audio settings window). Processing order is always EQ, then compressor; **the Limiter section has no effect on an input** (inputs get no limiter, only buses do). Effects this page doesn't know, such as a `compressor` written through the API, are listed under "Other effects (kept as is)" — shown, not editable. See [Concepts › Audio](concepts.md#audio) |
+| Source | Change type / device / file / source name / end action / rate; "Apply Source" rebuilds the input from the new source (the picture drops out briefly, files restart), "Revert" discards changes not yet applied; "Apply Source" is greyed out while nothing has changed. For a video file, **changing only "At end" or "Playback rate" applies at once without rebuilding** (playback continues) — no need for "Apply Source". Video files also get a "Playback" section below: ▶ Play / ⏸ Pause, ⏮ Back to Start, Restart when taken to PGM (the same as the cell buttons and right-click menu, see [Playback](#playback)) |
 
 "**Copy from another input…**" at the bottom of the sidebar: pick an input and the groups to copy (Crop & position / Keyer / Audio / Audio effects); they replace this input's settings in one step.
 

@@ -57,8 +57,10 @@ Three buttons at the bottom left:
 - **Device**: System default (follows changes) / Null device (silent) / the listed output devices. With the null device picture, recording and streaming carry on with sound; only local playback is silent.
 - **Which two channels each bus goes to**: Master, Bus A, Bus B and Headphones each pick a channel pair (1/2, 3/4, …) or "Off". Two buses can't share a pair: picking a pair another bus uses switches that bus to "Off" and says so.
   Changing the device only drops the pairs the new device doesn't have; "Restore device defaults" goes back to the device's default assignment. Recording / streaming / NDI® use Master itself and are not affected by this.
-- **2-channel devices** (built-in speakers, plain USB headsets): both channels go to Master, so this page and the mixer header say "This device has no headphone channels" — solo / PFL / AFL live on the headphone bus and can't be heard then.
-  "Use the Master channels while monitoring" is **not in effect yet** in this version (the choice is saved and works once the audio engine supports it); to hear the headphone bus today, use a device with more channels.
+  The pair given to "Headphones" normally carries Master, and the soloed inputs while something is soloed in the mixer ("Headphone output" in [Concepts › Audio](concepts.md#audio)).
+- **2-channel devices** (built-in speakers, plain USB headsets): both channels go to Master, so this page and the mixer header say "This device has no headphone channels" — solo / PFL / AFL live on the headphone bus, which has no channels of its own.
+  The page then offers "**Use the Master channels while monitoring**" (off by default): when on, these two channels carry the headphone bus (only the soloed inputs) while something is soloed in the mixer, back to Master when solo is off;
+  recording / streaming / NDI® keep getting Master. The switch **applies immediately**, no engine restart. With it off, solo can't be heard (the speakers keep playing Master).
 - A device change needs "Apply and Restart Engine". **Changing only channel pairs does not enable that button** (this version doesn't count it as pending): the change is stored and applies the next time the engine starts (New / Open, reopening the app).
 
 ### Remote Control
@@ -109,8 +111,8 @@ See [Shortcuts](shortcuts.md).
 
 ## Launch arguments
 
-When starting the app from a terminal (`open PlusMix.app --args …`, or running `PlusMix.app/Contents/MacOS/PlusMix …` directly). Launch arguments only apply to that run;
-**but if you change anything on the General, Audio Devices, Remote Control or Advanced pages during that run, this Mac's settings are written back as a whole and the launch-argument values (`--no-api`, `--api-listen`, `--api-token`, `--audio-device`, `--record-*`) are stored too** — don't edit those pages while running with launch arguments:
+When starting the app from a terminal (`open PlusMix.app --args …`, or running `PlusMix.app/Contents/MacOS/PlusMix …` directly). Launch arguments only apply to that run and are not stored as this Mac's settings;
+whatever you change in the Settings window during that run is stored as usual (only the item you changed; if only half of a listen address changes — say just "This Mac only / Allow local network" — the other half is taken from what this Mac had stored, not from `--api-listen`):
 
 | Argument | Effect |
 |---|---|
