@@ -345,6 +345,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         mixerPanel.send = send
         bottomBar.send = send
         inputStrip.runtimeState = session.map { s in { [weak s] n in s?.inputs.runtimeState(of: n) } }
+        inputStrip.runtimeDetail = session.map { s in { [weak s] n in s?.inputs.lastError(of: n) } }   // 无信号格子的第二行（W5-O）
         let source = session?.displaySource
         previewMonitor.display.source = source
         bindProgramLedger(to: source)

@@ -36,6 +36,8 @@ final class AppController {
     let midiFileURL: URL
     /// 用户表存在但读不出来（JSON 错 / 冲突）的原因：退回默认表并在状态行提示。
     private(set) var hotkeyTableError: String?
+    /// midi.json 存在但读不出来的原因：退回空表并在状态行提示（同 hotkeys.json，W5-O）。
+    private(set) var midiTableError: String?
     /// 面板与窗口（W3-E）。
     lazy var panels = PanelCoordinator(controller: self)
     /// 添加输入的本机记忆：上次的类型、最近添加的来源（W5-F，底栏"添加输入 ▴"与菜单栏"按类型添加"）。
@@ -92,7 +94,9 @@ final class AppController {
             } else {
                 hotkeyTable = .default
             }
-            midiTable = MIDIMapTable.loadUserTableOrDefault()
+            let midi = Self.loadMIDITable(from: MIDIMapTable.defaultFileURL)
+            midiTable = midi.table
+            midiTableError = midi.error
         }
         if isTestHost {
             let tests = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests", isDirectory: true)
@@ -214,7 +218,8 @@ final class AppController {
             case .keep: break
             }
             documentToken = s.observeState { [weak self] _ in self?.refreshDocumentEdited() }
-            if let hotkeyTableError { windowController.bottomBar.showNotice(hotkeyTableError) }
+            let tableErrors = [hotkeyTableError, midiTableError].compactMap { $0 }
+            if !tableErrors.isEmpty { windowController.bottomBar.showNotice(tableErrors.joined(separator: L("notice.join"))) }
         } catch {
             lastError = error
             session = nil
@@ -505,6 +510,17 @@ final class AppController {
         session?.outputs.fallbackDirectory = settings.recordFallbackDirectory
     }
 
+    /// MIDI 映射表的用户文件：没有 = 空表（默认）；有但读不出来（JSON 错 / 冲突 / 版本不对）= 退回空表并给一句提示（状态行，同 hotkeys.json；W5-O——
+    /// 原来 MIDIMapTable.loadUserTableOrDefault() 静默退回空表，用户的映射全没了也不知道为什么）。
+    static func loadMIDITable(from url: URL) -> (table: MIDIMapTable, error: String?) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return (.default, nil) }
+        do {
+            return (try MIDIMapTable.load(from: url), nil)
+        } catch {
+            return (.default, L("notice.midiTableUnreadable", url.path, "\(error)"))
+        }
+    }
+
     /// 快捷键编辑器保存后：换给派发器，下次起 session 也用它。
     func applyHotkeyTable(_ table: HotkeyTable) throws {
         hotkeyTable = table
@@ -516,6 +532,7 @@ final class AppController {
     /// MIDI 映射面板保存后：换给控制器。
     func applyMIDITable(_ table: MIDIMapTable) throws {
         midiTable = table
+        midiTableError = nil
         session?.control.midi.table = table
     }
 

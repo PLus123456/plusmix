@@ -410,7 +410,9 @@ final class SwitcherSession {
         case .recordingStopped(let n, let url, let frames, let seconds): notify(L("notice.recordingStopped", n, url.lastPathComponent, Int(frames), seconds))
         case .recordingFailed(_, let message): notify(message)
         case .recordingDiskLow(let n, let mb): notify(L("notice.recordingDiskLow", n, Int(mb)))
-        case .recordingSwitchedToFallback(let n, let url): notify(L("notice.recordingFallback", n, url.lastPathComponent))
+        case .recordingSwitchedToFallback(let n, let url, .diskFull): notify(L("notice.recordingFallback", n, url.lastPathComponent))
+        case .recordingSwitchedToFallback(let n, let url, .belowMinimum(let freeMB, let minimumMB)):
+            notify(L("notice.recordingFallbackBelowMinimum", n, freeMB, minimumMB, url.lastPathComponent))
         case .streamConnecting(let n): notify(L("notice.streamConnecting", n))
         case .streamStarted(let n): notify(L("notice.streamStarted", n))
         case .streamStopped(let n): notify(L("notice.streamStopped", n))

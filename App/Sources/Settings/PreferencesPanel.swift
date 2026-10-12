@@ -338,7 +338,9 @@ final class PreferencesModel: ObservableObject {
         var items: [PendingRestart] = []
         if programFormat != session.format { items.append(.format) }
         if alignmentFrames != session.state.audio.alignmentFrames || monitorPoint != session.state.audio.monitorPoint { items.append(.showAudio) }
-        if audioDevice != running.audioDevice { items.append(.audioDevice) }
+        // 每条总线的声道对也是建音频引擎时用的（AudioRuntime）：只改声道对同样待应用（W5-O；原来只比设备，改完要等下次起引擎才生效）。
+        // 借 Master 声道不算：G8b 起当场落到跑着的引擎（commit 里设 AudioEngine.borrowMasterForMonitor）
+        if audioDevice != running.audioDevice || audioOutput.storedMap != running.busOutputMap { items.append(.audioDevice) }
         let host = apiHost.trimmingCharacters(in: .whitespaces)
         if apiEnabled != running.apiEnabled || (host.isEmpty ? "127.0.0.1" : host) != running.apiHost || apiPort != running.apiPort
             || (apiToken.isEmpty ? nil : apiToken) != running.apiToken {

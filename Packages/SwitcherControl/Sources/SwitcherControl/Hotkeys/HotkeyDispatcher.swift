@@ -6,6 +6,7 @@ import SwitcherContracts
 // 并投给总线（来源 hotkey），返回 true 表示这个键被吃掉了。派发是异步的（键盘事件在主线程，总线是 async）；测试用 handleAndWait。
 // W5-J：一个动作可以是几条命令（组合动作，ControlAction.resolve 返回数组）——同一个任务里按顺序逐条 submit，前一条被拒就不发后面的
 // （"选进 PVW 并转场"的 setPreview 被拒时，autoTransition 会把原来的 PVW 推上去）；界面动作（.ui）不进总线，交给 App 设的 handler。
+// W5-O：按下去没做成、要在状态行说一句的（ControlFeedback：叠加空通道 + PVW 黑场、执行没选输入的 Stinger 被拒）交给 App 设的 feedback handler。
 
 /// 快捷键派发器。
 public final class HotkeyDispatcher: Sendable {
@@ -18,6 +19,7 @@ public final class HotkeyDispatcher: Sendable {
     public let bus: CommandBus
     private let tableBox: Mutex<HotkeyTable>
     private let uiHandler = Mutex<(@Sendable (String) -> Void)?>(nil)
+    private let feedbackHandler = Mutex<(@Sendable (ControlFeedback) -> Void)?>(nil)
     private let handled = Atomic<UInt64>(0)
     private let rejected = Atomic<UInt64>(0)
     private let unresolved = Atomic<UInt64>(0)
@@ -42,6 +44,26 @@ public final class HotkeyDispatcher: Sendable {
         uiHandler.withLock { $0 = handler }
     }
 
+    /// 按下去没做成、要在状态行说一句时交给谁（W5-O）：App 设。解析不出时在调 handle 的线程上同步调；被总线拒时在派发的 Task 里调（任意线程）。
+    public func setFeedbackHandler(_ handler: (@Sendable (ControlFeedback) -> Void)?) {
+        feedbackHandler.withLock { $0 = handler }
+    }
+
+    /// 解析不出：记一笔，要说的那一句交给 App。
+    private func noteUnresolved(_ action: ControlAction) {
+        unresolved.add(1, ordering: .relaxed)
+        guard let state = bus.stateMachine.publisher.latest?.state, let feedback = action.unresolvedFeedback(in: state) else { return }
+        feedbackHandler.withLock { $0 }?(feedback)
+    }
+
+    /// 被总线拒：记一笔，要说的那一句（按拒的那一刻的快照）交给 App。
+    private func noteRejected(_ error: any Error) {
+        rejected.add(1, ordering: .relaxed)
+        guard let rejection = error as? CommandRejection, let state = bus.stateMachine.publisher.latest?.state,
+              let feedback = ControlAction.rejectionFeedback(for: rejection.command, in: state) else { return }
+        feedbackHandler.withLock { $0 }?(feedback)
+    }
+
     /// 解析组合键对应的命令（不投递；组合动作按顺序多条）。没绑定、解析不出、界面动作为空。
     public func commands(for combo: KeyCombo) -> [Command] {
         guard let action = table.action(for: combo) else { return [] }
@@ -63,11 +85,11 @@ public final class HotkeyDispatcher: Sendable {
         }
         let commands = commands(for: combo)
         guard !commands.isEmpty else {
-            unresolved.add(1, ordering: .relaxed)
+            noteUnresolved(action)
             return true
         }
         Task { [bus] in
-            do { _ = try await Self.submitInOrder(commands, to: bus, source: .hotkey) } catch { self.rejected.add(1, ordering: .relaxed) }
+            do { _ = try await Self.submitInOrder(commands, to: bus, source: .hotkey) } catch { self.noteRejected(error) }
         }
         return true
     }
@@ -94,13 +116,13 @@ public final class HotkeyDispatcher: Sendable {
         }
         let commands = commands(for: combo)
         guard !commands.isEmpty else {
-            unresolved.add(1, ordering: .relaxed)
+            noteUnresolved(action)
             return []
         }
         do {
             return try await Self.submitInOrder(commands, to: bus, source: .hotkey)
         } catch {
-            rejected.add(1, ordering: .relaxed)
+            noteRejected(error)
             throw error
         }
     }

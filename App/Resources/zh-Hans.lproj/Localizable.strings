@@ -191,8 +191,8 @@
 "addInput.banner.help" = "看说明";
 "addInput.banner.microphone.message" = "本程序收不到话筒和声卡的声音。打开 系统设置 › 隐私与安全性 › 麦克风，允许 PlusMix，回来就有声音，不用重启。";
 "addInput.banner.microphone.title" = "麦克风权限被拒";
-"addInput.banner.ndi.message" = "收不到网络上的 NDI® 画面：这一版没带 NDI® 运行库，或者本机没装。可以先手填源名加上，装好之后这一路会自己好。";
-"addInput.banner.ndi.title" = "NDI® 运行库不在";
+"addInput.banner.ndi.message" = "这一版编译时没带 NDI® SDK，收不到网络上的 NDI® 画面。请换用带 NDI® 支持的版本。";
+"addInput.banner.ndi.title" = "这一版没带 NDI® 支持";
 "addInput.banner.openSettings" = "打开系统设置…";
 "addInput.banner.screen.message" = "抓屏幕 / 窗口 / 应用要先在 系统设置 › 隐私与安全性 › 屏幕与系统录音 里允许 PlusMix；系统可能要求重开本程序才生效。";
 "addInput.banner.screen.title" = "没有屏幕录制权限";
@@ -623,6 +623,8 @@
 "externalMenu.removeWithStatus" = "删除 %d %@（%@）";
 "feedback.ignored" = "命令被忽略：%@（状态没变）";
 "feedback.rejected" = "命令被拒：%@ — %@";
+"feedback.stingerSlotWithoutInput" = "转场 %d 是 Stinger、还没选输入——在转场列 ▾ 里选一路";
+"feedback.stingerWithoutInput" = "当前转场是 Stinger、还没选输入——在转场列 ▾ 里选一路";
 "help.manualMissing.text" = "这一版还没有带使用手册（随包 HTML 手册在下一版）。横幅上写的就是要做的事：按它装好或授权，回到添加面板会自动刷新。";
 "help.manualMissing.title" = "手册还没随包";
 "hotkeyList.action" = "动作";
@@ -907,6 +909,8 @@
 "notice.audioFailed" = "音频引擎起不来：%@";
 "notice.externalDisplay" = "外部显示 %d：%@";
 "notice.hotkeyTableUnreadable" = "快捷键表 %@ 读不出来，用默认表：%@";
+"notice.join" = "；";
+"notice.midiTableUnreadable" = "MIDI 映射表 %@ 读不出来，用空表：%@";
 "notice.isoBranchUnavailable" = "ISO 输入 %d 不存在或分支用完（每路最多 %d 个 ISO / Aux）";
 "notice.midiFailed" = "MIDI 起不来：%@";
 "notice.ndiBranchRestored" = "NDI 发送 %d：输入 %d 空出了分支，已重新接上、开始送画面";
@@ -921,6 +925,7 @@
 "notice.recordingError" = "录制 %d 失败：%@";
 "notice.recordingFailed" = "录制 %d 起不来：%@";
 "notice.recordingFallback" = "录制 %d：磁盘满，已切到备用目录：%@";
+"notice.recordingFallbackBelowMinimum" = "录制 %d：磁盘剩余 %d MB，低于下限 %d MB，已切到备用目录：%@";
 "notice.recordingFallbackFailed" = "%@；备用目录也起不来：%@";
 "notice.recordingFinishFailed" = "录制 %d 封口失败：%@";
 "notice.recordingStarted" = "录制 %d 开始：%@";

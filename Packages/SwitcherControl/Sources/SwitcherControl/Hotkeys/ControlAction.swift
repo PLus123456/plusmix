@@ -7,8 +7,9 @@ import SwitcherContracts
 // 界面动作（只在 App 里派发，不进总线）。resolve 返回命令数组：组合动作按顺序逐条进总线（前一条被拒就不发后面的）。
 // JSON 只加新键，旧的 hotkeys.json / midi.json 照读（旧的整数输入 = 编号）。
 // W5-M（prompt 100，01a N6）：转场槽的两类动作——执行转场 n（useTransitionSlot(n, start: true)，一拍内选中并开始）、选中转场 n（start: false，
-// 只换 T-bar / 回车用的当前槽）。回车仍是 autoTransition = 执行当前槽（当前那组就是当前槽的配置，提案 020）。Stinger 槽没选输入照常执行
-// （契约默认；只有屏幕上的按钮按 X18 先弹输入选择）。
+// 只换 T-bar / 回车用的当前槽）。回车仍是 autoTransition = 执行当前槽（当前那组就是当前槽的配置，提案 020）。
+// W5-O（prompt 112）：⌃1–⌃4（toggleOverlay）对没指定输入的通道用当前 PVW 那一路开（与转场列 / 菜单栏"切换 › Overlay"同一口径）；
+// 按下去没做成、要在状态行说一句的两种（叠加空通道 + PVW 黑场、执行没选输入的 Stinger——提案 029 起校验器拒）由派发器交给 App（ControlFeedback）。
 
 /// 按下时才定的输入（N3）。JSON：整数 = 编号；"preview" / "program" = 按下那一刻 PVW / PGM 上的那一路（黑场 = 解析不出，这条动作不发）。
 public enum InputRef: Hashable, Sendable, ExpressibleByIntegerLiteral {
@@ -69,6 +70,15 @@ public enum SwitchMode: String, Hashable, Sendable, Codable, CaseIterable {
     }
 }
 
+/// 快捷键按下去没做成、要在状态行说一句的几种（W5-O）：派发器解析不出命令、或命令被总线拒时交给 App 设的 handler（HotkeyDispatcher.setFeedbackHandler）。
+/// 其余的"没做成"（引用不存在、已是目标状态、别的结构性错误）照旧只记计数。
+public enum ControlFeedback: Hashable, Sendable {
+    /// 叠加 n 没指定输入、PVW 也是黑场：⌃n 开不了（与转场列 / 菜单栏"切换 › Overlay"同一句提示）。
+    case overlayNeedsPreview(channel: Int)
+    /// 要执行的转场是没选输入的 Stinger（提案 029：useTransitionSlot(start: true) / autoTransition 被校验器拒）；slot = nil：当前那组不对应任何槽。
+    case stingerWithoutInput(slot: Int?)
+}
+
 /// 一个可绑定的动作。JSON：{"command": {<Command>}}、{"toggleFTB": {}}、{"toggleOverlay": {"channel": 1}}……（键 = case 名，见 ControlActionKind）。
 public enum ControlAction: Hashable, Sendable {
     case command(Command)
@@ -120,7 +130,12 @@ public enum ControlAction: Hashable, Sendable {
             return [.ftb(on: !state.ftb.on)]
         case .toggleOverlay(let channel):
             guard (1...MixerState.overlayCount).contains(channel) else { return [] }
-            return [.overlay(channel: channel, on: !state.overlays[channel - 1].on, input: nil)]
+            // 开着 → 关（通道设置不清）；关着、指定了输入 → 开；没指定 → 用当前 PVW 那一路开（原来 input: nil，开了没画面，W5-O）；
+            // PVW 也是黑场 → 不发（unresolvedFeedback 给一句提示）
+            let overlay = state.overlays[channel - 1]
+            if overlay.on || overlay.input != nil { return [.overlay(channel: channel, on: !overlay.on, input: nil)] }
+            guard let preview = InputRef.preview.resolve(in: state) else { return [] }
+            return [.overlay(channel: channel, on: true, input: preview)]
         case .toggleMute(let ref):
             guard let n = ref.resolve(in: state), let i = state.input(n) else { return [] }
             return [.mute(input: n, on: !i.settings.audio.muted)]
@@ -178,6 +193,31 @@ public enum ControlAction: Hashable, Sendable {
             return [.useTransitionSlot(slot: slot, start: false)]
         }
     }
+
+    /// 解析不出命令时要在状态行说的那一句：只有"⌃n 开一个没指定输入的叠加通道、PVW 也是黑场"这一种（别的解析不出 = 引用不存在 / 没什么要变，不说）。
+    public func unresolvedFeedback(in state: MixerState) -> ControlFeedback? {
+        guard case .toggleOverlay(let channel) = self, (1...MixerState.overlayCount).contains(channel) else { return nil }
+        let overlay = state.overlays[channel - 1]
+        return !overlay.on && overlay.input == nil && InputRef.preview.resolve(in: state) == nil ? .overlayNeedsPreview(channel: channel) : nil
+    }
+
+    /// 命令被总线拒（CommandRejection）时要在状态行说的那一句：执行的是没选输入的 Stinger（提案 029，校验器按同一判定拒）。别的拒绝不说（只记计数）。
+    public static func rejectionFeedback(for command: Command, in state: MixerState) -> ControlFeedback? {
+        let t = state.transition
+        switch command {
+        case .useTransitionSlot(let slot, true):
+            guard slot >= 1, slot - 1 < t.slots.count, isStingerWithoutInput(t.slots[slot - 1]) else { return nil }
+            return .stingerWithoutInput(slot: slot)
+        case .autoTransition:
+            guard !t.isActive, isStingerWithoutInput(t.currentGroup) else { return nil }
+            return .stingerWithoutInput(slot: t.currentSlot)
+        default:
+            return nil
+        }
+    }
+
+    /// 没选输入的 Stinger（与契约的 TransitionSlot.isStingerWithoutInput 同一判定，提案 029）。
+    private static func isStingerWithoutInput(_ slot: TransitionSlot) -> Bool { slot.type == .stinger && slot.stinger.input == nil }
 
     /// outputSwitch / outputKindSwitch 管的四类（录制 / 推流有自己的起停命令，setOutputEnabled 对它们会被拒）。
     public static let switchableKinds: [OutputKind] = [.ndi, .externalDisplay, .virtualCamera, .multiview]

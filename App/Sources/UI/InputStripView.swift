@@ -51,6 +51,8 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     private var lastState = MixerState()
     /// 运行状态来源（session.inputs.runtimeState）。
     var runtimeState: ((Int) -> InputState?)?
+    /// 无信号的原因来源（session.inputs.lastError：各输入自己报的那一句，W5-O）；只在无信号时读。
+    var runtimeDetail: ((Int) -> String?)?
 
     /// 分类（颜色 = 快照里各路的 InputConfig.color，每个快照都对一遍；名字 = Show.layout，主窗口换 session / 改名时设）。
     var categories = InputCategories() {
@@ -210,7 +212,9 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         let label = transitionLabel(state)
         for config in state.inputs {
             guard let cell = cells[config.number] else { continue }
-            cell.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays, runtime: runtimeState?(config.number))
+            let runtime = runtimeState?(config.number)
+            cell.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays, runtime: runtime,
+                       detail: runtime == .noSignal ? runtimeDetail?(config.number) : nil)
             cell.applySwitching(program: state.program, transitionActive: state.transition.isActive, transitionLabel: label)
             cell.removalImpacts = InputRemovalImpact.impacts(of: config.number, in: state)   // 删之前要不要问（W5-B）
         }

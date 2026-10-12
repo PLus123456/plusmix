@@ -128,4 +128,27 @@ final class DiskProtectionAppTests: XCTestCase {
         let statsAfter = try XCTUnwrap(session.stats)
         XCTAssertEqual(statsAfter.missedRender, statsBefore.missedRender, "整个过程 missed_render 不增")
     }
+
+    /// W5-O（prompt 112 第 8 项）：低于下限、设了备用目录 → 切过去继续录，提示写"低于下限 n MB"；原来一律写"磁盘满"，盘其实没满（W4-C2 查出）。
+    func testW5O8_belowMinimumFallbackNoticeSaysBelowMinimum() throws {
+        let (mount, cleanup) = try mountTinyVolume(name: "c")
+        defer { cleanup() }
+        let fallback = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/s7-fallback-c", isDirectory: true)
+        try? FileManager.default.removeItem(at: fallback)
+        defer { try? FileManager.default.removeItem(at: fallback) }
+        let session = try start(noisyShow(recordDirectory: mount.path, bitrate: 6_000_000))
+        XCTAssertEqual(session.outputs.minimumFreeBytes, 200 * 1024 * 1024, "默认下限 200 MB：50 MB 的盘从一开始就低于它")
+        session.outputs.fallbackDirectory = fallback.path
+        var notices: [String] = []
+        let token = session.observeNotices { notices.append($0) }
+        defer { token.invalidate() }
+        session.send(.startRecord(output: 1))
+        XCTAssertTrue(AppTest.waitUntil(10) { session.outputs.recorders[1]?.onFallback == true }, "低于下限 + 有备用目录：切过去（\(session.outputs.diskEvents)）")
+        XCTAssertTrue(AppTest.waitUntil(2) { notices.contains { $0.contains("备用目录") } }, "\(notices)")
+        let notice = try XCTUnwrap(notices.first { $0.contains("备用目录") })
+        XCTAssertTrue(notice.contains("低于下限 200 MB"), notice)
+        XCTAssertFalse(notice.contains("磁盘满"), "盘没满：\(notice)")
+        session.send(.stopRecord(output: 1))
+        XCTAssertTrue(AppTest.waitUntil(20) { session.outputs.recorders.isEmpty })
+    }
 }

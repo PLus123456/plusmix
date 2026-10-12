@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import Synchronization
 import SwitcherContracts
 import SwitcherEngine
 @testable import SwitcherControl
@@ -122,7 +123,8 @@ final class HotkeyTests: XCTestCase {
         XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), [.ftb(on: true)])
         s.ftb.on = true
         XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), [.ftb(on: false)])
-        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: true, input: nil)])
+        // W5-O：通道没指定输入时用当前 PVW 那一路开（与转场列 / 菜单栏"切换 › Overlay"同一口径；testW5O8_toggleOverlayEmptyChannelUsesPreview）
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: true, input: 2)])
         s.overlays[1].on = true
         XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: false, input: nil)])
         XCTAssertEqual(ControlAction.toggleOverlay(channel: 9).resolve(in: s), [])
@@ -179,6 +181,39 @@ final class HotkeyTests: XCTestCase {
         XCTAssertTrue(d.handle(KeyCombo("9")!))
         let rejected = await waitUntil { d.counters.rejected == 2 }
         XCTAssertTrue(rejected)
+    }
+
+    /// W5-O（prompt 112 第 8 项）：⌃1–⌃4（toggleOverlay）对没指定输入的通道用当前 PVW 那一路开——原来发 overlay(on, input: nil)，开了没画面；
+    /// 与转场列 / 菜单栏"切换 › Overlay"同一口径（App 的 OverlayToggle）：开着 → 关（通道设置不清）；关着、指定了输入 → 开；
+    /// 都没有、PVW 也是黑场 → 不发，派发器给一句 ControlFeedback.overlayNeedsPreview（状态行）。
+    func testW5O8_toggleOverlayEmptyChannelUsesPreview() async throws {
+        var s = TestStates.base()
+        XCTAssertNil(s.overlays[2].input)
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 3).resolve(in: s), [.overlay(channel: 3, on: true, input: 2)], "空通道 = 用 PVW（2）开")
+        s.overlays[2].input = 4
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 3).resolve(in: s), [.overlay(channel: 3, on: true, input: nil)], "指定了输入：照它开")
+        s.overlays[2].on = true
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 3).resolve(in: s), [.overlay(channel: 3, on: false, input: nil)], "开着：关，输入留着")
+        var black = TestStates.base()
+        black.preview = MixerState.noInput
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 1).resolve(in: black), [], "空通道 + PVW 黑场：不发")
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 1).unresolvedFeedback(in: black), .overlayNeedsPreview(channel: 1))
+        XCTAssertNil(ControlAction.toggleOverlay(channel: 1).unresolvedFeedback(in: TestStates.base()), "解析得出来就不说")
+        XCTAssertNil(ControlAction.toggleMute(input: 42).unresolvedFeedback(in: black), "别的解析不出（引用不存在）照旧不说")
+        // 派发器：解析不出时把这一句交给 App 设的 handler（状态行）
+        let f = BusFixture(state: black)
+        defer { f.stop() }
+        let d = HotkeyDispatcher(bus: f.bus)
+        let got = Mutex<[ControlFeedback]>([])
+        d.setFeedbackHandler { fb in got.withLock { $0.append(fb) } }
+        let ok = await waitUntil { f.stateMachine.publisher.latest != nil }
+        XCTAssertTrue(ok)
+        let receipts = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("ctrl+1")))
+        XCTAssertEqual(receipts, [], "PVW 黑场：一条都不发")
+        XCTAssertEqual(got.withLock { $0 }, [.overlayNeedsPreview(channel: 1)])
+        XCTAssertEqual(d.counters.unresolved, 1)
+        XCTAssertTrue(d.handle(try XCTUnwrap(KeyCombo("ctrl+1"))), "异步入口同样吃掉这个键")
+        XCTAssertEqual(got.withLock { $0 }.count, 2)
     }
 
     #if canImport(AppKit)

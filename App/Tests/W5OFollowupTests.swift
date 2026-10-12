@@ -3,8 +3,10 @@ import AppKit
 import XCTest
 import SwitcherAudio
 import SwitcherContracts
+import SwitcherControl
 import SwitcherEngine
 import SwitcherExternal
+import SwitcherNDI
 @testable import Switcher
 
 @MainActor
@@ -384,5 +386,192 @@ final class W5OFollowupTests: XCTestCase {
         off.setDynamicsKind(.dynamicsProcessor)
         XCTAssertEqual(off.slots.map(\.id), ["dynamicsProcessor"])
         XCTAssertFalse(off.slots[0].enabled, "没启用时选种类：装一个旁路着的格，开关仍是关")
+    }
+
+    // MARK: 8. S3 一批（W4C2 两张问题单其余条 + 英文截断）
+
+    /// 只改总线声道对也算"待应用"（声道对是建音频引擎时用的；原来只比设备，改完"应用并重起引擎"是灰的、要等下次起引擎才生效）。
+    /// 借 Master 声道 G8b 起当场落到跑着的引擎（AudioEngine.borrowMasterForMonitor 任意线程可设），不算待应用。
+    func testW5O8_busChannelPairChangeIsPendingRestart() throws {
+        let session = try AppTest.freshSession()
+        let controller = AppTest.controller
+        let saved = controller.settings
+        addTeardownBlock { @MainActor in
+            AppTest.controller.panels.closeAll()
+            AppTest.controller.updateSettings(saved)
+        }
+        controller.panels.showSettings(page: .audioDevice)
+        let prefs = try XCTUnwrap(controller.panels.settingsWindow).model.preferences
+        XCTAssertNil(session.settings.busOutputMap, "测试宿主起引擎时没带映射")
+        XCTAssertFalse(prefs.pendingRestart.contains(.audioDevice))
+        prefs.audioOutput.setPair(.busA, first: 0)
+        XCTAssertTrue(AppTest.waitUntil(2) { prefs.pendingRestart.contains(.audioDevice) }, "只改声道对：待应用（\(prefs.pendingRestart)）")
+        prefs.audioOutput.resetToDeviceDefault()
+        XCTAssertTrue(AppTest.waitUntil(2) { !prefs.pendingRestart.contains(.audioDevice) }, "改回跟跑着的一样：不再待应用")
+        prefs.audioOutput.borrowMasterForMonitor = true
+        XCTAssertTrue(AppTest.waitUntil(2) { session.audio.engine.borrowMasterForMonitor }, "借 Master 当场落到跑着的引擎")
+        XCTAssertFalse(prefs.pendingRestart.contains(.audioDevice), "借 Master 不用重起引擎")
+        prefs.audioOutput.borrowMasterForMonitor = false
+        XCTAssertTrue(AppTest.waitUntil(2) { !session.audio.engine.borrowMasterForMonitor })
+    }
+
+    /// 导出 / 导入 / 恢复默认带上提醒（四个键）/ 电源（两个）/ Tally（两个）/ 兼容层 HTTP 端口；每条总线的声道对（Data）原来在键表里却导不出来
+    /// （包的值类型认不出 Data，导入时又按"包里没有 = 默认"删了键），这里一起修。
+    func testW5O8_settingsTransferCoversRemindersPowerTallyCompatPortAndBusMap() throws {
+        _ = try AppTest.freshSession()
+        let controller = AppTest.controller
+        let original = controller.settings
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-w5o-transfer-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            AppTest.dismissConfirmations()
+            controller.updateSettings(original)
+            try? controller.applyHotkeyTable(.default)
+            try? HotkeyTable.default.save(to: controller.hotkeyFileURL)
+            try? MIDIMapTable.default.save(to: controller.midiFileURL)
+            try? controller.applyMIDITable(.default)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        typealias K = AppSettings.Keys
+        for key in [K.reminderNotLive, K.reminderNotLiveMinutes, K.reminderFTB, K.reminderLowAudio, K.preventSleep, K.preventDisplaySleep,
+                    K.tallyEnabled, K.tallyPort, K.compatLayerHTTPPort, K.busOutputMap] {
+            XCTAssertTrue(SettingsTransfer.keys.contains(key), "\(key) 在导出 / 导入 / 恢复默认的键表里")
+        }
+        var s = original
+        s.reminders.notLiveEnabled = false
+        s.reminders.notLiveMinutes = 7
+        s.reminders.ftbEnabled = false
+        s.reminders.lowAudioEnabled = false
+        s.preventSleepWhileRunning = false
+        s.preventDisplaySleepWhileRunning = false
+        s.tallyEnabled = false
+        s.tallyPort = 18_777
+        s.compatLayerHTTPPort = 18_089
+        s.busOutputMap = BusOutputMap(master: 0, busA: 2)
+        controller.updateSettings(s)
+        let url = dir.appendingPathComponent("设置.json")
+        try SettingsTransfer.export(controller: controller, to: url)
+        let package = try SettingsTransfer.Package.load(from: url)
+        XCTAssertEqual(package.defaults[K.reminderNotLiveMinutes], .int(7))
+        XCTAssertEqual(package.defaults[K.reminderFTB], .bool(false))
+        XCTAssertEqual(package.defaults[K.preventDisplaySleep], .bool(false))
+        XCTAssertEqual(package.defaults[K.tallyPort], .int(18_777))
+        XCTAssertEqual(package.defaults[K.compatLayerHTTPPort], .int(18_089))
+        XCTAssertNotNil(package.defaults[K.busOutputMap], "声道对导得出来")
+
+        try SettingsTransfer.restoreDefaults(controller: controller)
+        XCTAssertEqual(controller.settings.reminders, ReminderSettings(), "提醒回默认")
+        XCTAssertTrue(controller.settings.preventSleepWhileRunning && controller.settings.preventDisplaySleepWhileRunning, "电源回默认")
+        XCTAssertNil(controller.defaults.object(forKey: K.tallyPort), "tally 端口键清掉（测试宿主内存里一律是 0：不在局域网上听）")
+        XCTAssertEqual(controller.settings.compatLayerHTTPPort, 8088)
+        XCTAssertNil(controller.settings.busOutputMap)
+
+        try SettingsTransfer.apply(try SettingsTransfer.Package.load(from: url), controller: controller)
+        XCTAssertEqual(controller.settings.reminders.notLiveMinutes, 7)
+        XCTAssertFalse(controller.settings.reminders.ftbEnabled)
+        XCTAssertFalse(controller.settings.preventDisplaySleepWhileRunning)
+        XCTAssertEqual(controller.defaults.object(forKey: K.tallyPort) as? Int, 18_777)
+        XCTAssertEqual(controller.settings.compatLayerHTTPPort, 18_089)
+        XCTAssertEqual(controller.settings.busOutputMap, BusOutputMap(master: 0, busA: 2), "声道对导入回来")
+    }
+
+    /// ⌃1–⌃4 对没指定输入的叠加通道用 PVW 那一路开（与转场列 / 格子一致）；PVW 也是黑场 → 状态行说一句（同转场列的提示）。
+    func testW5O8_ctrlNumberOnEmptyOverlayUsesPreview() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        session.send(.setPreview(input: 2))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.preview == 2 && session.state.overlays[0].input == nil })
+        let ctrl1 = try XCTUnwrap(KeyCombo("ctrl+1"))
+        XCTAssertTrue(session.control.hotkeys.handle(ctrl1))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.overlays[0].on && session.state.overlays[0].input == 2 }, "\(session.state.overlays[0])")
+        XCTAssertTrue(session.control.hotkeys.handle(ctrl1))
+        XCTAssertTrue(AppTest.waitUntil(2) { !session.state.overlays[0].on })
+        // 通道 2 空、PVW 黑场：不开，状态行说一句
+        session.send(.setPreview(input: MixerState.noInput))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.preview == MixerState.noInput })
+        XCTAssertTrue(session.control.hotkeys.handle(try XCTUnwrap(KeyCombo("ctrl+2"))))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.lastNotice == L("transition.overlayNeedsPreview", 2, 2) }, "\(session.lastNotice ?? "nil")")
+        XCTAssertFalse(session.state.overlays[1].on)
+    }
+
+    /// midi.json 读不出来（JSON 错 / 冲突）：退回空表并在状态行提示（同 hotkeys.json；原来静默退回空表，映射全没了也不知道为什么）。
+    func testW5O8_unreadableMIDITableIsReported() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-w5o-midi-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let missing = AppController.loadMIDITable(from: dir.appendingPathComponent("midi.json"))
+        XCTAssertEqual(missing.table, .default)
+        XCTAssertNil(missing.error, "没有文件 = 空表，不提示")
+        let bad = dir.appendingPathComponent("bad.json")
+        try Data("{ not json".utf8).write(to: bad)
+        let broken = AppController.loadMIDITable(from: bad)
+        XCTAssertEqual(broken.table, .default, "退回空表")
+        let message = try XCTUnwrap(broken.error, "读不出来要提示")
+        XCTAssertTrue(message.hasPrefix(L("notice.midiTableUnreadable", bad.path, "").prefix(12)), message)
+        XCTAssertTrue(message.contains(bad.path), message)
+        let good = dir.appendingPathComponent("good.json")
+        let table = MIDIMapTable(mappings: [MIDIMapping(trigger: .note(channel: 1, note: 40), action: .action(.overlaysOff))])
+        try table.save(to: good)
+        let ok = AppController.loadMIDITable(from: good)
+        XCTAssertEqual(ok.table, table)
+        XCTAssertNil(ok.error)
+    }
+
+    /// 无信号的格子把这一路的 lastError 作第二行（全文在悬停提示里）：原来只写"无信号"，在等什么看不出来（各输入的 lastError 界面不读）。
+    func testW5O8_noSignalCellShowsInputLastError() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let strip = AppTest.controller.windowController.inputStrip
+        XCTAssertTrue(AppTest.waitUntil(5) { (1...2).allSatisfy { session.inputs.runtimeState(of: $0) == .live } })
+        let cell = try XCTUnwrap(strip.cells[2])
+        let (realState, realDetail) = (strip.runtimeState, strip.runtimeDetail)
+        // 运行表的读数换成假的：2 号无信号、带原因
+        let reason = "网络上找不到 NDI 源 X（发送端没开、不在同一网段，或名字不对）"
+        strip.runtimeState = { n in n == 2 ? .noSignal : .live }
+        strip.runtimeDetail = { n in n == 2 ? reason : nil }
+        strip.apply(state: session.state)
+        XCTAssertEqual(cell.displayedStatus, L("input.noSignal") + "\n" + reason, "第二行是原因")
+        XCTAssertEqual(cell.statusToolTip, reason, "全文在悬停提示")
+        // 没有原因：只写无信号
+        strip.runtimeDetail = { _ in nil }
+        strip.apply(state: session.state)
+        XCTAssertEqual(cell.displayedStatus, L("input.noSignal"))
+        // 接回真的：InputRuntime 按每路输入对象的 lastError 给（合成源没有 = nil）
+        strip.runtimeState = realState
+        strip.runtimeDetail = realDetail
+        XCTAssertNotNil(realDetail, "主窗口绑 session 时接上")
+        XCTAssertNil(session.inputs.lastError(of: 1))
+        guard SwitcherNDIInfo.isSDKAvailable else { return }
+        session.send(.addInput(config: InputConfig(number: 3, name: "不存在的 NDI", source: .ndi(sourceName: "不存在的机器 (W5O)"))))
+        XCTAssertTrue(AppTest.waitUntil(15) { (strip.cells[3]?.displayedStatus ?? "").contains("NDI 源") }, "真 NDI 输入找不到源：\(strip.cells[3]?.displayedStatus ?? "nil")")
+    }
+
+    /// NDI® 横幅照 DeckLink 那条写实：这是编译期开关（这一版没编进 SDK），装运行库也不会好——不再许诺"装好之后这一路会自己好"。
+    func testW5O8_ndiBannerSaysBuildHasNoSDK() {
+        XCTAssertEqual(L("addInput.banner.ndi.title"), "这一版没带 NDI® 支持")
+        XCTAssertTrue(L("addInput.banner.ndi.message").contains("编译时没带 NDI® SDK"), L("addInput.banner.ndi.message"))
+        XCTAssertFalse(L("addInput.banner.ndi.message").contains("自己好"))
+        XCTAssertTrue(L10n.string("addInput.banner.ndi.message", language: "en").contains("without the NDI® SDK"))
+        XCTAssertFalse(L10n.string("addInput.banner.ndi.message", language: "en").contains("once the runtime is installed"))
+    }
+
+    /// 英文界面中档格子（宽 200）第一行"Transition"不截断：转场 / Cut 按标题实际宽度分剩下的宽（原来等宽，"Transition"截成"Transiti…"）。
+    func testW5O8_englishMediumCellTransitionTitleFits() throws {
+        let previous = L10n.languageOverride
+        L10n.languageOverride = "en"
+        defer { L10n.languageOverride = previous }
+        let config = AppTest.syntheticConfig(number: 1)
+        for size in [ThumbnailSize.medium, .large] {
+            let cell = InputCellView(config: config)
+            cell.setSize(width: size.width, thumbnailHeight: (size.width * 9 / 16).rounded())
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+            host.addSubview(cell)
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(cell.transitionButton.title, "Transition")
+            XCTAssertGreaterThanOrEqual(cell.transitionButton.frame.width + 0.5, cell.transitionButton.intrinsicContentSize.width,
+                                        "\(size)：Transition 按钮 \(cell.transitionButton.frame.width) 放不下标题 \(cell.transitionButton.intrinsicContentSize.width)")
+            XCTAssertGreaterThanOrEqual(cell.cutButton.frame.width + 0.5, cell.cutButton.intrinsicContentSize.width, "\(size)：Cut 也放得下")
+            cell.removeFromSuperview()
+        }
     }
 }

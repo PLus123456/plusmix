@@ -10,7 +10,23 @@ import Foundation
 import SwitcherContracts
 import SwitcherEngine
 import SwitcherInputs
+import SwitcherDeckLink
+import SwitcherNDI
 import SwitcherISO
+
+/// 输入对象自己报的最近一句原因（各输入类的 `lastError`：设备不在 / 被拔了、驱动没装、NDI 源找不到……）。它不在契约的 Input 协议里，
+/// App 这边让各类回溯遵守，格子在无信号时写成第二行（W5-O，问题单 W4C2-w5-app-inputs-outputs-gaps 第 2 条；不改契约）。
+protocol InputLastErrorReporting: AnyObject {
+    var lastError: String? { get }
+}
+
+extension CameraInput: InputLastErrorReporting {}
+extension ScreenInput: InputLastErrorReporting {}
+extension FileInput: InputLastErrorReporting {}
+extension ImageInput: InputLastErrorReporting {}
+extension AudioDeviceInput: InputLastErrorReporting {}
+extension DeckLinkInput: InputLastErrorReporting {}
+extension NDIInput: InputLastErrorReporting {}
 
 /// 运行中的输入表（主线程）。
 @MainActor
@@ -61,6 +77,9 @@ final class InputRuntime {
 
     /// 某路的运行状态（没有为 nil）。
     func runtimeState(of number: Int) -> InputState? { entries[number]?.input.state }
+
+    /// 某路输入自己报的最近一句原因（lastError；这一类不报 / 没有为 nil）。
+    func lastError(of number: Int) -> String? { (entries[number]?.input as? InputLastErrorReporting)?.lastError }
 
     /// 让运行表跟上快照：新编号建 + 注册（+ start），消失的编号 stop + 注销，来源变了的重建。名字 / 设置变化不重建；
     /// 文件输入只有结束动作 / 速率变了（路径没变）也不重建：改在跑着的 FileInput 上（两样都运行中可改），播放位置接着走（W5-H 的循环、W5-N 的速率）。

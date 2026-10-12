@@ -191,8 +191,8 @@
 "addInput.banner.help" = "Read the guide";
 "addInput.banner.microphone.message" = "PlusMix can’t hear microphones or audio interfaces. Open System Settings › Privacy & Security › Microphone and allow PlusMix; sound comes back on its own, no restart needed.";
 "addInput.banner.microphone.title" = "Microphone access is denied";
-"addInput.banner.ndi.message" = "Network NDI® sources can’t be received: this build doesn’t include the NDI® runtime, or it isn’t installed. You can still add the source by name; it starts working once the runtime is installed.";
-"addInput.banner.ndi.title" = "NDI® runtime not available";
+"addInput.banner.ndi.message" = "This build was made without the NDI® SDK, so network NDI® sources can’t be received. Use a build with NDI® support.";
+"addInput.banner.ndi.title" = "This build has no NDI® support";
 "addInput.banner.openSettings" = "Open System Settings…";
 "addInput.banner.screen.message" = "To capture a display, window or app, allow PlusMix in System Settings › Privacy & Security › Screen & System Audio Recording; macOS may ask you to reopen PlusMix.";
 "addInput.banner.screen.title" = "No screen recording permission";
@@ -623,6 +623,8 @@
 "externalMenu.removeWithStatus" = "Remove %d %@ (%@)";
 "feedback.ignored" = "Command ignored: %@ (state unchanged)";
 "feedback.rejected" = "Command rejected: %@ — %@";
+"feedback.stingerSlotWithoutInput" = "Transition %d is a Stinger with no input yet — pick one from ▾ in the transition column";
+"feedback.stingerWithoutInput" = "The current transition is a Stinger with no input yet — pick one from ▾ in the transition column";
 "help.manualMissing.text" = "This version doesn’t ship the user guide yet (the bundled HTML guide comes in the next version). The banner says what to do: install or allow it as described, and the Add Input panel refreshes when you come back.";
 "help.manualMissing.title" = "The guide isn’t bundled yet";
 "hotkeyList.action" = "Action";
@@ -907,6 +909,8 @@
 "notice.audioFailed" = "Audio engine failed to start: %@";
 "notice.externalDisplay" = "External display %d: %@";
 "notice.hotkeyTableUnreadable" = "Shortcut table %@ is unreadable; using defaults: %@";
+"notice.join" = "; ";
+"notice.midiTableUnreadable" = "MIDI mapping table %@ is unreadable; using an empty table: %@";
 "notice.isoBranchUnavailable" = "ISO input %d does not exist or has no free branch (at most %d ISO / Aux per input)";
 "notice.midiFailed" = "MIDI failed to start: %@";
 "notice.ndiBranchRestored" = "NDI output %d: a branch on input %d became free; reconnected and sending";
@@ -921,6 +925,7 @@
 "notice.recordingError" = "Recording %d failed: %@";
 "notice.recordingFailed" = "Recording %d failed to start: %@";
 "notice.recordingFallback" = "Recording %d: disk full, switched to the fallback directory: %@";
+"notice.recordingFallbackBelowMinimum" = "Recording %d: %d MB free on disk, below the %d MB minimum; switched to the fallback directory: %@";
 "notice.recordingFallbackFailed" = "%@; the fallback directory failed too: %@";
 "notice.recordingFinishFailed" = "Recording %d failed to finalize: %@";
 "notice.recordingStarted" = "Recording %d started: %@";
