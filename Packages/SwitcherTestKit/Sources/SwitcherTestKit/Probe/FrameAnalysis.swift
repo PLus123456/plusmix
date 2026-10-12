@@ -460,7 +460,8 @@ public enum FrameAnalysis {
     /// - Parameters:
     ///   - maxMatchSeconds: click 离闪光超过这个距离就算没配上。
     ///   - frameDurationSeconds: 节目帧时长；A2 阈值 = 1 帧，整秒拍 = 拍号是 round(1 / 帧时长) 的倍数。
-    ///   - startTick: 文件第一帧对应的节目拍（推流落盘从关键帧起录时用 `--start-tick` 对上）。
+    ///   - startTick: 文件第一帧对应的节目拍（推流落盘从关键帧起录时用 `--start-tick` 对上）。录制文件从第 0 拍起：G8b 起开录起点按节目输出时间线，
+    ///     带视频延后（Master 效果 L > 0）录的也是，默认 0 就对；录制中途 L 变了的话之后的拍号整体错开 ΔL（> 半帧时整秒判定失效，配对本身仍对齐）。
     public static func av(frames: [ProbeFrame], clicks: [ClickEvent], maxMatchSeconds: Double = 0.5,
                           frameDurationSeconds: Double = 1.0 / 60, startTick: Int64 = 0) -> AVReport {
         let clickTimes = clicks.map(\.timeSeconds)
