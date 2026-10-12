@@ -1,3 +1,4 @@
+> 这一段本该追加在 [026-monitor-source.md](026-monitor-source.md) 末尾（G8b 2026-10-12 写成了新文件）；P5-3（prompt 110）已原样并进那边、落地记录也写在那边，以那边为准。这份留着当记录。
 
 ## 2026-10-12 用户裁定：允许 `monitorSource = headphones`
 
