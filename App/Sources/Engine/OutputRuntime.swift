@@ -24,6 +24,7 @@
 // 起不来的录制 / 推流（W5-B，02 X02 / 01a L13）：原因记在 failed 表（人话，底栏提示与推流页那一段照着写），Stats.encoder 里那一项报 failed（原来报 idle）；
 //   enabled 仍为真时设置变了（地址 / 目录改对）reconcile 自动重试；底栏主体按钮有起不来的推流路时调 retry 只重试它们，正常的路不动。
 //   推流起的时候提示"连接中"，Stats 第一次报 publishing 才提示"已开始"（X37）。
+//   服务器拒绝鉴权（W2-D4）：StreamOutput 第一次就停在 failed（不退避），Stats 报 failed 时按它的类型化原因提示一次"鉴权失败，已停止"；点底栏主体 = retry。
 import Foundation
 import Synchronization
 import SwitcherContracts
@@ -107,6 +108,8 @@ final class OutputRuntime {
         var stopping = false
         /// 已经提示过"已开始"（第一次报 publishing）。
         var announced = false
+        /// 已经提示过鉴权失败（W2-D4）。
+        var failureAnnounced = false
         init(output: OutputState, stream: StreamOutput) {
             self.output = output
             self.stream = stream
@@ -313,6 +316,12 @@ final class OutputRuntime {
             guard Self.encoderEntry(in: stats, forOutput: n)?.state == "publishing" else { continue }
             e.announced = true
             onEvent?(.streamStarted(output: n))
+        }
+        // W2-D4：鉴权失败停下了 → 状态行一句（按类型化的原因，不认文字）；不支持的鉴权方式改密码没用，原样写原因
+        for (n, e) in streams where !e.failureAnnounced && !e.stopping && Self.encoderEntry(in: stats, forOutput: n)?.state == "failed" {
+            guard case .authentication(let why)? = e.stream.failure else { continue }
+            e.failureAnnounced = true
+            onEvent?(.streamFailed(output: n, message: why == .unsupportedMethod ? failureReason(output: n) ?? "" : L("notice.streamAuthFailed", n)))
         }
     }
 
@@ -914,7 +923,8 @@ final class EncoderStatsSource: @unchecked Sendable {
                     list[i].previousRecorder = c
                 case .stream(let s):
                     let c = s.counters
-                    out.append(c.statsEntry(previous: list[i].previousStream, windowSeconds: window, encoderSkipped: s.videoEncoder.counters.skipped, output: list[i].output))
+                    // 用 StreamOutput 的：022 的 uptime_s / last_error 只有它知道（W2-D4 核对时补上，原来少了这两项）
+                    out.append(s.statsEntry(counters: c, previous: list[i].previousStream, windowSeconds: window, output: list[i].output))
                     list[i].previousStream = c
                 case .ndi(let s):
                     // 同一份快照算这一项、也当下一窗口的起点（sender.statsEntry 自己另取快照，两次之间送出的帧会两边都不算）

@@ -18,6 +18,11 @@ import SwitcherOutputs
 /// 推流的原点（W2-D2）：第一次连上后送出的第一个关键帧，音频原点包对齐到它，两轨从同一时刻起送。原点之前的帧 / 包不算丢
 /// （StreamCounters.videoBeforeStart / audioBeforeStart）；第一次连上之后，断线期间没送出的才是损失。缓冲策略见 SendQueue。
 ///
+/// 服务器拒绝鉴权（W2-D4，传输层报类型化的 StreamTransportError.authenticationFailed）：第一次就停在 failed、不退避重试——密码不会自己变对，
+/// 重试只会每隔一会儿白打服务器几个连接、把原因埋在"重连中"里。last_error = 传输层那一句（原文、不带密码），`failure` = 类型化的原因；
+/// 停在 failed 之后关掉收帧 / 收音频块的门（计数定住），编码器会话等 stop() 收。改对之后重新 start（App：点底栏「推流」= 新对象）。
+/// 别的错误（连不上 / 断线 / 停滞）照旧退避重连。
+///
 /// 多目的地互不影响：每个实例自己的编码器、队列、Task、连接对象；没有任何共享锁或共享队列（E7）。
 public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked Sendable {
     /// 队列与门的参数（"每路队列深度与延迟的取舍"见报告）。
@@ -129,6 +134,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     private var senderTask: Task<Void, Never>?  // stateLock
     private let stopInitiated = Atomic<Bool>(false)   // stop() 的幂等门
     private let stopRequested = Atomic<Bool>(false)   // 编码器已停、尾巴已进队列：发送 Task 可以排空并退出
+    private let intakeOpen = Atomic<Bool>(false)      // 收帧的门（W2-D4）：start 开，stop / 停在 failed 关
     private let stopped = DispatchGroup()
     private let wake: AsyncStream<Void>
     private let wakeContinuation: AsyncStream<Void>.Continuation
@@ -186,7 +192,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 if restarted { enc?.requestKeyframe() }   // 缓冲清空了：别等两秒后那个排程的关键帧，现在就要
             case .droppedFull: counters.droppedQueueFull.add(1, ordering: .relaxed)
             case .droppedWaitingKeyframe: counters.droppedWaitingKeyframe.add(1, ordering: .relaxed)
-            case .droppedNotAccepting: counters.droppedDisconnected.add(1, ordering: .relaxed)
+            case .droppedNotAccepting: counters.countNotSent(video: 1, audio: 0)   // 会话已关（停在 failed 时编码器里还没出来的几帧）：没连上过就是"开始之前"
             }
             let depth = q.depth
             counters.queueDepth.store(depth.video, ordering: .relaxed)
@@ -208,7 +214,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     /// Stats.encoder[i] 的一项：skipped = 本路编码器的 E1 计数；bitrate = 窗口内交给传输层的 bit/s；
     /// frames / dropped / reconnects / state / disconnects / attempt 按提案 001 / 002 / 022（`StreamCounters.statsEntry`）；
     /// uptime_s / last_error（提案 022）只有本对象知道：uptime = 现在 − start() 成功那一刻（含握手 / 退避 / 重连期间；idle / stopped / failed = 0），
-    /// last_error = 最近一次断线原因 / 连接失败原因 / 放弃的原因，下一次 start() 清。
+    /// last_error = 最近一次断线原因 / 连接失败原因 / 放弃的原因（鉴权失败 = 传输层那一句"鉴权失败（…）：…"，W2-D4），下一次 start() 清。
     public func statsEntry(previous: StreamCounters?, windowSeconds: Double, output: Int = 0) -> Stats.EncoderEntry {
         statsEntry(counters: counters, previous: previous, windowSeconds: windowSeconds, output: output)
     }
@@ -234,6 +240,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             stopRequested.store(false, ordering: .releasing)
             atomicCounters.published.store(false, ordering: .releasing)
             lastError.withLock { $0 = "" }   // 022：下一次 start 清上一次的错误
+            failureReason.withLock { $0 = nil }   // W2-D4：上一次停在 failed 的原因也清
             queue.beginBuffering()   // 编码器起来之前就开始收：握手期间的帧 / 包排在缓冲里，连上后照送（W2-D2）
             try videoEncoder.start()
             if let audio = configuration.audio, let ring = pcmRing {
@@ -255,7 +262,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                     case .queued: wc.yield()
                     case .droppedFull: counters.audioDropped.add(1, ordering: .relaxed); wc.yield()
                     case .bufferedDrop(_, let da, _): counters.countNotSent(video: 0, audio: da)
-                    case .droppedNotAccepting: counters.audioDropped.add(1, ordering: .relaxed)
+                    case .droppedNotAccepting: counters.countNotSent(video: 0, audio: 1)
                     case .queuedAfterReset, .droppedWaitingKeyframe: break
                     }
                     counters.audioQueueDepth.store(q.depth.audio, ordering: .relaxed)
@@ -274,6 +281,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 audioAccepting.store(true, ordering: .releasing)
             }
             running = true
+            intakeOpen.store(true, ordering: .releasing)
             startedAt.withLock { $0 = HostClock.now() }   // 022：uptime_s 的起点
             stopped.enter()
             senderTask = Task.detached(priority: .userInitiated) { [self] in
@@ -308,6 +316,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
         }
         guard shouldStop else { return false }
         atomicCounters.state = .stopping
+        intakeOpen.store(false, ordering: .releasing)
         // 先停编码器：VideoEncoder.stop 会 flush，尾巴帧同步进队列；音频线程 finish 之后退出。
         // 尾巴都进了队列才置 stopRequested，否则发送 Task 可能先看到"停 + 队列空"就收尾，把随后到的尾巴当断线丢弃。
         videoEncoder.stop()
@@ -327,6 +336,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             audioThread = nil
             audioEncoder = nil
         }
+        // 发布循环先停在 failed（鉴权失败 / 超过尝试次数）、之后才 stop：beginStop 置的 stopping 没有循环来收尾，这里补成 stopped
+        if atomicCounters.state == .stopping { setState(.stopped) }
     }
 
     /// 下一帧强制关键帧（外部要求；重连时内部自己会调）。
@@ -335,6 +346,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     // MARK: FrameConsumer / AudioBlockConsumer
 
     public func consume(_ frame: RenderedFrame) {
+        guard intakeOpen.load(ordering: .acquiring) else { return }
         videoEncoder.consume(frame)
     }
 
@@ -381,6 +393,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             guard policy.allows(attempt: failures + 1) else {
                 let why = "连续 \(failures) 次连不上，超过最大尝试次数"
                 finalState = .failed(why)
+                failureReason.withLock { $0 = .retriesExhausted }
                 lastError.withLock { $0 = why }   // 022
                 break
             }
@@ -403,6 +416,14 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             }
             do {
                 try await withTimeout(seconds: configuration.connectTimeoutSeconds) { try await transport.connect() }
+            } catch StreamTransportError.authenticationFailed(let reason, let message) {
+                // W2-D4：服务器拒绝鉴权，第一次就停在 failed（见类型说明）；last_error 原样用传输层那一句
+                logger.error("[\(self.consumerName, privacy: .public)] \(message, privacy: .public)，不再重试")
+                lastError.withLock { $0 = message }
+                failureReason.withLock { $0 = .authentication(reason) }
+                finalState = .failed(message)
+                await transport.close()
+                break
             } catch {
                 logger.warning("[\(self.consumerName, privacy: .public)] 连接失败：\(String(describing: error), privacy: .public)")
                 lastError.withLock { $0 = "连接失败：\(error)" }   // 022
@@ -437,6 +458,11 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
             atomicCounters.disconnects.add(1, ordering: .relaxed)
             disconnectedAt = HostClock.now()
             failures = 1
+        }
+        if case .failed = finalState {
+            // 停在 failed（不是 stop）：关收帧 / 收音频块的门，计数定住；编码器会话、音频线程等 stop() 收
+            intakeOpen.store(false, ordering: .releasing)
+            audioAccepting.store(false, ordering: .releasing)
         }
         let leftover = queue.endSession()
         atomicCounters.countNotSent(video: leftover.video, audio: leftover.audio, published: everConnected)
