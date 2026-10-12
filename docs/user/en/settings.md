@@ -57,7 +57,7 @@ Three buttons at the bottom left:
 - **Device**: System default (follows changes) / Null device (silent) / the listed output devices. With the null device picture, recording and streaming carry on with sound; only local playback is silent.
 - **Which two channels each bus goes to**: Master, Bus A, Bus B and Headphones each pick a channel pair (1/2, 3/4, …) or "Off". Two buses can't share a pair: picking a pair another bus uses switches that bus to "Off" and says so.
   Changing the device only drops the pairs the new device doesn't have; "Restore device defaults" goes back to the device's default assignment. Recording / streaming / NDI® use Master itself and are not affected by this.
-  The pair given to "Headphones" normally carries Master, and the soloed inputs while something is soloed in the mixer ("Headphone output" in [Concepts › Audio](concepts.md#audio)).
+  The pair given to "Headphones" normally carries the bus picked in the Listen menu (Master in a new show), and the soloed inputs while something is soloed in the mixer ("Headphone output" in [Concepts › Audio](concepts.md#audio)).
 - **2-channel devices** (built-in speakers, plain USB headsets): both channels go to Master, so this page and the mixer header say "This device has no headphone channels" — solo / PFL / AFL live on the headphone bus, which has no channels of its own.
   The page then offers "**Use the Master channels while monitoring**" (off by default): when on, these two channels carry the headphone bus (only the soloed inputs) while something is soloed in the mixer, back to Master when solo is off;
   recording / streaming / NDI® keep getting Master. The switch **applies immediately**, no engine restart. With it off, solo can't be heard (the speakers keep playing Master).
