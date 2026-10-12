@@ -137,7 +137,10 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         } catch let e as StreamTransportError {
             throw e
         } catch {
-            throw Self.transportError(error, phase: "")
+            let e = Self.transportError(error, phase: "")
+            // 地址里写了账号、服务器却还在要 Adobe 鉴权：是我们的前两轮退回了（超时 / 没看懂），不是"没写账号"——照旧当连接失败、退避重试
+            if case .authenticationFailed(.credentialsRequired, let m) = e, destination.credentials != nil { throw StreamTransportError.connectFailed(m) }
+            throw e
         }
         // publish 之前先订阅流的状态：MediaMTX 一类按查询串鉴权的服务器，账号不对时先随机等 0–4 s 才回 NetStream.Publish.Unauthorized（防暴力猜），
         // HaishinKit 的 publish 请求 3 s 就按超时收场——之后那条迟到的回复只会出现在这里（W2-D4 探针，reports/w2-stream-4.md §1）。

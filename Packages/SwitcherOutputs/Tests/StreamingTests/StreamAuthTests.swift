@@ -229,6 +229,29 @@ final class StreamAuthTests: XCTestCase {
         XCTAssertEqual([server.connectionCount, server.publishCount], [1, 1])
     }
 
+    /// W2-D4：服务器要 Adobe 鉴权——地址里没写账号 → credentialsRequired（第一次就停）；地址里写了账号、只是我们的前两轮退回了
+    /// （这里让网关每轮拖 1.5 s、探针超时 1 s：第 1 轮超时 → 不带 userinfo 交给 HaishinKit → 服务器照样要 adobe）→ 不能说"地址里没写"、也不该停，
+    /// 照旧当连接失败（退避重试，下一次前两轮可能就成了）。
+    func testE_rtmpTransport_adobeDemand_withoutCredentialsStops_withCredentialsFallbackRetries() async throws {
+        let g = try gateway(19469, password: "secret")
+        func connect(_ url: String, probeTimeout: Int) async throws -> Error? {
+            let t = try HaishinKitTransportFactory(format: .hd1080p60, video: VideoEncodeSettings(), connectTimeoutSeconds: probeTimeout)
+                .makeTransport(for: StreamDestination(settings: StreamSettings(url: url)), audioFormat: nil)
+            var failure: Error?
+            do { try await withTimeout(seconds: 8) { try await t.connect() } } catch { failure = error }
+            await t.close()
+            return failure
+        }
+        let none = try await connect("rtmp://127.0.0.1:19469/s1", probeTimeout: 5)
+        XCTAssertEqual(none as? StreamTransportError, .authenticationFailed(.credentialsRequired,
+            message: "鉴权失败（服务器要用户名和密码，地址里没写）：NetConnection.Connect.Rejected [ AccessManager.Reject ] : [ code=403 need auth; authmod=adobe ] : "))
+        g.rejectDelay = 1.5
+        let fellBack = try await connect("rtmp://pub:secret@127.0.0.1:19469/s1", probeTimeout: 1)
+        guard case .connectFailed(let m)? = fellBack as? StreamTransportError else { return XCTFail("应照旧是连接失败：\(String(describing: fellBack))") }
+        XCTAssertTrue(m.contains("authmod=adobe"), m)
+        XCTAssertFalse(m.contains("secret"), m)
+    }
+
     // MARK: 脱敏（日志 / 错误）
 
     /// 地址：userinfo 整段换成标记、查询串里的密钥参数换成标记，主机、端口、路径保留；文字里的每个地址都这样处理。
