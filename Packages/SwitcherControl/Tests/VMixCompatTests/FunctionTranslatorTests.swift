@@ -364,4 +364,37 @@ final class FunctionTranslatorTests: XCTestCase {
             XCTAssertTrue(FunctionCatalog.implemented.map(\.name).contains(name), "prompt 要求的 \(name) 不在实现表里")
         }
     }
+
+    /// X51（W5-O，prompt 112 第 7 项）：上游真实存在、这里没做的 31 个函数名回 501 NotImplemented，不再当"不认识"回 400。
+    /// 名字表 = docs/ui-study/附录/核对-VF5-动作目录.md §3.2（R5-G25 的清单，编译复现 400 的那 31 个）；按 VF5 §3.4 只补精确名字、不加前缀族——
+    /// 编出来的名字（NDI / Auto / Streaming 开头的也算）照旧 400。
+    func testC5_x51_upstreamFunctionNamesReturnNotImplemented() throws {
+        let x51 = [
+            "ActivatorRefresh", "AudioChannelMatrixApplyPreset", "AudioMixerShowHide",
+            "StreamingSetKey", "StreamingSetURL", "StreamingSetUsername", "StreamingSetPassword",
+            "ChangeCountdown", "SuspendCountdown", "ResumeRender",
+            "AutoPauseOn", "AutoPauseOff", "AutoPlayOn", "AutoPlayOff", "AutoPlayFirst", "AutoPlayFirstOn", "AutoPlayFirstOff",
+            "AutoPlayNext", "AutoPlayNextOn", "AutoPlayNextOff", "AutoRestartOn", "AutoRestartOff",
+            "ColourCorrectionAuto", "ColourCorrectionReset", "MoveMultiViewOverlay",
+            "NDISelectSourceByName", "NDISelectSourceByIndex", "NDIStartRecording", "NDIStopRecording",
+            "OpenPreset", "LastPreset",
+        ]
+        XCTAssertEqual(x51.count, 31)
+        XCTAssertEqual(Set(x51).count, 31, "名字不重复")
+        for name in x51 {
+            let e = error("\(name) Input=1")
+            XCTAssertEqual(e?.code, .notImplemented, name)
+            XCTAssertEqual(e?.httpStatus, 501, name)
+            XCTAssertTrue(e?.message.contains(name) ?? false, "错误文案点名函数：\(e?.message ?? "nil")")
+            XCTAssertTrue(FunctionCatalog.knownUnimplemented.contains(name), "\(name) 以精确名字进 knownUnimplemented")
+            XCTAssertFalse(FunctionCatalog.implemented.map(\.name).contains(name), "\(name) 不在实现表里")
+            XCTAssertEqual(error(name.lowercased())?.code, .notImplemented, "不分大小写：\(name)")
+        }
+        // 不加前缀族：同样开头的编造名字仍是"不认识"
+        for invented in ["NDIAnything", "AutoAnything", "StreamingAnything", "ColourCorrectionAnything", "ChangeAnything", "OpenAnything"] {
+            let e = error(invented)
+            XCTAssertEqual(e?.code, .unknownFunction, invented)
+            XCTAssertEqual(e?.httpStatus, 400, invented)
+        }
+    }
 }

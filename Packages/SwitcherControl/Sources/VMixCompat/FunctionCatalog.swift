@@ -117,6 +117,16 @@ public enum FunctionCatalog {
             "ScriptStart", "ScriptStop", "ScriptStopAll", "KeyPress", "SendKeys", "DataSourceNextRow", "DataSourcePreviousRow", "DataSourceSelectRow",
             "DataSourceAutoNextOn", "DataSourceAutoNextOff", "DataSourceAutoNext", "SaveVideoDelay", "Undo", "SetMultiViewOverlay", "SetLayer",
             "MultiViewOverlay", "MultiViewOverlayOn", "MultiViewOverlayOff", "SetOutput2", "SetOutput3", "SetOutput4",
+            // X51（W5-O）：上游真有、前缀族又没盖住的 31 个（原来当"不认识"回 400；清单 = docs/ui-study/附录/核对-VF5-动作目录.md §3.2）。
+            // 只补精确名字，不加 NDI / Auto / Streaming 这类前缀族：那样编出来的 NDIAnything 也会变成 501（VF5 §3.4）
+            "ActivatorRefresh", "AudioChannelMatrixApplyPreset", "AudioMixerShowHide",
+            "StreamingSetKey", "StreamingSetURL", "StreamingSetUsername", "StreamingSetPassword",
+            "ChangeCountdown", "SuspendCountdown", "ResumeRender",
+            "AutoPauseOn", "AutoPauseOff", "AutoPlayOn", "AutoPlayOff", "AutoPlayFirst", "AutoPlayFirstOn", "AutoPlayFirstOff",
+            "AutoPlayNext", "AutoPlayNextOn", "AutoPlayNextOff", "AutoRestartOn", "AutoRestartOff",
+            "ColourCorrectionAuto", "ColourCorrectionReset", "MoveMultiViewOverlay",
+            "NDISelectSourceByName", "NDISelectSourceByIndex", "NDIStartRecording", "NDIStopRecording",
+            "OpenPreset", "LastPreset",
         ]
         for k in 1...4 { names += ["OverlayInput\(k)Zoom", "PreviewOverlayInput\(k)"] }
         for k in 5...8 { names += ["OverlayInput\(k)", "OverlayInput\(k)In", "OverlayInput\(k)Out", "OverlayInput\(k)Off", "OverlayInput\(k)Last", "OverlayInput\(k)Zoom", "PreviewOverlayInput\(k)"] }
