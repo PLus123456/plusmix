@@ -181,7 +181,7 @@ First row × | Transition | Cut | ⏮ | ▶⏸ | 🔁, second row 1 2 3 4 | Mute
 - **Click a thumbnail** = put it on PVW; **Shift-click** = cut it straight to PGM.
 - **During a transition** (a half-pulled T-bar counts) Transition and Cut are greyed out and clicking or Shift-clicking a thumbnail does nothing; the status line says "Transition in progress: PVW / PGM can change after it finishes" —
   the state machine refuses PVW / PGM changes during a transition (see [Concepts › How a switch happens](concepts.md#how-a-switch-happens)). Transition / Cut are also greyed out on the input that is already on PGM.
-- The six buttons fit even in the smallest cell (160 pt wide): ⏮ ▶⏸ 🔁 are 20 pt icons and Transition / Cut share the rest. In the English UI "Transition" is cut short ("Transiti…" in medium cells, shorter in small ones) — a known issue; the tooltip has the full text.
+- The six buttons fit even in the smallest cell (160 pt wide): ⏮ ▶⏸ 🔁 are 20 pt icons and Transition / Cut share the rest. In the English UI the Transition button's text is cut short in medium cells ("Transit…") and smaller ones — a known issue; the tooltip has the full text.
 - **Right-click menu**: Send to PVW / Cut to PGM / Take to PGM with the current transition (Transition 1 · Fade 0.5 s) / Overlay ▸ 1–4 / Category ▸ / Mute — [video file inputs add four items: Play (or Pause) / Back to Start / Loop (ticked) / Restart When Taken to PGM (ticked) —] Settings… / Change Source… (opens the Source section of the input settings) / Rename… — Remove Input n.
 
 ### Dropping files
