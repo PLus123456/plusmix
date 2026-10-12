@@ -28,3 +28,22 @@ PY
 2. 闪光在半秒的事件（|flash − round(flash)| ≈ 0.5）A2 那边已经按"整秒配对"过滤了，A4 也该只用整秒事件比较、半秒事件只列不判。
 3. 检测窗边上漏掉的 click（iso3 第 500 s）：看一下 `ClickEvent` 检测的窗口对齐（是否按整秒切窗、+20 µs 落到下一窗）。
 4. 修好后 G8 的产物在 `.build/gate4/g8/`（不入库）可直接重算；G8b 本轮按上面的整秒配对结论对 A4 `--waive`（reports/G8.md §5）。
+
+## 处理结果（W1-A5 / `w1-testkit-5`，prompt 113，2026-10-12）
+
+- **建议 1 按"以锚取"做了**（`FrameAnalysis.avMulti`）：按传入顺序第一个给事件配上 click 的文件（gate4 里 [0] PGM）为锚、用它自己配的那个，
+  其他文件取离锚最近的 click（±0.5 s，与 `av` 的配对窗同一个数）。没有选"闪光之后第一个 click"：音频略超前的整秒事件（click 在闪光前几十微秒）会被它推到下一秒。
+  离锚超过 1 帧的 click 照样进极差（真错位 30 ms 就报 30 ms），不当成"没找到"；锚文件没配上时顺延到下一个配上的文件。
+- **建议 2 做了**：闪光离锚 click 在半秒 ±1 帧内的事件（60 fps 节目从第 0 拍起的文件即 |flash − round(flash)| ≈ 0.5；没有 click 时按离最近整秒算）标 `halfSecond`，
+  照常算极差、列在 `events` 里，但不进 `maxFlashSpreadMs` / `maxClickSpreadMs` / `passA4`；含半秒事件的最大值另报 `allEventsMaxFlashSpreadMs` / `allEventsMaxClickSpreadMs`，
+  外加 `halfSecondEventCount`、`note`；markdown 表多"锚""判定"两列。新字段都是可选，老 JSON / 快照照常解码。
+- **建议 3（"iso3 第 500 s 的 click 漏检"）查下来不是检测问题**：探针（只读音轨、按 frameprobe 同一口径修正时间轴、同一个 `ClickDetector`）五个文件都是 599 个 click、
+  整秒一一对应、谁也不缺，iso3 那个在 **500.000021 s（样本 24000001，峰值 1.12）**。是平局让它没被任何闪光选中：499.5 s 的闪光配了近 20 µs 的 499.000021，
+  500.95 s 的配了 501.000021——上面的"592 个 vs 593 个"数的是配对里**用到的** click（`perFile[*].clickCount` 五个都是 599）。检测本身是逐样本滑的 1 ms 能量窗，
+  没有按整秒或按 48 样本对齐的窗边；加了一条用例钉住（click 起点在 48 样本网格的 48 个相位上都按样本精确找到）。以锚取 click 之后 iso3 用到的 click 592 → 593，与别的文件一样。
+- **建议 4 重算了**（本分支 release frameprobe，命令与 gate4.sh 那一步相同：`frameprobe av out.mov out.iso1–4.mov --fps 60.0`，2 分 51 秒）：
+  A4 判定口径 **click 极差最大 0.187 ms**（事件 #1，[2] +0.104 / [3] −0.083 ms；与 G7 / W1-D3 那轮的 0.188 一样）、闪光极差 0.000、`passA4` true；
+  半秒事件 10 个（#491–#500），含半秒的最大值也是 0.187 ms；与 G8 的原 JSON 比，只有这 10 个事件里 iso3 那一格变了（999.979 → 0.021 ms），其余 590 个事件逐值相同。
+  不带 `--waive` 的 `scripts/gate3-report.py`（没改）用新 JSON 出 G8 的运行报告：rc 0、A4 行"click 时刻极差最大 0.187 ms ✅"（只在 scratchpad 里出，不入库）。
+- **给 G9**：合入后 gate4 的 A4 不用再 waive；gate3-report.py 不用改（它读的 `maxClickSpreadMs` 现在就是判定口径）；KNOWN_ISSUES"测试与工具"里这条可以销号。
+- 状态：已修，待 G9（prompt 114）合入。
