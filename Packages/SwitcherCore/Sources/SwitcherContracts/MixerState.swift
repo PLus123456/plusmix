@@ -86,6 +86,11 @@ public struct TransitionSlot: Hashable, Codable, Sendable {
 
     /// JSON 键名。
     public static let jsonKeys = ["type", "durationTicks", "wipe", "stinger"]
+
+    /// 效果是 Stinger 但还没选输入（`stinger.input == nil`；提案 029，用户 2026-10-12 定，P5-3）：这种槽 `useTransitionSlot(start: true)` 拒收、
+    /// 当前那组（`TransitionState.currentGroup`）是这种时 `autoTransition` 拒收——校验器 400、reducer 原样返回；否则执行出来是一次延迟硬切
+    ///（渲染器对 nil 输入不叠任何东西，底在换底拍换）。只选中（start = false）、T-bar、cut、fade 不受影响。计算属性，不进 JSON。
+    public var isStingerWithoutInput: Bool { type == .stinger && stinger.input == nil }
 }
 
 /// 转场状态。空闲时 `type` / `durationTicks` 就是"下一次转场"的选择（UI 的转场按钮和时长预设改的是它）。

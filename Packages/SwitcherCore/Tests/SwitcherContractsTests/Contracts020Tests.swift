@@ -179,4 +179,41 @@ final class Contracts020Tests: XCTestCase {
         XCTAssertEqual(Samples.commandCaseCount, 42, "35 + 3（020）+ 2（021）+ 1（023 四）+ 1（023 五）")
         XCTAssertEqual(Set(Samples.commands().map(Samples.caseName(of:))).count, 42)
     }
+
+    // MARK: 提案 029（用户 2026-10-12 定，P5-3）：没选输入的 Stinger 槽拒收——契约这一层只有"什么叫没选输入的 Stinger"一条判定，
+    // 拒收本身在 reducer（ReducerTests.test029_*）与校验器（CommandBusTests）；不加字段、不加命令、JSON 形态不变。
+
+    /// `TransitionSlot.isStingerWithoutInput` = 效果是 Stinger 且 `stinger.input == nil`：出厂槽 4 就是；选了输入的 Stinger、别的效果（不管 stinger 参数）都不是。
+    /// useTransitionSlot(start: true) 看的是槽、autoTransition 看的是当前那组（`currentGroup`），两处用同一条判定。
+    func test029_isStingerWithoutInput_definition_factorySlot4AndCurrentGroup() {
+        XCTAssertEqual(Self.factory60.map(\.isStingerWithoutInput), [false, false, false, true], "出厂槽 4 = Stinger、没选输入")
+        XCTAssertFalse(TransitionSlot(type: .stinger, durationTicks: 60, stinger: StingerParams(input: 3, cutAtTick: 0)).isStingerWithoutInput)
+        XCTAssertTrue(TransitionSlot(type: .stinger, durationTicks: 0, stinger: StingerParams(input: nil, cutAtTick: 9)).isStingerWithoutInput, "时长 / 换底拍不影响")
+        for type in [TransitionType.cut, .fade, .wipe, .zoom] {
+            XCTAssertFalse(TransitionSlot(type: type, durationTicks: 30).isStingerWithoutInput, "\(type) 不看 stinger 参数")
+        }
+        var t = TransitionState()
+        XCTAssertFalse(t.currentGroup.isStingerWithoutInput, "新状态当前那组 = 槽 1 Fade")
+        t.select(slot: 4)
+        XCTAssertTrue(t.currentGroup.isStingerWithoutInput, "选中槽 4（只选中是合法的）")
+        t.stinger.input = 2
+        XCTAssertFalse(t.currentGroup.isStingerWithoutInput)
+        t = TransitionState(type: .stinger, durationTicks: 45)
+        XCTAssertNil(t.currentSlot)
+        XCTAssertTrue(t.currentGroup.isStingerWithoutInput, "不对应任何槽的当前那组（setTransition 直接给的）同一条判定")
+    }
+
+    /// 029 不加字段、不加命令：判定是计算属性、不进 JSON（槽与 TransitionState 的键不变）；useTransitionSlot / autoTransition 的 wire 形态不变；命令数仍 42。
+    func test029_noNewFieldsOrCommands_wireShapeUnchanged() throws {
+        let unset = TransitionSlot(type: .stinger, durationTicks: 60)
+        XCTAssertEqual(try json(unset), #"{"durationTicks":60,"stinger":{"cutAtTick":0},"type":"stinger","wipe":{"direction":"leftToRight","softness":0}}"#)
+        XCTAssertEqual(TransitionSlot.jsonKeys, ["type", "durationTicks", "wipe", "stinger"])
+        var t = TransitionState()
+        t.select(slot: 4)
+        let keys = try XCTUnwrap(try JSONSerialization.jsonObject(with: try sortedEncoder.encode(t)) as? [String: Any]).keys
+        XCTAssertEqual(Set(keys), Set(TransitionState.jsonKeys).subtracting(["startTick"]))
+        XCTAssertEqual(try json(Command.useTransitionSlot(slot: 4, start: true)), #"{"useTransitionSlot":{"slot":4,"start":true}}"#)
+        XCTAssertEqual(try json(Command.autoTransition), #"{"autoTransition":{}}"#)
+        XCTAssertEqual(Samples.commandCaseCount, 42)
+    }
 }

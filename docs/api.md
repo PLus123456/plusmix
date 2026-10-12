@@ -159,7 +159,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `autoTransition`
 
-按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。
+按已选的类型 / 时长（当前那组）开始 auto 转场；进行中再发则忽略；当前那组是 Stinger、还没选输入时被拒（HTTP 400，提案 029：否则是一次延迟硬切）。
 
 ```json
 {
@@ -203,7 +203,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `tbar`
 
-推杆位置 0–1；到 1 提交（对调并回到 0）。
+推杆位置 0–1；到 1 提交（对调并回到 0）。当前那组是 Stinger、还没选输入时照推（提案 029 不管 T-bar）：什么都不叠，推过换底拍那一格就是新画面。
 
 | 参数 | 含义 |
 |---|---|
@@ -263,7 +263,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `useTransitionSlot`
 
-选中转场槽 1–4（把槽拷进当前那组、currentSlot = slot）；start = true 同时开始 auto 转场、一拍内原子完成（cut / 时长 0 = 立即对调，Stinger 槽没选输入照常开始）；start = false 只选中给 T-bar / 回车用。转场进行中被拒（applied = false）。
+选中转场槽 1–4（把槽拷进当前那组、currentSlot = slot）；start = true 同时开始 auto 转场、一拍内原子完成（cut / 时长 0 = 立即对调）；start = false 只选中给 T-bar / 回车用。转场进行中被拒（applied = false）；start = true 而这个槽是 Stinger、还没选输入时被拒（HTTP 400，不选中；提案 029），start = false 照常选中。
 
 | 参数 | 含义 |
 |---|---|

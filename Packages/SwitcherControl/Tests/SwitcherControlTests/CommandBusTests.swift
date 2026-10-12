@@ -79,6 +79,7 @@ final class CommandBusTests: XCTestCase {
             (.setOutputSettings(output: 99, settings: OutputSettings()), "输出"),
             (.fade(durationTicks: -1), "时长"),
             (.setTransition(type: .wipe, durationTicks: -5), "时长"),
+            (.useTransitionSlot(slot: 4, start: true), "转场 4 是 Stinger、还没选输入"),   // 提案 029：出厂槽 4 没选输入
         ]
         for (command, keyword) in cases {
             do {
@@ -114,7 +115,8 @@ final class CommandBusTests: XCTestCase {
             // P5-2：提案 020 / 021 / 023
             .setTransitionSlot(slot: 2, config: TransitionSlot(type: .zoom, durationTicks: 20)),
             .setTransitionSlot(slot: 4, config: TransitionSlot(type: .stinger, durationTicks: 60, stinger: StingerParams(input: 3, cutAtTick: 5))),
-            .useTransitionSlot(slot: 1, start: false), .useTransitionSlot(slot: 4, start: true), .setFTBDuration(ticks: 0), .setFTBDuration(ticks: 10),
+            .useTransitionSlot(slot: 1, start: false), .useTransitionSlot(slot: 3, start: true), .setFTBDuration(ticks: 0), .setFTBDuration(ticks: 10),
+            .useTransitionSlot(slot: 4, start: false),   // 029：没选输入的 Stinger 槽只选中照常
             .setPlayback(input: 6, paused: true), .seekPlayback(input: 6, seconds: 0), .seekPlayback(input: 6, seconds: 12.5),
             .setInputAudio(input: 1, solo: true), .setInputAudio(input: 2), .setInputColor(input: 1, color: .red), .setInputColor(input: 1, color: nil),
             .loadShow(show: Show(name: "020 之前", state: legacyShowState)),   // 校验器先搬迁再 validate，否则老节目会被 400 拒
@@ -136,6 +138,7 @@ final class CommandBusTests: XCTestCase {
             .setTransitionSlot(slot: 5, config: TransitionSlot(type: .fade, durationTicks: 1)), .setTransitionSlot(slot: 0, config: TransitionSlot(type: .fade, durationTicks: 1)),
             .setTransitionSlot(slot: 1, config: TransitionSlot(type: .stinger, durationTicks: 1, stinger: StingerParams(input: 9, cutAtTick: 0))),
             .useTransitionSlot(slot: 0, start: true), .useTransitionSlot(slot: 5, start: false), .setFTBDuration(ticks: -1),
+            .useTransitionSlot(slot: 4, start: true),   // 提案 029：出厂槽 4 = Stinger、没选输入，执行拒（只选中照常，见上）
             .setPlayback(input: 1, paused: true), .setPlayback(input: 9, paused: true),   // 不是文件输入 / 不存在
             .seekPlayback(input: 2, seconds: 1), .seekPlayback(input: 6, seconds: -1), .seekPlayback(input: 6, seconds: .nan), .seekPlayback(input: 9, seconds: 0),
             .setInputAudio(input: 9, solo: true), .setInputColor(input: 9, color: .red),
@@ -144,6 +147,32 @@ final class CommandBusTests: XCTestCase {
             XCTAssertNotNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应拒绝")
             XCTAssertEqual(reducer.reduce(state, c, at: .zero), state, "reducer 对 \(c) 也应原样返回")
         }
+
+        // 提案 029：autoTransition 看要执行的当前那组——空闲且是没选输入的 Stinger（当前槽是这种槽，或 setTransition 直接给的）两边都拒；
+        // 选了输入的放行；转场进行中校验器不判（进行中本来就由 reducer 忽略，完成那一拍当前那组还可能按槽重拷）。文案带槽号或"当前转场"。
+        var slot4 = state
+        slot4.transition.select(slot: 4)
+        var legacyStinger = state
+        legacyStinger.transition.type = .stinger
+        legacyStinger.transition.durationTicks = 45
+        legacyStinger.transition.currentSlot = nil
+        for (s, words) in [(slot4, "转场 4 是 Stinger、还没选输入"), (legacyStinger, "当前转场是 Stinger、还没选输入")] {
+            let r = CommandValidator.reason(rejecting: .autoTransition, in: s)
+            XCTAssertEqual(r, words)
+            XCTAssertEqual(reducer.reduce(s, .autoTransition, at: .zero), s, "reducer 对 \(words) 也应原样返回")
+            XCTAssertNil(CommandValidator.reason(rejecting: .useTransitionSlot(slot: 1, start: true), in: s), "执行别的槽照常")
+            XCTAssertNil(CommandValidator.reason(rejecting: .tbar(progress: 0.5), in: s), "T-bar 不管（029 不动 T-bar）")
+            XCTAssertNil(CommandValidator.reason(rejecting: .fade(durationTicks: 30), in: s), "fade 总是 Fade")
+        }
+        var armed = legacyStinger
+        armed.transition.stinger.input = 3
+        XCTAssertNil(CommandValidator.reason(rejecting: .autoTransition, in: armed), "选了输入的 Stinger 放行")
+        XCTAssertNotEqual(reducer.reduce(armed, .autoTransition, at: .zero), armed)
+        var pushing = slot4
+        pushing.transition.progress = 0.4
+        pushing.transition.source = .tbar
+        XCTAssertNil(CommandValidator.reason(rejecting: .autoTransition, in: pushing), "进行中交给 reducer")
+        XCTAssertEqual(reducer.reduce(pushing, .autoTransition, at: .zero), pushing, "进行中 reducer 本来就忽略")
     }
 
     // MARK: C4（进程内形态）：每秒 100 条带序号命令，两个并发"客户端"
