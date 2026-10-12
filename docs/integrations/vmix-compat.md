@@ -103,7 +103,7 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 | Cut | Input? | `.cut`；带 Input 先 `.setPreview` 再 `.cut`（旧 PGM 进 PVW，与对方一致）。**转场进行中（T-bar 推到一半也算）带 Input → 409 NotConfigured、一条都不发**（这时 PVW 改不了，`.cut` 会把正在进行的那次做完、落不到点名的那一路）；不带 Input 照旧把当前转场做完 |
 | Fade / Wipe / Zoom | Duration?（ms，默认 500）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition`（改的是当前那组，之后它可能对不上任何转场槽） |
 | Stinger1 | | 执行**第一个选了输入的 Stinger 转场槽**（`.useTransitionSlot(k, start: true)`）；没有这种槽时用当前那组的 stinger 输入（`.setTransition(.stinger)` + `.autoTransition`）；都没有 → NotConfigured |
-| Transition1–4 | | `.useTransitionSlot(n, start: true)`：执行转场 n（一拍内选中并开始，之后 T-bar / 回车也用它）；转场进行中 → `OK TransitionN (no change)`。转场 n 是没选输入的 Stinger 槽时这一版照常执行（画面立刻硬切、等满时长才算切完）。Transition5 起 → NotImplemented |
+| Transition1–4 | | `.useTransitionSlot(n, start: true)`：执行转场 n（一拍内选中并开始，之后 T-bar / 回车也用它）；转场进行中 → `OK TransitionN (no change)`。转场 n 是没选输入的 Stinger 槽 → 409 NotConfigured（"…is a Stinger with no input; pick an input for it first"，与 Stinger1 没配好同口径），一条都不发。Transition5 起 → NotImplemented |
 | SetTransitionEffect1–4 | Value=Cut/Fade/Wipe/Zoom/Stinger（不分大小写） | `.setTransitionSlot(n, 槽 n 只换效果)`：时长、Wipe 方向 / 软边、Stinger 输入 / 换底拍原样带上；只改设置、不执行，转场进行中也收（进行中的那一次照原样走完）。对方的其他效果名 → NotImplemented，谁都没有的名字 → BadParameter |
 | SetTransitionDuration1–4 | Value=ms | `.setTransitionSlot(n, 槽 n 只换时长)`：毫秒按节目帧率换拍（2000 ms @60 = 120 拍）；只改设置、不执行 |
 | SetFader | Value=0–255 | `.tbar(v/255)` |

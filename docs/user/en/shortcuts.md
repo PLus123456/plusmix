@@ -15,8 +15,8 @@ Not while the Statistics window, the Stream / Recording Status window or the mul
 | `Space` | Cut |
 | `Return` | Run the current transition slot (the T-bar uses it too; Transition 1 · Fade 0.5 s in a new show) |
 | `F` | FTB on / off |
-| `⌥1` … `⌥4` | Run Transition 1–4 (selects that slot and starts it at once; Return and the T-bar use it afterwards; [Concepts › Transition slots](concepts.md#transition-slots)) |
-| `⌃1` … `⌃4` | Overlay 1–4 on / off (switch only, the input is not changed: a channel without an input shows nothing) |
+| `⌥1` … `⌥4` | Run Transition 1–4 (selects that slot and starts it at once; Return and the T-bar use it afterwards; [Concepts › Transition slots](concepts.md#transition-slots)). A slot that is a Stinger with no input yet doesn't run; the status line says so |
+| `⌃1` … `⌃4` | Overlay 1–4 on / off (a channel without an input uses the input on PVW; if PVW is black too it doesn't turn on and the status line says so — the same as the Overlay buttons in the transition column) |
 
 - **⇧1–⇧0 don't match a real keyboard**: when you press ⇧1 the system hands PlusMix the character Shift produces (`!` on a US keyboard, a full-width `！` with the Pinyin input source), while the table says `shift+1`, so these rows do nothing.
   Workaround: re-record those rows one by one with "Record" in Settings › Shortcuts (that stores something like `shift+!`, which then works), or use the Cut button on the cells. ⌥1–⌥4 and ⌃1–⌃4 are not affected.
@@ -135,7 +135,7 @@ Saving checks that every action fits its trigger (Notes take button actions, CCs
 }
 ```
 
-Inside a Note's `"action": {"action": …}` goes an action written exactly as in hotkeys.json above. **The default map is empty** (no factory mappings; restoring defaults empties it); an unreadable midi.json also falls back to the empty map, without a notice.
+Inside a Note's `"action": {"action": …}` goes an action written exactly as in hotkeys.json above. **The default map is empty** (no factory mappings; restoring defaults empties it); an unreadable midi.json (JSON error, conflict) falls back to the empty map and the status line says "MIDI mapping table … is unreadable; using an empty table: …".
 Devices unplugged and plugged back are picked up again; devices connected while the app runs are discovered too.
 
 ## Stream Deck, Companion, tally, scripts

@@ -1,7 +1,7 @@
 # Troubleshooting
 
 Look in three places first: the one-line message on an input cell (that input's own state, [Inputs › Input states](inputs.md#input-states)), the tooltip of the Record / Stream buttons in the bottom bar (every route's state and why it couldn't start) together with the [Stream / Recording Status window](outputs.md#stream--recording-status-window) (each route's last error and its drops and reconnects),
-and the notices / reminders at the right of the status line (outputs and system-level events). Cells in error and outputs that couldn't start name the cause and the next step; a "No signal" cell doesn't say what it is waiting for — go through [§2](#2-no-signal). This page groups them by symptom.
+and the notices / reminders at the right of the status line (outputs and system-level events). Cells in error and outputs that couldn't start name the cause and the next step; a "No signal" cell shows the reason the input itself reports on a second line (cut short if long; the tooltip has it all) — compare with [§2](#2-no-signal). This page groups them by symptom.
 Input messages come from the engine and are **in Chinese in this version**; below they are quoted in Chinese with an English gloss.
 
 ## 1. Permissions
@@ -18,19 +18,19 @@ Input messages come from the engine and are **in Chinese in this version**; belo
 
 ## 2. No signal
 
-A noSignal cell only says "No signal" (audio-only inputs: "Waiting for the audio device…"); the table lists the usual causes per input type. A cell in error shows the reason itself.
+A noSignal cell says "No signal" (audio-only inputs: "Waiting for the audio device…") with the input's own reason on a second line (in Chinese); the table lists the usual ones per input type. A cell in error shows the reason itself.
 
 | Input | Cell message | Usual causes / what to do |
 |---|---|---|
-| Camera / capture | "No signal" | Unplugged; the same device plugged back recovers automatically (≤ 3 s) |
-| DeckLink | "No signal" | Driver missing (install Blackmagic Desktop Video and connect the card; recovers by itself, no restart), or cable / card absent (recovers when the signal / card returns) |
+| Camera / capture | "No signal" + "摄像头 … 已断开，等待重新连接" (camera disconnected, waiting) / "找不到摄像头 …（未连接）" (camera not found) | Unplugged; the same device plugged back recovers automatically (≤ 3 s) |
+| DeckLink | "No signal" (with "没有找到 DeckLink 驱动：安装 Blackmagic Desktop Video……", driver not found, below it when the driver is missing) | Driver missing (install Blackmagic Desktop Video and connect the card; recovers by itself, no restart), or cable / card absent (recovers when the signal / card returns) |
 | DeckLink | "DeckLink SDK 未编译进来：…后重新编译" (DeckLink SDK not compiled in … rebuild) | Error: this copy of the app was built without the DeckLink SDK; use a build with it |
-| NDI® | "No signal" | Source not online yet, sender not running, different subnet, or wrong name: the name must match the sender's `MACHINE (source)`; the NDI® page of the Add Input panel searches again every 4 s; connects when the source appears |
+| NDI® | "No signal" + "网络上找不到 NDI 源 …（发送端没开、不在同一网段，或名字不对）" (NDI source not found on the network) | Source not online yet, sender not running, different subnet, or wrong name: the name must match the sender's `MACHINE (source)`; the NDI® page of the Add Input panel searches again every 4 s; connects when the source appears |
 | NDI® | "NDI SDK 未编译进来：…后重新编译" (NDI SDK not compiled in … rebuild) | Error: this copy of the app was built without the NDI SDK; install the NDI SDK for Apple to `/Library/NDI SDK for Apple` (or set `NDI_SDK_DIR`) and rebuild. The NDI® page of the Add Input panel then says "Cannot look for NDI sources: …" |
 | Video file | "文件里没有视频轨：…" (no video track) | An audio-only file (mp3 / wav / m4a / aac) was chosen: in this version the file input still needs a video track |
 | Video file | "文件不存在：…" (file not found) | Wrong path; relative paths are relative to the show file's directory ([Samples › relative paths](../../../Samples/README.md#2-相对路径), Chinese). Once the file is in place, remove the input and add it again, or reopen the show |
 | Image | "图片不存在：…" (image not found) | As above; once the file is in place it is picked up by itself (checked every 0.25 s), no need to re-add |
-| Audio-only device | "Waiting for the audio device…" | Unplugged; recovers when plugged back; "System default input" inputs rebuild when the default changes |
+| Audio-only device | "Waiting for the audio device…" + "音频输入设备「…」已断开，等待重新连接" (audio input device disconnected, waiting) and the like | Unplugged; recovers when plugged back; "System default input" inputs rebuild when the default changes |
 | Any | Picture present but looks like 30 fps in a 60 fps show | The camera negotiated 30 fps (no 60 fps mode; that line is yellow in the Add Input panel): frames repeat by design; not a drop |
 
 ## 3. Disk
@@ -40,7 +40,8 @@ A noSignal cell only says "No signal" (audio-only inputs: "Waiting for the audio
 | "Recording n: x MB free on disk" | Warning below 1 GB; still recording |
 | "Recording n: x MB free on disk, below the 200 MB minimum" | Without a fallback folder: only that recording stops; streaming and rendering continue. Change the minimum in Settings › Advanced › Free space minimum (or with the launch argument `--record-min-free-mb`) |
 | "Recording n: disk full (…)" | Full: written fragments are kept, that recording stops |
-| "Recording n: disk full, switched to the fallback directory: <file name>" | With a fallback folder (Settings › Advanced, or `--record-fallback`), running full **or dropping below the minimum** both continue recording there — below the minimum it says the same, although the disk isn't actually full |
+| "Recording n: disk full, switched to the fallback directory: <file name>" | The disk ran full; with a fallback folder (Settings › Advanced, or `--record-fallback`) recording continues there |
+| "Recording n: x MB free on disk, below the y MB minimum; switched to the fallback directory: <file name>" | Below the minimum (the disk isn't full yet); with a fallback folder recording continues there too |
 | "Recording n failed to start: …" | Folder not writable / missing; fixing the folder retries automatically |
 | "ISO input n does not exist or has no free branch (at most 4 ISO / Aux per input)" | The input being ISO-recorded is gone, or it already feeds 4 ISO recordings / Aux uses (external displays and NDI® outputs showing that input): remove some and record again |
 | "Recording n failed to finalize: …" | Writing the index at stop failed; the fragmented `.mov` stays playable |
@@ -70,7 +71,7 @@ Free space is measured on the recording's own volume. A killed process recovers 
 |---|---|
 | NDI® Output page "Unavailable: no NDI SDK", `state = unavailable` | No SDK at build time: nothing is sent. Install the SDK, then `make clean && make build` (Xcode caches the manifest's detection) |
 | `state = failed` with a reason in the status line | SDK present but initialise / create failed (usually another process holding the NDI® runtime or a name clash); retried after a settings change |
-| Add Input banner "NDI® runtime not available" / "This build has no DeckLink support" | This copy of the app was built without that SDK: you can still add the input, but it stays in error until you use a build with the SDK (the NDI® banner's "it starts working once the runtime is installed" does not hold); "Read the guide" opens the matching section of this manual |
+| Add Input banner "This build has no NDI® support" / "This build has no DeckLink support" | This copy of the app was built without that SDK: you can still add the input, but it stays in error until you use a build with the SDK; "Read the guide" opens the matching section of this manual |
 | Add Input banner "DeckLink driver not installed" | You can still add the input; it recovers once the driver is installed and the card connected, no restart needed |
 | Virtual camera: "failed: macOS refused the install: it needs a signed release build run from the Applications folder" | Development builds cannot activate system extensions: follow the three steps in [Outputs › Virtual camera](outputs.md#5-virtual-camera) |
 | Virtual camera: "waiting for approval in System Settings › Privacy & Security" | macOS showed the approval prompt; on macOS 15+ it is under General › Login Items & Extensions |
@@ -102,6 +103,7 @@ Free space is measured on the recording's own volume. A killed process recovers 
 | Nothing in the main window reacts to clicks; the status line says "Interface locked" | The interface lock is on: click the lock at the far right of the bottom bar, or Window › Lock Interface. Hotkeys and the menu bar keep working |
 | Transition / Cut on a cell are grey and clicking a thumbnail does nothing | A transition is running (a half-pulled T-bar counts): wait for it to finish; or that input is already on PGM |
 | Hotkeys do nothing | Hotkeys are not handled while the Statistics window, the Stream / Recording Status window or the multiview window is in front: click the main window first (Settings and the Input / Overlay / Audio Settings windows pass them on) |
+| ⌥4 / Return doesn't switch and the status line says "Transition 4 is a Stinger with no input yet — pick one from ▾ in the transition column" | That slot is a Stinger with no input, so it isn't run: pick an input under Stinger ▸ in the ▾ of "Transition 4" (or click its button and pick from the list), then run it |
 | Clicking "Transition 4" doesn't switch but shows a list of inputs | That slot is a Stinger with no input yet: pick an input from the list (it only changes the slot), then click again to run it ([Concepts › The transition column](concepts.md#the-transition-column)) |
 | The T-bar snaps back after I release it at the end | Expected: releasing past 97 % commits (PGM and PVW swap) and the T-bar returns to the left for the next one; it only stays put when released before 97 % |
 | ⌥1–⌥4 all just run the current transition instead of separate slots | This Mac has an old saved shortcut table: Settings › Shortcuts › Reset to Defaults |
@@ -118,6 +120,7 @@ Free space is measured on the recording's own volume. A killed process recovers 
 | 400 | Malformed command / unknown input or output number; the body says why |
 | A control panel / Companion on another machine can't connect | By default only this Mac can connect: set the local API or the compatibility layer to "Allow local network" in Settings › Remote Control, Apply and Restart Engine, and use the address shown there; click Allow when the firewall asks about incoming connections |
 | Tally lights can't connect | Turn on the read-only tally stream in Settings › Tally (off by default) and use the address shown there; "The tally stream could not start" usually means the port is in use — pick another |
+| Status line "MIDI mapping table … is unreadable; using an empty table: …" | `~/Library/Application Support/PlusMix/midi.json` has a JSON error or a conflict: MIDI runs with the empty map for now; fix the file and reopen PlusMix, or save the map again in Settings › MIDI |
 | Stream Deck buttons gray "未连接" (not connected; the plugin's label is in Chinese) | API off, wrong address / port / token; plugin logs in `~/Library/Logs/ElgatoStreamDeck/` |
 
 ## 9. Logs and diagnostics
