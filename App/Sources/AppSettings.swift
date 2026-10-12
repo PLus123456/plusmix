@@ -220,30 +220,52 @@ struct AppSettings: Equatable, Sendable {
         return s
     }
 
-    /// 设置窗：把可持久化的项写回 UserDefaults（同一组键；showURL / statsURL 是启动参数，不存）。W5-J 起也写录制下限 / 备用目录 / 兼容层地址（高级页）。
-    func save(to defaults: UserDefaults) {
-        defaults.set(audioDevice.spec, forKey: Keys.audioDevice)
-        defaults.set(apiEnabled, forKey: Keys.apiEnabled)
-        defaults.set("\(apiHost):\(apiPort)", forKey: Keys.apiListen)
-        if let apiToken, !apiToken.isEmpty { defaults.set(apiToken, forKey: Keys.apiToken) } else { defaults.removeObject(forKey: Keys.apiToken) }
-        defaults.set(compatLayerEnabled, forKey: Keys.compatLayerEnabled)
-        defaults.set(compatLayerPort, forKey: Keys.compatLayerPort)
-        defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview)
-        defaults.set(externalBehindInterface, forKey: Keys.externalBehindInterface)
-        defaults.set(confirmBeforeStop, forKey: Keys.confirmBeforeStop)
-        defaults.set(compatLayerHost, forKey: Keys.compatLayerHost)
-        defaults.set(recordMinimumFreeMB, forKey: Keys.recordMinimumFreeMB)
-        if let recordFallbackDirectory, !recordFallbackDirectory.isEmpty {
-            defaults.set(recordFallbackDirectory, forKey: Keys.recordFallbackDirectory)
-        } else {
-            defaults.removeObject(forKey: Keys.recordFallbackDirectory)
+    /// 把可持久化的项全部写回 UserDefaults（同一组键；showURL / statsURL 是启动参数，不存）。W5-J 起也写录制下限 / 备用目录 / 兼容层地址（高级页）。
+    /// W5-O 起只给程序内部用（导入 / 恢复默认之后按 UserDefaults 重读的那一份、用例还原）：设置窗的即时提交走 save(to:changedFrom:)。
+    func save(to defaults: UserDefaults) { save(to: defaults, changedFrom: nil) }
+
+    /// 只写与 old（内存里那一份）不同的键（W5-O，问题单 W4C2-w5-app-settings-gaps-found-by-docs 第 2 条）：内存里的设置带着启动参数
+    /// （--no-api / --api-listen / --api-token / --audio-device / --record-min-free-mb / --record-fallback / --tally-port），设置窗改一项就整份写回会把它们
+    /// 顺手存成本机设置——带参数排查问题的人改一下设置，本机的 API 就被存成关着。old 为 nil = 整份写。
+    /// 监听地址 host:port 是一个键：只变了一半时另一半按本机存着的（--api-listen 带进来的那一半不跟着存下）。
+    func save(to defaults: UserDefaults, changedFrom old: AppSettings?) {
+        func changed<T: Equatable>(_ key: KeyPath<AppSettings, T>) -> Bool { old.map { $0[keyPath: key] != self[keyPath: key] } ?? true }
+        if changed(\.audioDevice) { defaults.set(audioDevice.spec, forKey: Keys.audioDevice) }
+        if changed(\.apiEnabled) { defaults.set(apiEnabled, forKey: Keys.apiEnabled) }
+        if changed(\.apiHost) || changed(\.apiPort) {
+            let stored = old == nil ? nil : defaults.string(forKey: Keys.apiListen).flatMap { APIServerConfiguration.parseListen($0) }
+            let host = changed(\.apiHost) ? apiHost : stored?.host ?? apiHost
+            let port = changed(\.apiPort) ? apiPort : stored?.port ?? apiPort
+            defaults.set("\(host):\(port)", forKey: Keys.apiListen)
         }
-        if let busOutputMap, let data = try? JSONEncoder().encode(busOutputMap) { defaults.set(data, forKey: Keys.busOutputMap) } else { defaults.removeObject(forKey: Keys.busOutputMap) }
-        defaults.set(borrowMasterForMonitor, forKey: Keys.borrowMasterForMonitor)
-        defaults.set(compatLayerHTTPPort, forKey: Keys.compatLayerHTTPPort)
-        savePower(to: defaults)
-        saveTally(to: defaults)
-        saveReminders(to: defaults)
+        if changed(\.apiToken) {
+            if let apiToken, !apiToken.isEmpty { defaults.set(apiToken, forKey: Keys.apiToken) } else { defaults.removeObject(forKey: Keys.apiToken) }
+        }
+        if changed(\.compatLayerEnabled) { defaults.set(compatLayerEnabled, forKey: Keys.compatLayerEnabled) }
+        if changed(\.compatLayerPort) { defaults.set(compatLayerPort, forKey: Keys.compatLayerPort) }
+        if changed(\.overlaysInPreview) { defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview) }
+        if changed(\.externalBehindInterface) { defaults.set(externalBehindInterface, forKey: Keys.externalBehindInterface) }
+        if changed(\.confirmBeforeStop) { defaults.set(confirmBeforeStop, forKey: Keys.confirmBeforeStop) }
+        if changed(\.compatLayerHost) { defaults.set(compatLayerHost, forKey: Keys.compatLayerHost) }
+        if changed(\.recordMinimumFreeMB) { defaults.set(recordMinimumFreeMB, forKey: Keys.recordMinimumFreeMB) }
+        if changed(\.recordFallbackDirectory) {
+            if let recordFallbackDirectory, !recordFallbackDirectory.isEmpty {
+                defaults.set(recordFallbackDirectory, forKey: Keys.recordFallbackDirectory)
+            } else {
+                defaults.removeObject(forKey: Keys.recordFallbackDirectory)
+            }
+        }
+        if changed(\.busOutputMap) {
+            if let busOutputMap, let data = try? JSONEncoder().encode(busOutputMap) { defaults.set(data, forKey: Keys.busOutputMap) } else { defaults.removeObject(forKey: Keys.busOutputMap) }
+        }
+        if changed(\.borrowMasterForMonitor) { defaults.set(borrowMasterForMonitor, forKey: Keys.borrowMasterForMonitor) }
+        if changed(\.compatLayerHTTPPort) { defaults.set(compatLayerHTTPPort, forKey: Keys.compatLayerHTTPPort) }
+        if changed(\.preventSleepWhileRunning) || changed(\.preventDisplaySleepWhileRunning) { savePower(to: defaults) }
+        if changed(\.tallyEnabled) { defaults.set(tallyEnabled, forKey: Keys.tallyEnabled) }
+        if changed(\.tallyPort) {
+            if let tallyPort { defaults.set(tallyPort, forKey: Keys.tallyPort) } else { defaults.removeObject(forKey: Keys.tallyPort) }
+        }
+        if changed(\.reminders) { saveReminders(to: defaults) }
     }
 
     // 即时生效的三节（W5-L）只写自己的键（AppController.updateSettings(_:saving:)）：整份写回会把启动参数带进来的值（--api-token、--no-api……）

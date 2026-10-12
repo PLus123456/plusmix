@@ -421,7 +421,8 @@ final class PanelTests: XCTestCase {
         AppTest.controller.panels.closeAll()
     }
 
-    /// 外部显示：输出设置面板加一路 = 快照多一个 externalDisplay 输出 → W3-C 的 AuxOutputRuntime 跟着开窗口；用户关窗口 = 移除该输出。
+    /// 外部显示：输出设置面板加一路 = 快照多一个 externalDisplay 输出 → W3-C 的 AuxOutputRuntime 跟着开窗口；用户关窗口（Esc）= 关这一路
+    /// （W5-O 起只关不删：enabled = false、配置留着，与路由菜单的"关闭"一致；原来是移除该输出）。
     /// （W3-E 原来的窗口菜单 / 窗口实现在 G4 合并时换成 W3-C 的：菜单 = MainWindowController.externalOutputMenu，窗口 = ExternalDisplayManager。）
     func testPanels_externalDisplayMenuAndWindowLifecycle() throws {
         let session = try AppTest.freshSession()
@@ -440,8 +441,11 @@ final class PanelTests: XCTestCase {
         let w = try XCTUnwrap(session.aux.external.windows[number])
         XCTAssertEqual(w.spec.source, .input(number: 1), "任一输入 = 多画面纹理里那一格（Aux 语义）")
         XCTAssertEqual(w.spec.displayID, screen)
-        w.onCloseRequested?()   // = 用户在外部窗口按 Esc（W3-C：组装方收到后删输出；closeOutput 是管理器按快照关窗口用的）
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number) == nil && session.aux.external.windows.isEmpty }, "用户关窗口应移除输出")
+        w.onCloseRequested?()   // = 用户在外部窗口按 Esc（组装方收到后关这一路；closeOutput 是管理器按快照关窗口用的）
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number)?.enabled == false && session.aux.external.windows.isEmpty }, "用户关窗口 = 关这一路、窗口收起")
+        XCTAssertEqual(session.state.output(number)?.settings.source, .input(number: 1), "配置留着（W5-O：不再删输出）")
+        session.send(.removeOutput(output: number))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(number) == nil })
     }
 
 

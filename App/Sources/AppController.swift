@@ -476,10 +476,29 @@ final class AppController {
         settings = s
     }
 
-    /// 设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的同时落到跑着的 session：外部输出的主屏层级、
-    /// 录制磁盘下限（下一次开录起用，在录的路照旧）与备用目录（W5-J 高级页）。
+    /// 设置：整份写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的同时落到跑着的 session（applySettings）。
+    /// W5-O 起只给程序内部用（导入 / 恢复默认之后按 UserDefaults 重读的那一份、用例还原）；设置窗的提交走 commitSettings。
     func updateSettings(_ s: AppSettings) {
         s.save(to: defaults)
+        applySettings(s)
+    }
+
+    /// 设置窗即时生效的提交（常规 / 音频设备 / 远程控制 / 高级 页与 Tally，W5-O）：只写这次真变了的键（AppSettings.save(to:changedFrom:)）——
+    /// 内存里的设置带着启动参数（--no-api / --api-token / --audio-device……），整份写回会把它们顺手存成本机设置（问题单 W4C2-w5-app-settings-gaps 第 2 条）。
+    func commitSettings(_ s: AppSettings) {
+        s.save(to: defaults, changedFrom: settings)
+        applySettings(s)
+    }
+
+    /// 同上，按改法提交（Tally 页）。
+    func commitSettings(_ change: (inout AppSettings) -> Void) {
+        var s = settings
+        change(&s)
+        commitSettings(s)
+    }
+
+    /// 换上新设置；运行时能改的同时落到跑着的 session：外部输出的主屏层级、录制磁盘下限（下一次开录起用，在录的路照旧）与备用目录（W5-J 高级页）。
+    private func applySettings(_ s: AppSettings) {
         settings = s
         session?.aux.external.mainScreenLayering = settings.externalMainScreenLayering
         session?.outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024

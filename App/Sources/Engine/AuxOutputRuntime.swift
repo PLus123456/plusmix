@@ -24,7 +24,7 @@ final class AuxOutputRuntime {
     private let engine: Engine
     private let format: ProgramFormat
     var onEvent: ((Event) -> Void)?
-    /// 用户在外部窗口按 Esc → 删那个输出（经命令总线）。
+    /// 用户在外部窗口按 Esc → 关那一路（setOutputEnabled off，经命令总线；配置留着，与路由菜单的"关闭"同一条命令，W5-O）。
     var sendCommand: ((Command) -> Void)?
     /// 界面上的显示视图在 Stats 里的项（提案 013）：主界面监视器（output 0，kind "monitor"）与多画面窗口（kind "multiviewWindow"）。
     /// 由 `MainWindowController` 注册——那两个视图归界面所有，运行时这里看不到。
@@ -41,7 +41,8 @@ final class AuxOutputRuntime {
         external = ExternalDisplayManager(source: source)
         installer = SystemExtensionInstaller()
         external.onStatusChange = { [weak self] number, status in self?.onEvent?(.externalDisplay(output: number, status: status)) }
-        external.onCloseRequested = { [weak self] number in self?.sendCommand?(.removeOutput(output: number)) }
+        // Esc 只关不删（W5-O，问题单 W4C2-w5-app-inputs-outputs-gaps 第 1 条）：原来发 removeOutput，现场在投影窗口上误按一下，这块屏的显示器 / 来源配置就没了
+        external.onCloseRequested = { [weak self] number in self?.sendCommand?(.setOutputEnabled(output: number, on: false)) }
         installer.onStatusChange = { [weak self] status in
             guard let self else { return }
             self.onEvent?(.extensionStatus(status))

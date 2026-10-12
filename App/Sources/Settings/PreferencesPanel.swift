@@ -9,6 +9,8 @@
 // W5-K（97）："音频设备"页 = AudioOutputSettingsSection（设备 + 每条总线选声道对，AudioOutputSettingsModel），G7 合并时从偏好设置长表单搬进本机 › 音频设备；
 // 模型改了（选设备 / 声道 / 借 Master）按即时生效提交（bindAudioOutput）。
 // W5-L（98）：远程控制页 = RemoteControlSection（API / 兼容层"仅本机 / 允许局域网" + 可访问地址）、Tally / 性能与电源 / 提醒三节各自即时生效、只写自己的键（AppController.updateSettings(_:saving:)），G7 合并时挂进 96 的对应页。
+// W5-O（112）：常规 / 音频设备 / 远程控制 / 高级 页的提交也只写这次真变了的键（AppController.commitSettings → AppSettings.save(to:changedFrom:)）——
+// 原来整份写回，带 --no-api 之类启动参数起、改一项设置，就把启动参数存成了本机设置（问题单 W4C2-w5-app-settings-gaps 第 2 条）。
 import AppKit
 import Combine   // bindAudioOutput：订阅 W5-K 音频设备模型的改动（G7 合并时加）
 import SwiftUI
@@ -232,6 +234,7 @@ final class PreferencesModel: ObservableObject {
     // MARK: 提交（即时生效）
 
     /// 本机的项写回 UserDefaults + AppController（下次起 session 用；运行时能改的同时落到跑着的 session），再重算待应用的项。
+    /// 只写这次真变了的键（AppController.commitSettings，W5-O）：每页只存自己改的那几项，启动参数带进来的值不跟着存。
     private func commit() {
         guard !loading else { return }
         var s = controller.settings
@@ -255,7 +258,7 @@ final class PreferencesModel: ObservableObject {
         s.recordMinimumFreeMB = max(0, recordMinimumFreeMB)
         let fallback = recordFallbackDirectory.trimmingCharacters(in: .whitespaces)
         s.recordFallbackDirectory = fallback.isEmpty ? nil : fallback
-        controller.updateSettings(s)
+        controller.commitSettings(s)   // 只写这次真变了的键：内存里带着启动参数（--no-api……），不顺手存成本机设置（W5-O）
         status = L("prefs.status.saved")
         refreshPending()
     }
