@@ -68,6 +68,21 @@ final class ClickDetectorTests: XCTestCase {
         XCTAssertEqual(ClickDetector.detect(samples: loud, sampleRate: 48000).count, 0)
     }
 
+    /// W1-A5 交付 3（G8 iso3 第 500 s 那个 click）：检测是逐样本滑的 1 ms 能量窗，没有按整秒或按 48 样本对齐切的窗口，
+    /// click 晚 1 个样本（20.8 µs，iso3 那样）不会落到"窗边"上漏掉——起点在 48 样本网格的每个相位上都按样本精确找到。
+    func testA4_clickDetector_clickOneSampleLate_foundAtEveryWindowPhase() {
+        let signal = TestSignal(t0: .zero, clickPeriod: TestPattern.flashPeriod(frameRate: .fps60))
+        let n = 3 * 48000 - 1000
+        var buf = [Float](repeating: 0, count: n)
+        for phase in 0..<48 {
+            // 从绝对样本 −phase 起渲染 = 整条晚 phase 个样本：click 在 phase、48000 + phase、96000 + phase
+            buf.withUnsafeMutableBufferPointer { signal.render(into: $0.baseAddress!, frameCount: n, startingAt: -Int64(phase)) }
+            let ev = ClickDetector.detect(samples: buf, sampleRate: 48000)
+            XCTAssertEqual(ev.map(\.sampleIndex), [0, 48000, 96000].map { Int64($0 + phase) }, "相位 \(phase)")
+            XCTAssertEqual(ev.map(\.peak), [1, 1, 1], "相位 \(phase)")
+        }
+    }
+
     func testW1A_clickDetector_startOffsetAndHoldOff() {
         // 两个 click 相隔 10 ms（< holdOff 50 ms）只报第一个；startSeconds 加到时间上
         var s = [Float](repeating: 0, count: 48000)

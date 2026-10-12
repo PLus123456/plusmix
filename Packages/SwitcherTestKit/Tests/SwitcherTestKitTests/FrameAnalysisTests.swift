@@ -296,6 +296,121 @@ final class FrameAnalysisTests: XCTestCase {
         XCTAssertEqual(far.passA4, false)
     }
 
+    /// A4 用的合成文件，仿 G8 gate4 的 out.mov / out.iso1–4.mov（ISO 文件录的是 PGM 画面 + 各路音轨，所以各文件闪光相同、click 各自来）：
+    /// 60 fps 25 s；闪光在 0…9 s 整秒、9.5…18.5 s 半秒（PGM 上 59.94 的路在播，G8 的 490.5…499.5 s）、19.95…23.95 s（整秒前 50 ms，G8 的 500.95 s 起）；
+    /// click 在 0…24 s 整秒，`lateSeconds` 整体挪后（G8 的 iso3 晚 20 µs = 1 个样本，消费者流 +100 ppm），`shift` 单个挪。
+    /// 第 1 s 那个闪光帧读不出时间戳行（genTimeMs nil）→ 事件按序号对齐，与 G8 那次一样。
+    private func a4File(_ name: String, lateSeconds: Double = 0, shift: [Int: Double] = [:],
+                        flashTicks: [Int]? = nil) -> (name: String, frames: [ProbeFrame], clicks: [ClickEvent]) {
+        let ticks = Set(flashTicks ?? (0..<10).map { $0 * 60 } + (10..<20).map { $0 * 60 - 30 } + (20..<25).map { $0 * 60 - 3 })
+        let frames = (0..<(25 * 60)).map { t in
+            ProbeFrame(index: t, ptsSeconds: Double(t) / 60, frameNumber: UInt32(t), inputID: 1,
+                       genTimeMs: t == 60 ? nil : UInt32(t * 1000 / 60), flash: ticks.contains(t), gray: 128)
+        }
+        let clicks = (0..<25).map { k in
+            ClickEvent(sampleIndex: Int64(k * 48000), timeSeconds: Double(k) + lateSeconds + (shift[k] ?? 0), peak: 1)
+        }
+        return (name, frames, clicks)
+    }
+
+    /// W1-A5 交付 1（reports/issues/G8b-w1-testkit-frameprobe-a4-halfsecond-click-tie.md）：闪光落在半秒时前后两个整秒 click 各差 500 ms，
+    /// 各文件独立配"最近"的话，click 整体晚 20 µs 的那份配到前一秒、别的配到后一秒（恰好 500 ms 的平局按实现取后一个）→ 极差 999.98 ms。
+    /// 以第一个配上 click 的文件（PGM）为锚、其他文件取离锚最近的 click 之后，极差就是真实的 0.02 ms。
+    func testA4_avMulti_halfSecondTie_clicksFollowFirstFileAnchor() {
+        let files = (0..<5).map { a4File("f\($0)", lateSeconds: $0 == 3 ? 20e-6 : 0) }
+        // 先确认造出了 G8 的平局：各自独立配对时，第 10 个闪光（9.5 s）[0] 配到 10 s、[3] 配到 9.00002 s
+        let own0 = FrameAnalysis.av(frames: files[0].frames, clicks: files[0].clicks)
+        let own3 = FrameAnalysis.av(frames: files[3].frames, clicks: files[3].clicks)
+        XCTAssertEqual(own0.pairs.count, 25); XCTAssertEqual(own0.pairs[10].flashTimeSeconds, 9.5, accuracy: 1e-9)
+        XCTAssertEqual(own0.pairs[10].clickTimeSeconds ?? -1, 10, accuracy: 1e-9)
+        XCTAssertEqual(own3.pairs[10].clickTimeSeconds ?? -1, 9.00002, accuracy: 1e-9)
+
+        let r = FrameAnalysis.avMulti(files: files)
+        XCTAssertEqual(r.events.count, 25)
+        XCTAssertEqual(r.events.map(\.key), (0..<25).map { "#\($0)" }, "有闪光帧读不出 genTimeMs → 按序号对齐")
+        for (k, e) in r.events.enumerated() {
+            let c = e.clickTimes.map { $0 ?? -1 }
+            XCTAssertEqual(c[0], Double(k), accuracy: 1e-9, "事件 \(k)：锚 = [0] 自己配的 click")
+            for i in [1, 2, 4] { XCTAssertEqual(c[i], Double(k), accuracy: 1e-9, "事件 \(k) 文件 \(i)") }
+            XCTAssertEqual(c[3], Double(k) + 20e-6, accuracy: 1e-9, "事件 \(k)：[3] 取离锚最近的 click，不是离自己闪光最近的")
+            XCTAssertEqual(e.clickSpreadMs ?? -1, 0.02, accuracy: 1e-6, "事件 \(k)")
+            XCTAssertEqual(e.flashSpreadMs ?? -1, 0, accuracy: 1e-9)
+        }
+        XCTAssertEqual(r.maxClickSpreadMs, 0.02, accuracy: 1e-6, "不是 999.98 ms")
+        XCTAssertEqual(r.maxFlashSpreadMs, 0, accuracy: 1e-9)
+        XCTAssertEqual(r.passA4, true)
+        XCTAssertEqual(r.events.map(\.anchorFile), Array(repeating: 0, count: 25))
+        // 锚文件自己没配上 click 时顺延到下一个配上的文件
+        var noClick0 = files
+        noClick0[0].clicks = []
+        let r2 = FrameAnalysis.avMulti(files: noClick0)
+        XCTAssertEqual(r2.events[12].anchorFile, 1)
+        XCTAssertNil(r2.events[12].clickTimes[0])
+        XCTAssertEqual(r2.events[12].clickTimes[3] ?? -1, 12.00002, accuracy: 1e-9)
+        XCTAssertEqual(r2.maxClickSpreadMs, 0.02, accuracy: 1e-6)
+        // 真错位照样显出来：[2] 的音轨整体晚 30 ms → 极差 30 ms、A4 红（不会因为离锚超过 1 帧就当成"没找到"藏掉）
+        var late = files
+        late[2] = a4File("late", lateSeconds: 0.03)
+        let r3 = FrameAnalysis.avMulti(files: late)
+        XCTAssertEqual(r3.maxClickSpreadMs, 30, accuracy: 1e-6)
+        XCTAssertEqual(r3.passA4, false)
+    }
+
+    /// W1-A5 交付 2：闪光离锚 click 在半秒 ±1 帧内的事件，配哪一秒是平局（A2 本来就只用整秒配对判），A4 只列不判：
+    /// 照常算极差、列在 events 里（halfSecond = true），不进 maxFlashSpreadMs / maxClickSpreadMs / passA4；含它们的最大值另报。
+    func testA4_avMulti_halfSecondEvents_listedNotJudged() {
+        // 半秒事件（第 15 个：闪光 14.5 s，锚 15 s）上 [1] 的 click 晚 30 ms：列出来、不判
+        let halfFiles = (0..<5).map { a4File("f\($0)", lateSeconds: $0 == 3 ? 20e-6 : 0, shift: $0 == 1 ? [15: 0.03] : [:]) }
+        let half = FrameAnalysis.avMulti(files: halfFiles)
+        XCTAssertEqual(half.events.map { $0.halfSecond == true }, (0..<25).map { (10..<20).contains($0) })
+        XCTAssertEqual(half.halfSecondEventCount, 10)
+        XCTAssertEqual(half.events[15].clickSpreadMs ?? -1, 30, accuracy: 1e-6)
+        XCTAssertEqual(half.maxClickSpreadMs, 0.02, accuracy: 1e-6, "判定口径不含半秒事件")
+        XCTAssertEqual(half.allEventsMaxClickSpreadMs ?? -1, 30, accuracy: 1e-6, "含半秒事件的最大值另报")
+        XCTAssertEqual(half.allEventsMaxFlashSpreadMs ?? -1, 0, accuracy: 1e-9)
+        XCTAssertEqual(half.passA4, true)
+        XCTAssertNotNil(half.note)
+        let md = FrameProbe.markdown(FrameProbe.AVMultiOutput(sources: halfFiles.map(\.name),
+                                                             perFile: halfFiles.map { FrameAnalysis.av(frames: $0.frames, clicks: $0.clicks) }, multi: half))
+        XCTAssertTrue(md.contains("半秒"), md)
+        XCTAssertTrue(md.contains("A4 ✅"), md)
+        // 同样晚 30 ms 落在整秒事件（第 5 个）上：判、A4 红
+        let whole = FrameAnalysis.avMulti(files: (0..<5).map { a4File("f\($0)", shift: $0 == 1 ? [5: 0.03] : [:]) })
+        XCTAssertEqual(whole.events[5].halfSecond, false)
+        XCTAssertEqual(whole.maxClickSpreadMs, 30, accuracy: 1e-6)
+        XCTAssertEqual(whole.passA4, false)
+        // 半秒的边：闪光离锚 click 0.5 s − 1 帧（拍 60k ± 29）还算半秒，− 2 帧（60k ± 28）就判
+        let edgeTicks = [2 * 60 - 29, 4 * 60 - 28, 6 * 60 + 29, 8 * 60 + 28]
+        let edge = FrameAnalysis.avMulti(files: (0..<2).map { a4File("e\($0)", flashTicks: edgeTicks) })
+        XCTAssertEqual(edge.events.map(\.halfSecond), [true, false, true, false])
+        XCTAssertEqual(edge.events.map { $0.clickTimes[0] ?? -1 }, [2, 4, 6, 8])
+        XCTAssertEqual(edge.halfSecondEventCount, 2)
+        // 全是半秒事件 → 没有可判的，passA4 nil（与"一个整秒配对都没有"的 passA2 同口径）
+        let allHalf = FrameAnalysis.avMulti(files: (0..<2).map { a4File("h\($0)", flashTicks: (1..<6).map { $0 * 60 + 30 }) })
+        XCTAssertEqual(allHalf.halfSecondEventCount, 5)
+        XCTAssertNil(allHalf.passA4)
+    }
+
+    /// W1-A5 交付 3：G8 里 iso3"第 500 s 的 click 没检出"其实检出了——探针（只读音轨、同一个 ClickDetector）五个文件都是 599 个 click、
+    /// 整秒一一对应，iso3 那个在 500.000021 s（样本 24000001，峰值 1.12）。是平局让它没被任何闪光选中：499.5 s 的闪光配了更近 20 µs 的
+    /// 499.000021，500.95 s 的配了 501.000021；"592 个 vs 593 个"数的是配对里用到的 click。以锚取 click 之后，每个文件的每个 click 恰好用一次。
+    func testA4_avMulti_clickAfterHalfSecondRun_isUsedNotMissed() {
+        let files = (0..<5).map { a4File("f\($0)", lateSeconds: $0 == 3 ? 20e-6 : 0) }
+        // 老口径（各自配离自己闪光最近的）下 [3] 用不到 19.00002 s 那个 click（G8 的第 500 s），9.00002 s 那个用两次
+        let own3 = FrameAnalysis.av(frames: files[3].frames, clicks: files[3].clicks)
+        XCTAssertEqual(own3.clickCount, 25)
+        let usedOwn = own3.pairs.compactMap(\.clickTimeSeconds)
+        XCTAssertEqual(Set(usedOwn).count, 24)
+        XCTAssertFalse(usedOwn.contains { abs($0 - 19.00002) < 1e-9 })
+        let r = FrameAnalysis.avMulti(files: files)
+        for i in 0..<5 {
+            let used = r.events.compactMap { $0.clickTimes[i] }
+            XCTAssertEqual(used.count, 25, "文件 \(i) 每个事件都有 click")
+            XCTAssertEqual(Set(used).count, 25, "文件 \(i) 的 25 个 click 各用一次")
+        }
+        XCTAssertEqual(r.events[19].clickTimes[3] ?? -1, 19.00002, accuracy: 1e-9)
+    }
+
     func testW1A_linearFit_and_nearest() {
         let fit = FrameAnalysis.linearFit(x: [0, 1, 2, 3], y: [1, 3, 5, 7])
         XCTAssertEqual(fit.slope, 2, accuracy: 1e-12); XCTAssertEqual(fit.intercept, 1, accuracy: 1e-12)
