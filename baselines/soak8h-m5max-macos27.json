@@ -1,0 +1,53 @@
+{
+ "a3": {
+  "a2_max_abs_ms": 0.0,
+  "a2_mean_ms": 0.0,
+  "a2_std_ms": 0.0,
+  "drift_ms": 0.0,
+  "extrapolated": false,
+  "meets_target": true,
+  "note": "",
+  "pairs": 12975,
+  "pass": true,
+  "pass_a2": true,
+  "slope_ms_per_s": 0.0,
+  "span_s": 28589.0
+ },
+ "checkpoint": "W4-A-soak8h",
+ "commit": "93bb783",
+ "date": "2026-10-12T08:24:29",
+ "key": {
+  "a3_drift_ms": 0.0,
+  "cpu_avg_pct": 56.946337633722955,
+  "cpu_p95_pct": 58.67647124641879,
+  "gpu_avg_pct": 26.44349154543245,
+  "gpu_p95_pct": 28.0,
+  "s2_mb_per_h": 2.4637933750797134,
+  "v1_avg_ms": 1.93051181320894,
+  "v1_p99_ms": 2.3030996666666663,
+  "v2_ratio": 0.0,
+  "v3_p99_ms": 0.03225
+ },
+ "machine": "m5max",
+ "notes": {
+  "camera": "auto",
+  "macos": "27.0.1",
+  "ndi": "1",
+  "power": "AC",
+  "streams": "2"
+ },
+ "s2": {
+  "after_warmup": true,
+  "fit_span_s": 27000.074131965637,
+  "meets_target": false,
+  "r2": 0.1962260989597569,
+  "rss_first_mb": 1043.2828750610352,
+  "rss_fit_first_mb": 1201.986183166504,
+  "rss_fit_last_mb": 1165.8611602783203,
+  "rss_last_mb": 1165.8611602783203,
+  "rss_max_mb": 1282.2675476074219,
+  "samples": 451,
+  "slope_mb_per_h": 2.4637933750797134,
+  "verdict": "pass"
+ }
+}

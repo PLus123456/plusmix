@@ -11,7 +11,8 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 **2026-10-10 G8a**（reports/G8.md §1.1）：`p5-contracts`（已批的 023§1 / 024 (b) / 025 / 026 / 027 进契约，Command 34 → 35；**020 / 021 / 022 / 023 二–五只有提案、等用户批**，100 / 101 要等它们落地）、`w2-control-3`（S1 `MIDIHost.sync` 崩溃已修——下表销号，移到"2026-10-10 G8a 已修"表）、`w1-core-4`（视频延后 L 的引擎 / 渲染器 / Integration / headless；**App 的三行接线待 G8b**，下表新加一行 S2）合入 `g8`，整仓 make test 后等用户点头快进 main。
 **2026-10-11 用户裁定**（看完 reports/G8.md）：main 快进到 g8（f0c33ef）；提案 020 / 021 / 022 / 023 二–五**全批**、按提案默认 → 新 prompt 108（P5-2，`p5-contracts-2`）落地，100 / 101 等它合入；L1 对 videoDelay 的判定扣 `video_delay_ms`（阈值不动）；W1-B4 的 App 接线与开录起点归 G8b 胶水（上表那行 S2 的计划不变）。
 **2026-10-11 G8a-2**（reports/G8.md §1.2）：108 P5-2 合入——020 / 021 / 022 / 023 二–五 / 028 文字进 main，Command 42，Stats.encoder 多 uptime_s / disconnects / last_error / attempt、顶层多 video_delay_ms；整仓 830 用例 0 红、App 228 用例 0 红、headless 16 / 16，main 快进（代码树 97b0634）。
-**2026-10-11 G8b**（reports/G8.md §1.3 / §4.3 / §7）：100 `w5-transition-slots` → 101 `w5-playback-status` → 102 `w1-audio-3` → 103 `w4-docs-2` 合入（四路 0 冲突），G8 胶水 App 26/50 行（翻 87 / 88 的三条用例、X09 借 Master 接线、W1-B4 的 App 接线三行 + 开录起点按输出时间线）：**S1 X07 / X09、S2 X12 残口 / 监听晚 L / 兼容层 Cut Input 都销号**（下面"2026-10-11 G8b 合入已修"表）；UIA 那张表清空；W4-C2 写手册时对代码查出的两条 S2 与若干 S3 新进产品缺陷表。**0.1.1 这次仍不发**：8 小时长稳没在这棵树上跑、L3 清单（docs/checklists/G8.md）没人跑、签名账号 BLOCKED——阻塞项与归属 reports/G8.md §7。
+**2026-10-11 G8b**（reports/G8.md §1.3 / §4.3 / §7）：100 `w5-transition-slots` → 101 `w5-playback-status` → 102 `w1-audio-3` → 103 `w4-docs-2` 合入（四路 0 冲突），G8 胶水 App 26/50 行（翻 87 / 88 的三条用例、X09 借 Master 接线、W1-B4 的 App 接线三行 + 开录起点按输出时间线）：**S1 X07 / X09、S2 X12 残口 / 监听晚 L / 兼容层 Cut Input 都销号**（下面"2026-10-11 G8b 合入已修"表）；UIA 那张表清空；W4-C2 写手册时对代码查出的两条 S2 与若干 S3 新进产品缺陷表。0.1.1 当时判不发：8 小时长稳没在这棵树上跑、L3 清单（docs/checklists/G8.md）没人跑、签名账号 BLOCKED——阻塞项与归属 reports/G8.md §7。
+**2026-10-12 8 小时长稳**（用户终端 `make soak`，树 93bb783 = main，10-11 23:48 → 10-12 07:48）：S1 97 个窗口 0 超阈值、S2 2.46 MB/h、S3 30.4%（不含 NDI SDK 线程）、A3 0、崩溃 0 **全过**（reports/W4-soak-8h.md）——文件循环内存那条 S1 销号（挪进"2026-09-28 发布前已修"表）；0.1.1 还差 L3 清单与签名账号。
 
 ## 0.1.0 候选（分支 release/0.1 → main；2026-09-28 G5 判不发；2026-10-02 G6 重判不发，阻塞项与归属见 reports/G6.md §7）
 
@@ -19,7 +20,6 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 
 | 级别 | 现象 | 影响范围 | 绕过办法 | 来源 | 计划 |
 |---|---|---|---|---|---|
-| S1 → 已修（等 8 小时复验） | 视频文件输入**循环播放**时内存每圈涨约 0.5 MB（长稳 S2 实测 60.8 MB/h，门槛 ≤ 10）。根因：文件解码线程没有自动释放池。**W2-A3 2026-09-28 已修**（解码 / 推帧线程每轮迭代包 `autoreleasepool`）：用例修前 0.465 → 修后 0.017 MB/圈，fileprobe 120 圈 footprint 从 +65.7 MB 变平 | 修前：短片段循环长时间直播的节目 | — | reports/issues/W4A-w2-inputs-file-loop-memory-and-prores-starve.md §3；reports/w2-inputs-3.md | 正式的 S2 值等用户终端重跑 8 小时 `make soak`（2026-10-02 仍没跑）；通过后从表里删 |
 | S2 | 系统守护进程 / 桌面活动突发时渲染线程成串跳拍（10 分钟里 1–11 拍；V2 仍在 0.02% 以内）。W1-B3 定位：突发让整个进程的非实时线程和 GPU 一起停 100 ms 量级，只有实时线程按时醒，是 GPU 侧；已给渲染完成线程挂实时策略并给每次跳拍归因（GPU 晚 / 完成线程晚），在途深度是契约（≤ 2 帧）没动 | 直播机同时跑重桌面任务 | 直播时关掉其它占 GPU / CPU 的程序（测试标准 §2.8） | reports/issues/G4-w1-core-missed-render-bursts-under-daemon-activity.md；reports/w1-core-3.md §4 | 要不要把在途深度提到 4 等 8 小时长稳的 V2 累计定（契约） |
 | S3（原记 S2） | 标准负载（8 路合成源 + 摄像头 + 文件 + 录制 + 2 路推流 + NDI 发送）下进程 CPU 合计约 0.6 个核（8 小时均值 60.1%），其中 NDI SDK 自己的发送线程约 0.25 核（没有接收方也压两路）。**用户 2026-10-03 定口径：S3 的 CPU 判定不含 NDI SDK 线程**（测试标准 §3 / §4 S3，阈值 60% 不动），按线程快照扣掉 `ndis:*` 后 9-28 那次是 35.0%、达目标；SDK 线程我们不管、不重写 | 开着 NDI 发送时 | 不需要 NDI 时关掉该输出 | reports/issues/W4A-w2-stream-ndi-send-cpu-share.md；W4A-g5-cpu-multicore-distribution.md | 多核探查项仍到检查点安排；不再是发布判定的变量 |
 | S2 | 推流凭据外泄两处（W5-D 之后地址里的 user:pass@ 真的生效了，所以是密码）：②`GET /api/v1/state` 与 WebSocket 全量状态原样带 `streamKey` 与 `url`；③密钥写在地址路径里（`rtmp://h/app/密钥`，密钥栏留空）时原样进诊断包。①底栏推流按钮 / ▴ 菜单的悬停提示 **W5-F 2026-10-03 已修**（只写名字和打过码的地址，`StreamURLRedaction.redact(url:)`；G7 合入） | 用 userinfo / 路径密钥写法的推流；API 开在局域网且没设 token 时同网段任何人 | 密钥填密钥栏；API 只开本机 + token | reports/issues/W5D-w2-control-api-state-exposes-stream-credentials.md、W5D-w4-release-diagnostics-stream-key-in-url-path.md | ② 控制会话 + 提案（API 形态变）；③ W4-B（ShowRedaction 看同层 streamKey 为空 + 路径末段） |
@@ -119,6 +119,7 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 
 | 原级别 | 现象 | 修在 | 报告 |
 |---|---|---|---|
+| S1 | 视频文件输入**循环播放**时内存每圈涨约 0.5 MB（W4-A 长稳 S2 实测 60.8 MB/h，门槛 ≤ 10）：文件解码线程没有自动释放池 | 解码 / 推帧线程每轮迭代包 `autoreleasepool`（W2-A3）：用例修前 0.465 → 修后 0.017 MB/圈；**2026-10-12 用户终端 8 小时长稳复验通过：S2 2.46 MB/h（RSS 1043 → 1166 MB，文件 + 摄像头 + 8 路合成 + 录制 + NDI + 两路推流）**，这条到此销号 | reports/w2-inputs-3.md；reports/W4-soak-8h.md；reports/G8.md §5 L4 |
 | S2 | ProRes 等重片段循环点每圈空一拍、推帧线程晚醒自旋 | 离尾预开下一圈 reader、音频断供按周期轮询（W2-A4） | reports/w2-inputs-4.md |
 | S2 | 文件输入带音频、高速率（≥ 4 帧/拍）推帧线程饿死 | 队列深度随速率、解码侧丢落后帧、FIFO 三态不阻塞（W2-A4） | reports/w2-inputs-4.md |
 | S2 | 推流开始时握手期间的帧 / 包直接丢、落盘从连上那一拍才开始；长稳那 47 包是音频引擎早起 1 s 被起步对齐裁掉、错在计进 audioDropped | start 起就缓冲、两轨从第一个送出的关键帧同一原点起送（W2-D2） | reports/w2-stream-2.md |
