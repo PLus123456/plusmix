@@ -151,6 +151,24 @@ final class W5OFollowupTests: XCTestCase {
         tallyOff.save(to: defaults, changedFrom: launched)
         XCTAssertEqual(defaults.object(forKey: AppSettings.Keys.tallyEnabled) as? Bool, false)
         XCTAssertNil(defaults.object(forKey: AppSettings.Keys.tallyPort), "--tally-port 的端口不跟着存")
+        // 安全闸（W5-O 安全复核）：带 --api-token 起、在远程控制页改"允许局域网"——页上因为内存里有令牌不提醒；只存地址不存令牌的话，
+        // 下次不带参数起就成了局域网上没令牌的 API。存下来的会是"开着 + 非本机 + 没令牌"时，令牌跟着存
+        let tokenSuite = suite + ".token"
+        let tokenDefaults = try XCTUnwrap(UserDefaults(suiteName: tokenSuite))
+        defer { tokenDefaults.removePersistentDomain(forName: tokenSuite) }
+        let withToken = AppSettings.load(arguments: ["--api-token", "from-command-line"], defaults: tokenDefaults)
+        var unrelated = withToken
+        unrelated.confirmBeforeStop = false
+        unrelated.save(to: tokenDefaults, changedFrom: withToken)
+        XCTAssertNil(tokenDefaults.object(forKey: AppSettings.Keys.apiToken), "改别的项：令牌照旧不存")
+        var widened = withToken
+        widened.apiHost = "0.0.0.0"
+        widened.save(to: tokenDefaults, changedFrom: withToken)
+        XCTAssertEqual(tokenDefaults.string(forKey: AppSettings.Keys.apiListen), "0.0.0.0:8765")
+        XCTAssertEqual(tokenDefaults.string(forKey: AppSettings.Keys.apiToken), "from-command-line", "放开到局域网时令牌一起存，不留没鉴权的口子")
+        let reloaded = AppSettings.load(arguments: [], defaults: tokenDefaults)
+        XCTAssertEqual(reloaded.apiConfiguration?.host, "0.0.0.0")
+        XCTAssertEqual(reloaded.apiConfiguration?.token, "from-command-line", "下次不带参数起：局域网 + 令牌")
         // 整份写回（导入 / 恢复默认后重读、用例还原）照旧写全部
         let all = UserDefaults(suiteName: suite + ".all")!
         defer { all.removePersistentDomain(forName: suite + ".all") }

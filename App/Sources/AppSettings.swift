@@ -241,6 +241,13 @@ struct AppSettings: Equatable, Sendable {
         if changed(\.apiToken) {
             if let apiToken, !apiToken.isEmpty { defaults.set(apiToken, forKey: Keys.apiToken) } else { defaults.removeObject(forKey: Keys.apiToken) }
         }
+        // 存下来的 API 不能比页上看到的更敞：这次放开了（打开 API / 换成非本机地址）、存下来的会是"开着 + 非本机地址 + 没令牌"，而内存里（页上）有令牌
+        // （--api-token 带进来的：页上因此不提醒"没设令牌"）——令牌一起存。不然下次不带参数起，就是局域网上没鉴权的 API（W5-O 安全复核）。
+        if old != nil, changed(\.apiEnabled) || changed(\.apiHost), let apiToken, !apiToken.isEmpty, defaults.string(forKey: Keys.apiToken)?.isEmpty ?? true {
+            let storedEnabled = defaults.object(forKey: Keys.apiEnabled) == nil || defaults.bool(forKey: Keys.apiEnabled)
+            let storedHost = defaults.string(forKey: Keys.apiListen).flatMap { APIServerConfiguration.parseListen($0) }?.host ?? "127.0.0.1"
+            if storedEnabled, !ListenScope.isLoopback(storedHost) { defaults.set(apiToken, forKey: Keys.apiToken) }
+        }
         if changed(\.compatLayerEnabled) { defaults.set(compatLayerEnabled, forKey: Keys.compatLayerEnabled) }
         if changed(\.compatLayerPort) { defaults.set(compatLayerPort, forKey: Keys.compatLayerPort) }
         if changed(\.overlaysInPreview) { defaults.set(overlaysInPreview, forKey: Keys.overlaysInPreview) }
