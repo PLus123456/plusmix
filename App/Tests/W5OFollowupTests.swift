@@ -580,6 +580,13 @@ final class W5OFollowupTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(cell.cutButton.frame.width + 0.5, cell.cutButton.intrinsicContentSize.width, "\(size)：Cut 也放得下")
             cell.removeFromSuperview()
         }
+        // 小档（160）两颗加起来放不下：先截 Transition，Cut 保住全字（按比例硬分会把 Cut 挤成 "…"）
+        let small = InputCellView(config: config)
+        small.setSize(width: ThumbnailSize.small.width, thumbnailHeight: (ThumbnailSize.small.width * 9 / 16).rounded())
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        host.addSubview(small)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThanOrEqual(small.cutButton.frame.width + 0.5, small.cutButton.intrinsicContentSize.width, "小档：Cut 全字")
     }
 
     // MARK: 4. 没选输入的 Stinger 槽从外部执行被拒的提示（提案 029；拒收本身在 P5-3）
@@ -646,4 +653,5 @@ final class W5OFollowupTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { session.state.audio.monitorSource == .master })
         XCTAssertEqual(session.control.bus.counters.rejected, 0, "headphones 不再被拒（P5-3）")
     }
+
 }

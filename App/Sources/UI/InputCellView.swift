@@ -205,15 +205,16 @@ final class InputCellView: NSView {
             secondRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             secondRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight),
             secondRow.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.rowInset),
-            // 第一行：× 与三颗图标窄，转场 / Cut 按标题实际宽度分剩下的（W5-O：原来等宽，英文 "Transition" 比 "Cut" 宽一倍多，
-            // 中档格子里截成 "Transiti…"）；第二行：1–4 与 ⚙ 窄，静音吃剩下的
+            // 第一行：× 与三颗图标窄，转场 / Cut 按标题实际宽度分剩下的（transitionCutRatio）；第二行：1–4 与 ⚙ 窄，静音吃剩下的
             removeButton.widthAnchor.constraint(equalToConstant: 22),
-            transitionButton.widthAnchor.constraint(equalTo: cutButton.widthAnchor, multiplier: Self.titleWidthRatio(transitionButton, cutButton)),
+            transitionCutRatio,
             restartButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             playButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             loopButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             gearButton.widthAnchor.constraint(equalToConstant: 22),
         ] + overlayButtons.map { $0.widthAnchor.constraint(equalToConstant: 20) })
+        // 两颗都放不下时先截"转场"（英文小档）：Cut 字短，保住它
+        transitionButton.setContentCompressionResistancePriority(.defaultHigh - 10, for: .horizontal)
         let leading = nameLabel.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 6)
         leading.isActive = true
         nameLabelLeading = leading
@@ -239,6 +240,14 @@ final class InputCellView: NSView {
     private static func titleWidthRatio(_ a: NSButton, _ b: NSButton) -> CGFloat {
         max(a.intrinsicContentSize.width, 1) / max(b.intrinsicContentSize.width, 1)
     }
+
+    /// 转场 / Cut 按标题实际宽度分剩下的宽（W5-O：原来等宽，英文 "Transition" 比 "Cut" 宽一倍多，中档格子里截成 "Transiti…"）。
+    /// 优先级低于两颗按钮的抗压缩：放得下时按比例多给，放不下时（英文小档）先截转场、Cut 保住全字。
+    private lazy var transitionCutRatio: NSLayoutConstraint = {
+        let c = transitionButton.widthAnchor.constraint(equalTo: cutButton.widthAnchor, multiplier: Self.titleWidthRatio(transitionButton, cutButton))
+        c.priority = .defaultHigh - 50
+        return c
+    }()
 
     private static func iconButton(_ symbol: String) -> NSButton {
         let b = cellButton("")
