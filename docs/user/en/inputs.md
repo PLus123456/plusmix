@@ -28,7 +28,7 @@ The panel's left column is grouped by purpose; the first line of every page says
 | This build has no NDI® support, this build has no DeckLink support, DeckLink driver not installed | "Read the guide": opens the matching section of this manual |
 
 Access that has never been asked for shows no banner — macOS asks when you add the first one. After granting or installing, the banner updates when you come back to the panel.
-Note: "This build has no NDI® support" and "This build has no DeckLink support" mean **this copy of the app was built without that SDK**; an input added anyway stays in error until you use an app built with the SDK. "DeckLink driver not installed" really does recover once the driver is installed and the card connected.
+Note: "This build has no NDI® support" and "This build has no DeckLink support" mean **this copy of the app was built without that SDK**; an input added anyway stays in error until you use an app built with the SDK (for these two, the note next to Add, "It shows an error until that is installed, then recovers on its own", doesn't hold). "DeckLink driver not installed" really does recover once the driver is installed and the card connected.
 
 ## Input states
 

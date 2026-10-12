@@ -103,7 +103,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 - **转场进行中**（`transition.isActive`，T-bar 推到一半也算）`setPreview` / `setProgram` 被忽略（`applied = false`，PVW / PGM 不变）；`cut` 立即完成正在进行的转场。
 - **转场槽**：`useTransitionSlot {slot, start}` 选中槽 n（`start: true` 同一拍开始 auto 转场 = 界面上点"转场 n"、⌥n；`false` = 只给 T-bar / 回车用），转场进行中被忽略；
   `setTransitionSlot` 改槽的整份配置，**转场进行中也收**（进行中的那一次按开始时的参数走完）；`autoTransition` / T-bar 用的是当前那组 = 当前槽（`transition.currentSlot`；对不上任何槽时快照里没有这个键）。
-  老命令 `fade` / `setTransition` / `setTransitionParams` 改的是当前那组，之后 `currentSlot` = 仍对得上的槽，对不上就没有这个键。**没选输入的 Stinger**（提案 029）不执行：`useTransitionSlot(start: true)` 对这种槽、`autoTransition` 在要执行的当前那组是这种时都回 400（"转场 n 是 Stinger、还没选输入"，当前那组不对应槽时"当前转场是…"）——不然画面第 1 拍就硬切、状态机却要等满时长才对调；`start: false`、`tbar`、`cut`、`fade` 照常。
+  老命令 `fade` / `setTransition` / `setTransitionParams` 改的是当前那组，之后 `currentSlot` = 仍对得上的槽，对不上就没有这个键。**没选输入的 Stinger**（提案 029）不执行：`useTransitionSlot(start: true)` 对这种槽、`autoTransition` 在要执行的当前那组是这种时都回 400（"转场 n 是 Stinger、还没选输入"，当前那组不对应槽时"当前转场是…"）——不然画面在换底拍那一拍（出厂 0 = 第 1 拍）就硬切、状态机却要等满时长才对调；`start: false`、`tbar`、`cut`、`fade` 照常。
 - **文件播放**：`setPlayback {input, paused}` 暂停 / 继续（画面停在那一帧，仍每拍出帧）；`seekPlayback {input, seconds}` 定位（暂停中定位就停在那一帧）；
   `settings.playback.restartOnProgram` 开着的文件输入在被切上 PGM 的那一拍从头播（首帧晚几拍）。只对文件输入有意义。
 - **`setBusEffects`（总线效果链）已作用到声音**：
@@ -117,7 +117,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 - **`compressor`**（自写压缩器，总线与每路都能装、与 `dynamicsProcessor` 二选一占同一格）：`thresholdDb`（−60…0）、`ratio`（1…20，n:1）、`kneeDb`（0…24，0 = 硬拐点）、`attackSeconds`（0.0001…0.2）、`releaseSeconds`（0.01…3）、`makeupGainDb`（0…24）；
   不用前瞻、按设计 0 延迟（装格 / 改参数时实测，量到的进对齐）；起音 / 释放是线性域峰值包络的一阶时间常数（不是 dB 域增益走到 63% 的时间；两者差多少看信号超过阈值多少，超 20 dB 时后者约为前者的一半）。App 的压缩页两种都能选（新开默认 `compressor`）。
 - **监听同步**：见上面总线那一条；录制文件从这条延后的输出时间线的 0 起（开头没有黑帧）。
-- **`setMonitorSource {bus}`**：耳机出口放哪条总线——`0` Master（默认）/ `1` Bus A / `2` Bus B / `3` 耳机总线自己（提案 026 起允许，只听各路"送耳机"的那些）；调音台里有独听时耳机出口总是放独听的路。快照里是 `audio.monitorSource`。
+- **`setMonitorSource {bus}`**：耳机出口放哪条总线——`0` Master（默认）/ `1` Bus A / `2` Bus B / `3` 耳机总线自己（提案 026 追加、P5-3 起允许，只听各路"送耳机"的那些；之前的版本回 400）；调音台里有独听时耳机出口总是放独听的路。快照里是 `audio.monitorSource`。
 - **起不来的录制 / 推流路**：`stats.encoder[]` 里那一项报 `failed`（不是 `idle`），原因在那一项的 `last_error`（App 的界面提示与日志里也有）。
 
 ## 7. 版本

@@ -115,3 +115,12 @@
 - **Stream Deck 设置面板文案没跟上**：`ui/auto.html:11` 仍写"按 Switcher 里已选的转场（Auto）"、`manifest.json` 的 Auto 提示"按已选转场开始"（现在 = 执行当前转场槽）；
   `ui/slot.html` 的标题与"Switcher 地址"用的是代号 Switcher，不是产品名 PlusMix（`Tools/streamdeck-plugin/` 归 112 的目录）。
 - **英文 T-bar 行截尾**见第 6 条；**推流状态窗 / 统计窗不转发按键**见第 2 条。
+
+## 14. SDK 没编进来的两种横幅旁，"添加"下面的小字仍写"装好后自动恢复"
+
+- 现象：添加输入面板里"这一版没带 NDI® 支持"（112 改字之后）/ "这一版没带 DeckLink 支持"两种横幅，"添加"旁仍用 `addInput.addNote.install`
+  ="加上后先显示错误，装好后自动恢复" / "It shows an error until that is installed, then recovers on its own"——这两种是编译期开关，装什么都不会好，与横幅正文（"请换用带 NDI® 支持的版本"）矛盾。
+  只有"DeckLink 驱动没装"这一种该用"装好后自动恢复"。
+- 代码：`App/Sources/UI/AddInputSheet.swift`（112 分支 d38cbf5 的 :503 附近按横幅类型选小字）、两份 strings 的 `addInput.addNote.*`。
+- 建议：SDK 没编进来的两种换一句"加上后一直显示错误（这一版不支持）"或不给"添加"小字。
+- 手册：输入 / inputs"横幅"下面那句注明了这两种时小字不成立。
