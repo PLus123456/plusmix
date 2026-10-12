@@ -233,9 +233,10 @@ struct AppSettings: Equatable, Sendable {
         if changed(\.audioDevice) { defaults.set(audioDevice.spec, forKey: Keys.audioDevice) }
         if changed(\.apiEnabled) { defaults.set(apiEnabled, forKey: Keys.apiEnabled) }
         if changed(\.apiHost) || changed(\.apiPort) {
-            let stored = old == nil ? nil : defaults.string(forKey: Keys.apiListen).flatMap { APIServerConfiguration.parseListen($0) }
-            let host = changed(\.apiHost) ? apiHost : stored?.host ?? apiHost
-            let port = changed(\.apiPort) ? apiPort : stored?.port ?? apiPort
+            // 没变的那一半按本机存着的；本机没存过 = 默认值（不是内存里的：那可能是 --api-listen 带进来的）
+            let stored = defaults.string(forKey: Keys.apiListen).flatMap { APIServerConfiguration.parseListen($0) } ?? (AppSettings().apiHost, AppSettings().apiPort)
+            let host = changed(\.apiHost) ? apiHost : stored.host
+            let port = changed(\.apiPort) ? apiPort : stored.port
             defaults.set("\(host):\(port)", forKey: Keys.apiListen)
         }
         if changed(\.apiToken) {

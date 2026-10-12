@@ -152,6 +152,16 @@ final class W5OFollowupTests: XCTestCase {
         port.apiPort = 9_000
         port.save(to: defaults, changedFrom: lan)
         XCTAssertEqual(defaults.string(forKey: AppSettings.Keys.apiListen), "0.0.0.0:9000", "改了端口就存端口")
+        // 本机从没存过监听地址（键不在 = 默认 127.0.0.1:8765）：带 --api-listen 0.0.0.0:9000 起、只改端口 → 存的 host 是默认的本机，不是启动参数的局域网
+        let freshSuite = suite + ".fresh"
+        let fresh = try XCTUnwrap(UserDefaults(suiteName: freshSuite))
+        fresh.removePersistentDomain(forName: freshSuite)
+        defer { fresh.removePersistentDomain(forName: freshSuite) }
+        let lanArgs = AppSettings.load(arguments: ["--api-listen", "0.0.0.0:9000"], defaults: fresh)
+        var newPort = lanArgs
+        newPort.apiPort = 9_100
+        newPort.save(to: fresh, changedFrom: lanArgs)
+        XCTAssertEqual(fresh.string(forKey: AppSettings.Keys.apiListen), "127.0.0.1:9100", "没存过 = 默认本机；--api-listen 的局域网那一半不存")
         var tallyOff = launched
         tallyOff.tallyEnabled = false
         tallyOff.save(to: defaults, changedFrom: launched)
