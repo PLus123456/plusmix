@@ -194,7 +194,7 @@ public enum CommandCatalog {
         case .busGain: return [bus, dB]
         case .busMute: return [bus, on]
         case .setMonitorMode: return [CommandField(name: "mode", type: .choice(["afl", "pfl"]))]
-        case .setMonitorSource: return [bus]   // 026：四选一里的 headphones（3）会被拒，面板上该灰掉
+        case .setMonitorSource: return [bus]   // 026：四条都能选，3 = headphones = 听耳机总线自己（P5-3）
         case .setBusEffects: return [bus, CommandField(name: "effects", type: .json("[EffectSlot]"))]
         case .setInputAudio:
             return [input, CommandField(name: "solo", type: .onOff, optional: true), CommandField(name: "afv", type: .onOff, optional: true),
@@ -271,8 +271,8 @@ public enum CommandCatalog {
             CommandDoc(kind: .setAFV, group: "音频", summary: "音频跟随视频开 / 关。", parameters: [("on", "开 / 关")], example: .setAFV(on: true)),
             CommandDoc(kind: .setMonitorMode, group: "音频", summary: "耳机监听方式：AFL（推子后）/ PFL（推子前）。",
                        parameters: [("mode", "afl / pfl")], example: .setMonitorMode(mode: .pfl)),
-            CommandDoc(kind: .setMonitorSource, group: "音频", summary: "耳机 / 监听总线上听哪条总线（master / busA / busB）；headphones 自己无效被拒；独听仍优先；与现状相同的值 applied = false。",
-                       parameters: [("bus", "0 = master, 1 = busA, 2 = busB（3 = headphones 无效）")], example: .setMonitorSource(bus: .busA)),
+            CommandDoc(kind: .setMonitorSource, group: "音频", summary: "耳机 / 监听总线上听哪条总线（master / busA / busB / headphones；headphones = 听耳机总线自己，只听每路 routing.headphones 送出的那些）；独听仍优先；与现状相同的值 applied = false。",
+                       parameters: [("bus", "0 = master, 1 = busA, 2 = busB, 3 = headphones（耳机总线自己）")], example: .setMonitorSource(bus: .busA)),
             CommandDoc(kind: .setBusEffects, group: "音频", summary: "整体替换一条总线的效果链；链顺序 = 处理顺序，enabled = false 的格旁路。",
                        parameters: [("bus", "0 = master, 1 = busA, 2 = busB, 3 = headphones"),
                                     ("effects", "[{id, enabled, params}]：id 与参数键见 CONTRACTS.md §2.4")],

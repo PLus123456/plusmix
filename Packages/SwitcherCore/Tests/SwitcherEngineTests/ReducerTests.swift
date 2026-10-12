@@ -455,7 +455,7 @@ final class ReducerTests: XCTestCase {
             Row("setMonitorMode", .setMonitorMode(mode: .pfl)) { $0.audio.monitorMode = .pfl },
             // 提案 026（P5）：耳机听哪条总线
             Row("setMonitorSource", .setMonitorSource(bus: .busB)) { $0.audio.monitorSource = .busB },
-            Row("setMonitorSource headphones 拒绝（自己听自己）", .setMonitorSource(bus: .headphones)) { _ in },
+            Row("setMonitorSource headphones = 听耳机总线自己（P5-3 起合法）", .setMonitorSource(bus: .headphones)) { $0.audio.monitorSource = .headphones },
             Row("setMonitorSource 相同值原样返回", .setMonitorSource(bus: .master)) { _ in },
             Row("setBusEffects", .setBusEffects(bus: .busA, effects: [EffectSlot(id: "peakLimiter")])) {
                 $0.audio.buses[Bus.busA.rawValue].effects = [EffectSlot(id: "peakLimiter")] },
@@ -725,29 +725,32 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(loaded.inputs[1].settings.effects, [], "搬走的效果格清掉")
     }
 
-    // MARK: 提案 026（P5）：耳机听哪条总线
+    // MARK: 提案 026（P5；headphones 用户 2026-10-12 允许，P5-3）：耳机听哪条总线
 
-    /// `setMonitorSource`：master / busA / busB 生效、只动 `audio.monitorSource`；headphones 自己无效、原样返回（回执 applied = false）；相同值原样返回。
-    /// 独听（monitorMode + solo）与监听点（monitorPoint）不受它影响。
-    func test026_setMonitorSource_rejectsHeadphones_andSameValueUnchanged() {
+    /// `setMonitorSource`：四条总线都生效、只动 `audio.monitorSource`——headphones = 听耳机总线自己（只听每路 routing.headphones 送出的那些；P5 时拒收）；
+    /// 相同值原样返回（回执 applied = false）。独听（monitorMode + solo）与监听点（monitorPoint）不受它影响。
+    func test026_setMonitorSource_acceptsAllFourBuses_andSameValueUnchanged() {
         let s = Self.baseState()
         XCTAssertEqual(s.audio.monitorSource, .master, "新状态默认听 Master")
-        for bus in [Bus.busA, .busB, .master] {
+        for bus in [Bus.busA, .busB, .headphones] {
             let after = reducer.reduce(s, .setMonitorSource(bus: bus), at: Tick(1))
             var expected = s
             expected.audio.monitorSource = bus
             XCTAssertEqual(after, expected, "\(bus)")
         }
-        XCTAssertEqual(reducer.reduce(s, .setMonitorSource(bus: .headphones), at: Tick(1)), s, "headphones 拒绝")
+        XCTAssertEqual(reducer.reduce(s, .setMonitorSource(bus: .master), at: Tick(1)), s, "相同值原样返回")
         var onB = s
         onB.audio.monitorSource = .busB
-        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .headphones), at: Tick(2)), onB, "已经在听 busB 时发 headphones 也不改")
-        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .busB), at: Tick(3)), onB, "相同值原样返回")
+        var onHeadphones = s
+        onHeadphones.audio.monitorSource = .headphones
+        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .headphones), at: Tick(2)), onHeadphones, "从 busB 换到耳机总线自己")
+        XCTAssertEqual(reducer.reduce(onHeadphones, .setMonitorSource(bus: .headphones), at: Tick(3)), onHeadphones, "相同值原样返回")
+        XCTAssertEqual(reducer.reduce(onHeadphones, .setMonitorSource(bus: .master), at: Tick(3)), s, "回到 Master")
         // 与监听方式 / 监听点互不影响
-        let pfl = reducer.reduce(onB, .setMonitorMode(mode: .pfl), at: Tick(4))
-        XCTAssertEqual(pfl.audio.monitorSource, .busB)
+        let pfl = reducer.reduce(onHeadphones, .setMonitorMode(mode: .pfl), at: Tick(4))
+        XCTAssertEqual(pfl.audio.monitorSource, .headphones)
         XCTAssertEqual(pfl.audio.monitorMode, .pfl)
-        XCTAssertEqual(pfl.audio.monitorPoint, onB.audio.monitorPoint)
+        XCTAssertEqual(pfl.audio.monitorPoint, onHeadphones.audio.monitorPoint)
     }
 
     // MARK: 提案 020（P5-2）：转场槽 + FTB 时长

@@ -445,9 +445,9 @@ public struct AudioState: Hashable, Codable, Sendable {
     public var alignmentFrames: Int
     /// 耳机 / 监听总线取对齐延迟线之前（低延迟监听，默认）还是之后（与节目画面对齐）。提案 007；同上，没有对应命令。
     public var monitorPoint: MonitorPoint
-    /// 耳机 / 监听总线上听的是哪条总线（提案 026，用户 2026-10-10 批）：master（默认，老文件缺键也是）/ busA / busB；走 `setMonitorSource`。
-    /// `headphones` 自己无效：命令在校验器 / reducer 被拒，文件 / API 全量状态里出现的按 master 读。独听（PFL / AFL，`monitorMode` + 每路 solo）仍优先于它。
-    /// 设备客户端按它取总线送耳机（引擎侧归 W1-D3 / prompt 102；之前耳机固定听 Master）。
+    /// 耳机 / 监听总线上听的是哪条总线（提案 026，用户 2026-10-10 批）：master（默认，老文件缺键也是）/ busA / busB / headphones；走 `setMonitorSource`。
+    /// `headphones` = 听耳机总线自己：只听每路 `routing.headphones` 送出的那些（W1-D2 的旧行为；用户 2026-10-12 允许，P5-3——P5 时判无效、读成 master）。
+    /// 独听（PFL / AFL，`monitorMode` + 每路 solo）仍优先于它，四个值同一口径。混音器按它选耳机出口（W1-D3，`SW_CMD_MONITOR_SOURCE`）。
     public var monitorSource: Bus
 
     /// 对齐延迟的默认值（帧）。
@@ -465,7 +465,7 @@ public struct AudioState: Hashable, Codable, Sendable {
 
     enum CodingKeys: String, CodingKey { case buses, afv, monitorMode, alignmentFrames, monitorPoint, monitorSource }
 
-    /// 老 Show / 老快照没有 alignmentFrames / monitorPoint（提案 007）/ monitorSource（提案 026）：缺键给默认值；monitorSource = headphones 按 master 读。写出总是写全。
+    /// 老 Show / 老快照没有 alignmentFrames / monitorPoint（提案 007）/ monitorSource（提案 026）：缺键给默认值；monitorSource 四个值按字面读（P5-3 起 headphones 不再读成 master）。写出总是写全。
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         buses = try c.decode([BusState].self, forKey: .buses)
@@ -473,8 +473,7 @@ public struct AudioState: Hashable, Codable, Sendable {
         monitorMode = try c.decode(MonitorMode.self, forKey: .monitorMode)
         alignmentFrames = try c.decodeIfPresent(Int.self, forKey: .alignmentFrames) ?? AudioState.defaultAlignmentFrames
         monitorPoint = try c.decodeIfPresent(MonitorPoint.self, forKey: .monitorPoint) ?? .preDelayLine
-        let source = try c.decodeIfPresent(Bus.self, forKey: .monitorSource) ?? .master
-        monitorSource = source == .headphones ? .master : source
+        monitorSource = try c.decodeIfPresent(Bus.self, forKey: .monitorSource) ?? .master
     }
 
     /// JSON 键名。

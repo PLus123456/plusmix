@@ -482,11 +482,11 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setMonitorSource`
 
-耳机 / 监听总线上听哪条总线（master / busA / busB）；headphones 自己无效被拒；独听仍优先；与现状相同的值 applied = false。
+耳机 / 监听总线上听哪条总线（master / busA / busB / headphones；headphones = 听耳机总线自己，只听每路 routing.headphones 送出的那些）；独听仍优先；与现状相同的值 applied = false。
 
 | 参数 | 含义 |
 |---|---|
-| `bus` | 0 = master, 1 = busA, 2 = busB（3 = headphones 无效） |
+| `bus` | 0 = master, 1 = busA, 2 = busB, 3 = headphones（耳机总线自己） |
 
 ```json
 {

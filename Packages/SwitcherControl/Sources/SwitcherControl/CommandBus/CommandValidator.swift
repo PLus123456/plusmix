@@ -49,11 +49,9 @@ public enum CommandValidator {
             return seconds.isFinite && seconds >= 0 ? nil : "定位秒数必须是 ≥ 0 的有限数：\(seconds)"
         case .busGain(let bus, _), .busMute(let bus, _), .setBusEffects(let bus, _):
             return s.audio.buses.contains { $0.bus == bus } ? nil : "总线 \(bus) 不存在"
-        case .setMonitorMode:
+        case .setMonitorMode, .setMonitorSource:
+            // 提案 026：四条总线都合法（headphones = 听耳机总线自己，P5-3 起；P5 时入口拒）
             return nil
-        case .setMonitorSource(let bus):
-            // 提案 026：耳机总线不能作自己的监听来源；不随拍变，入口就拒（reducer 对它也原样返回）
-            return bus == .headphones ? "监听来源只能是 master / busA / busB，不能是 headphones" : nil
         case .startRecord(let output), .stopRecord(let output):
             return outputReference(output, kind: .record, name: "录制", in: s)
         case .startStream(let output), .stopStream(let output):

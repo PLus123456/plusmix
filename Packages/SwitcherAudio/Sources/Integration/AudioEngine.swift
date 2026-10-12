@@ -613,8 +613,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             if let rec = slots[cfg.number] { rec.effects = cfg.settings.effects; toApply.append(rec) }
         }
         lock.unlock()
-        // 契约：headphones 自己无效（reducer 拒收，文件里出现按 master 读）；监听"耳机总线自己"这一旧行为不再有入口
-        if pushMonitor { mixer.setMonitorSource(ms == .headphones ? .master : ms) }
+        // 提案 026：四个值原样交给混音器，headphones = 耳机总线自己（i0 = 3，用户 2026-10-12 允许，P5-3）；有独听时混音器总是放独听的路
+        if pushMonitor { mixer.setMonitorSource(ms) }
         for rec in toApply { applyEffects(rec) }
     }
 

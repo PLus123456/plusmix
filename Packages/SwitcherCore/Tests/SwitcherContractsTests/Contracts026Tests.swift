@@ -3,7 +3,7 @@ import XCTest
 @testable import SwitcherContracts
 
 /// 提案 026（用户 2026-10-10 批，P5 落契约）：耳机 / 监听总线上听哪条总线进状态——`AudioState.monitorSource: Bus`（缺键 master）+ 命令 `setMonitorSource(bus:)`
-///（Command 34 → 35 个 case）。`headphones` 自己无效：命令由校验器 / reducer 拒，文件 / API 全量状态里出现的按 master 读。引擎侧归 102。
+///（Command 34 → 35 个 case）。用户 2026-10-12 允许 `headphones`（= 听耳机总线自己，P5-3 落地）：四条都合法、文件 / API 全量状态按字面读写（P5 的"读成 master"兜底去掉）。引擎侧归 102。
 final class Contracts026Tests: XCTestCase {
     private var sortedEncoder: JSONEncoder { let e = JSONEncoder(); e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]; return e }
     private static var repoRoot: URL {
@@ -11,7 +11,7 @@ final class Contracts026Tests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
 
-    func test026_audioStateMonitorSource_defaultRoundTripMissingKeyAndHeadphonesReadAsMaster() throws {
+    func test026_audioStateMonitorSource_defaultRoundTripMissingKeyAndHeadphonesRoundTrip() throws {
         XCTAssertEqual(AudioState.jsonKeys, ["buses", "afv", "monitorMode", "alignmentFrames", "monitorPoint", "monitorSource"])
         XCTAssertEqual(AudioState().monitorSource, .master)
         var custom = AudioState()
@@ -27,9 +27,18 @@ final class Contracts026Tests: XCTestCase {
         // 写出总是写全
         let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: try sortedEncoder.encode(back)) as? [String: Any])
         XCTAssertEqual(Set(obj.keys), Set(AudioState.jsonKeys))
-        // headphones（3）自己无效：读进来按 master
+        // headphones（3）= 听耳机总线自己（用户 2026-10-12 允许，P5-3）：按字面读、按字面写，不再读成 master
         let headphones = try JSONDecoder().decode(AudioState.self, from: Data(old.replacingOccurrences(of: #""monitorPoint":"preDelayLine""#, with: #""monitorPoint":"preDelayLine","monitorSource":3"#).utf8))
-        XCTAssertEqual(headphones.monitorSource, .master)
+        XCTAssertEqual(headphones.monitorSource, .headphones)
+        var ownBus = AudioState()
+        ownBus.monitorSource = .headphones
+        let ownBusData = try sortedEncoder.encode(ownBus)
+        XCTAssertTrue(String(decoding: ownBusData, as: UTF8.self).contains(#""monitorSource":3"#))
+        XCTAssertEqual(try JSONDecoder().decode(AudioState.self, from: ownBusData), ownBus)
+        var ownBusState = MixerState()
+        ownBusState.audio.monitorSource = .headphones
+        let ownBusShow = Show(name: "监听耳机总线", state: ownBusState)
+        XCTAssertEqual(try Show.load(from: try ownBusShow.save()).audio.monitorSource, .headphones, "节目文件里也按字面往返")
         // 认不出的值（不是 0–3）照 Bus 的解码规则报错，与别处一致
         XCTAssertThrowsError(try JSONDecoder().decode(AudioState.self, from: Data(old.replacingOccurrences(of: #""monitorPoint":"preDelayLine""#, with: #""monitorPoint":"preDelayLine","monitorSource":9"#).utf8)))
         // 老场景节目照读
@@ -48,7 +57,7 @@ final class Contracts026Tests: XCTestCase {
         XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"setMonitorSource":{"bus":1}}"#)
         XCTAssertEqual(try JSONDecoder().decode(Command.self, from: data), c)
         XCTAssertEqual(try JSONDecoder().decode(Command.self, from: Data(#"{"setMonitorSource":{"bus":0}}"#.utf8)), .setMonitorSource(bus: .master))
-        // headphones 在 wire 上能表达（校验器 / reducer 拒），不是解码错误
+        // headphones（3）= 听耳机总线自己：P5-3 起合法（P5 时校验器 / reducer 拒），wire 形态不变
         XCTAssertEqual(try JSONDecoder().decode(Command.self, from: Data(#"{"setMonitorSource":{"bus":3}}"#.utf8)), .setMonitorSource(bus: .headphones))
         XCTAssertThrowsError(try JSONDecoder().decode(Command.self, from: Data(#"{"setMonitorSource":{"bus":4}}"#.utf8)))
     }

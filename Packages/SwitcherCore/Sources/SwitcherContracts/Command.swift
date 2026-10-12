@@ -59,8 +59,8 @@ public enum Command: Hashable, Codable, Sendable {
     case setAFV(on: Bool)
     /// 耳机监听方式 PFL / AFL（提案 012）。监听点（延迟线前 / 后）是 `AudioState.monitorPoint`，走 Show，不是这条。
     case setMonitorMode(mode: MonitorMode)
-    /// 耳机 / 监听总线上听哪条总线（提案 026）：master / busA / busB；`headphones` 自己无效，校验器拒（HTTP 400）、reducer 也原样返回。
-    /// 与现状相同的值原样返回（applied = false）。独听仍优先于它。
+    /// 耳机 / 监听总线上听哪条总线（提案 026）：master / busA / busB / headphones（= 听耳机总线自己，只听每路 routing.headphones 送出的那些；
+    /// 用户 2026-10-12 允许，P5-3——P5 时校验器 / reducer 拒）。与现状相同的值原样返回（applied = false）。独听仍优先于它。
     case setMonitorSource(bus: Bus)
     /// 整体替换一条总线的效果链（提案 012）。链顺序 = 处理顺序，`enabled = false` 的格旁路。
     case setBusEffects(bus: Bus, effects: [EffectSlot])

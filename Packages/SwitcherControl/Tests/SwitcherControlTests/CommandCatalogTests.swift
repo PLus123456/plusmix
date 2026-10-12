@@ -66,6 +66,16 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertTrue([CommandKind.useTransitionSlot, .setFTBDuration, .setPlayback, .seekPlayback, .setInputAudio, .setInputColor].allSatisfy { $0.operatorFacing })
     }
 
+    /// P5-3：提案 026 允许 headphones（用户 2026-10-12）——setMonitorSource 的 bus 0–3 四条都能选（3 = 听耳机总线自己），说明里不再写"无效"；命令数不变。
+    func testCatalog_026_monitorSourceAllFourBuses() {
+        XCTAssertEqual(CommandKind.allCases.count, 42, "P5-3 不加命令")
+        let monitor = CommandCatalog.entry(for: .setMonitorSource)
+        XCTAssertEqual(monitor.fields, [CommandField(name: "bus", type: .bus)])
+        let busNote = monitor.parameters.first { $0.name == "bus" }?.note ?? ""
+        XCTAssertTrue(busNote.contains("3 = headphones"), busNote)
+        XCTAssertFalse(busNote.contains("无效") || monitor.summary.contains("无效"), "headphones 合法了：\(monitor.summary) / \(busNote)")
+    }
+
     func testCatalog_generatedMarkdownMatchesCommittedDocsApiMd() throws {
         // docs/api.md 在仓库根：Packages/SwitcherControl/Tests/SwitcherControlTests/ → 上四级
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

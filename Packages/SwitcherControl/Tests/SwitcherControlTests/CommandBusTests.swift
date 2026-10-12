@@ -110,6 +110,7 @@ final class CommandBusTests: XCTestCase {
             .overlay(channel: 4, on: true, input: 2), .setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .fade, durationTicks: 10)),
             .audioGain(input: 1, dB: -6), .mute(input: 2, on: true), .busGain(bus: .master, dB: -3), .busMute(bus: .busA, on: true), .setAFV(on: true),
             .setMonitorSource(bus: .busB),   // 提案 026
+            .setMonitorSource(bus: .headphones),   // 026：听耳机总线自己，用户 2026-10-12 允许（P5-3）；P5 时拒
             // P5-2：提案 020 / 021 / 023
             .setTransitionSlot(slot: 2, config: TransitionSlot(type: .zoom, durationTicks: 20)),
             .setTransitionSlot(slot: 4, config: TransitionSlot(type: .stinger, durationTicks: 60, stinger: StingerParams(input: 3, cutAtTick: 5))),
@@ -131,7 +132,6 @@ final class CommandBusTests: XCTestCase {
             .removeInput(input: 99), .removeOutput(output: 99), .fade(durationTicks: -1),
             .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 9, cutAtTick: 0)),
             .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 0, cutAtTick: 0)),
-            .setMonitorSource(bus: .headphones),   // 提案 026：耳机不能听自己
             // P5-2：提案 020 / 021 / 023
             .setTransitionSlot(slot: 5, config: TransitionSlot(type: .fade, durationTicks: 1)), .setTransitionSlot(slot: 0, config: TransitionSlot(type: .fade, durationTicks: 1)),
             .setTransitionSlot(slot: 1, config: TransitionSlot(type: .stinger, durationTicks: 1, stinger: StingerParams(input: 9, cutAtTick: 0))),
