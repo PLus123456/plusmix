@@ -3,8 +3,11 @@
 // 窗左常驻这一条推子后的电平表（读调音台同一份 50 ms 的 AudioEngineStatus，MixerMeters），左侧分页 常规 / 均衡 / 压缩 / 限幅（只总线）；
 // 噪声门 / 插件等提案 023 与后续方案。均衡 / 压缩 / 限幅每页顶部一个"启用"开关（"用 X"和"启用"合一：关 = 旁路、参数留着）+ 参数 + 复位，改了即时生效。
 // 范围沿用 EffectEditorRanges（界面 ⊆ 引擎钳位，AudioEffectsTests 钉着），EQ 段数上限 3（一个 AUNBandEQ 格最多 16 段）。
-// 压缩页：提案 024 已批 (b)（新 id compressor、自写 C 压缩器，契约归 P5、实现归 102），落地之前按 (c) 的写实文案过渡——
-// 简单模式给"阈值 + 压缩量 + 输出增益"，压缩量就是 AUDynamicsProcessor 的 headroom（"输出不超过阈值 + 压缩量"，不冒充固定比例），起音 / 释放 / 扩展比放"高级"。
+// 压缩页（W5-O，提案 024 (b)；问题单 W1D3-app-monitor-source-and-input-effects-wiring 第 4 条）：顶上选"压缩器（阈值 + 比例）"= 自写 C 压缩器 compressor
+// 或"苹果动态处理器（阈值 + 压缩量）"= dynamicsProcessor，同一格二选一，新开默认是压缩器。压缩器简单模式给阈值 / 比例 / 补偿，拐点 / 起音 / 释放放"高级"，
+// 范围 = 引擎的 EffectParameterRanges["compressor"]；"延迟自测"一行读引擎冲激法量到的延迟（调音台同一份 50 ms 状态，MixerMeters；按设计 0）。
+// 动态处理器照旧"阈值 + 压缩量 + 输出增益"（压缩量就是 AUDynamicsProcessor 的 headroom，不冒充固定比例），起音 / 释放 / 扩展比放"高级"。
+// 限幅页多一个"天花板"（peakLimiter.ceilingDb，−20…0 dBFS：限幅之后同一格内的输出增益，提案 024 顺带 (2)）。
 // 每路的效果格 102 之前还没作用到声音：输入的均衡 / 压缩页照留"效果尚未作用到声音（本版本）"的横幅（AudioEffectsSupport）。
 // 常规页只读格式 + 推子读数（前级增益 / 自动增益先不加，J5 有意保留）。模型只发 setBusEffects / setInputSettings，快照回来再刷新。
 import AppKit
@@ -132,11 +135,26 @@ final class AudioSettingsModel: ObservableObject {
         }
     }
 
-    var compressorEnabled: Bool { editor.dynamics.present && editor.dynamics.enabled }
+    /// 压缩页用的是哪一种（同一格二选一）；还没装时显示新开的默认——自写压缩器。
+    var compressorKind: EffectChainEditor.DynamicsKind { editor.dynamicsKind ?? .compressor }
+    func setCompressorKind(_ kind: EffectChainEditor.DynamicsKind) { edit { $0.setDynamicsKind(kind) } }
+
+    var compressorEnabled: Bool {
+        let e = editor
+        switch e.dynamicsKind {
+        case .compressor?: return e.compressor.enabled
+        case .dynamicsProcessor?: return e.dynamics.enabled
+        case nil: return false
+        }
+    }
+    /// 启用 / 旁路动态格；还没装时启用 = 装一个自写压缩器（W5-O 起的默认，提案 024 (b)）。
     func setCompressorEnabled(_ on: Bool) {
         edit { e in
-            if on { e.dynamics.present = true }
-            e.dynamics.enabled = on
+            if e.dynamicsKind == nil {
+                guard on else { return }
+                e.compressor.present = true
+            }
+            if e.compressor.present { e.compressor.enabled = on } else { e.dynamics.enabled = on }
         }
     }
 
@@ -191,11 +209,33 @@ final class AudioSettingsModel: ObservableObject {
 
     func resetCompressor() {
         edit { e in
-            let (present, enabled) = (e.dynamics.present, e.dynamics.enabled)
-            e.dynamics = EffectChainEditor.Dynamics()
-            e.dynamics.present = present
-            e.dynamics.enabled = enabled
+            if e.compressor.present {
+                let enabled = e.compressor.enabled
+                e.compressor = EffectChainEditor.Compressor()
+                e.compressor.present = true
+                e.compressor.enabled = enabled
+            } else {
+                let (present, enabled) = (e.dynamics.present, e.dynamics.enabled)
+                e.dynamics = EffectChainEditor.Dynamics()
+                e.dynamics.present = present
+                e.dynamics.enabled = enabled
+            }
         }
+    }
+
+    /// 压缩页"延迟自测"一行（只给自写压缩器：动态处理器是 AU，延迟本来就算在这条的效果延迟里）：引擎装上压缩器后用冲激法量的实际延迟，
+    /// 按设计 0 帧；还没量到（刚装、引擎还没换进去）写"还没量到"。不是压缩器时为 nil（不显示这一行）。
+    func compressorLatencyFrames(_ meters: MixerMeters) -> Int? {
+        switch strip {
+        case .bus(let bus): meters.busCompressorLatencyFrames[bus]
+        case .input(let n): meters.inputCompressorLatencyFrames[n]
+        }
+    }
+
+    func compressorLatencyText(_ meters: MixerMeters) -> String? {
+        guard editor.dynamicsKind == .compressor else { return nil }
+        guard let frames = compressorLatencyFrames(meters) else { return L("audioSettings.compressor.latencyPending") }
+        return L("audioSettings.compressor.latency", frames, Double(frames) / 48.0)
     }
 
     func resetLimiter() {
@@ -353,26 +393,54 @@ struct AudioSettingsView: View {
     @ViewBuilder
     private var compressor: some View {
         banner
-        let d = model.editor.dynamics
         Section(L("effects.dynamics.title")) {
             enableRow(model.compressorEnabled) { model.setCompressorEnabled($0) }
+            Picker(L("audioSettings.compressor.kind"), selection: Binding(get: { model.compressorKind }, set: { model.setCompressorKind($0) })) {
+                ForEach(EffectChainEditor.DynamicsKind.allCases) { kind in Text(L("audioSettings.compressor.kind.\(kind.rawValue)")).tag(kind) }
+            }
             Group {
-                Slider(value: model.binding(\.dynamics.thresholdDb), in: EffectEditorRanges.dynThresholdDb) { Text(L("effects.dynamics.thresholdDb", d.thresholdDb)) }
-                Slider(value: model.binding(\.dynamics.headroomDb), in: EffectEditorRanges.dynHeadroomDb) { Text(L("audioSettings.compressor.amount", d.headroomDb)) }
-                Text(L("audioSettings.compressor.amountHint", d.thresholdDb + d.headroomDb)).font(.caption).foregroundStyle(.secondary)
-                Slider(value: model.binding(\.dynamics.overallGainDb), in: EffectEditorRanges.dynOverallGainDb) { Text(L("audioSettings.compressor.makeup", d.overallGainDb)) }
-                DisclosureGroup(L("audioSettings.advanced")) {
-                    Slider(value: model.binding(\.dynamics.attackSeconds), in: EffectEditorRanges.dynAttackSeconds) { Text(L("effects.dynamics.attackMs", d.attackSeconds * 1000)) }
-                    Slider(value: model.binding(\.dynamics.releaseSeconds), in: EffectEditorRanges.dynReleaseSeconds) { Text(L("effects.dynamics.releaseMs", d.releaseSeconds * 1000)) }
-                    Slider(value: model.binding(\.dynamics.expansionRatio), in: EffectEditorRanges.dynExpansionRatio) { Text(L("effects.dynamics.expansionRatio", d.expansionRatio)) }
+                switch model.compressorKind {
+                case .compressor: simpleCompressor
+                case .dynamicsProcessor: dynamicsProcessor
                 }
             }
             .disabled(!model.compressorEnabled)
+            if let latency = model.compressorLatencyText(meters) {
+                Text(latency).font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
-                Text(L("audioSettings.compressor.note")).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(L("audioSettings.reset")) { model.resetCompressor() }
             }
+        }
+    }
+
+    /// 自写压缩器（提案 024 (b)）简单模式：阈值 / 比例 / 补偿；拐点 / 起音 / 释放放"高级"。
+    @ViewBuilder
+    private var simpleCompressor: some View {
+        let c = model.editor.compressor
+        Slider(value: model.binding(\.compressor.thresholdDb), in: EffectEditorRanges.compThresholdDb) { Text(L("effects.dynamics.thresholdDb", c.thresholdDb)) }
+        Slider(value: model.binding(\.compressor.ratio), in: EffectEditorRanges.compRatio) { Text(L("audioSettings.compressor.ratio", c.ratio)) }
+        Slider(value: model.binding(\.compressor.makeupGainDb), in: EffectEditorRanges.compMakeupGainDb) { Text(L("audioSettings.compressor.makeupGain", c.makeupGainDb)) }
+        DisclosureGroup(L("audioSettings.advanced")) {
+            Slider(value: model.binding(\.compressor.kneeDb), in: EffectEditorRanges.compKneeDb) { Text(L("audioSettings.compressor.knee", c.kneeDb)) }
+            Slider(value: model.binding(\.compressor.attackSeconds), in: EffectEditorRanges.compAttackSeconds) { Text(L("effects.dynamics.attackMs", c.attackSeconds * 1000)) }
+            Slider(value: model.binding(\.compressor.releaseSeconds), in: EffectEditorRanges.compReleaseSeconds) { Text(L("effects.dynamics.releaseMs", c.releaseSeconds * 1000)) }
+        }
+    }
+
+    /// 动态处理器（AUDynamicsProcessor）："阈值 + 压缩量 + 输出增益"，压缩量就是 headroom（不冒充固定比例）；起音 / 释放 / 扩展比放"高级"。
+    @ViewBuilder
+    private var dynamicsProcessor: some View {
+        let d = model.editor.dynamics
+        Slider(value: model.binding(\.dynamics.thresholdDb), in: EffectEditorRanges.dynThresholdDb) { Text(L("effects.dynamics.thresholdDb", d.thresholdDb)) }
+        Slider(value: model.binding(\.dynamics.headroomDb), in: EffectEditorRanges.dynHeadroomDb) { Text(L("audioSettings.compressor.amount", d.headroomDb)) }
+        Text(L("audioSettings.compressor.amountHint", d.thresholdDb + d.headroomDb)).font(.caption).foregroundStyle(.secondary)
+        Slider(value: model.binding(\.dynamics.overallGainDb), in: EffectEditorRanges.dynOverallGainDb) { Text(L("audioSettings.compressor.makeup", d.overallGainDb)) }
+        DisclosureGroup(L("audioSettings.advanced")) {
+            Slider(value: model.binding(\.dynamics.attackSeconds), in: EffectEditorRanges.dynAttackSeconds) { Text(L("effects.dynamics.attackMs", d.attackSeconds * 1000)) }
+            Slider(value: model.binding(\.dynamics.releaseSeconds), in: EffectEditorRanges.dynReleaseSeconds) { Text(L("effects.dynamics.releaseMs", d.releaseSeconds * 1000)) }
+            Slider(value: model.binding(\.dynamics.expansionRatio), in: EffectEditorRanges.dynExpansionRatio) { Text(L("effects.dynamics.expansionRatio", d.expansionRatio)) }
         }
     }
 
@@ -387,6 +455,8 @@ struct AudioSettingsView: View {
                 Text(L("audioSettings.limiter.latencyHint")).font(.caption).foregroundStyle(.secondary)
                 Slider(value: model.binding(\.limiter.decaySeconds), in: EffectEditorRanges.limDecaySeconds) { Text(L("effects.limiter.decayMs", l.decaySeconds * 1000)) }
                 Slider(value: model.binding(\.limiter.preGainDb), in: EffectEditorRanges.limPreGainDb) { Text(L("effects.limiter.preGainDb", l.preGainDb)) }
+                Slider(value: model.binding(\.limiter.ceilingDb), in: EffectEditorRanges.limCeilingDb) { Text(L("audioSettings.limiter.ceiling", l.ceilingDb)) }
+                Text(L("audioSettings.limiter.ceilingHint")).font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!model.limiterEnabled)
             HStack {

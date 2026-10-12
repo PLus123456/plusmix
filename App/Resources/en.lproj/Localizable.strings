@@ -371,8 +371,15 @@
 "audioSettings.advanced" = "Advanced";
 "audioSettings.compressor.amount" = "Amount %.1f dB";
 "audioSettings.compressor.amountHint" = "Anything above the threshold is held down: the output stays at or below %.1f dBFS (threshold + amount). This compressor has no fixed ratio.";
+"audioSettings.compressor.kind" = "Type";
+"audioSettings.compressor.kind.compressor" = "Compressor (threshold + ratio)";
+"audioSettings.compressor.kind.dynamicsProcessor" = "Dynamics processor (threshold + amount)";
+"audioSettings.compressor.knee" = "Knee %.1f dB";
+"audioSettings.compressor.latency" = "Latency self-test: %d frames (%.2f ms) — the compressor has no look-ahead, 0 by design";
+"audioSettings.compressor.latencyPending" = "Latency self-test: not measured yet (the engine measures once it is installed)";
 "audioSettings.compressor.makeup" = "Output gain %.1f dB";
-"audioSettings.compressor.note" = "A threshold + ratio compressor comes in a later version (proposal 024).";
+"audioSettings.compressor.makeupGain" = "Makeup %.1f dB";
+"audioSettings.compressor.ratio" = "Ratio %.1f:1";
 "audioSettings.enabled" = "Enabled";
 "audioSettings.eq.band" = "Band %d";
 "audioSettings.general.fader" = "Fader";
@@ -382,6 +389,8 @@
 "audioSettings.general.mute" = "Mute";
 "audioSettings.general.openInputSettings" = "Input Settings… (gain / pan / delay / sends)";
 "audioSettings.inputTitle" = "Input %d";
+"audioSettings.limiter.ceiling" = "Ceiling %.1f dBFS";
+"audioSettings.limiter.ceilingHint" = "The limited output peaks here at most (0 = 0 dBFS).";
 "audioSettings.limiter.latencyHint" = "Attack is the look-ahead: this bus runs this many milliseconds late. Recording / streaming / NDI® stay in sync; headphone / speaker monitoring is late by this much.";
 "audioSettings.meterPost" = "Post";
 "audioSettings.page.compressor" = "Compressor";

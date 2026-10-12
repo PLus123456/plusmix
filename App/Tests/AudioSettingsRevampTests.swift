@@ -31,9 +31,11 @@ final class AudioSettingsRevampTests: XCTestCase {
         m.resetEQ()
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.compactMap { AudioEffectParams.number($0, "gainDb") } == [0, 0] })
         XCTAssertFalse(m.eqEnabled, "复位不动开关")
-        // 压缩：启用 → 一格；关 → enabled false、参数留着；复位 → 默认参数
+        // 压缩：启用 → 一格（W5-O 起新开默认是自写压缩器 compressor；这里换成动态处理器走它那一套）；关 → enabled false、参数留着；复位 → 默认参数
         m.page = .compressor
         m.setCompressorEnabled(true)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.contains { $0.id == AudioEffectParams.compressorID } }, "新开默认 = 压缩器")
+        m.setCompressorKind(.dynamicsProcessor)
         m.binding(\.dynamics.thresholdDb).wrappedValue = -30
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.first { $0.id == AudioEffectParams.dynamicsProcessorID }.flatMap { AudioEffectParams.number($0, "thresholdDb") } == -30 })
         m.setCompressorEnabled(false)
@@ -53,7 +55,7 @@ final class AudioSettingsRevampTests: XCTestCase {
         XCTAssertEqual(wi.model.pages, [.general, .eq, .compressor])
         XCTAssertNil(wi.model.effectsBanner, "每路效果已接（102）：不挂横幅")
         wi.model.setCompressorEnabled(true)
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.effects.contains { $0.id == AudioEffectParams.dynamicsProcessorID } == true })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.effects.contains { $0.id == AudioEffectParams.compressorID } == true })
         XCTAssertEqual(session.state.input(1)?.settings.audio.gainDb, 0, "只换效果链，别的音频设置不动")
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }

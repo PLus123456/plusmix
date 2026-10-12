@@ -1,6 +1,7 @@
 // W5-O（prompt 112）App 续做的用例：用例名带交付项编号（testW5O<n>_…）。各条的来由见 reports/w5-app-followups.md §1。
 import AppKit
 import XCTest
+import SwitcherAudio
 import SwitcherContracts
 import SwitcherEngine
 import SwitcherExternal
@@ -261,5 +262,127 @@ final class W5OFollowupTests: XCTestCase {
         XCTAssertNil(strip.cells[2]?.categoryColor)
         XCTAssertEqual(strip.categoryBar.button(for: .red).title, "机位")
         XCTAssertFalse(AppTest.controller.isDocumentEdited, "打开时搬迁不算改动")
+    }
+
+    // MARK: 6. 压缩器简单模式界面（提案 024 (b)；问题单 W1D3-app-monitor-source-and-input-effects-wiring 第 4 条）
+
+    /// 音频设置窗压缩页：新开默认装自写压缩器 compressor（阈值 / 比例 / 拐点 / 起音 / 释放 / 补偿，范围 = 引擎的 EffectParameterRanges["compressor"]），
+    /// 与 dynamicsProcessor 二选一占同一格（链里不会两个都在）；"延迟自测"一行读引擎冲激法量到的 compressorMeasuredLatencyFrames（调音台同一份 50 ms 状态）；
+    /// 限幅页"天花板"写 peakLimiter.ceilingDb（−20…0）。总线与每路都能装。
+    func testW5O6_compressorPageSimpleModeAndLimiterCeiling() throws {
+        let session = try AppTest.freshSession()
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 1, audio: true)))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 10), .live)
+        let panels = AppTest.controller.panels
+        defer { panels.closeAll() }
+        let meters = AppTest.controller.windowController.mixerPanel.meters
+        let w = try XCTUnwrap(panels.showAudioSettings(.bus(.master), page: .compressor))
+        let m = w.model
+        func master() -> [EffectSlot] { session.state.audio.buses[0].effects }
+        func ids() -> [String] { master().map(\.id) }
+
+        // 范围就是引擎的（不再是界面自己收窄的一段）
+        let engine = try XCTUnwrap(EffectParameterRanges.table["compressor"])
+        XCTAssertEqual(EffectEditorRanges.compThresholdDb, engine["thresholdDb"])
+        XCTAssertEqual(EffectEditorRanges.compRatio, engine["ratio"])
+        XCTAssertEqual(EffectEditorRanges.compKneeDb, engine["kneeDb"])
+        XCTAssertEqual(EffectEditorRanges.compAttackSeconds, engine["attackSeconds"])
+        XCTAssertEqual(EffectEditorRanges.compReleaseSeconds, engine["releaseSeconds"])
+        XCTAssertEqual(EffectEditorRanges.compMakeupGainDb, engine["makeupGainDb"])
+        XCTAssertEqual(EffectEditorRanges.limCeilingDb, EffectParameterRanges.range(effect: "peakLimiter", key: "ceilingDb"))
+        XCTAssertEqual(EffectEditorRanges.limCeilingDb, -20...0)
+
+        // 启用：默认装 compressor（契约默认参数）
+        XCTAssertEqual(m.compressorKind, .compressor, "没装时显示默认的压缩器")
+        m.setCompressorEnabled(true)
+        XCTAssertTrue(AppTest.waitUntil(3) { ids() == [AudioEffectParams.compressorID] }, "\(ids())")
+        let slot = try XCTUnwrap(master().first)
+        XCTAssertTrue(slot.enabled)
+        XCTAssertEqual(AudioEffectParams.number(slot, "thresholdDb"), -20)
+        XCTAssertEqual(AudioEffectParams.number(slot, "ratio"), 4)
+        XCTAssertEqual(AudioEffectParams.number(slot, "kneeDb"), 6)
+        XCTAssertEqual(AudioEffectParams.number(slot, "attackSeconds"), 0.005)
+        XCTAssertEqual(AudioEffectParams.number(slot, "releaseSeconds"), 0.1)
+        XCTAssertEqual(AudioEffectParams.number(slot, "makeupGainDb"), 0)
+        m.binding(\.compressor.ratio).wrappedValue = 8
+        m.binding(\.compressor.thresholdDb).wrappedValue = -30
+        m.binding(\.compressor.makeupGainDb).wrappedValue = 3
+        XCTAssertTrue(AppTest.waitUntil(3) {
+            let s = master().first
+            return s.flatMap { AudioEffectParams.number($0, "ratio") } == 8 && s.flatMap { AudioEffectParams.number($0, "thresholdDb") } == -30
+                && s.flatMap { AudioEffectParams.number($0, "makeupGainDb") } == 3
+        }, "\(master())")
+        // 延迟自测：引擎装上压缩器后冲激法量一次（按设计 0 帧）
+        XCTAssertTrue(AppTest.waitUntil(5) { meters.busCompressorLatencyFrames[.master] != nil }, "引擎状态里应有实测延迟")
+        XCTAssertEqual(meters.busCompressorLatencyFrames[.master], 0, "前瞻 0：按设计 0 帧")
+        XCTAssertEqual(m.compressorLatencyText(meters), L("audioSettings.compressor.latency", 0, 0.0))
+        // 二选一：换成苹果动态处理器 → 链里只剩 dynamicsProcessor（开关带过去）；再换回来
+        m.setCompressorKind(.dynamicsProcessor)
+        XCTAssertTrue(AppTest.waitUntil(3) { ids() == [AudioEffectParams.dynamicsProcessorID] }, "\(ids())")
+        XCTAssertTrue(m.compressorEnabled)
+        XCTAssertNil(m.compressorLatencyText(meters), "动态处理器是 AU、延迟进总线延迟：这一行只给自写压缩器")
+        m.setCompressorKind(.compressor)
+        XCTAssertTrue(AppTest.waitUntil(3) { ids() == [AudioEffectParams.compressorID] }, "\(ids())")
+        // 复位：参数回默认，开关不动
+        m.binding(\.compressor.kneeDb).wrappedValue = 12
+        m.resetCompressor()
+        XCTAssertTrue(AppTest.waitUntil(3) { master().first.flatMap { AudioEffectParams.number($0, "kneeDb") } == 6 })
+        XCTAssertTrue(m.compressorEnabled, "复位不动开关")
+
+        // 限幅页：天花板写 ceilingDb
+        m.page = .limiter
+        m.setLimiterEnabled(true)
+        m.binding(\.limiter.ceilingDb).wrappedValue = -1.5
+        XCTAssertTrue(AppTest.waitUntil(3) {
+            master().first { $0.id == AudioEffectParams.peakLimiterID }.flatMap { AudioEffectParams.number($0, "ceilingDb") } == -1.5
+        }, "\(master())")
+        XCTAssertEqual(ids(), [AudioEffectParams.compressorID, AudioEffectParams.peakLimiterID], "顺序 = 动态格 → 限幅格")
+
+        // 每路也能装（每路两格：EQ → 动态，W1-D3）
+        let wi = try XCTUnwrap(panels.showAudioSettings(.input(1), page: .compressor))
+        wi.model.setCompressorEnabled(true)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.effects.map(\.id) == [AudioEffectParams.compressorID] })
+        XCTAssertTrue(AppTest.waitUntil(5) { meters.inputCompressorLatencyFrames[1] != nil }, "每路的实测延迟也读得到")
+        XCTAssertEqual(wi.model.compressorLatencyText(meters), L("audioSettings.compressor.latency", 0, 0.0))
+        XCTAssertEqual(session.control.bus.counters.rejected, 0)
+    }
+
+    /// 编辑器值模型：compressor 与 peakLimiter.ceilingDb 往返不丢；链里两个动态格（API 写进来的）时第一个算数、第二个原样留在"其他"（引擎也只装第一个）。
+    func testW5O6_effectChainEditorRoundTripsCompressorAndCeiling() {
+        let comp = AudioEffectParams.compressor(thresholdDb: -24, ratio: 6, kneeDb: 3, attackSeconds: 0.01, releaseSeconds: 0.2, makeupGainDb: 2)
+        XCTAssertEqual(comp.id, "compressor")
+        XCTAssertEqual(Set(comp.params.keys), ["thresholdDb", "ratio", "kneeDb", "attackSeconds", "releaseSeconds", "makeupGainDb"])
+        let lim = AudioEffectParams.peakLimiter(attackSeconds: 0.012, decaySeconds: 0.024, preGainDb: 0, ceilingDb: -3)
+        XCTAssertEqual(AudioEffectParams.number(lim, "ceilingDb"), -3)
+        XCTAssertNil(AudioEffectParams.peakLimiter(attackSeconds: 0.012, decaySeconds: 0.024, preGainDb: 0).params["ceilingDb"], "天花板 0 = 默认，不写键（老链不变）")
+        let eq = AudioEffectParams.parametricEQ(centerHz: 1000, q: 1, gainDb: 3)
+        let editor = EffectChainEditor(slots: [eq, comp, lim])
+        XCTAssertEqual(editor.dynamicsKind, .compressor)
+        XCTAssertEqual(editor.compressor.ratio, 6)
+        XCTAssertEqual(editor.limiter.ceilingDb, -3)
+        XCTAssertEqual(editor.slots, [eq, comp, lim], "往返不丢")
+        // 超范围的读进来钳进引擎范围
+        let wild = EffectChainEditor(slots: [AudioEffectParams.compressor(thresholdDb: -90, ratio: 50, kneeDb: 30, attackSeconds: 0, releaseSeconds: 9, makeupGainDb: -5)])
+        XCTAssertEqual(wild.compressor.thresholdDb, -60)
+        XCTAssertEqual(wild.compressor.ratio, 20)
+        XCTAssertEqual(wild.compressor.kneeDb, 24)
+        XCTAssertEqual(wild.compressor.attackSeconds, 0.0001)
+        XCTAssertEqual(wild.compressor.releaseSeconds, 3)
+        XCTAssertEqual(wild.compressor.makeupGainDb, 0)
+        // 两个动态格：第一个算数，第二个原样留着
+        let dyn = AudioEffectParams.dynamicsProcessor(thresholdDb: -20, headroomDb: 5, expansionRatio: 2, attackSeconds: 0.001, releaseSeconds: 0.05, overallGainDb: 0)
+        let both = EffectChainEditor(slots: [comp, dyn])
+        XCTAssertEqual(both.dynamicsKind, .compressor)
+        XCTAssertEqual(both.others, [dyn])
+        XCTAssertEqual(both.slots, [comp, dyn])
+        // 换种类：同一格二选一，开关带过去
+        var e = EffectChainEditor(slots: [dyn])
+        e.setDynamicsKind(.compressor)
+        XCTAssertEqual(e.slots.map(\.id), ["compressor"])
+        XCTAssertTrue(e.compressor.enabled)
+        var off = EffectChainEditor()
+        off.setDynamicsKind(.dynamicsProcessor)
+        XCTAssertEqual(off.slots.map(\.id), ["dynamicsProcessor"])
+        XCTAssertFalse(off.slots[0].enabled, "没启用时选种类：装一个旁路着的格，开关仍是关")
     }
 }

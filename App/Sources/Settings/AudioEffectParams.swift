@@ -3,8 +3,9 @@
 // 音频会话接线时按这套键读（报告 §4 有说明）：
 //   parametricEQ      { centerHz, q, gainDb }
 //   dynamicsProcessor { thresholdDb, headroomDb, expansionRatio, attackSeconds, releaseSeconds, overallGainDb }
-//   peakLimiter       { attackSeconds, decaySeconds, preGainDb }
-// 一条链 = [EffectSlot]，顺序就是处理顺序（EQ 可多格，压缩 / 限幅各一格）。
+//   peakLimiter       { attackSeconds, decaySeconds, preGainDb, ceilingDb? }（ceilingDb：提案 024 顺带 (2)，0 = 默认、不写键）
+//   compressor        { thresholdDb, ratio, kneeDb, attackSeconds, releaseSeconds, makeupGainDb }（提案 024 (b) 的自写压缩器，与 dynamicsProcessor 二选一占同一格）
+// 一条链 = [EffectSlot]，顺序就是处理顺序（EQ 可多格，动态（压缩器 / 动态处理器二选一）/ 限幅各一格）。
 // W5-C（prompt 88）接线：总线的链装进混音器三格，连续的 EQ 格合成一个 AUNBandEQ（一格最多 16 段）；q 是经典口径
 // （带宽 = 半增益边频之比，BW = 2/ln2 · asinh(1/(2q)) 倍频程，q = √2 → 1 oct）。滑块范围收进引擎送进 AU 之前的钳位范围
 // （SwitcherAudio.EffectParameterRanges = SDK 头文件范围 ∩ macOS 27 ParameterInfo），超范围的老值读进来就钳，界面值 = AU 值。
@@ -15,6 +16,7 @@ enum AudioEffectParams {
     static let parametricEQID = "parametricEQ"
     static let dynamicsProcessorID = "dynamicsProcessor"
     static let peakLimiterID = "peakLimiter"
+    static let compressorID = "compressor"
 
     static func parametricEQ(centerHz: Double, q: Double, gainDb: Double, enabled: Bool = true) -> EffectSlot {
         EffectSlot(id: parametricEQID, enabled: enabled, params: ["centerHz": .number(centerHz), "q": .number(q), "gainDb": .number(gainDb)])
@@ -28,8 +30,20 @@ enum AudioEffectParams {
         ])
     }
 
-    static func peakLimiter(attackSeconds: Double, decaySeconds: Double, preGainDb: Double, enabled: Bool = true) -> EffectSlot {
-        EffectSlot(id: peakLimiterID, enabled: enabled, params: ["attackSeconds": .number(attackSeconds), "decaySeconds": .number(decaySeconds), "preGainDb": .number(preGainDb)])
+    /// ceilingDb = 限幅之后同一格内的输出增益（天花板，−20…0 dBFS）；0 是默认、不写键（老链原样）。
+    static func peakLimiter(attackSeconds: Double, decaySeconds: Double, preGainDb: Double, ceilingDb: Double = 0, enabled: Bool = true) -> EffectSlot {
+        var params: [String: JSONValue] = ["attackSeconds": .number(attackSeconds), "decaySeconds": .number(decaySeconds), "preGainDb": .number(preGainDb)]
+        if ceilingDb != 0 { params["ceilingDb"] = .number(ceilingDb) }
+        return EffectSlot(id: peakLimiterID, enabled: enabled, params: params)
+    }
+
+    /// 自写压缩器（提案 024 (b)，W1-D3 的 C 实现）：阈值 + 比例（n:1）+ 拐点 + 起音 / 释放 + 补偿；前瞻 0，组延迟按设计 0 帧（装格时引擎用冲激法量一次）。
+    static func compressor(thresholdDb: Double, ratio: Double, kneeDb: Double, attackSeconds: Double, releaseSeconds: Double, makeupGainDb: Double,
+                           enabled: Bool = true) -> EffectSlot {
+        EffectSlot(id: compressorID, enabled: enabled, params: [
+            "thresholdDb": .number(thresholdDb), "ratio": .number(ratio), "kneeDb": .number(kneeDb),
+            "attackSeconds": .number(attackSeconds), "releaseSeconds": .number(releaseSeconds), "makeupGainDb": .number(makeupGainDb),
+        ])
     }
 
     /// 读一个数值参数；没有或不是数字给 nil。
@@ -40,6 +54,7 @@ enum AudioEffectParams {
 }
 
 /// 效果编辑器滑块的范围（W5-C）：都在 SwitcherAudio.EffectParameterRanges（引擎的钳位范围）里面，AudioEffectsTests 逐条钉住。
+/// 自写压缩器与限幅天花板（W5-O）不是 AU 参数，范围就是契约 / 算法接受的范围（= 引擎表，CONTRACTS.md §2.4），界面不另收窄。
 /// 比引擎窄的几处是界面取的常用段：EQ 频率到 20 kHz、增益 ±24（AU −96…+24）、q 0.2…10（AU 0.18…28.9）、压缩阈值 −40…0（AU 到 +20）。
 /// 以前对不上 AU 的：阈值 −60（头文件下限 −40）、压缩起音 0.1 ms（27 上报 1 ms）、限幅衰减 60 ms（27 上报 40 ms）、q 0.1（带宽超 5 oct）。
 enum EffectEditorRanges {
@@ -55,6 +70,13 @@ enum EffectEditorRanges {
     static let limAttackSeconds: ClosedRange<Double> = 0.001...0.03
     static let limDecaySeconds: ClosedRange<Double> = 0.001...0.04
     static let limPreGainDb: ClosedRange<Double> = -40...40
+    static let limCeilingDb: ClosedRange<Double> = -20...0
+    static let compThresholdDb: ClosedRange<Double> = -60...0
+    static let compRatio: ClosedRange<Double> = 1...20
+    static let compKneeDb: ClosedRange<Double> = 0...24
+    static let compAttackSeconds: ClosedRange<Double> = 0.0001...0.2
+    static let compReleaseSeconds: ClosedRange<Double> = 0.01...3
+    static let compMakeupGainDb: ClosedRange<Double> = 0...24
 
     /// (契约 id, 参数键, 界面范围) 全表。
     static let all: [(effect: String, key: String, range: ClosedRange<Double>)] = [
@@ -70,13 +92,20 @@ enum EffectEditorRanges {
         (AudioEffectParams.peakLimiterID, "attackSeconds", limAttackSeconds),
         (AudioEffectParams.peakLimiterID, "decaySeconds", limDecaySeconds),
         (AudioEffectParams.peakLimiterID, "preGainDb", limPreGainDb),
+        (AudioEffectParams.peakLimiterID, "ceilingDb", limCeilingDb),
+        (AudioEffectParams.compressorID, "thresholdDb", compThresholdDb),
+        (AudioEffectParams.compressorID, "ratio", compRatio),
+        (AudioEffectParams.compressorID, "kneeDb", compKneeDb),
+        (AudioEffectParams.compressorID, "attackSeconds", compAttackSeconds),
+        (AudioEffectParams.compressorID, "releaseSeconds", compReleaseSeconds),
+        (AudioEffectParams.compressorID, "makeupGainDb", compMakeupGainDb),
     ]
 
     static func clamp(_ v: Double, _ r: ClosedRange<Double>) -> Double { min(max(v, r.lowerBound), r.upperBound) }
 }
 
-/// 效果链编辑器的值模型：把 [EffectSlot] 摊成"最多三段 EQ + 一格压缩 + 一格限幅"，改完再收回 [EffectSlot]。
-/// 没启用（且参数是默认）的格不写进链，所以空编辑器 = 空链。读进来的数值钳进 EffectEditorRanges（W5-C）。
+/// 效果链编辑器的值模型：把 [EffectSlot] 摊成"最多三段 EQ + 一格动态（自写压缩器 compressor / 苹果动态处理器 dynamicsProcessor 二选一）+ 一格限幅"，
+/// 改完再收回 [EffectSlot]。没有的格（present = false）不写进链，所以空编辑器 = 空链。读进来的数值钳进 EffectEditorRanges（W5-C）。
 struct EffectChainEditor: Hashable {
     struct EQBand: Hashable, Identifiable {
         var id = UUID()
@@ -101,10 +130,29 @@ struct EffectChainEditor: Hashable {
         var attackSeconds: Double = 0.012
         var decaySeconds: Double = 0.024
         var preGainDb: Double = 0
+        /// 天花板（限幅之后的输出增益，提案 024 顺带 (2)）：0 dBFS = 默认。
+        var ceilingDb: Double = 0
+    }
+    /// 自写压缩器（提案 024 (b)）：默认参数 = CONTRACTS.md §2.4 的默认值。
+    struct Compressor: Hashable {
+        var present = false
+        var enabled = true
+        var thresholdDb: Double = -20
+        var ratio: Double = 4
+        var kneeDb: Double = 6
+        var attackSeconds: Double = 0.005
+        var releaseSeconds: Double = 0.1
+        var makeupGainDb: Double = 0
+    }
+    /// 动态格用哪一种（同一格二选一，引擎每条总线 / 每路都只装一个动态格）。
+    enum DynamicsKind: String, CaseIterable, Identifiable, Sendable {
+        case compressor, dynamicsProcessor
+        var id: String { rawValue }
     }
 
     var eq: [EQBand] = []
     var dynamics = Dynamics()
+    var compressor = Compressor()
     var limiter = Limiter()
     /// 链里认不出 id 的格原样保留（别的会话定义的效果）。
     var others: [EffectSlot] = []
@@ -130,7 +178,7 @@ struct EffectChainEditor: Hashable {
                 b.q = value(s, "q", b.q, R.eqQ)
                 b.gainDb = value(s, "gainDb", b.gainDb, R.eqGainDb)
                 eq.append(b)
-            case AudioEffectParams.dynamicsProcessorID:
+            case AudioEffectParams.dynamicsProcessorID where !compressor.present:
                 dynamics.present = true
                 dynamics.enabled = s.enabled
                 dynamics.thresholdDb = value(s, "thresholdDb", dynamics.thresholdDb, R.dynThresholdDb)
@@ -139,29 +187,69 @@ struct EffectChainEditor: Hashable {
                 dynamics.attackSeconds = value(s, "attackSeconds", dynamics.attackSeconds, R.dynAttackSeconds)
                 dynamics.releaseSeconds = value(s, "releaseSeconds", dynamics.releaseSeconds, R.dynReleaseSeconds)
                 dynamics.overallGainDb = value(s, "overallGainDb", dynamics.overallGainDb, R.dynOverallGainDb)
+            case AudioEffectParams.compressorID where !compressor.present && !dynamics.present:
+                // 链里第二个动态格（API 写进来的）落到 others 原样留着：引擎也只装第一个（W1-D3 记 ignored）
+                compressor.present = true
+                compressor.enabled = s.enabled
+                compressor.thresholdDb = value(s, "thresholdDb", compressor.thresholdDb, R.compThresholdDb)
+                compressor.ratio = value(s, "ratio", compressor.ratio, R.compRatio)
+                compressor.kneeDb = value(s, "kneeDb", compressor.kneeDb, R.compKneeDb)
+                compressor.attackSeconds = value(s, "attackSeconds", compressor.attackSeconds, R.compAttackSeconds)
+                compressor.releaseSeconds = value(s, "releaseSeconds", compressor.releaseSeconds, R.compReleaseSeconds)
+                compressor.makeupGainDb = value(s, "makeupGainDb", compressor.makeupGainDb, R.compMakeupGainDb)
             case AudioEffectParams.peakLimiterID:
                 limiter.present = true
                 limiter.enabled = s.enabled
                 limiter.attackSeconds = value(s, "attackSeconds", limiter.attackSeconds, R.limAttackSeconds)
                 limiter.decaySeconds = value(s, "decaySeconds", limiter.decaySeconds, R.limDecaySeconds)
                 limiter.preGainDb = value(s, "preGainDb", limiter.preGainDb, R.limPreGainDb)
+                limiter.ceilingDb = value(s, "ceilingDb", limiter.ceilingDb, R.limCeilingDb)
             default:
                 others.append(s)
             }
         }
     }
 
-    /// 收回成链：EQ 各段 → 压缩 → 限幅 → 其他。
+    /// 收回成链：EQ 各段 → 动态（压缩器 / 动态处理器）→ 限幅 → 其他。
     var slots: [EffectSlot] {
         var out: [EffectSlot] = eq.map { AudioEffectParams.parametricEQ(centerHz: $0.centerHz, q: $0.q, gainDb: $0.gainDb, enabled: $0.enabled) }
-        if dynamics.present {
+        if compressor.present {
+            out.append(AudioEffectParams.compressor(thresholdDb: compressor.thresholdDb, ratio: compressor.ratio, kneeDb: compressor.kneeDb,
+                                                    attackSeconds: compressor.attackSeconds, releaseSeconds: compressor.releaseSeconds,
+                                                    makeupGainDb: compressor.makeupGainDb, enabled: compressor.enabled))
+        } else if dynamics.present {
             out.append(AudioEffectParams.dynamicsProcessor(thresholdDb: dynamics.thresholdDb, headroomDb: dynamics.headroomDb, expansionRatio: dynamics.expansionRatio,
                                                            attackSeconds: dynamics.attackSeconds, releaseSeconds: dynamics.releaseSeconds,
                                                            overallGainDb: dynamics.overallGainDb, enabled: dynamics.enabled))
         }
         if limiter.present {
-            out.append(AudioEffectParams.peakLimiter(attackSeconds: limiter.attackSeconds, decaySeconds: limiter.decaySeconds, preGainDb: limiter.preGainDb, enabled: limiter.enabled))
+            out.append(AudioEffectParams.peakLimiter(attackSeconds: limiter.attackSeconds, decaySeconds: limiter.decaySeconds, preGainDb: limiter.preGainDb,
+                                                     ceilingDb: limiter.ceilingDb, enabled: limiter.enabled))
         }
         return out + others
+    }
+
+    /// 动态格现在是哪一种（没有 = nil）。
+    var dynamicsKind: DynamicsKind? { compressor.present ? .compressor : dynamics.present ? .dynamicsProcessor : nil }
+
+    /// 动态格换成另一种（同一格二选一，提案 024 (b)）：开关状态带过去、参数用这一种自己的，另一种从链里拿掉。
+    /// 原来没有动态格：装一个旁路着的（开关仍是关，"关 = 旁路、参数留着"同一口径）。
+    mutating func setDynamicsKind(_ kind: DynamicsKind) {
+        guard kind != dynamicsKind else { return }
+        let enabled = switch dynamicsKind {
+        case .compressor?: compressor.enabled
+        case .dynamicsProcessor?: dynamics.enabled
+        case nil: false
+        }
+        switch kind {
+        case .compressor:
+            dynamics.present = false
+            compressor.present = true
+            compressor.enabled = enabled
+        case .dynamicsProcessor:
+            compressor.present = false
+            dynamics.present = true
+            dynamics.enabled = enabled
+        }
     }
 }

@@ -371,8 +371,15 @@
 "audioSettings.advanced" = "高级";
 "audioSettings.compressor.amount" = "压缩量 %.1f dB";
 "audioSettings.compressor.amountHint" = "超过阈值的部分被压住：输出最多到 %.1f dBFS（阈值 + 压缩量）。这个压缩器没有固定比例。";
+"audioSettings.compressor.kind" = "类型";
+"audioSettings.compressor.kind.compressor" = "压缩器（阈值 + 比例）";
+"audioSettings.compressor.kind.dynamicsProcessor" = "动态处理器（阈值 + 压缩量）";
+"audioSettings.compressor.knee" = "拐点 %.1f dB";
+"audioSettings.compressor.latency" = "延迟自测：%d 帧（%.2f ms）——压缩器不用前瞻，按设计是 0";
+"audioSettings.compressor.latencyPending" = "延迟自测：还没量到（装上之后引擎量一次）";
 "audioSettings.compressor.makeup" = "输出增益 %.1f dB";
-"audioSettings.compressor.note" = "按“阈值 + 比例”调的压缩器在后续版本（提案 024）。";
+"audioSettings.compressor.makeupGain" = "补偿 %.1f dB";
+"audioSettings.compressor.ratio" = "比例 %.1f:1";
 "audioSettings.enabled" = "启用";
 "audioSettings.eq.band" = "第 %d 段";
 "audioSettings.general.fader" = "推子";
@@ -382,6 +389,8 @@
 "audioSettings.general.mute" = "静音";
 "audioSettings.general.openInputSettings" = "输入设置…（增益 / 声像 / 延迟 / 送出）";
 "audioSettings.inputTitle" = "输入 %d";
+"audioSettings.limiter.ceiling" = "天花板 %.1f dBFS";
+"audioSettings.limiter.ceilingHint" = "限幅之后的输出最高到这里（0 = 0 dBFS）。";
 "audioSettings.limiter.latencyHint" = "起音就是前瞻：这条总线会晚这么多毫秒。录制 / 推流 / NDI® 的音画已经对齐，耳机 / 扬声器监听会晚这么多。";
 "audioSettings.meterPost" = "推子后";
 "audioSettings.page.compressor" = "压缩";
