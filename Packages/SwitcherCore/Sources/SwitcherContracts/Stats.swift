@@ -3,8 +3,8 @@ import Foundation
 /// stats.jsonl 的一行（测试标准 §7；P2 按已批提案 001 / 002 / 004 / 005 扩了 per_input、encoder、audio 三节）。字段名逐字：
 /// ts、tick、render_ms、missed_render、jitter_ms、per_input{fps, dup, drop, latency_ms, latency_max_ms}、
 /// encoder[{output, skipped, bitrate, frames, dropped, disk_free_mb, reconnects, connections, state, uptime_s, disconnects, last_error, attempt}]、
-/// display[{output, kind, frames, dropped, undelivered, state}]、audio{dropouts, underruns, discontinuities, meters}、rss_mb、cpu_pct、gpu_pct、video_delay_ms
-///（uptime_s / disconnects / last_error / attempt 与 video_delay_ms 是提案 022，P5-2 落地，用户 2026-10-11 批）。
+/// display[{output, kind, frames, dropped, undelivered, state}]、audio{dropouts, underruns, discontinuities, meters, effects}、rss_mb、cpu_pct、gpu_pct、video_delay_ms
+///（uptime_s / disconnects / last_error / attempt 与 video_delay_ms 是提案 022，P5-2 落地，用户 2026-10-11 批；audio.effects 是提案 030，P5-4 落地，用户 2026-10-17 批）。
 /// UI 状态行、API、测试三方读同一个结构，不许各自另算（铁律 4）。
 ///
 /// 口径（每秒一行，"窗口" = 上一行到这一行之间）：
@@ -20,7 +20,8 @@ import Foundation
 /// - `display[i]`：提案 013，显示类输出（外部显示窗口、虚拟摄像头、多画面窗口、主界面监视器）各一项，无固定顺序，按 `output` / `kind` 认。
 ///   frames = 已呈现 / 已送出帧数累计；dropped = 在呈现 / 发布时没赶上刷新 / 被扩展丢弃的帧数累计；
 ///   undelivered = 不在呈现 / 发布时没送出去的帧数累计（提案 018，与 dropped 不重叠）；state 见 `DisplayEntry.states`。
-/// - `audio`：A1，dropouts = 输出回调超时累计，underruns = 缓冲欠载累计，discontinuities = 波形不连续累计；meters = 表读数（提案 004，见 `AudioCounters`）。
+/// - `audio`：A1，dropouts = 输出回调超时累计，underruns = 缓冲欠载累计，discontinuities = 波形不连续累计；meters = 表读数（提案 004，见 `AudioCounters`）；
+///   effects = 各条总线 / 各路输入效果链的处理延迟（提案 030，瞬时值，见 `AudioCounters.EffectsLatency`）。
 /// - `rss_mb`：进程 RSS（MB）；`cpu_pct`：进程 CPU（100 = 一个核）；`gpu_pct`：GPU 占用。
 /// - `video_delay_ms`（提案 022 B2 / 028）：采样那一刻为监听同步把视频延后的毫秒数 L（W1-B4 的 videoDelay 补偿：按 Master 效果链的实测延迟延后派发；
 ///   补偿方式 audioPTS、没有效果、或组装方没接视频延后时为 0）。瞬时值，不累计；引擎 `EngineCounters.videoDelayMs` 填。
@@ -237,23 +238,100 @@ public struct Stats: Hashable, Codable, Sendable {
         public var discontinuities: UInt64
         /// JSON 键 meters（提案 004）：采样那一刻的表读数。来源只有一处（AudioMixer.meters）；1 Hz 的 Stats 留档 / API / 测试用，UI 高刷新率的表另读。
         public var meters: Meters
-        public init(dropouts: UInt64, underruns: UInt64, discontinuities: UInt64 = 0, meters: Meters = Meters()) {
+        /// JSON 键 effects（提案 030，用户 2026-10-17 批，P5-4 落地）：采样那一刻各条总线 / 各路输入效果链的处理延迟，瞬时值、不累计（口径见 `EffectsLatency`）。
+        /// 来源只有一处：集成层的 `AudioEngineStatus`（总线 `BusEffects`、每路 `InputEffects`）；`AudioEngine.audioCounters` 在出 Stats 行时从状态快照拷（1 Hz，不进实时线程）。
+        /// 不改 `video_delay_ms` 的口径（仍 = 为监听同步把视频延后的毫秒数，只跟 Master）。
+        public var effects: EffectsLatency
+        public init(dropouts: UInt64, underruns: UInt64, discontinuities: UInt64 = 0, meters: Meters = Meters(), effects: EffectsLatency = EffectsLatency()) {
             self.dropouts = dropouts
             self.underruns = underruns
             self.discontinuities = discontinuities
             self.meters = meters
+            self.effects = effects
         }
-        enum CodingKeys: String, CodingKey { case dropouts, underruns, discontinuities, meters }
-        /// 老文件只有 dropouts / underruns：缺键给 0 / 空表。
+        enum CodingKeys: String, CodingKey { case dropouts, underruns, discontinuities, meters, effects }
+        /// 老文件只有 dropouts / underruns：缺键给 0 / 空表；030 之前没有 effects：缺键 = 空（buses [] / inputs {}）。写出总是写全。
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             dropouts = try c.decode(UInt64.self, forKey: .dropouts)
             underruns = try c.decode(UInt64.self, forKey: .underruns)
             discontinuities = try c.decodeIfPresent(UInt64.self, forKey: .discontinuities) ?? 0
             meters = try c.decodeIfPresent(Meters.self, forKey: .meters) ?? Meters()
+            effects = try c.decodeIfPresent(EffectsLatency.self, forKey: .effects) ?? EffectsLatency()
         }
-        /// JSON 键名。
-        public static let jsonKeys = ["dropouts", "underruns", "discontinuities", "meters"]
+        /// JSON 键名（effects 是 030 加在末尾的）。
+        public static let jsonKeys = ["dropouts", "underruns", "discontinuities", "meters", "effects"]
+
+        /// 效果链的处理延迟（提案 030）：`buses` = Master / Bus A / Bus B 各一项（`listedBuses`，没装效果 = 0），`inputs` = 装了效果的那几路（键 = 输入编号）。
+        /// 延迟 = 已打开的格的延迟之和换成毫秒（`milliseconds(frames:)`，48 kHz）：NBandEQ 0、DynamicsProcessor 256 帧（5.33 ms）、PeakLimiter = 起音（默认 12 ms）、
+        /// 自写压缩器 = 冲激法实测（按设计 0）。总线的延迟由泵补到这条总线消费者流的 PTS 上（W5-C；Master 的在 videoDelay 补偿下改成把视频延后，见顶层 `video_delay_ms`），
+        /// 每路的从这一路的对齐延迟线里扣（W1-D3）。
+        /// 缺键 = 空（`buses: []`、`inputs: {}`），写出总是写全；没有音频引擎的组装方写空。
+        public struct EffectsLatency: Hashable, Codable, Sendable {
+            /// JSON 键 buses：顺序 = `listedBuses`，按 `bus` 认。
+            public var buses: [BusLatency]
+            /// JSON 键 inputs：键 = 输入编号（与 `meters.inputs` 同一写法）；只列装了效果的路——契约链里至少有一格装进了这一路的 EQ / 动态格（格关着也列，延迟 0）；
+            /// 没装效果、没注册音频的路不列。
+            public var inputs: [Int: InputLatency]
+            public init(buses: [BusLatency] = [], inputs: [Int: InputLatency] = [:]) {
+                self.buses = buses
+                self.inputs = inputs
+            }
+            enum CodingKeys: String, CodingKey { case buses, inputs }
+            /// 缺键 = 空。
+            public init(from decoder: any Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                buses = try c.decodeIfPresent([BusLatency].self, forKey: .buses) ?? []
+                inputs = try c.decodeIfPresent([Int: InputLatency].self, forKey: .inputs) ?? [:]
+            }
+            /// JSON 键名。
+            public static let jsonKeys = ["buses", "inputs"]
+            /// `buses` 列哪几条总线（顺序即写出顺序）：Master / Bus A / Bus B（提案 030 正文；耳机总线不列）。
+            public static let listedBuses: [Bus] = [.master, .busA, .busB]
+            /// 帧（@ `AudioFormat.sampleRate`）→ 毫秒：frames / 采样率 × 1000。填数方都用它，口径只有一处。
+            public static func milliseconds(frames: Int) -> Double { Double(frames) * 1000 / Double(AudioFormat.sampleRate) }
+
+            /// 一条总线的效果链延迟。
+            public struct BusLatency: Hashable, Codable, Sendable {
+                /// JSON 键 bus：`Bus.name`（master / busA / busB），与 `meters.buses[].bus` 同一写法。
+                public var bus: String
+                /// JSON 键 latency_ms：这条总线效果链当前的总处理延迟 = `AudioEngineStatus.BusEffects.latencyFrames` / 采样率 × 1000；没装效果 / 格都关着 = 0。
+                public var latencyMs: Double
+                /// JSON 键 measured_latency_ms：链里装着自写压缩器（`compressor`）时它冲激法自测的延迟（`BusEffects.compressorMeasuredLatencyFrames`；
+                /// 按设计 0，≠ 自报时按量到的记）；格关着也写（装着就量过）。链里没有它 = nil，不写键。
+                public var measuredLatencyMs: Double?
+                public init(bus: String, latencyMs: Double, measuredLatencyMs: Double? = nil) {
+                    self.bus = bus
+                    self.latencyMs = latencyMs
+                    self.measuredLatencyMs = measuredLatencyMs
+                }
+                enum CodingKeys: String, CodingKey {
+                    case bus
+                    case latencyMs = "latency_ms"
+                    case measuredLatencyMs = "measured_latency_ms"
+                }
+                /// JSON 键名（measured_latency_ms 可缺）。
+                public static let jsonKeys = ["bus", "latency_ms", "measured_latency_ms"]
+            }
+
+            /// 一路输入的效果链延迟（两格 EQ → 动态，W1-D3）。
+            public struct InputLatency: Hashable, Codable, Sendable {
+                /// JSON 键 latency_ms：这一路已打开的格的延迟之和 = `AudioEngineStatus.InputEffects.latencyFrames` / 采样率 × 1000（集成层从这一路的对齐延迟线里扣掉它）。
+                public var latencyMs: Double
+                /// JSON 键 measured_latency_ms：动态格是自写压缩器时它冲激法自测的延迟（`InputEffects.compressorMeasuredLatencyFrames`）；动态格不是它 = nil，不写键。
+                public var measuredLatencyMs: Double?
+                public init(latencyMs: Double, measuredLatencyMs: Double? = nil) {
+                    self.latencyMs = latencyMs
+                    self.measuredLatencyMs = measuredLatencyMs
+                }
+                enum CodingKeys: String, CodingKey {
+                    case latencyMs = "latency_ms"
+                    case measuredLatencyMs = "measured_latency_ms"
+                }
+                /// JSON 键名（measured_latency_ms 可缺）。
+                public static let jsonKeys = ["latency_ms", "measured_latency_ms"]
+            }
+        }
 
         /// 表读数（提案 004）：`buses` 顺序 = Bus.allCases（4 条），`inputs` 键 = 输入编号。
         /// 峰值 / RMS / 真峰值 dBFS / dBTP（20·log10，下限 `floorDb`），响度 LUFS（静音也钳到下限，JSON 写不了 −inf），LRA 单位 LU。

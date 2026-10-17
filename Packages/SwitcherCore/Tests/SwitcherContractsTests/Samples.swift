@@ -94,7 +94,7 @@ enum Samples {
         return show
     }
 
-    /// P2 之后每个新字段都填非默认值（latency、frames / dropped / disk_free_mb / reconnects / state、discontinuities / meters；022 的 uptime_s / disconnects / last_error / video_delay_ms）。
+    /// P2 之后每个新字段都填非默认值（latency、frames / dropped / disk_free_mb / reconnects / state、discontinuities / meters；022 的 uptime_s / disconnects / last_error / video_delay_ms；030 的 audio.effects）。
     static func stats() -> Stats {
         Stats(ts: 1_757_690_000.5, tick: Tick(216_000), renderMs: 1.75, missedRender: 0, jitterMs: 0.42,
               perInput: [1: Stats.PerInput(fps: 30, dup: 30, drop: 0, latencyMs: 33.4, latencyMaxMs: 41.7),
@@ -103,7 +103,7 @@ enum Samples {
                                            uptimeS: 3600.25),
                         Stats.EncoderEntry(output: 2, skipped: 3, bitrate: 2_500_000, frames: 215_000, dropped: 12, diskFreeMb: 0, reconnects: 2, connections: 0, state: "publishing",
                                            uptimeS: 3583.5, disconnects: 1, lastError: "stalled")],   // 022：在推时 attempt = 0
-              audio: Stats.AudioCounters(dropouts: 0, underruns: 1, discontinuities: 2, meters: meters()),
+              audio: Stats.AudioCounters(dropouts: 0, underruns: 1, discontinuities: 2, meters: meters(), effects: effects()),
               rssMb: 512.25, cpuPct: 12.5, gpuPct: 30,
               display: [Stats.DisplayEntry(output: 4, kind: "externalDisplay", frames: 36_000, dropped: 0, state: "presenting"),
                         Stats.DisplayEntry(output: 5, kind: "virtualCamera", frames: 35_900, dropped: 4, undelivered: 1_200, state: "publishing"),
@@ -123,6 +123,14 @@ enum Samples {
                 BM(bus: Bus.headphones.name, peakDb: [-9, -9], truePeakDb: [-8.9, -8.9], lufsM: -21, lufsS: -21.5, lufsI: -22, lra: 3),
             ],
             inputs: [1: Stats.AudioCounters.InputMeter(peakDb: [-12, -12.5], rmsDb: [-18, -18.5]), 3: Stats.AudioCounters.InputMeter(peakDb: silent)])
+    }
+
+    /// 提案 030：Master 一格限幅（起音 12 ms = 576 帧）、Bus A 一格自写压缩器（实测 0）、Bus B 没装；输入 1 动态格是压缩器（实测 1 ms）、输入 3 只有 EQ（0）。
+    static func effects() -> Stats.AudioCounters.EffectsLatency {
+        typealias E = Stats.AudioCounters.EffectsLatency
+        return E(buses: [E.BusLatency(bus: Bus.master.name, latencyMs: 12), E.BusLatency(bus: Bus.busA.name, latencyMs: 0, measuredLatencyMs: 0),
+                         E.BusLatency(bus: Bus.busB.name, latencyMs: 0)],
+                 inputs: [1: E.InputLatency(latencyMs: 1, measuredLatencyMs: 1), 3: E.InputLatency(latencyMs: 0)])
     }
 
     static func scenario() -> Scenario {
