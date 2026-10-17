@@ -154,8 +154,19 @@ struct EffectChainEditor: Hashable {
     var dynamics = Dynamics()
     var compressor = Compressor()
     var limiter = Limiter()
-    /// 链里认不出 id 的格原样保留（别的会话定义的效果）。
+    /// 链里认不出 id 的格原样保留（别的会话定义的效果；第 4 段起的 EQ、API 写进来的第二个动态 / 限幅格也在这里）。
     var others: [EffectSlot] = []
+
+    /// 读进来时每一格在链里的位置（W5-P，W4C3 第 13 条）：收回成链时按它排，API 设的顺序原样保住——改哪一格就在原位改、删了就去掉，
+    /// 新加的（原来没有的 EQ 段 / 动态格 / 限幅格）放在同类后面，没有同类按"EQ → 动态 → 限幅"的位置插。原来整条按 EQ → 动态 → 限幅 → 其他重排，
+    /// 第 4 段起的 EQ 与认不出的格被挪到链尾（总线上链的顺序就是处理顺序，挪出去的 EQ 还可能成了第 4 格、装不上）。
+    private enum Position: Hashable {
+        case eq(UUID)
+        case dynamics
+        case limiter
+        case other(Int)
+    }
+    private var layout: [Position] = []
 
     /// 界面最多几段 EQ（≤ 一个 AUNBandEQ 格的 16 段，全在一格里）。
     static let maxEQBands = 3
@@ -178,7 +189,9 @@ struct EffectChainEditor: Hashable {
                 b.q = value(s, "q", b.q, R.eqQ)
                 b.gainDb = value(s, "gainDb", b.gainDb, R.eqGainDb)
                 eq.append(b)
-            case AudioEffectParams.dynamicsProcessorID where !compressor.present:
+                layout.append(.eq(b.id))
+            case AudioEffectParams.dynamicsProcessorID where !compressor.present && !dynamics.present:
+                layout.append(.dynamics)
                 dynamics.present = true
                 dynamics.enabled = s.enabled
                 dynamics.thresholdDb = value(s, "thresholdDb", dynamics.thresholdDb, R.dynThresholdDb)
@@ -189,6 +202,7 @@ struct EffectChainEditor: Hashable {
                 dynamics.overallGainDb = value(s, "overallGainDb", dynamics.overallGainDb, R.dynOverallGainDb)
             case AudioEffectParams.compressorID where !compressor.present && !dynamics.present:
                 // 链里第二个动态格（API 写进来的）落到 others 原样留着：引擎也只装第一个（W1-D3 记 ignored）
+                layout.append(.dynamics)
                 compressor.present = true
                 compressor.enabled = s.enabled
                 compressor.thresholdDb = value(s, "thresholdDb", compressor.thresholdDb, R.compThresholdDb)
@@ -197,7 +211,9 @@ struct EffectChainEditor: Hashable {
                 compressor.attackSeconds = value(s, "attackSeconds", compressor.attackSeconds, R.compAttackSeconds)
                 compressor.releaseSeconds = value(s, "releaseSeconds", compressor.releaseSeconds, R.compReleaseSeconds)
                 compressor.makeupGainDb = value(s, "makeupGainDb", compressor.makeupGainDb, R.compMakeupGainDb)
-            case AudioEffectParams.peakLimiterID:
+            case AudioEffectParams.peakLimiterID where !limiter.present:
+                // 第二个限幅格（API 写进来的）原来会盖掉第一个的参数、第一个丢了；现在落到 others 原样留着（W4C3 第 13 条）
+                layout.append(.limiter)
                 limiter.present = true
                 limiter.enabled = s.enabled
                 limiter.attackSeconds = value(s, "attackSeconds", limiter.attackSeconds, R.limAttackSeconds)
@@ -205,28 +221,74 @@ struct EffectChainEditor: Hashable {
                 limiter.preGainDb = value(s, "preGainDb", limiter.preGainDb, R.limPreGainDb)
                 limiter.ceilingDb = value(s, "ceilingDb", limiter.ceilingDb, R.limCeilingDb)
             default:
+                layout.append(.other(others.count))
                 others.append(s)
             }
         }
     }
 
-    /// 收回成链：EQ 各段 → 动态（压缩器 / 动态处理器）→ 限幅 → 其他。
+    /// 收回成链：按读进来时的位置排（layout），新加的放在同类后面；全新的编辑器 = EQ 各段 → 动态（压缩器 / 动态处理器）→ 限幅。
     var slots: [EffectSlot] {
-        var out: [EffectSlot] = eq.map { AudioEffectParams.parametricEQ(centerHz: $0.centerHz, q: $0.q, gainDb: $0.gainDb, enabled: $0.enabled) }
+        let eqSlot = { (b: EQBand) in AudioEffectParams.parametricEQ(centerHz: b.centerHz, q: b.q, gainDb: b.gainDb, enabled: b.enabled) }
+        var dynamicsSlot: EffectSlot?
         if compressor.present {
-            out.append(AudioEffectParams.compressor(thresholdDb: compressor.thresholdDb, ratio: compressor.ratio, kneeDb: compressor.kneeDb,
-                                                    attackSeconds: compressor.attackSeconds, releaseSeconds: compressor.releaseSeconds,
-                                                    makeupGainDb: compressor.makeupGainDb, enabled: compressor.enabled))
+            dynamicsSlot = AudioEffectParams.compressor(thresholdDb: compressor.thresholdDb, ratio: compressor.ratio, kneeDb: compressor.kneeDb,
+                                                        attackSeconds: compressor.attackSeconds, releaseSeconds: compressor.releaseSeconds,
+                                                        makeupGainDb: compressor.makeupGainDb, enabled: compressor.enabled)
         } else if dynamics.present {
-            out.append(AudioEffectParams.dynamicsProcessor(thresholdDb: dynamics.thresholdDb, headroomDb: dynamics.headroomDb, expansionRatio: dynamics.expansionRatio,
-                                                           attackSeconds: dynamics.attackSeconds, releaseSeconds: dynamics.releaseSeconds,
-                                                           overallGainDb: dynamics.overallGainDb, enabled: dynamics.enabled))
+            dynamicsSlot = AudioEffectParams.dynamicsProcessor(thresholdDb: dynamics.thresholdDb, headroomDb: dynamics.headroomDb, expansionRatio: dynamics.expansionRatio,
+                                                               attackSeconds: dynamics.attackSeconds, releaseSeconds: dynamics.releaseSeconds,
+                                                               overallGainDb: dynamics.overallGainDb, enabled: dynamics.enabled)
         }
-        if limiter.present {
-            out.append(AudioEffectParams.peakLimiter(attackSeconds: limiter.attackSeconds, decaySeconds: limiter.decaySeconds, preGainDb: limiter.preGainDb,
-                                                     ceilingDb: limiter.ceilingDb, enabled: limiter.enabled))
+        let limiterSlot: EffectSlot? = limiter.present
+            ? AudioEffectParams.peakLimiter(attackSeconds: limiter.attackSeconds, decaySeconds: limiter.decaySeconds, preGainDb: limiter.preGainDb,
+                                            ceilingDb: limiter.ceilingDb, enabled: limiter.enabled)
+            : nil
+        var out: [EffectSlot] = []
+        var placedEQ = Set<UUID>()
+        var placedDynamics = false, placedLimiter = false
+        var eqEnd: Int?, dynamicsEnd: Int?   // 最后一个 EQ / 动态格之后的位置（插新格用）
+        for p in layout {
+            switch p {
+            case .eq(let id):
+                placedEQ.insert(id)
+                guard let band = eq.first(where: { $0.id == id }) else { continue }   // 删了
+                out.append(eqSlot(band))
+                eqEnd = out.count
+            case .dynamics:
+                placedDynamics = true
+                if let d = dynamicsSlot {
+                    out.append(d)
+                    dynamicsEnd = out.count
+                }
+            case .limiter:
+                placedLimiter = true
+                if let l = limiterSlot { out.append(l) }
+            case .other(let k):
+                if k < others.count { out.append(others[k]) }
+            }
         }
-        return out + others
+        // 新加的 EQ 段：接在最后一个 EQ 后面，一个都没有就放最前
+        let newBands = eq.filter { !placedEQ.contains($0.id) }.map(eqSlot)
+        if !newBands.isEmpty {
+            let at = eqEnd ?? 0
+            out.insert(contentsOf: newBands, at: at)
+            eqEnd = at + newBands.count
+            if let d = dynamicsEnd, d > at { dynamicsEnd = d + newBands.count }
+        }
+        // 新加的动态格：EQ 后面；新加的限幅格：动态格后面，没有就 EQ 后面
+        if !placedDynamics, let d = dynamicsSlot {
+            let at = eqEnd ?? 0
+            out.insert(d, at: at)
+            dynamicsEnd = at + 1
+        }
+        if !placedLimiter, let l = limiterSlot {
+            out.insert(l, at: dynamicsEnd ?? eqEnd ?? 0)
+        }
+        // 读进来时不在 layout 里的其他格（不会发生：others 只在 init 里加）——兜底接在最后，不丢
+        let placedOthers = Set(layout.compactMap { if case .other(let k) = $0 { k } else { nil } })
+        out += others.indices.filter { !placedOthers.contains($0) }.map { others[$0] }
+        return out
     }
 
     /// 动态格现在是哪一种（没有 = nil）。

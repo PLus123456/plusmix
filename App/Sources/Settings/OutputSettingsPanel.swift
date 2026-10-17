@@ -41,6 +41,8 @@ final class OutputSettingsModel: ObservableObject {
     var send: ((Command) -> Void)?
     /// 打开推流 / 录制状态面板（W5-N；PanelCoordinator 接）。
     var showOutputStatus: ((OutputStatusModel.Page) -> Void)?
+    /// 查询串鉴权用过的参数名（本机记忆；PanelCoordinator 接到 AppController.defaults）。
+    var authParamMemory: StreamAuthParamMemory?
     /// 一路起不来 / 停住的原因（PanelCoordinator 接到 session 的运行表）。
     var routeFailure: ((Int) -> OutputRouteFailure?)?
     /// 重试起不来的那几路（session.retryFailedOutputs）。

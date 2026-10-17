@@ -1554,6 +1554,7 @@
 "outputSettings.stream.auth.title" = "RTMP 鉴权（用户名 / 密码）";
 "outputSettings.stream.auth.user" = "用户名";
 "outputSettings.stream.auth.userSet" = "鉴权：用户 %@（密码已设）";
+"outputSettings.stream.auth.userSetNoPassword" = "鉴权：用户 %@（没有密码）";
 "outputSettings.stream.encodeDetails" = "编码详情…";
 "outputSettings.stream.followFirst" = "与推流 1 相同（编码跟着推流 1 改）";
 "outputSettings.stream.lockedHelp" = "正在推流：停止后可改";

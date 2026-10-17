@@ -151,6 +151,7 @@ final class PanelCoordinator: NSObject {
         model.send = { [weak self] c in self?.session?.send(c) }
         // 起不来的原因 / 重试（W5-B：推流页那一段写明原因，起不来的路不锁、可以重试或停用）；第几次连接 W5-N 起读 Stats 的 attempt
         model.routeFailure = { [weak self] n in self?.session?.outputs.routeFailure(output: n) }
+        model.authParamMemory = StreamAuthParamMemory(defaults: controller.defaults)   // 查询串鉴权用过的参数名记在本机（W5-P，W4C3 第 9 条）
         model.showOutputStatus = { [weak self] page in self?.showOutputStatus(page) }
         model.onRetry = { [weak self] numbers in self?.session?.retryFailedOutputs(numbers) }
         model.refreshRouteDetails()

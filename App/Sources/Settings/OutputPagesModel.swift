@@ -374,7 +374,22 @@ extension OutputSettingsModel {
 
     /// 这个目的地现在的鉴权写法（按地址认：有 user:pass@ = Adobe，查询串里有账号参数 = 查询串）。
     func streamAuthStyle(_ number: Int) -> StreamAddress.AuthStyle {
-        StreamAddress.authStyle(of: state.output(number)?.settings.stream?.url ?? "")
+        StreamAddress.authStyle(of: state.output(number)?.settings.stream?.url ?? "", remembered: authParamMemory?.pairs ?? [])
+    }
+
+    /// 按钮旁那一句鉴权摘要（"鉴权：用户 x（密码已设）" / "没有鉴权" / "加密：已设 passphrase"……）。
+    func streamAuthSummary(_ number: Int) -> String {
+        let url = state.output(number)?.settings.stream?.url ?? ""
+        if StreamAddress.scheme(of: url) == "srt" {
+            return StreamAddress.srtPassphrase(of: url).isEmpty ? L("outputSettings.stream.auth.none") : L("outputSettings.stream.auth.passphraseSet")
+        }
+        if case .query(let u, let p) = streamAuthStyle(number) {
+            guard let c = StreamAddress.queryCredentials(of: url, userParam: u, passParam: p) else { return L("outputSettings.stream.auth.none") }
+            return L("outputSettings.stream.auth.userSetQuery", c.user)
+        }
+        guard let c = streamCredentials(number) else { return L("outputSettings.stream.auth.none") }
+        // 原来固定写"（密码已设）"，不看密码空不空（W5-P，W4C3 第 13 条）
+        return L(c.password.isEmpty ? "outputSettings.stream.auth.userSetNoPassword" : "outputSettings.stream.auth.userSet", c.user)
     }
 
     func streamCredentials(_ number: Int) -> StreamDestination.Credentials? {
@@ -389,6 +404,9 @@ extension OutputSettingsModel {
     @discardableResult
     func setStreamAuth(_ number: Int, user: String, password: String, style: StreamAddress.AuthStyle = .adobe) -> String? {
         guard !isStreamLocked(number), let url = state.output(number)?.settings.stream?.url else { return L("outputSettings.stream.lockedNote") }
+        // 换写法 / 换名字之前认出来的那一对（含本机记得的自定义名字）：一起去掉，两种写法不并存（W4C3 第 9 条）
+        var stale: Set<String> = []
+        if case .query(let u, let p) = streamAuthStyle(number) { stale = [u, p] }
         let next: String
         do throws(StreamAddress.EditError) {
             if StreamAddress.scheme(of: url) == "srt" {
@@ -398,10 +416,11 @@ extension OutputSettingsModel {
                 case .adobe:
                     // 先去掉查询串里的账号（也会去掉 userinfo），再写 user:pass@
                     let cleared = try StreamAddress.withQueryCredentials(url, user: "", password: "", userParam: StreamAddress.defaultQueryUserParam,
-                                                                         passParam: StreamAddress.defaultQueryPassParam)
+                                                                         passParam: StreamAddress.defaultQueryPassParam, alsoDrop: stale)
                     next = try StreamAddress.withCredentials(cleared, user: user, password: password)
                 case .query(let userParam, let passParam):
-                    next = try StreamAddress.withQueryCredentials(url, user: user, password: password, userParam: userParam, passParam: passParam)
+                    next = try StreamAddress.withQueryCredentials(url, user: user, password: password, userParam: userParam, passParam: passParam, alsoDrop: stale)
+                    authParamMemory?.remember(user: userParam.trimmingCharacters(in: .whitespaces), pass: passParam.trimmingCharacters(in: .whitespaces))
                 }
             }
         } catch {

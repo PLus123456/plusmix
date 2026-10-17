@@ -1554,6 +1554,7 @@
 "outputSettings.stream.auth.title" = "RTMP authentication (user name / password)";
 "outputSettings.stream.auth.user" = "User name";
 "outputSettings.stream.auth.userSet" = "Authentication: user %@ (password set)";
+"outputSettings.stream.auth.userSetNoPassword" = "Authentication: user %@ (no password)";
 "outputSettings.stream.encodeDetails" = "Encoding details…";
 "outputSettings.stream.followFirst" = "Same as Stream 1 (encoding follows Stream 1)";
 "outputSettings.stream.lockedHelp" = "Streaming: stop to change";

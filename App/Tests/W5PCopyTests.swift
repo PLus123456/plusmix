@@ -308,6 +308,84 @@ final class W5PCopyTests: XCTestCase {
         }
     }
 
+    /// 第 9 条：查询串鉴权的参数名可以改成任意名字（SRS / nginx-rtmp 按回调规矩），原来重新读地址只认 user / pass 那几个：用了别的名字，按钮旁写"没有鉴权"、
+    /// 再打开小表停在 Adobe；换 Adobe 写法只去掉认得的名字，自定义名字的账号留在地址里、两种写法并存。现在表里用过的名字存在本机（节目里只有地址），
+    /// 认写法、换写法都按它们；换写法时按当时认出的名字去掉旧账号。
+    func testW4C3_9_customQueryParamNamesAreRememberedAndRemoved() throws {
+        let suite = "plusmix.w5p.streamauth"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        func model(_ url: String) -> OutputSettingsModel {
+            let state = MixerState(outputs: [OutputState(number: 2, kind: .stream, name: "SRS", enabled: false,
+                                                         settings: OutputSettings(source: .program, stream: StreamSettings(url: url)))])
+            let m = OutputSettingsModel(state: state, tab: .stream, defaultRecordDirectory: "/tmp", showName: "t", queriesSystemExtensions: false)
+            m.authParamMemory = StreamAuthParamMemory(defaults: defaults)
+            m.send = { c in if case .setOutputSettings(_, let s) = c { m.apply(state: MixerState(outputs: [OutputState(number: 2, kind: .stream, name: "SRS", enabled: false, settings: s)])) } }
+            return m
+        }
+        let m = model("rtmp://127.0.0.1/live/s1")
+        XCTAssertNil(m.setStreamAuth(2, user: "alice", password: "secret", style: .query(userParam: "u", passParam: "p")))
+        let url = try XCTUnwrap(m.state.output(2)?.settings.stream?.url)
+        XCTAssertEqual(url, "rtmp://127.0.0.1/live/s1?u=alice&p=secret")
+        XCTAssertEqual(m.streamAuthStyle(2), .query(userParam: "u", passParam: "p"), "认得刚用过的名字")
+        XCTAssertEqual(m.streamAuthSummary(2), "鉴权（查询串）：用户 alice")
+        // 关了再开（新的模型、同一台机器）：照样认得
+        let reopened = model(url)
+        XCTAssertEqual(reopened.streamAuthStyle(2), .query(userParam: "u", passParam: "p"), "存在本机，再打开还认得")
+        // 换成另一对名字：旧的 u / p 一起去掉
+        XCTAssertNil(reopened.setStreamAuth(2, user: "bob", password: "pw", style: .query(userParam: "account", passParam: "token")))
+        XCTAssertEqual(reopened.state.output(2)?.settings.stream?.url, "rtmp://127.0.0.1/live/s1?account=bob&token=pw")
+        // 换成 Adobe：按认出的名字去掉查询串里的账号，不并存
+        XCTAssertNil(reopened.setStreamAuth(2, user: "carol", password: "pw2", style: .adobe))
+        XCTAssertEqual(reopened.state.output(2)?.settings.stream?.url, "rtmp://carol:pw2@127.0.0.1/live/s1")
+        XCTAssertEqual(reopened.streamAuthStyle(2), .adobe)
+    }
+
+    /// 第 13 条（前一半）：Adobe 写法的按钮摘要原来固定写"（密码已设）"，不看密码空不空。
+    func testW4C3_13_adobeSummaryChecksPassword() {
+        func summary(_ url: String) -> String {
+            let state = MixerState(outputs: [OutputState(number: 2, kind: .stream, name: "W", enabled: false,
+                                                         settings: OutputSettings(source: .program, stream: StreamSettings(url: url)))])
+            return OutputSettingsModel(state: state, tab: .stream, defaultRecordDirectory: "/tmp", showName: "t", queriesSystemExtensions: false).streamAuthSummary(2)
+        }
+        XCTAssertEqual(summary("rtmp://alice:pw@host/app"), "鉴权：用户 alice（密码已设）")
+        XCTAssertEqual(summary("rtmp://alice@host/app"), "鉴权：用户 alice（没有密码）")
+        XCTAssertEqual(summary("rtmp://host/app"), "没有鉴权")
+        XCTAssertEqual(summary("srt://host:9000?passphrase=abcdefghij"), "加密：已设 passphrase")
+        XCTAssertEqual(L10n.string("outputSettings.stream.auth.userSetNoPassword", language: "en", "alice"), "Authentication: user alice (no password)")
+    }
+
+    /// 第 13 条（后一半）：界面一改效果链就整条重写——原来把第 4 段起的 EQ、认不出的格挪到链尾，限幅 / 动态格按"EQ → 动态 → 限幅"重排
+    /// （总线上链的顺序就是处理顺序，挪出去的 EQ 还可能成了第 4 格、装不上）。现在 API 设的顺序原样保住：改哪一格就在原位改、删了就去掉，
+    /// 新加的放在同类后面（没有同类按 EQ → 动态 → 限幅的位置）；API 写进来的第二个限幅格也不被第一个盖掉。
+    func testW4C3_13_effectChainEditorKeepsApiOrder() {
+        let eq1 = AudioEffectParams.parametricEQ(centerHz: 100, q: 1, gainDb: 1)
+        let eq2 = AudioEffectParams.parametricEQ(centerHz: 200, q: 1, gainDb: 2)
+        let eq3 = AudioEffectParams.parametricEQ(centerHz: 400, q: 1, gainDb: 3)
+        let eq4 = AudioEffectParams.parametricEQ(centerHz: 800, q: 1, gainDb: 4)
+        let lim = AudioEffectParams.peakLimiter(attackSeconds: 0.01, decaySeconds: 0.02, preGainDb: 1)
+        let dyn = AudioEffectParams.dynamicsProcessor(thresholdDb: -20, headroomDb: 5, expansionRatio: 2, attackSeconds: 0.001, releaseSeconds: 0.05, overallGainDb: 0)
+        let reverb = EffectSlot(id: "reverb", enabled: true, params: ["mix": .number(0.3)])
+        let chain = [lim, eq1, reverb, eq2, eq3, eq4, dyn]
+        var e = EffectChainEditor(slots: chain)
+        XCTAssertEqual(e.slots, chain, "不改就原样：第 4 段 EQ、认不出的格、排在前面的限幅都不挪")
+        e.eq[1].gainDb = 6
+        var expected = chain
+        expected[3] = AudioEffectParams.parametricEQ(centerHz: 200, q: 1, gainDb: 6)
+        XCTAssertEqual(e.slots, expected, "改哪一格就在原位改")
+        e.eq.remove(at: 0)
+        expected.remove(at: 1)
+        XCTAssertEqual(e.slots, expected, "删了就去掉，别的不动")
+        let lim2 = AudioEffectParams.peakLimiter(attackSeconds: 0.02, decaySeconds: 0.03, preGainDb: 2)
+        XCTAssertEqual(EffectChainEditor(slots: [lim, eq1, lim2]).slots, [lim, eq1, lim2], "第二个限幅格原样留着")
+        var fresh = EffectChainEditor(slots: [reverb, eq1, lim])
+        fresh.eq.append(EffectChainEditor.EQBand())
+        fresh.compressor.present = true
+        XCTAssertEqual(fresh.slots.map(\.id), ["reverb", "parametricEQ", "parametricEQ", "compressor", "peakLimiter"], "新加的放在同类后面")
+        XCTAssertEqual(EffectChainEditor().slots, [], "空编辑器还是空链")
+    }
+
     /// 状态行（W4C3 第 11 条）：failed 的推流不算在跑——原来取码率最低的那一路，起不来 / 鉴权停下的码率 0，写"推流 0 b/s"；状态窗写 —，两处不一致。
     func testW5P111_statusLineIgnoresFailedStreams() {
         func stats(_ entries: [Stats.EncoderEntry]) -> Stats {
