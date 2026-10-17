@@ -117,6 +117,67 @@ final class W5PFixesTests: XCTestCase {
         XCTAssertEqual(got, ["show-2.mov", "show-3.mov", "show-4.mov"])
     }
 
+    // MARK: D06 ISO 录制中换源
+
+    /// ISO 录着换这一路的来源（带音频的合成源 → 另一个带音频的合成源）：同一个录制器录到底，视频帧数 = 起止拍差（拍点连续、文件里没洞）、两轨等长；
+    /// 换源到新来源第一帧之间重复旧帧记在 tap 的 repeated 里（dup 记账），几拍之内就换上新来源、不定格到底；这一路的 tee / 主槽 / 引擎注册都没换。
+    func testD06_isoRecordingAcrossSourceChangeStaysContinuous() throws {
+        let session = try AppTest.freshSession()
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 1, gray: 80, audio: true)))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.audio.registeredInputs.contains(1) })
+        let input = try XCTUnwrap(session.state.input(1))
+        let iso = ISORoutes.makeISOOutput(for: input, in: session.state, defaultDirectory: AppTest.controller.documents.recordDirectory)
+        session.send(.addOutput(config: iso))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(iso.number) != nil })
+        let tee = try XCTUnwrap(session.inputs.entries[1]?.tee)
+        let slot = try XCTUnwrap(session.inputs.entries[1]?.slot)
+        session.send(.startRecord(output: iso.number))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[iso.number] != nil })
+        let entry = try XCTUnwrap(session.outputs.recorders[iso.number])
+        let tap = try XCTUnwrap(entry.consumer as? ISOFrameTap)
+        XCTAssertNotNil(entry.recorder.configuration.audio, "这一路带音频：ISO 有音轨")
+        AppTest.pump(seconds: 1)
+        let before = tap.counters
+        let oldInput = try XCTUnwrap(session.inputs.entries[1]?.input)
+        session.send(.setInputSource(input: 1, source: AppTest.syntheticConfig(number: 1, gray: 200, audio: true).source))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.entries[1].map { $0.input !== oldInput } ?? false })
+        XCTAssertTrue(AppTest.waitUntil(2) { tap.counters.lastSequence < before.lastSequence }, "新来源的帧（序号从头数）应很快进 ISO：\(tap.counters)")
+        let switched = tap.counters
+        AppTest.pump(seconds: 1.5)
+        let after = tap.counters
+        print("W5P D06 换源前后：before \(before)，换上新来源时 \(switched)，1.5 s 后 \(after)")
+        XCTAssertTrue(session.inputs.entries[1]?.tee === tee, "tee 不换")
+        XCTAssertTrue(session.inputs.entries[1]?.slot === slot, "引擎注册的主槽不换")
+        XCTAssertEqual(session.engine.registeredInputs, [1])
+        XCTAssertTrue(session.outputs.recorders[iso.number] === entry, "同一个录制器录到底（Recorder 不断）")
+        XCTAssertLessThanOrEqual(switched.repeated - before.repeated, 30, "换源到新来源第一帧之间的重复帧（dup）不到半秒")
+        XCTAssertGreaterThan(after.forwarded - switched.forwarded, 80, "换上之后每拍都在交帧")
+        XCTAssertLessThanOrEqual(after.repeated - switched.repeated, 2, "换上之后不再重复旧帧（60 fps 源）")
+        session.send(.stopRecord(output: iso.number))
+        XCTAssertTrue(AppTest.waitUntil(15) { session.outputs.recorders[iso.number] == nil && session.outputs.lastResults[iso.number] != nil })
+        let result = try XCTUnwrap(session.outputs.lastResults[iso.number])
+        defer { try? FileManager.default.removeItem(at: result.url) }
+        let ticks = Int(result.stopTick.rawValue - result.start.tick.rawValue)
+        print("W5P D06 ISO 文件：\(result.url.lastPathComponent)，\(ticks) 拍，视频 \(result.videoFrames) 帧，音频 \(result.audioFrames) 样本")
+        XCTAssertEqual(Int(result.videoFrames), ticks, "视频帧数 = 起止拍差：换源前后拍点连续、文件里没有洞")
+        XCTAssertEqual(Int(result.audioFrames), ticks * 800, accuracy: 800, "两轨等长（换源时音频重新注册的那几十毫秒是静音，不是断）")
+    }
+
+    /// 换到起不来的来源（图片文件不在：start 当场失败）：这一路画黑，不停在旧来源的最后一帧上（与新加一路起不来的输入"空槽画黑"一致）。
+    func testD06_sourceChangeToBrokenSourceGoesBlackNotFrozen() throws {
+        let session = try AppTest.freshSession()
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 1, gray: 200)))
+        session.send(.setProgram(input: 1))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
+        XCTAssertTrue(AppTest.waitUntil(3) { (AppTest.readback(session)?.lumaStats().mean ?? 0) > 120 }, "PGM 先是灰底的合成源")
+        session.send(.setInputSource(input: 1, source: .image(path: "/nonexistent/w5p-missing.png")))
+        XCTAssertTrue(AppTest.waitUntil(3) { if case .error? = session.inputs.runtimeState(of: 1) { return true } else { return false } },
+                      "\(String(describing: session.inputs.runtimeState(of: 1)))")
+        XCTAssertTrue(AppTest.waitUntil(3) { (AppTest.readback(session)?.lumaStats().mean ?? 255) < 3 },
+                      "起不来的来源：画黑，不定格在旧画面（\(String(describing: AppTest.readback(session)?.lumaStats())))")
+    }
+
     // MARK: D04 打开 / 保存配对
 
     /// 读不出来的打开：保存目标、跑着的节目都不变（D04 的"拒绝的请求不能提前改保存目标"）。

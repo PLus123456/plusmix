@@ -145,7 +145,7 @@ final class OutputRuntime {
         var phase = Phase.starting
         /// 挂在引擎上的消费者：PGM / PVW / 多画面 = sender 本身；输入 n = inputTap。
         var consumer: (any FrameConsumer)?
-        /// 源是输入 n 时：该路分支槽上按拍挑帧的 tap（下游 NDIInputFeed → sender），分支槽，接上时那一路的来源（换了来源要换到新 tee 上）。
+        /// 源是输入 n 时：该路分支槽上按拍挑帧的 tap（下游 NDIInputFeed → sender），分支槽，接上时那一路的来源（换了来源摘下重挂；W5-P 起换源 tee 不换，删了再加同编号时 tee 才是新的）。
         var inputTap: ISOFrameTap?
         var branch: LockFreeFrameSlot?
         var inputSource: InputSource?
@@ -670,7 +670,7 @@ final class OutputRuntime {
     // MARK: NDI 发送（W3-E3）
 
     /// 一路 NDI 输出跟上快照：enabled 且没有 sender 的起；关掉 / 名字 / 分组 / 源变了的停（停完按最新快照再起）；转换方式运行时改；
-    /// 源是输入 n、那一路换了来源（InputRuntime 重建了它的 tee）的把分支换到新 tee 上。起 / 停进行中的不动，做完会再对一次。
+    /// 源是输入 n、那一路换了来源的摘下重挂一个分支（W5-P 起换源不换 tee，重挂只差一拍；删了再加同编号时挂到新 tee 上）。起 / 停进行中的不动，做完会再对一次。
     private func reconcileNDI(_ output: OutputState) {
         let n = output.number
         let key = NDIKey(output)

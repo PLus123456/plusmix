@@ -6,6 +6,8 @@
 // （ImageFileWatcher；SwitcherInputs 里有监视之前的接线，问题单 W5H-w2-inputs-image-input-no-file-watch）。
 // W5-N（01a D5 / 02 V04，提案 021）：结束动作 / 速率变了（路径没变）都就地改；播放目标（`settings.playback.paused`）与定位请求
 // （`seekTick` + `seekSeconds`，⟲ 与"切上 PGM 时从头播"同一条路）按快照对到跑着的 FileInput 的 pause / resume / seek 上，不重建这一路。
+// W5-P（D06）：换来源只换输入对象，这一路的 tee 与引擎注册不换——ISO 录制 / Aux 窗口挂的分支跟着新来源走（replaceSource）。
+import CoreVideo
 import Foundation
 import SwitcherContracts
 import SwitcherEngine
@@ -81,7 +83,7 @@ final class InputRuntime {
     /// 某路输入自己报的最近一句原因（lastError；这一类不报 / 没有为 nil）。
     func lastError(of number: Int) -> String? { (entries[number]?.input as? InputLastErrorReporting)?.lastError }
 
-    /// 让运行表跟上快照：新编号建 + 注册（+ start），消失的编号 stop + 注销，来源变了的重建。名字 / 设置变化不重建；
+    /// 让运行表跟上快照：新编号建 + 注册（+ start），消失的编号 stop + 注销，来源变了的换输入对象（`replaceSource`：帧出口不换）。名字 / 设置变化不重建；
     /// 文件输入只有结束动作 / 速率变了（路径没变）也不重建：改在跑着的 FileInput 上（两样都运行中可改），播放位置接着走（W5-H 的循环、W5-N 的速率）。
     /// 播放目标（暂停 / 定位）随后由 `applyPlayback` 对上去。
     func reconcile(_ state: MixerState, timing: ProgramTiming) {
@@ -96,7 +98,7 @@ final class InputRuntime {
                 entries[number]?.config = config
                 continue
             }
-            remove(number)
+            replaceSource(number, with: config, timing: timing)
         }
         for config in state.inputs where entries[config.number] == nil {
             add(config, timing: timing)
@@ -145,13 +147,7 @@ final class InputRuntime {
         }
         let slot = LockFreeFrameSlot(capacity: 3)
         let tee = InputFrameTee(primary: slot)
-        let made: MadeInput
-        do {
-            // 只改交给输入对象的那份配置：运行表 / 快照 / 节目文件里仍是相对路径
-            made = try factory.makeInput(config: Self.resolvingMediaPaths(config, against: mediaBaseDirectory), slot: tee, timing: timing)
-        } catch {
-            made = MadeInput(input: PlaceholderInput(config: config, message: "\(error)"), audioRing: nil, audioBlockFrames: 0)
-        }
+        let made = make(config, slot: tee, timing: timing)
         engine.registerInput(number: config.number, slot: slot)
         if let ring = made.audioRing, let audio {
             audio.register(number: config.number, ring: ring, blockFrames: made.audioBlockFrames)
@@ -161,10 +157,76 @@ final class InputRuntime {
             startInput(made.input)
             syncPlayback(config.number)
         }
+        watchImage(config, made)
+    }
+
+    /// 换来源（D06，Codex 2026-10-13 审查；用户 2026-10-17 定：ISO 录制中换源跟着新来源继续录、Recorder 不断）：这一路的帧出口——tee（主槽 + 各分支）
+    /// 与引擎注册——不换，只把往里推帧的输入对象换掉。原来每次换源都建新 tee，挂在旧 tee 分支上的 ISO 录制 / Aux 窗口接着读一个再没人推的槽，
+    /// 每拍重复旧来源的最后一帧、录像一直定格到停。现在它们不用重挂，新来源的帧照常进同一个分支，节目拍点连续、录制器不断；
+    /// 新来源第一帧到之前，各槽重复旧来源的最后一帧（引擎 per_input 的 dup、ISO tap 的 repeated 记账）。
+    /// 先停旧的再建新的：同一个 tee 的生产者从旧输入换成新输入，SPSC 槽不能两个线程同时推（各输入的 stop 都同步收掉线程 / 回调队列）。
+    /// 新来源不出画面（建不出来的占位、纯音频设备、start 当场失败的——例如图片文件不在）而旧来源推过帧：往 tee 里推一帧黑——
+    /// 与新加这种输入时"空槽画黑"一致，不停在旧来源的最后一帧上。起来之后才没信号的（设备晚到、NDI 源不在）照旧停在最后一帧，同来源中途断掉。
+    private func replaceSource(_ number: Int, with config: InputConfig, timing: ProgramTiming) {
+        guard let old = entries[number] else {
+            add(config, timing: timing)
+            return
+        }
+        imageWatchers.removeValue(forKey: number)?.stop()
+        if old.made.audioRing != nil { audio?.unregister(number: number) }
+        old.input.stop()
+        let made = make(config, slot: old.tee, timing: timing)
+        if let ring = made.audioRing, let audio {
+            audio.register(number: number, ring: ring, blockFrames: made.audioBlockFrames)
+        }
+        entries[number] = Entry(config: config, made: made, slot: old.slot, tee: old.tee, appliedSeek: currentSeekRequest(number))
+        var startFailed = false
+        if started {
+            startFailed = !startInput(made.input)
+            syncPlayback(number)
+        }
+        if made.input.videoSlot == nil || startFailed, old.slot.stats.pushed > 0 {
+            Self.pushBlackFrame(into: old.tee, input: number, format: timing.format)
+        }
+        watchImage(config, made)
+    }
+
+    /// 建输入对象（交给它的是 slot，一般是这一路的 tee）；建不出来画占位。只改交给输入对象的那份配置：运行表 / 快照 / 节目文件里仍是相对路径。
+    private func make(_ config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) -> MadeInput {
+        do {
+            return try factory.makeInput(config: Self.resolvingMediaPaths(config, against: mediaBaseDirectory), slot: slot, timing: timing)
+        } catch {
+            return MadeInput(input: PlaceholderInput(config: config, message: "\(error)"), audioRing: nil, audioBlockFrames: 0)
+        }
+    }
+
+    /// 图片输入盯着文件（W5-H）。
+    private func watchImage(_ config: InputConfig, _ made: MadeInput) {
         if case .image(let path) = Self.resolvingMediaPaths(config, against: mediaBaseDirectory).source, made.input is ImageInput {
             let number = config.number
             imageWatchers[number] = ImageFileWatcher(path: path) { [weak self] in self?.reloadImage(number) }
         }
+    }
+
+    /// 往一路的 tee 里推一帧黑（节目尺寸、BGRA、IOSurface 背后；主线程，只在换源换到不出画面的来源时用一次）。旧输入已经停了、新输入不推，
+    /// 这一刻主线程是这个 tee 唯一的生产者。pts = 现在：下一拍起引擎与各分支都挑到它。
+    static func pushBlackFrame(into slot: any FrameSlot, input number: Int, format: ProgramFormat) {
+        let attrs: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary, kCVPixelBufferMetalCompatibilityKey: true]
+        var buffer: CVPixelBuffer?
+        guard CVPixelBufferCreate(nil, max(16, format.width), max(16, format.height), kCVPixelFormatType_32BGRA, attrs as CFDictionary, &buffer) == kCVReturnSuccess,
+              let buffer else { return }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        if let base = CVPixelBufferGetBaseAddress(buffer) {
+            let stride = CVPixelBufferGetBytesPerRow(buffer), height = CVPixelBufferGetHeight(buffer), width = CVPixelBufferGetWidth(buffer)
+            for y in 0..<height {
+                let row = (base + y * stride).assumingMemoryBound(to: UInt32.self)
+                for x in 0..<width { row[x] = 0xFF00_0000 }   // B G R = 0，A = 255（预乘也是黑）
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        let now = HostClock.now()
+        slot.push(Frame(pixelBuffer: buffer, pts: now, duration: HostDuration(seconds: format.frameDuration.doubleValue), color: .sRGBFull,
+                        inputNumber: number, sequence: 0, ingressTime: now))
     }
 
     /// 两个来源是同一个文件、只差结束动作和 / 或速率（都能运行中改）：返回新的结束动作与速率；否则 nil（路径变了 / 不是文件 / 没变）。
@@ -215,8 +277,16 @@ final class InputRuntime {
         entry.input.stop()
     }
 
-    private func startInput(_ input: any Input) {
-        do { try input.start() } catch { NSLog("输入 \(input.number) 启动失败：\(error)") }
+    /// 起一路输入；起不来记日志、返回 false（格子上照它的 state 显示原因）。
+    @discardableResult
+    private func startInput(_ input: any Input) -> Bool {
+        do {
+            try input.start()
+            return true
+        } catch {
+            NSLog("输入 \(input.number) 启动失败：\(error)")
+            return false
+        }
     }
 
     /// 引擎起来之后统一 start（合成源到 t0 才出第一帧，所以顺序无所谓）；文件输入随后对上播放目标（节目里存着"暂停"的那一路 start 完就停住）。
