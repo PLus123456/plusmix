@@ -65,11 +65,22 @@ final class ShowDocuments {
         stoppingOutputs(show).migratingLegacyAppFlags().migratingLegacyInputCategories()
     }
 
+    /// 读文件 + 把它当成当前文件（read + adopt；启动、用例读回）。App 换节目走 read，身份由 AppController 在换 session 的事务里 adopt（D04）。
     func load(from url: URL) throws -> Show {
-        let show = Self.prepared(try store.load(from: url))
+        let show = try read(from: url)
+        adopt(url)
+        return show
+    }
+
+    /// 只读文件（做过 prepared），不碰当前文件 / 最近列表。
+    func read(from url: URL) throws -> Show {
+        Self.prepared(try store.load(from: url))
+    }
+
+    /// 把 url 当成当前节目的文件（保存写到这里、素材相对路径按它所在目录找），记进最近列表。
+    func adopt(_ url: URL) {
         currentURL = url
         noteRecent(url)
-        return show
     }
 
     func save(_ show: Show, to url: URL) throws {

@@ -23,7 +23,7 @@ final class StartupOrderTests: XCTestCase {
     /// 修前（定 t0 之后才起控制层）：起晚 ≈ 定 t0 之后的 输入 + 控制层 + 音频 − 300 ms，missed_render = ⌊起晚 / 16.7 ms⌋，
     /// 这段时间 3 格帧槽挤掉的帧算 drop（真 App：起晚 491–507 ms、missed 29–30、drop 11–12 / 28–29）。
     func testW3E6_sessionStart_clockNotLateAfterColdStart() throws {
-        _ = try AppTest.runningSession()   // 等启动时的 replaceSession 完成（它进行中时再调会被 replacing 挡掉）
+        _ = try AppTest.runningSession()   // 等启动时的 replaceSession 完成（W5-P / D04 起换 session 排队、不再丢，等它是为了从跑着的会话开始）
         let controller = AppTest.controller
         var show = controller.documents.emptyShow(name: "w3e6-cold-start")
         show.inputs = (1...8).map { n in
