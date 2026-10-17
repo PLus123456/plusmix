@@ -739,7 +739,24 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         var c = mixer.audioCounters
         c.discontinuities = pump.discontinuities
         c.meters = statsMeters(mixer.meters)
+        c.effects = statsEffects(status)   // 提案 030：效果链延迟从状态快照拷（控制循环每 statusInterval 刷新的那一份）
         return c
+    }
+
+    /// 提案 030：AudioEngineStatus → Stats 的效果链延迟。buses = Master / Bus A / Bus B 总是列（没装 = 0）；inputs 只列契约链里装进了 EQ / 动态格的路；
+    /// measured 只在链里有自写压缩器时给——每路的看 dynamicsKind（`InputEffects.compressorMeasuredLatencyFrames` 换掉压缩器后还留着上一次的值）。
+    private func statsEffects(_ st: AudioEngineStatus) -> Stats.AudioCounters.EffectsLatency {
+        typealias E = Stats.AudioCounters.EffectsLatency
+        let buses = E.listedBuses.map { b -> E.BusLatency in
+            let fx = st.buses.first { $0.bus == b }?.effects ?? .empty
+            return E.BusLatency(bus: b.name, latencyMs: E.milliseconds(frames: fx.latencyFrames), measuredLatencyMs: fx.compressorMeasuredLatencyFrames.map(E.milliseconds))
+        }
+        var inputs: [Int: E.InputLatency] = [:]
+        for i in st.inputs where i.effects.eqBands > 0 || i.effects.dynamicsKind != nil {
+            let measured = i.effects.dynamicsKind == .compressor ? i.effects.compressorMeasuredLatencyFrames : nil
+            inputs[i.number] = E.InputLatency(latencyMs: E.milliseconds(frames: i.effects.latencyFrames), measuredLatencyMs: measured.map(E.milliseconds))
+        }
+        return E(buses: buses, inputs: inputs)
     }
 
     /// MixerMeters → Stats 的表：buses 顺序 = Bus.allCases，inputs 键 = 输入编号（槽位表在 lock 下换算）。
