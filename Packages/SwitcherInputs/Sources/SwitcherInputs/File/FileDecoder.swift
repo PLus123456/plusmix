@@ -13,8 +13,16 @@ public struct FileInfo: Sendable, Hashable {
         /// 一帧时长（秒，minFrameDuration；没有时按 nominalFrameRate）。
         public let frameDuration: Rational
         public let nominalFrameRate: Double
+        /// 编码宽（解码器原样给的像素宽；转正之前）。
         public let width: Int
+        /// 编码高。
         public let height: Int
+        /// 视频轨方向矩阵归成的方向（D15）；FileInput 出的帧已按它转正。认不出的矩阵（任意角度）按 `.identity`（原样出）。
+        public let orientation: FileOrientation
+        /// 转正后的宽 = FileInput 出帧的宽。
+        public var displayWidth: Int { orientation.swapsAxes ? height : width }
+        /// 转正后的高。
+        public var displayHeight: Int { orientation.swapsAxes ? width : height }
         public let hasAlpha: Bool
         public let fullRange: Bool
         public let color: ColorInfo
@@ -102,6 +110,7 @@ final class FileAsset: @unchecked Sendable {
         else if nominal > 0 { frameDuration = Rational(approximating: 1 / Double(nominal), maxDenominator: 60_000) }
         else { frameDuration = Rational(1, 30) }
         info = Info(duration: duration, frameDuration: frameDuration, nominalFrameRate: Double(nominal), width: width, height: height,
+                    orientation: .identity,
                     hasAlpha: hasAlpha, fullRange: fullRange, color: hasAlpha ? .sRGBFull : color,
                     hasAudio: a != nil && channels > 0, audioChannels: channels, codec: codec)
     }

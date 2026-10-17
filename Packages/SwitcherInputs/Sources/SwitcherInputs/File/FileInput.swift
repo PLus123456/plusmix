@@ -200,6 +200,8 @@ public final class FileInput: Input, @unchecked Sendable {
     }
     /// 是否暂停。
     public var isPaused: Bool { playback.withLock { $0.paused } }
+    /// 暂停已由推帧线程落实（测试看 D13 的触发条件：暂停还没落实就来了定位）。
+    var pauseIsApplied: Bool { playback.withLock { $0.paused && $0.pauseApplied } }
     /// 当前时间线的锚点拍：start / seek / resume / 改速率之后，从这一拍起按新时间线出帧。
     /// start / seek 后要等目标位置的第一帧解出来才定，之前为 nil。
     public var playbackStartTick: Tick? {

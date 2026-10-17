@@ -11,6 +11,19 @@
 | `w1a-sample-20s.mov`（439 KB） | W1-A，`frameprobe synth --out Tests/Fixtures/w1a-sample-20s.mov --seconds 20 --bitrate 2000000 --audio aac` | 1080p60 20 s H.264（目标 2 Mbps，图案太简单实际 77 kbps）+ AAC 128 kbps 单声道。A = 输入 ID 0、灰 64、60 fps；B = ID 1、灰 192、30 fps（每帧重复两次 = 设计内 50%）。第 400 拍 Cut A→B，第 700 拍 Fade 30 拍 B→A。闪光每 60 帧一次，click 与闪光同刻（t0 = 1 s host time，图案里的 genTimeMs 从 1000 起）。 |
 | `w1a-sample-20s.expected.json` | W1-A，`W1A_RECORD_SNAPSHOT=1 swift test --filter FixtureSnapshotTests`（在 Packages/SwitcherTestKit 下）；W1-A2 重录（av 报告加了整秒配对 / 音轨时间轴字段，老字段的值没变） | frameprobe 对上面样例的输出快照：前 130 帧、Cut / Fade 附近的帧、stats / switches / fade / av / 多文件 av。快照测试整数字段精确比，灰度 ±1.5、时间 ±0.1 ms。 |
 | `w2d-rtmp-stream-4s.mp4`（2.9 MB） | W1-A2：W2-D `MediaMTXTests.testRTMP_endToEnd_10s_framesContinuousAndAVAligned` 在本机（2026-09-18 13:20）让 MediaMTX 落盘的 fMP4，在顶层 box 边界截到前 4 个分片（ftyp + moov + 4 × moof/mdat，不改任何字节；MediaMTX 每个 part ≈ 1 s、两轨同一个 moof） | 推流落盘文件的代表：**无编辑列表、AAC 无 priming 信息、音轨 tfdt = 960（20 ms）而视频 tfdt = 0**。1080p60 H.264 6 Mbps 225 帧（帧号 0…224，输入 ID 3）+ AAC 48 kHz 双声道 171 包；闪光 0 / 1 / 2 / 3 s，click 1 / 2 / 3 s。AVFoundation 对它把音轨归零又裁 2112 样本，老 frameprobe av 报 +64 ms；修正后 0.000 ms，与 ffmpeg 口径一致（`StreamRecordingProbeTests`，问题单 W2D-w1-testkit-frameprobe-av-on-stream-recordings）。重做：跑一次 W2-D 的用例，取 `$TMPDIR/switcher-streaming-tests/rtmp-e2e/mtx1/s1/*.mp4`，按 reports/w1-testkit-2.md §5 的脚本截断。 |
+| `w2a5-rot90-320x240.mov`（2.3 KB） | W2-A5（prompt 117，Codex 审查 D15），ffmpeg 9.0.1 造，命令见下 | 1 s、30 帧（30 fps）H.264 320×240 yuv420p（BT.709 limited），编码方向四色象限：左上红、右上绿、左下蓝、右下白；视频轨带 90° 显示矩阵（ffmpeg `-display_rotation 90`，AVFoundation 读成 `preferredTransform` = (0, −1, 1, 0, 0, 0)，即逆时针 90° 才正）。转正后 240×320，四角 = 左上绿、右上白、左下红、右下蓝（与 AVAssetImageGenerator `appliesPreferredTrackTransform` 的参照一致）。`FileInputW2A5Tests` 的 D15 用例读它。 |
+
+`w2a5-rot90-320x240.mov` 的造法（两步：先编一段正的，再只改显示矩阵、流拷贝）：
+
+```bash
+ffmpeg -f lavfi -i "color=c=red:s=160x120:r=30:d=1" -f lavfi -i "color=c=lime:s=160x120:r=30:d=1" \
+       -f lavfi -i "color=c=blue:s=160x120:r=30:d=1" -f lavfi -i "color=c=white:s=160x120:r=30:d=1" \
+       -filter_complex "[0][1][2][3]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0,scale=out_color_matrix=bt709:out_range=limited,format=yuv420p" \
+       -c:v libx264 -crf 18 -g 30 -bf 0 -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -t 1 upright.mov
+ffmpeg -display_rotation 90 -i upright.mov -c copy Tests/Fixtures/w2a5-rot90-320x240.mov
+```
+
+180° / 270° / 镜像 / 带平移的手机矩阵（(0, 1, −1, 0, h, 0) 这类）不另放夹具：用例里用 AVAssetWriter（`AVAssetWriterInput.transform`）现场写八种。
 
 对样例跑 frameprobe：
 
