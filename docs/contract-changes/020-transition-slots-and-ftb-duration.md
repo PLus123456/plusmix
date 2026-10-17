@@ -95,3 +95,8 @@ CONTRACTS.md §2.5（TransitionState / TransitionSlot 行、搬迁一节）、§
 CONTRACTS.md §2.5 / §2.6 / §2.8 / §8；Samples 的四槽非默认值；`test016_existingShapesUnchanged` 改成只钉 016 当时那几个键（TransitionState 的 JSON 多了 slots / currentSlot）。
 用例：`Contracts020Tests`（6 条）、`ReducerTests.test020_*`（6 条）+ 覆盖表 20 行、CommandBusTests 合法 / 非法各 6 条、CommandCatalogTests 字段描述。
 界面 / 快捷键 / 兼容层 / Stream Deck 归 100；SwitcherRender 没动一个字节。
+
+## 2026-10-17 用户裁定：T-bar 拉回 0 取消也重拷（P5-4 落地，prompt 115）
+
+P5-3 探针核实的缺口（reports/p5-contracts-3.md §4 第 2 条）：T-bar 推到一半时 `setTransitionSlot` 改了当前槽（进行中只改槽），之后拉回 0 **取消**——取消不走 `completeTransition`、当前那组不重拷，下一次回车执行的是改之前的旧配置（探针：槽 1 改成 Zoom 12 拍后拉回 0，回车执行 Fade 30）。
+用户 2026-10-17 定：**修**。reducer 的 `tbar` 在 progress 回到 0（取消）那一拍按 currentSlot 重拷当前那组（与 completeTransition 同一句，幂等）；本提案与 CONTRACTS.md §2.5 的口径从"完成那一拍重拷"改成"**完成或取消那一拍重拷**"。不加字段、不加命令。

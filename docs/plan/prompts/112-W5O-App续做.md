@@ -15,3 +15,5 @@
 
 不做：新功能（播放进度条、推流 ▴ 每行时长那类）；030 效果延迟进 Stats 的界面（等用户 / 契约）；任何阈值。
 报告 reports/w5-app-followups.md 五段；不 push、不 merge，做完告诉 G9（prompt 114）。
+
+**G9 追加（2026-10-17）**：已随 G9 进 main（w5-app-followups 7f518cf → 合并提交 c1ef0d8，紧跟 110 合、0 冲突）。§3 用户裁定：第 1 条借 Master 不算待应用——**接受**；第 2 条 MIDI 被拒不提示——**加**，归 116（MIDIController.setFeedbackHandler + ControlRuntime ≤ 30 行）；第 6 条英文小档 "Transition" 截尾——**留着**（S3）；第 7 条格子"转场"遇没选输入的 Stinger——像转场列那样先弹选择、整条不发，归 119；第 8 条 ⇧1–⇧0——归 116；第 9 条 T-bar——App 灰掉并提示，归 119。KNOWN_ISSUES 销号由 G9 做了。
