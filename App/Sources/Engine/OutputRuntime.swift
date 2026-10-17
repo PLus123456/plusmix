@@ -310,13 +310,18 @@ final class OutputRuntime {
         rebuildStats()
     }
 
-    /// 一路起不来的原因（没有为 nil）：底栏提示、推流页那一段照着写，底栏主体按钮按它决定"重试"还是"停"。
-    /// 起不来的（failed 表）之外，推流的重连放弃了（StreamOutput 停在 failed；App 里不给重连上限，正常不会出现）也算。
-    func failureReason(output number: Int) -> String? {
-        if let reason = failed[number] { return reason }
-        if let e = streams[number], !e.stopping, case .failed(let why) = e.stream.state { return L("notice.streamGaveUp", number, why) }
+    /// 一路起不来 / 停住的原因（没有为 nil）：底栏提示、推流页那一段照着写，底栏主体按钮按它决定"重试"还是"停"。
+    /// 起不来的（failed 表）之外，推流对象自己停在 failed 也算——服务器拒绝鉴权（W2-D4）、重连放弃（App 里不给重连上限，正常不会出现）；
+    /// 这一种带 stoppedStream：界面写"失败"（同 Stats / 状态窗），改设置不自动重试（reconcile 只重试 failed 表里的），要点"重试"（W5-P，111 留下的）。
+    func routeFailure(output number: Int) -> OutputRouteFailure? {
+        if let reason = failed[number] { return OutputRouteFailure(reason: reason) }
+        if let e = streams[number], !e.stopping, case .failed(let why) = e.stream.state {
+            return OutputRouteFailure(reason: L("notice.streamGaveUp", number, why), stoppedStream: true)
+        }
         return nil
     }
+
+    func failureReason(output number: Int) -> String? { routeFailure(output: number)?.reason }
 
     /// 每行 Stats（主线程）：推流第一次报 publishing 时提示"已开始"（X37：start() 之后先提示"连接中"，连上才算开始）。
     func noteStats(_ stats: Stats) {

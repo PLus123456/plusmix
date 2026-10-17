@@ -35,13 +35,14 @@ final class OutputSettingsModel: ObservableObject {
     /// 推流页"添加目的地"的地址框要拿焦点（W5-F，L1：没有目的地时点底栏推流主体）；视图拿到就清掉。requests 是累计次数（测试看）。
     @Published var pendingAddDestinationFocus = false
     private(set) var addDestinationFocusRequests = 0
-    /// 起不来的录制 / 推流 → 原因（运行表，refreshRouteDetails 时取；W5-B）。第几次连接 W5-N 起读 Stats.encoder 的 attempt（提案 022 B1）。
-    @Published private(set) var failures: [Int: String] = [:]
+    /// 起不来 / 停住的录制 / 推流 → 原因（运行表，refreshRouteDetails 时取；W5-B；W5-P 起带"是不是停在 failed 的推流对象"）。
+    /// 第几次连接 W5-N 起读 Stats.encoder 的 attempt（提案 022 B1）。
+    @Published private(set) var failures: [Int: OutputRouteFailure] = [:]
     var send: ((Command) -> Void)?
     /// 打开推流 / 录制状态面板（W5-N；PanelCoordinator 接）。
     var showOutputStatus: ((OutputStatusModel.Page) -> Void)?
-    /// 一路起不来的原因（PanelCoordinator 接到 session 的运行表）。
-    var routeFailure: ((Int) -> String?)?
+    /// 一路起不来 / 停住的原因（PanelCoordinator 接到 session 的运行表）。
+    var routeFailure: ((Int) -> OutputRouteFailure?)?
     /// 重试起不来的那几路（session.retryFailedOutputs）。
     var onRetry: (([Int]) -> Void)?
     /// 新建录制输出的默认目录。
@@ -94,7 +95,7 @@ final class OutputSettingsModel: ObservableObject {
 
     /// 重新取一遍录制 / 推流各路起不来的原因（快照 / Stats 来的时候，或点了重试之后）。
     func refreshRouteDetails() {
-        var f: [Int: String] = [:]
+        var f: [Int: OutputRouteFailure] = [:]
         for o in state.outputs where o.kind == .record || o.kind == .stream {
             if let failure = routeFailure?(o.number) { f[o.number] = failure }
         }
@@ -312,12 +313,22 @@ final class OutputSettingsModel: ObservableObject {
         }
     }
 
-    /// 推流页那一段的状态行：起不来写原因；其余与底栏同一套文字（Stats.encoder 的 state + 正在第几次连接）。
+    /// 推流页那一段的状态行：起不来 / 失败写原因（推流对象停在 failed 的写"失败：…"，与底栏、状态窗同字，W5-P）；其余与底栏同一套文字
+    /// （Stats.encoder 的 state + 正在第几次连接）。
     func streamStatus(output number: Int) -> String {
         guard let o = state.output(number) else { return "" }
-        if o.enabled, let failure = failures[number] { return L("outputSettings.stream.statusFailed", failure) }
+        if o.enabled, let failure = failures[number] {
+            return L(failure.stoppedStream ? "outputSettings.stream.statusStopped" : "outputSettings.stream.statusFailed", failure.reason)
+        }
         let route = OutputRouteStatus(output: o, entry: OutputRuntime.encoderEntry(encoderStats, forOutput: number))
         return OutputButtonSummary.routeState(route, kind: .stream).text
+    }
+
+    /// 推流页那一段的红字（开着、起不来 / 失败时；没有为 nil）：按原因分两句（W5-P，W4C3 第 15 条）——运行表起不来的改好地址自动重试；
+    /// 推流对象停在 failed（服务器拒绝鉴权）的改了设置不会自己重试（reconcile 只重试 failed 表里的），写"改对后点「重试」"。
+    func streamFailureHint(_ number: Int) -> String? {
+        guard state.output(number)?.enabled == true, let failure = failures[number] else { return nil }
+        return L(failure.stoppedStream ? "outputSettings.stream.failedHintStopped" : "outputSettings.stream.failedHint")
     }
 
     /// 重试起不来的这一路。

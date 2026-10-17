@@ -463,6 +463,7 @@
 "bottom.tip.line" = "%@: %@";
 "bottom.tip.lineReason" = "%@: %@ — %@";
 "bottom.tip.retryHint" = "Click: retry the destinations that couldn't start; healthy ones keep going";
+"bottom.tip.retryHintStopped" = "Click: retry the destinations that couldn't start or failed; healthy ones keep going";
 "bottom.waitingStats" = "Waiting for the first Stats line…";
 "bus.busA" = "Bus A";
 "bus.busB" = "Bus B";
@@ -1022,13 +1023,15 @@
 "outputSettings.stream.hint" = "The protocol comes from the start of the address (rtmp://, rtmps://, srt://); each destination encodes and reconnects on its own.";
 "outputSettings.stream.disable" = "Turn Off This Destination";
 "outputSettings.stream.failedHint" = "Fix the URL / key (Return or leave the field) and it retries automatically; or turn this destination off.";
+"outputSettings.stream.failedHintStopped" = "This destination stopped and won't reconnect on its own (the server rejected the credentials): fix the URL / credentials, then click “Retry” — changing the settings alone doesn't retry; or turn this destination off.";
 "outputSettings.stream.key" = "Stream key";
 "outputSettings.stream.lockedNote" = "Streaming: URL, key and encoding can be changed after it stops.";
 "outputSettings.stream.name" = "Stream %d";
-"outputSettings.stream.reconnect" = "Max retry interval %.0f s (keeps retrying)";
+"outputSettings.stream.reconnect" = "Max retry interval %.0f s (keeps retrying, except after an authentication failure)";
 "outputSettings.stream.remove" = "Remove Destination";
 "outputSettings.stream.retry" = "Retry";
 "outputSettings.stream.statusFailed" = "Couldn't start: %@";
+"outputSettings.stream.statusStopped" = "Failed: %@";
 "outputSettings.stream.url" = "URL";
 "outputSettings.stream.urlPrompt" = "rtmp:// rtmps:// srt://";
 "outputSettings.tab.external" = "External Display";

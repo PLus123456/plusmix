@@ -356,7 +356,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         // 调音台头部：设备没有耳机声道时写明（W5-K / X09，音频设备页同一句）
         mixerPanel.model.setOutputInfo(outputChannels: session?.audio.outputChannelCount, map: session?.audio.effectiveOutputMap)
         // 底栏主体按钮：起不来的原因（运行表）、重试起不来的那几路（W5-B）；第几次连接 W5-N 起读 Stats 的 attempt
-        bottomBar.routeFailure = session.map { s in { [weak s] n in s?.outputs.failureReason(output: n) } }
+        bottomBar.routeFailure = session.map { s in { [weak s] n in s?.outputs.routeFailure(output: n) } }
         bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }
         mainToolbar.setSessionAvailable(session != nil)   // 没有 session 时节目组以外置灰（W5-G）
         refreshToolbarStatus()

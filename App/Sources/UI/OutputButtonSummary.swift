@@ -13,6 +13,23 @@
 import AppKit
 import SwitcherContracts
 
+/// 一路起不来 / 停住的原因（OutputRuntime.routeFailure 给）。用字符串字面量写 = 运行表起不来的那一种（测试、老调用照旧传一句原因）。
+struct OutputRouteFailure: Equatable, Sendable, ExpressibleByStringLiteral {
+    /// 给人看的一句原因。
+    var reason: String
+    /// 推流对象自己停在 failed（服务器拒绝鉴权；重连放弃——App 里不给重连上限，正常不会出现）：Stats 报 failed，界面写"失败"（与状态窗同字，
+    /// W5-P / 111 留下的，用户 2026-10-17 定）；改地址 / 账号不会自动重试，要点"重试"或底栏主体。false = 运行表起不来（没地址 / 地址不认 /
+    /// 建不起来 / 录制起不来），写"起不来"，设置改对了自动重试。
+    var stoppedStream = false
+
+    init(reason: String, stoppedStream: Bool = false) {
+        self.reason = reason
+        self.stoppedStream = stoppedStream
+    }
+
+    init(stringLiteral value: String) { self.init(reason: value) }
+}
+
 /// 一路录制 / 推流在按钮眼里的样子。
 struct OutputRouteStatus: Equatable {
     var number: Int
@@ -25,17 +42,20 @@ struct OutputRouteStatus: Equatable {
     var frames: UInt64 = 0
     /// 推流：正在 / 即将进行第几次连接（从 1 起，Stats.encoder 的 attempt（提案 022 B1）；不在连为 nil）。
     var attempt: Int? = nil
-    /// 起不来的原因（没有地址 / 地址不认 / 建不起来 / 录制起不来……）；nil = 没有。
+    /// 起不来 / 停住的原因（没有地址 / 地址不认 / 建不起来 / 录制起不来 / 推流对象停在 failed……）；nil = 没有。
     var failure: String? = nil
     /// 这一路本次运行的时长（秒，Stats.encoder 的 uptime_s，提案 022）；没有这一项为 0。
     var uptime: Double = 0
+    /// failure 来自停在 failed 的推流对象（OutputRouteFailure.stoppedStream）：状态按 Stats 的 failed 写"失败"，点主体照样重试它。
+    var failureStopped = false
 }
 
 extension OutputRouteStatus {
     /// 快照里的一路 + Stats.encoder 里它那一项（按 output 对号）+ 起不来的原因：state / frames / attempt / uptime 全读 Stats（W5-N）。
-    init(output o: OutputState, entry: Stats.EncoderEntry?, failure: String? = nil) {
+    init(output o: OutputState, entry: Stats.EncoderEntry?, failure: OutputRouteFailure? = nil) {
         self.init(number: o.number, name: o.name, enabled: o.enabled, state: entry?.state, frames: entry?.frames ?? 0,
-                  attempt: entry.flatMap { $0.attempt > 0 ? $0.attempt : nil }, failure: failure, uptime: entry?.uptimeS ?? 0)
+                  attempt: entry.flatMap { $0.attempt > 0 ? $0.attempt : nil }, failure: failure?.reason, uptime: entry?.uptimeS ?? 0,
+                  failureStopped: failure?.stoppedStream ?? false)
     }
 }
 
@@ -81,7 +101,11 @@ struct OutputButtonSummary: Equatable {
     /// 一路的状态文字与严重程度（按钮、提示、推流页那一段的状态行共用）。
     static func routeState(_ r: OutputRouteStatus, kind: Kind) -> (text: String, severity: OutputButtonSeverity) {
         guard r.enabled else { return (L("output.state.off"), .off) }
-        if r.failure != nil { return (L("output.state.startFailed"), .error) }
+        if r.failure != nil {
+            // 推流对象自己停在 failed（服务器拒绝鉴权）：与 Stats / 状态窗同一个字"失败"，不叫"起不来"（W5-P，111 留下的）；failure 照旧非空，点主体 = 重试它
+            if r.failureStopped { return (kind == .stream ? L("output.state.stream.failed") : L("output.state.record.failed"), .error) }
+            return (L("output.state.startFailed"), .error)
+        }
         let state = r.state ?? "idle"
         switch kind {
         case .stream:
@@ -131,8 +155,10 @@ struct OutputButtonSummary: Equatable {
             } else {
                 title = kind == .stream ? L("bottom.streamProblems", problems.count) : L("bottom.recordProblems", problems.count)
             }
-            // 推流：有起不来的路时点主体 = 重试它们（不停正常的），提示里说一句
-            let hint = kind == .stream && enabled.contains(where: { $0.failure != nil }) ? "\n" + L("bottom.tip.retryHint") : ""
+            // 推流：有起不来 / 失败的路时点主体 = 重试它们（不停正常的），提示里说一句（有停在 failed 的推流对象时连"失败"一起说）
+            let failing = enabled.filter { $0.failure != nil }
+            let hint = kind != .stream || failing.isEmpty ? ""
+                : "\n" + (failing.contains(where: \.failureStopped) ? L("bottom.tip.retryHintStopped") : L("bottom.tip.retryHint"))
             return OutputButtonSummary(title: title, toolTip: tip + hint, severity: worst)
         }
         // 时长：在录 / 在推的路里最长的那一路（同一拍起的几路差不到一秒；推流的 uptime 含重连期，提案 022 默认口径）

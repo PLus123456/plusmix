@@ -100,6 +100,10 @@ final class StreamWiringTests: XCTestCase {
         XCTAssertTrue(events.contains("推流 · 失败：" + (e?.lastError ?? "-")), "状态面板事件（W5-N）：\(events)")
         print("鉴权失败：底栏「\(bar.streamSummary.title)」提示「\(bar.streamSummary.toolTip ?? "")」；面板事件 \(events)")
         XCTAssertEqual(bar.streamSummary.severity, .error, "底栏深红：\(bar.streamSummary.title)")
+        // W5-P（111 留下的，用户 2026-10-17 定）：底栏与状态面板同一个字"失败"（原来底栏写"推流 · 起不来"）；点主体照旧 = 重试这一路
+        XCTAssertEqual(bar.streamSummary.title, "推流 · 失败")
+        XCTAssertEqual(session.outputs.routeFailure(output: 2)?.stoppedStream, true)
+        XCTAssertTrue(bar.streamSummary.toolTip?.contains("点一下：重试起不来 / 失败的路") == true, bar.streamSummary.toolTip ?? "")
         XCTAssertEqual(session.outputs.streams[2]?.stream.counters.connectAttempts, 1, "鉴权失败不重连")
     }
 }

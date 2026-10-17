@@ -463,6 +463,7 @@
 "bottom.tip.line" = "%@：%@";
 "bottom.tip.lineReason" = "%@：%@ — %@";
 "bottom.tip.retryHint" = "点一下：重试起不来的路，正常的路不受影响";
+"bottom.tip.retryHintStopped" = "点一下：重试起不来 / 失败的路，正常的路不受影响";
 "bottom.waitingStats" = "等待第一行 Stats…";
 "bus.busA" = "Bus A";
 "bus.busB" = "Bus B";
@@ -1022,13 +1023,15 @@
 "outputSettings.stream.hint" = "协议看地址开头（rtmp://、rtmps://、srt://）；每个目的地单独编码、断了单独重连。";
 "outputSettings.stream.disable" = "停用这一路";
 "outputSettings.stream.failedHint" = "改好地址 / 密钥（回车或离开输入框）会自动重试；也可以先停用这一路。";
+"outputSettings.stream.failedHintStopped" = "这一路已停止、不再自己重连（服务器拒绝了鉴权）：改对地址 / 账号后点「重试」，光改设置不会自己重试；也可以先停用这一路。";
 "outputSettings.stream.key" = "密钥";
 "outputSettings.stream.lockedNote" = "正在推流：地址、密钥和编码停止后可改。";
 "outputSettings.stream.name" = "推流 %d";
-"outputSettings.stream.reconnect" = "重试间隔最长 %.0f s（一直重试）";
+"outputSettings.stream.reconnect" = "重试间隔最长 %.0f s（一直重试，鉴权失败除外）";
 "outputSettings.stream.remove" = "删除目的地";
 "outputSettings.stream.retry" = "重试";
 "outputSettings.stream.statusFailed" = "起不来：%@";
+"outputSettings.stream.statusStopped" = "失败：%@";
 "outputSettings.stream.url" = "地址";
 "outputSettings.stream.urlPrompt" = "rtmp:// rtmps:// srt://";
 "outputSettings.tab.external" = "外部显示";

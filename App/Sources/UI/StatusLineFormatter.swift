@@ -26,9 +26,10 @@ enum StatusLineFormatter {
     }
 
     /// 在跑的录制 / 推流项（X28）：kinds 给了按输出类型分；没给（老调用 / 测试）按 state 认——recording / stopping 算录制，
-    /// publishing / connecting / backoff 算推流（这时分不出 NDI）。
+    /// publishing / connecting / backoff 算推流（这时分不出 NDI）。failed 不算在跑（起不来 / 鉴权停下的推流码率是 0，原来状态行写"推流 0 b/s"，
+    /// 推流 / 录制状态窗写 —，两处不一致；W5-P，W4C3 第 11 条）。
     static func runningEncoders(in stats: Stats, kinds: [Int: OutputKind]?) -> (record: [Stats.EncoderEntry], stream: [Stats.EncoderEntry], other: [Stats.EncoderEntry]) {
-        func running(_ e: Stats.EncoderEntry) -> Bool { !["idle", "stopped", "unavailable"].contains(e.state) }
+        func running(_ e: Stats.EncoderEntry) -> Bool { !["idle", "stopped", "unavailable", "failed"].contains(e.state) }
         var record: [Stats.EncoderEntry] = [], stream: [Stats.EncoderEntry] = [], other: [Stats.EncoderEntry] = []
         for e in stats.encoder where running(e) {
             let kind: OutputKind?

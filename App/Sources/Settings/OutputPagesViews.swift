@@ -395,8 +395,8 @@ struct StreamDestinationSection: View {
                     .disabled(!output.enabled && !model.canStartStream(number))
                 Text(model.streamStatusLine(output: number)).foregroundStyle(.secondary).lineLimit(1)
             }
-            if output.enabled, model.failures[number] != nil {
-                Text(L("outputSettings.stream.failedHint")).font(.caption).foregroundStyle(.red)
+            if let hint = model.streamFailureHint(number) {
+                Text(hint).font(.caption).foregroundStyle(.red)
                 HStack {
                     Button(L("outputSettings.stream.retry")) { model.retryStream(number) }
                     Button(L("outputSettings.stream.disable")) { model.disableStream(number) }
