@@ -374,6 +374,9 @@ public final class FileInput: Input, @unchecked Sendable {
             p.reachedEnd = false
             p.endMedia = nil
             p.loopResumeEnd = nil
+            // 暂停中定位 = 冻结在目标上，暂停就此落实——不管推帧线程落没落实之前那次暂停请求：新定位的代次优先于旧的暂停请求。
+            // 原来留着"待落实"，推帧线程随后拿上一代最后推出的帧覆盖目标（D13：1 s 文件定位 0.5 s，0.4 s 后仍停在 0.1 s）
+            if p.paused { p.pauseApplied = true }
         }
         fileCounters.seeks.add(1, ordering: .relaxed)
     }
@@ -647,6 +650,7 @@ public final class FileInput: Input, @unchecked Sendable {
         let sampleRate = Int64(AudioFormat.sampleRate)
         let chunkDuration = Rational(Int64(chunk), sampleRate).hostDuration
         var held: (media: Rational, buffer: CVPixelBuffer)?
+        var heldGeneration: UInt64 = 0   // held 是哪一代推出的（暂停落实只认本代的，D13）
         var ended = false
         var seenGeneration: UInt64 = 0
         var seenVersion: UInt64 = 0
@@ -725,23 +729,34 @@ public final class FileInput: Input, @unchecked Sendable {
                 if woke >= videoWake {
                     let tickTime = timing.time(of: tick)
                     if p.paused && !p.pauseApplied {
-                        // 落实暂停：位置冻结在最近推出的那一帧（没有推过就冻结在本拍的位置）
-                        let frozen = held?.media ?? p.timeline.position(at: tick)
-                        playback.withLock { q in
-                            guard q.paused, !q.pauseApplied else { return }
+                        // 落实暂停：位置冻结在本代最近推出的那一帧。本代还没推过（刚开播 / 刚定位）就冻结在本拍的位置、但不早于锚点位置
+                        // （= 定位目标：锚点拍在 seekLead 之后时本拍位置比目标早，冻在那里就永远等不到目标那帧）。上一代推出的帧不算——
+                        // 原来拿它冻结，"定位后紧跟暂停"会把位置冻回定位之前（D13 的反向顺序）
+                        let heldMedia = heldGeneration == p.generation ? held?.media : nil
+                        let frozen = heldMedia ?? max(p.timeline.position(at: tick), p.timeline.anchorMedia)
+                        let generation = p.generation
+                        let applied = playback.withLock { q -> Bool in
+                            guard q.paused, !q.pauseApplied, q.generation == generation else { return false }
                             q.timeline.anchorMedia = frozen
                             q.timeline.anchorTick = tick
                             q.pauseApplied = true
+                            return true
                         }
+                        // 没落成 = 读快照之后来了定位 / 恢复（定位会把暂停直接落在目标上）：这一拍不按旧快照出帧，下一轮按新状态来
+                        if !applied { return true }
                         p.timeline.anchorMedia = frozen
                         p.timeline.anchorTick = tick
+                        p.pauseApplied = true
                     }
-                    let position = p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick)
+                    var position = p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick)
                     var newest: DecodedVideoQueue.Item?
                     var rejected: UInt64 = 0
                     var endItem: (item: DecodedVideoQueue.Item, action: FileEndAction)?   // 本拍按结束动作收尾的哨兵（锁里判定过）
                     drain: while let head = queue.peek() {
-                        if head.generation != p.generation { _ = queue.pop(); continue }   // 旧代
+                        if head.generation < p.generation { _ = queue.pop(); continue }   // 旧代
+                        // 比本轮快照还新的代：读快照、睡到拍点的这段时间里又定位了，解码线程已经给出新代的帧——留给下一轮。
+                        // 原来按"代数不等 = 旧代"扔掉，定位目标那一帧就丢了（小文件重开 reader + 解首帧只要几 ms，比推帧线程的一拍短；D13 实测）
+                        if head.generation > p.generation { break drain }
                         if head.isEnd {
                             // 末帧显示期结束：本拍没有别的帧要出时判定——按结束动作收尾，或者哨兵放下之后循环开了（D14）：作废它、
                             // 接着出后面下一圈的帧（解码线程按 loopResumeEnd / 循环开关接着读）
@@ -762,8 +777,18 @@ public final class FileInput: Input, @unchecked Sendable {
                             _ = queue.pop()
                             if newest != nil { rejected += 1 }
                             newest = head
+                        } else if p.paused, newest == nil, heldGeneration != p.generation {
+                            // 暂停中定位后，新代的第一帧比冻结位置还晚（目标早于文件首帧的 pts）：照样出它、冻结位置挪到它——
+                            // 不然一直重推上一代的旧帧
+                            _ = queue.pop()
+                            newest = head
+                            position = head.media
+                            let generation = p.generation
+                            playback.withLock { q in if q.paused, q.generation == generation { q.timeline.anchorMedia = head.media } }
+                            p.timeline.anchorMedia = head.media
+                            break drain
                         } else {
-                            break
+                            break drain
                         }
                     }
                     if rejected > 0 { countersBox.framesRejected.add(rejected, ordering: .relaxed) }
@@ -779,6 +804,7 @@ public final class FileInput: Input, @unchecked Sendable {
                                         inputNumber: number, sequence: sequence, ingressTime: ingress))
                         countersBox.framesPushed.add(1, ordering: .relaxed)
                         held = (f.media, pb)
+                        heldGeneration = p.generation
                         hasPushed.store(true, ordering: .releasing)
                         if ended { ended = false }
                         stateBox.set(.live)
@@ -802,6 +828,7 @@ public final class FileInput: Input, @unchecked Sendable {
                                                 inputNumber: number, sequence: sequence, ingressTime: HostClock.now()))
                                 countersBox.framesPushed.add(1, ordering: .relaxed)
                                 held = (e.media, b)
+                                heldGeneration = p.generation
                             }
                         }
                         stateBox.set(.noSignal)

@@ -36,6 +36,12 @@ final class FileInputW2A5Tests: XCTestCase {
     /// 帧槽里现在那一帧的帧号。
     private func shownNumber(_ slot: LockFreeFrameSlot) -> Int? { frameNumber(of: slot.latest(atOrBefore: HostClock.now())) }
 
+    /// 帧槽里 pts 已到的最新一帧（刚进 live 时第一帧的 pts 还在 pushLead 之后，等它到点）。
+    private func currentFrame(_ slot: LockFreeFrameSlot, timeoutMs: Double = 1000) throws -> Frame {
+        _ = waitUntil(timeoutMs: timeoutMs, pollMs: 1) { slot.latest(atOrBefore: HostClock.now()) != nil }
+        return try XCTUnwrap(slot.latest(atOrBefore: HostClock.now()), "帧槽里 \(timeoutMs) ms 内没有到点的帧")
+    }
+
     /// Codex 的探针素材：1 s、30 帧（30 fps）；这里画帧号图案（640×360：320 宽的图案块只有 4 像素，H.264 之后读不稳）。
     private static func oneSecondClip() throws -> URL {
         let url = RepoPaths.output.appendingPathComponent("w2a5-1s-30f.mov")
@@ -89,6 +95,26 @@ final class FileInputW2A5Tests: XCTestCase {
             XCTAssertTrue(resumed.allSatisfy { $0 >= 15 && $0 <= 19 }, "\(order)：恢复后接着 15 往后播（30 fps 文件、60 fps 节目每帧两拍）：\(resumed)")
             input.stop()
         }
+    }
+
+    /// D13 的同一个竞争窗口（不暂停时）：推帧线程读快照、睡到拍点的这段时间里来了定位，小文件重开 reader + 解首帧只要几 ms，
+    /// 新代的首帧在推帧线程醒来前就进了队列——原来按"代数不等 = 旧代"扔掉，定位后首帧变成目标 + 1。连着定位 12 次，每次首个新帧号都是目标。
+    func testD13_seekWhilePlaying_fastReopen_firstNewFrameIsTargetEveryTime() throws {
+        let url = try Self.oneSecondClip()
+        let timing = makeTiming()
+        let slot = LockFreeFrameSlot(capacity: 3)
+        let input = try makeInput(timing: timing, slot: slot, path: url.path, endAction: .loop)
+        defer { input.stop() }
+        try startAndWaitLive(input)
+        var misses: [String] = []
+        for (i, target) in [5, 20, 9, 27, 14, 3, 22, 11, 18, 7, 25, 16].enumerated() {
+            sleepMs(Double(7 + (i * 5) % 13))   // 定位落在一拍里不同的相位
+            input.seek(toFrame: target)
+            let after = picks(timing, slot: slot, from: try anchor(of: input), count: 4).compactMap(\.number)
+            if after.first != target { misses.append("目标 \(target)：\(after)") }
+        }
+        XCTAssertTrue(misses.isEmpty, "定位后首帧不是目标 \(misses.count) / 12 次：\(misses)")
+        XCTAssertEqual(input.fileCountersSnapshot.seeks, 12)
     }
 
     // MARK: D14 片尾预解码窗口里开循环
@@ -335,13 +361,13 @@ final class FileInputW2A5Tests: XCTestCase {
         XCTAssertEqual(input.info?.orientation, .rotate270, "矩阵 (0,−1,1,0) = 顺时针 270°（逆时针 90°）")
         XCTAssertEqual(input.info.map { [$0.width, $0.height] }, [320, 240], "info.width / height 仍是编码尺寸")
         XCTAssertEqual(input.info.map { [$0.displayWidth, $0.displayHeight] }, [240, 320], "转正后的尺寸")
-        let frame = try XCTUnwrap(slot.latest(atOrBefore: HostClock.now()))
+        let frame = try currentFrame(slot)
         XCTAssertEqual([frame.width, frame.height], [240, 320], "第一帧该是转正后的 240×320")
         XCTAssertEqual(Quadrants.of(frame.pixelBuffer), Quadrants.of(reference), "第一帧内容方向与参照一致")
         XCTAssertEqual(frame.pixelFormat, .nv12)
         // 循环几圈之后仍是转正的（每圈重开 reader，转正不只做在第一帧上）
         XCTAssertTrue(waitUntil(timeoutMs: 3000) { input.fileCountersSnapshot.loops >= 2 })
-        let later = try XCTUnwrap(slot.latest(atOrBefore: HostClock.now()))
+        let later = try currentFrame(slot)
         XCTAssertEqual([later.width, later.height], [240, 320])
         XCTAssertEqual(Quadrants.of(later.pixelBuffer), "GWRB")
         XCTAssertLessThanOrEqual(input.counters.distinctSurfaces, 16, "转正用的像素池稳定复用（渲染器纹理表每路 16 项）：\(input.counters)")
@@ -372,7 +398,7 @@ final class FileInputW2A5Tests: XCTestCase {
             defer { input.stop() }
             try startAndWaitLive(input)
             XCTAssertEqual(input.info?.orientation, expected, "矩阵 \(transform)")
-            let frame = try XCTUnwrap(slot.latest(atOrBefore: HostClock.now()))
+            let frame = try currentFrame(slot)
             XCTAssertEqual([frame.width, frame.height], [reference.width, reference.height], "\(expected)：尺寸与参照一致")
             let got = Quadrants.of(frame.pixelBuffer), want = Quadrants.of(reference)
             XCTAssertEqual(got, want, "\(expected)：四角与参照一致")
@@ -394,7 +420,7 @@ final class FileInputW2A5Tests: XCTestCase {
         let input = try makeInput(timing: timing, slot: slot, path: url.path, endAction: .loop)
         defer { input.stop() }
         try startAndWaitLive(input)
-        let frame = try XCTUnwrap(slot.latest(atOrBefore: HostClock.now()))
+        let frame = try currentFrame(slot)
         input.stop()
         let renderer = try OfflineRenderer()
         let size = CGSize(width: 640, height: 640)
