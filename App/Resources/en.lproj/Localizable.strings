@@ -1600,6 +1600,7 @@
 "slot.stingerMenu.header" = "Transition %d · Stinger: choose an input first, then click again to run it";
 "slot.stingerMenu.noInputs" = "No inputs yet";
 "slot.tbarRow" = "%@ ▾";
+"slot.tbarRowSlot" = "T%d · %@ ▾";
 "slot.tbarRowAX" = "Transition for the T-bar and Return: %@";
 "slot.tbarMenu.header" = "Run a transition (the T-bar and Return use it afterwards)";
 "slot.tbarMenu.hint" = "To choose without running: ▾ on a transition button › Use for T-bar";

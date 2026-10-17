@@ -1600,6 +1600,7 @@
 "slot.stingerMenu.header" = "转场 %d · Stinger：先选一路输入（选了才执行）";
 "slot.stingerMenu.noInputs" = "还没有输入";
 "slot.tbarRow" = "%@ ▾";
+"slot.tbarRowSlot" = "转场 %d · %@ ▾";
 "slot.tbarRowAX" = "T-bar 和回车用的转场：%@";
 "slot.tbarMenu.header" = "执行转场（之后 T-bar 和回车也用它）";
 "slot.tbarMenu.hint" = "只选不执行：在转场按钮的 ▾ 里点“用于 T-bar”";

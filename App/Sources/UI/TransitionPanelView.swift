@@ -423,7 +423,7 @@ final class TransitionPanelView: NSView {
     private func updateTbarSlot() {
         let t = state.transition
         let current = SlotText.current(t, rate: frameRate)
-        let title = L("slot.tbarRow", current)
+        let title = SlotText.tbarRowTitle(t, rate: frameRate)
         if tbarSlotButton.title != title {
             tbarSlotButton.title = title
             tbarSlotButton.setAccessibilityLabel(L("slot.tbarRowAX", current))

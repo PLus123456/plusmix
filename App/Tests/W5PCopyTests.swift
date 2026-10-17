@@ -276,6 +276,38 @@ final class W5PCopyTests: XCTestCase {
         XCTAssertEqual(sent(), [.setPlayback(input: 3, paused: false)])
     }
 
+    /// 第 6 条：英文界面转场列 T-bar 那一行出厂就截尾（"Transition 1 · Fade 0.5…"，这一行 134 pt）。英文写短"T1 · Fade 0.5 s ▾"，
+    /// 中文照旧"转场 1 · Fade 0.5 秒 ▾"（121–133 pt 放得下）；悬停提示 / 辅助功能标签照旧写全。
+    func testW4C3_6_englishTbarRowFitsWithoutTruncation() throws {
+        let session = try AppTest.freshSession()
+        let panel = self.panel
+        defer {
+            L10n.languageOverride = "zh-Hans"
+            panel.apply(state: session.state)
+        }
+        let row = Theme.transitionColumnWidth - 16
+        for (language, first) in [("zh-Hans", "转场 1 · Fade 0.5 秒 ▾"), ("en", "T1 · Fade 0.5 s ▾")] {
+            L10n.languageOverride = language
+            for n in TransitionSlot.indexRange {
+                var state = session.state
+                state.transition.currentSlot = n
+                let slot = state.transition.slots[n - 1]
+                state.transition.type = slot.type
+                state.transition.durationTicks = slot.durationTicks
+                state.transition.wipe = slot.wipe
+                state.transition.stinger = slot.stinger
+                panel.apply(state: state)
+                let title = panel.tbarSlotButton.title
+                if n == 1 { XCTAssertEqual(title, first, language) }
+                let width = panel.tbarSlotButton.intrinsicContentSize.width
+                print("W5P W4C3-6 \(language) 槽 \(n)：「\(title)」\(String(format: "%.1f", width)) pt / 行 \(row) pt")
+                XCTAssertLessThanOrEqual(width, row, "\(language) 槽 \(n)「\(title)」放得下")
+                XCTAssertTrue(panel.tbarSlotButton.accessibilityLabel()?.contains(language == "en" ? "Transition \(n)" : "转场 \(n)") == true,
+                              "辅助功能标签写全：\(panel.tbarSlotButton.accessibilityLabel() ?? "nil")")
+            }
+        }
+    }
+
     /// 状态行（W4C3 第 11 条）：failed 的推流不算在跑——原来取码率最低的那一路，起不来 / 鉴权停下的码率 0，写"推流 0 b/s"；状态窗写 —，两处不一致。
     func testW5P111_statusLineIgnoresFailedStreams() {
         func stats(_ entries: [Stats.EncoderEntry]) -> Stats {
