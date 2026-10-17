@@ -110,9 +110,9 @@ final class FileInputW2A5Tests: XCTestCase {
             let reached = waitUntil(timeoutMs: 3000, pollMs: 0.5) { input.counters.framesReceived >= 30 && input.counters.framesPushed >= 28 }
             sleepMs(10)
             let before = input.counters
-            guard reached, before.framesPushed < 30, input.state == .live else {
+            guard reached, before.framesPushed < 30, input.state == .live, input.decoderParkedAtEnd else {
                 input.stop()
-                continue   // 没卡进"收完 30 帧、只推到 28–29 帧"的窗口：重来
+                continue   // 没卡进"解码线程已放哨兵、推帧线程只推到 28–29 帧"的窗口：重来
             }
             input.endAction = .loop
             hits += 1
@@ -120,6 +120,7 @@ final class FileInputW2A5Tests: XCTestCase {
             let fc = input.fileCountersSnapshot
             let c = input.counters
             XCTAssertEqual(input.state, .live, "第 \(hits) 次：开了循环不该进 noSignal（开之前 received \(before.framesReceived) pushed \(before.framesPushed)）：\(fc) \(c)")
+            XCTAssertEqual(c.noSignalTransitions, 0, "第 \(hits) 次：中途也没进过 noSignal：\(c)")
             XCTAssertGreaterThanOrEqual(fc.loops, 1, "第 \(hits) 次：loops 该涨：\(fc)")
             XCTAssertEqual(fc.seeks, 0, "第 \(hits) 次：窗口里开循环是接着下一圈，不是定位从头：\(fc)")
             XCTAssertGreaterThan(c.framesPushed, 30, "第 \(hits) 次：开循环之后接着推第二圈：\(c)")
@@ -148,7 +149,7 @@ final class FileInputW2A5Tests: XCTestCase {
             try startAndWaitLive(input)
             let reached = waitUntil(timeoutMs: 3000, pollMs: 0.5) { input.counters.framesReceived >= 30 && input.counters.framesPushed >= 28 }
             sleepMs(10)
-            guard reached, input.counters.framesPushed < 30 else { input.stop(); continue }
+            guard reached, input.counters.framesPushed < 30, input.decoderParkedAtEnd else { input.stop(); continue }
             hit = true
             input.endAction = .loop
             input.endAction = .holdLastFrame
@@ -161,6 +162,51 @@ final class FileInputW2A5Tests: XCTestCase {
             XCTAssertTrue(waitUntil(timeoutMs: 1000) { input.state == .live }, "播完再开循环该从头接着播")
             XCTAssertEqual(input.fileCountersSnapshot.seeks, 1, "播完之后开循环走从头定位：\(input.fileCountersSnapshot)")
             input.stop()
+        }
+        XCTAssertTrue(hit, "\(attempts) 次都没卡进窗口")
+    }
+
+    /// D14 带音轨：窗口里开循环之后声音也接着下一圈（音频块继续写、host time 连续），画面同上。
+    func testD14_loopEnabledInWindow_withAudio_audioContinues() throws {
+        let url = RepoPaths.output.appendingPathComponent("w2a5-1s-30f-audio.mov")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try LoopClipWriter.write(to: url, width: 640, height: 360, fps: 30, frames: 30, content: .testPattern(background: .gray(level: 64)))
+        }
+        var hit = false, attempts = 0
+        while !hit && attempts < 10 {
+            attempts += 1
+            let timing = makeTiming()
+            let slot = LockFreeFrameSlot(capacity: 3)
+            let ring = RecordingAudioRing(channelCount: 2)
+            ring.keepSamplesUpTo = 0
+            let input = try FileInput(number: 1, name: "文件", path: url.path, endAction: .holdLastFrame, timing: timing, videoSlot: slot, audioRing: ring)
+            defer { input.stop() }
+            try startAndWaitLive(input)
+            XCTAssertEqual(input.info?.hasAudio, true)
+            let reached = waitUntil(timeoutMs: 3000, pollMs: 0.5) { input.counters.framesReceived >= 30 && input.counters.framesPushed >= 28 }
+            sleepMs(10)
+            guard reached, input.counters.framesPushed < 30, input.decoderParkedAtEnd else { input.stop(); continue }
+            hit = true
+            input.endAction = .loop
+            sleepMs(600)
+            let fc = input.fileCountersSnapshot
+            let c = input.counters   // stop 之前读：stop 自己会置一次 noSignal
+            input.stop()
+            let blocks = ring.recorded
+            var gaps = 0
+            if let first = blocks.first {
+                for (i, b) in blocks.enumerated() {
+                    let expected = first.hostTime + HostDuration(nanoseconds: Int64(i) * 256 * 1_000_000_000 / 48_000)
+                    if abs(Int64(b.hostTime.ticks) - Int64(expected.ticks)) > 2 { gaps += 1 }
+                }
+            }
+            print("D14 带音轨：\(fc)，环块 \(blocks.count)，host time 不连续 \(gaps)")
+            XCTAssertEqual(c.noSignalTransitions, 0, "开了循环不该进过 noSignal：\(c)")
+            XCTAssertGreaterThanOrEqual(fc.loops, 1, "loops 该涨：\(fc)")
+            XCTAssertEqual(fc.seeks, 0, "接着下一圈，不是定位：\(fc)")
+            // 1 s 片子 + 开循环后 0.6 s：写满 ≈ 1.5 s 的块（每块 256 帧）才说明声音接上了第二圈
+            XCTAssertGreaterThanOrEqual(Double(blocks.count), 1.4 * 48_000 / 256, "声音没接着下一圈：\(blocks.count) 块，\(fc)")
+            XCTAssertEqual(gaps, 0, "音频块 host time 连续（同一条时间线接着走）：\(gaps)")
         }
         XCTAssertTrue(hit, "\(attempts) 次都没卡进窗口")
     }
