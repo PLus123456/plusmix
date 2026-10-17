@@ -73,6 +73,8 @@ harness 开的分支 `worktree-agent-a084dea82a0342d2f`，另打别名 **`w3-out
 **整包 156 个用例 = 152 过 + 4 跳 + 0 红**（VirtualCameraTests 19 / 1 跳、SwitcherOutputsTests 29、StreamingTests 61、NDISendTests 17 / 2 跳、ISOTests 15、ExternalTests 15 / 1 跳），
 其中本会话新加 27 条（main 上是 129 条）。四个跳过：D09 签名环境端到端（BLOCKED-签名，新）、NDI Studio Monitor 人工真发、"SDK 不在"空实现（本机有 SDK）、外部显示 L2 人工秒表——后三个原来就跳。
 `scripts/check-rt-symbols.sh`：CSwitcherAudioRT 4 个目标文件无禁用符号（本会话没动 C 热路径）。扩展 target 见 §1。
+`make lint BRANCH=w3-outputs-5`：C 与 UTF-8 两种 locale 都全绿（禁词 / 版本号 / Package.swift / 依赖方向 / 归属 15 个文件 / 手册 / 链接 / RT 符号）。
+`swift build --package-path Tools/switcher-headless` 编过。App 没重编（同机 119 在跑 App 的 xcodebuild，没去抢）：包的公开接口只加不改——`InputFrameTee(primary:)` 签名不变（App 唯一的调用点 InputRuntime.swift:147）、`NDISendCounters` 多一个 `sendFailing`、`NDISender` 多 `VideoRoute` / `failureStreakLimit` / `pixelFormatName`，G10 合入时 App 照常编。
 
 D05 / D12 / D08 / D09 是 Codex 审查的缺陷编号，A1 = 测试标准的音频断裂指标；这些用例没有测试标准里的数值阈值，判据是"读到的块就是它自己 / 槽全部销毁 / 帧送出去"，按 0 容忍写。
 
