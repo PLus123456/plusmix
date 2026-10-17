@@ -23,6 +23,8 @@ final class FakeTransport: StreamTransport, @unchecked Sendable {
         var alignment: StartAlignment = .dtsOffset
         /// connect 要花这么久（模拟远端握手 / 慢服务器；W2-D2 握手期间排队的用例用）。
         var connectDelaySeconds: Double = 0
+        /// connect 抛这个错（W2-D4：服务器拒绝鉴权的 authenticationFailed 等）；优先于 connectFails。
+        var connectError: StreamTransportError?
     }
 
     struct SentVideo: Sendable {
@@ -60,6 +62,7 @@ final class FakeTransport: StreamTransport, @unchecked Sendable {
 
     func connect() async throws {
         if behavior.connectDelaySeconds > 0 { try? await Task.sleep(for: .milliseconds(Int(behavior.connectDelaySeconds * 1000))) }
+        if let e = behavior.connectError { throw e }
         if behavior.connectFails { throw StreamTransportError.connectFailed("fake") }
         lock.withLock { connected = true; lastDrain = HostClock.now() }
     }

@@ -929,6 +929,7 @@
 "notice.recordingFinishFailed" = "Recording %d failed to finalize: %@";
 "notice.recordingStarted" = "Recording %d started: %@";
 "notice.recordingStopped" = "Recording %d stopped: %@, %d frames / %.2f s";
+"notice.streamAuthFailed" = "Stream %d authentication failed (wrong user name or password) and stopped: fix it on the Streaming page, then click “Stream” in the bottom bar to retry";
 "notice.streamConnecting" = "Stream %d connecting…";
 "notice.streamFailed" = "Stream %d failed to start: %@";
 "notice.streamGaveUp" = "Stream %d stopped retrying: %@";

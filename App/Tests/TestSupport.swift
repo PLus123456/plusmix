@@ -321,7 +321,8 @@ final class MediaMTXHarness {
     let recordDir: URL
     private let process = Process()
 
-    init(rtmpPort: Int = 23935, srtPort: Int = 28893, apiPort: Int = 29993, recordDir: URL) throws {
+    /// `environment`：另加的 MTX_* 配置（比如开鉴权的 MTX_AUTHINTERNALUSERS_*，W2-D4）。
+    init(rtmpPort: Int = 23935, srtPort: Int = 28893, apiPort: Int = 29993, recordDir: URL, environment: [String: String] = [:]) throws {
         self.rtmpPort = rtmpPort
         self.apiPort = apiPort
         self.recordDir = recordDir
@@ -336,7 +337,7 @@ final class MediaMTXHarness {
         process.environment = ProcessInfo.processInfo.environment.merging([
             "MTX_RTMPADDRESS": ":\(rtmpPort)", "MTX_SRTADDRESS": "0.0.0.0:\(srtPort)", "MTX_APIADDRESS": "127.0.0.1:\(apiPort)",
             "MTX_PATHDEFAULTS_RECORDPATH": recordDir.appendingPathComponent("%path/%Y-%m-%d_%H-%M-%S-%f").path,
-        ]) { $1 }
+        ]) { $1 }.merging(environment) { $1 }
         process.standardOutput = log
         process.standardError = log
         try process.run()

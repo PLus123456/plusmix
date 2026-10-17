@@ -929,6 +929,7 @@
 "notice.recordingFinishFailed" = "录制 %d 封口失败：%@";
 "notice.recordingStarted" = "录制 %d 开始：%@";
 "notice.recordingStopped" = "录制 %d 已停：%@，%d 帧 / %.2f s";
+"notice.streamAuthFailed" = "推流 %d 鉴权失败（用户名或密码不对），已停止：在推流页改对后点底栏「推流」重试";
 "notice.streamConnecting" = "推流 %d 连接中…";
 "notice.streamFailed" = "推流 %d 起不来：%@";
 "notice.streamGaveUp" = "推流 %d 不再重连：%@";

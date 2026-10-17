@@ -18,7 +18,8 @@ import RTMPHaishinKit
 enum RTMPAdobeAuth {
     /// 失败原因（描述给日志 / 状态行，不带密码）。
     enum Failure: Swift.Error, CustomStringConvertible, Equatable {
-        case badCredentials(String)
+        /// 服务器拒绝了这套账号：类型化的原因（nosuchuser / authfailed）+ 服务器回的原文（状态码 + 描述），W2-D4 原样进 last_error。
+        case badCredentials(StreamAuthFailure, String)
         case unsupported(String)
         case rejected(String)
         case protocolError(String)
@@ -26,8 +27,8 @@ enum RTMPAdobeAuth {
 
         var description: String {
             switch self {
-            case .badCredentials(let s): return "鉴权失败：\(s)"
-            case .unsupported(let s): return "鉴权方式不支持：\(s)"
+            case .badCredentials(let reason, let s): return "\(reason.summary)：\(s)"
+            case .unsupported(let s): return "\(StreamAuthFailure.unsupportedMethod.summary)：\(s)"
             case .rejected(let s): return "服务器拒绝连接：\(s)"
             case .protocolError(let s): return "RTMP 协议错误：\(s)"
             case .timedOut: return "鉴权超时"
@@ -65,11 +66,12 @@ enum RTMPAdobeAuth {
             let second = try await probeConnect(url: withUser, timeoutSeconds: timeoutSeconds)
             if second.isSuccess { return withUser }
             params = parameters(inDescription: second.description)
+            let reply = StreamURLRedaction.redact(text: "\(second.code) \(second.description)")
             switch params["reason"] {
             case "needauth": break
-            case "nosuchuser": throw Failure.badCredentials("用户名不对（服务器回 nosuchuser）")
-            case "authfailed": throw Failure.badCredentials("用户名或密码不对（服务器回 authfailed）")
-            default: throw Failure.rejected("\(second.code) \(second.description)")
+            case "nosuchuser": throw Failure.badCredentials(.noSuchUser, reply)
+            case "authfailed": throw Failure.badCredentials(.badCredentials, reply)
+            default: throw Failure.rejected(reply)
             }
         }
         guard let salt = params["salt"] else { throw Failure.protocolError("needauth 回复里没有 salt") }

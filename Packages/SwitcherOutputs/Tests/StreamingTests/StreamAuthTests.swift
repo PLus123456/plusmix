@@ -150,6 +150,108 @@ final class StreamAuthTests: XCTestCase {
         XCTAssertFalse(g.attempts.contains { $0.outcome == .accepted })
     }
 
+    // MARK: 鉴权失败就停（W2-D4）
+
+    /// 服务器回的状态 → 类型化的鉴权失败原因：只看状态码，加上 Adobe 那套写在描述里的 reason / authmod 参数；不是鉴权的拒绝返回 nil（照旧退避）。
+    /// 转成的 StreamTransportError：鉴权类 = "鉴权失败（…）：<状态码> <描述>"（原文），其余 = connectFailed（publish 阶段带前缀）。
+    func testE_rtmpStatus_classifiesAuthFailures() {
+        let rejected = "NetConnection.Connect.Rejected"
+        let authfailed = "[ AccessManager.Reject ] : [ authmod=adobe ] : ?reason=authfailed&opaque=b3BhcXVl"
+        XCTAssertEqual(RTMPTransport.authFailure(code: rejected, description: authfailed), .badCredentials)
+        XCTAssertEqual(RTMPTransport.authFailure(code: rejected, description: "[ AccessManager.Reject ] : [ authmod=adobe ] : ?reason=nosuchuser&opaque=x"), .noSuchUser)
+        XCTAssertEqual(RTMPTransport.authFailure(code: "NetStream.Publish.Unauthorized", description: "authentication failed"), .publishUnauthorized)
+        XCTAssertEqual(RTMPTransport.authFailure(code: rejected, description: "[ AccessManager.Reject ] : [ code=403 need auth; authmod=adobe ] : "), .credentialsRequired)
+        XCTAssertEqual(RTMPTransport.authFailure(code: rejected, description: "[ AccessManager.Reject ] : [ authmod=llnw ] : "), .unsupportedMethod)
+        XCTAssertNil(RTMPTransport.authFailure(code: rejected, description: "Connection rejected."))
+        XCTAssertNil(RTMPTransport.authFailure(code: "NetStream.Publish.BadName", description: "Stream already publishing"))
+        XCTAssertNil(RTMPTransport.authFailure(code: "NetConnection.Connect.Closed", description: ""))
+        XCTAssertEqual(RTMPTransport.error(code: rejected, description: authfailed, phase: ""),
+                       .authenticationFailed(.badCredentials, message: "鉴权失败（用户名或密码不对）：\(rejected) \(authfailed)"))
+        XCTAssertEqual(RTMPTransport.error(code: "NetStream.Publish.Unauthorized", description: "authentication failed", phase: "publish"),
+                       .authenticationFailed(.publishUnauthorized, message: "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed"))
+        XCTAssertEqual(RTMPTransport.error(code: "NetStream.Publish.BadName", description: "busy", phase: "publish"), .connectFailed("publish: NetStream.Publish.BadName busy"))
+        XCTAssertEqual(RTMPTransport.error(code: rejected, description: "see rtmp://u:p@h/app", phase: ""),
+                       .connectFailed("\(rejected) see rtmp://\(StreamURLRedaction.marker)@h/app"), "原文里的地址照样打码")
+    }
+
+    /// W2-D4（Adobe 密码错）：StreamOutput（真编码器 + HaishinKit）第一次就停在 failed——网关正好 3 次连接（我们 2 次 + HaishinKit 1 次），
+    /// 之后照喂 10 s 帧（原来按退避 1、2、4 s 会再试 3 次 = 再 9 个连接）一次都不再连；Stats 项 state = failed、attempt 0、dropped 0、
+    /// last_error = "鉴权失败（用户名或密码不对）：NetConnection.Connect.Rejected …reason=authfailed…"（不带密码）；stop() 立刻返回、收尾成 stopped。
+    func testE_streamOutput_adobeWrongPassword_failsFirstTimeNoRetry() throws {
+        let g = try gateway(19467, password: "secret")
+        let scene = try StreamScene()
+        let o = try scene.makeOutput(name: "auth-adobe-wrong", url: "rtmp://pub:wr%40ng-pass@127.0.0.1:19467/s1", connectTimeout: 3)
+        outputs = [o]
+        try o.start()
+        XCTAssertTrue(waitUntil(timeout: 5) { if case .failed = o.state { return true } else { return false } }, "\(o.state)，网关：\(g.attempts.map(\.outcome))")
+        let before = o.counters
+        try scene.feed(outputs: [o], ticks: 0..<600)
+        let c = o.counters, e = o.statsEntry(previous: nil, windowSeconds: 1)
+        print("Adobe 密码错：\(e.lastError)；\(c)")
+        XCTAssertEqual(g.attempts.map(\.outcome), [.askedForAuthmod, .challenged, .authFailed], "一次尝试 3 个连接，之后 10 s 不再连")
+        XCTAssertEqual(c.connectAttempts, 1)
+        XCTAssertEqual(o.failure, .authentication(.badCredentials))
+        XCTAssertEqual(e.state, "failed")
+        XCTAssertEqual(e.attempt, 0)
+        XCTAssertEqual(e.dropped, 0, "没连上过：不算网络丢帧")
+        XCTAssertEqual(c.framesReceived, before.framesReceived, "failed 之后喂的帧不进编码器")
+        XCTAssertTrue(e.lastError.hasPrefix("鉴权失败（用户名或密码不对）：NetConnection.Connect.Rejected"), e.lastError)
+        XCTAssertTrue(e.lastError.contains("reason=authfailed"), "服务器回的原文照留：\(e.lastError)")
+        XCTAssertFalse(e.lastError.contains("wr@ng") || e.lastError.contains("wr%40ng"), "last_error 里有密码：\(e.lastError)")
+        let t0 = Date()
+        o.stop()
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 2, "stop() 被卡住了")
+        XCTAssertEqual(o.state, .stopped)
+    }
+
+    /// W2-D4：publish 的拒绝比 HaishinKit 的 publish 请求超时（3 s）来得晚——MediaMTX 鉴权失败随机等 0–4 s 才回——超时之后照样从状态流里接住
+    /// 那条 NetStream.Publish.Unauthorized，报类型化的鉴权失败（不是"连接失败"去退避重试）。服务器：PublishRejectServer，publish 之后 3.5 s 才回。
+    func testE_rtmpTransport_latePublishUnauthorizedStillAuthFailure() async throws {
+        let server = try PublishRejectServer(port: 19468, publishReplyDelay: 3.5)
+        defer { server.stop() }
+        let d = try StreamDestination(settings: StreamSettings(url: "rtmp://127.0.0.1:19468/s1?user=pub&pass=wrong"))
+        let transport = try HaishinKitTransportFactory(format: .hd1080p60, video: VideoEncodeSettings(), connectTimeoutSeconds: 5)
+            .makeTransport(for: d, audioFormat: nil)
+        let t0 = Date()
+        do {
+            try await withTimeout(seconds: 5) { try await transport.connect() }
+            XCTFail("publish 被拒应该失败")
+        } catch StreamTransportError.authenticationFailed(let reason, let message) {
+            XCTAssertEqual(reason, .publishUnauthorized)
+            XCTAssertEqual(message, "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed")
+        } catch {
+            XCTFail("应是类型化的鉴权失败：\(error)")
+        }
+        let elapsed = Date().timeIntervalSince(t0)
+        await transport.close()
+        XCTAssertGreaterThan(elapsed, 3.4, "回复确实是在 HaishinKit 的 3 s 超时之后才到的")
+        XCTAssertLessThan(elapsed, 4.5)
+        XCTAssertEqual([server.connectionCount, server.publishCount], [1, 1])
+    }
+
+    /// W2-D4：服务器要 Adobe 鉴权——地址里没写账号 → credentialsRequired（第一次就停）；地址里写了账号、只是我们的前两轮退回了
+    /// （这里让网关每轮拖 1.5 s、探针超时 1 s：第 1 轮超时 → 不带 userinfo 交给 HaishinKit → 服务器照样要 adobe）→ 不能说"地址里没写"、也不该停，
+    /// 照旧当连接失败（退避重试，下一次前两轮可能就成了）。
+    func testE_rtmpTransport_adobeDemand_withoutCredentialsStops_withCredentialsFallbackRetries() async throws {
+        let g = try gateway(19469, password: "secret")
+        func connect(_ url: String, probeTimeout: Int) async throws -> Error? {
+            let t = try HaishinKitTransportFactory(format: .hd1080p60, video: VideoEncodeSettings(), connectTimeoutSeconds: probeTimeout)
+                .makeTransport(for: StreamDestination(settings: StreamSettings(url: url)), audioFormat: nil)
+            var failure: Error?
+            do { try await withTimeout(seconds: 8) { try await t.connect() } } catch { failure = error }
+            await t.close()
+            return failure
+        }
+        let none = try await connect("rtmp://127.0.0.1:19469/s1", probeTimeout: 5)
+        XCTAssertEqual(none as? StreamTransportError, .authenticationFailed(.credentialsRequired,
+            message: "鉴权失败（服务器要用户名和密码，地址里没写）：NetConnection.Connect.Rejected [ AccessManager.Reject ] : [ code=403 need auth; authmod=adobe ] : "))
+        g.rejectDelay = 1.5
+        let fellBack = try await connect("rtmp://pub:secret@127.0.0.1:19469/s1", probeTimeout: 1)
+        guard case .connectFailed(let m)? = fellBack as? StreamTransportError else { return XCTFail("应照旧是连接失败：\(String(describing: fellBack))") }
+        XCTAssertTrue(m.contains("authmod=adobe"), m)
+        XCTAssertFalse(m.contains("secret"), m)
+    }
+
     // MARK: 脱敏（日志 / 错误）
 
     /// 地址：userinfo 整段换成标记、查询串里的密钥参数换成标记，主机、端口、路径保留；文字里的每个地址都这样处理。

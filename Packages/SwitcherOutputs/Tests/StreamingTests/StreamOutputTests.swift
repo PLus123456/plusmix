@@ -114,6 +114,63 @@ final class StreamOutputTests: XCTestCase {
         XCTAssertEqual(o.state, .stopped)
     }
 
+    /// W2-D4：服务器拒绝鉴权（传输层抛类型化的 authenticationFailed）→ 第一次就停在 failed、不退避重试：failed 之后照喂 1 s
+    /// （退避 0.1 / 0.2 / 0.4 s 的话够重试三次）连接仍只有 1 次、传输层已关；state = failed、failure 是类型化的原因；
+    /// Stats 项 state = failed、attempt 0、last_error = 传输层那一句；failed 之后喂的帧不再进来（计数定住，不记成网络丢帧）。
+    /// 对照：同样喂 1 s、connect 抛一般错误的那一路照旧按退避重试、不进 failed。
+    func testW2D4_authFailureFailsFirstTimeWithoutBackoff() throws {
+        let message = "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed"
+        let factory = FakeTransportFactory(behavior: .init(connectError: .authenticationFailed(.publishUnauthorized, message: message)))
+        let other = FakeTransportFactory(behavior: .init(connectFails: true))
+        let o = try StreamOutput.makeForTest(name: "auth", factory: factory)
+        let p = try StreamOutput.makeForTest(name: "other", factory: other)
+        try o.start()
+        try p.start()
+        XCTAssertTrue(waitUntil(timeout: 2) { if case .failed = o.state { return true } else { return false } }, "\(o.state)")
+        let before = o.counters
+        _ = try feed(outputs: [o, p], seconds: 1)
+        let c = o.counters, e = o.statsEntry(previous: nil, windowSeconds: 1)
+        XCTAssertEqual(factory.transports.count, 1, "鉴权失败不重试")
+        XCTAssertEqual(c.connectAttempts, 1)
+        XCTAssertTrue(factory.transports[0].isClosed, "失败的那次连接要关掉")
+        XCTAssertEqual(o.state, .failed(message))
+        XCTAssertEqual(o.failure, .authentication(.publishUnauthorized))
+        XCTAssertEqual([e.state, e.lastError], ["failed", message])
+        XCTAssertEqual(e.attempt, 0)
+        XCTAssertEqual(e.uptimeS, 0)
+        XCTAssertEqual(c.framesReceived, before.framesReceived, "failed 之后喂的帧不进编码器：\(c)")
+        XCTAssertEqual(c.audioPacketsReceived, before.audioPacketsReceived, "failed 之后的音频块也不进：\(c)")
+        XCTAssertEqual(c.networkDropped, 0, "没连上过：不算网络丢帧：\(c)")
+        XCTAssertGreaterThanOrEqual(other.transports.count, 3, "一般的连接失败照旧退避重试")
+        XCTAssertNotEqual(p.state.name, "failed")
+        XCTAssertNil(p.failure)
+        o.stop()
+        p.stop()
+    }
+
+    /// W2-D4：停在 failed 之后 stop → stopped（原来留在 stopping）、last_error 留到下一次 start；再 start 清掉 last_error / failure、
+    /// 照常连上、照常送帧（"改对之后重试"：App 的重试是新对象，这里用同一个对象把 start 清状态这件事钉住）。
+    func testW2D4_stopAfterAuthFailureThenRestartConnects() throws {
+        let message = "鉴权失败（用户名或密码不对）：x"
+        let factory = FakeTransportFactory { attempt in
+            attempt == 1 ? .init(connectError: .authenticationFailed(.badCredentials, message: message)) : .init()
+        }
+        let o = try StreamOutput.makeForTest(name: "auth-retry", factory: factory)
+        try o.start()
+        XCTAssertTrue(waitUntil(timeout: 2) { o.failure != nil }, "\(o.state)")
+        o.stop()
+        XCTAssertEqual(o.state, .stopped, "failed 之后再 stop 要收尾成 stopped")
+        XCTAssertEqual(o.statsEntry(previous: nil, windowSeconds: 1).lastError, message, "last_error 留到下一次 start")
+        try o.start()
+        XCTAssertNil(o.failure, "start 清掉上一次的失败原因")
+        XCTAssertTrue(waitUntil(timeout: 2) { o.state == .publishing }, "\(o.state)")
+        XCTAssertEqual(o.statsEntry(previous: nil, windowSeconds: 1).lastError, "")
+        _ = try feed(outputs: [o], seconds: 0.5)
+        o.stop()
+        XCTAssertGreaterThan(o.counters.framesSent, 0, "重新 start 之后照常送帧（收帧的门重新打开）")
+        XCTAssertEqual(factory.transports.count, 2)
+    }
+
     /// 超过最大尝试次数 → failed。
     func testReconnectGivesUpAfterMaxAttempts() throws {
         let factory = FakeTransportFactory(behavior: .init(connectFails: true))

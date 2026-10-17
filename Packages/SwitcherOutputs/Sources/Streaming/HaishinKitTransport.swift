@@ -19,6 +19,9 @@ import SwitcherOutputs
 //      TS 只能挑最近的包（≤ 10.7 ms），且第一个音频包会被它当格式热身丢掉（expectedMedias 齐了才写），所以要一个 preroll 包。
 //   3. AudioSpecificConfig 从 ASBD.mFormatFlags 取 AAC object type：flags 必须是 AAC_LC(2)，W1-E 的格式描述里是 0，这里自己造。
 //   4. 它的 RTMP 鉴权（connect 地址带 user:pass@ 时自动走）不能用（W5-D 探针）：交给它的地址永远不带 userinfo，Adobe 鉴权的前两轮由 RTMPAdobeAuth 做。
+//   5. 服务器拒绝鉴权（W2-D4）报类型化的 StreamTransportError.authenticationFailed（StreamOutput 第一次就停、不退避）：Adobe 的 authfailed /
+//      nosuchuser / llnw、publish 的 NetStream.Publish.Unauthorized。publish 的回复可能晚于 HaishinKit 3 s 的请求超时（MediaMTX 随机等 0–4 s），
+//      超时之后从流的状态流里接着等（RTMPTransport.connect）。
 // 错误文字进日志 / 状态之前都过 StreamURLRedaction（HaishinKit 的错误里可能带整个地址：unsupportedCommand、SRT 的 unsupportedUri）。
 
 /// 存 HaishinKit 每秒一次的网络上报（NetworkMonitorEvent），供 StreamOutput 读。不调 setVideoSettings（我们不让它改码率）。
@@ -116,8 +119,10 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
                 target = try await RTMPAdobeAuth.authorize(connectURL: target, credentials: credentials, timeoutSeconds: Double(connectTimeout))
             } catch let e as RTMPAdobeAuth.Failure {
                 switch e {
-                case .badCredentials, .unsupported:
-                    throw StreamTransportError.connectFailed(e.description)
+                case .badCredentials(let reason, _):
+                    throw StreamTransportError.authenticationFailed(reason, message: e.description)
+                case .unsupported:
+                    throw StreamTransportError.authenticationFailed(.unsupportedMethod, message: e.description)
                 case .rejected, .protocolError, .timedOut:
                     // 服务器不是 Adobe 那套、或者我们的最小客户端没看懂：退回改之前的做法，把不带 userinfo 的地址交给 HaishinKit（账号这时用不上）
                     break
@@ -132,8 +137,15 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         } catch let e as StreamTransportError {
             throw e
         } catch {
-            throw StreamTransportError.connectFailed(Self.describe(error))
+            let e = Self.transportError(error, phase: "")
+            // 地址里写了账号、服务器却还在要 Adobe 鉴权：是我们的前两轮退回了（超时 / 没看懂），不是"没写账号"——照旧当连接失败、退避重试
+            if case .authenticationFailed(.credentialsRequired, let m) = e, destination.credentials != nil { throw StreamTransportError.connectFailed(m) }
+            throw e
         }
+        // publish 之前先订阅流的状态：MediaMTX 一类按查询串鉴权的服务器，账号不对时先随机等 0–4 s 才回 NetStream.Publish.Unauthorized（防暴力猜），
+        // HaishinKit 的 publish 请求 3 s 就按超时收场——之后那条迟到的回复只会出现在这里（W2-D4 探针，reports/w2-stream-4.md §1）。
+        // 状态流无界缓冲，推流期间服务器几乎不再发 onStatus，留着不读也攒不下几条。
+        let statuses = await s.status
         do {
             let r = try await s.publish(destination.streamName)
             guard r.status?.code == RTMPStream.Code.publishStart.rawValue else {
@@ -141,8 +153,18 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
             }
         } catch let e as StreamTransportError {
             throw e
+        } catch RTMPStream.Error.requestTimedOut {
+            // 接着等迟到的回复，等多久由 StreamOutput 的连接超时管（超时取消本 Task，状态流随之结束）
+            for await status in statuses {
+                if status.code == RTMPStream.Code.publishStart.rawValue {
+                    // 迟到的成功：HaishinKit 这边的 publish 已经按超时收场（流回到 idle），这条连接用不了，按一般失败重连
+                    throw StreamTransportError.connectFailed("publish: 服务器 \(RTMPConnection.defaultRequestTimeout) ms 之后才回 \(status.code)")
+                }
+                if status.level != "status" { throw Self.error(code: status.code, description: status.description, phase: "publish") }
+            }
+            throw StreamTransportError.connectFailed("publish: requestTimedOut")
         } catch {
-            throw StreamTransportError.connectFailed("publish: \(Self.describe(error))")
+            throw Self.transportError(error, phase: "publish")
         }
         // 它自己发的 onMetaData 对压缩输入只有 duration；补一份带尺寸 / 码率 / 编码的
         try? await s.send("@setDataFrame", arguments: "onMetaData", metadata)
@@ -173,14 +195,50 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         try? await connection.close()
     }
 
-    /// HaishinKit 的错误 → 日志里看得懂的一句：服务器拒绝时给它的 code / description（鉴权失败单独点明），其余原样；地址一律打码。
-    static func describe(_ error: any Error) -> String {
-        if case RTMPConnection.Error.requestFailed(let response) = error, let status = response.status {
-            let reason = RTMPAdobeAuth.parameters(inDescription: status.description)["reason"]
-            let prefix = reason == "authfailed" || reason == "nosuchuser" ? "鉴权失败（用户名或密码不对）：" : ""
-            return StreamURLRedaction.redact(text: "\(prefix)\(status.code) \(status.description)")
+    /// 服务器回的状态是不是"拒绝鉴权"（W2-D4）；不是返回 nil（照旧当连接失败、退避重试）。只看协议字段：状态码，
+    /// 加上 Adobe 那套写在 Rejected 描述里的参数——reason=authfailed / nosuchuser（第三轮 / 第二轮被拒）、authmod=llnw（要 Limelight）、
+    /// 只有 authmod=adobe 没有 reason（服务器要账号、地址里没写，HaishinKit 拿不到 userinfo 只能就此失败）。
+    /// MediaMTX 1.21 查询串账号不对 / 没给：publish 回 level error、NetStream.Publish.Unauthorized、"authentication failed"（探针）。
+    static func authFailure(code: String, description: String) -> StreamAuthFailure? {
+        switch code {
+        case "NetStream.Publish.Unauthorized":
+            return .publishUnauthorized
+        case RTMPConnection.Code.connectRejected.rawValue:
+            switch RTMPAdobeAuth.parameters(inDescription: description)["reason"] {
+            case "authfailed": return .badCredentials
+            case "nosuchuser": return .noSuchUser
+            default:
+                if description.contains("authmod=llnw") { return .unsupportedMethod }
+                if description.contains("authmod=adobe") { return .credentialsRequired }
+                return nil
+            }
+        default:
+            return nil
         }
-        return StreamURLRedaction.redact(text: "\(error)")
+    }
+
+    /// 服务器回的状态 → StreamTransportError：拒绝鉴权 → authenticationFailed（"鉴权失败（…）：<状态码> <描述>"，原文照留），
+    /// 其余 → connectFailed（publish 阶段带 "publish: "）。文字里的地址一律打码。
+    static func error(code: String, description: String, phase: String) -> StreamTransportError {
+        let text = StreamURLRedaction.redact(text: "\(code) \(description)")
+        if let reason = authFailure(code: code, description: description) {
+            return .authenticationFailed(reason, message: "\(reason.summary)：\(text)")
+        }
+        return .connectFailed(phase.isEmpty ? text : "\(phase): \(text)")
+    }
+
+    /// HaishinKit 的错误 → StreamTransportError：服务器回了状态（connect 的 _error、publish 的 onStatus）按 `error(code:…)` 认，
+    /// 其余（socket 错误、超时……）原样写进 connectFailed；地址一律打码。
+    static func transportError(_ error: any Error, phase: String) -> StreamTransportError {
+        let status: RTMPStatus?
+        switch error {
+        case RTMPConnection.Error.requestFailed(let response): status = response.status
+        case RTMPStream.Error.requestFailed(let response): status = response.status
+        default: status = nil
+        }
+        if let status { return Self.error(code: status.code, description: status.description, phase: phase) }
+        let text = StreamURLRedaction.redact(text: "\(error)")
+        return .connectFailed(phase.isEmpty ? text : "\(phase): \(text)")
     }
 }
 
