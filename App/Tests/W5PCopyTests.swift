@@ -143,6 +143,58 @@ final class W5PCopyTests: XCTestCase {
         XCTAssertNil(panel.tbar.toolTip)
     }
 
+    // MARK: W4C3 的 S3 一批（reports/issues/W4C3-w5-app-gaps-found-by-docs.md）
+
+    /// 第 1 条：推流 / 录制状态窗"显示日志…"原来打开诊断文件夹，里面只有崩溃 / 卡死记录、没有推流 / 录制日志（那些只在系统日志里）。
+    /// 现在把最近 10 分钟本程序的系统日志导出成文本、放进诊断文件夹再打开；提示照实写。第 12 条：英文提示里的菜单名对上"Show Diagnostics Folder"。
+    func testW4C3_1_showLogsExportsRecentSystemLog() throws {
+        XCTAssertEqual(OutputStatusModel.showLogsTitle, "显示日志…")
+        XCTAssertFalse(L("outputStatus.showLogsTip").contains("推流 / 录制的日志在里面"), "不再说诊断文件夹里有推流 / 录制日志")
+        XCTAssertTrue(L("outputStatus.showLogsTip").contains("系统日志"), L("outputStatus.showLogsTip"))
+        let en = L10n.string("outputStatus.showLogsTip", language: "en")
+        XCTAssertFalse(en.contains("Open Diagnostics Folder"), en)
+        XCTAssertTrue(en.contains(L10n.string("menu.help.showDiagnosticsFolder", language: "en")), "英文菜单名：\(en)")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("plusmix-w5p-logs-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        NSLog("W5P W4C3-1 导出系统日志用例的标记行")
+        let url = try DiagnosticsExport.writeRecentLog(minutes: 1, processes: [ProductName.executable], directory: dir)
+        XCTAssertEqual(url.deletingLastPathComponent().standardizedFileURL.path, dir.standardizedFileURL.path, "放进给的目录（正式 App 是诊断文件夹）")
+        XCTAssertTrue(url.lastPathComponent.hasPrefix("log-") && url.pathExtension == "txt", url.lastPathComponent)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.hasPrefix("# log show --last 1m"), String(text.prefix(200)))
+        XCTAssertTrue(text.contains("process == \"\(ProductName.executable)\""), String(text.prefix(200)))
+    }
+
+    /// 第 2 条：推流 / 录制状态窗、统计窗、多画面窗口在前时按键照样走快捷键表（X12 同一类：原来只有设置类窗口转发）。
+    func testW4C3_2_statusStatsAndMultiviewWindowsForwardHotkeys() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let controller = AppTest.controller
+        let panels = controller.panels
+        defer {
+            panels.closeAll()
+            if controller.windowController.isMultiviewWindowVisible { controller.windowController.toggleMultiviewWindow() }
+        }
+        try controller.applyHotkeyTable(.default)
+        session.send(.setProgram(input: 1))
+        session.send(.setPreview(input: 2))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.program == 1 && session.state.preview == 2 })
+        var expected = (program: 2, preview: 1)
+        func pressSpace(_ window: NSWindow?, _ what: String) throws {
+            let w = try XCTUnwrap(window, what)
+            let handled = session.control.hotkeys.counters.handled
+            AppTest.press(" ", in: w)
+            XCTAssertTrue(AppTest.waitUntil(2) { session.state.program == expected.program && session.state.preview == expected.preview },
+                          "\(what)在前按空格 = Cut：PGM \(session.state.program) PVW \(session.state.preview)")
+            XCTAssertEqual(session.control.hotkeys.counters.handled, handled + 1, "\(what)：走的是快捷键表")
+            expected = (expected.preview, expected.program)
+        }
+        try pressSpace(panels.showOutputStatus(.stream)?.window, "推流 / 录制状态窗")
+        try pressSpace(panels.showStats().window, "统计窗")
+        controller.windowController.toggleMultiviewWindow()
+        try pressSpace(controller.windowController.multiviewWindow?.window, "多画面窗口")
+    }
+
     /// 状态行（W4C3 第 11 条）：failed 的推流不算在跑——原来取码率最低的那一路，起不来 / 鉴权停下的码率 0，写"推流 0 b/s"；状态窗写 —，两处不一致。
     func testW5P111_statusLineIgnoresFailedStreams() {
         func stats(_ entries: [Stats.EncoderEntry]) -> Stats {

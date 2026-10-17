@@ -58,8 +58,9 @@ final class OutputStatusModel: ObservableObject {
     @Published private(set) var videoDelayText: String?
     /// 收到过 Stats（没收到时窗里写"等待统计…"）。
     @Published private(set) var hasStats = false
-    /// "显示日志…"：打开诊断文件夹（测试换掉它，不真开 Finder）。
-    var showLogs: (() -> Void)? = { DiagnosticsExport.revealFolder() }
+    /// "显示日志…"：把最近 10 分钟本程序的系统日志导出成文本、放进诊断文件夹并打开（W5-P，W4C3 第 1 条：推流 / 录制的日志只在系统日志里，
+    /// 原来只是打开诊断文件夹，里面只有崩溃 / 卡死记录）。测试换掉它，不真开文件。
+    var showLogs: (() -> Void)? = { DiagnosticsExport.showRecentLog() }
     static var showLogsTitle: String { L("outputStatus.showLogs") }
     /// 事件最多留多少条（老的丢掉）。
     static let maxEvents = 500

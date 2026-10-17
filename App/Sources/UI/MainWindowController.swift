@@ -590,6 +590,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         if multiviewWindow == nil {
             let w = MultiviewWindowController(source: session?.displaySource)
             if let session { w.restore(from: session.layout) }
+            (w.window as? PanelWindow)?.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }   // 多画面窗口在前照样派发快捷键（W4C3 第 2 条）
             w.onOpenChange = { [weak self] open in self?.bottomBar.setMultiviewOpen(open) }
             multiviewWindow = w
         }

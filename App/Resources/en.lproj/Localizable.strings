@@ -1673,7 +1673,7 @@
 "outputStatus.noEvents" = "No events yet.";
 "outputStatus.hint" = "All numbers come from the stats (the same data the API reads); events are derived from state changes in the once-a-second stats, so changes that come and go within a second are not shown.";
 "outputStatus.showLogs" = "Show Logs…";
-"outputStatus.showLogsTip" = "Opens the diagnostics folder (Help › Open Diagnostics Folder) with the stream / recording logs";
+"outputStatus.showLogsTip" = "Stream / recording logs live in the system log: exports the last 10 minutes of this app's system log to a text file (in the diagnostics folder) and opens it. The diagnostics folder (Help › Show Diagnostics Folder) otherwise holds only crash / hang reports";
 "outputStatus.noStreams" = "No stream destinations.";
 "outputStatus.noRecords" = "No recording outputs.";
 "outputStatus.col.name" = "Name";

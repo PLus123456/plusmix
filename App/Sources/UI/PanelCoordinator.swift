@@ -302,6 +302,7 @@ final class PanelCoordinator: NSObject {
             return w
         }
         let w = OutputStatusWindowController(model: outputStatus)
+        forwardHotkeys(w)   // 直播中盯着看的窗：开着它按空格照样切（W5-P，W4C3 第 2 条，X12 同一类）
         w.onClose = { [weak self] in self?.outputStatusWindow = nil }
         outputStatusWindow = w
         w.present()
@@ -318,6 +319,7 @@ final class PanelCoordinator: NSObject {
         let model = StatsWindowModel()
         if let stats = session?.stats { model.apply(stats: stats, state: state) }
         let w = StatsWindowController(model: model)
+        forwardHotkeys(w)   // 同上（W4C3 第 2 条）
         w.onClose = { [weak self] in self?.statsWindow = nil }
         statsWindow = w
         w.present()

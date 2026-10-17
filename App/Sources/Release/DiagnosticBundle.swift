@@ -262,4 +262,30 @@ enum DiagnosticsExport {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
+
+    /// 推流 / 录制状态窗"显示日志…"（W5-P，W4C3 第 1 条）：推流 / 录制模块打的日志只在系统日志里（诊断文件夹只有 MetricKit 交来的崩溃 / 卡死记录），
+    /// 所以把最近 minutes 分钟本程序与虚拟摄像头扩展的系统日志（log show，与诊断包同一个取法）导出成一份文本、放进诊断文件夹并打开。
+    /// log show 要几秒，在后台跑，做完回主线程打开。
+    static func showRecentLog(minutes: Int = 10) {
+        let directory = CrashDiagnostics.shared.store.directory
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.plusmix.switcher"
+        let processes = [ProductName.executable, VirtualCameraConstantsBridge.extensionBundleIdentifier(bundleID)]
+        Task.detached(priority: .userInitiated) {
+            let url = try? writeRecentLog(minutes: minutes, processes: processes, directory: directory)
+            await MainActor.run {
+                if let url { NSWorkspace.shared.open(url) } else { revealFolder() }
+            }
+        }
+    }
+
+    /// 写一份 log-yyyyMMdd-HHmmss.txt 到 directory（没有就建），返回它的位置。任意线程。
+    nonisolated static func writeRecentLog(minutes: Int, processes: [String], directory: URL, now: Date = Date()) throws -> URL {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let url = directory.appending(path: "log-\(f.string(from: now)).txt")
+        try DiagnosticBundle.systemLog(processes: processes, minutes: minutes).write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
 }
