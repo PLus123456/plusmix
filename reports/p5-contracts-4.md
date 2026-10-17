@@ -58,7 +58,7 @@
 | App：`make gen` → `xcodebuild build-for-testing`（TEST BUILD SUCCEEDED）→ `test-without-building -only-testing:SwitcherTests/StatusLineTests -only-testing:SwitcherTests/PlaybackStatusTests`（01:38） | **11 = StatusLine 3 + PlaybackStatus 8**，0 红（App 一行没改，只是重编过新契约） |
 | headless：`swift build --package-path Tools/switcher-headless`（全依赖链编译过）+ 上表 4 s 实测 | 过 |
 | `swift run --package-path Packages/SwitcherControl switcher-apidoc > docs/api.md`（两次）；报告前再生成一份 `diff -q` | 2 + 4 行变化，`#### ` 命令标题 42 个；最后一份与提交的逐字一致 |
-| `make lint BRANCH=p5-contracts-4`（C locale 与 `LC_ALL=en_US.UTF-8` 各一遍，报告提交前） | 两遍全绿：禁词 / 版本 0.1.0 / Package 约束 / 依赖方向 8 包 / 归属 24 个文件在范围内 / check-help / check-links 200 个 Markdown / check-rt-symbols |
+| `make lint BRANCH=p5-contracts-4`（C locale 与 `LC_ALL=en_US.UTF-8` 各一遍；报告提交前一轮、提交后又一轮） | 四遍全绿：禁词 / 版本 0.1.0 / Package 约束 / 依赖方向 8 包 / 归属 24 个文件（报告提交后 25 个）都在范围内 / check-help / check-links 200 个 Markdown / check-rt-symbols |
 
 没跑：gate4 / perf-baseline / soak（prompt 不让跑，同机有三个会话）；Inputs / Outputs 两个包与 TestKit 的整包测试、App 全量（不在 prompt 第 5 条里；它们只依赖契约的新类型编译——headless 全依赖链与 App 都编过）。
 
