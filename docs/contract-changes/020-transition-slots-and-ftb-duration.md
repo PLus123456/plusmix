@@ -1,7 +1,7 @@
 # 020 转场槽（转场 1–4 四个可配置槽）+ FTB 时长命令
 
 提出会话 / 分支：P5（prompt 99）/ `p5-contracts`；来源 docs/ui-study/01a 第 5 节候选 1 / 2、04 Q01（用户按落地方案 §8.5 默认 A）、Q07（默认 (a) 跟当前槽）、Q08（默认 (a) 加命令并进 020）、R3a C 附 3、01-菜单逻辑 §3.3；落地方归 prompt 100（W5-M）
-状态：**已落地**（P5-2 / prompt 108，2026-10-11，提交 51e614e；文字 9ecc22a）。原状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + reducer + 校验器 + 目录 / api.md；界面、快捷键 / MIDI、兼容层、Stream Deck 归 100）
+状态：**已落地**（P5-2 / prompt 108，2026-10-11，提交 51e614e；文字 9ecc22a；2026-10-17 追加的"T-bar 拉回 0 取消也重拷"P5-4 / prompt 115 落地，提交 350dab5，见文末）。原状态：**已批**（用户 2026-10-11 看完 reports/G8.md 后原话"提案 020 / 021 / 022 / 023 二–五落地"，没批注——"请用户定的点"每条按本提案写的默认；落地归 P5-2，prompt 108，分支 `p5-contracts-2`。原状态行：（批了由 P5 落契约 + reducer + 校验器 + 目录 / api.md；界面、快捷键 / MIDI、兼容层、Stream Deck 归 100）
 
 ## 改什么
 
@@ -100,3 +100,8 @@ CONTRACTS.md §2.5 / §2.6 / §2.8 / §8；Samples 的四槽非默认值；`test
 
 P5-3 探针核实的缺口（reports/p5-contracts-3.md §4 第 2 条）：T-bar 推到一半时 `setTransitionSlot` 改了当前槽（进行中只改槽），之后拉回 0 **取消**——取消不走 `completeTransition`、当前那组不重拷，下一次回车执行的是改之前的旧配置（探针：槽 1 改成 Zoom 12 拍后拉回 0，回车执行 Fade 30）。
 用户 2026-10-17 定：**修**。reducer 的 `tbar` 在 progress 回到 0（取消）那一拍按 currentSlot 重拷当前那组（与 completeTransition 同一句，幂等）；本提案与 CONTRACTS.md §2.5 的口径从"完成那一拍重拷"改成"**完成或取消那一拍重拷**"。不加字段、不加命令。
+
+**落地记录（P5-4 / prompt 115，2026-10-18，提交 350dab5）**：reducer 的 `tbar` 在 progress 钳完 ≤ 0（拉回 0，或推到负数）那一拍、currentSlot 非 nil 时 `select(slot:)` 重拷当前那组——与 `completeTransition` 同一句、幂等；
+推杆还在 (0, 1) 不重拷（进行中的那一次按开始时的参数走），currentSlot = nil 不重拷；T-bar 接管进行中的 auto 转场后拉回 0 也走这一句（auto 进行中改的槽在取消时生效）；空闲时再发 tbar(0) 同样走它（当前那组与槽本来相同，状态不变）。
+文字：`Command.tbar` / `setTransitionSlot` 的注释、CommandCatalog 两条摘要 → docs/api.md（仍 42 条）、CONTRACTS.md §2.5 转场槽一段与 §8 两行（"完成那一拍重拷"→"完成或取消那一拍重拷"）。
+用例：`ReducerTests.test020_tbarCancelRecopiesCurrentSlot`（P5-3 的探针路径：推到 0.4 → 槽 1 改 Zoom 12 → 拉回 0 → 当前那组 = Zoom 12、回车按 12 拍走完；另有负数、接管 auto、currentSlot nil 三种）、`testW1B_reduce_everyCommand_beforeAfterTable` 加三行、`CommandCatalogTests.testCatalog_020_tbarCancelRecopyDocumented`。不加字段、不加命令。
