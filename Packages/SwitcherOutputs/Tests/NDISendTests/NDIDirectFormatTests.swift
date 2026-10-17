@@ -1,5 +1,6 @@
 import CoreVideo
 import Foundation
+import Metal
 import XCTest
 import SwitcherContracts
 import SwitcherOutputs
@@ -75,6 +76,47 @@ final class NDIDirectFormatTests: XCTestCase {
         try sender.start()
         XCTAssertEqual(sender.statsEntry(previous: nil, windowSeconds: 1).lastError, NDISender.isAvailable ? "" : "NDI SDK 不在（编译时没探测到）")
         sender.stop()
+    }
+
+    /// 分路表：NV12（'420v' / '420f'）转、'2vuy' / 'BGRA' 直送、别的送不了；last_error 里的像素格式名。
+    func testD08_videoRouteByPixelFormat_andFormatNames() {
+        typealias Route = NDISender.VideoRoute
+        XCTAssertEqual(Route(pixelFormat: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange), .convertNV12)
+        XCTAssertEqual(Route(pixelFormat: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange), .convertNV12)
+        XCTAssertEqual(Route(pixelFormat: kCVPixelFormatType_422YpCbCr8), .directUYVY)
+        XCTAssertEqual(Route(pixelFormat: kCVPixelFormatType_32BGRA), .directBGRA)
+        for other in [kCVPixelFormatType_422YpCbCr8_yuvs, kCVPixelFormatType_32ARGB, kCVPixelFormatType_32RGBA, kCVPixelFormatType_422YpCbCr10] {
+            XCTAssertEqual(Route(pixelFormat: other), .unsupported, NDISender.pixelFormatName(other))
+        }
+        // 契约 PixelFormat 的三种（输入只出这三种）全都送得了
+        for f in PixelFormat.allCases {
+            for range in [ColorRange.limited, .full] {
+                XCTAssertNotEqual(Route(pixelFormat: f.cvPixelFormatType(range: range)), .unsupported, "\(f) \(range)")
+            }
+        }
+        XCTAssertEqual(NDISender.pixelFormatName(kCVPixelFormatType_32BGRA), "BGRA")
+        XCTAssertEqual(NDISender.pixelFormatName(kCVPixelFormatType_422YpCbCr8), "2vuy")
+        XCTAssertEqual(NDISender.pixelFormatName(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange), "420v")
+        XCTAssertEqual(NDISender.pixelFormatName(kCVPixelFormatType_422YpCbCr8_yuvs), "yuvs")
+        XCTAssertEqual(NDISender.pixelFormatName(kCVPixelFormatType_32ARGB), "0x00000020", "不是可打印四字符的写十六进制")
+    }
+
+    /// 比节目小的 NV12 输入（1280×720 进 1080p 的发送器）：CPU 与 GPU 都按帧尺寸转、行距紧排、逐字节相同
+    /// （CPU 版原来送节目尺寸，右边 / 下边是上一帧的残留）。
+    func testD08_nv12SmallerThanProgram_cpuAndGpuConvertAtFrameSize() throws {
+        let sender = NDISender(configuration: .init(name: "d08-small", format: format, source: .input(number: 4), conversion: .cpu, dryRun: true))
+        try sender.prepareConverter()
+        let pb = NDITestFrames.nv12(width: 1280, height: 720, y: 90, cb: 100, cr: 160)
+        let cpu = try sender.convert(pb)
+        XCTAssertEqual([cpu.width, cpu.height, cpu.bytesPerRow], [1280, 720, 2560])
+        let cpuBytes = Data(bytes: cpu.base, count: cpu.byteCount)
+        XCTAssertEqual(Array(cpuBytes.prefix(4)), [100, 90, 160, 90], "Cb Y0 Cr Y1")
+        guard MTLCreateSystemDefaultDevice() != nil else { return }   // 没有 Metal：GPU 版退到 CPU，比不了
+        sender.setConversion(.gpu)
+        try sender.prepareConverter()
+        let gpu = try sender.convert(pb)
+        XCTAssertEqual([gpu.width, gpu.height, gpu.bytesPerRow], [1280, 720, 2560])
+        XCTAssertEqual(Data(bytes: gpu.base, count: gpu.byteCount), cpuBytes, "GPU 与 CPU 逐字节相同")
     }
 
     /// 真接收端回环（本机装了 NDI SDK）：同一进程里起一个 NDI 接收端连到发送器，依次送 UYVY 1280×720、BGRA 1600×900、NV12 1920×1080
