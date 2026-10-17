@@ -70,6 +70,79 @@ final class W5PCopyTests: XCTestCase {
         XCTAssertEqual(L10n.string("outputSettings.stream.reconnect", language: "en", 30.0), "Max retry interval 30 s (keeps retrying, except after an authentication failure)")
     }
 
+    // MARK: 112 留下的：当前那组是没选输入的 Stinger
+
+    private var panel: TransitionPanelView { AppTest.controller.windowController.transitionPanel }
+
+    private func uiCommands(_ session: SwitcherSession, since: UInt64) -> [Command] {
+        session.control.bus.recentEntries().filter { $0.sequence > since && $0.source == .ui }.map(\.command)
+    }
+
+    private func lastSequence(_ session: SwitcherSession) -> UInt64 { session.control.bus.recentEntries().last?.sequence ?? 0 }
+
+    /// PGM 1、PVW 2，当前槽 = 出厂的槽 4（没选输入的 Stinger，"用于 T-bar（不执行）"选上的）。
+    private func prepareUnsetStingerCurrent() throws -> SwitcherSession {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 3)
+        session.send(.setProgram(input: 1))
+        session.send(.setPreview(input: 2))
+        session.send(.useTransitionSlot(slot: 4, start: false))
+        guard AppTest.waitUntil(3, { session.state.program == 1 && session.state.preview == 2 && session.state.transition.currentSlot == 4
+            && session.state.transition.currentGroup.isStingerWithoutInput }) else {
+            throw XCTSkip("前提没就绪：\(session.state.transition)")
+        }
+        AppTest.pump(seconds: 0.1)
+        return session
+    }
+
+    /// 格子"转场"（112 留下的，用户 2026-10-17 定）：当前那组是没选输入的 Stinger → 先弹这个槽的输入选择、整条不发（PVW 也不换）。
+    /// 原来发 setPreview + autoTransition，前一条生效、后一条被拒，PVW 换了却没转场。选了输入只改槽，再点才执行。
+    func testW5P112_cellTransitionWithUnsetStingerAsksForInputAndSendsNothing() throws {
+        let session = try prepareUnsetStingerCurrent()
+        let cell = try XCTUnwrap(AppTest.controller.windowController.inputStrip.cells[3])
+        XCTAssertTrue(cell.transitionButton.isEnabled, "按钮照样能点（点了是先选输入）")
+        XCTAssertTrue(cell.transitionButton.toolTip?.contains("还没选输入") == true, cell.transitionButton.toolTip ?? "nil")
+        let since = lastSequence(session)
+        _ = AppTest.measurePoppedMenu(open: { cell.transitionButton.performClick(nil) }, menu: { self.panel.activeMenu })
+        let menu = try XCTUnwrap(panel.activeMenu, "应弹出槽 4 的输入选择")
+        XCTAssertEqual(menu.items.first?.title, "转场 4 · Stinger：先选一路输入（选了才执行）", "\(menu.items.map(\.title))")
+        AppTest.pump(seconds: 0.3)
+        XCTAssertEqual(uiCommands(session, since: since), [], "整条不发：既不换 PVW，也不发 autoTransition")
+        XCTAssertEqual(session.state.preview, 2, "PVW 不换")
+        XCTAssertEqual(session.state.program, 1)
+        XCTAssertFalse(session.state.transition.isActive)
+        // 选一路输入：只改槽 4
+        menu.performActionForItem(at: menu.index(of: try XCTUnwrap(menu.items.first { $0.title == "输入 3 合成 3" })))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.transition.slots[3].stinger.input == 3 && !session.state.transition.currentGroup.isStingerWithoutInput },
+                      "\(session.state.transition)")
+        XCTAssertFalse(session.state.transition.isActive, "选了输入不执行")
+        AppTest.pump(seconds: 0.1)
+        // 再点"转场"：照常 setPreview + autoTransition（Stinger 用输入 3 跑完、3 上 PGM）
+        cell.transitionButton.performClick(nil)
+        XCTAssertTrue(AppTest.waitUntil(5) { !session.state.transition.isActive && session.state.program == 3 }, "\(session.state.program)")
+        XCTAssertEqual(session.control.bus.counters.rejected, 0, "一条都没被拒")
+    }
+
+    /// T-bar（112 留下的，用户 2026-10-17 定）：当前槽是没选输入的 Stinger 时推了照契约会硬切，界面拦——T-bar 灰掉、下面写"转场 n 是 Stinger、还没选输入"；
+    /// 选了输入 / 换了当前槽就恢复。
+    func testW5P112_tbarDisabledWhileCurrentSlotIsUnsetStinger() throws {
+        let session = try prepareUnsetStingerCurrent()
+        let panel = self.panel
+        XCTAssertTrue(AppTest.waitUntil(1) { !panel.tbar.isEnabled }, "T-bar 灰掉")
+        XCTAssertFalse(panel.tbarHint.isHidden, "下面有一行提示")
+        XCTAssertEqual(panel.tbarHint.stringValue, "转场 4 是 Stinger、还没选输入")
+        XCTAssertTrue(panel.tbar.toolTip?.contains("硬切") == true, panel.tbar.toolTip ?? "nil")
+        let since = lastSequence(session)
+        panel.tbar.simulateDrag(to: 1)
+        AppTest.pump(seconds: 0.3)
+        XCTAssertEqual(uiCommands(session, since: since), [], "灰着的 T-bar 推不动、不发 tbar")
+        XCTAssertEqual(session.state.program, 1)
+        // 换一个当前槽：恢复
+        session.send(.useTransitionSlot(slot: 1, start: false))
+        XCTAssertTrue(AppTest.waitUntil(2) { panel.tbar.isEnabled && panel.tbarHint.isHidden }, "当前槽换成 Fade：T-bar 恢复")
+        XCTAssertNil(panel.tbar.toolTip)
+    }
+
     /// 状态行（W4C3 第 11 条）：failed 的推流不算在跑——原来取码率最低的那一路，起不来 / 鉴权停下的码率 0，写"推流 0 b/s"；状态窗写 —，两处不一致。
     func testW5P111_statusLineIgnoresFailedStreams() {
         func stats(_ entries: [Stats.EncoderEntry]) -> Stats {

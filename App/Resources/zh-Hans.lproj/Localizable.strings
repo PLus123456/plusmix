@@ -522,6 +522,12 @@
 "cell.transition" = "转场";
 "cell.transition.a11y" = "把输入 %d 按当前转场送上 PGM";
 "cell.transition.tip" = "按当前转场送上 PGM（%@）";
+"cell.transition.stingerUnsetTip" = "转场 %d 是 Stinger、还没选输入：点一下先选输入（不换 PVW、不执行）";
+"cell.transition.stingerUnsetTipNoSlot" = "当前转场是 Stinger、还没选输入：先在转场列 ▾ 里选一路";
+"tbar.stingerUnsetHint" = "转场 %d 是 Stinger、还没选输入";
+"tbar.stingerUnsetHintNoSlot" = "当前转场是 Stinger、还没选输入";
+"tbar.stingerUnsetTip" = "转场 %d 是 Stinger、还没选输入：推 T-bar 会是一次硬切，所以先灰着；在这个槽的 ▾ 里选一路输入，或在上面一行换一个转场";
+"tbar.stingerUnsetTipNoSlot" = "当前转场是 Stinger、还没选输入：推 T-bar 会是一次硬切，所以先灰着；在上面一行换一个转场";
 "channels.summary.mono" = "第 %d 路（单声道）";
 "channels.summary.pair" = "第 %d、%d 路";
 "codec.aac" = "AAC";

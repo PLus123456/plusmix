@@ -40,6 +40,10 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     var onOverlaySettings: ((Int) -> Void)? {
         didSet { for c in cells.values { c.onOverlaySettings = onOverlaySettings } }
     }
+    /// 格子"转场"遇当前那组是没选输入的 Stinger（W5-P，112 留下的）：弹这个槽的输入选择（参数 = 当前槽号，不对应槽为 nil；锚点 = 那颗按钮）。
+    var onStingerUnset: ((Int?, NSView) -> Void)? {
+        didSet { for c in cells.values { c.onStingerUnset = onStingerUnset } }
+    }
     let searchField = NSSearchField()
     let categoryBar = CategoryTagBar()
     let mixerToggle: NSButton
@@ -210,12 +214,14 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
             for v in order { stack.addArrangedSubview(v) }
         }
         let label = transitionLabel(state)
+        let unsetStinger = !state.transition.isActive && state.transition.currentGroup.isStingerWithoutInput   // 提案 029 的判定（校验器拒 autoTransition 的同一条）
         for config in state.inputs {
             guard let cell = cells[config.number] else { continue }
             let runtime = runtimeState?(config.number)
             cell.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays, runtime: runtime,
                        detail: runtime == .noSignal ? runtimeDetail?(config.number) : nil)
-            cell.applySwitching(program: state.program, transitionActive: state.transition.isActive, transitionLabel: label)
+            cell.applySwitching(program: state.program, transitionActive: state.transition.isActive, transitionLabel: label,
+                                unsetStinger: unsetStinger, currentSlot: state.transition.currentSlot)
             cell.removalImpacts = InputRemovalImpact.impacts(of: config.number, in: state)   // 删之前要不要问（W5-B）
         }
         addPlaceholder.setHintVisible(state.inputs.isEmpty)
@@ -242,6 +248,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         cell.send = send
         cell.onOpenSettings = onOpenSettings
         cell.onOverlaySettings = onOverlaySettings   // W5-K：Overlay 小按钮右键"叠加设置…"
+        cell.onStingerUnset = onStingerUnset
         cell.onChangeSource = onChangeSource
         cell.onNotice = onNotice
         cell.onSetCategory = { [weak self] number, color in self?.setCategory(color, for: number) }

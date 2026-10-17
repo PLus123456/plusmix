@@ -314,6 +314,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         inputStrip.onAddInput = { [weak self] in self?.presentAddInput() }
         inputStrip.onDropFiles = { [weak self] result in self?.addInputs(from: result) }
         inputStrip.onNotice = { [weak self] message in self?.bottomBar.showNotice(message) }
+        inputStrip.onStingerUnset = { [weak self] slot, anchor in self?.transitionPanel.showStingerInputs(slot: slot, below: anchor) }   // W5-P：格子"转场"先选输入
         inputStrip.onRenameCategory = { [weak self] color in self?.presentRenameCategory(color) }
         inputStrip.onClearCategoryName = { [weak self] color in self?.renameCategory(color, to: "") }
         inputStrip.onThumbnailSizeChange = { [weak self] size in self?.setThumbnailSize(size) }

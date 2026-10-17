@@ -17,6 +17,15 @@ final class TBarView: NSView {
         }
     }
     private(set) var isDragging = false
+    /// 能不能推（W5-P，112 留下的）：当前槽是没选输入的 Stinger 时转场列把它关掉——推了照契约是一次硬切。关着画淡、鼠标不理、不发 tbar。
+    var isEnabled = true {
+        didSet {
+            guard isEnabled != oldValue else { return }
+            alphaValue = isEnabled ? 1 : 0.4
+            setAccessibilityEnabled(isEnabled)
+            needsDisplay = true
+        }
+    }
     private var grabOffset: CGFloat = 0
     private var springTimer: Timer?
     /// 松手时视为"到顶"的阈值。
@@ -102,6 +111,7 @@ final class TBarView: NSView {
     // MARK: 鼠标
 
     override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
         let p = convert(event.locationInWindow, from: nil)
         springTimer?.invalidate()
         springTimer = nil
@@ -168,6 +178,7 @@ final class TBarView: NSView {
 
     /// 测试用：模拟一次从 0 拖到 target 再松手。
     func simulateDrag(to target: Double) {
+        guard isEnabled else { return }   // 灰着的 T-bar 推不动（同 mouseDown）
         isDragging = true
         var p = 0.0
         while p < target {

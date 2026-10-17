@@ -53,6 +53,8 @@ final class TransitionPanelView: NSView {
     let params = TransitionParamsModel()
     private var paramsPopover: NSPopover?
     let tbar = TBarView(frame: .zero)
+    /// T-bar 下面那一行提示（当前槽是没选输入的 Stinger 时："转场 n 是 Stinger、还没选输入"；平时藏着、不占高度）。
+    let tbarHint = Theme.label("", size: NSFont.systemFontSize(for: .small), color: .systemOrange)
     let clock = ClockView(frame: .zero)
     /// T-bar 与时钟之间的空白（列里多出来的高度都给它）。
     private let spacer = NSView()
@@ -136,7 +138,11 @@ final class TransitionPanelView: NSView {
         overlayRow.distribution = .fillEqually
         overlayRow.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [cutButton] + slotButtons + [ftbSplit, overlayHeader, overlayRow, tbarHeader, tbarSlotButton, durationControl, tbar, spacer, clock])
+        tbarHint.isHidden = true
+        tbarHint.lineBreakMode = .byWordWrapping
+        tbarHint.maximumNumberOfLines = 2
+        tbarHint.cell?.wraps = true
+        let stack = NSStackView(views: [cutButton] + slotButtons + [ftbSplit, overlayHeader, overlayRow, tbarHeader, tbarSlotButton, durationControl, tbar, tbarHint, spacer, clock])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.distribution = .fill
@@ -149,6 +155,7 @@ final class TransitionPanelView: NSView {
         stack.setCustomSpacing(4, after: tbarSlotButton)
         stack.setCustomSpacing(4, after: durationControl)
         stack.setCustomSpacing(0, after: tbar)
+        stack.setCustomSpacing(0, after: tbarHint)
         stack.setCustomSpacing(8, after: spacer)
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -192,6 +199,7 @@ final class TransitionPanelView: NSView {
             Theme.setHighlighted(b, state.overlays[i].on)
         }
         tbar.apply(state: state)
+        updateTbarGuard()
         updateTbarSlot()
         refreshTooltips(force: false)
         params.apply(state: state)
@@ -202,6 +210,31 @@ final class TransitionPanelView: NSView {
     /// 槽 n 现在的配置（槽号不对为 nil）。
     private func slot(_ n: Int) -> TransitionSlot? {
         TransitionSlot.indexRange.contains(n) && n - 1 < state.transition.slots.count ? state.transition.slots[n - 1] : nil
+    }
+
+    /// 当前槽（当前那组）是没选输入的 Stinger 时 T-bar 灰掉、下面写一行（W5-P，112 留下的，用户 2026-10-17 定）：推 T-bar 照契约（提案 029 只拒
+    /// autoTransition / useTransitionSlot(start)）推到顶是一次硬切，界面拦；选了输入 / 换了当前槽就恢复。转场进行中不动它（进行中的不是这种组）。
+    private func updateTbarGuard() {
+        let t = state.transition
+        let unset = !t.isActive && t.currentGroup.isStingerWithoutInput
+        if tbar.isEnabled == unset { tbar.isEnabled = !unset }
+        let hint = unset ? (t.currentSlot.map { L("tbar.stingerUnsetHint", $0) } ?? L("tbar.stingerUnsetHintNoSlot")) : ""
+        if tbarHint.stringValue != hint { tbarHint.stringValue = hint }
+        if tbarHint.isHidden == unset { tbarHint.isHidden = !unset }
+        let tip: String? = unset ? (t.currentSlot.map { L("tbar.stingerUnsetTip", $0) } ?? L("tbar.stingerUnsetTipNoSlot")) : nil
+        if tbar.toolTip != tip { tbar.toolTip = tip }
+    }
+
+    /// 格子"转场"遇当前那组是没选输入的 Stinger（W5-P）：弹这个槽的输入选择（与点转场列那个槽的主体同一个菜单，选了只改槽、不执行），
+    /// 菜单挂在格子的按钮下面；当前那组不对应槽（API 用 setTransition 设的）没有槽可选，状态行说一句。
+    func showStingerInputs(slot: Int?, below anchor: NSView) {
+        guard let n = slot, self.slot(n) != nil else {
+            onNotice?(L("feedback.stingerWithoutInput"))
+            return
+        }
+        let menu = stingerInputMenu(slot: n)
+        activeMenu = menu
+        ScreenMenu.popUpBelow(menu, anchor)
     }
 
     /// 点主体 / T-bar 那一行的菜单 / 菜单栏"切换 › 转场 n"：执行转场 n。Stinger 槽没选输入 = 弹出这个槽的输入选择、不执行（X18）。

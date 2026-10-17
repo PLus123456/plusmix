@@ -602,7 +602,8 @@ final class W5OFollowupTests: XCTestCase {
     // MARK: 4. 没选输入的 Stinger 槽从外部执行被拒的提示（提案 029；拒收本身在 P5-3）
 
     /// ⌥4（出厂槽 4 = Stinger、没选输入）被拒：状态行"转场 4 是 Stinger、还没选输入——在转场列 ▾ 里选一路"，转场没开始；
-    /// 当前槽是这种槽时按格子上的"转场"（界面命令通道）同一句。选了输入之后照常执行。
+    /// 当前槽是这种槽时按格子上的"转场"：W5-P 起（112 留下的，用户 2026-10-17 定）不再发、不再被拒，先弹这个槽的输入选择、整条不发（PVW 不换）。
+    /// 选了输入之后照常执行。
     func testW5O4_stingerSlotRefusalShowsStatusLineNotice() throws {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 3)
@@ -622,10 +623,14 @@ final class W5OFollowupTests: XCTestCase {
         AppTest.pump(seconds: 0.1)
         bar.showNotice("")
         let cell = try XCTUnwrap(AppTest.controller.windowController.inputStrip.cells[2])
-        cell.transitionButton.performClick(nil)
-        XCTAssertTrue(AppTest.waitUntil(2) { bar.displayedNotice == expected }, "格子转场被拒：\(bar.displayedNotice)")
+        let panel = AppTest.controller.windowController.transitionPanel
+        let previewBefore = session.state.preview
+        _ = AppTest.measurePoppedMenu(open: { cell.transitionButton.performClick(nil) }, menu: { panel.activeMenu })
+        XCTAssertEqual(panel.activeMenu?.items.first?.title, "转场 4 · Stinger：先选一路输入（选了才执行）", "格子转场先弹这个槽的输入选择")
+        AppTest.pump(seconds: 0.2)
         XCTAssertFalse(session.state.transition.isActive)
         XCTAssertEqual(session.state.program, 1, "PGM 没换")
+        XCTAssertEqual(session.state.preview, previewBefore, "整条不发：PVW 也不换")
         // 选了输入：照常执行
         var slot4 = session.state.transition.slots[3]
         slot4.stinger.input = 3
