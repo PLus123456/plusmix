@@ -1,5 +1,6 @@
-// 断言用例：node --test 和 JXA 共用。每个用例 run(assert) 只用 assert.equal / deepEqual / ok / match。
+// 断言用例：node --test 和 JXA 共用。每个用例 run(assert) 只用 assert.equal / deepEqual / ok / match，同步跑完（JXA 没有事件循环）。
 import { COLORS, classifyMessage, commandFor, fpsFrom, inputName, keyStyle, outputOf, pressFeedback, slotSublabel, svgDataURI, svgKey, tallyFor } from "../com.plusmix.switcher.sdPlugin/lib/tally.js";
+import { SwitcherClient } from "../com.plusmix.switcher.sdPlugin/lib/api-client.js";
 
 export const snapshot = {
   type: "snapshot",
@@ -169,6 +170,98 @@ export const cases = [
       assert.equal(ignored.level, "info");
       assert.deepEqual(pressFeedback("slot", { receipt: { applied: true, sequence: 3 } }), { alert: false, level: null, log: null });
       assert.equal(pressFeedback("preview", { error: "没设输入编号" }).alert, true, "本地就判出来的错误同样闪");
+    },
+  },
+  {
+    name: "SwitcherClient 改连接设置（W2-C4 / D17）：旧 socket 后到的事件不碰新连接；不起第三条、不留没关的连接；旧连接没回执的命令作废、旧快照清掉",
+    run(assert) {
+      // 假 socket：事件由用例按顺序触发（真 ws 的 close 是异步的，旧连接的 close 会在新连接打开之后才到）
+      const made = [];
+      function FakeSocket(url) { this.url = url; this.handlers = {}; this.closeCalls = 0; this.closedByPeer = false; this.sent = []; made.push(this); }
+      FakeSocket.prototype.on = function (event, f) { (this.handlers[event] = this.handlers[event] || []).push(f); return this; };
+      FakeSocket.prototype.fire = function (event, arg) {
+        if (event === "close") this.closedByPeer = true;
+        for (const f of this.handlers[event] || []) f(arg);
+      };
+      FakeSocket.prototype.close = function () { this.closeCalls += 1; };
+      FakeSocket.prototype.send = function (text) { this.sent.push(text); };
+      const timers = [];
+      const client = new SwitcherClient({
+        WebSocket: FakeSocket,
+        setTimer: (f, ms) => { timers.push({ f, ms, cleared: false, fired: false }); return timers.length - 1; },
+        clearTimer: (id) => { if (timers[id]) timers[id].cleared = true; },
+      });
+      const events = [];
+      const logs = [];
+      client.on("connected", () => events.push("connected"));
+      client.on("disconnected", () => events.push("disconnected"));
+      client.on("log", (line) => logs.push(line));
+      const open = () => made.filter((s) => s.closeCalls === 0 && !s.closedByPeer);   // 还开着的连接
+      const reconnects = () => timers.filter((t) => t.ms === 2000 && !t.cleared && !t.fired);
+
+      client.connect();
+      const first = made[0];
+      first.fire("open");
+      first.fire("message", JSON.stringify({ type: "snapshot", sequence: 1, state: { program: 1, preview: 2 } }));
+      assert.equal(client.connected, true);
+      assert.equal(client.snapshot.sequence, 1);
+      let oldError = null;
+      client.send({ cut: {} }).catch((e) => { oldError = e.message; });   // 旧连接上一条还没回执的命令
+      assert.equal(client.pending.size, 1);
+
+      // 改地址：旧连接关掉、起第二条；旧连接上没回执的命令作废（不留给新连接）；旧快照清掉（别拿旧那台的状态算开关）
+      client.reconfigure({ host: "127.0.0.2", port: 8765, token: "" });
+      assert.equal(made.length, 2, "改设置：起第二条");
+      const second = made[1];
+      assert.equal(first.closeCalls, 1, "旧连接关掉");
+      assert.equal(client.ws, second);
+      assert.equal(client.pending.size, 0, "旧连接上没回执的命令作废");
+      assert.equal(client.snapshot, null, "旧快照清掉");
+      second.fire("open");
+      assert.equal(client.connected, true);
+
+      // 旧 socket 后到的事件（快照 / 出错 / close）一概不碰新连接：不收快照、不记日志、不当成断开、不排重连、不作废新连接的命令
+      first.fire("message", JSON.stringify({ type: "snapshot", sequence: 99, state: {} }));
+      assert.equal(client.snapshot, null, "旧连接的快照不收");
+      first.fire("error", { message: "旧连接出错" });
+      assert.equal(logs.length, 0, "旧连接出错不记成当前连接的");
+      client.send({ cut: {} }).catch(() => {});
+      assert.equal(client.pending.size, 1);
+      first.fire("close");
+      assert.equal(client.connected, true, "旧连接的 close 不把新连接当成断开");
+      assert.equal(client.ws, second, "当前连接还是第二条");
+      assert.equal(client.pending.size, 1, "新连接上的命令不被作废");
+      assert.equal(reconnects().length, 0, "不排重连");
+      assert.deepEqual(events, ["connected", "connected"], "没有 disconnected");
+      assert.equal(second.sent.length, 1, "Cut 发到第二条上");
+      assert.ok(JSON.parse(second.sent[0]).command.cut, "发的是 Cut");
+      client.open();
+      assert.equal(made.length, 2, "不出现第三条");
+      assert.deepEqual(open(), [second], "只有第二条开着");
+
+      // 改 token：第二条关掉、第三条起来；第二条后到的 close 同样不碰第三条
+      client.reconfigure({ host: "127.0.0.2", port: 8765, token: "abc" });
+      assert.equal(made.length, 3);
+      const third = made[2];
+      assert.equal(second.closeCalls, 1, "第二条关掉");
+      assert.match(third.url, /token=abc/);
+      third.fire("open");
+      second.fire("close");
+      assert.equal(client.connected, true);
+      assert.equal(client.ws, third);
+      assert.deepEqual(open(), [third], "只有第三条开着");
+
+      // 当前连接自己断了：照旧 disconnected、2 s 后只重连一条
+      third.fire("close");
+      assert.equal(client.connected, false);
+      assert.equal(events[events.length - 1], "disconnected");
+      const retry = reconnects();
+      assert.equal(retry.length, 1, "排一次重连");
+      retry[0].fired = true;
+      retry[0].f();
+      assert.equal(made.length, 4, "重连起一条");
+      assert.deepEqual(open(), [made[3]]);
+      assert.equal(oldError === null || oldError === "连接断了", true, "旧命令按断开作废");
     },
   },
   {

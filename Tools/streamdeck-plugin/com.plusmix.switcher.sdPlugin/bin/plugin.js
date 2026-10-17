@@ -1,13 +1,14 @@
 // Switcher 的 Stream Deck 插件（官方 SDK @elgato/streamdeck）：按钮 = 命令，按钮颜色 = tally（PGM 红 / PVW 绿）。
 // 对着本地 API（docs/api.md）：WS /api/v1/events 收快照，连接上发命令。连接参数（host / port / token）是全局设置，任一按钮的设置面板都能改。
 import streamDeck, { SingletonAction } from "@elgato/streamdeck";
+import WebSocket from "ws";
 import { SwitcherClient } from "../lib/api-client.js";
 import { commandFor, fpsFrom, keyStyle, pressFeedback, svgDataURI, svgKey } from "../lib/tally.js";
 
 const PREFIX = "com.plusmix.switcher.";
 const KINDS = ["cut", "auto", "slot", "preview", "program", "tally", "overlay", "record", "stream", "ftb"];
 
-const client = new SwitcherClient();
+const client = new SwitcherClient({ WebSocket });
 /** 屏幕上的按钮：id → { action, kind, settings }。 */
 const visible = new Map();
 
@@ -69,7 +70,7 @@ function applyGlobal(settings) {
 
 client.on("snapshot", paintAll);
 client.on("connected", () => { streamDeck.logger.info(`已连上 ${client.url}`); paintAll(); });
-client.on("disconnected", () => { streamDeck.logger.info("Switcher 断开，2 s 后重连"); paintAll(); });
+client.on("disconnected", () => { streamDeck.logger.info("PlusMix 断开，2 s 后重连"); paintAll(); });
 client.on("log", (line) => streamDeck.logger.debug(line));
 streamDeck.settings.onDidReceiveGlobalSettings((ev) => applyGlobal(ev.settings));
 
