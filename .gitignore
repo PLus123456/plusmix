@@ -39,3 +39,7 @@ reports/**/*.jsonl
 # ---- 调研资料 ----
 # 竞品截图是作品（设计方案 §0），只留在本机；文档里按图号引用（docs/ui-study/README.md）
 vmix-28-guide/
+
+# Python 字节码（scripts/ 下的报告 / 判定脚本跑一次就生成；G9 2026-10-18 误提交过一次）
+__pycache__/
+*.pyc
