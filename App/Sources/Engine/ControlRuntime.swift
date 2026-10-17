@@ -17,7 +17,7 @@ enum CommandFeedback: Equatable {
     case rejected(Command, reason: String)
     /// 状态机按规则忽略（回执 applied == false：转场进行中再 fade、FTB 目标已相同……）。
     case ignored(Command)
-    /// 快捷键按下去没做成、要说一句的（W5-O：⌃n 开空叠加通道而 PVW 是黑场、执行没选输入的 Stinger 被拒——提案 029）。
+    /// 快捷键 / MIDI 按下去没做成、要说一句的（W5-O / W2-C4：⌃n 开空叠加通道而 PVW 是黑场、执行没选输入的 Stinger 被拒——提案 029）。
     case control(ControlFeedback)
 
     var message: String {
@@ -99,11 +99,13 @@ final class ControlRuntime {
         }
         hotkeys.setUIActionHandler(ui)
         midi.setUIActionHandler(ui)
-        // 快捷键按下去没做成、要说一句的（W5-O）：派发器在调 handle 的线程上（解析不出）或派发 Task 里（被拒）调，一律回主线程。
-        // MIDI 音符的同类提示要动 SwitcherControl/MIDI（不在 W5-O 的目录），这一版只记计数
-        hotkeys.setFeedbackHandler { [weak self] feedback in
+        // 快捷键 / MIDI 音符按下去没做成、要说一句的（W5-O；MIDI 是 W2-C4）：派发器在调 handle 的线程上、MIDI 在 CoreMIDI 接收线程上（解析不出），
+        // 或各自的派发 Task 里（被拒）调——一律回主线程，状态行同一句
+        let feedback: @Sendable (ControlFeedback) -> Void = { [weak self] feedback in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.onFeedback?(.control(feedback)) } }
         }
+        hotkeys.setFeedbackHandler(feedback)
+        midi.setFeedbackHandler(feedback)
     }
 
     /// 起：命令循环 → 推送源 → API → MIDI。API / MIDI 起不来不算错（记原因，节目照跑）。
