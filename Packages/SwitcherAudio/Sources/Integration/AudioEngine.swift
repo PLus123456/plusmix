@@ -687,8 +687,9 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private func stepFadeToBlack(now: HostTime) {
         lock.lock()
         guard let ramp = ftbRamp else { lock.unlock(); return }
-        // 混音块 T 里的内容是 T − 对齐延迟 采集的，斜坡按内容时刻评估；再提前 3 ms（总线增益一阶平滑 τ = 3 ms），曲线就对上斜坡
-        let at = now - alignmentDuration + HostDuration(milliseconds: 3, timebase: timebase)
+        // 混音块 T 里的内容是 T − 对齐延迟 采集的，斜坡按内容时刻评估；再提前 3 ms（总线增益一阶平滑 τ = 3 ms）+ 半块（目标每块才设一次，
+        // 一块里是台阶：只补 τ 时块内平均还落后半块 2.7 ms，30 拍斜坡到 −20 dB 那头差 0.5 dB，D11 的分段用例量出来的），曲线就对上斜坡
+        let at = now - alignmentDuration + HostDuration(milliseconds: 3, timebase: timebase) + blockDuration / 2
         let level = AudioProgramGate.fadeToBlackLevel(at: at, on: ramp.on, start: ramp.start, duration: ramp.duration)
         ftbLevel = level
         let factor = Float(1 - level)
