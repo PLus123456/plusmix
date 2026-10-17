@@ -83,6 +83,7 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 - `volume` 是幅度百分比：100 = 0 dB，`SetVolume Value` 是推子 0–100，幅度 = (推子/100)⁴（对方的曲线，Companion 按它算增减）。内部增益 0 dB 以上表示不了，顶格 100。
 - `meterF1 / meterF2` 来自 `Stats.audio.meters`（1 Hz 的那一份），没有就是 0。
 - 叠加 `<overlay number="k">输入</overlay>` 只在通道可见（开着或退出动画未完）时写输入，否则空元素。
+- 转场 `<transitions>` 是四个转场槽各一项：`<transition number="n" effect="Wipe" duration="1000" />`，`number` = 槽号（与 Transition1–4 对得上），`effect` / `duration` = 槽的效果与毫秒。
 - `active` / `preview` 就是快照的 PGM / PVW。**转场进行中 PVW 也算在 PGM 上**（C3 口径）——TALLY 串和 ACTS 反映这一点，XML 没有"转场中"字段，
   只能靠 `active`，这是与快照 tally 的唯一差别（`testC3_tallyDigitsAndXMLAgreeWithSnapshotTallies` 钉着）。
 
@@ -99,12 +100,12 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 
 | 函数 | 参数 | 映射 |
 |---|---|---|
-| Cut | Input? | `.cut`；带 Input 先 `.setPreview` 再 `.cut`（旧 PGM 进 PVW，与对方一致） |
-| Fade / Wipe / Zoom | Duration?（ms，默认 500）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition` |
-| Stinger1 | | `.setTransition(.stinger)` + `.autoTransition`；没设 stinger 输入 → NotConfigured |
-| Transition1 | | `.autoTransition`（按已选类型 / 时长）；Transition2–4 → NotImplemented（只有一个转场槽） |
-| SetTransitionEffect1 | Value=Cut/Fade/Wipe/Zoom/Stinger | `.setTransition(type, 当前时长)`；对方的其他效果名 → NotImplemented |
-| SetTransitionDuration1 | Value=ms | `.setTransition(当前类型, 拍)` |
+| Cut | Input? | `.cut`；带 Input 先 `.setPreview` 再 `.cut`（旧 PGM 进 PVW，与对方一致）。**转场进行中（T-bar 推到一半也算）带 Input → 409 NotConfigured、一条都不发**（这时 PVW 改不了，`.cut` 会把正在进行的那次做完、落不到点名的那一路）；不带 Input 照旧把当前转场做完 |
+| Fade / Wipe / Zoom | Duration?（ms，默认 500）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition`（改的是当前那组，之后它可能对不上任何转场槽） |
+| Stinger1 | | 执行**第一个选了输入的 Stinger 转场槽**（`.useTransitionSlot(k, start: true)`）；没有这种槽时用当前那组的 stinger 输入（`.setTransition(.stinger)` + `.autoTransition`）；都没有 → NotConfigured |
+| Transition1–4 | | `.useTransitionSlot(n, start: true)`：执行转场 n（一拍内选中并开始，之后 T-bar / 回车也用它）；转场进行中 → `OK TransitionN (no change)`。转场 n 是没选输入的 Stinger 槽 → 409 NotConfigured（"…is a Stinger with no input; pick an input for it first"，与 Stinger1 没配好同口径），一条都不发。Transition5 起 → NotImplemented |
+| SetTransitionEffect1–4 | Value=Cut/Fade/Wipe/Zoom/Stinger（不分大小写） | `.setTransitionSlot(n, 槽 n 只换效果)`：时长、Wipe 方向 / 软边、Stinger 输入 / 换底拍原样带上；只改设置、不执行，转场进行中也收（进行中的那一次照原样走完）。对方的其他效果名 → NotImplemented，谁都没有的名字 → BadParameter |
+| SetTransitionDuration1–4 | Value=ms | `.setTransitionSlot(n, 槽 n 只换时长)`：毫秒按节目帧率换拍（2000 ms @60 = 120 拍）；只改设置、不执行 |
 | SetFader | Value=0–255 | `.tbar(v/255)` |
 | PreviewInput / SetPreviewInput | Input | `.setPreview` |
 | ActiveInput / CutDirect | Input | `.setProgram`（直切，PVW 不变；Companion 的 Send Input to Program 发 CutDirect） |
@@ -126,10 +127,11 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 `Input=` 的四种写法都认：编号、`0` = 当前 PVW、`-1` = 当前 PGM、XML 里的 `key`、整个标题（区分大小写）。
 
 明确不做（返回 NotImplemented + 文案，`FunctionCatalog.knownUnimplemented` 与前缀族）：对方的其他转场效果（Slide / Fly / Merge / CubeZoom…）、
-Transition2–4（提案 020 转场槽落地后由 prompt 100 接上）、Stinger2–8、OverlayInput5–8、OverlayInputNZoom、PreviewOverlayInputN（没有"叠加预览"）、External / MultiCorder / Fullscreen / SRT 输出
+Transition5 起、Stinger2–8、文件播放（Play / Pause / PlayPause / Restart / SetPosition：PlusMix 有 `setPlayback` / `seekPlayback`，映射还没做）、OverlayInput5–8、OverlayInputNZoom、PreviewOverlayInputN（没有"叠加预览"）、External / MultiCorder / Fullscreen / SRT 输出
 （外部显示的开关命令 `setOutputEnabled` 2026-09-23 起已有，映射待定：先要定 External / Fullscreen 各对哪种输出，见 docs/ui-study/02 V14）、Snapshot、SetOutput2–4、AudioAuto（每路 afv 2026-09-23 起已有，但只在全局 AFV 打开时生效，映射有损，暂不映射）、BusXSolo、SendToMaster、
-SetGain（内部只有一个增益）、SetVolumeFade、声道混音器、音频插件、Title / List / Replay / PTZ / Browser / VideoCall / VirtualSet / 数据源 / 脚本等整族。
-完全不认识的名字返回 UnknownFunction。注意：另有 31 个参考软件里真实存在的函数名现在也被当成"不认识"返回 400，按上面的定义应返回 501（docs/ui-study/02 X51，归 W3-D 系）。
+SetGain（内部只有一个增益）、SetVolumeFade、声道混音器、音频插件、Title / List / Replay / PTZ / Browser / VideoCall / VirtualSet / 数据源 / 脚本等整族，
+以及前缀族盖不住的 31 个具体名字（推流设置 StreamingSetKey / URL / Username / Password、AutoPlay / AutoPause / AutoRestart 一族、NDISelectSourceByName / ByIndex、NDIStart / StopRecording、OpenPreset / LastPreset、ActivatorRefresh 等，只认精确名字）。
+完全不认识的名字返回 UnknownFunction（400）。
 
 ## 7. C5 怎么测
 
@@ -143,6 +145,6 @@ SetGain（内部只有一个增益）、SetVolumeFade、声道混音器、音频
 ## 8. 已知限制
 
 - XML 里没有"转场进行中"，Companion 的 PGM 反馈在转场那几十帧只亮旧 PGM（TALLY 订阅和外部 tally 流没这个问题）。
-- 输入的 `state` 恒 Running、`position` / `duration` 恒 0（快照里没有播放状态；文件输入的播放控制不在本期）。
+- 输入的 `state` 恒 Running（编号空洞处补的 Blank 占位写 Paused）、`position` / `duration` 恒 0、`loop` 恒 False：兼容层没映射文件播放（PlusMix 自己有暂停 / 回到开头 / 循环，见[用户手册 · 输入](../user/输入.md#播放)；对方的 Play / Pause / Restart / SetPosition 回 NotImplemented）。
 - 没有鉴权（对方的 TCP 协议也没有）；默认只听 127.0.0.1，开到局域网前想清楚。
 - 每条 TCP 连接的推送缓冲 64 条快照，慢客户端丢旧的；ACTS 事件按"上次看到的状态 → 这次"算差，中间被合并的来回不会都发（收敛到最终状态）。

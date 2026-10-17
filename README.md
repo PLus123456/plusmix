@@ -5,8 +5,8 @@ T-bar、FTB、四个叠加通道、四条音频总线，输出到录制（含 IS
 Swift 6（严格并发）+ Metal，macOS 15+，Apache-2.0。
 代码名 Switcher：模块（`Switcher*`）、命令行工具（`switcher-headless` / `frameprobe`）、scheme、bundle id（`com.plusmix.switcher`）仍叫这个名字；界面、`PlusMix.app` 与发布产物用产品名 PlusMix。
 
-**状态**：0.1.0 第一版功能已全部合入，之后又做了一轮界面改版（工具条、三段式底栏、一个设置窗……，0.1.x）。检查点 G2–G7 的自动化门槛通过（[测试报告索引](docs/testing/README.md)），
-但还没有发布版：发布门槛 G5 / G7 判了不发（8 小时长稳复验、一个已知崩溃、签名与公证没做完，见 [已知问题](docs/KNOWN_ISSUES.md)）。
+**状态**：0.1.0 第一版功能已全部合入，之后又做了一轮界面改版（工具条、三段式底栏、一个设置窗、转场槽、播放控制与推流 / 录制状态窗……，0.1.x）。检查点 G2–G8 的自动化门槛通过（[测试报告索引](docs/testing/README.md)），
+但还没有发布版：G8 判 0.1.1 还不发，只差人工检查清单与签名公证（8 小时长稳已复验通过、已知崩溃已修，见 [已知问题](docs/KNOWN_ISSUES.md)）。
 现在能用来干活，但请先在自己的设备上按 [测试标准](docs/testing/测试标准.md) 验一遍。
 
 ## 一分钟上手
@@ -47,11 +47,12 @@ swift build -c release --package-path Tools/switcher-headless && Tools/switcher-
 |---|---|
 | `make gen` | XcodeGen 由 `project.yml` 生成 `Switcher.xcodeproj`（不入库）。真实签名：`DEVELOPMENT_TEAM=你的TeamID make gen`（虚拟摄像头的系统扩展必须这样签） |
 | `make build` | 六个包、两个命令行工具、App 全部编译 |
-| `make test` | 包的 `swift test`（G7 时 777 个用例）、工具冒烟、App 的 `xcodebuild test`（228 个） |
-| `make lint` | 禁词 / 版本号 / 包约束、依赖方向、目录归属 |
+| `make test` | 包的 `swift test`（G8 时 861 个用例）、工具冒烟、App 的 `xcodebuild test`（244 个） |
+| `make lint` | 禁词 / 版本号 / 包约束、依赖方向、目录归属、文档链接、随包手册与 `docs/user/` 一致 |
+| `make manual` | 由 `docs/user/` 重生成随 App 打包的 HTML 手册（`App/Resources/Help/`） |
 | `make gate4` | 10 分钟集成场景（V1–V7、A1–A4、E1–E3、E5、C1–C4）并出报告 |
 
-改了 `docs/user/` 之后跑 `python3 docs/tools/build-help.py`，重生成随 App 打包的 HTML 手册（`App/Resources/Help/`，帮助 › PlusMix 使用手册 打开的就是它）。
+改了 `docs/user/` 之后跑 `make manual`（= `python3 docs/tools/build-help.py`），重生成随 App 打包的 HTML 手册（`App/Resources/Help/`，帮助 › PlusMix 使用手册 打开的就是它）；忘了跑 `make lint` 会红。
 单独跑一个包：`swift test --package-path Packages/SwitcherCore`。可选的第三方 SDK：NDI SDK for Apple（默认 `/Library/NDI SDK for Apple`，环境变量 `NDI_SDK_DIR`）、
 DeckLink SDK（`DECKLINK_SDK_DIR` 或 `~/SDKs/DeckLink`）；没有时对应输入 / 输出编成空实现，其他功能不受影响。
 

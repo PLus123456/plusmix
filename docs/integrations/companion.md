@@ -45,9 +45,11 @@ companion-module-switcher/
 
 | 动作 | 命令 |
 |---|---|
-| Cut / Auto | `{"cut":{}}` / `{"autoTransition":{}}` |
+| Cut / Auto | `{"cut":{}}` / `{"autoTransition":{}}`（Auto = 执行当前转场槽） |
+| 转场 1–4 | 执行：`{"useTransitionSlot":{"slot":2,"start":true}}`；只选中给 T-bar / 回车用：`"start":false` |
+| 改转场槽 | `{"setTransitionSlot":{"slot":2,"config":{…}}}`（整份配置，先从快照的 `state.transition.slots[1]` 拿到再改） |
 | Fade（时长 ms） | `{"fade":{"durationTicks": round(ms/1000 × fps)}}`，fps 从 hello 的 `clock.frameDuration` 算 |
-| 选转场 | `{"setTransition":{"type":"wipe","durationTicks":30}}` |
+| 选转场（不经过槽） | `{"setTransition":{"type":"wipe","durationTicks":30}}`（改的是当前那组，之后可能对不上任何槽） |
 | Preview / Program | `{"setPreview":{"input":n}}` / `{"setProgram":{"input":n}}` |
 | T-bar | `{"tbar":{"progress":p}}`（0–1；推到 1 提交） |
 | Overlay | `{"overlay":{"channel":k,"on":true,"input":n}}` |
@@ -63,6 +65,7 @@ companion-module-switcher/
 | 录制 / 推流中 | `snapshot.state.outputs[].enabled`（kind record / stream） |
 | FTB | `snapshot.state.ftb.on` |
 | 转场中 | `snapshot.state.transition.startTick != null || progress > 0` |
+| 当前转场槽 | `snapshot.state.transition.currentSlot`（1–4；对不上任何槽时快照里没有这个键）；四个槽在 `transition.slots` |
 
 要点：整快照每拍最多一条、幂等，模块只需保存最近一条；断线重连后第一条就是当前状态；命令回执里 `applied == false` 表示状态机按规则忽略了（已是目标状态），不是错误。
 Stream Deck 插件（[stream-deck.md](stream-deck.md)）的 `lib/tally.js` 已经把"快照 → 颜色"和"按下 → 命令"写成纯函数，Companion 模块可以直接搬。

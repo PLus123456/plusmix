@@ -32,6 +32,14 @@ curl -s -X POST http://127.0.0.1:8765/api/v1/command -H 'Content-Type: applicati
 curl -s -X POST http://127.0.0.1:8765/api/v1/command -H 'Content-Type: application/json' -d '{"commands": [{"setPreview": {"input": 3}}, {"fade": {"durationTicks": 30}}]}'
 ```
 
+转场进行中发这一批：`setPreview` 被拒（回执 `applied = false`），`fade` 也被忽略，3 号上不了 PGM；换成 `[setPreview, cut]` 时 `cut` 会把正在进行的那次做完，PGM 落在原来那次的目标上、不是 3 号——看每条回执的 `applied`（[§4](#4-时序上要知道的)）。
+
+执行转场槽 2（= 界面上点"转场 2"、⌥2；之后 T-bar / 回车也用它）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/api/v1/command -H 'Content-Type: application/json' -d '{"command": {"useTransitionSlot": {"slot": 2, "start": true}}}'
+```
+
 打开叠加通道 1 并换成 6 号输入：
 
 ```bash
@@ -120,7 +128,8 @@ C 系列测试用的完整客户端（记录快照、按计划发命令、算 C1
 | 直切 PGM n | `{"command": {"setProgram": {"input": 1}}}` |
 | Cut / Auto | `{"command": {"cut": {}}}` / `{"command": {"autoTransition": {}}}` |
 | Fade 0.5 s（60 fps） | `{"command": {"fade": {"durationTicks": 30}}}` |
-| 选 + 切一次完成 | `{"commands": [{"setPreview": {"input": 3}}, {"cut": {}}]}` |
+| 选 + 切一次完成 | `{"commands": [{"setPreview": {"input": 3}}, {"cut": {}}]}`（转场进行中 `setPreview` 被拒、`cut` 只把正在进行的那次做完，看回执） |
+| 执行转场 1–4 | `{"command": {"useTransitionSlot": {"slot": 2, "start": true}}}` |
 | 叠加 1 开 / 关 | `{"command": {"overlay": {"channel": 1, "on": true, "input": null}}}` / `"on": false` |
 | FTB | `{"command": {"ftb": {"on": true}}}` |
 | 录制 / 推流 | `{"command": {"startRecord": {"output": 1}}}` … |

@@ -21,7 +21,8 @@ npx streamdeck pack com.plusmix.switcher.sdPlugin    # 发布：出 com.plusmix.
 | 动作 | 设置 | 按下 | 颜色 |
 |---|---|---|---|
 | Cut | — | PGM / PVW 对调 | 固定 |
-| Auto / Fade | 方式（Auto = 按 PlusMix 里已选的转场；Fade + 毫秒） | `autoTransition` 或 `fade` | 转场进行中红 |
+| Auto / Fade | 方式（Auto = 执行 PlusMix 里的当前转场槽；Fade + 毫秒） | `autoTransition` 或 `fade` | 转场进行中红 |
+| Transition 1–4 | 转场（1–4）、按下（执行 = 选中并开始；只选中 = 之后 T-bar 和回车用它，不执行） | `useTransitionSlot(slot, start: true / false)`；没选输入的 Stinger 槽执行不了：按下被拒、按钮闪一下警告，先在 PlusMix 的槽里选好输入（只选中照常） | 跟当前槽：当前槽蓝、它正在执行红、别的灰；大字"转场 n"，小字 = 槽的效果与时长（"Wipe → 1s"，9 个字放不下只写效果，Stinger 没选输入写"未选输入"） |
 | Preview | 输入编号 | 选到 PVW | 这路的 tally：红 PGM / 绿 PVW / 灰；转场中红底绿边 |
 | Program | 输入编号 | 直切 PGM（PVW 不变） | 同上 |
 | Tally | 输入编号 | 只看；按下 = 选到 PVW | 同上 |
@@ -35,7 +36,7 @@ npx streamdeck pack com.plusmix.switcher.sdPlugin    # 发布：出 com.plusmix.
 ## 排错
 
 - 按钮灰色写"未连接"：API 没开、地址端口不对、token 不对。插件日志在 Stream Deck 的插件日志目录（macOS：`~/Library/Logs/ElgatoStreamDeck/com.plusmix.switcher.*.log`）。
-- 按下闪警告：命令被拒（输入不存在、没有录制输出）或回执超时；原因在日志。
+- 按下闪警告：命令被拒（输入不存在、没有录制输出、执行的是没选输入的 Stinger 槽）或回执超时；原因在日志。
 - 改了代码：`npx streamdeck restart com.plusmix.switcher`。
 - 没有 Node 的机器上验证纯逻辑：`scripts/run-jxa.sh`（macOS 自带 JavaScriptCore）。
 

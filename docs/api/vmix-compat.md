@@ -23,9 +23,9 @@ Connections 加 "vMix" 类型的连接，Target host = PlusMix 所在机器，TC
 
 | Companion 动作 | 支持 | 说明 |
 |---|---|---|
-| Transition → Cut / Fade / Wipe / Zoom（带 Duration、可选 Input） | ✅ | 带 Input 时先选到 PVW 再切（旧 PGM 进 PVW） |
-| Transition → Stinger 1 | ✅ | 要在 PlusMix 里先设好 Stinger 输入，否则 409 NotConfigured |
-| Transition → Transition 1 / Set transition effect 1 / duration 1 | ✅ | 只有一个转场槽；Transition 2–4 与对方的其他效果名返回 NotImplemented |
+| Transition → Cut / Fade / Wipe / Zoom（带 Duration、可选 Input） | ✅ | 带 Input 时先选到 PVW 再切（旧 PGM 进 PVW）；转场进行中带 Input 的 Cut 回 409 NotConfigured、什么都不做 |
+| Transition → Stinger 1 | ✅ | 执行 PlusMix 里第一个选了输入的 Stinger 转场槽；一个都没有（当前那组也没设 Stinger 输入）时 409 NotConfigured |
+| Transition → Transition 1–4 / Set transition effect 1–4 / Set transition duration 1–4 | ✅ | 对应 PlusMix 的四个转场槽：Transition n = 执行转场 n（那个槽是没选输入的 Stinger 时 409 NotConfigured）；改效果 / 时长只改那个槽、不执行；效果只认 Cut / Fade / Wipe / Zoom / Stinger，对方的其他效果名返回 NotImplemented |
 | Set fader（T-bar） | ✅ | 0–255 映射到推杆 0–1 |
 | Input → Preview input / Send input to program / Preview next / previous | ✅ | Input 可以是编号、`0` = 当前 PVW、`-1` = 当前 PGM、XML 里的 key、或整个标题 |
 | Input → Set input name | ✅ | |
@@ -38,7 +38,8 @@ Connections 加 "vMix" 类型的连接，Target host = PlusMix 所在机器，TC
 | Overlay → Overlay 1–4 toggle / in / out / off / last / all off（带可选 Input） | ✅ | |
 | Tally / Status 反馈：Program、Preview、Overlay、Recording、Streaming、FTB | ✅ | 由 XML 轮询 + TALLY / ACTS 订阅驱动；转场进行中 XML 只报旧 PGM（TALLY 订阅正确） |
 | Overlay 5–8、Overlay zoom、Preview overlay | ❌ NotImplemented | PlusMix 只有四个叠加通道、没有"叠加预览"概念 |
-| Transition 2–4、Stinger 2–8、对方的其他转场效果（Slide / Fly / Merge / CubeZoom …） | ❌ NotImplemented | |
+| Transition 5 起、Stinger 2–8、对方的其他转场效果（Slide / Fly / Merge / CubeZoom …） | ❌ NotImplemented | PlusMix 只有四个转场槽 |
+| 文件播放（Play / Pause / Restart / Set position） | ❌ NotImplemented | PlusMix 自己有暂停 / 回到开头（`setPlayback` / `seekPlayback`）和循环（`setInputSource` 改播完动作），兼容层还没映射 |
 | External / MultiCorder / Fullscreen / SRT output 开关、Snapshot、SetOutput 2–4 | ❌ NotImplemented | 外部显示的开关命令 setOutputEnabled 2026-09-23 起已有，映射还没做：要先定 External / Fullscreen 各对应哪种输出、同类有多个时用哪一个（docs/ui-study/02 V14） |
 | Audio auto（AFV per input）、Bus solo、Send to master、Set gain、Volume fade、声道混音器、音频插件 | ❌ NotImplemented | AFV 在 PlusMix 里是全局开关 + 每路标志（每路 afv 只在全局开关打开时生效），映射有损，暂不映射 |
 | Title / List / Replay / PTZ / Browser / Video call / Virtual set / 数据源 / 脚本等整族 | ❌ NotImplemented | 第一版没有这些功能 |
