@@ -1,4 +1,6 @@
+import Foundation
 import os
+import Synchronization
 import SwitcherContracts
 
 /// 音频块的有界环（录制器 / 编码器的入口缓冲）：泵线程 push 拷贝一块进来，消费线程 pop 取走。
@@ -22,6 +24,12 @@ final class AudioBlockRing: @unchecked Sendable {
     private var head = 0
     private var count = 0
     private(set) var dropped: UInt64 = 0   // lock
+
+    #if DEBUG
+    /// 测试用（D05 的端到端录制背压探针，RecorderBackpressureTests）：每次 pop 拿到块、交给消费者之前睡这么多微秒——
+    /// 模拟消费者被拖慢（编码 / 写盘慢）：环一直满着，消费者读块的窗口里生产者照推。只在 DEBUG 构建里有，0（默认）= 不睡。
+    static let consumerStallMicrosecondsForTesting = Atomic<UInt32>(0)
+    #endif
 
     init(channelCount: Int, maxFrames: Int, capacity: Int) {
         precondition(channelCount >= 1 && maxFrames >= 1 && capacity >= 1)
@@ -72,12 +80,17 @@ final class AudioBlockRing: @unchecked Sendable {
     /// （环深度 ≥ 2 且单消费者时，pop 出来的槽要再过 capacity − 1 次 push 才会被覆盖）。
     func pop() -> Block? {
         lock.lock()
-        defer { lock.unlock() }
-        guard count > 0 else { return nil }
+        guard count > 0 else { lock.unlock(); return nil }
         let slot = head
         head = (head + 1) % capacity
         count -= 1
-        return Block(hostTime: hostTimes[slot], frameCount: frameCounts[slot], planes: planeTable + slot * channelCount)
+        let block = Block(hostTime: hostTimes[slot], frameCount: frameCounts[slot], planes: planeTable + slot * channelCount)
+        lock.unlock()
+        #if DEBUG
+        let stall = Self.consumerStallMicrosecondsForTesting.load(ordering: .relaxed)
+        if stall > 0 { usleep(stall) }
+        #endif
+        return block
     }
 
     /// 当前块数。
