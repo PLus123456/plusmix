@@ -460,7 +460,8 @@ public enum FrameAnalysis {
     /// - Parameters:
     ///   - maxMatchSeconds: click 离闪光超过这个距离就算没配上。
     ///   - frameDurationSeconds: 节目帧时长；A2 阈值 = 1 帧，整秒拍 = 拍号是 round(1 / 帧时长) 的倍数。
-    ///   - startTick: 文件第一帧对应的节目拍（推流落盘从关键帧起录时用 `--start-tick` 对上）。
+    ///   - startTick: 文件第一帧对应的节目拍（推流落盘从关键帧起录时用 `--start-tick` 对上）。录制文件从第 0 拍起：G8b 起开录起点按节目输出时间线，
+    ///     带视频延后（Master 效果 L > 0）录的也是，默认 0 就对；录制中途 L 变了的话之后的拍号整体错开 ΔL（> 半帧时整秒判定失效，配对本身仍对齐）。
     public static func av(frames: [ProbeFrame], clicks: [ClickEvent], maxMatchSeconds: Double = 0.5,
                           frameDurationSeconds: Double = 1.0 / 60, startTick: Int64 = 0) -> AVReport {
         let clickTimes = clicks.map(\.timeSeconds)
@@ -602,27 +603,49 @@ public enum FrameAnalysis {
         public var key: String
         /// 每个文件里的闪光时刻（没有为 nil）。
         public var flashTimes: [Double?]
-        /// 每个文件里对应的 click 时刻。
+        /// 每个文件里对应的 click 时刻：锚文件是它自己配上的那个，其他文件是离锚最近的那个（W1-A5，见 `avMulti`）。
         public var clickTimes: [Double?]
         /// 闪光时刻的极差（ms）。
         public var flashSpreadMs: Double?
         /// click 时刻的极差（ms）。
         public var clickSpreadMs: Double?
+        /// 锚文件序号：按传入顺序第一个给这个事件配上 click 的文件（gate4 里是 [0] PGM）；一个都没配上时为 nil。
+        public var anchorFile: Int?
+        /// 闪光离锚 click 在半秒 ±1 帧内（没有 click 时按离最近的整秒算）：前后两个 click 差不多一样近，配哪一秒是平局——只列不判。
+        public var halfSecond: Bool?
     }
     public struct MultiFileAVReport: Hashable, Codable, Sendable {
         public var files: [String]
         public var events: [MultiFileEvent]
+        /// 判定事件（不含半秒事件）里闪光时刻的最大极差（ms）：A4 的判定口径，gate 脚本读它。
         public var maxFlashSpreadMs: Double
+        /// 判定事件里 click 时刻的最大极差（ms）：A4 的判定口径，gate 脚本读它。
         public var maxClickSpreadMs: Double
         public var thresholdMs: Double
-        /// A4：各文件同一事件的时间差 ≤ 1 帧。
+        /// A4：判定事件里各文件同一事件的时间差 ≤ 1 帧；一个可比的判定事件都没有时为 nil。
         public var passA4: Bool?
+        /// 半秒事件数（只列不判）。
+        public var halfSecondEventCount: Int?
+        /// 含半秒事件的最大闪光极差（ms，只报不判）。
+        public var allEventsMaxFlashSpreadMs: Double?
+        /// 含半秒事件的最大 click 极差（ms，只报不判）。
+        public var allEventsMaxClickSpreadMs: Double?
+        /// 有半秒事件时的说明。
+        public var note: String?
     }
 
     /// 多文件模式比较同一事件（A4）。事件按闪光帧的 genTimeMs 对齐（±1 帧内算同一事件）；读不到时按序号。
+    ///
+    /// click 不是各文件各自配"离自己闪光最近的"（W1-A5，reports/issues/G8b-w1-testkit-frameprobe-a4-halfsecond-click-tie.md）：闪光落在半秒时
+    /// 前后两个整秒 click 差不多一样近，某路 click 晚几十微秒（消费者流 ±100 ppm）就配到另一秒，G8b 的 gate4 因此报了 999.979 ms。
+    /// 现在以**锚**为准：按传入顺序第一个给这个事件配上 click 的文件（gate4 里 [0] 是 PGM）用它自己配的那个（与它的 A2 配对相同），
+    /// 其他文件取**离锚最近**的 click（±maxMatchSeconds 内）；真错位照样体现在极差里（30 ms 就是 30 ms），不会因为离锚远就当成"没找到"藏掉。
+    /// 闪光离锚 click 在半秒 ±1 帧内的事件（60 fps 节目从第 0 拍起的文件就是 |flash − round(flash)| ≈ 0.5）照常算、列在 events 里，
+    /// 但不进 maxFlashSpreadMs / maxClickSpreadMs / passA4，含它们的最大值另报（A2 本来就只用整秒配对判）。
     public static func avMulti(files: [(name: String, frames: [ProbeFrame], clicks: [ClickEvent])],
-                               frameDurationSeconds: Double = 1.0 / 60) -> MultiFileAVReport {
-        let reports = files.map { av(frames: $0.frames, clicks: $0.clicks, frameDurationSeconds: frameDurationSeconds) }
+                               frameDurationSeconds: Double = 1.0 / 60, maxMatchSeconds: Double = 0.5) -> MultiFileAVReport {
+        let reports = files.map { av(frames: $0.frames, clicks: $0.clicks, maxMatchSeconds: maxMatchSeconds, frameDurationSeconds: frameDurationSeconds) }
+        let clickTimes = files.map { $0.clicks.map(\.timeSeconds).sorted() }
         let toleranceMs = UInt32((frameDurationSeconds * 1000).rounded(.up))
         // 收集事件键
         var keys: [(key: String, gen: UInt32?, ordinal: Int)] = []
@@ -648,24 +671,45 @@ public enum FrameAnalysis {
             pairsByFile.append(list)
         }
         var events: [MultiFileEvent] = []
-        var maxFlash = 0.0, maxClick = 0.0
+        var maxFlash = 0.0, maxClick = 0.0, allFlash = 0.0, allClick = 0.0
+        var halfCount = 0
         for k in keys {
-            var flashes: [Double?] = [], clicks: [Double?] = []
-            for list in pairsByFile {
-                let p = list.first { $0.key == k.key }?.pair
-                flashes.append(p?.flashTimeSeconds)
-                clicks.append(p?.clickTimeSeconds)
+            let pairs = pairsByFile.map { list in list.first { $0.key == k.key }?.pair }
+            let flashes = pairs.map { $0?.flashTimeSeconds }
+            var clicks = [Double?](repeating: nil, count: pairs.count)
+            let anchorFile = pairs.firstIndex { $0?.clickTimeSeconds != nil }
+            // 判半秒用的 (闪光, click)：锚文件那一对；没有 click 时用第一个闪光和离它最近的整秒
+            var reference: (flash: Double, click: Double)?
+            if let a = anchorFile, let ap = pairs[a], let anchor = ap.clickTimeSeconds {
+                reference = (ap.flashTimeSeconds, anchor)
+                for i in pairs.indices where pairs[i] != nil {
+                    if i == a { clicks[i] = anchor; continue }
+                    if let c = nearest(clickTimes[i], to: anchor), abs(c - anchor) <= maxMatchSeconds { clicks[i] = c }
+                }
+            } else if let f = flashes.compactMap({ $0 }).first {
+                reference = (f, f.rounded())
             }
+            let half = reference.map { abs(abs($0.flash - $0.click) - 0.5) <= frameDurationSeconds + 1e-9 } ?? false
             let fv = flashes.compactMap { $0 }, cv = clicks.compactMap { $0 }
             let fs = fv.count >= 2 ? (fv.max()! - fv.min()!) * 1000 : nil
             let cs = cv.count >= 2 ? (cv.max()! - cv.min()!) * 1000 : nil
-            if let fs { maxFlash = max(maxFlash, fs) }
-            if let cs { maxClick = max(maxClick, cs) }
-            events.append(MultiFileEvent(key: k.key, flashTimes: flashes, clickTimes: clicks, flashSpreadMs: fs, clickSpreadMs: cs))
+            if let fs { allFlash = max(allFlash, fs); if !half { maxFlash = max(maxFlash, fs) } }
+            if let cs { allClick = max(allClick, cs); if !half { maxClick = max(maxClick, cs) } }
+            if half { halfCount += 1 }
+            events.append(MultiFileEvent(key: k.key, flashTimes: flashes, clickTimes: clicks, flashSpreadMs: fs, clickSpreadMs: cs,
+                                         anchorFile: anchorFile, halfSecond: half))
         }
         let threshold = frameDurationSeconds * 1000
-        let comparable = events.contains { $0.flashSpreadMs != nil }
+        let comparable = events.contains { $0.flashSpreadMs != nil && $0.halfSecond != true }
+        var note: String?
+        if halfCount > 0 {
+            note = "\(halfCount) 个事件的闪光离锚 click 在半秒 ±1 帧内（如 PGM 上 59.94 的路在播时闪光落在 .5 s），前后两个 click 差不多一样近，只列不判；" +
+                   "含它们的最大闪光极差 \(String(format: "%.3f", allFlash)) ms、click 极差 \(String(format: "%.3f", allClick)) ms" +
+                   (comparable ? "" : "；没有可判的整秒事件")
+        }
         return MultiFileAVReport(files: files.map(\.name), events: events, maxFlashSpreadMs: maxFlash, maxClickSpreadMs: maxClick,
-                                 thresholdMs: threshold, passA4: comparable ? (maxFlash <= threshold && maxClick <= threshold) : nil)
+                                 thresholdMs: threshold, passA4: comparable ? (maxFlash <= threshold && maxClick <= threshold) : nil,
+                                 halfSecondEventCount: halfCount, allEventsMaxFlashSpreadMs: allFlash, allEventsMaxClickSpreadMs: allClick,
+                                 note: note)
     }
 }

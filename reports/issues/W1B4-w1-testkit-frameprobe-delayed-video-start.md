@@ -27,3 +27,17 @@ swift test --package-path Tools/switcher-headless --filter AVCompensationTests/t
 
 拍号别只靠 pts 网格：跳过开头没有图案的帧（黑场 / 空 edit）再取 pts0，或者用图案里的帧号 + 输入帧率反推；中途改延后的情形可以按"相邻帧 pts 差 ≈ 1 拍"逐帧累加拍号，
 而不是 (pts − pts0) × fps 一次乘出来。要不要做由 W1-A 系列定；做之前，带视频延后的录制文件按上面的 `--start-tick` 量，且别在录制中途改 Master 效果。
+
+## 处理结果（W1-A5 / `w1-testkit-5`，prompt 113，2026-10-12）
+
+- **"开录起点是拍点"那一半已在源头修掉**（G8b 胶水 9533369，用户 2026-10-11 定归 G8b）：App `OutputRuntime` 与 headless `HeadlessRun` 的开录起点改成拍点 + 当时的视频延后 L，
+  录出来的文件第一帧 = 第 0 拍、视频轨从 0 起、开头不再多读一帧黑；`AVCompensationTests.testA2_videoDelayMode_recordingStaysAligned` 去掉了 `startTick = −2` 的变通，
+  按默认 `--start-tick 0` 整秒配对就对。
+- **frameprobe 只改说明**：`frameprobe av --start-tick` 改成"文件第一帧的节目拍，默认 0。开录起点已按节目输出时间线（G8b），开着 Master 效果录的文件也从第 0 拍起，
+  默认 0 就对；只在录制中途改了 Master 效果（L 变了：之后的拍号整体错开 ΔL，给了也只对改了之后那段有效）时才要给"，另留一句"文件本来就不从第 0 拍起
+  （推流落盘从关键帧起录、soak 切段）照旧给第一帧的拍号"；`FrameAnalysis.av` 的 `startTick` 注释同口径。
+- **拍号推法不改**（上面建议里的"跳过开头没图案的帧再取 pts0 / 按相邻帧 pts 差逐帧累加拍号"这次不做）：① 起点那一半已经在源头修了，剩下的"录制中途 L 变了"只在手动开 / 关
+  Master 效果时出现，gate4 / perf 场景不带效果（reports/G8.md §9 第 5 条）；② 逐帧累加会改所有 `av` 结果的拍号来源（A2 / A3 的整秒判定、soak 每段的 `--start-tick` 都靠现在的
+  (pts − pts0) × fps），要做该单独开、带 gate4 / soak 新旧对照，不放进 A4 这次小修。中途改了 L 的录像：按改动时刻切开分段量（后一段给 `--start-tick −round(ΔL × fps)`），
+  A/V 配对本身不受影响。
+- 状态：已处理（说明已改；拍号推法的改进记作可选项，不在任何计划里）。

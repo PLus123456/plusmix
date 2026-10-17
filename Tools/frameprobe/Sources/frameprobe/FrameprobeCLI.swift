@@ -27,8 +27,12 @@ struct FrameprobeCLI {
       fade      Fade 逐帧混合比例与线性曲线的最大偏差帧数（V7）                   [--gray-a N --gray-b N] [--duration D] [--fade-at S] [--fade-tolerance N]
       wipe      Wipe 逐帧擦边位置（软边取 50% 点）与线性曲线的偏差帧数（V7）       --at S --duration D [--wipe-direction leftToRight|rightToLeft|topToBottom|bottomToTop|diagonal]
       zoom      Zoom 逐帧新画面宽度（中心行带）与线性曲线的偏差帧数（V7）          --at S --duration D
-      av        闪光帧 ↔ 最近 click 的时间差（A2、A3；按整秒拍配对判，全部配对另报）；多个文件比较同一事件（A4）
-                [--start-tick N] 文件第一帧的节目拍  [--aac-priming auto|0|N] 音轨 priming：auto = 有编辑列表信 AVFoundation、没有按 ffmpeg 口径加回；0 = 不加回；N = 加回 N 样本
+      av        闪光帧 ↔ 最近 click 的时间差（A2、A3；按整秒拍配对判，全部配对另报）；多个文件比较同一事件（A4：click 以第一个文件 / PGM 配上的为锚，
+                闪光落在半秒的事件只列不判）
+                [--start-tick N] 文件第一帧的节目拍，默认 0。开录起点已按节目输出时间线（G8b），开着 Master 效果录的文件也从第 0 拍起，默认 0 就对；
+                                 只在录制中途改了 Master 效果（L 变了：之后的拍号整体错开 ΔL，给了也只对改了之后那段有效）时才要给。
+                                 文件本来就不从第 0 拍起（推流落盘从关键帧起录、soak 切段）照旧给第一帧的拍号
+                [--aac-priming auto|0|N] 音轨 priming：auto = 有编辑列表信 AVFoundation、没有按 ffmpeg 口径加回；0 = 不加回；N = 加回 N 样本
                 [--discontinuities] 顺带做波形不连续检测（A1 第三项：跳变 > 0.5 满幅、click ±1 ms 排除） [--click-margin-ms 1]
       synth     生成合成源样例 .mov（VideoToolbox H.264）或原始 NV12 帧目录       --out x.mov [--seconds 20] [--width W --height H] [--fps 60] [--bitrate B] [--audio aac|pcm|none] [--noise N] [--software] [--no-events] [--cut T] [--fade T:D] [--wipe T:D:dir[:softness]] [--zoom T:D] [--raw-dir DIR --raw-frames N]
     通用：--size WxH（原始 NV12 目录的尺寸，默认 1920x1080）  --markdown（人读表）  --out PATH（JSON 写到文件）  --version
