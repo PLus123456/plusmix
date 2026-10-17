@@ -3,8 +3,8 @@
 // 用法：
 //   frameprobe frames   <file|dir> [--limit N]
 //   frameprobe stats    <file|dir> [--fps 60] [--input-fps 0=30,1=60] [--max-events N]        V4 / V5
-//   frameprobe switches <file|dir> [--start-tick N] [--gray-tolerance 6]                       V6
-//   frameprobe fade     <file|dir> [--gray-a 64 --gray-b 192] [--duration D] [--fade-at S] [--fade-tolerance 2]   V7
+//   frameprobe switches <file|dir> [--start-tick N] [--gray-tolerance 6] [--fps N]             V6（拍号按 pts，漏帧单独列）
+//   frameprobe fade     <file|dir> [--gray-a 64 --gray-b 192] [--duration D] [--fade-at S] [--fade-tolerance 2] [--fps N]   V7
 //   frameprobe wipe     <file|dir> --at S --duration D [--wipe-direction leftToRight]                            V7
 //   frameprobe zoom     <file|dir> --at S --duration D                                                           V7
 //   frameprobe av       <file> [<file2> ...] [--fps 60] [--start-tick N] [--aac-priming auto|0|N] [--discontinuities]   A2 / A3（多文件 = A4）、A1 第三项
@@ -23,10 +23,13 @@ struct FrameprobeCLI {
     用法：frameprobe <frames|stats|switches|fade|wipe|zoom|av|synth> [选项] <文件或目录…>
       frames    每帧 {index, frameNumber, inputID, genTimeMs, flash, gray}      [--limit N]
       stats     每输入重复 / 丢弃序列与比例（V4）、总帧数 vs 时长 × 帧率（V5）   [--fps N] [--input-fps id=fps,…] [--max-events N]
-      switches  输入 ID 变化的帧、Cut 前后有无混合帧（V6）                       [--start-tick N] [--gray-tolerance N]
-      fade      Fade 逐帧混合比例与线性曲线的最大偏差帧数（V7）                   [--gray-a N --gray-b N] [--duration D] [--fade-at S] [--fade-tolerance N]
+      switches  输入 ID 变化的帧、Cut 前后有无混合帧（V6）                       [--start-tick N] [--gray-tolerance N] [--fps N]
+      fade      Fade 逐帧混合比例与线性曲线的最大偏差帧数（V7）                   [--gray-a N --gray-b N] [--duration D] [--fade-at S] [--fade-tolerance N] [--fps N]
+                switches / fade 的拍号 = --start-tick + round((pts − 第一帧 pts) × fps)，文件里漏的帧单独列（missingFrames），不挪后面的转场落点；
+                fps 只认 --fps，没给按相邻帧 pts 差估（容器的标称帧率是"样本数 / 时长"，漏了帧就偏低，不用它）
       wipe      Wipe 逐帧擦边位置（软边取 50% 点）与线性曲线的偏差帧数（V7）       --at S --duration D [--wipe-direction leftToRight|rightToLeft|topToBottom|bottomToTop|diagonal]
       zoom      Zoom 逐帧新画面宽度（中心行带）与线性曲线的偏差帧数（V7）          --at S --duration D
+                wipe / zoom 的拍号 = --start-tick + round(pts × fps)，窗口里漏的帧单独列；fps 不给时用容器标称帧率，漏了帧的文件要给 --fps
       av        闪光帧 ↔ 最近 click 的时间差（A2、A3；按整秒拍配对判，全部配对另报）；多个文件比较同一事件（A4：click 以第一个文件 / PGM 配上的为锚，
                 闪光落在半秒的事件只列不判）
                 [--start-tick N] 文件第一帧的节目拍，默认 0。开录起点已按节目输出时间线（G8b），开着 Master 效果录的文件也从第 0 拍起，默认 0 就对；

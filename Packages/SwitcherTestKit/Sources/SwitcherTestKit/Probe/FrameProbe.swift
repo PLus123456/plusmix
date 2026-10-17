@@ -110,7 +110,7 @@ public enum FrameProbe {
     /// 自证 + `--blank-ticks`。两者判掉的帧都置成解不出，报告里分开记。
     static func check(_ v: MediaReader.VideoResult, options: Options, fps: Double) -> ([ProbeFrame], SelfCheck.Report) {
         let checked = SelfCheck.apply(frames: v.frames, readings: v.readings, options: options.selfCheck,
-                                      startTick: options.startTick, maxEvents: options.maxEvents)
+                                      startTick: options.startTick, maxEvents: options.maxEvents, fps: options.fps)
         let frames = blank(checked.frames, options: options, fps: fps)
         var report = checked.report
         let blanked = zip(checked.frames, frames).filter { $0.inputID != nil && $1.inputID == nil }.count
@@ -255,15 +255,20 @@ public enum FrameProbe {
         return CurveOutput(source: l.source, curve: curve)
     }
 
+    /// 转场落点按 pts 换算的节目拍号（W1-A6，Codex T02）。拍号用的帧率只认 `--fps`；没给就按相邻帧 pts 差估（`FrameAnalysis.programFps`），
+    /// **不用** `l.fps` 里的容器 nominalFrameRate——它是"样本数 / 时长"，漏了帧就偏低（gate4 的 switches / fade 不带 --fps）。
     public static func switches(_ url: URL, options: Options = Options()) async throws -> SwitchesOutput {
         let l = try await load(url, options: options, withAudio: false)
-        return SwitchesOutput(source: l.source, switches: FrameAnalysis.switches(frames: l.frames, startTick: options.startTick, grayTolerance: options.grayTolerance))
+        return SwitchesOutput(source: l.source, switches: FrameAnalysis.switches(frames: l.frames, startTick: options.startTick, grayTolerance: options.grayTolerance,
+                                                                                 fps: options.fps, maxEvents: options.maxEvents))
     }
 
+    /// 拍号口径同 `switches`。
     public static func fade(_ url: URL, options: Options = Options()) async throws -> FadeOutput {
         let l = try await load(url, options: options, withAudio: false)
         let r = FrameAnalysis.fade(frames: l.frames, grayA: options.grayA, grayB: options.grayB, durationTicks: options.fadeDuration,
-                                   at: options.fadeAt, tolerance: options.fadeTolerance, startTick: options.startTick)
+                                   at: options.fadeAt, tolerance: options.fadeTolerance, startTick: options.startTick,
+                                   fps: options.fps, maxEvents: options.maxEvents)
         return FadeOutput(source: l.source, fade: r)
     }
 
@@ -350,10 +355,19 @@ public enum FrameProbe {
     }
 
     /// `wipe` / `zoom` 的曲线表（与 `fade` 同形）。
+    /// 漏帧的一句话："漏帧 N 拍（a, b, …）"；没有漏帧为空串。
+    static func missingSummary(_ list: [Int64]?, _ count: Int?, label: String = "漏帧") -> String {
+        guard let n = count, n > 0 else { return "" }
+        let shown = (list ?? []).prefix(12).map(String.init).joined(separator: ", ")
+        return "\(label) \(n) 拍（\(shown)\(n > min(12, list?.count ?? 0) ? ", …" : "")）"
+    }
+
     public static func markdown(_ r: CurveOutput) -> String {
         let t = r.curve
         var s = "**\(r.source)** \(t.kind)\(t.direction.map { " \($0)" } ?? "")：第 \(t.startTick) 拍起 \(t.durationTicks) 拍，"
-        s += "最大偏差 \(f(t.maxDeviationFrames, 3)) 帧（进度误差 \(pct(t.maxProgressError))），单调 \(t.monotonic ? "是" : "否")，V7 \(mark(t.passV7))\n\n"
+        s += "最大偏差 \(f(t.maxDeviationFrames, 3)) 帧（进度误差 \(pct(t.maxProgressError))），单调 \(t.monotonic ? "是" : "否")，V7 \(mark(t.passV7))"
+        let missing = missingSummary(t.missingFrames, t.missingFrameCount, label: "；窗口里漏帧")
+        s += missing + "\n\n"
         if let n = t.note { s += "\(n)\n\n" }
         s += "| 帧 | 拍 | 进度 | 期望 | 偏差（帧） | 取样点 |\n|---|---|---|---|---|---|\n"
         for x in t.samples {
@@ -362,12 +376,21 @@ public enum FrameProbe {
         return s
     }
 
+    /// 拍号口径的一句话（帧率、漏帧）。
+    static func tickBasis(fps: Double?, missing: [Int64]?, missingCount: Int?) -> String {
+        var s = "拍号 = startTick + round((pts − 第一帧 pts) × \(fps.map { f($0, 3) } ?? "—") fps)"
+        let m = missingSummary(missing, missingCount, label: "；文件里漏帧")
+        s += m.isEmpty ? "；没有漏帧" : m + "（单独列，不挪转场落点）"
+        return s
+    }
+
     public static func markdown(_ r: SwitchesOutput) -> String {
         let t = r.switches
         var s = "**\(r.source)** 标称灰度：" + t.nominalGrays.map { "输入 \($0.inputID) = \(f($0.gray, 0))" }.joined(separator: "，") + "；容差 \(f(t.grayTolerance, 0))；startTick \(t.startTick)\n\n"
-        s += "| 帧 | 拍 | pts (s) | 从 | 到 | 类型 | 中间帧 | 前一帧混合 | 该帧混合 | 后一帧混合 | 干净 Cut（V6） |\n|---|---|---|---|---|---|---|---|---|---|---|\n"
+        s += tickBasis(fps: t.fps, missing: t.missingFrames, missingCount: t.missingFrameCount) + "\n\n"
+        s += "| 帧 | 拍 | pts (s) | 从 | 到 | 类型 | 中间帧 | 中间漏拍 | 前一帧混合 | 该帧混合 | 后一帧混合 | 干净 Cut（V6） |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n"
         for w in t.switches {
-            s += "| \(w.index) | \(w.tick) | \(f(w.ptsSeconds, 4)) | \(w.from.map(String.init) ?? "—") | \(w.to) | \(w.kind) | \(w.betweenFrames) | \(w.mixedBefore ? "是" : "否") | \(w.mixedAt ? "是" : "否") | \(w.mixedAfter ? "是" : "否") | \(w.kind == "cut" ? mark(w.cleanCut) : "—") |\n"
+            s += "| \(w.index) | \(w.tick) | \(f(w.ptsSeconds, 4)) | \(w.from.map(String.init) ?? "—") | \(w.to) | \(w.kind) | \(w.betweenFrames) | \(w.missingBetween.map(String.init) ?? "") | \(w.mixedBefore ? "是" : "否") | \(w.mixedAt ? "是" : "否") | \(w.mixedAfter ? "是" : "否") | \(w.kind == "cut" ? mark(w.cleanCut) : "—") |\n"
         }
         s += "\n所有 Cut 干净：\(mark(t.allCutsClean))\n"
         return s
@@ -376,8 +399,10 @@ public enum FrameProbe {
     public static func markdown(_ r: FadeOutput) -> String {
         let t = r.fade
         var s = "**\(r.source)** A = \(f(t.grayA, 0))，B = \(f(t.grayB, 0))；比例 = (gray − A) / (B − A)\n\n"
+        s += tickBasis(fps: t.fps, missing: t.missingFrames, missingCount: t.missingFrameCount) + "\n\n"
         for (i, fd) in t.fades.enumerated() {
-            s += "Fade \(i + 1)：帧 \(fd.startIndex)–\(fd.endIndex)（拍 \(fd.startTick) 起），\(fd.direction)，混合 \(fd.mixedFrames) 帧，D = \(fd.durationTicks)，最大偏差 \(f(fd.maxDeviationFrames, 2)) 帧（进度误差 \(pct(fd.maxProgressError))），单调 \(fd.monotonic ? "是" : "否")，V7 \(mark(fd.passV7))\n\n"
+            s += "Fade \(i + 1)：帧 \(fd.startIndex)–\(fd.endIndex)（拍 \(fd.startTick) 起），\(fd.direction)，混合 \(fd.mixedFrames) 帧，D = \(fd.durationTicks)，最大偏差 \(f(fd.maxDeviationFrames, 2)) 帧（进度误差 \(pct(fd.maxProgressError))），单调 \(fd.monotonic ? "是" : "否")，V7 \(mark(fd.passV7))"
+            s += missingSummary(fd.missingFrames, fd.missingFrameCount, label: "；窗口里漏帧") + "\n\n"
             s += "| 帧 | 拍 | gray | 比例 | 进度 | 期望 | 偏差（帧） |\n|---|---|---|---|---|---|---|\n"
             for x in fd.samples {
                 s += "| \(x.index) | \(x.tick) | \(f(x.gray, 1)) | \(f(x.ratio, 3)) | \(f(x.progress, 3)) | \(f(x.expectedProgress, 3)) | \(f(x.deviationFrames, 2)) |\n"

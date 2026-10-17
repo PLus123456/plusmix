@@ -164,6 +164,58 @@ public enum FrameAnalysis {
     }
 
 
+    // MARK: - 节目拍号（W1-A6，Codex T02）
+
+    /// 一帧的节目拍号 = startTick + round((pts − 第一帧 pts) × fps)。`av` 的闪光拍号、`switches` / `fade` 的转场落点共用这一个式子。
+    /// 转场分析原来拿数组下标当拍号：文件里漏了帧（missed_render），下标就比拍号小，正确的第 60 拍 Cut 前面漏两帧就报成第 58 拍、
+    /// 30 拍 Fade 被判 2 帧偏差（reports/codex-debug-audit-20261013.md §1.5 T02）。拍号来源本身（第一帧 = 第 startTick 拍、帧距均匀）不改，
+    /// 理由见 reports/issues/W1B4-w1-testkit-frameprobe-delayed-video-start.md。
+    static func programTick(pts: Double, pts0: Double, fps: Double, startTick: Int64) -> Int64 {
+        startTick + Int64(((pts - pts0) * fps).rounded())
+    }
+
+    /// 每帧的节目拍号（`programTick`，pts0 = 第一帧的 pts）。
+    public static func programTicks(_ frames: [ProbeFrame], fps: Double, startTick: Int64 = 0) -> [Int64] {
+        let pts0 = frames.first?.ptsSeconds ?? 0
+        return frames.map { programTick(pts: $0.ptsSeconds, pts0: pts0, fps: fps, startTick: startTick) }
+    }
+
+    /// 节目帧率的估计：相邻帧 pts 差里正常的那些（< 1.5 × 中位数；漏帧留下的 2 帧、3 帧空档不算）求平均再取倒数。
+    /// 转场分析没给帧率（`--fps`）时用它，不用容器的 nominalFrameRate：AVFoundation 给的是"样本数 / 时长"，漏了帧就偏低
+    /// （W1-A6 探针：60 fps 3600 帧漏 2 帧 → 59.967、漏 60 帧 → 59.0，minFrameDuration 仍是 1/60），10 分钟的文件后面差出好几拍；
+    /// minFrameDuration 对推流落盘的毫秒时间戳（16 / 17 ms 交替）又偏高。一半以上的帧都漏了的文件估不对，要给 `--fps`。
+    public static func programFps(_ frames: [ProbeFrame]) -> Double? {
+        guard frames.count >= 2 else { return nil }
+        var deltas: [Double] = []
+        deltas.reserveCapacity(frames.count - 1)
+        for i in 1..<frames.count {
+            let d = frames[i].ptsSeconds - frames[i - 1].ptsSeconds
+            if d > 0 { deltas.append(d) }
+        }
+        guard !deltas.isEmpty else { return nil }
+        let median = deltas.sorted()[deltas.count / 2]
+        var sum = 0.0, n = 0
+        for d in deltas where d < 1.5 * median { sum += d; n += 1 }
+        return n > 0 && sum > 0 ? Double(n) / sum : nil
+    }
+
+    /// 拍号序列里漏掉的拍：相邻两帧拍号差 > 1 时中间那些拍（文件里没有这些拍的帧）。`window` 给了只数落在里面的；
+    /// `list` 最多 `limit` 个，`count` 是全部。文件头尾之外的拍不算（看不见）。
+    static func missingTicks(_ ticks: [Int64], within window: ClosedRange<Int64>? = nil, limit: Int = .max) -> (list: [Int64], count: Int) {
+        var list: [Int64] = []
+        var count = 0
+        guard ticks.count >= 2 else { return (list, count) }
+        for i in 1..<ticks.count where ticks[i] - ticks[i - 1] > 1 {
+            var lo = ticks[i - 1] + 1, hi = ticks[i] - 1
+            if let w = window { lo = max(lo, w.lowerBound); hi = min(hi, w.upperBound) }
+            guard lo <= hi else { continue }
+            count += Int(hi - lo + 1)
+            var t = lo
+            while t <= hi && list.count < limit { list.append(t); t += 1 }
+        }
+        return (list, count)
+    }
+
     // MARK: - V6
 
     /// 某路输入的标称灰度（该 ID 帧的众数）。
@@ -173,20 +225,20 @@ public enum FrameAnalysis {
     }
     /// 一次切换。
     public struct Switch: Hashable, Codable, Sendable {
-        /// 新输入 ID 出现的第一帧。
+        /// 新输入 ID 出现的第一帧（文件里的序号）。
         public var index: Int
-        /// startTick + index。
+        /// 这一帧的节目拍号：startTick + round((pts − 第一帧 pts) × fps)（`programTick`；W1-A6 之前是 startTick + index，漏帧之后就错开了）。
         public var tick: Int64
         public var ptsSeconds: Double
         public var from: Int?
         public var to: Int
         /// 旧输入最后出现的帧。
         public var lastFromIndex: Int?
-        /// 两者之间读不出 ID 的帧数：0 = Cut，> 0 = 转场。
+        /// 两者之间读不出 ID 的帧数（文件里实有的帧）：0 = Cut，> 0 = 转场。
         public var betweenFrames: Int
         /// "cut" 或 "transition"。
         public var kind: String
-        /// 切换前一帧灰度是否不等于任一输入标称灰度。
+        /// 切换前一帧（文件里的上一帧）灰度是否不等于任一输入标称灰度。
         public var mixedBefore: Bool
         /// 切换帧灰度是否不等于任一输入标称灰度。
         public var mixedAt: Bool
@@ -194,6 +246,9 @@ public enum FrameAnalysis {
         public var mixedAfter: Bool
         /// Cut 且前后都无混合帧（V6 硬性）。
         public var cleanCut: Bool
+        /// 旧输入最后一帧与新输入第一帧之间漏掉的拍数（文件里没有这些拍的帧）；没漏为 nil。
+        /// Cut 的这一项不为 nil 时，新画面第一帧仍是 `tick`，但真正换过去的那一拍可能落在漏掉的拍里——缺帧单独报，不改落点与 cleanCut。
+        public var missingBetween: Int? = nil
     }
     public struct SwitchesReport: Hashable, Codable, Sendable {
         public var startTick: Int64
@@ -202,6 +257,12 @@ public enum FrameAnalysis {
         public var switches: [Switch]
         /// 所有 Cut 都干净。
         public var allCutsClean: Bool
+        /// 拍号用的帧率：给了就是给的，没给按相邻帧 pts 差估（`programFps`）。老版本 JSON 没有。
+        public var fps: Double? = nil
+        /// 文件里漏掉的拍（相邻两帧拍号差 > 1 的中间那些拍），最多列 maxEvents 个。
+        public var missingFrames: [Int64]? = nil
+        /// 漏掉的拍数（全部）。
+        public var missingFrameCount: Int? = nil
     }
 
     /// 输入 ID 变化的帧、Cut 前后有无混合帧（判据：帧灰度不等于任一输入的标称灰度）。
@@ -215,10 +276,18 @@ public enum FrameAnalysis {
     ///   判据是叠层在**解码区**（帧号行、时间戳行、ID 块、中心采样区、ID 邻域条，见 `PatternProbe.decodeRects`）上必须是透明的——
     ///   G4Factory 的 PNG 就是按这个画的（只占下 20% 与左右两侧）。叠层要是盖住了解码区，那几帧会被自证判成解不出，
     ///   这里就变成一条 `betweenFrames > 0` 的 transition，而不是 Cut。动画 stinger（文件输入）落地后再看。
-    /// - Parameter startTick: 输出第 0 帧对应的节目拍（默认 0）；tick = startTick + index。
-    public static func switches(frames: [ProbeFrame], startTick: Int64 = 0, grayTolerance: Double = 6) -> SwitchesReport {
+    /// - Parameters:
+    ///   - startTick: 输出第 0 帧对应的节目拍（默认 0）。
+    ///   - fps: 拍号用的节目帧率；nil = 按相邻帧 pts 差估（`programFps`）。tick = startTick + round((pts − 第一帧 pts) × fps)，
+    ///     不再是 startTick + index（W1-A6，Codex T02）：文件里漏的帧单独列在 `missingFrames`，不挪后面转场的落点。
+    ///   - maxEvents: `missingFrames` 最多列多少个。
+    public static func switches(frames: [ProbeFrame], startTick: Int64 = 0, grayTolerance: Double = 6,
+                                fps: Double? = nil, maxEvents: Int = 200) -> SwitchesReport {
         let nominal = nominalGrays(frames)
         let nominalValues = nominal.map(\.gray)
+        let tickFps = fps ?? programFps(frames) ?? 60
+        let ticks = programTicks(frames, fps: tickFps, startTick: startTick)
+        // 下标是数组位置（文件里的相邻帧），拍号是 ticks[位置]
         func isMixed(_ i: Int) -> Bool {
             guard i >= 0 && i < frames.count else { return false }
             let g = frames[i].gray
@@ -226,28 +295,32 @@ public enum FrameAnalysis {
         }
         var switches: [Switch] = []
         var lastID: Int?
-        var lastIDIndex: Int?
-        for f in frames {
+        var lastPosition: Int?
+        for (i, f) in frames.enumerated() {
             guard let id = f.inputID else { continue }
-            if let l = lastID, l != id {
-                let between = f.index - (lastIDIndex! + 1)
-                let sw = Switch(index: f.index, tick: startTick + Int64(f.index), ptsSeconds: f.ptsSeconds, from: l, to: id,
-                                lastFromIndex: lastIDIndex, betweenFrames: between, kind: between == 0 ? "cut" : "transition",
-                                mixedBefore: isMixed(f.index - 1), mixedAt: isMixed(f.index), mixedAfter: isMixed(f.index + 1),
-                                cleanCut: between == 0 && !isMixed(f.index - 1) && !isMixed(f.index) && !isMixed(f.index + 1))
+            if let l = lastID, let p = lastPosition, l != id {
+                let between = i - (p + 1)
+                let missing = Int(ticks[i] - ticks[p] - 1) - between
+                var sw = Switch(index: f.index, tick: ticks[i], ptsSeconds: f.ptsSeconds, from: l, to: id,
+                                lastFromIndex: frames[p].index, betweenFrames: between, kind: between == 0 ? "cut" : "transition",
+                                mixedBefore: isMixed(i - 1), mixedAt: isMixed(i), mixedAfter: isMixed(i + 1),
+                                cleanCut: between == 0 && !isMixed(i - 1) && !isMixed(i) && !isMixed(i + 1))
+                if missing > 0 { sw.missingBetween = missing }
                 switches.append(sw)
             } else if lastID == nil {
                 // 第一路出现也记一条（from nil）
-                switches.append(Switch(index: f.index, tick: startTick + Int64(f.index), ptsSeconds: f.ptsSeconds, from: nil, to: id,
-                                       lastFromIndex: nil, betweenFrames: 0, kind: "start", mixedBefore: false, mixedAt: isMixed(f.index),
-                                       mixedAfter: isMixed(f.index + 1), cleanCut: true))
+                switches.append(Switch(index: f.index, tick: ticks[i], ptsSeconds: f.ptsSeconds, from: nil, to: id,
+                                       lastFromIndex: nil, betweenFrames: 0, kind: "start", mixedBefore: false, mixedAt: isMixed(i),
+                                       mixedAfter: isMixed(i + 1), cleanCut: true))
             }
             lastID = id
-            lastIDIndex = f.index
+            lastPosition = i
         }
         let cuts = switches.filter { $0.kind == "cut" }
+        let missing = missingTicks(ticks, limit: maxEvents)
         return SwitchesReport(startTick: startTick, grayTolerance: grayTolerance, nominalGrays: nominal, switches: switches,
-                              allCutsClean: cuts.allSatisfy(\.cleanCut))
+                              allCutsClean: cuts.allSatisfy(\.cleanCut), fps: tickFps, missingFrames: missing.list,
+                              missingFrameCount: missing.count)
     }
 
     /// 每个输入 ID 的标称灰度 = 该 ID 帧灰度取整后的众数。
@@ -267,7 +340,9 @@ public enum FrameAnalysis {
 
     /// Fade 里的一帧。
     public struct FadeSample: Hashable, Codable, Sendable {
+        /// 文件里的序号。
         public var index: Int
+        /// 节目拍号（`programTick`）。
         public var tick: Int64
         public var gray: Double
         /// (gray − grayA) / (grayB − grayA)：画面里 B 的比例。
@@ -281,16 +356,17 @@ public enum FrameAnalysis {
     }
     /// 一次 Fade。
     public struct Fade: Hashable, Codable, Sendable {
-        /// 第一个混合帧。
+        /// 第一个混合帧（文件里的序号）。
         public var startIndex: Int
         /// 最后一个混合帧。
         public var endIndex: Int
+        /// 第一个混合帧的节目拍号。
         public var startTick: Int64
         /// "A→B" 或 "B→A"。
         public var direction: String
-        /// 混合帧数。
+        /// 混合帧数（文件里实有的帧）。
         public var mixedFrames: Int
-        /// 转场时长 D（拍）：给定值，或 mixedFrames + 1。
+        /// 转场时长 D（拍）：给定值，或 末个混合帧拍号 − 首个混合帧拍号 + 2（没漏帧时 = mixedFrames + 1）。
         public var durationTicks: Int
         public var samples: [FadeSample]
         /// 与线性曲线的最大偏差（帧）。
@@ -299,14 +375,22 @@ public enum FrameAnalysis {
         public var maxProgressError: Double
         /// 进度是否单调不减。
         public var monotonic: Bool
-        /// V7：曲线误差 ≤ 1 帧。
+        /// V7：曲线误差 ≤ 1 帧（只在有样本的拍上判；漏掉的拍见 missingFrames）。
         public var passV7: Bool
+        /// 这次 Fade 的窗口里漏掉的拍（指定模式 [s, s + D]；自动模式是混合段前后两个纯色帧之间）：那些拍没有样本，单独列，不占 k。
+        public var missingFrames: [Int64]? = nil
+        public var missingFrameCount: Int? = nil
     }
     public struct FadeReport: Hashable, Codable, Sendable {
         public var grayA: Double
         public var grayB: Double
         public var fades: [Fade]
         public var allPassV7: Bool
+        /// 拍号用的帧率（给的，或按相邻帧 pts 差估的）。老版本 JSON 没有。
+        public var fps: Double? = nil
+        /// 整个文件漏掉的拍（最多列 maxEvents 个）与拍数。
+        public var missingFrames: [Int64]? = nil
+        public var missingFrameCount: Int? = nil
     }
 
     /// V7 阈值（必须档）：曲线误差 ≤ 1 帧。
@@ -320,47 +404,63 @@ public enum FrameAnalysis {
     /// - 指定（`at` = 发 Fade 命令的拍 s）：按契约"第 s + k 拍 progress = k / D"直接评估第 s + 1 … s + D − 1 帧，
     ///   形状和滞后都量得到；此时 durationTicks 必填。
     /// tolerance 默认 2：D = 30 时相邻两帧差 4.3 级，6 会把头尾两帧当成纯色；中心区均值对 H.264 噪声不敏感，2 够用。
+    ///
+    /// 拍号按 pts（`programTick`，W1-A6，Codex T02）：指定模式按拍号找第 s + k 拍那一帧（不是下标 s + k），
+    /// 自动模式的 k = 这一帧的拍号 − s（s = 第一个混合帧的拍号 − 1）、D = 末拍 − 首拍 + 2。漏掉的拍没有样本、不占 k，单独列在 `missingFrames`。
+    /// - Parameter fps: 拍号用的节目帧率；nil = 按相邻帧 pts 差估（`programFps`）。
     public static func fade(frames: [ProbeFrame], grayA: Double = 64, grayB: Double = 192, durationTicks: Int? = nil,
-                            at commandTick: Int64? = nil, tolerance: Double = 2, startTick: Int64 = 0) -> FadeReport {
+                            at commandTick: Int64? = nil, tolerance: Double = 2, startTick: Int64 = 0,
+                            fps: Double? = nil, maxEvents: Int = 200) -> FadeReport {
         precondition(grayA != grayB)
         let span = grayB - grayA
+        let tickFps = fps ?? programFps(frames) ?? 60
+        let ticks = programTicks(frames, fps: tickFps, startTick: startTick)
         func ratio(_ g: Double) -> Double { (g - grayA) / span }
         func isMixed(_ f: ProbeFrame) -> Bool {
             let tol = tolerance / abs(span)
             let r = ratio(f.gray)
             return r > tol && r < 1 - tol
         }
-        func evaluate(run: ArraySlice<ProbeFrame>, before: Double, after: Double, d: Int) -> Fade {
+        /// points：(数组位置, k)，k = 拍号 − s。
+        func evaluate(_ points: [(position: Int, k: Int)], before: Double, after: Double, d: Int, window: ClosedRange<Int64>) -> Fade {
             let aToB = after >= before
             var samples: [FadeSample] = []
             var maxDev = 0.0, maxErr = 0.0, monotonic = true
             var lastProgress = -1.0
-            for (k, f) in run.enumerated() {
+            for (i, k) in points {
+                let f = frames[i]
                 let r = ratio(f.gray)
                 let p = aToB ? r : 1 - r
-                let expected = Double(k + 1) / Double(d)
-                let dev = abs(p * Double(d) - Double(k + 1))
+                let expected = Double(k) / Double(d)
+                let dev = abs(p * Double(d) - Double(k))
                 maxDev = max(maxDev, dev)
                 maxErr = max(maxErr, abs(p - expected))
                 if p < lastProgress - 1e-9 { monotonic = false }
                 lastProgress = p
-                samples.append(FadeSample(index: f.index, tick: startTick + Int64(f.index), gray: f.gray, ratio: r, progress: p,
+                samples.append(FadeSample(index: f.index, tick: ticks[i], gray: f.gray, ratio: r, progress: p,
                                           expectedProgress: expected, deviationFrames: dev))
             }
-            let first = run.first!.index, last = run.last!.index
-            return Fade(startIndex: first, endIndex: last, startTick: startTick + Int64(first), direction: aToB ? "A→B" : "B→A",
-                        mixedFrames: run.count, durationTicks: d, samples: samples, maxDeviationFrames: maxDev,
-                        maxProgressError: maxErr, monotonic: monotonic, passV7: maxDev <= v7MaximumDeviationFrames)
+            let first = points.first!.position, last = points.last!.position
+            let missing = missingTicks(ticks, within: window, limit: maxEvents)
+            return Fade(startIndex: frames[first].index, endIndex: frames[last].index, startTick: ticks[first], direction: aToB ? "A→B" : "B→A",
+                        mixedFrames: points.count, durationTicks: d, samples: samples, maxDeviationFrames: maxDev,
+                        maxProgressError: maxErr, monotonic: monotonic, passV7: maxDev <= v7MaximumDeviationFrames,
+                        missingFrames: missing.list, missingFrameCount: missing.count)
         }
         var fades: [Fade] = []
         if let s = commandTick {
             guard let d = durationTicks, d >= 2 else { preconditionFailure("指定 at 时必须给 durationTicks ≥ 2") }
-            let firstIndex = Int(s - startTick) + 1
-            let lastIndex = Int(s - startTick) + d - 1
-            if firstIndex >= 0 && lastIndex < frames.count && firstIndex <= lastIndex {
-                let before = ratio(frames[firstIndex - 1].gray)
-                let after = lastIndex + 1 < frames.count ? ratio(frames[lastIndex + 1].gray) : 1 - before
-                fades.append(evaluate(run: frames[firstIndex...lastIndex], before: before, after: after, d: d))
+            let end = s + Int64(d)
+            var positionByTick: [Int64: Int] = [:]
+            for (i, t) in ticks.enumerated() where (s...end).contains(t) && positionByTick[t] == nil { positionByTick[t] = i }
+            let points = (1..<d).compactMap { k in positionByTick[s + Int64(k)].map { (position: $0, k: k) } }
+            // 文件要盖住第 s 拍（纯旧画面）到第 s + D − 1 拍，与原来"下标 s 到 s + D − 1 都在文件里"同一个条件
+            if let firstTick = ticks.first, let lastTick = ticks.last, firstTick <= s, lastTick >= end - 1, !points.isEmpty,
+               let beforePosition = positionByTick[s] ?? ticks.lastIndex(where: { $0 < s }) {
+                let before = ratio(frames[beforePosition].gray)
+                let afterPosition = positionByTick[end] ?? ticks.firstIndex { $0 > end }
+                let after = afterPosition.map { ratio(frames[$0].gray) } ?? 1 - before
+                fades.append(evaluate(points, before: before, after: after, d: d, window: s...end))
             }
         } else {
             var i = 0
@@ -370,11 +470,17 @@ public enum FrameAnalysis {
                 while j + 1 < frames.count && isMixed(frames[j + 1]) { j += 1 }
                 let before = i > 0 ? ratio(frames[i - 1].gray) : ratio(frames[i].gray)
                 let after = j + 1 < frames.count ? ratio(frames[j + 1].gray) : ratio(frames[j].gray)
-                fades.append(evaluate(run: frames[i...j], before: before, after: after, d: durationTicks ?? (j - i + 2)))
+                let s = ticks[i] - 1
+                let points = (i...j).map { (position: $0, k: Int(ticks[$0] - s)) }
+                // 漏帧窗口：混合段前一个纯色帧与后一个纯色帧之间（段头段尾漏了帧时，段的起止本身就不确定）
+                let window = (i > 0 ? ticks[i - 1] + 1 : ticks[i])...(j + 1 < frames.count ? ticks[j + 1] - 1 : ticks[j])
+                fades.append(evaluate(points, before: before, after: after, d: durationTicks ?? Int(ticks[j] - ticks[i]) + 2, window: window))
                 i = j + 1
             }
         }
-        return FadeReport(grayA: grayA, grayB: grayB, fades: fades, allPassV7: fades.allSatisfy(\.passV7))
+        let missing = missingTicks(ticks, limit: maxEvents)
+        return FadeReport(grayA: grayA, grayB: grayB, fades: fades, allPassV7: fades.allSatisfy(\.passV7), fps: tickFps,
+                          missingFrames: missing.list, missingFrameCount: missing.count)
     }
 
     // MARK: - A2 / A3
@@ -388,7 +494,7 @@ public enum FrameAnalysis {
         public var clickTimeSeconds: Double?
         /// (闪光时刻 − click 时刻) ms：音频超前为正（测试标准 §0 第 6 条）。
         public var offsetMs: Double?
-        /// 闪光帧的节目拍号 = startTick + round((pts − 第一帧 pts) × fps)。
+        /// 闪光帧的节目拍号 = startTick + round((pts − 第一帧 pts) × fps)（`programTick`，与转场分析同一个式子）。
         public var tick: Int64
         /// 闪光是否落在整秒拍上（拍号是标称整数帧率的倍数）。59.94 的路在 60 fps 节目里在播时闪光周期 1.001 s（契约定的），
         /// 相对整秒的 click 逐秒滞后，这些配对只报不判（G2 报告第 5 条、W2-E 清单 3-10）。
@@ -473,7 +579,7 @@ public enum FrameAnalysis {
         for f in frames {
             defer { prevFlash = f.flash }
             guard f.flash && !prevFlash else { continue }
-            let tick = startTick + Int64(((f.ptsSeconds - pts0) * fps).rounded())
+            let tick = programTick(pts: f.ptsSeconds, pts0: pts0, fps: fps, startTick: startTick)
             var pair = AVPair(flashIndex: f.index, flashTimeSeconds: f.ptsSeconds, genTimeMs: f.genTimeMs, clickTimeSeconds: nil, offsetMs: nil,
                               tick: tick, onSecondTick: ((tick % nominal) + nominal) % nominal == 0)
             if let c = nearest(clickTimes, to: f.ptsSeconds), abs(c - f.ptsSeconds) <= maxMatchSeconds {

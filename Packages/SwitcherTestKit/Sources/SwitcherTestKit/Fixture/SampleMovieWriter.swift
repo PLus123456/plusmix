@@ -72,6 +72,8 @@ public enum SampleMovieWriter {
         public var noise = 0
         /// 强制软件编码器。
         public var softwareEncoder = false
+        /// 这些拍不写进文件（模拟录制漏帧，如 missed_render）：其余帧的 pts 照旧是拍点，文件里的帧序号从漏帧处起比拍号小（W1-A6，Codex T02）。
+        public var droppedTicks: Set<Int> = []
         public init() {}
     }
 
@@ -323,7 +325,9 @@ public enum SampleMovieWriter {
         let session = try makeSession(spec: spec, sink: sink)
 
         let started = HostClock.now()
-        for n in 0..<totalFrames {
+        var written = 0
+        for n in 0..<totalFrames where !spec.droppedTicks.contains(n) {
+            written += 1
             guard let pb = pool.take(), let tmp = scratch.take() else { throw WriterError.vt("pool", -1) }
             program.render(tick: n, into: pb, scratch: tmp)
             let pts = CMTime(value: CMTimeValue(n) * frameTicks, timescale: timescale)
@@ -342,7 +346,7 @@ public enum SampleMovieWriter {
         try await sink.finish()
         let encodeSeconds = (HostClock.now() - started).seconds
         let fileBytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-        return Report(frames: totalFrames, videoBytes: sink.videoBytes, fileBytes: fileBytes,
+        return Report(frames: written, videoBytes: sink.videoBytes, fileBytes: fileBytes,
                       averageKbps: Double(sink.videoBytes) * 8 / spec.seconds / 1000, encodeSeconds: encodeSeconds, audioSamples: sink.audioWritten)
     }
 

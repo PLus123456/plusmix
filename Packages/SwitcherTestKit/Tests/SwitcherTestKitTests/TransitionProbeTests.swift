@@ -156,6 +156,17 @@ final class TransitionProbeTests: XCTestCase {
         XCTAssertEqual(result.report.byReason[SelfCheck.Reason.rhythm.rawValue], 4, "四帧「旧 ID + 新帧号」都该按节奏判掉")
         for f in result.frames where (16..<20).contains(f.index) { XCTAssertNil(f.inputID, "第 \(f.index) 帧该判成解不出") }
         for f in result.frames where !(16..<20).contains(f.index) { XCTAssertNotNil(f.inputID, "第 \(f.index) 帧不该被误杀") }
+        // W1-A6（T02 同一类）：报告里判掉的帧的"拍"按 pts 算——前面漏了第 5 拍，文件序号比拍号小 1，列出来的仍是第 16–19 拍
+        let keep = frames.indices.filter { frames[$0].index != 5 }
+        let dropped = keep.enumerated().map { pos, i in
+            ProbeFrame(index: pos, ptsSeconds: frames[i].ptsSeconds, frameNumber: frames[i].frameNumber, inputID: frames[i].inputID,
+                       genTimeMs: frames[i].genTimeMs, flash: frames[i].flash, gray: frames[i].gray)
+        }
+        let r2 = SelfCheck.apply(frames: dropped, readings: keep.map { readings[$0] }, options: SelfCheck.Options())
+        XCTAssertEqual(r2.report.examples.map(\.index), [15, 16, 17, 18], "文件序号")
+        XCTAssertEqual(r2.report.examples.map(\.tick), [16, 17, 18, 19], "节目拍号按 pts，不是 startTick + 序号")
+        XCTAssertEqual(SelfCheck.apply(frames: dropped, readings: keep.map { readings[$0] }, options: SelfCheck.Options(), startTick: 100)
+            .report.examples.map(\.tick), [116, 117, 118, 119])
     }
 
     /// 自证用的读数必须与契约的 `TestPattern.decode` 逐字段一致（纯帧上）：解码口径只有一份。
@@ -246,5 +257,43 @@ final class TransitionProbeTests: XCTestCase {
         }
         print("[W1-A3] C3：\(checked) 个混合帧，解成第三路 \(decodedThird) 个")
         XCTAssertEqual(decodedThird, 0)
+    }
+
+    // MARK: - T02（W1-A6，prompt 121）：录制漏帧之后，转场落点按 pts 换算的节目拍号判
+
+    /// Codex T02 的真文件版：VideoToolbox 写一个漏了第 20 / 30 拍的 720p 文件（3 s：第 100 拍 Cut 到 B、第 130 拍 Fade 30 拍回 A），
+    /// **不给 --fps**（gate4 的 switches / fade 就是这么调的）。容器的 nominalFrameRate 是"样本数 / 时长"= 178 / 3 ≈ 59.33
+    /// （W1-A6 探针），拿它乘 pts 同样偏一拍；按相邻帧 pts 差估的帧率是 60：Cut 落在第 100 拍、Fade 偏差不到 1 帧。
+    func testV6_V7_T02_droppedFramesInRecording_transitionsLandOnPtsTicks() async throws {
+        var s = spec(events: [.cut(tick: 100), .fade(tick: 130, durationTicks: 30)])
+        s.seconds = 3
+        s.droppedTicks = [20, 30]
+        let url = tempDir().appendingPathComponent("t02-dropped.mov")
+        let written = try await SampleMovieWriter.write(spec: s, to: url)
+        XCTAssertEqual(written.frames, 178)
+        var o = FrameProbe.Options()
+        o.inputFps = [0: 60, 1: 30]
+        let loaded = try await FrameProbe.load(url, options: o, withAudio: false)
+        XCTAssertEqual(loaded.frames.count, 178)
+        print("[W1-A6] T02 真文件：178 帧 / 3 s，容器 nominalFrameRate \(loaded.info.nominalFps)")
+        let sw = try await FrameProbe.switches(url, options: o).switches
+        let cut = try XCTUnwrap(sw.switches.first { $0.kind == "cut" })
+        XCTAssertEqual(cut.index, 98, "文件里第 98 帧（前面漏了两帧）")
+        XCTAssertEqual(cut.tick, 100, "第 100 拍的 Cut")
+        XCTAssertTrue(cut.cleanCut)
+        XCTAssertEqual(sw.missingFrames, [20, 30]); XCTAssertEqual(sw.missingFrameCount, 2)
+        XCTAssertEqual(sw.fps ?? 0, 60, accuracy: 1e-6, "按相邻帧 pts 差估，不是容器的 \(loaded.info.nominalFps)")
+        o.fadeAt = 130
+        o.fadeDuration = 30
+        let fd = try await FrameProbe.fade(url, options: o).fade
+        XCTAssertEqual(fd.fades.count, 1)
+        let fade = try XCTUnwrap(fd.fades.first)
+        XCTAssertEqual(fade.direction, "B→A")
+        XCTAssertEqual(fade.startTick, 131)
+        XCTAssertEqual(fade.samples.count, 29)
+        XCTAssertLessThanOrEqual(fade.maxDeviationFrames, FrameAnalysis.v7MaximumDeviationFrames, "按下标取拍时整体错 2 帧")
+        XCTAssertTrue(fade.passV7)
+        XCTAssertEqual(fade.missingFrameCount, 0, "Fade 窗口里没漏"); XCTAssertEqual(fd.missingFrames, [20, 30])
+        print("[W1-A6] T02 真文件：Cut 第 \(cut.tick) 拍（文件第 \(cut.index) 帧），Fade 最大偏差 \(String(format: "%.3f", fade.maxDeviationFrames)) 帧")
     }
 }

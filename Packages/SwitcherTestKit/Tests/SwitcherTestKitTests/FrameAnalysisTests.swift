@@ -428,6 +428,180 @@ final class FrameAnalysisTests: XCTestCase {
     }
 }
 
+// MARK: - W1-A6（prompt 121）：转场拍号按 pts（Codex T02）、A4 判定事件缺 click 算不过
+
+extension FrameAnalysisTests {
+    /// 按拍号造一段节目输出，`drop` 里的拍不进文件（录制漏帧，如 missed_render）：pts 照旧是拍点，`index` 是文件里的序号——
+    /// 漏帧之后序号比拍号小，和真文件一样（MediaReader 按读出的顺序编号）。
+    private func program(ticks: Range<Int>, drop: Set<Int> = [], fps: Double = 60,
+                         _ spec: (Int) -> (id: Int?, gray: Double)) -> [ProbeFrame] {
+        var out: [ProbeFrame] = []
+        for t in ticks where !drop.contains(t) {
+            let s = spec(t)
+            out.append(ProbeFrame(index: out.count, ptsSeconds: Double(t) / fps, frameNumber: s.id.map { _ in UInt32(t) }, inputID: s.id,
+                                  genTimeMs: s.id.map { _ in UInt32(t * 16) }, flash: false, gray: s.gray))
+        }
+        return out
+    }
+
+    /// Codex T02（reports/codex-debug-audit-20261013.md §1.5）：正确的第 60 拍 Cut，前面第 20 / 30 拍各漏一帧，
+    /// 拿数组下标当拍号就报成第 58 拍；按 pts 换算的节目拍号仍是 60。
+    func testV6_T02_cutTickFromPts_droppedFramesBeforeDoNotShiftIt() {
+        let f = program(ticks: 0..<120, drop: [20, 30]) { t in t < 60 ? (0, 64) : (1, 192) }
+        XCTAssertEqual(f.count, 118)
+        let r = FrameAnalysis.switches(frames: f)
+        XCTAssertEqual(r.switches.map(\.kind), ["start", "cut"])
+        let cut = r.switches[1]
+        XCTAssertEqual(cut.index, 58, "文件里的第 58 帧")
+        XCTAssertEqual(cut.tick, 60, "节目拍号按 pts 算是第 60 拍，不是下标 58")
+        XCTAssertEqual(cut.ptsSeconds, 1, accuracy: 1e-12)
+        XCTAssertTrue(cut.cleanCut); XCTAssertTrue(r.allCutsClean)
+        // 漏的两帧单独报：列表 + 数量；Cut 紧挨着的两拍都在，missingBetween 为空
+        XCTAssertEqual(r.missingFrames, [20, 30]); XCTAssertEqual(r.missingFrameCount, 2)
+        XCTAssertNil(cut.missingBetween)
+        XCTAssertEqual(r.fps ?? 0, 60, accuracy: 1e-9, "没给帧率：按相邻帧 pts 差估")
+        // --start-tick：第一帧的节目拍
+        let shifted = FrameAnalysis.switches(frames: f, startTick: 1000)
+        XCTAssertEqual(shifted.switches[1].tick, 1060); XCTAssertEqual(shifted.missingFrames, [1020, 1030])
+        // Cut 紧挨着的前一拍也漏了：新画面第一帧仍在第 60 拍，真正换过去的那一拍可能是第 59 拍——缺帧单独标在这次切换上
+        let g = program(ticks: 0..<120, drop: [20, 30, 59]) { t in t < 60 ? (0, 64) : (1, 192) }
+        let rg = FrameAnalysis.switches(frames: g)
+        XCTAssertEqual(rg.switches[1].tick, 60); XCTAssertEqual(rg.switches[1].kind, "cut", "中间没有解不出身份的帧，仍是 Cut")
+        XCTAssertEqual(rg.switches[1].missingBetween, 1); XCTAssertEqual(rg.switches[1].betweenFrames, 0)
+        XCTAssertEqual(rg.missingFrames, [20, 30, 59]); XCTAssertEqual(rg.missingFrameCount, 3)
+        // 列表按 maxEvents 截断，数量是全部
+        let capped = FrameAnalysis.switches(frames: g, maxEvents: 2)
+        XCTAssertEqual(capped.missingFrames, [20, 30]); XCTAssertEqual(capped.missingFrameCount, 3)
+        // markdown 写出拍号口径与漏帧
+        let md = FrameProbe.markdown(FrameProbe.SwitchesOutput(source: "t02", switches: rg))
+        XCTAssertTrue(md.contains("漏帧 3 拍（20, 30, 59）"), md)
+        // 没漏帧的文件：拍号就是下标，与改前逐字段相同（快照不用重录）
+        let clean = program(ticks: 0..<120) { t in t < 60 ? (0, 64) : (1, 192) }
+        let rc = FrameAnalysis.switches(frames: clean)
+        XCTAssertEqual(rc.switches.map(\.tick), rc.switches.map { Int64($0.index) })
+        XCTAssertEqual(rc.missingFrames, []); XCTAssertEqual(rc.missingFrameCount, 0); XCTAssertNil(rc.switches[1].missingBetween)
+    }
+
+    /// 不给帧率时（gate4 的 switches / fade 就没给 --fps）拍号用的帧率从相邻帧 pts 差估，不能拿"样本数 / 时长"：
+    /// AVFoundation 的 nominalFrameRate 就是这么算的，漏了帧就偏低（W1-A6 探针：60 fps 3600 帧漏 2 帧 → 59.967、漏 60 帧 → 59.0），
+    /// 10 分钟的文件后面差出好几拍。推流落盘的毫秒时间戳（16 / 17 ms 交替）也要估得出 60。
+    func testV6_T02_tickRateFromPtsDeltas_notSampleCountOverDuration() {
+        let f = program(ticks: 0..<36000, drop: [20, 30]) { t in t < 30000 ? (0, 64) : (1, 192) }
+        XCTAssertEqual(FrameAnalysis.programFps(f) ?? 0, 60, accuracy: 1e-9, "漏帧留下的 2 帧空档不进平均")
+        let r = FrameAnalysis.switches(frames: f)
+        XCTAssertEqual(r.switches[1].tick, 30000, "第 500 s 的 Cut")
+        XCTAssertEqual(r.missingFrames, [20, 30])
+        // 拿"样本数 / 时长"（nominalFrameRate 的算法）当帧率就差 2 拍——这就是不用它的原因
+        let sampleCountOverDuration = Double(f.count) / 600
+        XCTAssertEqual(sampleCountOverDuration, 59.9967, accuracy: 1e-4)
+        XCTAssertEqual(FrameAnalysis.switches(frames: f, fps: sampleCountOverDuration).switches[1].tick, 29998)
+        // 给了 --fps 就用给的
+        XCTAssertEqual(FrameAnalysis.switches(frames: f, fps: 60).switches[1].tick, 30000)
+        XCTAssertEqual(FrameAnalysis.switches(frames: f, fps: 60).fps, 60)
+        // 推流落盘：pts 截到毫秒
+        let ms = f.map { ProbeFrame(index: $0.index, ptsSeconds: ($0.ptsSeconds * 1000).rounded(.down) / 1000, frameNumber: $0.frameNumber,
+                                    inputID: $0.inputID, genTimeMs: $0.genTimeMs, flash: $0.flash, gray: $0.gray) }
+        XCTAssertEqual(FrameAnalysis.programFps(ms) ?? 0, 60, accuracy: 1e-3)
+        let rms = FrameAnalysis.switches(frames: ms)
+        XCTAssertEqual(rms.switches[1].tick, 30000)
+        XCTAssertEqual(rms.missingFrames, [20, 30])
+        // 59.94 节目（1001 / 60000 s 一帧）
+        let ntsc = program(ticks: 0..<3600, drop: [100], fps: 60000.0 / 1001) { t in t < 3000 ? (0, 64) : (1, 192) }
+        XCTAssertEqual(FrameAnalysis.programFps(ntsc) ?? 0, 60000.0 / 1001, accuracy: 1e-9)
+        XCTAssertEqual(FrameAnalysis.switches(frames: ntsc).switches[1].tick, 3000)
+        // 帧太少估不出：退回 60
+        XCTAssertNil(FrameAnalysis.programFps([f[0]]))
+        XCTAssertEqual(FrameAnalysis.switches(frames: [f[0]]).fps, 60)
+    }
+
+    /// Codex T02：30 拍 Fade 前面漏了两帧，按下标取拍（第 s + k 拍 = 下标 s + k）整体错开 2 帧、被判 2 帧偏差；按 pts 取拍是 0。
+    /// Fade 窗口里漏的帧（第 50 拍）不占 k；自动模式的 k 与 D 也按拍号算。
+    func testV7_T02_fadeTicksFromPts_droppedFramesBeforeAndInside() {
+        // A(64) → 第 40 拍发 Fade 30 拍（第 40 + k 拍 progress = k / 30）→ 第 70 拍起 B(192)
+        func spec(_ t: Int) -> (id: Int?, gray: Double) {
+            t <= 40 ? (0, 64) : t >= 70 ? (1, 192) : (nil, 64 + 128 * Double(t - 40) / 30)
+        }
+        let before = FrameAnalysis.fade(frames: program(ticks: 0..<100, drop: [20, 30], spec), durationTicks: 30, at: 40)
+        XCTAssertEqual(before.fades.count, 1)
+        let fd = before.fades[0]
+        XCTAssertEqual(fd.maxDeviationFrames, 0, accuracy: 1e-9, "按下标取拍时这里是 2 帧")
+        XCTAssertEqual(fd.samples.count, 29)
+        XCTAssertEqual(fd.samples.map(\.tick), (41...69).map(Int64.init))
+        XCTAssertEqual(fd.startTick, 41); XCTAssertEqual(fd.startIndex, 39, "文件里的序号比拍号小 2")
+        XCTAssertEqual(fd.direction, "A→B"); XCTAssertTrue(fd.passV7); XCTAssertTrue(before.allPassV7)
+        XCTAssertEqual(fd.missingFrames, []); XCTAssertEqual(fd.missingFrameCount, 0, "Fade 窗口 [40, 70] 里没漏")
+        XCTAssertEqual(before.missingFrames, [20, 30]); XCTAssertEqual(before.missingFrameCount, 2, "整个文件漏的另报")
+        // 窗口里也漏一帧：那一拍没有样本、单独列，别的拍照样 0 偏差
+        let insideFrames = program(ticks: 0..<100, drop: [20, 30, 50], spec)
+        let inside = FrameAnalysis.fade(frames: insideFrames, durationTicks: 30, at: 40)
+        XCTAssertEqual(inside.fades.count, 1)
+        XCTAssertEqual(inside.fades[0].samples.count, 28)
+        XCTAssertFalse(inside.fades[0].samples.contains { $0.tick == 50 })
+        XCTAssertEqual(inside.fades[0].maxDeviationFrames, 0, accuracy: 1e-9)
+        XCTAssertEqual(inside.fades[0].missingFrames, [50]); XCTAssertEqual(inside.fades[0].missingFrameCount, 1)
+        XCTAssertTrue(inside.fades[0].passV7)
+        // 自动模式：第一个混合帧当第 s + 1 拍，D = 末拍 − 首拍 + 2（不是混合帧数 + 1），漏的帧不占位
+        let auto = FrameAnalysis.fade(frames: insideFrames)
+        XCTAssertEqual(auto.fades.count, 1)
+        XCTAssertEqual(auto.fades[0].mixedFrames, 28)
+        XCTAssertEqual(auto.fades[0].durationTicks, 30)
+        XCTAssertEqual(auto.fades[0].startTick, 41)
+        XCTAssertEqual(auto.fades[0].maxDeviationFrames, 0, accuracy: 1e-9)
+        XCTAssertEqual(auto.fades[0].missingFrames, [50])
+        // 窗口第一拍（s + 1）漏了：指定模式照样从第 42 拍起量、0 偏差，startTick 是第一个有样本的拍
+        let head = FrameAnalysis.fade(frames: program(ticks: 0..<100, drop: [41], spec), durationTicks: 30, at: 40)
+        XCTAssertEqual(head.fades[0].startTick, 42); XCTAssertEqual(head.fades[0].samples.count, 28)
+        XCTAssertEqual(head.fades[0].maxDeviationFrames, 0, accuracy: 1e-9); XCTAssertEqual(head.fades[0].missingFrames, [41])
+        // 第 s 拍（纯旧画面）漏了：方向取它前面最近的一帧
+        let base = FrameAnalysis.fade(frames: program(ticks: 0..<100, drop: [40], spec), durationTicks: 30, at: 40)
+        XCTAssertEqual(base.fades[0].direction, "A→B"); XCTAssertEqual(base.fades[0].samples.count, 29); XCTAssertEqual(base.fades[0].missingFrames, [40])
+        // 窗口不在文件里（命令拍在第一帧之前）：不出 Fade，也不崩
+        XCTAssertTrue(FrameAnalysis.fade(frames: program(ticks: 0..<100, spec), durationTicks: 30, at: -1).fades.isEmpty)
+        // markdown 写出窗口里的漏帧
+        let md = FrameProbe.markdown(FrameProbe.FadeOutput(source: "t02", fade: inside))
+        XCTAssertTrue(md.contains("窗口里漏帧 1 拍（50）"), md)
+        XCTAssertTrue(md.contains("文件里漏帧 3 拍（20, 30, 50）"), md)
+    }
+
+    /// T02 的 Wipe / Zoom 一半：曲线本来就按 pts 取拍（W1-A3），这次补"缺帧单独报"——窗口 [s, s + D] 里漏的拍列出来，
+    /// 那一拍没有样本，别的拍照常判；前面漏的帧不影响窗口。
+    func testV7_T02_wipeZoomCurve_droppedFrameInWindowListed() {
+        let w = 240, h = 36, s = 40, d = 24
+        let f = program(ticks: 0..<100, drop: [20, 30, 50]) { _ in (nil, 128) }
+        // 剖面：第 s + k 拍 Wipe leftToRight 左边 10k 列是新画面（192）；Zoom 中心行带上新画面居中、宽 10k
+        var profiles: [Int: ScanProfile] = [:]
+        for fr in f {
+            let t = Int((fr.ptsSeconds * 60).rounded())
+            guard (s...(s + d)).contains(t) else { continue }
+            let k = t - s
+            let wipe = (0..<w).map { $0 < 10 * k ? 192.0 : 64.0 }
+            let zoom = (0..<w).map { x -> Double in x >= 120 - 5 * k && x < 120 + 5 * k ? 192 : 64 }
+            profiles[fr.index] = ScanProfile(width: w, height: h, columns: wipe, rows: [Double](repeating: 128, count: h), centerColumns: zoom,
+                                             columnBand: 0...(h - 1), rowBand: 0...(w - 1))
+        }
+        let wc = FrameAnalysis.wipeCurve(frames: f, profiles: profiles, direction: .leftToRight, at: Int64(s), durationTicks: d)
+        let zc = FrameAnalysis.zoomCurve(frames: f, profiles: profiles, at: Int64(s), durationTicks: d)
+        for (name, c) in [("wipe", wc), ("zoom", zc)] {
+            XCTAssertEqual(c.samples.count, d - 2, "\(name)：第 50 拍漏了，其余 22 拍各一个样本")
+            XCTAssertFalse(c.samples.contains { $0.tick == 50 }, name)
+            XCTAssertEqual(c.maxDeviationFrames, 0, accuracy: 1e-9, name)
+            XCTAssertTrue(c.passV7, name)
+            XCTAssertEqual(c.missingFrames, [50], name); XCTAssertEqual(c.missingFrameCount, 1, name)
+            XCTAssertTrue(c.note?.contains("漏了 1 拍：50") ?? false, "\(name)：\(c.note ?? "nil")")
+            let md = FrameProbe.markdown(FrameProbe.CurveOutput(source: name, curve: c))
+            XCTAssertTrue(md.contains("窗口里漏帧 1 拍（50）"), md)
+        }
+        // 窗口端点（第 s + D 拍，纯新画面）漏了：量不了，note 说清楚是漏帧
+        let tail = program(ticks: 0..<100, drop: [s + d]) { _ in (nil, 128) }
+        var tailProfiles: [Int: ScanProfile] = [:]
+        for fr in tail { if let p = profiles.values.first, (s...(s + d)).contains(Int((fr.ptsSeconds * 60).rounded())) { tailProfiles[fr.index] = p } }
+        let tc = FrameAnalysis.wipeCurve(frames: tail, profiles: tailProfiles, direction: .leftToRight, at: Int64(s), durationTicks: d)
+        XCTAssertTrue(tc.samples.isEmpty); XCTAssertFalse(tc.passV7)
+        XCTAssertEqual(tc.missingFrames, [Int64(s + d)])
+        XCTAssertTrue(tc.note?.contains("漏了 1 拍：64") ?? false, tc.note ?? "nil")
+    }
+}
+
 extension FrameAnalysisTests {
     /// 节目输出里某路切走再切回来，中间那段不是它的丢帧；切回来后帧号从新段起算。
     func testV4_stats_offAirGapIsNotADrop() {
