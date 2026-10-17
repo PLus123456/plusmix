@@ -6,7 +6,9 @@ import CoreVideo
 /// PremultipliedAlpha（输入缓冲带 kCVImageBufferAlphaChannelModeKey 附件时跟附件走）。所以按各自默认口径写像素：
 /// ProRes 直通 (B0 G0 R255 A128)，HEVC 预乘 (B0 G0 R128 A128)。
 enum AlphaMovieWriter {
-    static func write(to url: URL, codec: AVVideoCodecType, width: Int, height: Int, frames: Int, fps: Int32 = 30) throws {
+    /// - transform: 视频轨的 `preferredTransform`（W2-A5 / D15：带方向矩阵的 alpha 素材，转正后仍要按 alpha 模式附件预乘）。
+    static func write(to url: URL, codec: AVVideoCodecType, width: Int, height: Int, frames: Int, fps: Int32 = 30,
+                      transform: CGAffineTransform = .identity) throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -15,6 +17,7 @@ enum AlphaMovieWriter {
             AVVideoHeightKey: height,
         ])
         input.expectsMediaDataInRealTime = false
+        input.transform = transform
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: width,

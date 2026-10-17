@@ -409,6 +409,34 @@ final class FileInputW2A5Tests: XCTestCase {
         XCTAssertEqual(seen.count, 8, "八种方向的参照两两不同（用例真的覆盖了八种）：\(seen)")
     }
 
+    /// 带 alpha 的素材也带方向矩阵（ProRes 4444 直通 alpha / HEVC alpha 预乘）：转正后宽高互换、仍是 BGRA，alpha 模式附件跟着转正后的缓冲走，
+    /// 推帧线程照样只给直通的预乘一次（与 FileInputTests.testFile_alphaSources_outputPremultipliedBGRA 同一口径：R 落在 100–140）。
+    func testD15_rotatedAlphaSources_uprightAndPremultipliedOnce() throws {
+        for codec in [AVVideoCodecType.proRes4444, .hevcWithAlpha] {
+            let url = RepoPaths.output.appendingPathComponent("w2a5-alpha-rot90-\(codec.rawValue).mov")
+            try AlphaMovieWriter.write(to: url, codec: codec, width: 320, height: 240, frames: 30,
+                                       transform: CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 240, ty: 0))
+            let timing = makeTiming()
+            let slot = LockFreeFrameSlot(capacity: 3)
+            let input = try makeInput(timing: timing, slot: slot, path: url.path, endAction: .loop)
+            defer { input.stop() }
+            try startAndWaitLive(input)
+            XCTAssertTrue(input.hasAlpha, "\(codec.rawValue)")
+            XCTAssertEqual(input.info?.orientation, .rotate90, "\(codec.rawValue)")
+            let result = picks(timing, slot: slot, from: try anchor(of: input), count: 6)
+            guard let last = result.last, last.hasFrame, last.probe.count == 4 else { return XCTFail("\(codec.rawValue) 没有帧：\(result)") }
+            XCTAssertEqual(last.pixelFormat, .bgra)
+            let frame = try currentFrame(slot)
+            XCTAssertEqual([frame.width, frame.height], [240, 320], "\(codec.rawValue)：转正后 240×320")
+            let (b, g, r, a) = (last.probe[0], last.probe[1], last.probe[2], last.probe[3])
+            XCTAssertEqual(a, 128, accuracy: 12, "\(codec.rawValue) alpha")
+            XCTAssertGreaterThan(r, 100, "\(codec.rawValue) 预乘后的 R（预乘了两次？）")
+            XCTAssertLessThan(r, 140, "\(codec.rawValue) 预乘后的 R（转正后的缓冲丢了 alpha 模式附件、没预乘？）")
+            XCTAssertLessThan(max(b, g), 24, "\(codec.rawValue) 预乘后 B/G 应接近 0")
+            input.stop()
+        }
+    }
+
     /// 用户在输入设置里设的旋转叠在转正之后、不重复转：同一个真渲染器（OfflineRenderer，与实时路径同一个合成 pass），
     /// FileInput 出的帧 + 用户旋转 R 与"AVFoundation 转正的参照图 + 同一个 R"画出来的 PGM 四角一致（R = 0 / 90 / 180 / 270），
     /// 且 R = 90 与 R = 0 不同（用户旋转真的叠上去了）。

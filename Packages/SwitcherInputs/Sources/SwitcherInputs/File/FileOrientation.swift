@@ -28,8 +28,23 @@ public enum FileOrientation: String, Sendable, Hashable, CaseIterable {
         }
     }
 
-    /// 由矩阵归类；不是轴对齐（任意角度）、退化、非有限的返回 nil。
+    /// 由矩阵归类：只看线性部分 (a, b, c, d) 每一项的符号（相对最大项 1e-3 以内算 0，容下浮点噪声与缩放）；平移 (tx, ty) 只是把转过的画面
+    /// 挪回第一象限，转正后的帧本来就从 (0, 0) 起，不用看。不是轴对齐（任意角度）、退化、非有限的返回 nil（调用方按原样出）。
+    /// 对应关系由探针对着 AVAssetImageGenerator（appliesPreferredTrackTransform）逐一验过（reports/w2-inputs-5.md §1）。
     public init?(transform t: CGAffineTransform) {
-        return nil
+        let m = [t.a, t.b, t.c, t.d]
+        guard m.allSatisfy(\.isFinite), let scale = m.map({ abs($0) }).max(), scale > 0 else { return nil }
+        func sign(_ v: CGFloat) -> Int { abs(v) <= scale * 1e-3 ? 0 : (v > 0 ? 1 : -1) }
+        switch (sign(t.a), sign(t.b), sign(t.c), sign(t.d)) {
+        case (1, 0, 0, 1): self = .identity
+        case (0, 1, -1, 0): self = .rotate90
+        case (-1, 0, 0, -1): self = .rotate180
+        case (0, -1, 1, 0): self = .rotate270
+        case (-1, 0, 0, 1): self = .flipHorizontal
+        case (1, 0, 0, -1): self = .flipVertical
+        case (0, 1, 1, 0): self = .transpose
+        case (0, -1, -1, 0): self = .transverse
+        default: return nil
+        }
     }
 }

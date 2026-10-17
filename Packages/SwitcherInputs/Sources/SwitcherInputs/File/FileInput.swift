@@ -25,6 +25,9 @@ import SwitcherContracts
 /// - 音频：每 256 帧一块，块首 host time = 锚点拍时刻 + 块序号 × 256 / 48000，块在它的样本"发生之后"写（像真设备，
 ///   混音器的年龄设定点才对得上）；速率 ≠ 1 时按有理数位置线性插值变速（音调随之变）。
 /// - 带 alpha 的素材（ProRes 4444 / HEVC alpha）输出 BGRA；解码器标 StraightAlpha 的就地预乘（渲染器约定预乘）。
+/// - 方向：视频轨 `preferredTransform`（手机竖拍）归成 `FileOrientation`，解码帧先转正再进帧槽（`PixelRotator`，D15）；
+///   用户在输入设置里设的旋转由渲染器叠在转正之后（这里不碰 InputSettings）。
+/// - 速率 / 定位越界不崩：速率钳进 `FileSource.rateRange`、定位先在 Double 里钳到 [0, 时长]，`lastError` 说一句（提案 031，D01）。
 /// - 线程：解码线程（普通优先级）+ 推帧线程（time-constraint，周期 = 一拍）。都允许锁和分配；帧槽 push / 环 write 无锁。
 ///   两条都是裸 pthread（InputThread），每轮迭代各包一个自动释放池：AVFoundation 每次 copyNextSampleBuffer 都会 autorelease
 ///   reader / track output，没有池就攒到停机（S2 每圈 +0.5 MB；W2-A3）。
@@ -293,6 +296,7 @@ public final class FileInput: Input, @unchecked Sendable {
         }
         assetBox.withLock { $0 = asset }
         errorBox.withLock { $0 = nil }
+        if let note = asset.orientationNote { noteBox.withLock { if $0 == nil { $0 = note } } }
         let timing = self.timing
         let vq = DecodedVideoQueue(depth: options.predecodeDepth)
         let channels = audioRing?.channelCount ?? 0
@@ -429,6 +433,7 @@ public final class FileInput: Input, @unchecked Sendable {
         var pendingAudio: (start: Int64, frames: Int)?   // FIFO 前面的空洞比容量大、还没放进去的那块（audioPlanes 里）
         var audioPlanes: [[Float]] = Array(repeating: [], count: fifo?.channels ?? 0)
         var queueDepth = queue.depth
+        var rotationFailuresSeen = 0
         let sampleRate = Int64(AudioFormat.sampleRate)
         let duration = asset.info.duration
         let frameDuration = asset.info.frameDuration
@@ -490,7 +495,12 @@ public final class FileInput: Input, @unchecked Sendable {
                 if !queue.isFull, let src = videoSource, !src.videoDone {
                     if let (t, pb) = src.reader.nextVideo() {
                         countersBox.framesReceived.add(1, ordering: .relaxed)
-                        countersBox.surfaces.note(pb)
+                        countersBox.surfaces.note(pb)   // 转正过的是池里的缓冲（推进帧槽的就是它）
+                        if let r = asset.rotator, r.failures != rotationFailuresSeen {
+                            rotationFailuresSeen = r.failures
+                            let reason = r.lastFailure ?? "?"
+                            noteBox.withLock { $0 = "转正失败 \(rotationFailuresSeen) 帧（\(reason)），这些帧按编码方向原样出" }
+                        }
                         src.lastVideoMedia = t
                         let media = src.base + t
                         if shouldDrop(media: media, playback: p, timing: timing, frameDuration: frameDuration) {
