@@ -95,8 +95,11 @@ public final class FileInput: Input, @unchecked Sendable {
     private let assetBox = Mutex<FileAsset?>(nil)
     private let errorBox = Mutex<String?>(nil)
     /// 参数被钳的提示（速率 / 定位不在契约范围，提案 031、Codex D01）：不改 state、不算出错，`lastError` 在没有真错误时给它；
-    /// 下一次合法的同类操作清掉。start 不清（构造时钳的速率开播之后仍要看得见）。
+    /// 下一次合法的速率 / 定位清掉。start 不清（构造时钳的速率开播之后仍要看得见）。
     private let noteBox = Mutex<String?>(nil)
+    /// 方向的提示（D15：方向矩阵认不出 / 转正器建不出来 / 有帧转正失败，这些帧按编码方向原样出）：start 按这次打开的文件重置，解码线程追加；
+    /// 优先级在参数提示之后（合法的速率 / 定位不清它）。
+    private let orientationNoteBox = Mutex<String?>(nil)
     private var decoderThread: InputThread?
     private var pacerThread: InputThread?
     private var videoQueue: DecodedVideoQueue?
@@ -272,8 +275,8 @@ public final class FileInput: Input, @unchecked Sendable {
         let v = pos.doubleValue
         return v < 0 ? 0 : v.truncatingRemainder(dividingBy: d.doubleValue)
     }
-    /// 最近一次错误文案；没有错误时是参数被钳的提示（速率 / 定位越界，见 `noteBox`）。
-    public var lastError: String? { errorBox.withLock { $0 } ?? noteBox.withLock { $0 } }
+    /// 最近一次错误文案；没有错误时是参数被钳的提示（速率 / 定位越界，见 `noteBox`），再没有是方向的提示（`orientationNoteBox`）。
+    public var lastError: String? { errorBox.withLock { $0 } ?? noteBox.withLock { $0 } ?? orientationNoteBox.withLock { $0 } }
     /// 计数。
     public var counters: InputCounters { countersBox.snapshot(state: stateBox) }
     /// 文件专属计数。
@@ -296,7 +299,7 @@ public final class FileInput: Input, @unchecked Sendable {
         }
         assetBox.withLock { $0 = asset }
         errorBox.withLock { $0 = nil }
-        if let note = asset.orientationNote { noteBox.withLock { if $0 == nil { $0 = note } } }
+        orientationNoteBox.withLock { $0 = asset.orientationNote }
         let timing = self.timing
         let vq = DecodedVideoQueue(depth: options.predecodeDepth)
         let channels = audioRing?.channelCount ?? 0
@@ -499,7 +502,7 @@ public final class FileInput: Input, @unchecked Sendable {
                         if let r = asset.rotator, r.failures != rotationFailuresSeen {
                             rotationFailuresSeen = r.failures
                             let reason = r.lastFailure ?? "?"
-                            noteBox.withLock { $0 = "转正失败 \(rotationFailuresSeen) 帧（\(reason)），这些帧按编码方向原样出" }
+                            orientationNoteBox.withLock { $0 = "转正失败 \(rotationFailuresSeen) 帧（\(reason)），这些帧按编码方向原样出" }
                         }
                         src.lastVideoMedia = t
                         let media = src.base + t

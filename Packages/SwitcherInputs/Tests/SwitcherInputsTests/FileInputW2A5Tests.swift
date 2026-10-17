@@ -409,6 +409,27 @@ final class FileInputW2A5Tests: XCTestCase {
         XCTAssertEqual(seen.count, 8, "八种方向的参照两两不同（用例真的覆盖了八种）：\(seen)")
     }
 
+    /// 认不出的方向矩阵（45° 这种不是 90° 整数倍的）：按编码方向原样出（不猜），lastError 说一句；之后合法的定位 / 改速率不把这句清掉。
+    func testD15_nonAxisAlignedTransform_passesThroughWithNote() throws {
+        let url = RepoPaths.output.appendingPathComponent("w2a5-orient-45deg.mov")
+        try LoopClipWriter.write(to: url, width: 320, height: 240, fps: 30, frames: 10, content: .quadrants,
+                                 transform: CGAffineTransform(rotationAngle: .pi / 4))
+        let timing = makeTiming()
+        let slot = LockFreeFrameSlot(capacity: 3)
+        let input = try makeInput(timing: timing, slot: slot, path: url.path, endAction: .loop)
+        defer { input.stop() }
+        try startAndWaitLive(input)
+        XCTAssertEqual(input.info?.orientation, .identity)
+        let frame = try currentFrame(slot)
+        XCTAssertEqual([frame.width, frame.height], [320, 240], "认不出的矩阵按编码方向原样出")
+        XCTAssertEqual(Quadrants.of(frame.pixelBuffer), "RGBW")
+        XCTAssertEqual(input.lastError?.contains("方向矩阵"), true, "lastError 该说一句：\(input.lastError ?? "nil")")
+        input.seek(toSeconds: 0.1)
+        input.rate = 1
+        XCTAssertEqual(input.lastError?.contains("方向矩阵"), true, "合法的定位 / 改速率不清方向提示")
+        XCTAssertEqual(input.state, .live)
+    }
+
     /// 带 alpha 的素材也带方向矩阵（ProRes 4444 直通 alpha / HEVC alpha 预乘）：转正后宽高互换、仍是 BGRA，alpha 模式附件跟着转正后的缓冲走，
     /// 推帧线程照样只给直通的预乘一次（与 FileInputTests.testFile_alphaSources_outputPremultipliedBGRA 同一口径：R 落在 100–140）。
     func testD15_rotatedAlphaSources_uprightAndPremultipliedOnce() throws {
