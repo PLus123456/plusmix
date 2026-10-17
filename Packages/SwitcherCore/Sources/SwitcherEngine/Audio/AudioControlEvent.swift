@@ -29,11 +29,15 @@ public enum AudioControlEvent: Sendable, Hashable {
                            durationTicks: Int, duration: HostDuration)
     /// T-bar 推杆位置（source = tbar 的转场每次变化一条）。
     case tbarProgress(from: Int, to: Int, progress: Double)
-    /// 转场结束：completed = 对调已发生（program / preview 是对调后的）；false = 被取消（例如中途 removeInput）。
-    case transitionEnded(program: Int, preview: Int, tick: Tick, at: HostTime, completed: Bool)
-    /// FTB 目标翻转：向 on 走。斜坡起点 = 第 startTick 拍的拍点 at（反转时状态机已把起点回拨到"当前电平对应的等效起点"），
-    /// 时长 durationTicks 拍 = duration；duration 为 0 = 立即到位。
-    case fadeToBlack(on: Bool, startTick: Tick, at: HostTime, durationTicks: Int, duration: HostDuration)
+    /// 转场结束，在第 tick 拍（拍点 at）。completion 非 nil = 对调已发生（program / preview 是对调后的），值 = 怎么完成的（D10）：
+    /// `.elapsed` auto 走满（音频那条等长淡变在同一刻自己走满）；`.interrupted` auto 没走满就被 Cut / T-bar 推到底切完（音频要在
+    /// at 起短淡收口）；`.tbar` T-bar 提交。nil = 被取消（例如中途 removeInput、T-bar 拉回 0），program / preview 是 0 占位。
+    case transitionEnded(program: Int, preview: Int, tick: Tick, at: HostTime, completion: TransitionCompletion?)
+    /// FTB 目标斜坡变了（方向翻转；途中改时长 / 归零，D11）：向 on 走。斜坡起点 = 第 startTick 拍的拍点 at（反转 / 改时长时状态机已把
+    /// 起点回拨到"当前电平对应的等效起点"），时长 durationTicks 拍 = duration；duration 为 0 = 立即到位。
+    /// 新斜坡从第 effectiveTick 拍（拍点 effectiveAt，= 改的那一拍）起生效：之前那段内容仍按上一条斜坡走——音频按内容时刻评估、
+    /// 比状态机晚"对齐延迟 + 状态机领先的那一拍"，一收到就换会在换点之前就用上新斜坡（反向时那一段比画面低几 dB）。
+    case fadeToBlack(on: Bool, startTick: Tick, at: HostTime, durationTicks: Int, duration: HostDuration, effectiveTick: Tick, effectiveAt: HostTime)
 }
 
 /// 事件接收方。转场类事件在**状态机线程**上同步到达（`prepare` / `apply` 返回前），实现必须立即返回、不阻塞、不进 actor；

@@ -42,7 +42,7 @@ final class AudioBridgeTests: XCTestCase {
                                                    durationTicks: 30, duration: clock.duration(ofTicks: 30)))
         XCTAssertEqual(clock.duration(ofTicks: 30).milliseconds, 500, accuracy: 0.001)
         let ended = events.first { if case .transitionEnded = $0 { return true } else { return false } }
-        XCTAssertEqual(ended, .transitionEnded(program: 2, preview: 1, tick: Tick(330), at: clock.time(of: Tick(330)), completed: true))
+        XCTAssertEqual(ended, .transitionEnded(program: 2, preview: 1, tick: Tick(330), at: clock.time(of: Tick(330)), completion: .elapsed))
         await bridge.detach()
     }
 
@@ -106,7 +106,7 @@ final class AudioBridgeTests: XCTestCase {
         let e = sink.events
         XCTAssertTrue(e.contains(.tbarProgress(from: 1, to: 2, progress: 0.25)), "\(e)")
         XCTAssertTrue(e.contains(.tbarProgress(from: 1, to: 2, progress: 0.5)), "\(e)")
-        XCTAssertTrue(e.contains { if case .transitionEnded(let p, let v, _, _, let done) = $0 { return p == 2 && v == 1 && done } else { return false } }, "\(e)")
+        XCTAssertTrue(e.contains { if case .transitionEnded(let p, let v, _, _, let done) = $0 { return p == 2 && v == 1 && done == .tbar } else { return false } }, "\(e)")
         // started(tbar) 先于第一个进度
         let startedIndex = e.firstIndex { if case .transitionStarted(_, _, _, let src, _, _, _, _) = $0 { return src == .tbar } else { return false } }
         let progressIndex = e.firstIndex { if case .tbarProgress = $0 { return true } else { return false } }
@@ -182,33 +182,39 @@ final class AudioBridgeTests: XCTestCase {
 
     // MARK: FTB
 
+    /// FTB 斜坡变化走转场事件那条路（D11 起：带改的那一拍，不靠快照轮询）；轮询照常跑也不重复发。
     func testFTB_toggleEmitsRamp_startTickAndDurationMatchStateMachine_reversalKeepsLevel() async {
         let sm = makeMachine()
         defer { sm.stop() }
         let sink = AudioControlEventCollector()
         let bridge = AudioStateBridge(stateMachine: sm, clock: clock, sink: sink)
+        await bridge.attach()
         bridge.pollSnapshot()
         sink.reset()
         await sm.schedule(.ftb(on: true), at: Tick(100))
         await sm.prepare(upTo: Tick(110))
         bridge.pollSnapshot()
         XCTAssertEqual(sink.events, [.fadeToBlack(on: true, startTick: Tick(100), at: clock.time(of: Tick(100)), durationTicks: 30,
-                                                  duration: clock.duration(ofTicks: 30))])
-        // 第 115 拍反转（level = 15/30 = 0.5）：状态机把起点回拨到 100（等效起点），我们照发
+                                                  duration: clock.duration(ofTicks: 30), effectiveTick: Tick(100), effectiveAt: clock.time(of: Tick(100)))])
+        // 第 115 拍反转（level = 15/30 = 0.5）：状态机把起点回拨到 100（等效起点），我们照发；生效拍 = 反转那一拍
         sink.reset()
         await sm.schedule(.ftb(on: false), at: Tick(115))
         await sm.prepare(upTo: Tick(116))
         bridge.pollSnapshot()
-        guard case .fadeToBlack(let on, let start, let at, let d, _)? = sink.events.first else { return XCTFail("\(sink.events)") }
+        guard case .fadeToBlack(let on, let start, let at, let d, _, let effectiveTick, let effectiveAt)? = sink.events.first else { return XCTFail("\(sink.events)") }
         XCTAssertFalse(on)
         XCTAssertEqual(d, 30)
         XCTAssertEqual(start, Tick(100), "从 0.5 往回走：等效起点 = 115 − 15 = 100")
         XCTAssertEqual(at, clock.time(of: Tick(100)))
-        // 期间没有 ftb 事件重复发（progress 变化不算）
+        XCTAssertEqual(effectiveTick, Tick(115), "生效拍 = 反转那一拍（快照轮询在 116 才看到，不能拿快照的拍）")
+        XCTAssertEqual(effectiveAt, clock.time(of: Tick(115)))
+        XCTAssertEqual(sink.events.count, 1)
+        // 期间没有 ftb 事件重复发（progress 变化、自然走完都不算）
         sink.reset()
         await sm.prepare(upTo: Tick(140))
         bridge.pollSnapshot()
         XCTAssertFalse(sink.events.contains { if case .fadeToBlack = $0 { return true } else { return false } })
+        await bridge.detach()
     }
 
     func testFTB_levelAt_followsRamp() {

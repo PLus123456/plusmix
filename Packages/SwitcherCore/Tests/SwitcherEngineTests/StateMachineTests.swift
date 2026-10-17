@@ -202,10 +202,10 @@ final class StateMachineTests: XCTestCase {
         XCTAssertEqual(events.map(\.0), [
             .cut(tick: .zero, from: 1, to: 2),
             .started(tick: Tick(5), type: .fade, durationTicks: 3, from: 2, to: 1, source: .auto),
-            .completed(tick: Tick(8), from: 2, to: 1),
+            .completed(tick: Tick(8), from: 2, to: 1, completion: .elapsed),
             .cut(tick: Tick(10), from: 1, to: 3),
             .started(tick: Tick(10), type: .fade, durationTicks: 3, from: 3, to: 2, source: .tbar),
-            .completed(tick: Tick(10), from: 3, to: 2),
+            .completed(tick: Tick(10), from: 3, to: 2, completion: .tbar),
         ])
     }
 }
