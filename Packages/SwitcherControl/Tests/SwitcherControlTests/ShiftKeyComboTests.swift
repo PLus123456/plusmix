@@ -146,6 +146,11 @@ final class ShiftKeyComboTests: XCTestCase {
         XCTAssertTrue(table.bindings[1].enabled)
         XCTAssertTrue(table.bindings[2].enabled, "别的行不动")
         XCTAssertTrue(table.conflicts().isEmpty)
+        // 设置导出包（App 的 SettingsTransfer）先把整个包解码、再编码回来交给 load 查——原样的写法到 load 那一步已经没了，所以解码时就要处理掉
+        struct SettingsPackage: Codable { var hotkeys: HotkeyTable }
+        let package = try JSONDecoder().decode(SettingsPackage.self, from: Data("{\"hotkeys\": \(json)}".utf8))
+        XCTAssertEqual(package.hotkeys, table, "包里解码同一个结果")
+        XCTAssertNoThrow(try HotkeyTable.load(from: try package.hotkeys.jsonData()), "编码回来再查：不报冲突")
         let both = #"{"version":1,"bindings":[{"key":"shift+!","action":{"toggleFTB":{}}},{"key":"shift+！","action":{"toggleAFV":{}}}]}"#
         XCTAssertThrowsError(try HotkeyTable.load(from: Data(both.utf8)), "两行都是旧写法：照旧报冲突") { e in
             guard case HotkeyTableError.conflicts(let c) = e else { return XCTFail("\(e)") }

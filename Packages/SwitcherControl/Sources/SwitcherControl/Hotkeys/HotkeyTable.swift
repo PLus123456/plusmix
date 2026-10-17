@@ -116,21 +116,28 @@ public struct HotkeyTable: Hashable, Codable, Sendable {
     /// 人读的 JSON。
     public func jsonData() throws -> Data { try APIJSON.prettyEncoder.encode(self) }
 
-    /// 从 JSON 读；有冲突默认报错（allowConflicts 关掉）。带 ⇧ 的符号老写法（"shift+!"）读进来规范成 "shift+1"，与别的行撞了按 preferRecordedShiftRows 处理。
+    /// 从 JSON 读；有冲突默认报错（allowConflicts 关掉）。带 ⇧ 的符号老写法（"shift+!"）解码时已规范成 "shift+1"、撞键按 preferRecordedShiftRows 处理过。
     public static func load(from data: Data, allowConflicts: Bool = false) throws -> HotkeyTable {
-        var t = try APIJSON.decoder.decode(HotkeyTable.self, from: data)
+        let t = try APIJSON.decoder.decode(HotkeyTable.self, from: data)
         guard t.version == currentVersion else { throw HotkeyTableError.unsupportedVersion(t.version) }
-        t.preferRecordedShiftRows(rawKeys: rawBindingKeys(in: data))
         let c = t.conflicts()
         if !allowConflicts, !c.isEmpty { throw HotkeyTableError.conflicts(c) }
         return t
     }
 
-    /// JSON 里每条绑定原样的 key 字符串（按下标）；读不出来给空数组。
-    static func rawBindingKeys(in data: Data) -> [String?] {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let bindings = root["bindings"] as? [[String: Any]] else { return [] }
-        return bindings.map { $0["key"] as? String }
+    private enum CodingKeys: String, CodingKey { case version, bindings }
+
+    /// 只读每条绑定原样的 key 字符串（看它是不是旧写法）。
+    private struct RawBindingKey: Decodable { let key: String? }
+
+    /// 解码时就把旧写法撞键处理掉（W2-C4）：hotkeys.json（load）、设置导出包（App 的 SettingsTransfer 先解码整个包、再编码回来交给 load 查）
+    /// 走的都是这里——等到 load 那一步原样的写法已经没了。
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decode(Int.self, forKey: .version)
+        bindings = try c.decode([HotkeyBinding].self, forKey: .bindings)
+        let rawKeys = (try? c.decode([RawBindingKey].self, forKey: .bindings))?.map(\.key) ?? []
+        preferRecordedShiftRows(rawKeys: rawKeys)
     }
 
     /// W2-C4：设置 › 快捷键 录键录下的旧行（"shift+!"，⇧1 原来组合出来的）读进来是 "shift+1"；它若与表里原来那行 "shift+1" 撞了，留录下的那行
