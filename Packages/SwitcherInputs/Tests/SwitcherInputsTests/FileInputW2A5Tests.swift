@@ -231,7 +231,9 @@ final class FileInputW2A5Tests: XCTestCase {
         input.rate = 2
         XCTAssertEqual(input.rate, 2, accuracy: 1e-9)
         XCTAssertNil(input.lastError, "改回合法速率后提示清掉")
-        let fast = picks(timing, slot: slot, from: try anchor(of: input) + 1, count: 10).compactMap(\.number)
+        // 从 8 倍速切下来：新锚点位置是按 8 倍速往前算两拍的（比解码线程领先），解码线程要追几拍（原来就这样，与钳位无关），从锚点后第 10 拍起看
+        let fast = picks(timing, slot: slot, from: try anchor(of: input) + 10, count: 10).compactMap(\.number)
+        XCTAssertEqual(fast.count, 10)
         for i in 1..<fast.count { XCTAssertEqual((fast[i] - fast[i - 1] + 600) % 600, 2, "速率 2：\(fast)") }
     }
 

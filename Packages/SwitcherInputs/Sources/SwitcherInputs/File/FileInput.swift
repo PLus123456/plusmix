@@ -91,6 +91,9 @@ public final class FileInput: Input, @unchecked Sendable {
     private let playback: Mutex<Playback>
     private let assetBox = Mutex<FileAsset?>(nil)
     private let errorBox = Mutex<String?>(nil)
+    /// 参数被钳的提示（速率 / 定位不在契约范围，提案 031、Codex D01）：不改 state、不算出错，`lastError` 在没有真错误时给它；
+    /// 下一次合法的同类操作清掉。start 不清（构造时钳的速率开播之后仍要看得见）。
+    private let noteBox = Mutex<String?>(nil)
     private var decoderThread: InputThread?
     private var pacerThread: InputThread?
     private var videoQueue: DecodedVideoQueue?
@@ -121,13 +124,14 @@ public final class FileInput: Input, @unchecked Sendable {
     /// - Parameters:
     ///   - path: 文件路径。
     ///   - endAction: 结束动作。
-    ///   - rate: 播放速率（> 0；按分母 ≤ 1000 的有理数近似）。
+    ///   - rate: 播放速率（`FileSource.rateRange` = 0.1…8，提案 031；越界 / 非有限的钳进去、`lastError` 说一句，不崩——Codex D01；
+    ///     按分母 ≤ 1000 的有理数近似）。
     ///   - timing: 节目时钟。
     ///   - videoSlot / audioRing: 组装方注入。audioRing 为 nil 时不解音频。
     public init(number: Int, name: String, path: String, endAction: FileEndAction = .loop, rate: Double = 1,
                 timing: ProgramTiming, videoSlot: any FrameSlot, audioRing: (any AudioRing)? = nil, options: Options = Options()) throws {
         precondition(number >= 1, "输入编号从 1 起")
-        precondition(rate > 0 && rate.isFinite, "速率必须为正")
+        let (clamped, note) = FileInput.clampRate(rate)
         self.number = number
         self.name = name
         self.path = path
@@ -136,10 +140,35 @@ public final class FileInput: Input, @unchecked Sendable {
         slot = videoSlot
         self.videoSlot = videoSlot
         self.audioRing = audioRing
-        let r = Rational(approximating: rate)
+        let r = Rational(approximating: clamped)
         let tl = FileTimeline(anchorTick: .zero, anchorMedia: .zero, rate: r, programFrame: timing.format.frameDuration)
         playback = Mutex(Playback(timeline: tl, paused: false, generation: 0, restartMedia: .zero, version: 0, endAction: endAction, anchorPending: true, pauseApplied: false))
+        noteBox.withLock { $0 = note }
     }
+
+    /// 速率钳进 `FileSource.rateRange`（提案 031 第 5 条；Codex D01：0 / 负数原来在 precondition 崩、1e-4 近似成 0 后取倒数崩、1e300 换 Int64 溢出）。
+    /// NaN 没有方向，按 1（正常速度）；±∞ 按两端。返回钳后的值与提示（合法值提示为 nil）。
+    static func clampRate(_ rate: Double) -> (value: Double, note: String?) {
+        let range = FileSource.rateRange
+        if range.contains(rate) { return (rate, nil) }
+        let value = rate.isNaN ? 1 : min(max(rate, range.lowerBound), range.upperBound)
+        return (value, "播放速率 \(shortNumber(rate)) 不在 \(shortNumber(range.lowerBound))–\(shortNumber(range.upperBound)) 之间，按 \(shortNumber(value)) 播")
+    }
+
+    /// 定位秒数 → 文件内位置（Codex D01：原来 1e300 在钳到时长之前就 × 1e6 换 Int64，溢出崩）：先在 Double 里钳到 [0, 时长]
+    /// （非有限 / 负数给 0，与 `InputSettings.clamped()` 同口径；时长未知时上限按 `PlaybackLimits.maxSeekSeconds`；再兜一道 Int64 能表示的上限），
+    /// 再换 Rational。钳完 ≥ 时长（过尾、1e300）与原来一样 = 从头。
+    static func seekTarget(seconds: Double, duration: Rational) -> Rational {
+        guard seconds.isFinite, seconds > 0 else { return .zero }
+        let known = duration.numerator > 0
+        let upper = min(known ? duration.doubleValue : PlaybackLimits.maxSeekSeconds, Double(Int64.max) / 2_000_000)
+        var target = Rational(approximating: min(seconds, upper), maxDenominator: 1_000_000)
+        if known, target >= duration { target = .zero }
+        return target
+    }
+
+    /// 提示里的数：1e+300、0.1、8、nan、inf。
+    private static func shortNumber(_ v: Double) -> String { String(format: "%g", v) }
 
     /// 从 InputSource.file 构造。
     public convenience init(config: InputConfig, timing: ProgramTiming, videoSlot: any FrameSlot, audioRing: (any AudioRing)? = nil,
@@ -183,17 +212,18 @@ public final class FileInput: Input, @unchecked Sendable {
             if restart { seek(toMedia: .zero) }
         }
     }
-    /// 播放速率。设置时在下一拍重新锚定。
+    /// 播放速率。设置时在下一拍重新锚定。越界 / 非有限的钳进 `FileSource.rateRange` 并在 `lastError` 说一句（不崩，Codex D01）；读回来是钳后的值。
     public var rate: Double {
         get { playback.withLock { $0.timeline.rate.doubleValue } }
         set {
-            precondition(newValue > 0 && newValue.isFinite)
+            let (clamped, note) = FileInput.clampRate(newValue)
+            noteBox.withLock { $0 = note }
             let timing = self.timing
             playback.withLock { p in
                 let tick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
                 if !p.paused { p.timeline.anchorMedia = p.timeline.position(at: tick) }
                 p.timeline.anchorTick = tick
-                p.timeline.rate = Rational(approximating: newValue)
+                p.timeline.rate = Rational(approximating: clamped)
                 p.version += 1
             }
         }
@@ -216,8 +246,8 @@ public final class FileInput: Input, @unchecked Sendable {
         let v = pos.doubleValue
         return v < 0 ? 0 : v.truncatingRemainder(dividingBy: d.doubleValue)
     }
-    /// 最近一次错误文案。
-    public var lastError: String? { errorBox.withLock { $0 } }
+    /// 最近一次错误文案；没有错误时是参数被钳的提示（速率 / 定位越界，见 `noteBox`）。
+    public var lastError: String? { errorBox.withLock { $0 } ?? noteBox.withLock { $0 } }
     /// 计数。
     public var counters: InputCounters { countersBox.snapshot(state: stateBox) }
     /// 文件专属计数。
@@ -286,19 +316,23 @@ public final class FileInput: Input, @unchecked Sendable {
 
     // MARK: 控制
 
-    /// 定位到文件内某秒（钳到 [0, 时长)）。目标帧解出来之后 seekLead 之后的第一拍生效，从那一拍起显示目标位置的帧；
-    /// 之前帧槽里还是旧帧。
+    /// 定位到文件内某秒：先在 Double 里钳到 [0, 时长]（非有限 / 负数 = 0），过尾（≥ 时长）= 从头（`seekTarget`）。不在契约范围
+    /// （0…`PlaybackLimits.maxSeekSeconds`，提案 031）的照做、`lastError` 说一句；合法的定位清掉提示。
+    /// 目标帧解出来之后 seekLead 之后的第一拍生效，从那一拍起显示目标位置的帧；之前帧槽里还是旧帧。暂停中定位 = 停在目标那一帧、仍暂停。
     public func seek(toSeconds seconds: Double) {
         guard let info else { return }
-        var target = Rational(approximating: max(0, seconds), maxDenominator: 1_000_000)
-        if info.duration.numerator > 0, target >= info.duration { target = .zero }
-        seek(toMedia: target)
+        let inContract = (0...PlaybackLimits.maxSeekSeconds).contains(seconds)
+        noteBox.withLock {
+            $0 = inContract ? nil : "定位秒数 \(FileInput.shortNumber(seconds)) 不在 0–\(FileInput.shortNumber(PlaybackLimits.maxSeekSeconds))（一周）之间，按从头处理"
+        }
+        seek(toMedia: FileInput.seekTarget(seconds: seconds, duration: info.duration))
     }
 
-    /// 定位到第 n 帧（按文件的帧时长）。
+    /// 定位到第 n 帧（按文件的帧时长）。帧号先钳到文件的帧数（帧时长 × n 不在 Int64 里溢出，D01 同一类）；过尾 = 从头。
     public func seek(toFrame n: Int) {
         guard let info else { return }
-        var target = info.frameDuration.scaled(by: Int64(max(0, n)))
+        let frames = info.duration.numerator > 0 ? FileInput.ceilInt(info.duration / info.frameDuration) : Int(Int32.max)
+        var target = info.frameDuration.scaled(by: Int64(min(max(0, n), frames)))
         if info.duration.numerator > 0, target >= info.duration { target = .zero }
         seek(toMedia: target)
     }
