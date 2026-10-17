@@ -719,16 +719,19 @@ public enum FrameAnalysis {
         public var anchorFile: Int?
         /// 闪光离锚 click 在半秒 ±1 帧内（没有 click 时按离最近的整秒算）：前后两个 click 差不多一样近，配哪一秒是平局——只列不判。
         public var halfSecond: Bool?
+        /// 有这个事件的闪光、但锚 ±maxMatchSeconds 内没有 click 的文件序号（那一格 clickTimes 是 nil，极差只在剩下的文件里算）；没有为 nil。
+        /// 判定事件（非半秒）里有这样的文件 = A4 不过（用户 2026-10-17 定，测试标准 §2.3）；没有锚的事件（一个文件都没配上 click）不算缺。
+        public var missingClickFiles: [Int]? = nil
     }
     public struct MultiFileAVReport: Hashable, Codable, Sendable {
         public var files: [String]
         public var events: [MultiFileEvent]
         /// 判定事件（不含半秒事件）里闪光时刻的最大极差（ms）：A4 的判定口径，gate 脚本读它。
         public var maxFlashSpreadMs: Double
-        /// 判定事件里 click 时刻的最大极差（ms）：A4 的判定口径，gate 脚本读它。
+        /// 判定事件里 click 时刻的最大极差（ms）：A4 的判定口径，gate 脚本读它。缺 click 的那一格不进极差（看 missingClickEventCount / passA4）。
         public var maxClickSpreadMs: Double
         public var thresholdMs: Double
-        /// A4：判定事件里各文件同一事件的时间差 ≤ 1 帧；一个可比的判定事件都没有时为 nil。
+        /// A4：判定事件里各文件同一事件的时间差 ≤ 1 帧，且没有文件缺 click；一个可比的判定事件都没有（也没有缺 click 的）时为 nil。
         public var passA4: Bool?
         /// 半秒事件数（只列不判）。
         public var halfSecondEventCount: Int?
@@ -736,8 +739,12 @@ public enum FrameAnalysis {
         public var allEventsMaxFlashSpreadMs: Double?
         /// 含半秒事件的最大 click 极差（ms，只报不判）。
         public var allEventsMaxClickSpreadMs: Double?
-        /// 有半秒事件时的说明。
+        /// 有半秒事件 / 缺 click / 没有锚的事件时的说明。
         public var note: String?
+        /// 判定事件里有文件缺 click 的事件数：> 0 时 passA4 = false（W1-A6）。老版本 JSON 没有。
+        public var missingClickEventCount: Int? = nil
+        /// 没有锚的事件数（一个文件都没配上 click，只比闪光；G8 / G9 的第 0 s 就是这样）。
+        public var unanchoredEventCount: Int? = nil
     }
 
     /// 多文件模式比较同一事件（A4）。事件按闪光帧的 genTimeMs 对齐（±1 帧内算同一事件）；读不到时按序号。
@@ -748,6 +755,8 @@ public enum FrameAnalysis {
     /// 其他文件取**离锚最近**的 click（±maxMatchSeconds 内）；真错位照样体现在极差里（30 ms 就是 30 ms），不会因为离锚远就当成"没找到"藏掉。
     /// 闪光离锚 click 在半秒 ±1 帧内的事件（60 fps 节目从第 0 拍起的文件就是 |flash − round(flash)| ≈ 0.5）照常算、列在 events 里，
     /// 但不进 maxFlashSpreadMs / maxClickSpreadMs / passA4，含它们的最大值另报（A2 本来就只用整秒配对判）。
+    /// 判定事件里某个文件有闪光、锚 ±maxMatchSeconds 内却没有 click（W1-A6，用户 2026-10-17 定）：那一格照旧 nil、极差只在剩下的文件里算，
+    /// 事件里列出是哪个文件（`missingClickFiles`），passA4 = false。半秒事件里缺的照样列、不判；没有锚的事件不算缺（只比闪光，另计数）。
     public static func avMulti(files: [(name: String, frames: [ProbeFrame], clicks: [ClickEvent])],
                                frameDurationSeconds: Double = 1.0 / 60, maxMatchSeconds: Double = 0.5) -> MultiFileAVReport {
         let reports = files.map { av(frames: $0.frames, clicks: $0.clicks, maxMatchSeconds: maxMatchSeconds, frameDurationSeconds: frameDurationSeconds) }
@@ -778,11 +787,13 @@ public enum FrameAnalysis {
         }
         var events: [MultiFileEvent] = []
         var maxFlash = 0.0, maxClick = 0.0, allFlash = 0.0, allClick = 0.0
-        var halfCount = 0
+        var halfCount = 0, unanchored = 0
+        var missingJudged: [(key: String, files: [Int])] = []
         for k in keys {
             let pairs = pairsByFile.map { list in list.first { $0.key == k.key }?.pair }
             let flashes = pairs.map { $0?.flashTimeSeconds }
             var clicks = [Double?](repeating: nil, count: pairs.count)
+            var missing: [Int] = []
             let anchorFile = pairs.firstIndex { $0?.clickTimeSeconds != nil }
             // 判半秒用的 (闪光, click)：锚文件那一对；没有 click 时用第一个闪光和离它最近的整秒
             var reference: (flash: Double, click: Double)?
@@ -790,10 +801,11 @@ public enum FrameAnalysis {
                 reference = (ap.flashTimeSeconds, anchor)
                 for i in pairs.indices where pairs[i] != nil {
                     if i == a { clicks[i] = anchor; continue }
-                    if let c = nearest(clickTimes[i], to: anchor), abs(c - anchor) <= maxMatchSeconds { clicks[i] = c }
+                    if let c = nearest(clickTimes[i], to: anchor), abs(c - anchor) <= maxMatchSeconds { clicks[i] = c } else { missing.append(i) }
                 }
             } else if let f = flashes.compactMap({ $0 }).first {
                 reference = (f, f.rounded())
+                unanchored += 1
             }
             let half = reference.map { abs(abs($0.flash - $0.click) - 0.5) <= frameDurationSeconds + 1e-9 } ?? false
             let fv = flashes.compactMap { $0 }, cv = clicks.compactMap { $0 }
@@ -802,20 +814,31 @@ public enum FrameAnalysis {
             if let fs { allFlash = max(allFlash, fs); if !half { maxFlash = max(maxFlash, fs) } }
             if let cs { allClick = max(allClick, cs); if !half { maxClick = max(maxClick, cs) } }
             if half { halfCount += 1 }
+            if !half && !missing.isEmpty { missingJudged.append((k.key, missing)) }
             events.append(MultiFileEvent(key: k.key, flashTimes: flashes, clickTimes: clicks, flashSpreadMs: fs, clickSpreadMs: cs,
-                                         anchorFile: anchorFile, halfSecond: half))
+                                         anchorFile: anchorFile, halfSecond: half, missingClickFiles: missing.isEmpty ? nil : missing))
         }
         let threshold = frameDurationSeconds * 1000
         let comparable = events.contains { $0.flashSpreadMs != nil && $0.halfSecond != true }
-        var note: String?
-        if halfCount > 0 {
-            note = "\(halfCount) 个事件的闪光离锚 click 在半秒 ±1 帧内（如 PGM 上 59.94 的路在播时闪光落在 .5 s），前后两个 click 差不多一样近，只列不判；" +
-                   "含它们的最大闪光极差 \(String(format: "%.3f", allFlash)) ms、click 极差 \(String(format: "%.3f", allClick)) ms" +
-                   (comparable ? "" : "；没有可判的整秒事件")
+        var notes: [String] = []
+        if !missingJudged.isEmpty {
+            let shown = missingJudged.prefix(8).map { "\($0.key) 缺 " + $0.files.map { "[\($0)]" }.joined(separator: " ") }.joined(separator: "、")
+            notes.append("\(missingJudged.count) 个判定事件里有文件在锚 ±\(String(format: "%.1f", maxMatchSeconds)) s 内没有 click（那一格空着、极差只在剩下的文件里算），A4 不过：" +
+                         shown + (missingJudged.count > 8 ? " …" : ""))
         }
+        if halfCount > 0 {
+            notes.append("\(halfCount) 个事件的闪光离锚 click 在半秒 ±1 帧内（如 PGM 上 59.94 的路在播时闪光落在 .5 s），前后两个 click 差不多一样近，只列不判；" +
+                         "含它们的最大闪光极差 \(String(format: "%.3f", allFlash)) ms、click 极差 \(String(format: "%.3f", allClick)) ms" +
+                         (comparable ? "" : "；没有可判的整秒事件"))
+        }
+        if unanchored > 0 {
+            notes.append("\(unanchored) 个事件一个文件都没配上 click（没有锚：只比闪光，不算缺 click）")
+        }
+        let passA4: Bool? = !missingJudged.isEmpty ? false : (comparable ? (maxFlash <= threshold && maxClick <= threshold) : nil)
         return MultiFileAVReport(files: files.map(\.name), events: events, maxFlashSpreadMs: maxFlash, maxClickSpreadMs: maxClick,
-                                 thresholdMs: threshold, passA4: comparable ? (maxFlash <= threshold && maxClick <= threshold) : nil,
+                                 thresholdMs: threshold, passA4: passA4,
                                  halfSecondEventCount: halfCount, allEventsMaxFlashSpreadMs: allFlash, allEventsMaxClickSpreadMs: allClick,
-                                 note: note)
+                                 note: notes.isEmpty ? nil : notes.joined(separator: "；"), missingClickEventCount: missingJudged.count,
+                                 unanchoredEventCount: unanchored)
     }
 }

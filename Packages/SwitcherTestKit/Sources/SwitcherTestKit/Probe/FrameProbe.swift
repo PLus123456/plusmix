@@ -453,16 +453,21 @@ public enum FrameProbe {
             s += "[\(i)] 闪光 \(p.flashCount)、click \(p.clickCount)，整秒配对 \(p.onSecond.count) 对偏移均值 \(f(p.onSecond.meanMs)) ms，最大 \(f(p.onSecond.maxAbsMs)) ms（全部配对均值 \(f(p.meanMs)) ms）\n"
         }
         let m = r.multi
-        s += "\nclick 取法：第一个配上 click 的文件（锚，通常是 [0] PGM）用它自己配的那个，其他文件取离锚最近的；闪光离锚 click 在半秒 ±1 帧内的事件只列不判（W1-A5）\n"
-        s += "\n| 事件 | " + r.sources.indices.map { "闪光[\($0)] (s)" }.joined(separator: " | ") + " | 闪光极差 (ms) | " + r.sources.indices.map { "click[\($0)] (s)" }.joined(separator: " | ") + " | click 极差 (ms) | 锚 | 判定 |\n"
-        s += "|---|" + String(repeating: "---|", count: r.sources.count * 2 + 4) + "\n"
+        s += "\nclick 取法：第一个配上 click 的文件（锚，通常是 [0] PGM）用它自己配的那个，其他文件取离锚最近的；闪光离锚 click 在半秒 ±1 帧内的事件只列不判（W1-A5）；"
+        s += "判定事件里有文件在锚 ±0.5 s 内没有 click 算 A4 不过（W1-A6）\n"
+        s += "\n| 事件 | " + r.sources.indices.map { "闪光[\($0)] (s)" }.joined(separator: " | ") + " | 闪光极差 (ms) | " + r.sources.indices.map { "click[\($0)] (s)" }.joined(separator: " | ") + " | click 极差 (ms) | 锚 | 判定 | 缺 click |\n"
+        s += "|---|" + String(repeating: "---|", count: r.sources.count * 2 + 5) + "\n"
         for e in m.events {
             s += "| \(e.key) | " + e.flashTimes.map { $0.map { f($0, 4) } ?? "—" }.joined(separator: " | ") + " | \(e.flashSpreadMs.map { f($0) } ?? "—") | "
             s += e.clickTimes.map { $0.map { f($0, 5) } ?? "—" }.joined(separator: " | ") + " | \(e.clickSpreadMs.map { f($0) } ?? "—") | "
-            s += "\(e.anchorFile.map { "[\($0)]" } ?? "—") | \(e.halfSecond == true ? "半秒，只列" : "●") |\n"
+            s += "\(e.anchorFile.map { "[\($0)]" } ?? "—") | \(e.halfSecond == true ? "半秒，只列" : "●") | "
+            s += (e.missingClickFiles ?? []).map { "[\($0)]" }.joined(separator: " ") + " |\n"
         }
         let half = m.halfSecondEventCount ?? 0
-        s += "\n判定事件 \(m.events.count - half) 个（半秒事件 \(half) 个只列不判）：最大闪光极差 \(f(m.maxFlashSpreadMs)) ms，最大 click 极差 \(f(m.maxClickSpreadMs)) ms，阈值 \(f(m.thresholdMs, 2)) ms：A4 \(mark(m.passA4))\n"
+        s += "\n判定事件 \(m.events.count - half) 个（半秒事件 \(half) 个只列不判）：最大闪光极差 \(f(m.maxFlashSpreadMs)) ms，最大 click 极差 \(f(m.maxClickSpreadMs)) ms，阈值 \(f(m.thresholdMs, 2)) ms"
+        if let n = m.missingClickEventCount, n > 0 { s += "；其中 \(n) 个有文件缺 click" }
+        if let n = m.unanchoredEventCount, n > 0 { s += "；没有锚（一个文件都没配上 click）的事件 \(n) 个只比闪光" }
+        s += "：A4 \(mark(m.passA4))\n"
         if let n = m.note { s += "\n\(n)\n" }
         return s
     }

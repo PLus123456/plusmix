@@ -600,6 +600,63 @@ extension FrameAnalysisTests {
         XCTAssertEqual(tc.missingFrames, [Int64(s + d)])
         XCTAssertTrue(tc.note?.contains("漏了 1 拍：64") ?? false, tc.note ?? "nil")
     }
+
+    /// 用户 2026-10-17 对 113 的裁定（测试标准 §2.3）：判定事件里某个文件在锚 ±0.5 s 内没有 click，A4 不过；
+    /// 那一格照旧 nil、极差只在剩下的文件里算（gate 脚本读的 maxClickSpreadMs 数字不变）。半秒事件照旧只列不判；
+    /// 五个文件都没配上 click 的事件没有锚，不算"缺 click"（G8 / G9 的第 0 s 就是这样，A2 那边是各文件没配上的闪光）。
+    func testA4_avMulti_fileMissingClickInJudgedEvent_failsA4() {
+        func g8Like() -> [(name: String, frames: [ProbeFrame], clicks: [ClickEvent])] {
+            (0..<5).map { a4File("f\($0)", lateSeconds: $0 == 3 ? 20e-6 : 0) }
+        }
+        // 第 5 s（整秒事件，判）[2] 的 click 没了
+        var files = g8Like()
+        files[2].clicks.removeAll { abs($0.timeSeconds - 5) < 0.01 }
+        let r = FrameAnalysis.avMulti(files: files)
+        XCTAssertEqual(r.events[5].halfSecond, false)
+        XCTAssertEqual(r.events[5].anchorFile, 0)
+        XCTAssertNil(r.events[5].clickTimes[2], "那一格照旧空着")
+        XCTAssertEqual(r.events[5].clickSpreadMs ?? -1, 0.02, accuracy: 1e-6, "极差只在剩下的四个文件里算")
+        XCTAssertEqual(r.maxClickSpreadMs, 0.02, accuracy: 1e-6)
+        XCTAssertEqual(r.passA4, false, "判定事件里有文件缺 click：A4 不过")
+        XCTAssertEqual(r.events[5].missingClickFiles, [2], "事件里列出缺的是哪个文件")
+        XCTAssertEqual(r.missingClickEventCount, 1)
+        XCTAssertEqual(r.events.filter { $0.missingClickFiles != nil }.count, 1, "别的事件不受影响")
+        XCTAssertTrue(r.note?.contains("#5 缺 [2]") ?? false, r.note ?? "nil")
+        let md = FrameProbe.markdown(FrameProbe.AVMultiOutput(sources: files.map(\.name),
+                                                             perFile: files.map { FrameAnalysis.av(frames: $0.frames, clicks: $0.clicks) }, multi: r))
+        XCTAssertTrue(md.contains("其中 1 个有文件缺 click"), md)
+        XCTAssertTrue(md.contains("| ● | [2] |"), md)
+        XCTAssertTrue(md.contains("A4 ❌"), md)
+        // 缺在半秒事件（第 15 个：闪光 14.5 s，锚 15 s）上：列出来、不判
+        var half = g8Like()
+        half[1].clicks.removeAll { abs($0.timeSeconds - 15) < 0.01 }
+        let rh = FrameAnalysis.avMulti(files: half)
+        XCTAssertEqual(rh.events[15].halfSecond, true)
+        XCTAssertNil(rh.events[15].clickTimes[1])
+        XCTAssertEqual(rh.events[15].missingClickFiles, [1])
+        XCTAssertEqual(rh.missingClickEventCount, 0)
+        XCTAssertEqual(rh.passA4, true)
+        // 五个文件都没有第 7 s 的 click：没有锚，不算缺 click（另计数）
+        var none = g8Like()
+        for i in none.indices { none[i].clicks.removeAll { abs($0.timeSeconds - 7) < 0.01 } }
+        let rn = FrameAnalysis.avMulti(files: none)
+        XCTAssertNil(rn.events[7].anchorFile)
+        XCTAssertNil(rn.events[7].missingClickFiles)
+        XCTAssertEqual(rn.unanchoredEventCount, 1); XCTAssertEqual(rn.missingClickEventCount, 0)
+        XCTAssertEqual(rn.passA4, true)
+        XCTAssertTrue(rn.note?.contains("1 个事件一个文件都没配上 click") ?? false, rn.note ?? "nil")
+        // 锚文件整条音轨都没有 click（W1-A5 用例里的 noClick0）：锚顺延到 [1]，[0] 在 15 个判定事件里都缺
+        var noClick0 = g8Like()
+        noClick0[0].clicks = []
+        let r0 = FrameAnalysis.avMulti(files: noClick0)
+        XCTAssertEqual(r0.maxClickSpreadMs, 0.02, accuracy: 1e-6)
+        XCTAssertEqual(r0.missingClickEventCount, 15)
+        XCTAssertEqual(r0.passA4, false)
+        // 什么都不缺：0 个、A4 照旧按极差判
+        let ok = FrameAnalysis.avMulti(files: g8Like())
+        XCTAssertEqual(ok.missingClickEventCount, 0); XCTAssertEqual(ok.unanchoredEventCount, 0); XCTAssertEqual(ok.passA4, true)
+        XCTAssertTrue(ok.events.allSatisfy { $0.missingClickFiles == nil })
+    }
 }
 
 extension FrameAnalysisTests {
