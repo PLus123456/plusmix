@@ -305,10 +305,9 @@ final class InputSettingsModel: ObservableObject {
         if ended != playbackEnded { playbackEnded = ended }
     }
 
-    /// "播放"一节那颗按钮：暂停中 / 播完 = ▶ 播放，播着 = ⏸ 暂停（同格子）。
-    var playButtonTitle: String {
-        config.settings.playback.paused || playbackEnded ? L("inputSettings.playback.play") : L("inputSettings.playback.pause")
-    }
+    /// "播放"一节那颗按钮画 ▶ 吗：暂停中 / 播完 = ▶ 播放，播着 = ⏸ 暂停（同格子）。
+    var playButtonShowsPlay: Bool { config.settings.playback.paused || playbackEnded }
+    var playButtonTitle: String { playButtonShowsPlay ? L("inputSettings.playback.play") : L("inputSettings.playback.pause") }
 
     /// ▶ / ⏸（与格子同一套，InputCellView.playPressed）：暂停中 → 继续；播完不循环 → 从头播（seekPlayback 0）；播着 → 暂停。
     /// 原来只看 paused：播完时写"⏸ 暂停"、点了发暂停，再点"▶ 播放"也只是取消暂停、画面不动。
@@ -608,7 +607,7 @@ struct InputSettingsView: View {
         if model.isFileSource {
             Section(L("inputSettings.playback.title")) {
                 HStack {
-                    Button(model.playButtonTitle) { model.togglePaused() }
+                    Button(model.playButtonShowsPlay ? L("inputSettings.playback.play") : L("inputSettings.playback.pause")) { model.togglePaused() }
                     Button(L("inputSettings.playback.restart")) { model.restartPlayback() }
                 }
                 Toggle(L("inputSettings.playback.restartOnProgram"), isOn: model.bind(\.playback.restartOnProgram))
