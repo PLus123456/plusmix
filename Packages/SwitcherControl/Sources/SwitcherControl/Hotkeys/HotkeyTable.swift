@@ -116,13 +116,33 @@ public struct HotkeyTable: Hashable, Codable, Sendable {
     /// 人读的 JSON。
     public func jsonData() throws -> Data { try APIJSON.prettyEncoder.encode(self) }
 
-    /// 从 JSON 读；有冲突默认报错（allowConflicts 关掉）。
+    /// 从 JSON 读；有冲突默认报错（allowConflicts 关掉）。带 ⇧ 的符号老写法（"shift+!"）读进来规范成 "shift+1"，与别的行撞了按 preferRecordedShiftRows 处理。
     public static func load(from data: Data, allowConflicts: Bool = false) throws -> HotkeyTable {
-        let t = try APIJSON.decoder.decode(HotkeyTable.self, from: data)
+        var t = try APIJSON.decoder.decode(HotkeyTable.self, from: data)
         guard t.version == currentVersion else { throw HotkeyTableError.unsupportedVersion(t.version) }
+        t.preferRecordedShiftRows(rawKeys: rawBindingKeys(in: data))
         let c = t.conflicts()
         if !allowConflicts, !c.isEmpty { throw HotkeyTableError.conflicts(c) }
         return t
+    }
+
+    /// JSON 里每条绑定原样的 key 字符串（按下标）；读不出来给空数组。
+    static func rawBindingKeys(in data: Data) -> [String?] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let bindings = root["bindings"] as? [[String: Any]] else { return [] }
+        return bindings.map { $0["key"] as? String }
+    }
+
+    /// W2-C4：设置 › 快捷键 录键录下的旧行（"shift+!"，⇧1 原来组合出来的）读进来是 "shift+1"；它若与表里原来那行 "shift+1" 撞了，留录下的那行
+    /// （原来按得出来的是它；"shift+1" 那行在美式 / 拼音键盘上按不出来）、停用撞上的别的行（还在表里，可以再勾回来）——不然整张表因冲突读不进来、
+    /// App 退回默认表。同一个键有两条以上旧写法（例如美式录一次 "shift+!"、手写一次 "shift+！"）不替用户选，照旧报冲突。
+    mutating func preferRecordedShiftRows(rawKeys: [String?]) {
+        guard rawKeys.count == bindings.count else { return }
+        for conflict in conflicts() {
+            let recorded = conflict.bindings.filter { rawKeys[$0].map(KeyCombo.isLegacyShiftedSpelling) ?? false }
+            guard recorded.count == 1 else { continue }
+            for i in conflict.bindings where i != recorded[0] { bindings[i].enabled = false }
+        }
     }
 
     public static func load(from url: URL, allowConflicts: Bool = false) throws -> HotkeyTable {

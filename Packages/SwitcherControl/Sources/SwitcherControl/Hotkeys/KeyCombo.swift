@@ -22,12 +22,19 @@ public struct KeyCombo: Hashable, Sendable, CustomStringConvertible, LosslessStr
     public var modifiers: KeyModifiers
 
     public init(key: String, modifiers: KeyModifiers = []) {
-        self.key = KeyCombo.normalizedKey(key) ?? key.lowercased()
+        self.key = KeyCombo.canonicalKey(KeyCombo.normalizedKey(key) ?? key.lowercased(), modifiers: modifiers)
         self.modifiers = modifiers
     }
 
-    /// 解析 "cmd+shift+1"、"⇧1"、"Return" 之类；解析不了返回 nil。
+    /// 解析 "cmd+shift+1"、"⇧1"、"Return" 之类；解析不了返回 nil。带 ⇧ 的符号写法规范成它所在的键（"shift+!" → "shift+1"，见 canonicalKey）。
     public init?(_ description: String) {
+        guard let (key, mods) = KeyCombo.parse(description) else { return nil }
+        self.key = KeyCombo.canonicalKey(key, modifiers: mods)
+        self.modifiers = mods
+    }
+
+    /// 文本 → (键, 修饰键)，不做 ⇧ 规范化（`isLegacyShiftedSpelling` 要看原样的写法）。
+    static func parse(_ description: String) -> (key: String, modifiers: KeyModifiers)? {
         var text = description.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
         var mods: KeyModifiers = []
@@ -48,9 +55,35 @@ public struct KeyCombo: Hashable, Sendable, CustomStringConvertible, LosslessStr
             mods.insert(m)
         }
         guard let key = KeyCombo.normalizedKey(last) else { return nil }
-        self.key = key
-        self.modifiers = mods
+        return (key, mods)
     }
+
+    /// 带 ⇧ 的键统一写成不加 ⇧ 的那个键（W2-C4，reports/issues/W4C3-w5-app-gaps-found-by-docs.md 第 7 条）：⇧ 打出来的符号换回它所在的键——
+    /// 美式 `!@#$%^&*()_+{}|:"<>?~`、它们的全角写法、拼音输入法另外打出的 `¥ … — 「 」 《 》`（本机 CGEvent 探针实测）。
+    /// 键盘事件那边按键码取（`init?(event:)` 的 ansiUnshiftedKeys），这里管 JSON 里的写法与录键录下的旧行，两边对得上；不带 ⇧ 的不动（法语键盘上 "!" 不用 ⇧）。
+    static func canonicalKey(_ key: String, modifiers: KeyModifiers) -> String {
+        guard modifiers.contains(.shift) else { return key }
+        return shiftedSymbolBase[key] ?? key
+    }
+
+    /// 这个写法是不是"带 ⇧ 的符号"老写法（规范化会改它）：HotkeyTable 读表时据此决定撞键时留哪一行。
+    static func isLegacyShiftedSpelling(_ description: String) -> Bool {
+        guard let (key, mods) = parse(description) else { return false }
+        return canonicalKey(key, modifiers: mods) != key
+    }
+
+    /// ⇧ 打出来的符号 → 不加 ⇧ 的键（美式键位）。
+    static let shiftedSymbolBase: [String: String] = {
+        let shifted = Array("!@#$%^&*()_+{}|:\"<>?~".unicodeScalars), base = Array("1234567890-=[]\\;',./`")
+        var map: [String: String] = [:]
+        for (s, b) in zip(shifted, base) {
+            map[String(s)] = String(b)
+            // 全角（U+FF01…U+FF5E 与 ASCII 差 0xFEE0）：中文输入法下 ⇧1 = "！"、⇧9 = "（"……
+            if let wide = Unicode.Scalar(s.value + 0xFEE0) { map[String(wide)] = String(b) }
+        }
+        for (s, b) in [("¥", "4"), ("￥", "4"), ("…", "6"), ("—", "-"), ("「", "["), ("」", "]"), ("《", ","), ("》", ".")] { map[s] = b }
+        return map
+    }()
 
     /// "ctrl+alt+shift+cmd+<键>"，顺序固定。
     public var description: String {
@@ -113,7 +146,9 @@ extension KeyCombo: Codable {
 import AppKit
 
 extension KeyCombo {
-    /// 由键盘事件得到组合键：字符用 charactersIgnoringModifiers（Shift+1 仍是 "1"），特殊键按 keyCode；无关的标志位（数字小键盘、大写锁定）忽略。
+    /// 由键盘事件得到组合键：特殊键按 keyCode；带 ⇧ 的数字行 / 美式符号键也按 keyCode 取不加 ⇧ 的字符（W2-C4：charactersIgnoringModifiers 只忽略
+    /// ⇧ **以外**的修饰键，⇧1 得到 "!"、拼音输入法下全角 "！"，组合不成表里的 "shift+1"——与布局 / 输入法无关地取键位，法语这类数字要按 ⇧ 的布局也照旧是 "shift+1"）；
+    /// 别的字符用 charactersIgnoringModifiers；无关的标志位（数字小键盘、大写锁定）忽略。
     public init?(event: NSEvent) {
         guard event.type == .keyDown || event.type == .keyUp else { return nil }
         var mods: KeyModifiers = []
@@ -124,6 +159,10 @@ extension KeyCombo {
         if flags.contains(.shift) { mods.insert(.shift) }
         if let named = KeyCombo.keyCodeNames[event.keyCode] {
             self.init(key: named, modifiers: mods)
+            return
+        }
+        if mods.contains(.shift), let unshifted = KeyCombo.ansiUnshiftedKeys[event.keyCode] {
+            self.init(key: unshifted, modifiers: mods)
             return
         }
         guard let chars = event.charactersIgnoringModifiers, let first = chars.unicodeScalars.first else { return nil }
@@ -142,6 +181,11 @@ extension KeyCombo {
         126: "up", 125: "down", 123: "left", 124: "right", 115: "home", 119: "end", 116: "pageup", 121: "pagedown",
         122: "f1", 120: "f2", 99: "f3", 118: "f4", 96: "f5", 97: "f6", 98: "f7", 100: "f8", 101: "f9", 109: "f10", 103: "f11", 111: "f12",
         105: "f13", 107: "f14", 113: "f15", 106: "f16", 64: "f17", 79: "f18", 80: "f19", 90: "f20",
+    ]
+    /// 数字行与美式符号键（Carbon kVK_ANSI_*）不加 ⇧ 时的字符：带 ⇧ 时按它取键名（W2-C4）。
+    static let ansiUnshiftedKeys: [UInt16: String] = [
+        18: "1", 19: "2", 20: "3", 21: "4", 23: "5", 22: "6", 26: "7", 28: "8", 25: "9", 29: "0",
+        27: "-", 24: "=", 33: "[", 30: "]", 42: "\\", 41: ";", 39: "'", 43: ",", 47: ".", 44: "/", 50: "`",
     ]
     /// NSEvent 的功能键私有码点（NSUpArrowFunctionKey = 0xF700 起）。
     static let functionKeyNames: [UInt32: String] = [
