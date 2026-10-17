@@ -15,7 +15,7 @@ final class AudioEffectsTests: XCTestCase {
 
     /// 界面上每个滑块的范围 ⊆ 引擎的钳位范围：界面上拖得到的值送进 AU 时不会再被钳（界面值 = AU 值）。
     func testAudioEffects_editorRangesWithinEngineClamp() {
-        XCTAssertEqual(EffectEditorRanges.all.count, 12, "三种效果的 12 个参数都有界面范围")
+        XCTAssertEqual(EffectEditorRanges.all.count, 19, "三种 AU 效果的 12 个参数 + 自写压缩器 6 个 + 限幅天花板（W5-O）都有界面范围")
         for (effect, key, ui) in EffectEditorRanges.all {
             guard let engine = EffectParameterRanges.range(effect: effect, key: key) else { XCTFail("\(effect).\(key) 引擎没有钳位范围"); continue }
             XCTAssertGreaterThanOrEqual(ui.lowerBound, engine.lowerBound, "\(effect).\(key)：界面 \(ui) 引擎 \(engine)")

@@ -6,7 +6,7 @@
 // W5-K（97）加叠加设置窗（一个）与音频设置窗（每条总线 / 每路输入一个）；输入设置 / 叠加设置 / 音频设置窗在前时，没被文本框吃掉的按键照样走快捷键表（X12，forwardHotkeys）。
 // W5-N（101）加推流 / 录制状态面板（一个窗两页）：模型每行 Stats 都喂（窗口关着也记事件），换 session 清空。
 // 多画面 = MainWindowController.multiviewWindow，外部显示窗口 = AuxOutputRuntime.external 跟着快照里的 externalDisplay 输出开关
-// （设置面板 / 菜单加输出 → 开窗口；用户关窗口 → removeOutput）；这里只留 showMultiview 转调。
+// （设置面板 / 菜单加输出 → 开窗口；用户在外部窗口按 Esc → setOutputEnabled off，W5-O 起只关不删）；这里只留 showMultiview 转调。
 import AppKit
 import SwitcherContracts
 import SwitcherControl

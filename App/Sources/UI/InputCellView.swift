@@ -35,6 +35,8 @@ final class InputCellView: NSView {
     private let categoryDot = CategoryDotView()
     private let nameLabel = Theme.label("", size: 11, weight: .semibold, color: .white)
     private let statusLabel = Theme.label("", size: 10, color: .white)
+    /// 无信号时的第二行：这一路输入自己报的原因（lastError：设备不在 / 驱动没装 / NDI 源找不到……），一行放不下截尾、全文在悬停提示（W5-O）。
+    private let statusDetailLabel = Theme.label("", size: 9, color: NSColor(white: 0.9, alpha: 1))
     // 第一行
     let removeButton: NSButton
     let transitionButton: NSButton
@@ -109,6 +111,11 @@ final class InputCellView: NSView {
         statusLabel.backgroundColor = NSColor(white: 0, alpha: 0.6)
         statusLabel.drawsBackground = true
         statusLabel.isHidden = true
+        statusDetailLabel.alignment = .center
+        statusDetailLabel.backgroundColor = NSColor(white: 0, alpha: 0.6)
+        statusDetailLabel.drawsBackground = true
+        statusDetailLabel.lineBreakMode = .byTruncatingTail
+        statusDetailLabel.isHidden = true
         removeButton.action = #selector(removePressed)
         removeButton.setAccessibilityLabel(L("cell.remove.a11y", number))
         removeButton.toolTip = L("cell.remove.tip")
@@ -157,6 +164,7 @@ final class InputCellView: NSView {
         addSubview(display)
         addSubview(audioPlaceholder)
         addSubview(statusLabel)
+        addSubview(statusDetailLabel)
         addSubview(firstRow)
         addSubview(secondRow)
         widthConstraint = widthAnchor.constraint(equalToConstant: Theme.thumbnailWidth)
@@ -185,6 +193,9 @@ final class InputCellView: NSView {
             statusLabel.centerXAnchor.constraint(equalTo: display.centerXAnchor),
             statusLabel.centerYAnchor.constraint(equalTo: display.centerYAnchor),
             statusLabel.widthAnchor.constraint(lessThanOrEqualTo: display.widthAnchor, constant: -8),
+            statusDetailLabel.centerXAnchor.constraint(equalTo: display.centerXAnchor),
+            statusDetailLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 1),
+            statusDetailLabel.widthAnchor.constraint(lessThanOrEqualTo: display.widthAnchor, constant: -8),
             firstRow.topAnchor.constraint(equalTo: display.bottomAnchor, constant: Self.rowInset),
             firstRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             firstRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
@@ -194,14 +205,16 @@ final class InputCellView: NSView {
             secondRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             secondRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight),
             secondRow.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.rowInset),
-            // 第一行：× 与三颗图标窄，转场 / Cut 等宽吃剩下的；第二行：1–4 与 ⚙ 窄，静音吃剩下的
+            // 第一行：× 与三颗图标窄，转场 / Cut 按标题实际宽度分剩下的（transitionCutRatio）；第二行：1–4 与 ⚙ 窄，静音吃剩下的
             removeButton.widthAnchor.constraint(equalToConstant: 22),
-            cutButton.widthAnchor.constraint(equalTo: transitionButton.widthAnchor),
+            transitionCutRatio,
             restartButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             playButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             loopButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             gearButton.widthAnchor.constraint(equalToConstant: 22),
         ] + overlayButtons.map { $0.widthAnchor.constraint(equalToConstant: 20) })
+        // 两颗都放不下时先截"转场"（英文小档）：Cut 字短，保住它
+        transitionButton.setContentCompressionResistancePriority(.defaultHigh - 10, for: .horizontal)
         let leading = nameLabel.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 6)
         leading.isActive = true
         nameLabelLeading = leading
@@ -223,6 +236,19 @@ final class InputCellView: NSView {
     /// 第一行的图标按钮宽（⏮ / ▶⏸ / 🔁）。
     static let iconButtonWidth: CGFloat = 20
 
+    /// 两颗按钮按标题本身的宽（含边框）成比例分一段宽：a 的宽 = b 的宽 × 这个比。
+    private static func titleWidthRatio(_ a: NSButton, _ b: NSButton) -> CGFloat {
+        max(a.intrinsicContentSize.width, 1) / max(b.intrinsicContentSize.width, 1)
+    }
+
+    /// 转场 / Cut 按标题实际宽度分剩下的宽（W5-O：原来等宽，英文 "Transition" 比 "Cut" 宽一倍多，中档格子里截成 "Transiti…"）。
+    /// 优先级低于两颗按钮的抗压缩：放得下时按比例多给，放不下时（英文小档）先截转场、Cut 保住全字。
+    private lazy var transitionCutRatio: NSLayoutConstraint = {
+        let c = transitionButton.widthAnchor.constraint(equalTo: cutButton.widthAnchor, multiplier: Self.titleWidthRatio(transitionButton, cutButton))
+        c.priority = .defaultHigh - 50
+        return c
+    }()
+
     private static func iconButton(_ symbol: String) -> NSButton {
         let b = cellButton("")
         b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
@@ -241,7 +267,8 @@ final class InputCellView: NSView {
     }
 
     /// 快照里这一路的部分 + 运行状态。配置没变时只动 tally / 叠加 / 运行状态（快照 ≤ 60 Hz，别每次重设字和提示：92 的坑）。
-    func apply(config: InputConfig, tally: Tally, overlays: [OverlayState], runtime: InputState?) {
+    /// detail = 无信号时这一路输入自己报的原因（lastError，W5-O），格子写在"无信号"下面一行。
+    func apply(config: InputConfig, tally: Tally, overlays: [OverlayState], runtime: InputState?, detail: String? = nil) {
         let configChanged = config != self.config || nameLabel.stringValue.isEmpty
         self.config = config
         if tally != self.tally || configChanged {
@@ -267,8 +294,9 @@ final class InputCellView: NSView {
             restartButton.toolTip = isFile ? L("cell.restart.tip") : L("cell.playback.onlyFile")
         }
         Theme.setHighlighted(loopButton, isLooping)
-        if runtime != self.runtime || configChanged {
+        if runtime != self.runtime || detail != runtimeDetail || configChanged {
             self.runtime = runtime
+            runtimeDetail = detail
             updateStatus()
         }
         updatePlayButton()
@@ -378,6 +406,8 @@ final class InputCellView: NSView {
     /// 布局里没有这一路（缩略图画不出来）。
     private(set) var isOutsideMultiviewLayout = false
     private var runtime: InputState?
+    /// 无信号的原因（lastError；没有 / 不是无信号为 nil）。
+    private var runtimeDetail: String?
 
     /// 纯音频输入（没有画面）：格子画占位，不画多画面格子。视频文件输入选的是 mp3 / wav / m4a / aac 也算（W5-K，04 Q57）。
     var isAudioOnly: Bool {
@@ -394,23 +424,35 @@ final class InputCellView: NSView {
     }
 
     /// 格子中间那行字：运行状态（无信号 / 错误文案）优先，其次"不在多画面布局里"。纯音频输入没有画面不算无信号：
-    /// 设备不在（noSignal）写"等音频设备"，权限被拒等（error）照样显示文案。
+    /// 设备不在（noSignal）写"等音频设备"，权限被拒等（error）照样显示文案。无信号时这一路报了原因（lastError）就在下面一行写出来（W5-O）。
     private func updateStatus() {
         let audioOnly = isAudioOnly
         display.isHidden = audioOnly || isOutsideMultiviewLayout
         audioPlaceholder.isHidden = !audioOnly
         let text: String?
+        var detail: String?
         switch runtime {
-        case .noSignal?: text = audioOnly ? L("input.audioWaiting") : L("input.noSignal")
+        case .noSignal?:
+            text = audioOnly ? L("input.audioWaiting") : L("input.noSignal")
+            detail = runtimeDetail.flatMap { $0.isEmpty ? nil : $0 }
         case .error(let message)?: text = message
         case .live?, nil: text = (!audioOnly && isOutsideMultiviewLayout) ? L("cell.notInMultiview") : nil
         }
         statusLabel.stringValue = text ?? ""
         statusLabel.isHidden = text == nil
+        statusLabel.toolTip = detail
+        statusDetailLabel.stringValue = detail ?? ""
+        statusDetailLabel.toolTip = detail
+        statusDetailLabel.isHidden = detail == nil
     }
 
-    /// 格子上现在显示的状态文字（没有为空串；测试看）。
-    var displayedStatus: String { statusLabel.isHidden ? "" : statusLabel.stringValue }
+    /// 格子上现在显示的状态文字（没有为空串；有原因时第二行用换行接上；测试看）。
+    var displayedStatus: String {
+        guard !statusLabel.isHidden else { return "" }
+        return statusDetailLabel.isHidden ? statusLabel.stringValue : statusLabel.stringValue + "\n" + statusDetailLabel.stringValue
+    }
+    /// 状态那几个字的悬停提示（无信号的原因全文；测试看）。
+    var statusToolTip: String? { statusLabel.toolTip }
 
     /// 搜索匹配：编号或名字包含关键字。
     func matches(search: String) -> Bool {

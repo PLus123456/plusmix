@@ -30,7 +30,7 @@ enum SlotText {
     }
 
     /// Stinger 槽没选输入（X18：点主体先弹输入选择、不执行）。
-    static func isUnsetStinger(_ slot: TransitionSlot) -> Bool { slot.type == .stinger && slot.stinger.input == nil }
+    static func isUnsetStinger(_ slot: TransitionSlot) -> Bool { slot.isStingerWithoutInput }   // 契约同一条判定（提案 029，P5-3）
 
     /// 按钮上的字。
     static func buttonTitle(_ slot: TransitionSlot, rate: FrameRate) -> String {

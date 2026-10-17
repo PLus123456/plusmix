@@ -308,12 +308,12 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
             self.setInterfaceLocked(!self.isInterfaceLocked)
         }
         inputStrip.onOpenSettings = { [weak self] number in self?.panels?.showInputSettings(input: number) }
-        // 输入条（W5-H）：换来源… 直达输入设置的"来源"一节；占位格 = 添加输入主体；拖文件直接加；分类写回 Show.layout；三档存本机
+        // 输入条（W5-H）：换来源… 直达输入设置的"来源"一节；占位格 = 添加输入主体；拖文件直接加；三档存本机。
+        // 分类颜色由输入条直接发 setInputColor（InputConfig.color，W5-O）；分类名字写回 Show.layout（renameCategory）
         inputStrip.onChangeSource = { [weak self] number in self?.panels?.showInputSettings(input: number)?.model.section = .source }
         inputStrip.onAddInput = { [weak self] in self?.presentAddInput() }
         inputStrip.onDropFiles = { [weak self] result in self?.addInputs(from: result) }
         inputStrip.onNotice = { [weak self] message in self?.bottomBar.showNotice(message) }
-        inputStrip.onCategoriesChange = { [weak self] categories in self?.storeCategories(categories) }
         inputStrip.onRenameCategory = { [weak self] color in self?.presentRenameCategory(color) }
         inputStrip.onClearCategoryName = { [weak self] color in self?.renameCategory(color, to: "") }
         inputStrip.onThumbnailSizeChange = { [weak self] size in self?.setThumbnailSize(size) }
@@ -340,11 +340,12 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         transitionPanel.send = send
         if let session { transitionPanel.hotkeyTable = session.control.hotkeyTable }
         inputStrip.send = send
-        // 分类先换成新节目的（快照观察者一挂上就会回调一次：先挂会把旧节目的分类按新输入表清理后写进新节目）
-        inputStrip.categories = session.map { InputCategories(layout: $0.layout.values) } ?? InputCategories()
+        // 分类先换成新节目的（颜色 = 各路 InputConfig.color，名字 = Show.layout；快照观察者一挂上就会回调一次，之后颜色每个快照对一遍）
+        inputStrip.categories = session.map { InputCategories(inputs: $0.state.inputs, layout: $0.layout.values) } ?? InputCategories()
         mixerPanel.send = send
         bottomBar.send = send
         inputStrip.runtimeState = session.map { s in { [weak s] n in s?.inputs.runtimeState(of: n) } }
+        inputStrip.runtimeDetail = session.map { s in { [weak s] n in s?.inputs.lastError(of: n) } }   // 无信号格子的第二行（W5-O）
         let source = session?.displaySource
         previewMonitor.display.source = source
         bindProgramLedger(to: source)
@@ -632,7 +633,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         return added
     }
 
-    /// 分类数据写回 Show.layout（键见 InputCategories），算节目内容。
+    /// 分类名字写回 Show.layout（键见 InputCategories；颜色在 InputConfig.color，不经这里），算节目内容。
     private func storeCategories(_ categories: InputCategories) {
         guard let session else { return }
         var values = session.layout.values

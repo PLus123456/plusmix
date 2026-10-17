@@ -31,9 +31,11 @@ final class AudioSettingsRevampTests: XCTestCase {
         m.resetEQ()
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.compactMap { AudioEffectParams.number($0, "gainDb") } == [0, 0] })
         XCTAssertFalse(m.eqEnabled, "复位不动开关")
-        // 压缩：启用 → 一格；关 → enabled false、参数留着；复位 → 默认参数
+        // 压缩：启用 → 一格（W5-O 起新开默认是自写压缩器 compressor；这里换成动态处理器走它那一套）；关 → enabled false、参数留着；复位 → 默认参数
         m.page = .compressor
         m.setCompressorEnabled(true)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.contains { $0.id == AudioEffectParams.compressorID } }, "新开默认 = 压缩器")
+        m.setCompressorKind(.dynamicsProcessor)
         m.binding(\.dynamics.thresholdDb).wrappedValue = -30
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.audio.buses[0].effects.first { $0.id == AudioEffectParams.dynamicsProcessorID }.flatMap { AudioEffectParams.number($0, "thresholdDb") } == -30 })
         m.setCompressorEnabled(false)
@@ -53,7 +55,7 @@ final class AudioSettingsRevampTests: XCTestCase {
         XCTAssertEqual(wi.model.pages, [.general, .eq, .compressor])
         XCTAssertNil(wi.model.effectsBanner, "每路效果已接（102）：不挂横幅")
         wi.model.setCompressorEnabled(true)
-        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.effects.contains { $0.id == AudioEffectParams.dynamicsProcessorID } == true })
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.effects.contains { $0.id == AudioEffectParams.compressorID } == true })
         XCTAssertEqual(session.state.input(1)?.settings.audio.gainDb, 0, "只换效果链，别的音频设置不动")
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }
@@ -110,10 +112,17 @@ final class AudioSettingsRevampTests: XCTestCase {
 
     func testPanels_masterListenAndLoudnessDetails() {
         let model = MixerModel()
-        XCTAssertFalse(MixerModel.listenToOtherBusSupported, "耳机听所选总线要音频引擎支持（问题单 W5K-w1-audio-monitor-selected-bus）")
-        XCTAssertFalse(model.listen(.master), "引擎不支持：不换")
-        XCTAssertEqual(model.listenBus, .headphones)
+        // W5-O：引擎（W1-D3）与契约（026，P5-3 允许 headphones）都支持了，四项都能选，发 setMonitorSource（App 里的整条见 testW5O3_listenMenuSendsSetMonitorSourceIncludingHeadphones）
+        XCTAssertTrue(MixerModel.listenToOtherBusSupported)
+        XCTAssertEqual(MixerModel.listenBuses, [.master, .busA, .busB, .headphones])
+        XCTAssertEqual(model.listenBus, .master, "读快照的 monitorSource（新节目默认 Master）")
+        XCTAssertFalse(model.listen(.busA), "没接 session：发不出去")
+        var sent: [Command] = []
+        model.send = { sent.append($0) }
         XCTAssertTrue(model.listen(.headphones))
+        XCTAssertEqual(sent, [.setMonitorSource(bus: .headphones)])
+        XCTAssertTrue(model.listen(.master))
+        XCTAssertEqual(sent.count, 1, "已经是 Master：不发")
         // 响度详情读 Stats（1 Hz）
         let master = Stats.AudioCounters.BusMeter(bus: "master", peakDb: [-6, -7], truePeakDb: [-1.24, -2], lufsM: -21.04, lufsS: -23.0, lufsI: -24.46, lra: 5.2)
         let silent = Stats.AudioCounters.BusMeter(bus: "busA", peakDb: [-120, -120], truePeakDb: [-120, -120], lufsM: -120, lufsS: -120, lufsI: -120, lra: 0)

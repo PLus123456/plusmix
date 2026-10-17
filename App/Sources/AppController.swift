@@ -36,6 +36,8 @@ final class AppController {
     let midiFileURL: URL
     /// 用户表存在但读不出来（JSON 错 / 冲突）的原因：退回默认表并在状态行提示。
     private(set) var hotkeyTableError: String?
+    /// midi.json 存在但读不出来的原因：退回空表并在状态行提示（同 hotkeys.json，W5-O）。
+    private(set) var midiTableError: String?
     /// 面板与窗口（W3-E）。
     lazy var panels = PanelCoordinator(controller: self)
     /// 添加输入的本机记忆：上次的类型、最近添加的来源（W5-F，底栏"添加输入 ▴"与菜单栏"按类型添加"）。
@@ -92,7 +94,9 @@ final class AppController {
             } else {
                 hotkeyTable = .default
             }
-            midiTable = MIDIMapTable.loadUserTableOrDefault()
+            let midi = Self.loadMIDITable(from: MIDIMapTable.defaultFileURL)
+            midiTable = midi.table
+            midiTableError = midi.error
         }
         if isTestHost {
             let tests = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests", isDirectory: true)
@@ -214,7 +218,8 @@ final class AppController {
             case .keep: break
             }
             documentToken = s.observeState { [weak self] _ in self?.refreshDocumentEdited() }
-            if let hotkeyTableError { windowController.bottomBar.showNotice(hotkeyTableError) }
+            let tableErrors = [hotkeyTableError, midiTableError].compactMap { $0 }
+            if !tableErrors.isEmpty { windowController.bottomBar.showNotice(tableErrors.joined(separator: L("notice.join"))) }
         } catch {
             lastError = error
             session = nil
@@ -240,7 +245,7 @@ final class AppController {
     // MARK: 未保存判定（W5-B）
 
     /// 未保存判定的口径：比"节目内容"——Show 去掉现场操作与界面摆放之后剩下的部分（报告 §1 有这张表）。
-    /// 不算改动：界面布局（窗口位置 / 面板开关；W5-H 起 layout 里的输入分类两个键除外——它们是节目内容，023 后进 InputConfig）、节目名（跟文件名走）、录制 / 推流的开关（运行目标，打开文件时本来就清掉）、PGM / PVW 选哪路、
+    /// 不算改动：界面布局（窗口位置 / 面板开关；layout 里的分类名字键除外——它是节目内容；分类颜色 W5-O 起在 InputConfig.color，随输入表算）、节目名（跟文件名走）、录制 / 推流的开关（运行目标，打开文件时本来就清掉）、PGM / PVW 选哪路、
     /// 转场进度 / T-bar / 起始拍、FTB 开没开与进度、叠加通道开没开 / 放哪路 / 动画进度、文件输入的暂停与定位请求（提案 021 的 paused / seek*，W5-N：
     /// 播放 / 暂停 / 回到开头是现场操作；"切上 PGM 时从头播"是设置，算改动）。
     /// 算改动：输入表与每路设置（含推子、静音、路由、延迟、效果、抠像）、输出表与设置（含 NDI / 外部显示 / 虚拟摄像头 / 多画面的开关）、
@@ -476,14 +481,44 @@ final class AppController {
         settings = s
     }
 
-    /// 设置：写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的同时落到跑着的 session：外部输出的主屏层级、
-    /// 录制磁盘下限（下一次开录起用，在录的路照旧）与备用目录（W5-J 高级页）。
+    /// 设置：整份写 UserDefaults（同一组键）并记下，下次起 session 生效；运行时能改的同时落到跑着的 session（applySettings）。
+    /// W5-O 起只给程序内部用（导入 / 恢复默认之后按 UserDefaults 重读的那一份、用例还原）；设置窗的提交走 commitSettings。
     func updateSettings(_ s: AppSettings) {
         s.save(to: defaults)
+        applySettings(s)
+    }
+
+    /// 设置窗即时生效的提交（常规 / 音频设备 / 远程控制 / 高级 页与 Tally，W5-O）：只写这次真变了的键（AppSettings.save(to:changedFrom:)）——
+    /// 内存里的设置带着启动参数（--no-api / --api-token / --audio-device……），整份写回会把它们顺手存成本机设置（问题单 W4C2-w5-app-settings-gaps 第 2 条）。
+    func commitSettings(_ s: AppSettings) {
+        s.save(to: defaults, changedFrom: settings)
+        applySettings(s)
+    }
+
+    /// 同上，按改法提交（Tally 页）。
+    func commitSettings(_ change: (inout AppSettings) -> Void) {
+        var s = settings
+        change(&s)
+        commitSettings(s)
+    }
+
+    /// 换上新设置；运行时能改的同时落到跑着的 session：外部输出的主屏层级、录制磁盘下限（下一次开录起用，在录的路照旧）与备用目录（W5-J 高级页）。
+    private func applySettings(_ s: AppSettings) {
         settings = s
         session?.aux.external.mainScreenLayering = settings.externalMainScreenLayering
         session?.outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
         session?.outputs.fallbackDirectory = settings.recordFallbackDirectory
+    }
+
+    /// MIDI 映射表的用户文件：没有 = 空表（默认）；有但读不出来（JSON 错 / 冲突 / 版本不对）= 退回空表并给一句提示（状态行，同 hotkeys.json；W5-O——
+    /// 原来 MIDIMapTable.loadUserTableOrDefault() 静默退回空表，用户的映射全没了也不知道为什么）。
+    static func loadMIDITable(from url: URL) -> (table: MIDIMapTable, error: String?) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return (.default, nil) }
+        do {
+            return (try MIDIMapTable.load(from: url), nil)
+        } catch {
+            return (.default, L("notice.midiTableUnreadable", url.path, "\(error)"))
+        }
     }
 
     /// 快捷键编辑器保存后：换给派发器，下次起 session 也用它。
@@ -497,6 +532,7 @@ final class AppController {
     /// MIDI 映射面板保存后：换给控制器。
     func applyMIDITable(_ table: MIDIMapTable) throws {
         midiTable = table
+        midiTableError = nil
         session?.control.midi.table = table
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import Synchronization
 import SwitcherContracts
 import SwitcherEngine
 @testable import SwitcherControl
@@ -122,7 +123,8 @@ final class HotkeyTests: XCTestCase {
         XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), [.ftb(on: true)])
         s.ftb.on = true
         XCTAssertEqual(ControlAction.toggleFTB.resolve(in: s), [.ftb(on: false)])
-        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: true, input: nil)])
+        // W5-O：通道没指定输入时用当前 PVW 那一路开（与转场列 / 菜单栏"切换 › Overlay"同一口径；testW5O8_toggleOverlayEmptyChannelUsesPreview）
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: true, input: 2)])
         s.overlays[1].on = true
         XCTAssertEqual(ControlAction.toggleOverlay(channel: 2).resolve(in: s), [.overlay(channel: 2, on: false, input: nil)])
         XCTAssertEqual(ControlAction.toggleOverlay(channel: 9).resolve(in: s), [])
@@ -179,6 +181,86 @@ final class HotkeyTests: XCTestCase {
         XCTAssertTrue(d.handle(KeyCombo("9")!))
         let rejected = await waitUntil { d.counters.rejected == 2 }
         XCTAssertTrue(rejected)
+    }
+
+    /// W5-O（prompt 112 第 8 项）：⌃1–⌃4（toggleOverlay）对没指定输入的通道用当前 PVW 那一路开——原来发 overlay(on, input: nil)，开了没画面；
+    /// 与转场列 / 菜单栏"切换 › Overlay"同一口径（App 的 OverlayToggle）：开着 → 关（通道设置不清）；关着、指定了输入 → 开；
+    /// 都没有、PVW 也是黑场 → 不发，派发器给一句 ControlFeedback.overlayNeedsPreview（状态行）。
+    func testW5O8_toggleOverlayEmptyChannelUsesPreview() async throws {
+        var s = TestStates.base()
+        XCTAssertNil(s.overlays[2].input)
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 3).resolve(in: s), [.overlay(channel: 3, on: true, input: 2)], "空通道 = 用 PVW（2）开")
+        s.overlays[2].input = 4
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 3).resolve(in: s), [.overlay(channel: 3, on: true, input: nil)], "指定了输入：照它开")
+        s.overlays[2].on = true
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 3).resolve(in: s), [.overlay(channel: 3, on: false, input: nil)], "开着：关，输入留着")
+        var black = TestStates.base()
+        black.preview = MixerState.noInput
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 1).resolve(in: black), [], "空通道 + PVW 黑场：不发")
+        XCTAssertEqual(ControlAction.toggleOverlay(channel: 1).unresolvedFeedback(in: black), .overlayNeedsPreview(channel: 1))
+        XCTAssertNil(ControlAction.toggleOverlay(channel: 1).unresolvedFeedback(in: TestStates.base()), "解析得出来就不说")
+        XCTAssertNil(ControlAction.toggleMute(input: 42).unresolvedFeedback(in: black), "别的解析不出（引用不存在）照旧不说")
+        // 派发器：解析不出时把这一句交给 App 设的 handler（状态行）
+        let f = BusFixture(state: black)
+        defer { f.stop() }
+        let d = HotkeyDispatcher(bus: f.bus)
+        let got = Mutex<[ControlFeedback]>([])
+        d.setFeedbackHandler { fb in got.withLock { $0.append(fb) } }
+        let ok = await waitUntil { f.stateMachine.publisher.latest != nil }
+        XCTAssertTrue(ok)
+        let receipts = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("ctrl+1")))
+        XCTAssertEqual(receipts, [], "PVW 黑场：一条都不发")
+        XCTAssertEqual(got.withLock { $0 }, [.overlayNeedsPreview(channel: 1)])
+        XCTAssertEqual(d.counters.unresolved, 1)
+        XCTAssertTrue(d.handle(try XCTUnwrap(KeyCombo("ctrl+1"))), "异步入口同样吃掉这个键")
+        XCTAssertEqual(got.withLock { $0 }.count, 2)
+    }
+
+    /// W5-O（prompt 112 第 4 项，提案 029）：⌥n / 回车执行"效果 = Stinger、还没选输入"的槽被校验器拒（P5-3）——派发器把这件事交给 App 的
+    /// feedback handler（状态行"转场 n 是 Stinger、还没选输入——在转场列 ▾ 里选一路"）；只选中（start: false）照常；选了输入之后照常执行。
+    func testW5O4_stingerSlotWithoutInputRejectedWithFeedback() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        let ready = await waitUntil { f.stateMachine.publisher.latest != nil }
+        XCTAssertTrue(ready)
+        let base = try XCTUnwrap(f.stateMachine.publisher.latest?.state)
+        XCTAssertTrue(base.transition.slots[3].isStingerWithoutInput, "出厂槽 4 = Stinger、没选输入")
+        let d = HotkeyDispatcher(bus: f.bus)
+        let got = Mutex<[ControlFeedback]>([])
+        d.setFeedbackHandler { fb in got.withLock { $0.append(fb) } }
+
+        // ⌥4 = 执行转场 4 → 校验器拒（400 那一类）→ 反馈带槽号
+        do { _ = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("alt+4"))); XCTFail("应被拒") } catch let r as CommandRejection {
+            XCTAssertTrue(r.reason.contains("转场 4 是 Stinger"), r.reason)
+        }
+        XCTAssertEqual(got.withLock { $0 }, [.stingerWithoutInput(slot: 4)])
+        var state = await f.stateMachine.state
+        XCTAssertFalse(state.transition.isActive, "没执行")
+        // 异步入口（真按键走这条）：一样给反馈
+        XCTAssertTrue(d.handle(try XCTUnwrap(KeyCombo("alt+4"))))
+        let async = await waitUntil { got.withLock { $0 }.count == 2 }
+        XCTAssertTrue(async)
+        // 回车（autoTransition）：当前槽选成 4（只选中照常）再按 → 同样拒、同一句
+        _ = try await f.bus.submit(.useTransitionSlot(slot: 4, start: false), source: .ui)
+        state = await f.stateMachine.state
+        XCTAssertEqual(state.transition.currentSlot, 4, "只选中照常")
+        do { _ = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("return"))); XCTFail("应被拒") } catch is CommandRejection {}
+        XCTAssertEqual(got.withLock { $0 }.last, .stingerWithoutInput(slot: 4))
+        // 别的拒绝不说（只记计数）
+        let before = got.withLock { $0 }.count
+        d.table = HotkeyTable(bindings: [HotkeyBinding(key: try XCTUnwrap(KeyCombo("9")), action: .command(.setPreview(input: 9)))])
+        do { _ = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("9"))); XCTFail("应被拒") } catch is CommandRejection {}
+        XCTAssertEqual(got.withLock { $0 }.count, before, "输入不存在：不给这句")
+        // 给槽 4 选了输入：照常执行
+        d.table = .default
+        var slot4 = state.transition.slots[3]
+        slot4.stinger.input = 3
+        _ = try await f.bus.submit(.setTransitionSlot(slot: 4, config: slot4), source: .ui)
+        let receipts = try await d.handleAllAndWait(try XCTUnwrap(KeyCombo("alt+4")))
+        XCTAssertEqual(receipts.map(\.applied), [true])
+        state = await f.stateMachine.state
+        XCTAssertTrue(state.transition.isActive, "选了输入：执行")
+        XCTAssertEqual(got.withLock { $0 }.count, before)
     }
 
     #if canImport(AppKit)

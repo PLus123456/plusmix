@@ -2,6 +2,7 @@
 // 颜色按设计方案 §1.1 / 落地方案决策 3：PGM 红、PVW 绿（广播惯例）。
 // 转场 1–4（W5-M，提案 020 的槽）：按下 = useTransitionSlot(n, start: true)（设置成"选中"时 start: false）；颜色跟当前槽——
 // 当前槽（T-bar / 回车用的）蓝、它正在执行红、别的灰；字 = "转场 n" + 槽的效果与时长。
+// W5-O：按下之后怎么回应（pressFeedback）也在这里——命令被拒（例如提案 029 没选输入的 Stinger 槽）闪一下警告。
 
 export const COLORS = {
   off: "#2b2b2b",
@@ -259,4 +260,17 @@ export function classifyMessage(text) {
   } catch (e) {
     return { type: "invalid", message: null };
   }
+}
+
+/**
+ * 按下之后怎么回应（W5-O）：命令被拒（WS 回 error = HTTP 400 那一类结构性非法，例如提案 029 起执行没选输入的 Stinger 槽
+ * "转场 n 是 Stinger、还没选输入"；或本地就判出来的错误）→ 按钮闪一下警告（SDK 的 showAlert）+ 记 warn；
+ * 状态机忽略（回执 applied: false，已是目标状态）→ 只记 info；成功 → 什么都不做。outcome = { receipt } 或 { error: "<理由>" }。
+ */
+export function pressFeedback(kind, outcome) {
+  if (outcome && outcome.error) return { alert: true, level: "warn", log: `${kind}: ${outcome.error}` };
+  if (outcome && outcome.receipt && outcome.receipt.applied === false) {
+    return { alert: false, level: "info", log: `${kind}: 状态机忽略了这条命令（已是目标状态）` };
+  }
+  return { alert: false, level: null, log: null };
 }

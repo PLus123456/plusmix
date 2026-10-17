@@ -12,12 +12,18 @@ enum SettingsTransfer {
         case int(Int)
         case string(String)
         case strings([String])
+        /// 二进制（每条总线的声道对 audioBusOutputMap 存的是 JSON 的 Data）：包里写成 {"data": "<base64>"}，与字符串分得开（W5-O；
+        /// 原来认不出 Data，这个键在键表里却导不出来，导入时又按"包里没有 = 默认"删掉了）。
+        case data(Data)
+
+        private struct DataBox: Codable { var data: Data }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.singleValueContainer()
             if let b = try? c.decode(Bool.self) { self = .bool(b) }
             else if let n = try? c.decode(Int.self) { self = .int(n) }
             else if let s = try? c.decode(String.self) { self = .string(s) }
+            else if let box = try? c.decode(DataBox.self) { self = .data(box.data) }
             else { self = .strings(try c.decode([String].self)) }
         }
 
@@ -28,6 +34,7 @@ enum SettingsTransfer {
             case .int(let n): try c.encode(n)
             case .string(let s): try c.encode(s)
             case .strings(let a): try c.encode(a)
+            case .data(let d): try c.encode(DataBox(data: d))
             }
         }
 
@@ -39,6 +46,8 @@ enum SettingsTransfer {
                 self = .string(s)
             } else if let a = object as? [String] {
                 self = .strings(a)
+            } else if let d = object as? Data {
+                self = .data(d)
             } else {
                 return nil
             }
@@ -50,6 +59,7 @@ enum SettingsTransfer {
             case .int(let n): n
             case .string(let s): s
             case .strings(let a): a
+            case .data(let d): d
             }
         }
     }
@@ -92,6 +102,10 @@ enum SettingsTransfer {
         AppSettings.Keys.recordMinimumFreeMB, AppSettings.Keys.compatLayerEnabled, AppSettings.Keys.compatLayerPort, AppSettings.Keys.compatLayerHost,
         AppSettings.Keys.overlaysInPreview, AppSettings.Keys.externalBehindInterface, AppSettings.Keys.confirmBeforeStop, "AppleLanguages",
         AppSettings.Keys.busOutputMap, AppSettings.Keys.borrowMasterForMonitor,   // W5-K：每条总线的声道 / 借 Master（G7 合并时加进导出 / 导入 / 恢复默认）
+        // W5-L 的几节（W5-O 补上：原来导出 / 导入 / 恢复默认都漏了）：提醒四个键、性能与电源两个、Tally 两个、兼容层 HTTP 端口
+        AppSettings.Keys.reminderNotLive, AppSettings.Keys.reminderNotLiveMinutes, AppSettings.Keys.reminderFTB, AppSettings.Keys.reminderLowAudio,
+        AppSettings.Keys.preventSleep, AppSettings.Keys.preventDisplaySleep, AppSettings.Keys.tallyEnabled, AppSettings.Keys.tallyPort,
+        AppSettings.Keys.compatLayerHTTPPort,
     ]
 
     /// 恢复默认时清掉的键（包里的 + 访问令牌）。

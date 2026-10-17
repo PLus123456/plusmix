@@ -191,8 +191,8 @@
 "addInput.banner.help" = "看说明";
 "addInput.banner.microphone.message" = "本程序收不到话筒和声卡的声音。打开 系统设置 › 隐私与安全性 › 麦克风，允许 PlusMix，回来就有声音，不用重启。";
 "addInput.banner.microphone.title" = "麦克风权限被拒";
-"addInput.banner.ndi.message" = "收不到网络上的 NDI® 画面：这一版没带 NDI® 运行库，或者本机没装。可以先手填源名加上，装好之后这一路会自己好。";
-"addInput.banner.ndi.title" = "NDI® 运行库不在";
+"addInput.banner.ndi.message" = "这一版编译时没带 NDI® SDK，收不到网络上的 NDI® 画面。请换用带 NDI® 支持的版本。";
+"addInput.banner.ndi.title" = "这一版没带 NDI® 支持";
 "addInput.banner.openSettings" = "打开系统设置…";
 "addInput.banner.screen.message" = "抓屏幕 / 窗口 / 应用要先在 系统设置 › 隐私与安全性 › 屏幕与系统录音 里允许 PlusMix；系统可能要求重开本程序才生效。";
 "addInput.banner.screen.title" = "没有屏幕录制权限";
@@ -371,8 +371,15 @@
 "audioSettings.advanced" = "高级";
 "audioSettings.compressor.amount" = "压缩量 %.1f dB";
 "audioSettings.compressor.amountHint" = "超过阈值的部分被压住：输出最多到 %.1f dBFS（阈值 + 压缩量）。这个压缩器没有固定比例。";
+"audioSettings.compressor.kind" = "类型";
+"audioSettings.compressor.kind.compressor" = "压缩器（阈值 + 比例）";
+"audioSettings.compressor.kind.dynamicsProcessor" = "动态处理器（阈值 + 压缩量）";
+"audioSettings.compressor.knee" = "拐点 %.1f dB";
+"audioSettings.compressor.latency" = "延迟自测：%d 帧（%.2f ms）——压缩器不用前瞻，按设计是 0";
+"audioSettings.compressor.latencyPending" = "延迟自测：还没量到（装上之后引擎量一次）";
 "audioSettings.compressor.makeup" = "输出增益 %.1f dB";
-"audioSettings.compressor.note" = "按“阈值 + 比例”调的压缩器在后续版本（提案 024）。";
+"audioSettings.compressor.makeupGain" = "补偿 %.1f dB";
+"audioSettings.compressor.ratio" = "比例 %.1f:1";
 "audioSettings.enabled" = "启用";
 "audioSettings.eq.band" = "第 %d 段";
 "audioSettings.general.fader" = "推子";
@@ -382,6 +389,8 @@
 "audioSettings.general.mute" = "静音";
 "audioSettings.general.openInputSettings" = "输入设置…（增益 / 声像 / 延迟 / 送出）";
 "audioSettings.inputTitle" = "输入 %d";
+"audioSettings.limiter.ceiling" = "天花板 %.1f dBFS";
+"audioSettings.limiter.ceilingHint" = "限幅之后的输出最高到这里（0 = 0 dBFS）。";
 "audioSettings.limiter.latencyHint" = "起音就是前瞻：这条总线会晚这么多毫秒。录制 / 推流 / NDI® 的音画已经对齐，耳机 / 扬声器监听会晚这么多。";
 "audioSettings.meterPost" = "推子后";
 "audioSettings.page.compressor" = "压缩";
@@ -614,6 +623,8 @@
 "externalMenu.removeWithStatus" = "删除 %d %@（%@）";
 "feedback.ignored" = "命令被忽略：%@（状态没变）";
 "feedback.rejected" = "命令被拒：%@ — %@";
+"feedback.stingerSlotWithoutInput" = "转场 %d 是 Stinger、还没选输入——在转场列 ▾ 里选一路";
+"feedback.stingerWithoutInput" = "当前转场是 Stinger、还没选输入——在转场列 ▾ 里选一路";
 "help.manualMissing.text" = "这一版还没有带使用手册（随包 HTML 手册在下一版）。横幅上写的就是要做的事：按它装好或授权，回到添加面板会自动刷新。";
 "help.manualMissing.title" = "手册还没随包";
 "hotkeyList.action" = "动作";
@@ -846,9 +857,8 @@
 "mixer.inputFader" = "输入 %d 推子";
 "mixer.inputSettings" = "输入设置…";
 "mixer.listen" = "监听";
-"mixer.listen.headphones" = "耳机总线（现在）";
-"mixer.listen.unsupportedHeader" = "要音频引擎支持（下一版）";
-"mixer.listenHelp" = "耳机里听哪条总线。这一版耳机里只能听耳机总线（独听 / PFL / AFL 都在它上面）；听 Master / Bus A / Bus B 要音频引擎支持。";
+"mixer.listen.headphones" = "耳机总线";
+"mixer.listenHelp" = "耳机里听哪条总线：Master / Bus A / Bus B，或耳机总线自己（只听每路送耳机的那一条）。独听 / PFL / AFL 时总是听独听的那一路。";
 "mixer.loudness.heading" = "%@ 响度";
 "mixer.loudness.hint" = "EBU R128，每秒更新；积分从引擎启动算起。";
 "mixer.loudness.integrated" = "积分";
@@ -898,6 +908,8 @@
 "notice.audioFailed" = "音频引擎起不来：%@";
 "notice.externalDisplay" = "外部显示 %d：%@";
 "notice.hotkeyTableUnreadable" = "快捷键表 %@ 读不出来，用默认表：%@";
+"notice.join" = "；";
+"notice.midiTableUnreadable" = "MIDI 映射表 %@ 读不出来，用空表：%@";
 "notice.isoBranchUnavailable" = "ISO 输入 %d 不存在或分支用完（每路最多 %d 个 ISO / Aux）";
 "notice.midiFailed" = "MIDI 起不来：%@";
 "notice.ndiBranchRestored" = "NDI 发送 %d：输入 %d 空出了分支，已重新接上、开始送画面";
@@ -912,6 +924,7 @@
 "notice.recordingError" = "录制 %d 失败：%@";
 "notice.recordingFailed" = "录制 %d 起不来：%@";
 "notice.recordingFallback" = "录制 %d：磁盘满，已切到备用目录：%@";
+"notice.recordingFallbackBelowMinimum" = "录制 %d：磁盘剩余 %d MB，低于下限 %d MB，已切到备用目录：%@";
 "notice.recordingFallbackFailed" = "%@；备用目录也起不来：%@";
 "notice.recordingFinishFailed" = "录制 %d 封口失败：%@";
 "notice.recordingStarted" = "录制 %d 开始：%@";
@@ -947,7 +960,7 @@
 "outputSettings.audioCodec" = "音频编码";
 "outputSettings.bitrateKbps" = "码率 kb/s";
 "outputSettings.codec" = "编码器";
-"outputSettings.external.close" = "关闭这路";
+"outputSettings.external.remove" = "删除这一路";
 "outputSettings.external.enabled" = "启用（关掉 = 收起窗口，设置留着）";
 "outputSettings.external.fallbackHelp" = "关（默认）：显示器拔掉时黑着等它回来，不动主屏；开：退到主屏全屏（会盖住操作界面）";
 "outputSettings.external.fallbackToMain" = "显示器不在时退回主屏";

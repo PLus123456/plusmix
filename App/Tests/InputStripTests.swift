@@ -157,7 +157,7 @@ final class InputStripTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(3) { session.inputs.entries[1].map { ObjectIdentifier($0.input as AnyObject) != identity } ?? false }, "路径变了要重建")
     }
 
-    // MARK: 3. 分类标签：点 = 只显示这一类，与搜索叠加；右键改名；数据在 Show.layout（D1 / Q14）
+    // MARK: 3. 分类标签：点 = 只显示这一类，与搜索叠加；右键改名；颜色在 InputConfig.color（W5-O 起，提案 023 四）、名字在 Show.layout（D1 / Q14）
 
     func testUI_categoryFilterHidesOtherInputs() throws {
         let session = try AppTest.freshSession()
@@ -181,9 +181,9 @@ final class InputStripTests: XCTestCase {
         XCTAssertEqual(strip.cells[2]?.categoryColor, .blue)
         XCTAssertNil(strip.cells[4]?.categoryColor)
         XCTAssertEqual(try XCTUnwrap(strip.cells[1]).contextMenu().items.first { $0.title == "分类" }?.submenu?.items.first { $0.state == .on }?.title, "红色")
-        // 存在 Show.layout（键名写进报告给 023 迁移）："inputCategories" = { 编号: 颜色 }
-        XCTAssertEqual(session.layout.values[InputCategories.Keys.assignments], .object(["1": .string("red"), "2": .string("blue"), "3": .string("red")]))
-        XCTAssertTrue(AppTest.waitUntil(2) { AppTest.controller.isDocumentEdited }, "改分类算未保存的改动（它是节目内容，023 后进 InputConfig）")
+        // 颜色存在各路 InputConfig.color（setInputColor；原来存 Show.layout 的 "inputCategories"，W5-O 切过来）
+        XCTAssertTrue(AppTest.waitUntil(2) { session.state.inputs.map(\.color) == [.red, .blue, .red, nil] }, "\(session.state.inputs.map(\.color))")
+        XCTAssertTrue(AppTest.waitUntil(2) { AppTest.controller.isDocumentEdited }, "改分类算未保存的改动（它是节目内容）")
 
         // 点红色 = 只剩红的；和搜索叠加；点蓝色换类；点"全部"回来；再点一次已选的那一类也回到全部
         strip.categoryBar.button(for: .red).performClick(nil)
@@ -235,7 +235,7 @@ final class InputStripTests: XCTestCase {
         reopened.send(.removeInput(input: 3))
         XCTAssertTrue(AppTest.waitUntil(2) { reopened.state.input(3) == nil })
         AppTest.pump(seconds: 0.1)
-        XCTAssertEqual(reopened.layout.values[InputCategories.Keys.assignments], .object(["1": .string("red"), "2": .string("blue")]))
+        XCTAssertEqual(reopened.state.inputs.map(\.color), [.red, .blue, nil], "删掉的那一路颜色跟着它的配置没了")
         XCTAssertEqual(strip.visibleNumbers, [1])
         strip.categoryBar.button(for: nil).performClick(nil)
     }

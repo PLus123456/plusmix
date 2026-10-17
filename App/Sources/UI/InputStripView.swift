@@ -20,8 +20,6 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     var onChangeSource: ((Int) -> Void)? {
         didSet { for c in cells.values { c.onChangeSource = onChangeSource } }
     }
-    /// 分类数据变了（格子右键"分类 ▸"、删了一路清掉它的分类）：交给主窗口写回 Show.layout。
-    var onCategoriesChange: ((InputCategories) -> Void)?
     /// 分类标签右键"改名…" / "清除名字"。
     var onRenameCategory: ((InputCategories.Color) -> Void)?
     var onClearCategoryName: ((InputCategories.Color) -> Void)?
@@ -53,11 +51,16 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     private var lastState = MixerState()
     /// 运行状态来源（session.inputs.runtimeState）。
     var runtimeState: ((Int) -> InputState?)?
+    /// 无信号的原因来源（session.inputs.lastError：各输入自己报的那一句，W5-O）；只在无信号时读。
+    var runtimeDetail: ((Int) -> String?)?
 
-    /// 分类（Show.layout 里来的；主窗口换 session 时先设它再挂快照）。
+    /// 分类（颜色 = 快照里各路的 InputConfig.color，每个快照都对一遍；名字 = Show.layout，主窗口换 session / 改名时设）。
     var categories = InputCategories() {
         didSet { if categories != oldValue { applyCategories() } }
     }
+    /// 刚发出去（setInputColor）还没回到快照里的颜色：快照没赶上之前别用旧值盖掉格子上刚点的色点（同音频设置窗的 pendingSlots）；
+    /// 快照对上了、或 0.3 s 还没回来就放掉（被拒了以快照为准）。
+    private var pendingColors: [Int: (color: InputColor?, since: Date)] = [:]
     /// 选中的分类（nil = 全部）。界面状态，不存。
     private(set) var selectedCategory: InputCategories.Color?
     /// 缩略图大小（主窗口按本机偏好设）。
@@ -209,18 +212,25 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         let label = transitionLabel(state)
         for config in state.inputs {
             guard let cell = cells[config.number] else { continue }
-            cell.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays, runtime: runtimeState?(config.number))
+            let runtime = runtimeState?(config.number)
+            cell.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays, runtime: runtime,
+                       detail: runtime == .noSignal ? runtimeDetail?(config.number) : nil)
             cell.applySwitching(program: state.program, transitionActive: state.transition.isActive, transitionLabel: label)
             cell.removalImpacts = InputRemovalImpact.impacts(of: config.number, in: state)   // 删之前要不要问（W5-B）
         }
         addPlaceholder.setHintVisible(state.inputs.isEmpty)
-        // 删掉的路：分类跟着清（编号以后被别的输入用上时不继承）
-        if wanted != previousNumbers {
-            var pruned = categories
-            if pruned.prune(keeping: Set(wanted)) {
-                categories = pruned
-                onCategoriesChange?(pruned)
+        // 分类颜色跟快照（InputConfig.color：格子右键改的、API / 脚本改的都从这里来；删掉的路颜色跟着它的配置没了）
+        var assignments = InputCategories.assignments(of: state.inputs)
+        for (number, pending) in pendingColors {
+            if state.input(number)?.color == pending.color || state.input(number) == nil || Date().timeIntervalSince(pending.since) > 0.3 {
+                pendingColors[number] = nil
+            } else {
+                assignments[number] = pending.color
             }
+        }
+        if assignments != categories.assignments {
+            categories.assignments = assignments
+        } else if wanted != previousNumbers {
             applyCategories()
         }
         relayoutThumbnails()
@@ -343,13 +353,12 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         applyFilter()
     }
 
-    /// 格子右键"分类 ▸"：改这一路的分类，交给主窗口写回 Show.layout。
+    /// 格子右键"分类 ▸"：发 setInputColor（颜色是这一路的 InputConfig.color，提案 023 四）；格子先按点的画上，快照回来再对齐。
     func setCategory(_ color: InputCategories.Color?, for number: Int) {
-        var next = categories
-        next.assignments[number] = color
-        guard next != categories else { return }
-        categories = next
-        onCategoriesChange?(next)
+        guard categories.assignments[number] != color else { return }
+        pendingColors[number] = (color, Date())
+        categories.assignments[number] = color
+        send?(.setInputColor(input: number, color: color))
     }
 
     private func applyCategories() {

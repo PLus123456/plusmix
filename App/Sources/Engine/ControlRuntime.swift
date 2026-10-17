@@ -17,11 +17,16 @@ enum CommandFeedback: Equatable {
     case rejected(Command, reason: String)
     /// 状态机按规则忽略（回执 applied == false：转场进行中再 fade、FTB 目标已相同……）。
     case ignored(Command)
+    /// 快捷键按下去没做成、要说一句的（W5-O：⌃n 开空叠加通道而 PVW 是黑场、执行没选输入的 Stinger 被拒——提案 029）。
+    case control(ControlFeedback)
 
     var message: String {
         switch self {
         case .rejected(let c, let reason): L("feedback.rejected", Self.describe(c), reason)
         case .ignored(let c): L("feedback.ignored", Self.describe(c))
+        case .control(.overlayNeedsPreview(let channel)): L("transition.overlayNeedsPreview", channel, channel)   // 与转场列 / 菜单栏同一句
+        case .control(.stingerWithoutInput(let slot?)): L("feedback.stingerSlotWithoutInput", slot)
+        case .control(.stingerWithoutInput(nil)): L("feedback.stingerWithoutInput")
         }
     }
 
@@ -94,6 +99,11 @@ final class ControlRuntime {
         }
         hotkeys.setUIActionHandler(ui)
         midi.setUIActionHandler(ui)
+        // 快捷键按下去没做成、要说一句的（W5-O）：派发器在调 handle 的线程上（解析不出）或派发 Task 里（被拒）调，一律回主线程。
+        // MIDI 音符的同类提示要动 SwitcherControl/MIDI（不在 W5-O 的目录），这一版只记计数
+        hotkeys.setFeedbackHandler { [weak self] feedback in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onFeedback?(.control(feedback)) } }
+        }
     }
 
     /// 起：命令循环 → 推送源 → API → MIDI。API / MIDI 起不来不算错（记原因，节目照跑）。
@@ -238,7 +248,12 @@ final class ControlRuntime {
             let receipt = try await bus.submit(command, source: .ui)
             if !receipt.applied { onFeedback?(.ignored(command)) }
         } catch let rejection as CommandRejection {
-            onFeedback?(.rejected(command, reason: rejection.reason))
+            // 执行没选输入的 Stinger（提案 029 起校验器拒）：说人话的那一句（与快捷键同一句，W5-O）；别的照旧"命令被拒：…"
+            if let state = bus.stateMachine.publisher.latest?.state, let feedback = ControlAction.rejectionFeedback(for: command, in: state) {
+                onFeedback?(.control(feedback))
+            } else {
+                onFeedback?(.rejected(command, reason: rejection.reason))
+            }
         } catch {
             onFeedback?(.rejected(command, reason: "\(error)"))
         }

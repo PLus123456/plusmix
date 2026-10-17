@@ -123,10 +123,10 @@ final class FunctionTranslatorTests: XCTestCase {
     }
 
     /// Transition1–4 = 执行转场 1–4（提案 020 的槽，W5-M）：一条 useTransitionSlot(n, start: true)，一拍内选中并开始；
-    /// 转场进行中再发由状态机忽略（"(no change)"，HTTPTests 走一遍）；Stinger 槽没选输入照常执行（与快捷键同口径，只有屏幕上的按钮拦，X18）。
+    /// 转场进行中再发由状态机忽略（"(no change)"，HTTPTests 走一遍）；没选输入的 Stinger 槽（出厂槽 4）提案 029 起回 409（testC5_transitionStingerSlotWithoutInputIsNotConfigured）。
     func testC5_transition2ExecutesSlot() throws {
         for n in 1...4 {
-            XCTAssertEqual(try plan("Transition\(n)"), [.useTransitionSlot(slot: n, start: true)], "Transition\(n) = 执行转场 \(n)")
+            if n <= 3 { XCTAssertEqual(try plan("Transition\(n)"), [.useTransitionSlot(slot: n, start: true)], "Transition\(n) = 执行转场 \(n)") }
             XCTAssertTrue(FunctionCatalog.implemented.map(\.name).contains("Transition\(n)"), "Transition\(n) 在实现表里")
             XCTAssertFalse(FunctionCatalog.knownUnimplemented.contains("Transition\(n)"), "Transition\(n) 不再列为未实现")
         }
@@ -139,6 +139,27 @@ final class FunctionTranslatorTests: XCTestCase {
         XCTAssertEqual(try plan("Transition3", state: busy), [.useTransitionSlot(slot: 3, start: true)], "翻译不看进行中（状态机判，回 no change）")
         XCTAssertEqual(error("Transition5")?.code, .notImplemented, "只有 4 个槽")
         XCTAssertEqual(error("Transition0")?.code, .notImplemented)
+    }
+
+    /// 提案 029（W5-O）：Transition n 对"效果 = Stinger、还没选输入"的槽回 409 NotConfigured（与 Stinger1 没配好同口径），一条都不发——
+    /// 状态机 / 校验器（P5-3）也拒，兼容层这里先把原因说清楚；选了输入照常执行。
+    func testC5_transitionStingerSlotWithoutInputIsNotConfigured() throws {
+        let s = TestStates.base()
+        XCTAssertEqual(s.transition.slots[3].type, .stinger, "出厂槽 4 = Stinger")
+        XCTAssertNil(s.transition.slots[3].stinger.input, "出厂没选输入")
+        let e = error("Transition4")
+        XCTAssertEqual(e?.code, .notConfigured)
+        XCTAssertEqual(e?.httpStatus, 409)
+        XCTAssertTrue(e?.wireText.hasPrefix("NotConfigured: Transition4") ?? false, e?.wireText ?? "nil")
+        XCTAssertTrue(e?.message.contains("Stinger") ?? false, e?.message ?? "nil")
+        XCTAssertEqual(error("transition4")?.code, .notConfigured, "不分大小写")
+        var ready = s
+        ready.transition.slots[3].stinger.input = 3
+        XCTAssertEqual(try plan("Transition4", state: ready), [.useTransitionSlot(slot: 4, start: true)], "选了输入：照常执行")
+        var custom = s
+        custom.transition.slots[0] = TransitionSlot(type: .stinger, durationTicks: 30)
+        XCTAssertEqual(error("Transition1", state: custom)?.code, .notConfigured, "哪个槽是这种都一样")
+        XCTAssertEqual(try plan("Transition2"), [.useTransitionSlot(slot: 2, start: true)], "别的效果照旧")
     }
 
     /// SetTransitionEffect1–4 / SetTransitionDuration1–4 = 改转场 n 的效果 / 时长（setTransitionSlot，槽里别的字段原样带上）；
@@ -362,6 +383,39 @@ final class FunctionTranslatorTests: XCTestCase {
                      "OverlayInput1Off", "OverlayInput2Off", "OverlayInput3Off", "OverlayInput4Off", "StartRecording", "StopRecording",
                      "StartStreaming", "StopStreaming", "FadeToBlack", "SetMasterVolume", "Audio", "AudioOn", "AudioOff"] {
             XCTAssertTrue(FunctionCatalog.implemented.map(\.name).contains(name), "prompt 要求的 \(name) 不在实现表里")
+        }
+    }
+
+    /// X51（W5-O，prompt 112 第 7 项）：上游真实存在、这里没做的 31 个函数名回 501 NotImplemented，不再当"不认识"回 400。
+    /// 名字表 = docs/ui-study/附录/核对-VF5-动作目录.md §3.2（R5-G25 的清单，编译复现 400 的那 31 个）；按 VF5 §3.4 只补精确名字、不加前缀族——
+    /// 编出来的名字（NDI / Auto / Streaming 开头的也算）照旧 400。
+    func testC5_x51_upstreamFunctionNamesReturnNotImplemented() throws {
+        let x51 = [
+            "ActivatorRefresh", "AudioChannelMatrixApplyPreset", "AudioMixerShowHide",
+            "StreamingSetKey", "StreamingSetURL", "StreamingSetUsername", "StreamingSetPassword",
+            "ChangeCountdown", "SuspendCountdown", "ResumeRender",
+            "AutoPauseOn", "AutoPauseOff", "AutoPlayOn", "AutoPlayOff", "AutoPlayFirst", "AutoPlayFirstOn", "AutoPlayFirstOff",
+            "AutoPlayNext", "AutoPlayNextOn", "AutoPlayNextOff", "AutoRestartOn", "AutoRestartOff",
+            "ColourCorrectionAuto", "ColourCorrectionReset", "MoveMultiViewOverlay",
+            "NDISelectSourceByName", "NDISelectSourceByIndex", "NDIStartRecording", "NDIStopRecording",
+            "OpenPreset", "LastPreset",
+        ]
+        XCTAssertEqual(x51.count, 31)
+        XCTAssertEqual(Set(x51).count, 31, "名字不重复")
+        for name in x51 {
+            let e = error("\(name) Input=1")
+            XCTAssertEqual(e?.code, .notImplemented, name)
+            XCTAssertEqual(e?.httpStatus, 501, name)
+            XCTAssertTrue(e?.message.contains(name) ?? false, "错误文案点名函数：\(e?.message ?? "nil")")
+            XCTAssertTrue(FunctionCatalog.knownUnimplemented.contains(name), "\(name) 以精确名字进 knownUnimplemented")
+            XCTAssertFalse(FunctionCatalog.implemented.map(\.name).contains(name), "\(name) 不在实现表里")
+            XCTAssertEqual(error(name.lowercased())?.code, .notImplemented, "不分大小写：\(name)")
+        }
+        // 不加前缀族：同样开头的编造名字仍是"不认识"
+        for invented in ["NDIAnything", "AutoAnything", "StreamingAnything", "ColourCorrectionAnything", "ChangeAnything", "OpenAnything"] {
+            let e = error(invented)
+            XCTAssertEqual(e?.code, .unknownFunction, invented)
+            XCTAssertEqual(e?.httpStatus, 400, invented)
         }
     }
 }

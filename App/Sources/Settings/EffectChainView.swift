@@ -25,15 +25,32 @@ struct EffectChainView: View {
             }
         }
         Section(L("effects.dynamics.title")) {
-            Toggle(L("effects.dynamics.present"), isOn: $editor.dynamics.present)
-            if editor.dynamics.present {
-                Toggle(L("effects.enabled"), isOn: $editor.dynamics.enabled)
-                Slider(value: $editor.dynamics.thresholdDb, in: EffectEditorRanges.dynThresholdDb) { Text(L("effects.dynamics.thresholdDb", editor.dynamics.thresholdDb)) }
-                Slider(value: $editor.dynamics.headroomDb, in: EffectEditorRanges.dynHeadroomDb) { Text(L("effects.dynamics.headroomDb", editor.dynamics.headroomDb)) }
-                Slider(value: $editor.dynamics.expansionRatio, in: EffectEditorRanges.dynExpansionRatio) { Text(L("effects.dynamics.expansionRatio", editor.dynamics.expansionRatio)) }
-                Slider(value: $editor.dynamics.attackSeconds, in: EffectEditorRanges.dynAttackSeconds) { Text(L("effects.dynamics.attackMs", editor.dynamics.attackSeconds * 1000)) }
-                Slider(value: $editor.dynamics.releaseSeconds, in: EffectEditorRanges.dynReleaseSeconds) { Text(L("effects.dynamics.releaseMs", editor.dynamics.releaseSeconds * 1000)) }
-                Slider(value: $editor.dynamics.overallGainDb, in: EffectEditorRanges.dynOverallGainDb) { Text(L("effects.dynamics.overallGainDb", editor.dynamics.overallGainDb)) }
+            // 动态格：压缩器（compressor）/ 动态处理器（dynamicsProcessor）二选一占同一格（提案 024 (b)，W5-O；新开默认压缩器，同音频设置窗）
+            Toggle(L("effects.dynamics.present"), isOn: Binding(get: { editor.dynamicsKind != nil }, set: { on in
+                if on, editor.dynamicsKind == nil { editor.compressor.present = true }
+                if !on { editor.compressor.present = false; editor.dynamics.present = false }
+            }))
+            if let kind = editor.dynamicsKind {
+                Picker(L("audioSettings.compressor.kind"), selection: Binding(get: { kind }, set: { editor.setDynamicsKind($0) })) {
+                    ForEach(EffectChainEditor.DynamicsKind.allCases) { k in Text(L("audioSettings.compressor.kind.\(k.rawValue)")).tag(k) }
+                }
+                if kind == .compressor {
+                    Toggle(L("effects.enabled"), isOn: $editor.compressor.enabled)
+                    Slider(value: $editor.compressor.thresholdDb, in: EffectEditorRanges.compThresholdDb) { Text(L("effects.dynamics.thresholdDb", editor.compressor.thresholdDb)) }
+                    Slider(value: $editor.compressor.ratio, in: EffectEditorRanges.compRatio) { Text(L("audioSettings.compressor.ratio", editor.compressor.ratio)) }
+                    Slider(value: $editor.compressor.kneeDb, in: EffectEditorRanges.compKneeDb) { Text(L("audioSettings.compressor.knee", editor.compressor.kneeDb)) }
+                    Slider(value: $editor.compressor.attackSeconds, in: EffectEditorRanges.compAttackSeconds) { Text(L("effects.dynamics.attackMs", editor.compressor.attackSeconds * 1000)) }
+                    Slider(value: $editor.compressor.releaseSeconds, in: EffectEditorRanges.compReleaseSeconds) { Text(L("effects.dynamics.releaseMs", editor.compressor.releaseSeconds * 1000)) }
+                    Slider(value: $editor.compressor.makeupGainDb, in: EffectEditorRanges.compMakeupGainDb) { Text(L("audioSettings.compressor.makeupGain", editor.compressor.makeupGainDb)) }
+                } else {
+                    Toggle(L("effects.enabled"), isOn: $editor.dynamics.enabled)
+                    Slider(value: $editor.dynamics.thresholdDb, in: EffectEditorRanges.dynThresholdDb) { Text(L("effects.dynamics.thresholdDb", editor.dynamics.thresholdDb)) }
+                    Slider(value: $editor.dynamics.headroomDb, in: EffectEditorRanges.dynHeadroomDb) { Text(L("effects.dynamics.headroomDb", editor.dynamics.headroomDb)) }
+                    Slider(value: $editor.dynamics.expansionRatio, in: EffectEditorRanges.dynExpansionRatio) { Text(L("effects.dynamics.expansionRatio", editor.dynamics.expansionRatio)) }
+                    Slider(value: $editor.dynamics.attackSeconds, in: EffectEditorRanges.dynAttackSeconds) { Text(L("effects.dynamics.attackMs", editor.dynamics.attackSeconds * 1000)) }
+                    Slider(value: $editor.dynamics.releaseSeconds, in: EffectEditorRanges.dynReleaseSeconds) { Text(L("effects.dynamics.releaseMs", editor.dynamics.releaseSeconds * 1000)) }
+                    Slider(value: $editor.dynamics.overallGainDb, in: EffectEditorRanges.dynOverallGainDb) { Text(L("effects.dynamics.overallGainDb", editor.dynamics.overallGainDb)) }
+                }
             }
         }
         Section(L("effects.limiter.title")) {

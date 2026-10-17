@@ -61,8 +61,8 @@ final class OutputRuntime {
         case recordingFailed(output: Int, message: String)
         /// 磁盘剩余空间跌破警戒线（提示）。
         case recordingDiskLow(output: Int, freeMB: Double)
-        /// 磁盘满 / 低于下限，切到备用目录继续录。
-        case recordingSwitchedToFallback(output: Int, url: URL)
+        /// 磁盘满 / 低于下限，切到备用目录继续录（原因分开：提示原来一律写"磁盘满"，低于下限时盘其实没满，W5-O）。
+        case recordingSwitchedToFallback(output: Int, url: URL, cause: FallbackCause)
         /// 推流起来了、正在连（还没连上，X37）。
         case streamConnecting(output: Int)
         /// 推流连上了（Stats 第一次报 publishing）。
@@ -74,6 +74,12 @@ final class OutputRuntime {
         case ndiFailed(output: Int, message: String)
         /// 源是输入 n 的 NDI 发送等到了分支、接上了（W3-E4）。
         case ndiBranchRestored(output: Int, input: Int)
+    }
+
+    /// 为什么切到备用目录。
+    enum FallbackCause: Equatable {
+        case diskFull
+        case belowMinimum(freeMB: Int, minimumMB: Int)
     }
 
     /// 一路在跑的录制（主线程改，封口回调经主线程；标 @unchecked Sendable 只为能捕获进回调）。
@@ -512,9 +518,10 @@ final class OutputRuntime {
         case .lowSpace(let free):
             onEvent?(.recordingDiskLow(output: number, freeMB: Double(free) / 1_048_576))
         case .belowMinimum(let free):
-            let reason = L("notice.recordingBelowMinimum", number, Int(free / 1_048_576), Int(minimumFreeBytes / 1_048_576))
+            let (freeMB, minimumMB) = (Int(free / 1_048_576), Int(minimumFreeBytes / 1_048_576))
+            let reason = L("notice.recordingBelowMinimum", number, freeMB, minimumMB)
             if canFallback(entry) {
-                switchToFallback(entry, reason: reason)
+                switchToFallback(entry, reason: reason, cause: .belowMinimum(freeMB: freeMB, minimumMB: minimumMB))
             } else {
                 stopForDisk(entry, reason: reason)
             }
@@ -527,7 +534,7 @@ final class OutputRuntime {
             }
             let reason = L("notice.recordingDiskFull", number, String(message.prefix(80)))
             if canFallback(entry) {
-                switchToFallback(entry, reason: reason)
+                switchToFallback(entry, reason: reason, cause: .diskFull)
             } else {
                 stopForDisk(entry, reason: reason)
             }
@@ -553,7 +560,7 @@ final class OutputRuntime {
     }
 
     /// 切备用目录：停旧录制器（失败的直接封口），下一拍在备用目录起新的，运行表换成新的。
-    private func switchToFallback(_ entry: RecordEntry, reason: String) {
+    private func switchToFallback(_ entry: RecordEntry, reason: String, cause: FallbackCause) {
         guard let clock, let dir = fallbackDirectory else { return }
         let number = entry.output.number
         entry.stopping = true
@@ -588,7 +595,7 @@ final class OutputRuntime {
         diskMonitor.remove(key: number)
         attach(output: entry.output, recorder: rec, branch: branch, start: start)
         recorders[number]?.onFallback = true
-        onEvent?(.recordingSwitchedToFallback(output: number, url: url))
+        onEvent?(.recordingSwitchedToFallback(output: number, url: url, cause: cause))
         NSLog("%@", reason + "，已切到备用目录 \(url.path)")
         rebuildStats()
     }

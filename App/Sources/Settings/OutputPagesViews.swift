@@ -608,7 +608,8 @@ struct ExternalOutputSection: View {
                                                                                set: { model.setExternalFallback(output.number, on: $0) }))
                 .help(L("outputSettings.external.fallbackHelp"))
             LabeledContent(L("outputSettings.external.status"), value: model.displayStatus(output: output.number, kind: "externalDisplay") ?? "—")
-            Button(L("outputSettings.external.close")) { model.removeOutput(output.number) }
+            // 做的是删除（与录制页同字、与路由菜单"删除 n …"同口径，都不问）；只关用顶上的"启用"开关。原来写"关闭这路"，字面像关掉（W5-O）
+            Button(L("outputSettings.external.remove")) { model.removeOutput(output.number) }
         } header: {
             OutputSectionHeader(model: model, output: output, title: L("outputSettings.external.title"), subtitle: L("outputSettings.outputNumber", output.number))
         }
