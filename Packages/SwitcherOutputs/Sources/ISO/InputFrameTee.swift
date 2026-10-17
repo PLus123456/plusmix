@@ -22,8 +22,16 @@ public final class InputFrameTee: FrameSlot, @unchecked Sendable {
     /// 摘下的分支保留多久再释放。
     static let retireGrace = HostDuration(seconds: 1)
 
-    public init(primary: LockFreeFrameSlot) {
+    /// 建分支槽（参数 = 容量）。生产代码就是 `LockFreeFrameSlot(capacity:)`；测试换成记下弱引用的工厂，数每个槽是否销毁（D12）。
+    private let makeBranchSlot: @Sendable (Int) -> LockFreeFrameSlot
+
+    public convenience init(primary: LockFreeFrameSlot) {
+        self.init(primary: primary, makeBranchSlot: { LockFreeFrameSlot(capacity: $0) })
+    }
+
+    init(primary: LockFreeFrameSlot, makeBranchSlot: @escaping @Sendable (Int) -> LockFreeFrameSlot) {
         self.primary = primary
+        self.makeBranchSlot = makeBranchSlot
         cells = (0..<InputFrameTee.maxBranches).map { _ in Cell() }
     }
 
@@ -59,7 +67,7 @@ public final class InputFrameTee: FrameSlot, @unchecked Sendable {
     /// 开一个分支；已有 `maxBranches` 个时返回 nil。
     public func addBranch(capacity: Int = 3) -> LockFreeFrameSlot? {
         reclaimRetired(now: .now(), force: false)
-        let slot = LockFreeFrameSlot(capacity: capacity)
+        let slot = makeBranchSlot(capacity)
         var i = 0
         while i < InputFrameTee.maxBranches {
             let (exchanged, _) = cells[i].slot.compareExchange(expected: nil, desired: Unmanaged.passRetained(slot), ordering: .acquiringAndReleasing)
