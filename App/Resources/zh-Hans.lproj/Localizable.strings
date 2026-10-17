@@ -167,6 +167,7 @@
 "addInput.add" = "添加";
 "addInput.addNote.install" = "加上后先显示错误，装好后自动恢复";
 "addInput.addNote.permission" = "加上后先显示错误，授权后自动恢复";
+"addInput.addNote.unsupportedBuild" = "加上后一直显示错误（这一版不支持）";
 "addInput.audio.about" = "只有声音的输入：话筒、声卡、调音台的 USB 输出。格子里显示话筒和电平表；第一次用要麦克风权限。";
 "addInput.audio.detail" = "%@（%@）\n%d 个输入声道，%@";
 "addInput.audio.detailNoTransport" = "%@\n%d 个输入声道，%@";

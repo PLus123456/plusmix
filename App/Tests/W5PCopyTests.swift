@@ -386,6 +386,31 @@ final class W5PCopyTests: XCTestCase {
         XCTAssertEqual(EffectChainEditor().slots, [], "空编辑器还是空链")
     }
 
+    /// 第 14 条：添加输入面板里"这一版没带 NDI® 支持" / "这一版没带 DeckLink 支持"两种横幅，"添加"旁的小字原来仍写"装好后自动恢复"——
+    /// 这两种是编译期开关，装什么都不会好，与横幅正文矛盾。只有"DeckLink 驱动没装"那一种该写"装好后自动恢复"。
+    func testW4C3_14_buildWithoutSDKAddNoteDoesNotPromiseRecovery() throws {
+        var env = AddInputEnvironment.live
+        env.ndiAvailable = { false }
+        env.decklinkSDKAvailable = { false }
+        env.decklinkDriverPresent = { false }
+        env.cameraPermission = { .denied }
+        let form = AddInputFormModel(state: MixerState(), maxInputs: 16, environment: env)
+        defer { form.close() }
+        form.model.kind = .ndi
+        XCTAssertEqual(form.addNote, "加上后一直显示错误（这一版不支持）")
+        form.model.kind = .decklink
+        XCTAssertEqual(form.addNote, "加上后一直显示错误（这一版不支持）", "SDK 没编进来：驱动在不在都一样")
+        var driverOnly = env
+        driverOnly.decklinkSDKAvailable = { true }
+        let installForm = AddInputFormModel(state: MixerState(), maxInputs: 16, environment: driverOnly)
+        defer { installForm.close() }
+        installForm.model.kind = .decklink
+        XCTAssertEqual(installForm.addNote, "加上后先显示错误，装好后自动恢复", "只有驱动没装那一种：装好后自动恢复")
+        form.model.kind = .camera
+        XCTAssertEqual(form.addNote, "加上后先显示错误，授权后自动恢复", "权限那种照旧")
+        XCTAssertEqual(L10n.string("addInput.addNote.unsupportedBuild", language: "en"), "It keeps showing an error (this build doesn't support it)")
+    }
+
     /// 状态行（W4C3 第 11 条）：failed 的推流不算在跑——原来取码率最低的那一路，起不来 / 鉴权停下的码率 0，写"推流 0 b/s"；状态窗写 —，两处不一致。
     func testW5P111_statusLineIgnoresFailedStreams() {
         func stats(_ entries: [Stats.EncoderEntry]) -> Stats {

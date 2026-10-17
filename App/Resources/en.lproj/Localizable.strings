@@ -167,6 +167,7 @@
 "addInput.add" = "Add";
 "addInput.addNote.install" = "It shows an error until that is installed, then recovers on its own";
 "addInput.addNote.permission" = "It shows an error until access is granted, then recovers on its own";
+"addInput.addNote.unsupportedBuild" = "It keeps showing an error (this build doesn't support it)";
 "addInput.audio.about" = "Sound-only input: a microphone, an audio interface or a mixing desk’s USB output. The cell shows a microphone and a meter; needs microphone access the first time.";
 "addInput.audio.detail" = "%@ (%@)\n%d input channels, %@";
 "addInput.audio.detailNoTransport" = "%@\n%d input channels, %@";

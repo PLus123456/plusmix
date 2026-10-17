@@ -499,8 +499,14 @@ final class AddInputFormModel: ObservableObject {
     /// 当前页顶部的横幅（权限被拒 / SDK 没编进来 / 驱动没装）。
     var banner: AddInputBanner? { environment.banner(for: model.kind) }
 
-    /// 有横幅时"添加"旁边的一句：照样能加，格子上先显示错误，授权 / 装好之后这一路自己恢复。
-    var addNote: String? { banner.map { $0.isPermission ? L("addInput.addNote.permission") : L("addInput.addNote.install") } }
+    /// 有横幅时"添加"旁边的一句：照样能加，格子上先显示错误，授权 / 装好之后这一路自己恢复；这一版没带 SDK 的两种（NDI® / DeckLink）
+    /// 装什么都不会好，写"一直显示错误（这一版不支持）"（W5-P，W4C3 第 14 条，原来也写"装好后自动恢复"、与横幅正文矛盾）。
+    var addNote: String? {
+        banner.map { b in
+            if b.isPermission { return L("addInput.addNote.permission") }
+            return b.buildLacksSupport ? L("addInput.addNote.unsupportedBuild") : L("addInput.addNote.install")
+        }
+    }
 
     /// 横幅上的按钮。
     func perform(_ action: AddInputBanner.Action) {
