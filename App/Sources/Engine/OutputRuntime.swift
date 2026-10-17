@@ -12,6 +12,8 @@
 // - 磁盘（S7）：RecordingDiskMonitor 每秒看每路的剩余空间（DiskGuard.freeBytes，非启动卷也对）：跌破警戒线提示；跌破下限或写满 →
 //   有备用目录就在下一拍把那一路切到备用目录继续录（S7 目标档），否则只停那一路（发 stopRecord 让快照一致）并提示；推流 / 渲染不在这条链上。
 //   Recorder 自己的 minimumFreeBytes 设 0（它的 freeBytes 在非启动卷上是 0，见 reports/issues/W3C-w1-outputs-recorder-freebytes-nonboot-volume.md）。
+// - 落点（K01，W5-P）：模板展开的名字被占（磁盘上已有同名 .mov、转封装的路连同名 .mp4，或这一批 / 在录 / 在停的别的路要用）就依次加 -2、-3……
+//   （RecordingPaths），切备用目录同样避让；Recorder 的库接口约定覆盖，永不删旧文件只能在这一层保证（用户 2026-10-17 定：自动加后缀）。
 // - 推流：StreamOutput 自己有编码器 + 有界队列 + 重连；起 = start() + 挂消费者，停 = 摘消费者 + stopAsync()。
 // - NDI 发送（W3-E3）：kind = ndi 且 enabled 的输出 = 一个 NDISender（W2-D）。源名 = 输出名，分组 = extra["ndi.groups"]，转换方式 = extra["ndi.conversion"]。
 //   PGM / PVW / 多画面：sender 自己是 PGM 帧的消费者，从 RenderedFrame 挑（PVW / 多画面帧由渲染器按状态自动填：有 enabled 的输出要它才转，开头可能缺一两帧）；
@@ -378,18 +380,16 @@ final class OutputRuntime {
         let start = RecordingStart(tick: startTick, tickTime: clock.time(of: startTick) + engine.videoDelayApplied)   // 开录起点按节目输出时间线（提案 028：拍点 + 当时的视频延后 L），两轨都从 0 起、没有空 edit（G8b）
         // 建录制器（主线程：算路径、分支槽、音轨）
         var prepared: [(OutputState, Recorder, LockFreeFrameSlot?)] = []
-        var usedURLs = Set(recorders.values.map(\.url))
+        // K01：落点避让——磁盘上已有的（转封装的路连同名 .mp4）、正在录 / 在停的、这一批前面分出去的都算占了，依次加 -2、-3……；永不删旧文件
+        var taken = Set(recorders.values.map { RecordingPaths.key($0.url) })
         for output in outputs {
             var record = output.settings.record ?? RecordSettings(directory: ShowDocuments.defaultRecordDirectory)
             // 相对目录（headless 的场景文件写 "."，那是相对仓库根）在 App 里没有可靠的 cwd（Finder 起的是 /），一律挂到默认录制目录下
             if !record.directory.hasPrefix("/") {
                 record.directory = (ShowDocuments.defaultRecordDirectory as NSString).appendingPathComponent(record.directory)
             }
-            var url = record.outputURL(showName: showName, outputName: output.name)
-            if usedURLs.contains(url) {   // 同一秒起的几路模板里没有 {output} 时会同名：加编号
-                url = url.deletingPathExtension().appendingPathExtension("\(output.number).mov")
-            }
-            usedURLs.insert(url)
+            let url = RecordingPaths.unique(record.outputURL(showName: showName, outputName: output.name), remuxToMP4: record.remuxToMP4, taken: taken)
+            taken.insert(RecordingPaths.key(url))
             var branch: LockFreeFrameSlot?
             var hasAudio = audio != nil
             if let n = output.settings.source.inputNumber {
@@ -575,7 +575,9 @@ final class OutputRuntime {
         entry.stopping = true
         entry.onFallback = true
         let boundary = clock.tick(at: .now()) + 2
-        let url = RecordingFallback.url(for: entry.url, directory: dir)
+        // 备用目录里同名的照样避让（K01）：RecordingFallback 只看磁盘上的 .mov，这里再算上转封装的 .mp4 与正在录的别的路
+        let others = Set(recorders.values.filter { $0 !== entry }.map { RecordingPaths.key($0.url) })
+        let url = RecordingPaths.unique(RecordingFallback.url(for: entry.url, directory: dir), remuxToMP4: entry.recorder.configuration.remuxToMP4, taken: others)
         var cfg = entry.recorder.configuration
         cfg.url = url
         let rec = Recorder(configuration: cfg)
