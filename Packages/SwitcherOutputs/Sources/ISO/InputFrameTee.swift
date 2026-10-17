@@ -65,15 +65,19 @@ public final class InputFrameTee: FrameSlot, @unchecked Sendable {
     // MARK: 分支（普通线程）
 
     /// 开一个分支；已有 `maxBranches` 个时返回 nil。
+    /// 引用计数（D12，Codex 2026-10-13 审查）：格子持有的那一个强引用只 retain 一次——装上了就归格子（removeBranch / reclaimRetired / deinit 放），
+    /// 四格都占着就当场放掉。以前每试一格都 passRetained、失败的不放：第 n 个分支多留 n − 1 个引用，满额失败的申请留 4 个，永远不销毁。
     public func addBranch(capacity: Int = 3) -> LockFreeFrameSlot? {
         reclaimRetired(now: .now(), force: false)
         let slot = makeBranchSlot(capacity)
+        let owned = Unmanaged.passRetained(slot)
         var i = 0
         while i < InputFrameTee.maxBranches {
-            let (exchanged, _) = cells[i].slot.compareExchange(expected: nil, desired: Unmanaged.passRetained(slot), ordering: .acquiringAndReleasing)
+            let (exchanged, _) = cells[i].slot.compareExchange(expected: nil, desired: owned, ordering: .acquiringAndReleasing)
             if exchanged { return slot }
             i += 1
         }
+        owned.release()
         return nil
     }
 
