@@ -19,13 +19,14 @@ public enum Command: Hashable, Codable, Sendable {
     /// 转场进行中被拒（与 setTransition 同一口径：进行中的那一次按开始时的参数走）；stinger.input 非 nil 时须是存在的输入；
     /// softness 钳到 0–1，cutAtTick 钳到 ≥ 0（≥ durationTicks = 完成时换，不钳上限）。
     case setTransitionParams(wipe: WipeParams, stinger: StingerParams)
-    /// 按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。
+    /// 按已选的类型 / 时长（当前那组）开始 auto 转场；进行中再发则忽略。当前那组是没选输入的 Stinger（`TransitionSlot.isStingerWithoutInput`）时拒收：
+    /// 校验器 400、reducer 原样返回（提案 029；当前槽是这种槽、或 setTransition / setTransitionParams 直接给的都算——否则是一次延迟硬切）。
     case autoTransition
     /// 把 PVW 换成该输入（0 = 黑场）；转场进行中被拒（与 autoTransition 同一口径，提案 023）。
     case setPreview(input: Int)
     /// 直接把 PGM 换成该输入（硬切），PVW 不变。转场进行中被拒（提案 023）。
     case setProgram(input: Int)
-    /// 推杆位置 0–1；到 1 提交（对调并回到 0）。
+    /// 推杆位置 0–1；到 1 提交（对调并回到 0）。当前那组是没选输入的 Stinger 照推（提案 029 不管 T-bar）：渲染器什么都不叠，推过换底拍那一格就是新画面。
     case tbar(progress: Double)
     case ftb(on: Bool)
     /// 改转场槽 1–4 之一的配置（提案 020）：只改 `TransitionState.slots[slot − 1]`，**转场进行中也收**（只是改配置）；
@@ -35,7 +36,8 @@ public enum Command: Hashable, Codable, Sendable {
     case setTransitionSlot(slot: Int, config: TransitionSlot)
     /// 把槽拷进当前那组、`currentSlot = slot`（提案 020）；start = true 同时开始 auto 转场（类型 cut 或时长 0 = 原子对调，与 autoTransition 同口径），
     /// 一拍内原子完成；start = false 只选中（T-bar / 回车用）。转场进行中被拒（与 setTransition / autoTransition 同口径）；
-    /// start = false 且槽已是当前槽、当前那组与槽相同 → 原样返回。Stinger 槽没选输入照常开始（渲染器对 nil 输入不叠任何东西）。
+    /// start = false 且槽已是当前槽、当前那组与槽相同 → 原样返回。start = true 而槽是没选输入的 Stinger（`isStingerWithoutInput`）→ 拒收：校验器 400、
+    /// reducer 原样返回、不选中（提案 029，用户 2026-10-12 定；020 原来是照常开始 = 一次延迟硬切）；start = false 照常选中。
     case useTransitionSlot(slot: Int, start: Bool)
     /// 改 FTB 时长（提案 020）：`ftb.durationTicks = ticks`（存拍，界面按秒填）；FTB 渐变进行中按"当前电平对应的起点"回拨 startTick，电平从当前值按新时长继续走、不跳变；
     /// 相同值原样返回；ticks < 0 校验器拒。不跟随转场时长（"慢渐黑 + 快切"要并存）。
@@ -59,8 +61,8 @@ public enum Command: Hashable, Codable, Sendable {
     case setAFV(on: Bool)
     /// 耳机监听方式 PFL / AFL（提案 012）。监听点（延迟线前 / 后）是 `AudioState.monitorPoint`，走 Show，不是这条。
     case setMonitorMode(mode: MonitorMode)
-    /// 耳机 / 监听总线上听哪条总线（提案 026）：master / busA / busB；`headphones` 自己无效，校验器拒（HTTP 400）、reducer 也原样返回。
-    /// 与现状相同的值原样返回（applied = false）。独听仍优先于它。
+    /// 耳机 / 监听总线上听哪条总线（提案 026）：master / busA / busB / headphones（= 听耳机总线自己，只听每路 routing.headphones 送出的那些；
+    /// 用户 2026-10-12 允许，P5-3——P5 时校验器 / reducer 拒）。与现状相同的值原样返回（applied = false）。独听仍优先于它。
     case setMonitorSource(bus: Bus)
     /// 整体替换一条总线的效果链（提案 012）。链顺序 = 处理顺序，`enabled = false` 的格旁路。
     case setBusEffects(bus: Bus, effects: [EffectSlot])

@@ -66,6 +66,29 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertTrue([CommandKind.useTransitionSlot, .setFTBDuration, .setPlayback, .seekPlayback, .setInputAudio, .setInputColor].allSatisfy { $0.operatorFacing })
     }
 
+    /// P5-3：提案 026 允许 headphones（用户 2026-10-12）——setMonitorSource 的 bus 0–3 四条都能选（3 = 听耳机总线自己），说明里不再写"无效"；命令数不变。
+    func testCatalog_026_monitorSourceAllFourBuses() {
+        XCTAssertEqual(CommandKind.allCases.count, 42, "P5-3 不加命令")
+        let monitor = CommandCatalog.entry(for: .setMonitorSource)
+        XCTAssertEqual(monitor.fields, [CommandField(name: "bus", type: .bus)])
+        let busNote = monitor.parameters.first { $0.name == "bus" }?.note ?? ""
+        XCTAssertTrue(busNote.contains("3 = headphones"), busNote)
+        XCTAssertFalse(busNote.contains("无效") || monitor.summary.contains("无效"), "headphones 合法了：\(monitor.summary) / \(busNote)")
+    }
+
+    /// P5-3：提案 029（没选输入的 Stinger 槽拒收，用户 2026-10-12 定）——useTransitionSlot / autoTransition 的说明写明拒收条件（与校验器 400 的文案同一口径），
+    /// tbar 写明它不管（T-bar 推这样的当前那组照旧）；字段不变。
+    func testCatalog_029_stingerWithoutInputRefusalDocumented() {
+        for kind in [CommandKind.useTransitionSlot, .autoTransition] {
+            let summary = CommandCatalog.entry(for: kind).summary
+            XCTAssertTrue(summary.contains("Stinger、还没选输入") && summary.contains("400"), "\(kind)：\(summary)")
+            XCTAssertFalse(summary.contains("照常开始"), "\(kind)：P5-2 的\"没选输入照常开始\"去掉了：\(summary)")
+        }
+        XCTAssertTrue(CommandCatalog.entry(for: .tbar).summary.contains("还没选输入"), CommandCatalog.entry(for: .tbar).summary)
+        XCTAssertEqual(CommandCatalog.entry(for: .useTransitionSlot).fields, [CommandField(name: "slot", type: .transitionSlot), CommandField(name: "start", type: .onOff)])
+        XCTAssertEqual(CommandCatalog.entry(for: .autoTransition).fields, [])
+    }
+
     func testCatalog_generatedMarkdownMatchesCommittedDocsApiMd() throws {
         // docs/api.md 在仓库根：Packages/SwitcherControl/Tests/SwitcherControlTests/ → 上四级
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

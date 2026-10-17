@@ -194,7 +194,7 @@ public enum CommandCatalog {
         case .busGain: return [bus, dB]
         case .busMute: return [bus, on]
         case .setMonitorMode: return [CommandField(name: "mode", type: .choice(["afl", "pfl"]))]
-        case .setMonitorSource: return [bus]   // 026：四选一里的 headphones（3）会被拒，面板上该灰掉
+        case .setMonitorSource: return [bus]   // 026：四条都能选，3 = headphones = 听耳机总线自己（P5-3）
         case .setBusEffects: return [bus, CommandField(name: "effects", type: .json("[EffectSlot]"))]
         case .setInputAudio:
             return [input, CommandField(name: "solo", type: .onOff, optional: true), CommandField(name: "afv", type: .onOff, optional: true),
@@ -239,17 +239,17 @@ public enum CommandCatalog {
                        parameters: [("wipe", "{direction: leftToRight / rightToLeft / topToBottom / bottomToTop / diagonal, softness: 软边宽占画面的比例 0–1，超出钳住}"),
                                     ("stinger", "{input: 作 stinger 的输入编号（带 alpha 的文件 / 图片），不写 = 未设置；cutAtTick: 第几拍换底，≥ 0，≥ 时长 = 完成时换}")],
                        example: .setTransitionParams(wipe: WipeParams(direction: .topToBottom, softness: 0.2), stinger: StingerParams(input: 4, cutAtTick: 12))),
-            CommandDoc(kind: .autoTransition, group: "切换", summary: "按已选的类型 / 时长开始 auto 转场；进行中再发则忽略。", parameters: [], example: .autoTransition),
+            CommandDoc(kind: .autoTransition, group: "切换", summary: "按已选的类型 / 时长（当前那组）开始 auto 转场；进行中再发则忽略；当前那组是 Stinger、还没选输入时被拒（HTTP 400，提案 029：否则是一次延迟硬切）。", parameters: [], example: .autoTransition),
             CommandDoc(kind: .setPreview, group: "切换", summary: "把 PVW 换成该输入；转场进行中（含 T-bar 推到一半）被拒（applied = false）。", parameters: [("input", "输入编号；0 = 黑场")], example: .setPreview(input: 2)),
             CommandDoc(kind: .setProgram, group: "切换", summary: "直接把 PGM 换成该输入（硬切），PVW 不变；转场进行中被拒（applied = false）。", parameters: [("input", "输入编号；0 = 黑场")], example: .setProgram(input: 3)),
-            CommandDoc(kind: .tbar, group: "切换", summary: "推杆位置 0–1；到 1 提交（对调并回到 0）。", parameters: [("progress", "0–1")], example: .tbar(progress: 0.5)),
+            CommandDoc(kind: .tbar, group: "切换", summary: "推杆位置 0–1；到 1 提交（对调并回到 0）。当前那组是 Stinger、还没选输入时照推（提案 029 不管 T-bar）：什么都不叠，推过换底拍那一格就是新画面。", parameters: [("progress", "0–1")], example: .tbar(progress: 0.5)),
             CommandDoc(kind: .ftb, group: "切换", summary: "渐黑开 / 关（显式目标，脚本可重放）；时长用状态里的 ftb.durationTicks（改它走 setFTBDuration）。", parameters: [("on", "true = 黑")], example: .ftb(on: true)),
             CommandDoc(kind: .setTransitionSlot, group: "切换",
                        summary: "改转场槽 1–4 之一的配置（效果 + 时长 + Wipe / Stinger 参数整体替换），转场进行中也收；改的是当前槽且空闲时当前那组同时按槽重拷，进行中的那一次按开始时的参数走完再重拷；相同配置 applied = false。",
                        parameters: [("slot", "1–4"), ("config", "{type: cut / fade / wipe / zoom / stinger, durationTicks: 时长（拍，≥ 0），wipe: {direction, softness 0–1}, stinger: {input 或不写, cutAtTick ≥ 0}}")],
                        example: .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: 60, wipe: WipeParams(direction: .topToBottom, softness: 0.2)))),
             CommandDoc(kind: .useTransitionSlot, group: "切换",
-                       summary: "选中转场槽 1–4（把槽拷进当前那组、currentSlot = slot）；start = true 同时开始 auto 转场、一拍内原子完成（cut / 时长 0 = 立即对调，Stinger 槽没选输入照常开始）；start = false 只选中给 T-bar / 回车用。转场进行中被拒（applied = false）。",
+                       summary: "选中转场槽 1–4（把槽拷进当前那组、currentSlot = slot）；start = true 同时开始 auto 转场、一拍内原子完成（cut / 时长 0 = 立即对调）；start = false 只选中给 T-bar / 回车用。转场进行中被拒（applied = false）；start = true 而这个槽是 Stinger、还没选输入时被拒（HTTP 400，不选中；提案 029），start = false 照常选中。",
                        parameters: [("slot", "1–4"), ("start", "true = 选中并开始；false = 只选中")], example: .useTransitionSlot(slot: 2, start: true)),
             CommandDoc(kind: .setFTBDuration, group: "切换",
                        summary: "改 FTB 淡入 / 淡出黑的时长（拍）；渐变进行中电平从当前值按新时长继续走、不跳变；相同值 applied = false；不跟随转场时长。",
@@ -271,8 +271,8 @@ public enum CommandCatalog {
             CommandDoc(kind: .setAFV, group: "音频", summary: "音频跟随视频开 / 关。", parameters: [("on", "开 / 关")], example: .setAFV(on: true)),
             CommandDoc(kind: .setMonitorMode, group: "音频", summary: "耳机监听方式：AFL（推子后）/ PFL（推子前）。",
                        parameters: [("mode", "afl / pfl")], example: .setMonitorMode(mode: .pfl)),
-            CommandDoc(kind: .setMonitorSource, group: "音频", summary: "耳机 / 监听总线上听哪条总线（master / busA / busB）；headphones 自己无效被拒；独听仍优先；与现状相同的值 applied = false。",
-                       parameters: [("bus", "0 = master, 1 = busA, 2 = busB（3 = headphones 无效）")], example: .setMonitorSource(bus: .busA)),
+            CommandDoc(kind: .setMonitorSource, group: "音频", summary: "耳机 / 监听总线上听哪条总线（master / busA / busB / headphones；headphones = 听耳机总线自己，只听每路 routing.headphones 送出的那些）；独听仍优先；与现状相同的值 applied = false。",
+                       parameters: [("bus", "0 = master, 1 = busA, 2 = busB, 3 = headphones（耳机总线自己）")], example: .setMonitorSource(bus: .busA)),
             CommandDoc(kind: .setBusEffects, group: "音频", summary: "整体替换一条总线的效果链；链顺序 = 处理顺序，enabled = false 的格旁路。",
                        parameters: [("bus", "0 = master, 1 = busA, 2 = busB, 3 = headphones"),
                                     ("effects", "[{id, enabled, params}]：id 与参数键见 CONTRACTS.md §2.4")],

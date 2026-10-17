@@ -11,8 +11,14 @@ public enum CommandValidator {
     /// 命令在当前状态下结构性非法的理由；nil = 放行（交给 reducer）。
     public static func reason(rejecting command: Command, in s: MixerState) -> String? {
         switch command {
-        case .cut, .autoTransition, .tbar, .ftb, .setAFV:
+        case .cut, .tbar, .ftb, .setAFV:
             return nil
+        case .autoTransition:
+            // 提案 029：空闲时要执行的当前那组是没选输入的 Stinger → 拒（空闲时它只随命令变）；进行中照旧交给 reducer
+            //（进行中再发本来就忽略，完成那一拍当前那组还可能按槽重拷）
+            let t = s.transition
+            guard !t.isActive, t.currentGroup.isStingerWithoutInput else { return nil }
+            return t.currentSlot.map { "转场 \($0) 是 Stinger、还没选输入" } ?? "当前转场是 Stinger、还没选输入"
         case .fade(let d):
             return d < 0 ? "转场时长不能为负：\(d)" : nil
         case .setTransition(_, let d):
@@ -28,8 +34,11 @@ public enum CommandValidator {
             if !TransitionSlot.indexRange.contains(slot) { return "转场槽必须是 1…\(TransitionSlot.count)：\(slot)" }
             if let input = config.stinger.input, s.input(input) == nil { return "Stinger 用的输入 \(input) 不存在" }
             return nil
-        case .useTransitionSlot(let slot, _):
-            return TransitionSlot.indexRange.contains(slot) ? nil : "转场槽必须是 1…\(TransitionSlot.count)：\(slot)"
+        case .useTransitionSlot(let slot, let start):
+            guard TransitionSlot.indexRange.contains(slot) else { return "转场槽必须是 1…\(TransitionSlot.count)：\(slot)" }
+            // 提案 029：没选输入的 Stinger 槽不执行（只选中照常）；槽的配置只随命令变，入口就拒（reducer 同判）
+            if start, slot - 1 < s.transition.slots.count, s.transition.slots[slot - 1].isStingerWithoutInput { return "转场 \(slot) 是 Stinger、还没选输入" }
+            return nil
         case .setFTBDuration(let ticks):
             return ticks < 0 ? "FTB 时长不能为负：\(ticks)" : nil
         case .overlay(let channel, _, let input):
@@ -49,11 +58,9 @@ public enum CommandValidator {
             return seconds.isFinite && seconds >= 0 ? nil : "定位秒数必须是 ≥ 0 的有限数：\(seconds)"
         case .busGain(let bus, _), .busMute(let bus, _), .setBusEffects(let bus, _):
             return s.audio.buses.contains { $0.bus == bus } ? nil : "总线 \(bus) 不存在"
-        case .setMonitorMode:
+        case .setMonitorMode, .setMonitorSource:
+            // 提案 026：四条总线都合法（headphones = 听耳机总线自己，P5-3 起；P5 时入口拒）
             return nil
-        case .setMonitorSource(let bus):
-            // 提案 026：耳机总线不能作自己的监听来源；不随拍变，入口就拒（reducer 对它也原样返回）
-            return bus == .headphones ? "监听来源只能是 master / busA / busB，不能是 headphones" : nil
         case .startRecord(let output), .stopRecord(let output):
             return outputReference(output, kind: .record, name: "录制", in: s)
         case .startStream(let output), .stopStream(let output):

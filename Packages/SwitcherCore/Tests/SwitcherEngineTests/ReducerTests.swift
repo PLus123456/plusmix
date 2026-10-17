@@ -20,6 +20,12 @@ final class ReducerTests: XCTestCase {
         return s
     }
 
+    /// 029 起没选输入的 Stinger 不开始（autoTransition 原样返回）：Wipe / Zoom / Stinger 共用的 auto 转场用例先给当前那组的 Stinger 选一路（3 号）。
+    /// Wipe / Zoom 不看 stinger 参数；当前那组从此不对应任何槽（currentSlot = nil），完成时不重拷。
+    static func stingerReadyState() -> MixerState {
+        MixerReducer().reduce(baseState(), .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 3, cutAtTick: 0)), at: Tick(0))
+    }
+
     // MARK: V6 切换
 
     func testV6_cut_isAtomicSwap_noIntermediateState() {
@@ -83,7 +89,7 @@ final class ReducerTests: XCTestCase {
         XCTAssertFalse(done.transition.isActive)
         // Wipe / Zoom / Stinger 同一规则
         for type in [TransitionType.wipe, .zoom, .stinger] {
-            let auto = reducer.reduce(reducer.reduce(Self.baseState(), .setTransition(type: type, durationTicks: 20), at: Tick(0)), .autoTransition, at: Tick(10))
+            let auto = reducer.reduce(reducer.reduce(Self.stingerReadyState(), .setTransition(type: type, durationTicks: 20), at: Tick(0)), .autoTransition, at: Tick(10))
             let m = reducer.advance(auto, to: Tick(15))
             XCTAssertEqual(reducer.reduce(m, .setPreview(input: 4), at: Tick(15)), m, "\(type) 进行中 setPreview 原样返回")
             XCTAssertEqual(reducer.advance(m, to: Tick(30)).program, 2, "\(type) 走完 PGM = 2")
@@ -126,7 +132,7 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(done.program, 2)
         XCTAssertEqual(done.preview, 1, "切出去的仍是开始时的 1 号，不是 3 号")
         for type in [TransitionType.wipe, .zoom, .stinger] {
-            let auto = reducer.reduce(reducer.reduce(Self.baseState(), .setTransition(type: type, durationTicks: 20), at: Tick(0)), .autoTransition, at: Tick(10))
+            let auto = reducer.reduce(reducer.reduce(Self.stingerReadyState(), .setTransition(type: type, durationTicks: 20), at: Tick(0)), .autoTransition, at: Tick(10))
             let m = reducer.advance(auto, to: Tick(15))
             XCTAssertEqual(reducer.reduce(m, .setProgram(input: 4), at: Tick(15)), m, "\(type) 进行中 setProgram 原样返回")
         }
@@ -246,7 +252,7 @@ final class ReducerTests: XCTestCase {
 
     func testV7_autoTransition_wipeZoomStinger_sameProgressRule() {
         for type in [TransitionType.wipe, .zoom, .stinger] {
-            var s = reducer.reduce(Self.baseState(), .setTransition(type: type, durationTicks: 10), at: Tick(0))
+            var s = reducer.reduce(Self.stingerReadyState(), .setTransition(type: type, durationTicks: 10), at: Tick(0))   // 029：Stinger 要选了输入
             XCTAssertEqual(s.transition.type, type)
             XCTAssertFalse(s.transition.isActive, "setTransition 不开始")
             s = reducer.reduce(s, .autoTransition, at: Tick(50))
@@ -455,7 +461,7 @@ final class ReducerTests: XCTestCase {
             Row("setMonitorMode", .setMonitorMode(mode: .pfl)) { $0.audio.monitorMode = .pfl },
             // 提案 026（P5）：耳机听哪条总线
             Row("setMonitorSource", .setMonitorSource(bus: .busB)) { $0.audio.monitorSource = .busB },
-            Row("setMonitorSource headphones 拒绝（自己听自己）", .setMonitorSource(bus: .headphones)) { _ in },
+            Row("setMonitorSource headphones = 听耳机总线自己（P5-3 起合法）", .setMonitorSource(bus: .headphones)) { $0.audio.monitorSource = .headphones },
             Row("setMonitorSource 相同值原样返回", .setMonitorSource(bus: .master)) { _ in },
             Row("setBusEffects", .setBusEffects(bus: .busA, effects: [EffectSlot(id: "peakLimiter")])) {
                 $0.audio.buses[Bus.busA.rawValue].effects = [EffectSlot(id: "peakLimiter")] },
@@ -505,8 +511,19 @@ final class ReducerTests: XCTestCase {
                 $0.transition.type = .wipe; $0.transition.durationTicks = 60; $0.transition.wipe = WipeParams(direction: .leftToRight, softness: 0); $0.transition.stinger = StingerParams(); $0.transition.currentSlot = 2 },
             Row("useTransitionSlot 选中并开始", .useTransitionSlot(slot: 3, start: true)) {
                 $0.transition.type = .zoom; $0.transition.durationTicks = 60; $0.transition.currentSlot = 3; $0.transition.startTick = tick; $0.transition.source = .auto; $0.transition.progress = 0 },
-            Row("useTransitionSlot Stinger 槽没选输入照常开始", .useTransitionSlot(slot: 4, start: true)) {
-                $0.transition.type = .stinger; $0.transition.durationTicks = 60; $0.transition.currentSlot = 4; $0.transition.startTick = tick; $0.transition.source = .auto },
+            // 提案 029（P5-3）：没选输入的 Stinger 槽不执行（不选中、不开始）；只选中照常；选了输入照常开始；autoTransition 要执行的当前那组是这种也拒
+            Row("useTransitionSlot Stinger 槽没选输入拒绝（029）", .useTransitionSlot(slot: 4, start: true)) { _ in },
+            Row("useTransitionSlot Stinger 槽没选输入只选中照常（029）", .useTransitionSlot(slot: 4, start: false)) {
+                $0.transition.type = .stinger; $0.transition.durationTicks = 60; $0.transition.currentSlot = 4 },
+            Row("useTransitionSlot Stinger 槽选了输入照常开始", before: { $0.transition.slots[3].stinger.input = 3 }, .useTransitionSlot(slot: 4, start: true)) {
+                $0.transition.type = .stinger; $0.transition.durationTicks = 60; $0.transition.stinger.input = 3; $0.transition.currentSlot = 4
+                $0.transition.startTick = tick; $0.transition.source = .auto },
+            Row("autoTransition 当前槽是没选输入的 Stinger 拒绝（029）", before: { $0.transition.select(slot: 4) }, .autoTransition) { _ in },
+            Row("autoTransition 当前那组是没选输入的 Stinger（不对应槽）也拒绝（029）",
+                before: { $0.transition.type = .stinger; $0.transition.durationTicks = 45; $0.transition.currentSlot = nil }, .autoTransition) { _ in },
+            Row("autoTransition 当前那组是选了输入的 Stinger 照常开始",
+                before: { $0.transition.type = .stinger; $0.transition.durationTicks = 45; $0.transition.stinger.input = 3; $0.transition.currentSlot = nil }, .autoTransition) {
+                $0.transition.startTick = tick },
             Row("useTransitionSlot 转场进行中拒绝", before: { $0.transition.startTick = Tick(40); $0.transition.progress = 2.0 / 30.0 }, .useTransitionSlot(slot: 2, start: true)) { _ in },
             Row("useTransitionSlot T-bar 推到一半拒绝", before: { $0.transition.progress = 0.4; $0.transition.source = .tbar }, .useTransitionSlot(slot: 2, start: false)) { _ in },
             Row("useTransitionSlot 槽越界拒绝", .useTransitionSlot(slot: 0, start: true)) { _ in },
@@ -725,29 +742,32 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(loaded.inputs[1].settings.effects, [], "搬走的效果格清掉")
     }
 
-    // MARK: 提案 026（P5）：耳机听哪条总线
+    // MARK: 提案 026（P5；headphones 用户 2026-10-12 允许，P5-3）：耳机听哪条总线
 
-    /// `setMonitorSource`：master / busA / busB 生效、只动 `audio.monitorSource`；headphones 自己无效、原样返回（回执 applied = false）；相同值原样返回。
-    /// 独听（monitorMode + solo）与监听点（monitorPoint）不受它影响。
-    func test026_setMonitorSource_rejectsHeadphones_andSameValueUnchanged() {
+    /// `setMonitorSource`：四条总线都生效、只动 `audio.monitorSource`——headphones = 听耳机总线自己（只听每路 routing.headphones 送出的那些；P5 时拒收）；
+    /// 相同值原样返回（回执 applied = false）。独听（monitorMode + solo）与监听点（monitorPoint）不受它影响。
+    func test026_setMonitorSource_acceptsAllFourBuses_andSameValueUnchanged() {
         let s = Self.baseState()
         XCTAssertEqual(s.audio.monitorSource, .master, "新状态默认听 Master")
-        for bus in [Bus.busA, .busB, .master] {
+        for bus in [Bus.busA, .busB, .headphones] {
             let after = reducer.reduce(s, .setMonitorSource(bus: bus), at: Tick(1))
             var expected = s
             expected.audio.monitorSource = bus
             XCTAssertEqual(after, expected, "\(bus)")
         }
-        XCTAssertEqual(reducer.reduce(s, .setMonitorSource(bus: .headphones), at: Tick(1)), s, "headphones 拒绝")
+        XCTAssertEqual(reducer.reduce(s, .setMonitorSource(bus: .master), at: Tick(1)), s, "相同值原样返回")
         var onB = s
         onB.audio.monitorSource = .busB
-        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .headphones), at: Tick(2)), onB, "已经在听 busB 时发 headphones 也不改")
-        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .busB), at: Tick(3)), onB, "相同值原样返回")
+        var onHeadphones = s
+        onHeadphones.audio.monitorSource = .headphones
+        XCTAssertEqual(reducer.reduce(onB, .setMonitorSource(bus: .headphones), at: Tick(2)), onHeadphones, "从 busB 换到耳机总线自己")
+        XCTAssertEqual(reducer.reduce(onHeadphones, .setMonitorSource(bus: .headphones), at: Tick(3)), onHeadphones, "相同值原样返回")
+        XCTAssertEqual(reducer.reduce(onHeadphones, .setMonitorSource(bus: .master), at: Tick(3)), s, "回到 Master")
         // 与监听方式 / 监听点互不影响
-        let pfl = reducer.reduce(onB, .setMonitorMode(mode: .pfl), at: Tick(4))
-        XCTAssertEqual(pfl.audio.monitorSource, .busB)
+        let pfl = reducer.reduce(onHeadphones, .setMonitorMode(mode: .pfl), at: Tick(4))
+        XCTAssertEqual(pfl.audio.monitorSource, .headphones)
         XCTAssertEqual(pfl.audio.monitorMode, .pfl)
-        XCTAssertEqual(pfl.audio.monitorPoint, onB.audio.monitorPoint)
+        XCTAssertEqual(pfl.audio.monitorPoint, onHeadphones.audio.monitorPoint)
     }
 
     // MARK: 提案 020（P5-2）：转场槽 + FTB 时长
@@ -793,7 +813,7 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(cut.transition.currentGroup, committed.transition.currentGroup)
     }
 
-    /// useTransitionSlot(start: true) 一拍内原子完成：类型 cut 或时长 0 的槽立即对调；Stinger 槽没选输入照常开始；start = false 只选中。
+    /// useTransitionSlot(start: true) 一拍内原子完成：类型 cut 或时长 0 的槽立即对调；start = false 只选中（Stinger 槽没选输入的 029 起拒收，见 test029_*）。
     func test020_useTransitionSlot_startAtomic_cutSlotCompletesImmediately() {
         let withCut = reducer.reduce(Self.baseState(), .setTransitionSlot(slot: 3, config: TransitionSlot(type: .cut, durationTicks: 0)), at: Tick(1))
         let cut = reducer.reduce(withCut, .useTransitionSlot(slot: 3, start: true), at: Tick(2))
@@ -876,6 +896,95 @@ final class ReducerTests: XCTestCase {
         var broken = Self.baseState()
         broken.transition.slots.removeLast()
         XCTAssertEqual(reducer.reduce(Self.baseState(), .loadShow(show: Show(name: "3 个槽", state: broken)), at: Tick(1)), Self.baseState(), "slots 不是 4 个（且非空）被拒")
+    }
+
+    // MARK: 提案 029（用户 2026-10-12 定，P5-3）：没选输入的 Stinger 槽拒收
+
+    /// useTransitionSlot(start: true) 遇到效果 = Stinger 且没选输入的槽（`isStingerWithoutInput`）：状态原样（不选中、不开始；回执 applied = false）——
+    /// 看槽的配置不看槽号（出厂槽 4，或改成 Stinger 的槽 2 一样）；start = false 照常选中（之后 T-bar 用）；给槽选了输入照常开始；removeInput 清掉那一路后又拒。
+    func test029_useTransitionSlot_stingerWithoutInput_startRefused_selectAllowed() async {
+        let s0 = Self.baseState()
+        XCTAssertTrue(s0.transition.slots[3].isStingerWithoutInput, "出厂槽 4 = Stinger、没选输入")
+        XCTAssertEqual(reducer.reduce(s0, .useTransitionSlot(slot: 4, start: true), at: Tick(10)), s0, "不选中、不开始")
+        let selected = reducer.reduce(s0, .useTransitionSlot(slot: 4, start: false), at: Tick(10))
+        XCTAssertEqual(selected.transition.currentSlot, 4)
+        XCTAssertEqual(selected.transition.type, .stinger)
+        XCTAssertFalse(selected.transition.isActive, "只选中照常")
+        XCTAssertEqual(reducer.reduce(selected, .useTransitionSlot(slot: 4, start: true), at: Tick(11)), selected, "已是当前槽也一样拒")
+        // 别的槽改成没选输入的 Stinger：同样拒（看配置，不看槽号）
+        let slot2 = reducer.reduce(s0, .setTransitionSlot(slot: 2, config: TransitionSlot(type: .stinger, durationTicks: 30)), at: Tick(12))
+        XCTAssertEqual(reducer.reduce(slot2, .useTransitionSlot(slot: 2, start: true), at: Tick(13)), slot2)
+        // 选了输入：照常一拍内选中并开始，走完对调
+        let armed = reducer.reduce(s0, .setTransitionSlot(slot: 4, config: TransitionSlot(type: .stinger, durationTicks: 60, stinger: StingerParams(input: 3, cutAtTick: 20))), at: Tick(14))
+        let started = reducer.reduce(armed, .useTransitionSlot(slot: 4, start: true), at: Tick(15))
+        XCTAssertTrue(started.transition.isActive)
+        XCTAssertEqual(started.transition.startTick, Tick(15))
+        XCTAssertEqual(started.transition.currentSlot, 4)
+        XCTAssertEqual(started.transition.stinger, StingerParams(input: 3, cutAtTick: 20))
+        XCTAssertEqual(reducer.advance(started, to: Tick(75)).program, 2, "走完对调")
+        // 删掉 Stinger 用的那一路：槽里的引用清掉（020），又成了没选输入的槽
+        let removed = reducer.reduce(armed, .removeInput(input: 3), at: Tick(16))
+        XCTAssertTrue(removed.transition.slots[3].isStingerWithoutInput)
+        XCTAssertEqual(reducer.reduce(removed, .useTransitionSlot(slot: 4, start: true), at: Tick(17)), removed)
+
+        // 状态机：结构合法、走到 reducer，回执 applied = false，当前槽仍是 1
+        let sm = StateMachine(initialState: s0)
+        sm.start()
+        defer { sm.stop() }
+        guard case .applied(let receipt) = await sm.submit(IssuedCommand(sequence: 1, issuedAt: .now(), command: .useTransitionSlot(slot: 4, start: true))) else {
+            return XCTFail("useTransitionSlot 应走到 reducer")
+        }
+        XCTAssertFalse(receipt.applied, "没选输入的 Stinger 槽不执行")
+        let after = await sm.state
+        XCTAssertEqual(after.transition.currentSlot, 1, "没被选中")
+        XCTAssertFalse(after.transition.isActive)
+    }
+
+    /// autoTransition（回车 / "执行当前转场" / 格子"转场" / 兼容层老路）：要执行的当前那组是没选输入的 Stinger → 原样（applied = false）——当前槽是这种槽，
+    /// 或 setTransition / setTransitionParams 直接给的（currentSlot = nil）都算，否则绕过 useTransitionSlot 还是一次延迟硬切。给当前那组选了输入照常开始。
+    /// fade（总是 Fade）、cut 不受影响；T-bar 不动——推这样的当前那组照收（progress = 推杆位置），推到 1 提交、拉回 0 取消（画面口径见 CONTRACTS.md 转场槽一段）。
+    func test029_autoTransition_currentStingerWithoutInput_refused_tbarUnaffected() async {
+        let s0 = Self.baseState()
+        let slot4 = reducer.reduce(s0, .useTransitionSlot(slot: 4, start: false), at: Tick(1))
+        XCTAssertTrue(slot4.transition.currentGroup.isStingerWithoutInput)
+        XCTAssertEqual(reducer.reduce(slot4, .autoTransition, at: Tick(2)), slot4, "当前槽是没选输入的 Stinger")
+        // 老命令直接给的（不对应任何槽）同样拒
+        let legacy = reducer.reduce(s0, .setTransition(type: .stinger, durationTicks: 45), at: Tick(1))
+        XCTAssertNil(legacy.transition.currentSlot)
+        XCTAssertEqual(reducer.reduce(legacy, .autoTransition, at: Tick(2)), legacy, "setTransition 选的没选输入的 Stinger")
+        // 选了输入：照常开始、走完对调
+        let armed = reducer.reduce(legacy, .setTransitionParams(wipe: WipeParams(), stinger: StingerParams(input: 3, cutAtTick: 10)), at: Tick(2))
+        let started = reducer.reduce(armed, .autoTransition, at: Tick(3))
+        XCTAssertEqual(started.transition.startTick, Tick(3))
+        XCTAssertEqual(reducer.advance(started, to: Tick(48)).program, 2)
+        // fade / cut 不受影响
+        let faded = reducer.reduce(slot4, .fade(durationTicks: 30), at: Tick(4))
+        XCTAssertTrue(faded.transition.isActive)
+        XCTAssertEqual(faded.transition.type, .fade)
+        let cut = reducer.reduce(slot4, .cut, at: Tick(4))
+        XCTAssertEqual(cut.program, 2); XCTAssertEqual(cut.preview, 1)
+        XCTAssertEqual(cut.transition.currentGroup, slot4.transition.currentGroup, "cut 完成按当前槽重拷，仍是槽 4")
+        // T-bar 不动：推到一半照收，推到 1 提交，拉回 0 取消
+        let half = reducer.reduce(slot4, .tbar(progress: 0.5), at: Tick(5))
+        XCTAssertEqual(half.transition.progress, 0.5)
+        XCTAssertEqual(half.transition.source, .tbar)
+        XCTAssertEqual(half.transition.type, .stinger)
+        XCTAssertEqual(reducer.reduce(half, .tbar(progress: 1), at: Tick(6)).program, 2)
+        let back = reducer.reduce(half, .tbar(progress: 0), at: Tick(6))
+        XCTAssertFalse(back.transition.isActive)
+        XCTAssertEqual(back.program, 1)
+
+        // 状态机：回执 applied = false
+        let sm = StateMachine(initialState: slot4)
+        sm.start()
+        defer { sm.stop() }
+        guard case .applied(let receipt) = await sm.submit(IssuedCommand(sequence: 1, issuedAt: .now(), command: .autoTransition)) else {
+            return XCTFail("autoTransition 应走到 reducer")
+        }
+        XCTAssertFalse(receipt.applied)
+        let after = await sm.state
+        XCTAssertFalse(after.transition.isActive)
+        XCTAssertEqual(after.program, 1)
     }
 
     // MARK: 提案 021（P5-2）：切上 PGM 时从头播

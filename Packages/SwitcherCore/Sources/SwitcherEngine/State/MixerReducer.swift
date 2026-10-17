@@ -19,6 +19,8 @@ import SwitcherContracts
 //
 // 转场槽（提案 020，P5-2）：`completeTransition` 在 currentSlot 非 nil 时总是把当前那组按槽重拷（幂等）——进行中改了当前槽的，完成那一拍生效；
 // fade / setTransition / setTransitionParams 执行后 currentSlot = 当前那组仍对得上的槽（优先原来那个），对不上任何槽 → nil。
+// 没选输入的 Stinger（提案 029，P5-3；`TransitionSlot.isStingerWithoutInput`）不执行：useTransitionSlot(start: true) 对这种槽、autoTransition 对这种当前那组原样返回
+//（否则是一次延迟硬切）；只选中、T-bar、cut、fade 照旧。
 // 文件播放（提案 021）：reducer 只记状态（paused / 一次定位请求 (seekTick, seekSeconds)），真正的 pause / seek 由组装方交给 FileInput；
 // 新 PGM 那一路若 restartOnProgram，四处换人（cut / auto 完成 / T-bar 提交 / setProgram）在同一拍写定位 0，与手发 seekPlayback(0) 同一条路。
 
@@ -138,6 +140,8 @@ public struct MixerReducer: MixerReducing {
         case .useTransitionSlot(let slot, let start):
             // 020：转场进行中被拒（与 setTransition / autoTransition 同口径）；只选中且已是当前槽、当前那组相同 → 原样
             guard !s.transition.isActive, TransitionSlot.indexRange.contains(slot), slot - 1 < s.transition.slots.count else { return state }
+            // 029：没选输入的 Stinger 槽不执行（不选中、不开始）；只选中照常
+            if start, s.transition.slots[slot - 1].isStingerWithoutInput { return state }
             if !start, s.transition.currentSlot == slot, s.transition.currentGroup == s.transition.slots[slot - 1] { return state }
             s.transition.select(slot: slot)
             if start { Self.startAuto(&s, at: tick) }
@@ -155,7 +159,8 @@ public struct MixerReducer: MixerReducing {
                 }
             }
         case .autoTransition:
-            guard !s.transition.isActive else { return state }
+            // 029：要执行的当前那组是没选输入的 Stinger 也拒（当前槽是这种槽，或 setTransition / setTransitionParams 直接给的）
+            guard !s.transition.isActive, !s.transition.currentGroup.isStingerWithoutInput else { return state }
             Self.startAuto(&s, at: tick)
         case .setPreview(let input):
             guard !s.transition.isActive, Self.isValidReference(input, in: s) else { return state }
@@ -233,8 +238,7 @@ public struct MixerReducer: MixerReducing {
         case .setMonitorMode(let mode):
             s.audio.monitorMode = mode
         case .setMonitorSource(let bus):
-            // 提案 026：耳机听哪条总线；headphones 自己无效（校验器也拒），原样返回
-            guard bus != .headphones else { return state }
+            // 提案 026：耳机听哪条总线；headphones = 听耳机总线自己（P5-3 起合法）；相同值状态不变
             s.audio.monitorSource = bus
         case .setBusEffects(let bus, let effects):
             guard let i = Self.busIndex(bus, in: s) else { return state }

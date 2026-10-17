@@ -86,6 +86,11 @@ public struct TransitionSlot: Hashable, Codable, Sendable {
 
     /// JSON 键名。
     public static let jsonKeys = ["type", "durationTicks", "wipe", "stinger"]
+
+    /// 效果是 Stinger 但还没选输入（`stinger.input == nil`；提案 029，用户 2026-10-12 定，P5-3）：这种槽 `useTransitionSlot(start: true)` 拒收、
+    /// 当前那组（`TransitionState.currentGroup`）是这种时 `autoTransition` 拒收——校验器 400、reducer 原样返回；否则执行出来是一次延迟硬切
+    ///（渲染器对 nil 输入不叠任何东西，底在换底拍换）。只选中（start = false）、T-bar、cut、fade 不受影响。计算属性，不进 JSON。
+    public var isStingerWithoutInput: Bool { type == .stinger && stinger.input == nil }
 }
 
 /// 转场状态。空闲时 `type` / `durationTicks` 就是"下一次转场"的选择（UI 的转场按钮和时长预设改的是它）。
@@ -445,9 +450,9 @@ public struct AudioState: Hashable, Codable, Sendable {
     public var alignmentFrames: Int
     /// 耳机 / 监听总线取对齐延迟线之前（低延迟监听，默认）还是之后（与节目画面对齐）。提案 007；同上，没有对应命令。
     public var monitorPoint: MonitorPoint
-    /// 耳机 / 监听总线上听的是哪条总线（提案 026，用户 2026-10-10 批）：master（默认，老文件缺键也是）/ busA / busB；走 `setMonitorSource`。
-    /// `headphones` 自己无效：命令在校验器 / reducer 被拒，文件 / API 全量状态里出现的按 master 读。独听（PFL / AFL，`monitorMode` + 每路 solo）仍优先于它。
-    /// 设备客户端按它取总线送耳机（引擎侧归 W1-D3 / prompt 102；之前耳机固定听 Master）。
+    /// 耳机 / 监听总线上听的是哪条总线（提案 026，用户 2026-10-10 批）：master（默认，老文件缺键也是）/ busA / busB / headphones；走 `setMonitorSource`。
+    /// `headphones` = 听耳机总线自己：只听每路 `routing.headphones` 送出的那些（W1-D2 的旧行为；用户 2026-10-12 允许，P5-3——P5 时判无效、读成 master）。
+    /// 独听（PFL / AFL，`monitorMode` + 每路 solo）仍优先于它，四个值同一口径。混音器按它选耳机出口（W1-D3，`SW_CMD_MONITOR_SOURCE`）。
     public var monitorSource: Bus
 
     /// 对齐延迟的默认值（帧）。
@@ -465,7 +470,7 @@ public struct AudioState: Hashable, Codable, Sendable {
 
     enum CodingKeys: String, CodingKey { case buses, afv, monitorMode, alignmentFrames, monitorPoint, monitorSource }
 
-    /// 老 Show / 老快照没有 alignmentFrames / monitorPoint（提案 007）/ monitorSource（提案 026）：缺键给默认值；monitorSource = headphones 按 master 读。写出总是写全。
+    /// 老 Show / 老快照没有 alignmentFrames / monitorPoint（提案 007）/ monitorSource（提案 026）：缺键给默认值；monitorSource 四个值按字面读（P5-3 起 headphones 不再读成 master）。写出总是写全。
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         buses = try c.decode([BusState].self, forKey: .buses)
@@ -473,8 +478,7 @@ public struct AudioState: Hashable, Codable, Sendable {
         monitorMode = try c.decode(MonitorMode.self, forKey: .monitorMode)
         alignmentFrames = try c.decodeIfPresent(Int.self, forKey: .alignmentFrames) ?? AudioState.defaultAlignmentFrames
         monitorPoint = try c.decodeIfPresent(MonitorPoint.self, forKey: .monitorPoint) ?? .preDelayLine
-        let source = try c.decodeIfPresent(Bus.self, forKey: .monitorSource) ?? .master
-        monitorSource = source == .headphones ? .master : source
+        monitorSource = try c.decodeIfPresent(Bus.self, forKey: .monitorSource) ?? .master
     }
 
     /// JSON 键名。
