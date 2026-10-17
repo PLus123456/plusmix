@@ -29,4 +29,4 @@ hdiutil create -quiet -volname "$volname" -srcfolder "$stage/root" -ov -format U
 hdiutil verify -quiet "$out" || { echo "[dmg] hdiutil verify 失败" >&2; exit 1; }
 if [ -n "$identity" ]; then codesign --force --sign "$identity" --timestamp "$out" || { echo "[dmg] DMG 签名失败" >&2; exit 1; }; fi
 (cd "$(dirname "$out")" && shasum -a 256 "$(basename "$out")" > "$(basename "$out").sha256")
-echo "[dmg] $out（$(du -h "$out" | cut -f1 | tr -d ' ')）$( [ -n "$identity" ] && echo '已签名' || echo '未签名（没有身份）')"
+echo "[dmg] ${out}（$(du -h "$out" | cut -f1 | tr -d ' ')）$( [ -n "$identity" ] && echo '已签名' || echo '未签名（没有身份）')"

@@ -285,6 +285,21 @@ def s3_verdict(perf, threads=None):
             "meets_target": cpu_judged <= S3_CPU_TARGET and gpu <= S3_GPU_TARGET, "note": note}
 
 
+def a3_with_segment_completeness(a3, missing, total):
+    """T01（Codex 2026-10-13 审查，G9 修）：frameprobe 按 5 分钟分段跑，有段没出结果（probe-seg/failed.txt）时原来只合并成功的段、缺段只写进文末备注，
+    A3 / A2 / 离线不连续按剩下的段判、总判定照样"通过"（构造 96 段只剩首尾 2 段，overall_pass 仍 true）。缺段 = 判不全 → A3 不过（pass = False，带 incomplete_segments），
+    不是 None（None 只用于"没有产物、判不了"，overall_verdict 对 None 放行）。"""
+    if not missing:
+        return a3
+    out = dict(a3)
+    out["pass"] = False
+    out["meets_target"] = False
+    out["incomplete_segments"] = list(missing)
+    out["note"] = (f"frameprobe 缺 {len(missing)} / {total} 段（probe-seg/failed.txt、probe.err）：缺段里的 A2 配对与离线不连续没算进来，A3 判不过"
+                   + ("；" + a3["note"] if a3.get("note") else ""))
+    return out
+
+
 def overall_verdict(s1, s2, s3, a3):
     """L4 总判定（§5）：S1 通过，S2 没判失败（短跑只作参考不算失败），S3 通过（判得了的话），A3 没判失败（判不了 = None 不算失败）。"""
     return bool(s1["pass"]) and s2.get("verdict") != "fail" and s3.get("pass") is not False and a3.get("pass") is not False

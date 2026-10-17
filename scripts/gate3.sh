@@ -68,7 +68,7 @@ if [ "$do_run" = 1 ]; then
 fi
 step "环境：$(grep -E '^(cpu|macos|power|load_before)=' "$env_file" | tr '\n' ' ')"
 if pgrep -x Cyberpunk2077 >/dev/null 2>&1 || [ "$(uptime | sed 's/.*load averages: //' | cut -d' ' -f1 | cut -d. -f1)" -ge 8 ]; then
-  red "警告：机器上有其它重负载（见 $env_file），V1/V3 的数字不可信；建议等机器空闲再跑"
+  red "警告：机器上有其它重负载（见 ${env_file}），V1/V3 的数字不可信；建议等机器空闲再跑"
 fi
 
 # ---- 1. 编译 ----
@@ -118,7 +118,7 @@ if [ "$do_run" = 1 ]; then
   echo "load_after=$(uptime | sed 's/.*load averages: //')" >> "$env_file"
   tail -n 30 "$run_log"
   [ "$rc" = 0 ] || { red "headless 退出码 $rc"; exit 1; }
-  [ "$client_status" = 0 ] || red "apitest 客户端退出码 $client_status（C 系列可能不完整，继续出报告）"
+  [ "$client_status" = 0 ] || red "apitest 客户端退出码 ${client_status}（C 系列可能不完整，继续出报告）"
 fi
 [ -s "$stats" ] || { red "没有 $stats"; exit 1; }
 [ -s "$movie" ] || { red "没有 $movie"; exit 1; }

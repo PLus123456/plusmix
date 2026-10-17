@@ -21,9 +21,9 @@ skip() { yellow "  SKIP $*"; exit 77; }
 note() { printf '  ·    %s\n' "$*"; }
 
 # assert_true <说明> <命令...>：命令退出 0 就 ok
-assert_true() { local msg=$1; shift; if "$@" >/dev/null 2>&1; then ok "$msg"; else fail "$msg（命令：$*）"; fi; }
+assert_true() { local msg=$1; shift; if "$@" >/dev/null 2>&1; then ok "$msg"; else fail "${msg}（命令：$*）"; fi; }
 # assert_false <说明> <命令...>：命令退出非 0 就 ok
-assert_false() { local msg=$1; shift; if "$@" >/dev/null 2>&1; then fail "$msg（命令本该失败：$*）"; else ok "$msg"; fi; }
+assert_false() { local msg=$1; shift; if "$@" >/dev/null 2>&1; then fail "${msg}（命令本该失败：$*）"; else ok "$msg"; fi; }
 assert_file() { if [ -e "$1" ]; then ok "存在：${2:-$1}"; else fail "缺文件：${2:-$1}"; fi; }
 assert_no_file() { if [ -e "$1" ]; then fail "不该存在：${2:-$1}"; else ok "不存在：${2:-$1}"; fi; }
 assert_eq() { if [ "$1" = "$2" ]; then ok "$3 = $1"; else fail "$3：期望 [$2]，实际 [$1]"; fi; }

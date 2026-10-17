@@ -28,7 +28,7 @@ submit=$target; tmpzip=""
 case "$target" in
   *.app) tmpzip=$(mktemp -d)/$(basename "$target" .app).zip; ditto -c -k --keepParent "$target" "$tmpzip"; submit=$tmpzip ;;
 esac
-echo "[notarize] 提交 $(basename "$submit")（最多等 $timeout）"
+echo "[notarize] 提交 $(basename "$submit")（最多等 ${timeout}）"
 out=$(xcrun notarytool submit "$submit" "${creds[@]}" --wait --timeout "$timeout" 2>&1); code=$?
 printf '%s\n' "$out" | sed 's/^/    /'
 id=$(printf '%s' "$out" | sed -n 's/^ *id: \([0-9a-f-]*\).*/\1/p' | head -1)
@@ -40,4 +40,4 @@ if [ $code != 0 ] || [ "$status" != Accepted ]; then
   exit 1
 fi
 if [ "$staple" = 1 ]; then xcrun stapler staple "$target" || { echo "[notarize] stapler staple 失败" >&2; exit 1; }; xcrun stapler validate "$target" >/dev/null && echo "[notarize] 已 staple：$target"; fi
-echo "[notarize] Accepted（id $id）"
+echo "[notarize] Accepted（id ${id}）"

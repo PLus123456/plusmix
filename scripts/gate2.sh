@@ -59,7 +59,7 @@ env_file="$out_dir/environment.txt"
 } > "$env_file"
 step "环境：$(grep -E '^(cpu|macos|power|load_before)=' "$env_file" | tr '\n' ' ')"
 if pgrep -x Cyberpunk2077 >/dev/null 2>&1 || [ "$(uptime | sed 's/.*load averages: //' | cut -d' ' -f1 | cut -d. -f1)" -ge 8 ]; then
-  red "警告：机器上有其它重负载（见 $env_file），V1/V3 的数字不可信；建议等机器空闲再跑"
+  red "警告：机器上有其它重负载（见 ${env_file}），V1/V3 的数字不可信；建议等机器空闲再跑"
 fi
 
 # ---- 1. 编译 ----
@@ -114,7 +114,7 @@ print(",".join(parts))
 PY
 )
 program_fps=$(python3 -c "import json,sys; fr=json.load(open('$show'))['mixer']['format']['frameRate']; print(fr['numerator']/fr['denominator'])")
-step "frameprobe stats（V4 / V5，--fps $program_fps --input-fps $input_fps）"
+step "frameprobe stats（V4 / V5，--fps $program_fps --input-fps ${input_fps}）"
 # --out + --markdown 并用：一遍解码同时写 JSON 文件并打印人读表（60 分钟的文件每遍约 7 分钟）
 "$frameprobe" stats "$movie" --fps "$program_fps" --input-fps "$input_fps" --max-events 20 --out "$out_dir/probe-stats.json" --markdown > "$out_dir/probe-stats.md"
 step "frameprobe switches（V6，M0 只记录不判定）"

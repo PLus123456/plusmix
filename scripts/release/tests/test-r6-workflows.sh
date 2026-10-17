@@ -62,7 +62,7 @@ print("\n".join(l[cut:] for l in body))
 PY
 then
   if (cd "$REPO_ROOT" && GITHUB_OUTPUT="$outf" GITHUB_REF_NAME="v$(marketing_version)" bash -e "$step") >"$outf.log" 2>&1; then ok "ver 这步在仓库根跑得通（tag v$(marketing_version)）"
-  else fail "ver 这步跑失败（脚本 $step，输出 $outf.log）"; fi
+  else fail "ver 这步跑失败（脚本 ${step}，输出 $outf.log）"; fi
 else
   fail "release.yml 里找不到 id: ver 那步的 run 脚本"
 fi

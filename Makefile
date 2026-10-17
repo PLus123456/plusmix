@@ -25,7 +25,7 @@ BRANCH ?= $(shell git symbolic-ref --short -q HEAD 2>/dev/null || echo main)
 EXTRA_LINTS := $(filter-out scripts/lint-rules.sh scripts/check-deps.sh scripts/check-ownership.sh,\
                  $(wildcard scripts/lint-*.sh scripts/check-*.sh))
 
-.PHONY: all gen build test lint clean help manual build-packages build-tools build-app test-packages test-tools test-app
+.PHONY: all gen build test lint clean help manual build-packages build-tools build-app test-packages test-tools test-app frameprobe-release
 
 all: gen build test lint
 
@@ -67,10 +67,16 @@ build-app: $(XCODEPROJ)/project.pbxproj
 # ---------- test ----------
 # 三组都跑完再判（P4 / W3-E3 / W3-C3 三个会话都撞到"第一个包红了后面全不跑"：macOS 27 上 SwitcherRender 有 3 处环境红，make test 每次都停在第一个包）
 test:
-	@fail=0; for t in test-packages test-tools test-app; do $(MAKE) --no-print-directory $$t || fail=1; done; \
+	@fail=0; for t in test-tools test-packages test-app; do $(MAKE) --no-print-directory $$t || fail=1; done; \
 	  [ $$fail = 0 ] || { echo "make test：有失败的组（见上）"; exit 1; }
 
-test-packages:
+# T04（Codex 2026-10-13 审查，G9 修）：包测试里 MediaMTX / ISO 用例与 App 的推流 / ISO 用例直接调 Tools/frameprobe/.build/release/frameprobe，
+# 旧二进制也算"有"——test 原来先跑包测试、后编工具，用例拿到的是上一次编的 frameprobe（9 月的旧 CLI 对新参数只回版本号、9 条推流用例"没有 JSON"）。
+# 现在包测试 / App 测试前先把 release 版编到当前源码；make test 的三组改成 test-tools 在前。
+frameprobe-release:
+	@echo "== swift build -c release Tools/frameprobe"; swift build -c release --package-path Tools/frameprobe
+
+test-packages: frameprobe-release
 	@failed=""; for p in $(PACKAGES); do echo "== swift test $$p"; swift test --package-path $$p || failed="$$failed $$p"; done; \
 	  if [ -n "$$failed" ]; then echo "test-packages：失败的包：$$failed"; exit 1; else echo "test-packages：$(words $(PACKAGES)) 个包全过"; fi
 
@@ -84,7 +90,7 @@ test-tools:
 	  echo "$$out" | grep -qE "^$$name [0-9]+\.[0-9]+\.[0-9]+" || { echo "   冒烟失败：$$bin 输出不含版本"; exit 1; }; \
 	done
 
-test-app: $(XCODEPROJ)/project.pbxproj
+test-app: frameprobe-release $(XCODEPROJ)/project.pbxproj
 	@echo "== xcodebuild test $(SCHEME)"
 	$(XCB) $(XCB_FLAGS) test
 

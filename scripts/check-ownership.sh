@@ -165,7 +165,7 @@ while IFS=$'\t' read -r added deleted path; do
   lines=$((added + deleted))
   denied=0
   for d in "${deny[@]:-}"; do [ -n "$d" ] && match_glob "$path" "$d" && denied=1; done
-  if [ "$denied" = 1 ]; then violations+=("$path（明确排除）"); continue; fi
+  if [ "$denied" = 1 ]; then violations+=("${path}（明确排除）"); continue; fi
   ok=0
   for a in "${allow[@]}"; do match_glob "$path" "$a" && { ok=1; break; }; done
   [ "$ok" = 1 ] && continue
@@ -211,7 +211,7 @@ done
 
 total=$(printf '%s\n' "$changes" | wc -l | tr -d ' ')
 if [ "${#violations[@]}" -gt 0 ]; then
-  red "[check-ownership] $branch 越界（相对 $base，共 $total 个改动文件）。允许：${allow[*]}"
+  red "[check-ownership] $branch 越界（相对 ${base}，共 $total 个改动文件）。允许：${allow[*]}"
   for v in "${violations[@]}"; do printf '    %s\n' "$v"; done
   exit 1
 fi

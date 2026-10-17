@@ -26,11 +26,11 @@ lines=("## 编译矩阵（scripts/gate4-matrix.sh，$(date '+%Y-%m-%d %H:%M')）
 all_ok=1
 run_config() { # $1 名字 $2 说明 $3... 环境变量赋值
   local name=$1 desc=$2; shift 2
-  step "配置 $name（$desc）：$*"
+  step "配置 ${name}（${desc}）：$*"
   local blog="$out/build-$name.log" tlog="$out/test-$name.log" bres tres ok=1 tsum="—"
-  if env "$@" swift build --package-path "$pkg" > "$blog" 2>&1; then bres="✅"; else bres="❌（看 $blog）"; ok=0; fi
+  if env "$@" swift build --package-path "$pkg" > "$blog" 2>&1; then bres="✅"; else bres="❌（看 ${blog}）"; ok=0; fi
   if [ "$run_tests" = 1 ] && [ "$ok" = 1 ]; then
-    if env "$@" swift test --package-path "$pkg" --filter 'NDITests|DeckLinkTests' > "$tlog" 2>&1; then tres="✅"; else tres="❌（看 $tlog）"; ok=0; fi
+    if env "$@" swift test --package-path "$pkg" --filter 'NDITests|DeckLinkTests' > "$tlog" 2>&1; then tres="✅"; else tres="❌（看 ${tlog}）"; ok=0; fi
     # 只数每个 .xctest target 的汇总行（Xcode 27 的 swift test 对每个类、每个 target、"All tests" 各印一次 Executed）；
     # 行形如 "Executed 20 tests, with 2 tests skipped and 0 failures (0 unexpected)"
     tsum=$(python3 - "$tlog" <<'PYSUM'
@@ -51,7 +51,7 @@ PYSUM
     [ -n "$tsum" ] || tsum=$(grep -E 'Executed [0-9]+ tests?' "$tlog" | tail -1)
   fi
   [ "$ok" = 1 ] || all_ok=0
-  lines+=("| $name | $desc（\`$*\`） | $bres | ${tres:-未跑} $tsum | $([ "$ok" = 1 ] && echo ✅ || echo ❌) |")
+  lines+=("| $name | ${desc}（\`$*\`） | $bres | ${tres:-未跑} $tsum | $([ "$ok" = 1 ] && echo ✅ || echo ❌) |")
 }
 run_config A "都在（本机默认）" NOOP_MATRIX=1
 run_config B "只有 NDI" DECKLINK_SDK_DIR=/nonexistent
@@ -61,5 +61,5 @@ env swift build --package-path "$pkg" > "$out/build-restore.log" 2>&1 || true
 lines+=("" "- 日志：\`$out/\`。切配置只改环境变量（清单重新求值），最后按默认配置重编一次还原产物。" "- 结论：**$([ "$all_ok" = 1 ] && echo 通过 || echo 未通过)**。")
 printf '%s\n' "${lines[@]}" > "$report"
 printf '%s\n' "${lines[@]}"
-[ "$all_ok" = 1 ] && green "编译矩阵通过 → $report" || red "编译矩阵有配置失败（$report）"
+[ "$all_ok" = 1 ] && green "编译矩阵通过 → $report" || red "编译矩阵有配置失败（${report}）"
 [ "$all_ok" = 1 ]

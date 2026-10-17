@@ -57,7 +57,7 @@ if [ -z "$yml_ver" ] || [ -z "$swift_ver" ]; then
   red "[lint-rules] 版本号：读不到 MARKETING_VERSION（project.yml）或 SwitcherVersion.current（Version.swift）"
   status=1
 elif [ "$yml_ver" != "$swift_ver" ]; then
-  red "[lint-rules] 版本号不一致：project.yml=$yml_ver，Version.swift=$swift_ver（两处都归 G5 改）"
+  red "[lint-rules] 版本号不一致：project.yml=${yml_ver}，Version.swift=${swift_ver}（两处都归 G5 改）"
   status=1
 else
   green "[lint-rules] 版本号一致：$yml_ver"
@@ -67,9 +67,9 @@ fi
 pkg_bad=0
 for m in Packages/*/Package.swift Tools/*/Package.swift; do
   [ -f "$m" ] || continue
-  head -1 "$m" | grep -q '^// swift-tools-version: *6\.0' || { red "[lint-rules] $m：首行必须是 // swift-tools-version: 6.0"; pkg_bad=1; }
-  grep -q 'swiftLanguageModes: *\[\.v6\]' "$m" || { red "[lint-rules] $m：必须声明 swiftLanguageModes: [.v6]"; pkg_bad=1; }
-  grep -q '\.macOS(\.v15)' "$m" || { red "[lint-rules] $m：platforms 必须是 .macOS(.v15)"; pkg_bad=1; }
+  head -1 "$m" | grep -q '^// swift-tools-version: *6\.0' || { red "[lint-rules] ${m}：首行必须是 // swift-tools-version: 6.0"; pkg_bad=1; }
+  grep -q 'swiftLanguageModes: *\[\.v6\]' "$m" || { red "[lint-rules] ${m}：必须声明 swiftLanguageModes: [.v6]"; pkg_bad=1; }
+  grep -q '\.macOS(\.v15)' "$m" || { red "[lint-rules] ${m}：platforms 必须是 .macOS(.v15)"; pkg_bad=1; }
 done
 if [ "$pkg_bad" = 0 ]; then green "[lint-rules] Package.swift 约束通过（tools 6.0 / 语言模式 v6 / macOS 15）"; else status=1; fi
 

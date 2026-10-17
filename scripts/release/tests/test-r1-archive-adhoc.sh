@@ -12,7 +12,7 @@ rm -rf "$out"
 ver=$(marketing_version)
 product=PlusMix
 assert_eq "$(product_name)" "$product" "project.yml 的 App target PRODUCT_NAME"
-note "ad-hoc 归档到 $out（版本 $ver，产品名 $product）"
+note "ad-hoc 归档到 ${out}（版本 ${ver}，产品名 ${product}）"
 if ! "$REPO_ROOT/scripts/release/archive.sh" --adhoc --skip-notarize --out "$out" >"$RELEASE_TEST_OUT/r1-archive.log" 2>&1; then
   fail "archive.sh --adhoc 退出非 0（日志 $RELEASE_TEST_OUT/r1-archive.log）"; tail -30 "$RELEASE_TEST_OUT/r1-archive.log"; finish
 fi
@@ -95,5 +95,5 @@ smoke="$RELEASE_TEST_OUT/r1-smoke.log"
 pid=$!
 sleep 4
 if kill -0 "$pid" 2>/dev/null; then ok "App 起来 4 秒没崩（dyld / libndi / Sparkle 都加载成功）"; kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; else
-  wait "$pid"; code=$?; fail "App 4 秒内退出（码 $code）：$(tail -3 "$smoke")"; fi
+  wait "$pid"; code=$?; fail "App 4 秒内退出（码 ${code}）：$(tail -3 "$smoke")"; fi
 finish

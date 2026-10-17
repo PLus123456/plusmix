@@ -31,7 +31,7 @@ case "$cmd" in
     ;;
   export)
     [ -n "$to" ] || { echo "用法：sparkle-keys.sh export --to FILE [--account NAME]" >&2; exit 2; }
-    "$bin/generate_keys" --account "$account" -x "$to" && chmod 600 "$to" && echo "[sparkle] 私钥已导出到 $to（放进 CI secret SPARKLE_PRIVATE_KEY 后删掉它；不要提交）"
+    "$bin/generate_keys" --account "$account" -x "$to" && chmod 600 "$to" && echo "[sparkle] 私钥已导出到 ${to}（放进 CI secret SPARKLE_PRIVATE_KEY 后删掉它；不要提交）"
     ;;
   import)
     [ -n "$file" ] && [ -f "$file" ] || { echo "用法：sparkle-keys.sh import FILE [--account NAME]" >&2; exit 2; }

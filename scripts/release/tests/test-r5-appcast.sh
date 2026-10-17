@@ -42,7 +42,7 @@ assert_not_contains "$(cat "$RELEASE_TEST_OUT/r5-appcast.log")" "does not match"
 assert_contains "$xml" 'sparkle:edSignature="' "enclosure 带 EdDSA 签名"
 grep -qE "sparkle:shortVersionString(=\"|>)$ver(\"|<)" <<< "$xml" && ok "shortVersionString = $ver" || fail "shortVersionString 不是 $ver"
 build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$RELEASE_TEST_APP/Contents/Info.plist")
-grep -qE "sparkle:version(=\"|>)$build(\"|<)" <<< "$xml" && ok "version = CFBundleVersion（$build）" || fail "version 不是 $build"
+grep -qE "sparkle:version(=\"|>)$build(\"|<)" <<< "$xml" && ok "version = CFBundleVersion（${build}）" || fail "version 不是 $build"
 assert_contains "$xml" "url=\"https://example.invalid/downloads/$product-$ver.dmg\"" "下载地址用了前缀（$product-$ver.dmg）"
 assert_contains "$xml" "sparkle:minimumSystemVersion>15.0<" "最低系统 15.0（从 LSMinimumSystemVersion 推）"
 assert_contains "$xml" "sparkle:hardwareRequirements>arm64<" "硬件要求 arm64（从二进制架构推）"

@@ -139,8 +139,8 @@ do_serve() {
         local other
         other=$(cat "$lock/pid" 2>/dev/null || echo "")
         if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then
-            echo "netem: 已经有一个代理在跑（pid $other，$(ps -o lstart= -p "$other" 2>/dev/null | sed 's/^ *//')，tty $(ps -o tty= -p "$other" 2>/dev/null)）。" >&2
-            echo "netem: 先在它的终端 Ctrl-C，或者 sudo kill $other；再起本代理。" >&2
+            echo "netem: 已经有一个代理在跑（pid ${other}，$(ps -o lstart= -p "$other" 2>/dev/null | sed 's/^ *//')，tty $(ps -o tty= -p "$other" 2>/dev/null)）。" >&2
+            echo "netem: 先在它的终端 Ctrl-C，或者 sudo kill ${other}；再起本代理。" >&2
             exit 2
         fi
         echo "netem: 上一个代理（pid ${other:-?}）已不在，接管锁"

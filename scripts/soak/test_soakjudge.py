@@ -227,6 +227,23 @@ if __name__ == "__main__":
     unittest.main()
 
 
+    def test_A3_missingSegmentsFailA3AndOverall(self):
+        # T01（Codex 2026-10-13 审查，G9 修）：构造 8 小时 96 段只剩首尾 2 段，原来 overall_pass 仍 true、A3 仍 ✅——缺段算 A3 不过，总判定跟着不过
+        a3 = {"pass": True, "meets_target": True, "drift_ms": 1.0, "extrapolated": False, "note": ""}
+        out = sj.a3_with_segment_completeness(a3, [f"seg{n:04d}.mov" for n in range(1, 95)], 96)
+        self.assertIs(out["pass"], False)
+        self.assertIs(out["meets_target"], False)
+        self.assertEqual(len(out["incomplete_segments"]), 94)
+        self.assertIn("缺 94 / 96 段", out["note"])
+        self.assertEqual(out["drift_ms"], 1.0)        # 数字照留，只是判不过
+        good = {"pass": True}
+        self.assertTrue(sj.overall_verdict(good, {"verdict": "pass"}, {"pass": True}, a3))
+        self.assertFalse(sj.overall_verdict(good, {"verdict": "pass"}, {"pass": True}, out))
+        self.assertIs(sj.a3_with_segment_completeness(a3, [], 96), a3)   # 没缺段原样返回
+        unjudged = sj.a3_with_segment_completeness({"pass": None, "drift_ms": None, "note": "没有 frameprobe av 结果"}, ["seg0001.mov"], 1)
+        self.assertIs(unjudged["pass"], False)         # 全缺也是不过，不是"判不了"
+
+
 class ShellLocaleTests(unittest.TestCase):
     def test_S1_shellScriptsBraceVariablesBeforeNonASCII(self):
         # macOS 的 /bin/bash 3.2 在 UTF-8 locale 下把 `$label（` 里"（"的首字节也算进变量名，set -u 下直接"未定义变量"退出
@@ -236,7 +253,8 @@ class ShellLocaleTests(unittest.TestCase):
         import re
         root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
         bad = []
-        for path in sorted(glob.glob(os.path.join(root, "soak", "*.sh")) + glob.glob(os.path.join(root, "perf", "*.sh"))):
+        # 2026-10-17 G9：扩到 scripts/ 下全部 .sh——Codex 2026-10-13 审查在 check-rt-symbols.sh 第 87 行撞到同一个坑（用户终端里 make lint 直接退出），25 个脚本一起改成 ${name}
+        for path in sorted(glob.glob(os.path.join(root, "**", "*.sh"), recursive=True)):
             with open(path, "rb") as f:
                 for n, line in enumerate(f, 1):
                     for m in re.finditer(rb"\$[A-Za-z_][A-Za-z0-9_]*(?=[\x80-\xff])", line):

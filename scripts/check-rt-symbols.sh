@@ -74,7 +74,7 @@ done
 # 一个目标文件都没对上源文件 = 布局又变了，不能静默通过
 n_src=$(ls "$pkg"/Sources/"$target"/*.c | wc -l | tr -d ' ')
 if [ "$checked" != "$n_src" ]; then
-  red "[check-rt-symbols] 只核对了 $checked / $n_src 个目标文件（$objdir）：目标文件命名或位置与脚本假设不符"; status=1
+  red "[check-rt-symbols] 只核对了 $checked / $n_src 个目标文件（${objdir}）：目标文件命名或位置与脚本假设不符"; status=1
 fi
 
 # 每个热路径源文件都要带 nonblocking 的编译期检查
@@ -84,6 +84,6 @@ done
 
 if [ "$status" = 0 ]; then
   n=$(ls "$pkg"/Sources/"$target"/*.c | wc -l | tr -d ' ')
-  green "[check-rt-symbols] $target（$config）$n 个目标文件：无 malloc / 锁 / 日志 / ObjC / Swift 运行时 / 系统调用符号；外部符号都在审计清单内"
+  green "[check-rt-symbols] ${target}（${config}）$n 个目标文件：无 malloc / 锁 / 日志 / ObjC / Swift 运行时 / 系统调用符号；外部符号都在审计清单内"
 fi
 exit $status

@@ -57,7 +57,7 @@ if [ "$mode" = team ]; then
   [ -n "$team" ] || die "--team 要给 Team ID"
   if [ -z "$identity" ]; then identity=$(printf '%s' "$identities" | grep "($team)" | head -1 | sed 's/.*"\(.*\)".*/\1/'); fi
   [ -n "$identity" ] || die "钥匙串里没有 Team $team 的 \"Developer ID Application\" 身份（security find-identity -v -p codesigning）：BLOCKED-账号"
-  echo "模式：Developer ID（Team $team，身份 \"$identity\"）"
+  echo "模式：Developer ID（Team ${team}，身份 \"$identity\"）"
   [ -n "$pubkey" ] || yellow "[archive] SPARKLE_PUBLIC_ED_KEY 为空：这份构建不带自动更新（正式发布要给：scripts/release/sparkle-keys.sh public）"
   [ -n "$feed" ] || yellow "[archive] SPARKLE_FEED_URL 为空：这份构建不带自动更新"
 else
@@ -65,7 +65,7 @@ else
   echo "模式：ad-hoc（没有 Developer ID 身份：公证 BLOCKED-账号，Gatekeeper 会拦；其余步骤照走）"
 fi
 ndi_linked_expected=0; [ -f "$ndi_sdk/include/Processing.NDI.Lib.h" ] && ndi_linked_expected=1
-[ "$ndi_linked_expected" = 1 ] || yellow "[archive] 没装 NDI SDK（$ndi_sdk）：这份构建的 NDI 输入 / 输出是空实现，Stats 标 unavailable"
+[ "$ndi_linked_expected" = 1 ] || yellow "[archive] 没装 NDI SDK（${ndi_sdk}）：这份构建的 NDI 输入 / 输出是空实现，Stats 标 unavailable"
 
 dir="$out/$ver"
 if [ -d "$dir" ]; then
@@ -101,7 +101,7 @@ xcb=(xcodebuild archive -project Switcher.xcodeproj -scheme Switcher -configurat
 [ "$mode" = team ] && xcb+=(-allowProvisioningUpdates DEVELOPMENT_TEAM="$team")
 run_logged archive "${xcb[@]}" || { tail -40 "$dir/logs/archive.log"; die "xcodebuild archive 失败（$dir/logs/archive.log）"; }
 [ -d "$archive/Products/Applications/$product.app" ] || die "归档里没有 $product.app（project.yml 的 PRODUCT_NAME 与归档产物对不上：$(ls "$archive/Products/Applications" 2>/dev/null | tr '\n' ' ')）"
-row "xcodebuild archive" "通过" "$archive（$(elapsed)）"
+row "xcodebuild archive" "通过" "${archive}（$(elapsed)）"
 
 # ---- 4. 导出 ----
 step "导出"
@@ -214,7 +214,7 @@ step "报告"
   echo
   echo "- 时间：$(date '+%Y-%m-%d %H:%M:%S')；用时 $(elapsed)；机器：$(sysctl -n hw.model 2>/dev/null) / macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))；Xcode $(xcodebuild -version | head -1 | sed 's/Xcode //')"
   echo "- 提交：$(git rev-parse --short HEAD 2>/dev/null)$( [ -n "$(git status --porcelain 2>/dev/null)" ] && echo '（工作树有未提交改动）')；分支 $(git symbolic-ref --short -q HEAD 2>/dev/null)"
-  echo "- 模式：$( [ "$mode" = team ] && echo "Developer ID（Team $team）" || echo 'ad-hoc（BLOCKED-账号）')；Sparkle feed：${feed:-<空：不带更新>}；公钥：$( [ -n "$pubkey" ] && echo 已注入 || echo '<空>')"
+  echo "- 模式：$( [ "$mode" = team ] && echo "Developer ID（Team ${team}）" || echo 'ad-hoc（BLOCKED-账号）')；Sparkle feed：${feed:-<空：不带更新>}；公钥：$( [ -n "$pubkey" ] && echo 已注入 || echo '<空>')"
   echo "- 产物：\`$dir/\`（$product.xcarchive、$product.app、$( [ "$make_dmg" = 1 ] && echo "$product-$ver.dmg + .sha256、" )verify.json、logs/）"
   echo
   echo "| 步骤 | 结果 | 说明 |"; echo "|---|---|---|"

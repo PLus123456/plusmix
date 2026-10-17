@@ -52,14 +52,14 @@ if [ -n "$app" ]; then
   bin="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist" 2>/dev/null)"
   ver=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist" 2>/dev/null); build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist" 2>/dev/null)
   set_r version "\"$ver\""; set_r build "\"$build\""; set_r bundle_id "\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist" 2>/dev/null)\""
-  say "== $app（$ver build $build）"
+  say "== ${app}（$ver build ${build}）"
   # 签名
   if out=$(codesign --verify --deep --strict --verbose=2 "$app" 2>&1); then pass signature_valid "--deep --strict"; else bad signature_valid "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"; fi
   info=$(codesign -dvv "$app" 2>&1)
   sig=$(printf '%s' "$info" | sed -n 's/^Signature=//p' | head -1); team=$(printf '%s' "$info" | sed -n 's/^TeamIdentifier=//p' | head -1); auth=$(printf '%s' "$info" | sed -n 's/^Authority=//p' | head -1)
   flags=$(printf '%s' "$info" | sed -n 's/^CodeDirectory.*flags=\([^ ]*\).*/\1/p' | head -1)
   set_r signature "\"${sig:-$auth}\""; set_r team_id "\"$team\""; set_r code_directory_flags "\"$flags\""
-  if [ "$sig" = adhoc ]; then set_r adhoc true; say "  info  签名：ad-hoc（TeamIdentifier ${team:-not set}）"; else set_r adhoc false; say "  info  签名：$auth（Team $team）"; fi
+  if [ "$sig" = adhoc ]; then set_r adhoc true; say "  info  签名：ad-hoc（TeamIdentifier ${team:-not set}）"; else set_r adhoc false; say "  info  签名：${auth}（Team ${team}）"; fi
   case "$flags" in *runtime*) set_r hardened_runtime true ;; *) set_r hardened_runtime false ;; esac
   # Gatekeeper
   sp=$(spctl --assess --type execute --verbose=4 "$app" 2>&1); spcode=$?
@@ -96,7 +96,7 @@ if [ -n "$app" ]; then
     [ -f "$app/Contents/Resources/Licenses/Sparkle/LICENSE" ] && pass sparkle_license "" || warn sparkle_license "缺 Resources/Licenses/Sparkle/LICENSE"
   else bad sparkle_present "没有 Sparkle.framework"; fi
   # 架构 / 最低系统
-  archs=$(lipo -archs "$bin" 2>/dev/null); set_r archs "\"$archs\""; say "  info  架构：$archs；LSMinimumSystemVersion $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist" 2>/dev/null)"
+  archs=$(lipo -archs "$bin" 2>/dev/null); set_r archs "\"$archs\""; say "  info  架构：${archs}；LSMinimumSystemVersion $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$plist" 2>/dev/null)"
 fi
 
 # --expect-notarized

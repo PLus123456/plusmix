@@ -109,5 +109,5 @@ lines.append("")
 lines.append(f"生成时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print("\n".join(lines))
 PY
-if [ "$rc" = 0 ]; then green "E7–E9 通过：reports/G3-net.md"; else red "E7–E9 有失败 / 跳过（xctest 退出码 $rc）：看 $log 与 reports/G3-net.md"; fi
+if [ "$rc" = 0 ]; then green "E7–E9 通过：reports/G3-net.md"; else red "E7–E9 有失败 / 跳过（xctest 退出码 ${rc}）：看 $log 与 reports/G3-net.md"; fi
 exit $rc

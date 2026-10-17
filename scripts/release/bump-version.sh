@@ -50,6 +50,6 @@ PY
     printf '\033[33m%s\033[0m\n' "[bump-version] $changelog 里没有“## 未发布”小节，没改它"
   fi
 else
-  printf '\033[33m%s\033[0m\n' "[bump-version] 没有 $changelog（G5 从 docs/release/CHANGELOG-template.md 建），没改变更日志"
+  printf '\033[33m%s\033[0m\n' "[bump-version] 没有 ${changelog}（G5 从 docs/release/CHANGELOG-template.md 建），没改变更日志"
 fi
 printf '\033[32m%s\033[0m\n' "[bump-version] $cur (build $curbuild) → $version (build $build)。接下来：make lint（版本号一致）、git tag v$version 在 G5 判定通过后打"

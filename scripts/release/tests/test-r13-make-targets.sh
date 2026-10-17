@@ -6,7 +6,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 cd "$REPO_ROOT"
 for t in archive archive-adhoc release-verify appcast release-test pin-check pin-sync runner-install; do
-  if make -n "$t" >/dev/null 2>&1; then ok "make $t 可解析"; else fail "make $t：没有这个目标（Makefile 没 include scripts/release/release.mk？）"; fi
+  if make -n "$t" >/dev/null 2>&1; then ok "make $t 可解析"; else fail "make ${t}：没有这个目标（Makefile 没 include scripts/release/release.mk？）"; fi
 done
 assert_true "make help 提到 archive" bash -c "make help | grep -q archive"
 cl="$REPO_ROOT/scripts/check-links.sh"

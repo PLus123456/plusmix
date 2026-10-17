@@ -76,7 +76,7 @@ if [ "$do_run" = 1 ]; then
 fi
 step "环境：$(grep -E '^(cpu|macos|power|load_before)=' "$env_file" | tr '\n' ' ')"
 if pgrep -x Cyberpunk2077 >/dev/null 2>&1 || [ "$(uptime | sed 's/.*load averages: //' | cut -d' ' -f1 | cut -d. -f1)" -ge 8 ]; then
-  red "警告：机器上有其它重负载（见 $env_file），V1/V3 的数字不可信；建议等机器空闲再跑"
+  red "警告：机器上有其它重负载（见 ${env_file}），V1/V3 的数字不可信；建议等机器空闲再跑"
 fi
 
 # ---- 1. 编译 ----
@@ -167,7 +167,7 @@ if [ "$do_run" = 1 ]; then
   echo "load_after=$(uptime | sed 's/.*load averages: //')" >> "$env_file"
   tail -n 30 "$run_log"
   [ "$rc" = 0 ] || { red "headless 退出码 $rc"; exit 1; }
-  [ "$client_status" = 0 ] || red "apitest 客户端退出码 $client_status（C 系列可能不完整，继续出报告）"
+  [ "$client_status" = 0 ] || red "apitest 客户端退出码 ${client_status}（C 系列可能不完整，继续出报告）"
 fi
 [ -s "$stats" ] || { red "没有 $stats"; exit 1; }
 [ -s "$movie" ] || { red "没有 $movie"; exit 1; }
@@ -250,13 +250,13 @@ if [ "$checkpoint" = G4 ]; then
 else
   # 别的检查点：运行报告入库，拼出来的整份只留在 out-dir（它们的报告是 reports/<检查点>.md 手写的五段 / §7 模板，不是 notes + run 的形态）
   report="$out_dir/$checkpoint-assembled.md"; notes="reports/$checkpoint-notes.md"
-  step "生成 $run_report（拼好的整份只放 $report，不入库；判定口径与 G4 相同）"
+  step "生成 ${run_report}（拼好的整份只放 ${report}，不入库；判定口径与 G4 相同）"
 fi
 python3 scripts/gate3-report.py --checkpoint G4 --out-dir "$out_dir" --label "$label" --minutes "$minutes" --show "$show" --script "$script" \
   --baseline "$baseline" --blank-ticks "$blank_ticks" --run-report "$run_report" --notes "$notes" --report "$report" ${waives[@]+"${waives[@]}"}
 rc=$?
 if [ "$rc" = 0 ]; then
-  green "$checkpoint 自动项全部满足（G4 口径）：$out_dir → $run_report → $report（NDI 回环 L1：scripts/gate4-ndi.sh；编译矩阵：scripts/gate4-matrix.sh）"
+  green "$checkpoint 自动项全部满足（G4 口径）：$out_dir → $run_report → ${report}（NDI 回环 L1：scripts/gate4-ndi.sh；编译矩阵：scripts/gate4-matrix.sh）"
 else
   red "$checkpoint 有指标未过（看 $run_report 的判定表）：$out_dir"
 fi

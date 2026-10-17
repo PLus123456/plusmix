@@ -42,7 +42,7 @@ step "跑 $seconds s：--ndi-send \"$name\" → NDI 输入 2 号（抖动缓冲 
   --ndi-send "$name" --ndi-jitter-frames "$jitter" > "$log" 2>&1
 rc=$?
 tail -n 12 "$log"
-[ "$rc" = 0 ] || { red "headless 退出码 $rc（看 $log）"; exit 1; }
+[ "$rc" = 0 ] || { red "headless 退出码 ${rc}（看 ${log}）"; exit 1; }
 python3 - "$stats" "$jitter" "$seconds" "$report" "$log" "$name" <<'PY'
 # -*- coding: utf-8 -*-
 import json, sys, datetime
@@ -94,5 +94,5 @@ print("\n".join(md))
 sys.exit(0 if ok else 3)
 PY
 rc=$?
-[ "$rc" = 0 ] && green "NDI 回环 L1 通过 → $report" || red "NDI 回环 L1 未通过（$report）"
+[ "$rc" = 0 ] && green "NDI 回环 L1 通过 → $report" || red "NDI 回环 L1 未通过（${report}）"
 exit $rc

@@ -55,8 +55,8 @@ app_id="$app_prefix.$PRODUCT"; sd_id="$sd_prefix.$PRODUCT"
 
 case "$mode" in
   check)
-    echo "App / 扩展 bundle id 前缀：$app_prefix（$app_id、$app_id.camera-extension、mach service $app_id.camera）"
-    echo "Stream Deck 插件前缀：      $sd_prefix（$sd_id、目录 $sd_id.sdPlugin）"
+    echo "App / 扩展 bundle id 前缀：${app_prefix}（${app_id}、$app_id.camera-extension、mach service $app_id.camera）"
+    echo "Stream Deck 插件前缀：      ${sd_prefix}（${sd_id}、目录 $sd_id.sdPlugin）"
     [ "$app_prefix" = "$sd_prefix" ] && green "两者一致" || printf '\033[33m%s\033[0m\n' "两者不一致：定正式域名时跑 set-bundle-id.sh <前缀> 一起换"
     exit 0 ;;
   list)
@@ -65,11 +65,11 @@ esac
 
 [ -n "$prefix" ] || { red "用法：set-bundle-id.sh <新前缀，如 com.plusmix> [--dry-run] [--root DIR]"; exit 2; }
 printf '%s' "$prefix" | grep -qE '^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$' || { red "[set-bundle-id] 前缀要是反写域名（小写字母 / 数字 / 连字符，至少两段）：$prefix"; exit 2; }
-[ "$prefix" != "$app_id" ] || { red "[set-bundle-id] 给前缀（com.plusmix），不是完整 id（$app_id）"; exit 2; }
+[ "$prefix" != "$app_id" ] || { red "[set-bundle-id] 给前缀（com.plusmix），不是完整 id（${app_id}）"; exit 2; }
 new_id="$prefix.$PRODUCT"
 files=$(occurrences "$app_id" "$sd_id")
 [ -n "$files" ] || { red "[set-bundle-id] 没找到任何出现处"; exit 1; }
-echo "把 $app_id 与 $sd_id 全部改成 $new_id："
+echo "把 $app_id 与 $sd_id 全部改成 ${new_id}："
 printf '  %s\n' $files
 sd_dir_old="Tools/streamdeck-plugin/$sd_id.sdPlugin"; sd_dir_new="Tools/streamdeck-plugin/$new_id.sdPlugin"
 [ -d "$root/$sd_dir_old" ] && echo "  目录改名：$sd_dir_old → $sd_dir_new"
@@ -86,4 +86,4 @@ if [ -d "$root/$sd_dir_old" ] && [ "$sd_dir_old" != "$sd_dir_new" ]; then
 fi
 left=$(occurrences "$app_id" "$sd_id" || true)
 if [ -n "$left" ]; then red "[set-bundle-id] 还有没改到的："; printf '  %s\n' $left; exit 1; fi
-green "[set-bundle-id] 完成：$new_id。接下来 make gen build test；扩展要重新签名 / 激活；Stream Deck 插件 npm test、npx streamdeck link $new_id.sdPlugin。"
+green "[set-bundle-id] 完成：${new_id}。接下来 make gen build test；扩展要重新签名 / 激活；Stream Deck 插件 npm test、npx streamdeck link $new_id.sdPlugin。"

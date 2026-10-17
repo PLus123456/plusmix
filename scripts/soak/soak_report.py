@@ -244,6 +244,7 @@ def main():
     perf = pj.perf_metrics(lines)
     pm = pj.powermetrics_summary(pm_all) if pm_all else {}
     a3 = sj.a3_from_probe(probe, a.hours)
+    a3 = sj.a3_with_segment_completeness(a3, seg_missing, seg_count)   # T01：有段没出结果就不能算 A3 通过（G9，Codex 审查）
     # S3 按线程：soak.sh 每分钟一份 thread-cpu 快照；只取运行段内的首尾两份（停机段的线程已经在退）。
     # 2026-10-03 起 S3 的 CPU 判定不含 NDI SDK 线程（ndis:*），所以先算线程归因再判（测试标准 §3 / §4 S3）
     threads = None
@@ -425,7 +426,7 @@ def main():
           f"8 小时 ≤ 16 ms | ≤ 5 ms | {'✅' if a3['pass'] else '❌'}{' 达目标' if a3.get('meets_target') else ''} | {delta('a3_drift_ms', 2, ' ms')} |")
         w(f"| A2（信息项） | 整秒配对最大 {f(a3.get('a2_max_abs_ms'))} ms、均值 {f(a3.get('a2_mean_ms'))} ms、标准差 {f(a3.get('a2_std_ms'))} ms | ≤ 16.7 ms | ≤ 5 ms | {'✅' if a3.get('pass_a2') else '❌' if a3.get('pass_a2') is False else '—'} | — |")
     else:
-        w(f"| A3 A/V 漂移 | 未判：{a3.get('note')} | 8 小时 ≤ 16 ms | ≤ 5 ms | — | — |")
+        w(f"| A3 A/V 漂移 | {'不过' if a3.get('pass') is False else '未判'}：{a3.get('note')} | 8 小时 ≤ 16 ms | ≤ 5 ms | {'❌' if a3.get('pass') is False else '—'} | — |")
     w(f"| V1（信息项） | avg {f(perf['v1_avg_ms'])} ms / p99 {f(perf['v1_p99_ms'])} ms / max {f(perf['v1_max_ms'])} ms | avg ≤ 6, p99 ≤ 12 | avg ≤ 4, p99 ≤ 8 | {'✅' if perf['v1_avg_ms'] <= 6 and perf['v1_p99_ms'] <= 12 else '❌'} | {delta('v1_avg_ms', 3, ' ms')} |")
     w(f"| V3（信息项） | p99 {f(perf['v3_p99_ms'])} ms / max {f(perf['v3_max_ms'])} ms | p99 ≤ 4 | p99 ≤ 2 | {'✅' if perf['v3_p99_ms'] <= 4 else '❌'} | {delta('v3_p99_ms', 3, ' ms')} |")
     vs = [s for s in ffp.get("streams", []) if s.get("codec_type") == "video"]
@@ -521,7 +522,7 @@ def main():
     if run.get("camera_note"):
         notes.append(run["camera_note"])
     if seg_missing:
-        notes.append(f"frameprobe 有 {len(seg_missing)} 段没出结果（probe-seg/failed.txt、probe.err）：这些段的 A2 配对与离线不连续没算进来。")
+        notes.append(f"frameprobe 有 {len(seg_missing)} / {seg_count} 段没出结果（probe-seg/failed.txt、probe.err）：这些段的 A2 配对与离线不连续没算进来，A3 按不过算、总判定不过（T01，G9 起）。")
     if not notes:
         notes.append("无。")
     for n_ in notes:

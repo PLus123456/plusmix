@@ -37,7 +37,7 @@ green() { printf '\033[32m%s\033[0m\n' "$*"; }
 step()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
 if [ "$skip_build" = 0 ]; then
-  step "编译 $config：switcher-headless、frameprobe"
+  step "编译 ${config}：switcher-headless、frameprobe"
   swift build -c "$config" --package-path Tools/switcher-headless 2>&1 | grep -E 'error|Build complete' | tail -2 || true
   swift build -c "$config" --package-path Tools/frameprobe 2>&1 | grep -E 'error|Build complete' | tail -2 || true
 fi
@@ -56,7 +56,7 @@ uptime
 pgrep -x Cyberpunk2077 >/dev/null && red "游戏在跑！" || true
 if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then red "端口 $port 被占：$(lsof -nP -iTCP:"$port" -sTCP:LISTEN | tail -1)"; exit 1; fi
 
-step "起 headless（--api 127.0.0.1:$port，录制 + stats）"
+step "起 headless（--api 127.0.0.1:${port}，录制 + stats）"
 rm -f "$out_dir/out.mov" "$out_dir/stats.jsonl"
 "$headless" run --show "$out_dir/show.json" --script "$out_dir/scenario.json" --duration "$seconds" --stats "$out_dir/stats.jsonl" \
   --record "$out_dir/out.mov" --audio-device null --api --api-listen "127.0.0.1:$port" > "$out_dir/headless.log" 2>&1 &
@@ -87,5 +87,5 @@ python3 scripts/apitest/apitest.py evaluate --session "$out_dir/session.json" --
 eval_status=$?
 echo
 echo "产物：$out_dir"
-if [ "$eval_status" = 0 ] && [ "$headless_status" = 0 ] && [ "$client_status" = 0 ]; then green "C 系列通过"; else red "C 系列未通过（evaluate $eval_status / headless $headless_status / client $client_status）"; fi
+if [ "$eval_status" = 0 ] && [ "$headless_status" = 0 ] && [ "$client_status" = 0 ]; then green "C 系列通过"; else red "C 系列未通过（evaluate $eval_status / headless $headless_status / client ${client_status}）"; fi
 exit $eval_status
