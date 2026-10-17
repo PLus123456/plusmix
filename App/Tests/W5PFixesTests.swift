@@ -178,6 +178,42 @@ final class W5PFixesTests: XCTestCase {
                       "起不来的来源：画黑，不定格在旧画面（\(String(describing: AppTest.readback(session)?.lumaStats())))")
     }
 
+    // MARK: D16 LastSession 的相对素材
+
+    /// 走恢复入口的整条路：打开带相对素材（assets/logo.png）的节目 → 退出（shutdown 存 LastSession）→ 节目 › 打开上次退出时的节目：
+    /// 恢复出来的没有文件身份，素材仍按原节目目录找到、这一路 live；LastSession 里存的是绝对路径（节目文件里照旧相对）。
+    func testD16_openLastSessionFindsRelativeImageInShowDirectory() throws {
+        _ = try AppTest.freshSession()
+        let controller = AppTest.controller
+        let dir = try temporaryDirectory("lastsession")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("assets", isDirectory: true), withIntermediateDirectories: true)
+        try InputWiringTests.writeSolidPNG(to: dir.appendingPathComponent("assets/logo.png"), width: 320, height: 180, red: 200, green: 40, blue: 40)
+        var show = ShowDocuments.emptyShow(name: "相对素材", recordDirectory: dir.path)
+        show.inputs = [InputConfig(number: 1, name: "台标", source: .image(path: "assets/logo.png"))]
+        let url = dir.appendingPathComponent("相对素材.\(ShowDocuments.fileExtension)")
+        try ShowStore().save(show, to: url)
+        let opened = AppTest.expectationBox()
+        Task { await controller.openShow(url: url); opened.value = true }
+        XCTAssertTrue(AppTest.waitUntil(20) { opened.value && controller.session?.isRunning == true })
+        XCTAssertEqual(AppTest.waitLive(try XCTUnwrap(controller.session), input: 1, timeout: 5), .live, "打开文件时按节目目录找到")
+        defer { try? FileManager.default.removeItem(at: controller.documents.autosaveURL) }
+        let restored = AppTest.expectationBox()
+        Task {
+            await controller.shutdown()          // 退出那一步：存 LastSession
+            await controller.openLastSession()   // 节目 › 打开上次退出时的节目（确认框之后的本体）
+            restored.value = true
+        }
+        XCTAssertTrue(AppTest.waitUntil(20) { restored.value && controller.session?.isRunning == true }, "\(String(describing: controller.lastError))")
+        let session = try XCTUnwrap(controller.session)
+        XCTAssertNil(controller.documents.currentURL, "恢复的不是文件：保存时要另存")
+        guard case .image(let path)? = session.state.inputs.first?.source else { return XCTFail("\(String(describing: session.state.inputs.first))") }
+        print("W5P D16 恢复后：\(path)，素材基准 \(controller.documents.mediaBaseDirectory.path)")
+        XCTAssertTrue(path.hasPrefix("/") && path.hasSuffix("assets/logo.png"), "LastSession 里落成绝对路径：\(path)")
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live, "素材仍指向原节目目录：\(String(describing: session.inputs.runtimeState(of: 1)))")
+        XCTAssertEqual(try ShowStore().load(from: url).inputs.first?.source, .image(path: "assets/logo.png"), "节目文件里照旧是相对路径")
+    }
+
     // MARK: D04 打开 / 保存配对
 
     /// 读不出来的打开：保存目标、跑着的节目都不变（D04 的"拒绝的请求不能提前改保存目标"）。
