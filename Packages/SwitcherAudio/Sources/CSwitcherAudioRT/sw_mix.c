@@ -407,11 +407,14 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
     case SW_CMD_MONITOR_BORROW_MASTER: ctx->borrow_master = c->i0 != 0; break;
     case SW_CMD_MONITOR_MODE:  ctx->monitor_mode = (uint32_t)c->i0; break;
     case SW_CMD_MONITOR_POINT: ctx->monitor_point = c->i0 == SW_MONITOR_POST_DELAY ? SW_MONITOR_POST_DELAY : SW_MONITOR_PRE_DELAY; break;
-    case SW_CMD_CROSSFADE: {
-        // 同一槽位只允许一条在进行：旧的取消
+    case SW_CMD_CROSSFADE:
+    case SW_CMD_CROSSFADE_REPLACE: {
+        // 同一槽位只允许一条在进行：旧的取消。替换语义（W1-B5，D10）：已经开始的旧淡变留到新淡变起点那一块再取消（sw_xfade_take_over），
+        // 之前照走——在这里就撤，起点之前那段 afv 会向转场前的目标（旧 PGM 1、旧 PVW 0）平滑回去，起点再跳回来
+        const bool replace = c->type == SW_CMD_CROSSFADE_REPLACE;
         for (int k = 0; k < (int)SW_MIX_MAX_CROSSFADES; k++) {
             sw_crossfade *x = &ctx->xfades[k];
-            if (!x->active) continue;
+            if (!x->active || (replace && x->started)) continue;
             if (c->i0 >= 0 && (x->from == c->i0 || x->to == c->i0)) { if (x->from == c->i0) x->from = -1; else x->to = -1; }
             if (c->i1 >= 0 && (x->from == c->i1 || x->to == c->i1)) { if (x->from == c->i1) x->from = -1; else x->to = -1; }
             if (x->from < 0 && x->to < 0) x->active = 0;
@@ -425,9 +428,12 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
             x->start_host = c->u0;
             x->elapsed_frames = 0;
             x->started = 0;
+            x->replace = replace ? 1u : 0u;
             x->active = (x->from >= 0 || x->to >= 0);
-            if (x->from >= 0) ctx->inputs[x->from].afv_fade_start = ctx->inputs[x->from].afv;
-            if (x->to >= 0) ctx->inputs[x->to].afv_fade_start = ctx->inputs[x->to].afv;
+            if (!replace) {   // 替换的起点 afv 在起点那一块取（那时旧淡变已经走到哪是哪）
+                if (x->from >= 0) ctx->inputs[x->from].afv_fade_start = ctx->inputs[x->from].afv;
+                if (x->to >= 0) ctx->inputs[x->to].afv_fade_start = ctx->inputs[x->to].afv;
+            }
             break;
         }
         break;
@@ -896,6 +902,20 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
 // AFV 交叉淡变：为本块算 from / to 两路的每样本增益（等幅：cos / sin）
 // ---------------------------------------------------------------------------
 
+/// 替换淡变（SW_CMD_CROSSFADE_REPLACE）在起点那一块接管：同槽位上别的淡变去掉这个槽位（两个都去掉了就停），起点 afv = 槽位此刻的 afv
+/// （上一块末尾的值，旧淡变走到哪是哪；本块起点之前那几个样本按它保持，见 sw_xfade_block 的 k = 0）。
+static void sw_xfade_take_over(struct sw_mix_ctx *ctx, sw_crossfade *x) SW_NONBLOCKING {
+    for (int k = 0; k < (int)SW_MIX_MAX_CROSSFADES; k++) {
+        sw_crossfade *o = &ctx->xfades[k];
+        if (o == x || !o->active) continue;
+        if (x->from >= 0) { if (o->from == x->from) o->from = -1; if (o->to == x->from) o->to = -1; }
+        if (x->to >= 0) { if (o->from == x->to) o->from = -1; if (o->to == x->to) o->to = -1; }
+        if (o->from < 0 && o->to < 0) o->active = 0;
+    }
+    if (x->from >= 0) ctx->inputs[x->from].afv_fade_start = ctx->inputs[x->from].afv;
+    if (x->to >= 0) ctx->inputs[x->to].afv_fade_start = ctx->inputs[x->to].afv;
+}
+
 /// *ended：本块走满（elapsed ≥ duration）→ true；调用方在推子之后把 from / to 的 afv 钉到 0 / 1（不在这里写，见 sw_process_input）。
 static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t frames, uint64_t host_time,
                            float *gain_from, float *gain_to, bool *has_from, bool *has_to, bool *ended) SW_NONBLOCKING {
@@ -912,6 +932,7 @@ static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t fra
         if (dt > 0) s0 = (uint32_t)(dt / tpf + 0.5);
         else x->elapsed_frames = (uint64_t)(-dt / tpf);                  // 迟到：跳到该在的位置，终点仍与视频对齐
         if (s0 >= frames) s0 = frames - 1u;
+        if (x->replace) sw_xfade_take_over(ctx, x);
     }
     const float dur = (float)x->duration_frames;
     const float a_from = x->from >= 0 ? ctx->inputs[x->from].afv_fade_start : 0.0f;
@@ -1052,8 +1073,10 @@ void sw_mix_block(sw_mix_ctx *ctx, float *const *out, uint32_t frames, uint64_t 
         bool hf, ht, ended;
         const int32_t from = x->from, to = x->to;
         sw_xfade_block(ctx, x, frames, host_time, gf, gt, &hf, &ht, &ended);
-        if (hf && from >= 0) { slot_xf[from] = gf; if (ended) slot_xf_end[from] = 1; }
-        if (ht && to >= 0) { slot_xf[to] = gt; if (ended) slot_xf_end[to] = 2; }
+        // 后写的覆盖先写的，终值标记跟着曲线一起换：替换淡变起点那一块，序号在它前面的旧淡变已经写过同一槽位（可能还标了走满），
+        // 这一块归新淡变（W1-B5）；别的时候同一槽位不会有两条已经开始的淡变
+        if (hf && from >= 0) { slot_xf[from] = gf; slot_xf_end[from] = ended ? 1 : 0; }
+        if (ht && to >= 0) { slot_xf[to] = gt; slot_xf_end[to] = ended ? 2 : 0; }
     }
 
     // 3. 每路输入（独听状态先看一遍：耳机是"有独听只听独听的"，每路处理时就要知道）

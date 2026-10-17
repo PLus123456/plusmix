@@ -129,6 +129,7 @@ typedef struct sw_crossfade {
     uint64_t start_host;        ///< 起点 host time（块首样本 ≥ 它的那一块里按样本定位）
     uint64_t elapsed_frames;    ///< 已走过的帧数
     uint8_t  active, started;
+    uint8_t  replace;           ///< SW_CMD_CROSSFADE_REPLACE：起点那一块才接管同槽位上别的淡变、才取起点 afv（W1-B5，D10）
 } sw_crossfade;
 
 /// 消费者队列挂点。
