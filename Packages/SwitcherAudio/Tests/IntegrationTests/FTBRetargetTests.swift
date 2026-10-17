@@ -99,6 +99,7 @@ final class FTBRetargetTests: XCTestCase {
         if a < b, b <= r.master.left.count {
             let nonzero = r.master.left[a..<b].filter { $0 != 0 }.count
             XCTAssertEqual(nonzero, 0, "\(label)：第 \(n + 3)…\(until) 拍 Master 应严格 0（\(nonzero) 个样本不是）", file: file, line: line)
+            print("D11 \(label)：画面第 \(n) 拍全黑；Master 第 +1 拍 \(String(format: "%.1f", IT.db(rms1 / baseRMS))) dB、第 +2 拍 \(String(format: "%.1f", IT.db(rms2 / baseRMS))) dB、第 +3…\(until - n) 拍非零样本 \(nonzero)")
         }
     }
 

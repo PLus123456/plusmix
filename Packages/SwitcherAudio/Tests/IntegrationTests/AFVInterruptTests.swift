@@ -148,7 +148,8 @@ final class AFVInterruptTests: XCTestCase {
         await rig.run(seconds: 4.5)
         let program = await rig.sm.state.program
         XCTAssertEqual(program, 2)
-        assertShortFadeAt(rig, taps, tCut: rig.clock.time(of: cutTick), autoStart: rig.clock.time(of: s), autoDuration: rig.clock.duration(ofTicks: 600), label: "Auto 中 T-bar 推到底")
+        let silent = assertShortFadeAt(rig, taps, tCut: rig.clock.time(of: cutTick), autoStart: rig.clock.time(of: s), autoDuration: rig.clock.duration(ofTicks: 600), label: "Auto 中 T-bar 推到底")
+        print("D10 Auto 600 拍第 60 拍 T-bar 推到底：旧源 t_cut + \(String(format: "%.3f", silent)) ms 到 −∞")
         await rig.shutdown()
     }
 
@@ -161,7 +162,8 @@ final class AFVInterruptTests: XCTestCase {
         let receipt = await rig.sm.apply(.cut)
         XCTAssertTrue(receipt.applied)
         await rig.run(seconds: 1.5)
-        assertShortFadeAt(rig, taps, tCut: rig.clock.time(of: receipt.appliedTick), autoStart: rig.clock.time(of: s), autoDuration: rig.clock.duration(ofTicks: 600), label: "apply(.cut)")
+        let silent = assertShortFadeAt(rig, taps, tCut: rig.clock.time(of: receipt.appliedTick), autoStart: rig.clock.time(of: s), autoDuration: rig.clock.duration(ofTicks: 600), label: "apply(.cut)")
+        print("D10 Auto 600 拍途中 apply(.cut)（落在第 \(receipt.appliedTick.rawValue) 拍）：旧源 t_cut + \(String(format: "%.3f", silent)) ms 到 −∞")
         await rig.shutdown()
     }
 
@@ -184,6 +186,7 @@ final class AFVInterruptTests: XCTestCase {
         // 终点：from 最后一个非零样本就在 t_s + D（± 1 样本）
         let silent = silenceMs(taps.p1, after: tE)
         XCTAssertEqual(silent, 0, accuracy: 0.05, "自然完成：from 恰好在 t_s + D 到 −∞（实测 \(silent) ms）")
+        print("D10 自然走满的 Auto 120 拍：from 在 t_s + D \(String(format: "%+.3f", silent)) ms 到 −∞（没被短淡打断）")
         let i2 = index(taps.p2, at: tE), j2 = Self.sameSample(i2, of: taps.p2, in: taps.iso2), n = index(taps.p2, at: rig.lastDeliveredWindow(blocks: 1).1) - i2
         XCTAssertNil(Self.sampleDiff(taps.p2.left[i2..<(i2 + n)], taps.iso2.left[j2..<(j2 + n)]), "t_s + D 起 to 满")
         await rig.shutdown()
@@ -201,6 +204,7 @@ final class AFVInterruptTests: XCTestCase {
         let tE = rig.clock.time(of: s + d), oneTick = rig.clock.duration(ofTicks: 1)
         let silent = silenceMs(taps.p1, after: tE)
         XCTAssertLessThanOrEqual(silent, oneTick.milliseconds, "完成那一拍 + 1 拍内旧源到 −∞，实测 \(silent) ms")
+        print("D10 Auto 途中才开 AFV、自然完成：旧源 t_e + \(String(format: "%.3f", silent)) ms 到 −∞")
         let i2 = index(taps.p2, at: tE + oneTick), j2 = Self.sameSample(i2, of: taps.p2, in: taps.iso2)
         let n = index(taps.p2, at: rig.lastDeliveredWindow(blocks: 1).1) - i2
         XCTAssertGreaterThan(n, 40_000)
@@ -225,6 +229,7 @@ final class AFVInterruptTests: XCTestCase {
         XCTAssertEqual(taps.p1.rms(from: a, to: b), 0, "提交之后旧源应是 −∞（实测 \(IT.db(taps.p1.rms(from: a, to: b) / baseRMS)) dB）")
         XCTAssertEqual(taps.p2.rms(from: a, to: b), baseRMS, accuracy: baseRMS * 0.02)
         XCTAssertEqual(rig.engine.status.inputs.first { $0.number == 1 }?.afvGain, 0)
+        print("D10 T-bar 0.9 后 2 块推到底：提交后旧源 \(IT.db(taps.p1.rms(from: a, to: b) / baseRMS)) dB、新源 \(String(format: "%+.3f", IT.db(taps.p2.rms(from: a, to: b) / baseRMS))) dB")
         await rig.shutdown()
     }
 
@@ -241,6 +246,7 @@ final class AFVInterruptTests: XCTestCase {
         let (a, b) = rig.lastDeliveredWindow(blocks: 32)
         XCTAssertEqual(taps.p2.rms(from: a, to: b), 0, "取消之后 PVW 应是 −∞（实测 \(IT.db(taps.p2.rms(from: a, to: b) / baseRMS)) dB）")
         XCTAssertEqual(taps.p1.rms(from: a, to: b), baseRMS, accuracy: baseRMS * 0.02)
+        print("D10 T-bar 0.1 后 2 块拉回 0：取消后 PVW \(IT.db(taps.p2.rms(from: a, to: b) / baseRMS)) dB、PGM \(String(format: "%+.3f", IT.db(taps.p1.rms(from: a, to: b) / baseRMS))) dB")
         await rig.shutdown()
     }
 
@@ -259,6 +265,7 @@ final class AFVInterruptTests: XCTestCase {
         let (a, b) = rig.lastDeliveredWindow(blocks: 32)
         XCTAssertEqual(taps.p1.rms(from: a, to: b), 0, "提交之后旧源应是 −∞（实测 \(IT.db(taps.p1.rms(from: a, to: b) / baseRMS)) dB）")
         XCTAssertEqual(taps.p2.rms(from: a, to: b), baseRMS, accuracy: baseRMS * 0.02)
+        print("D10 T-bar 接管 Auto（0.6）再推到底：提交后旧源 \(IT.db(taps.p1.rms(from: a, to: b) / baseRMS)) dB、新源 \(String(format: "%+.3f", IT.db(taps.p2.rms(from: a, to: b) / baseRMS))) dB")
         await rig.shutdown()
     }
 }
@@ -287,6 +294,7 @@ extension IntegrationRealtimeTests {
         guard let last = p1.left.lastIndex(where: { $0 != 0 }) else { return XCTFail("旧源一直是 0？") }
         let silentMs = (p1.hostTime(ofSample: last + 1) - tCut).milliseconds
         XCTAssertLessThanOrEqual(silentMs, oneTick.milliseconds, "旧源到 −∞ 晚了：t_cut + \(silentMs) ms")
+        print("D10 空设备实时 Auto 600 拍第 60 拍 Cut：旧源 t_cut + \(String(format: "%.3f", silentMs)) ms 到 −∞")
         let a = AFVInterruptTests.index(p2, at: tCut + oneTick)
         let b = AFVInterruptTests.sameSample(a, of: p2, in: iso2)
         let n = min(p2.left.count - a, iso2.left.count - b)
