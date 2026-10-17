@@ -39,6 +39,12 @@ final class AudioSettingsModel: ObservableObject {
     /// 打开"输入设置"窗（输入的常规页上的按钮）。
     var onOpenInputSettings: ((Int) -> Void)?
 
+    /// 限幅页"起音就是前瞻"那一句按总线分开（W5-P，W4C3 第 4 条）：G8b 接了 W1-B4 之后 Master 的效果延迟由画面一起延后来对齐（状态窗写着视频延后 n ms），
+    /// Master 的监听不再晚于画面；Bus A / B（耳机）自己的延迟没补，照旧"监听会晚这么多"。
+    var limiterLatencyHint: String {
+        strip == .bus(.master) ? L("audioSettings.limiter.latencyHintMaster") : L("audioSettings.limiter.latencyHint")
+    }
+
     init(strip: AudioStrip, state: MixerState, page: AudioSettingsPage = .general) {
         self.strip = strip
         self.state = state
@@ -452,7 +458,7 @@ struct AudioSettingsView: View {
             enableRow(model.limiterEnabled) { model.setLimiterEnabled($0) }
             Group {
                 Slider(value: model.binding(\.limiter.attackSeconds), in: EffectEditorRanges.limAttackSeconds) { Text(L("effects.limiter.attackMs", l.attackSeconds * 1000)) }
-                Text(L("audioSettings.limiter.latencyHint")).font(.caption).foregroundStyle(.secondary)
+                Text(model.limiterLatencyHint).font(.caption).foregroundStyle(.secondary)
                 Slider(value: model.binding(\.limiter.decaySeconds), in: EffectEditorRanges.limDecaySeconds) { Text(L("effects.limiter.decayMs", l.decaySeconds * 1000)) }
                 Slider(value: model.binding(\.limiter.preGainDb), in: EffectEditorRanges.limPreGainDb) { Text(L("effects.limiter.preGainDb", l.preGainDb)) }
                 Slider(value: model.binding(\.limiter.ceilingDb), in: EffectEditorRanges.limCeilingDb) { Text(L("audioSettings.limiter.ceiling", l.ceilingDb)) }

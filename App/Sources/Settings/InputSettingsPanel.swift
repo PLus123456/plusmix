@@ -378,6 +378,8 @@ struct SliderField: View {
 }
 
 struct InputSettingsView: View {
+    /// 效果页显示"限幅器"那一节吗：每路不装限幅（W5-P，W4C3 第 3 条），不显示；已有的限幅格列在"其他效果"里原样留着。
+    static let effectsShowLimiter = false
     @ObservedObject var model: InputSettingsModel
     let preview: InputPreviewContainer
     @FocusState private var nameFocused: Bool
@@ -465,7 +467,7 @@ struct InputSettingsView: View {
                     Text(L("effects.notEffectiveHelp")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            EffectChainView(editor: model.effectsBinding)
+            EffectChainView(editor: model.effectsBinding, showsLimiter: Self.effectsShowLimiter)
         case .source: source
         }
     }

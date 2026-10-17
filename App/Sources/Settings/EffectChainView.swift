@@ -5,6 +5,22 @@ import SwitcherContracts
 
 struct EffectChainView: View {
     @Binding var editor: EffectChainEditor
+    /// 有没有"限幅器"那一节（W5-P，W4C3 第 3 条）：每路输入只装 EQ + 一个动态格（W1-D3 的 InputEffectPlan，peakLimiter 每路不装、只记一次日志），
+    /// 输入设置窗传 false——原来那一节勾上、调参数都存进节目、听不出变化。链里已有的限幅格原样留着（写回不丢），列在"其他效果（原样保留）"里。
+    var showsLimiter = true
+
+    /// 这个编辑器有哪几节（"其他"那一节只在有东西时出；这里给全表，用例对照）。
+    static func sectionTitles(showsLimiter: Bool) -> [String] {
+        [L("effects.eq.title"), L("effects.dynamics.title")] + (showsLimiter ? [L("effects.limiter.title")] : []) + [L("effects.others.title")]
+    }
+
+    /// "其他效果（原样保留）"一节列哪些：认不出的格；不显示限幅节时再加上链里已有的限幅格（按它写回的样子）。
+    static func otherSlots(_ editor: EffectChainEditor, showsLimiter: Bool) -> [EffectSlot] {
+        guard !showsLimiter, editor.limiter.present else { return editor.others }
+        let l = editor.limiter
+        return [AudioEffectParams.peakLimiter(attackSeconds: l.attackSeconds, decaySeconds: l.decaySeconds, preGainDb: l.preGainDb,
+                                              ceilingDb: l.ceilingDb, enabled: l.enabled)] + editor.others
+    }
 
     var body: some View {
         Section(L("effects.eq.title")) {
@@ -53,18 +69,21 @@ struct EffectChainView: View {
                 }
             }
         }
-        Section(L("effects.limiter.title")) {
-            Toggle(L("effects.limiter.present"), isOn: $editor.limiter.present)
-            if editor.limiter.present {
-                Toggle(L("effects.enabled"), isOn: $editor.limiter.enabled)
-                Slider(value: $editor.limiter.attackSeconds, in: EffectEditorRanges.limAttackSeconds) { Text(L("effects.limiter.attackMs", editor.limiter.attackSeconds * 1000)) }
-                Slider(value: $editor.limiter.decaySeconds, in: EffectEditorRanges.limDecaySeconds) { Text(L("effects.limiter.decayMs", editor.limiter.decaySeconds * 1000)) }
-                Slider(value: $editor.limiter.preGainDb, in: EffectEditorRanges.limPreGainDb) { Text(L("effects.limiter.preGainDb", editor.limiter.preGainDb)) }
+        if showsLimiter {
+            Section(L("effects.limiter.title")) {
+                Toggle(L("effects.limiter.present"), isOn: $editor.limiter.present)
+                if editor.limiter.present {
+                    Toggle(L("effects.enabled"), isOn: $editor.limiter.enabled)
+                    Slider(value: $editor.limiter.attackSeconds, in: EffectEditorRanges.limAttackSeconds) { Text(L("effects.limiter.attackMs", editor.limiter.attackSeconds * 1000)) }
+                    Slider(value: $editor.limiter.decaySeconds, in: EffectEditorRanges.limDecaySeconds) { Text(L("effects.limiter.decayMs", editor.limiter.decaySeconds * 1000)) }
+                    Slider(value: $editor.limiter.preGainDb, in: EffectEditorRanges.limPreGainDb) { Text(L("effects.limiter.preGainDb", editor.limiter.preGainDb)) }
+                }
             }
         }
-        if !editor.others.isEmpty {
+        let others = Self.otherSlots(editor, showsLimiter: showsLimiter)
+        if !others.isEmpty {
             Section(L("effects.others.title")) {
-                ForEach(Array(editor.others.enumerated()), id: \.offset) { _, slot in
+                ForEach(Array(others.enumerated()), id: \.offset) { _, slot in
                     Text(L("effects.others.slot", slot.id, slot.enabled ? L("common.on") : L("common.off")))
                 }
             }

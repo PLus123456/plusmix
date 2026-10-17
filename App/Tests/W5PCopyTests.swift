@@ -195,6 +195,50 @@ final class W5PCopyTests: XCTestCase {
         try pressSpace(controller.windowController.multiviewWindow?.window, "多画面窗口")
     }
 
+    /// 第 3 条：每路输入只装 EQ + 一个动态格（W1-D3 的 InputEffectPlan，peakLimiter 每路不装），输入设置窗的效果页原来照样有"限幅器"一节，
+    /// 勾上调参数都存进节目、听不出变化。现在输入设置窗不显示那一节；链里已有的限幅格原样留着、列在"其他效果（原样保留）"里。
+    func testW4C3_3_inputEffectsPageHidesLimiterSection() {
+        let limiter = AudioEffectParams.peakLimiter(attackSeconds: 0.01, decaySeconds: 0.02, preGainDb: 3)
+        let eq = AudioEffectParams.parametricEQ(centerHz: 1000, q: 1, gainDb: 2)
+        let editor = EffectChainEditor(slots: [eq, limiter])
+        XCTAssertFalse(InputSettingsView.effectsShowLimiter, "输入设置窗不显示限幅那一节")
+        XCTAssertEqual(EffectChainView.sectionTitles(showsLimiter: false), [L("effects.eq.title"), L("effects.dynamics.title"), L("effects.others.title")])
+        XCTAssertTrue(EffectChainView.sectionTitles(showsLimiter: true).contains(L("effects.limiter.title")), "总线那边（如果用它）照旧有")
+        XCTAssertEqual(EffectChainView.otherSlots(editor, showsLimiter: false), [limiter], "已有的限幅格列进\"其他效果（原样保留）\"")
+        XCTAssertEqual(EffectChainView.otherSlots(editor, showsLimiter: true), [], "显示限幅节时它不在\"其他\"里")
+        XCTAssertEqual(editor.slots, [eq, limiter], "链原样写回，限幅格不丢")
+    }
+
+    /// 第 4 条：几处过时的文案——限幅的延迟提示按总线分开（Master 的效果延迟 G8b 起由画面一起延后来对齐，监听不再晚于画面；Bus A / B 原句）；
+    /// "切上 PGM 时从头播"首帧晚约 3 拍（W5-N 实测，不是 1–2 拍）。
+    func testW4C3_4_limiterLatencyHintPerBusAndFirstFrameThreeTicks() {
+        let state = MixerState()
+        let master = AudioSettingsModel(strip: .bus(.master), state: state, page: .limiter)
+        let busA = AudioSettingsModel(strip: .bus(.busA), state: state, page: .limiter)
+        XCTAssertTrue(master.limiterLatencyHint.contains("画面跟着一起延后"), master.limiterLatencyHint)
+        XCTAssertFalse(master.limiterLatencyHint.contains("耳机 / 扬声器监听会晚这么多"), "Master 的监听不再晚于画面")
+        XCTAssertTrue(busA.limiterLatencyHint.contains("耳机 / 扬声器监听会晚这么多"), "Bus A / B 保留原句：\(busA.limiterLatencyHint)")
+        for key in ["cell.menu.restartOnProgram.tip", "inputSettings.playback.hint"] {
+            XCTAssertTrue(L(key).contains("约 3 拍"), "\(key)：\(L(key))")
+            XCTAssertFalse(L(key).contains("1–2 拍"), key)
+            let en = L10n.string(key, language: "en")
+            XCTAssertTrue(en.contains("about 3 ticks"), "\(key) en：\(en)")
+            XCTAssertFalse(en.contains("1–2 ticks"), key)
+        }
+    }
+
+    /// 第 12 条：只有英文错的三处——Stinger 选输入菜单的段标题（选了只改槽、要再点一次才执行）、诊断文件夹的菜单名（第 1 条的用例里查）、
+    /// 文件来源"就地改"提示里的两个字段名对上表单（"At end" / "Playback rate"）。
+    func testW4C3_12_englishCopyMatchesUI() {
+        let header = L10n.string("slot.stingerMenu.header", language: "en", 4)
+        XCTAssertFalse(header.contains("runs once chosen"), header)
+        XCTAssertTrue(header.contains("then click again to run it"), header)
+        let hint = L10n.string("inputSettings.source.fileInPlaceHint", language: "en")
+        XCTAssertTrue(hint.contains("“\(L10n.string("addInput.file.endAction", language: "en"))”"), hint)
+        XCTAssertTrue(hint.contains("“\(L10n.string("addInput.file.rate", language: "en"))”"), hint)
+        XCTAssertFalse(hint.contains("“Speed”"), hint)
+    }
+
     /// 状态行（W4C3 第 11 条）：failed 的推流不算在跑——原来取码率最低的那一路，起不来 / 鉴权停下的码率 0，写"推流 0 b/s"；状态窗写 —，两处不一致。
     func testW5P111_statusLineIgnoresFailedStreams() {
         func stats(_ entries: [Stats.EncoderEntry]) -> Stats {

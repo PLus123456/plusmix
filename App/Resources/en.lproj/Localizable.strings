@@ -392,6 +392,7 @@
 "audioSettings.limiter.ceiling" = "Ceiling %.1f dBFS";
 "audioSettings.limiter.ceilingHint" = "The limited output peaks here at most (0 = 0 dBFS).";
 "audioSettings.limiter.latencyHint" = "Attack is the look-ahead: this bus runs this many milliseconds late. Recording / streaming / NDI® stay in sync; headphone / speaker monitoring is late by this much.";
+"audioSettings.limiter.latencyHintMaster" = "Attack is the look-ahead: Master runs this many milliseconds late and the picture is delayed with it (the status window shows “Video delayed n ms”) — recording / streaming / NDI® and headphone / speaker monitoring all stay in sync.";
 "audioSettings.meterPost" = "Post";
 "audioSettings.page.compressor" = "Compressor";
 "audioSettings.page.eq" = "EQ";
@@ -1596,7 +1597,7 @@
 "slot.menu.factory" = "Restore Factory Setting";
 "slot.duration.seconds" = "%@ s";
 "slot.duration.customTitle" = "Duration of Transition %d";
-"slot.stingerMenu.header" = "Transition %d · Stinger: choose an input first (it runs once chosen)";
+"slot.stingerMenu.header" = "Transition %d · Stinger: choose an input first, then click again to run it";
 "slot.stingerMenu.noInputs" = "No inputs yet";
 "slot.tbarRow" = "%@ ▾";
 "slot.tbarRowAX" = "Transition for the T-bar and Return: %@";
@@ -1647,14 +1648,14 @@
 "cell.menu.restart" = "Back to Start";
 "cell.menu.loop" = "Loop";
 "cell.menu.restartOnProgram" = "Restart When Taken to PGM";
-"cell.menu.restartOnProgram.tip" = "Plays from the start on the tick this input goes to PGM (Cut / transition done / T-bar at the end); the first frame lands 1–2 ticks later. Previewing on PVW does not restart it. Saved with the show.";
-"inputSettings.source.fileInPlaceHint" = " For file inputs, changing only “At End” or “Speed” applies right away without rebuilding the input (playback continues); no need to click Apply Source.";
+"cell.menu.restartOnProgram.tip" = "Plays from the start on the tick this input goes to PGM (Cut / transition done / T-bar at the end); the first frame lands a few ticks later (about 3 ticks). Previewing on PVW does not restart it. Saved with the show.";
+"inputSettings.source.fileInPlaceHint" = " For file inputs, changing only “At end” or “Playback rate” applies right away without rebuilding the input (playback continues); no need to click Apply Source.";
 "inputSettings.playback.title" = "Playback";
 "inputSettings.playback.play" = "▶ Play";
 "inputSettings.playback.pause" = "⏸ Pause";
 "inputSettings.playback.restart" = "⏮ Back to Start";
 "inputSettings.playback.restartOnProgram" = "Restart when taken to PGM";
-"inputSettings.playback.hint" = "Pause holds the current frame (frames keep coming every tick; it is not “no signal”). Back to Start while paused holds the first frame. Restart when taken to PGM: starts over on the tick of the Cut / transition end / T-bar commit, first frame 1–2 ticks later; previewing on PVW does not restart it. The cell's first row and context menu do the same.";
+"inputSettings.playback.hint" = "Pause holds the current frame (frames keep coming every tick; it is not “no signal”). Back to Start while paused holds the first frame. Restart when taken to PGM: starts over on the tick of the Cut / transition end / T-bar commit, first frame a few ticks later (about 3 ticks); previewing on PVW does not restart it. The cell's first row and context menu do the same.";
 "bottom.recordingTime" = "● REC %@";
 "bottom.recordingTimeMany" = "● REC %@ (%d)";
 "bottom.streamingTime" = "● LIVE %@";
