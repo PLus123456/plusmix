@@ -8,6 +8,7 @@ import SwitcherEngine
 import SwitcherISO
 import SwitcherAudio
 import SwitcherOutputs
+import SwitcherAudioIntegration
 @testable import Switcher
 
 @MainActor
@@ -176,6 +177,104 @@ final class W5PFixesTests: XCTestCase {
                       "\(String(describing: session.inputs.runtimeState(of: 1)))")
         XCTAssertTrue(AppTest.waitUntil(3) { (AppTest.readback(session)?.lumaStats().mean ?? 255) < 3 },
                       "起不来的来源：画黑，不定格在旧画面（\(String(describing: AppTest.readback(session)?.lumaStats())))")
+    }
+
+    // MARK: D07 换源重试的代次（可控计钟替身）
+
+    /// 手动拨的钟（毫秒）：schedule 记下到期时刻，advance 按到期先后依次做（同一刻按排的先后）。
+    @MainActor
+    final class ManualClock {
+        private(set) var now = 0
+        private var items: [(due: Int, order: Int, work: @MainActor () -> Void)] = []
+        private var order = 0
+        func schedule(_ milliseconds: Int, _ work: @escaping @MainActor () -> Void) {
+            items.append((now + milliseconds, order, work))
+            order += 1
+        }
+        func advance(to t: Int) {
+            while let i = items.indices.filter({ items[$0].due <= t }).min(by: { (items[$0].due, items[$0].order) < (items[$1].due, items[$1].order) }) {
+                let item = items.remove(at: i)
+                now = item.due
+                item.work()
+            }
+            now = t
+        }
+    }
+
+    /// 音频引擎注册的替身：摘除要淡出 fadeMs 才放开这个编号（同真引擎的 removalFadeBlocks ≈ 16 ms），淡出期间再注册抛 inputAlreadyRegistered。
+    @MainActor
+    final class FadingRegistrar {
+        let clock: ManualClock
+        let fadeMs: Int
+        private(set) var current: [Int: ObjectIdentifier] = [:]
+        private(set) var successes: [ObjectIdentifier] = []
+        init(clock: ManualClock, fadeMs: Int) {
+            self.clock = clock
+            self.fadeMs = fadeMs
+        }
+        func register(_ number: Int, _ ring: any AudioRing) throws {
+            guard current[number] == nil else { throw AudioEngineError.inputAlreadyRegistered(number) }
+            current[number] = ObjectIdentifier(ring)
+            successes.append(ObjectIdentifier(ring))
+        }
+        func unregister(_ number: Int) {
+            guard let id = current[number] else { return }
+            clock.schedule(fadeMs) { [weak self] in if self?.current[number] == id { self?.current[number] = nil } }
+        }
+    }
+
+    private func makeRegistration(_ clock: ManualClock, _ engine: FadingRegistrar) -> AudioInputRegistration {
+        AudioInputRegistration(register: { n, ring, _ in try engine.register(n, ring) },
+                               unregister: { n in engine.unregister(n) },
+                               schedule: { ms, work in clock.schedule(ms, work) })
+    }
+
+    /// Codex 的时序（16 ms 淡出替身）：A → B 时 A 还在淡出、B 排了 30 ms 的重试；5 ms 后再换 B → C。修前最终注册的是 B（生产者已停、残留音频耗尽后无声）、
+    /// C 撞满 10 次、累计重试 11 次；修后 B 的重试作废，最终是 C、不残留 B、只重试两次（B、C 各一次）。
+    func testD07_rapidSourceChangesRegisterOnlyLatestRing() {
+        let clock = ManualClock()
+        let engine = FadingRegistrar(clock: clock, fadeMs: 16)
+        let registration = makeRegistration(clock, engine)
+        let a = CAudioRing(channelCount: 2), b = CAudioRing(channelCount: 2), c = CAudioRing(channelCount: 2)
+        registration.register(number: 1, ring: a, hints: AudioInputHints())
+        XCTAssertEqual(engine.current[1], ObjectIdentifier(a))
+        // t = 0：A → B（InputRuntime.replaceSource 的顺序：先摘旧环、再注册新环）
+        registration.unregister(number: 1)
+        registration.register(number: 1, ring: b, hints: AudioInputHints())
+        // t = 5：B 还没注册上，又换 B → C
+        clock.advance(to: 5)
+        registration.unregister(number: 1)
+        registration.register(number: 1, ring: c, hints: AudioInputHints())
+        clock.advance(to: 1000)
+        print("W5P D07 A→B→C：最终 \(engine.current[1] == ObjectIdentifier(c) ? "C" : engine.current[1] == ObjectIdentifier(b) ? "B" : "?")，重试 \(registration.retries) 次")
+        XCTAssertEqual(engine.current[1], ObjectIdentifier(c), "最终注册的是 C")
+        XCTAssertFalse(engine.successes.contains(ObjectIdentifier(b)), "过期的 B 不能注册上")
+        XCTAssertLessThan(registration.retries, 11, "重试次数不累到 11")
+        XCTAssertEqual(registration.retries, 2, "B、C 各撞一次淡出")
+        XCTAssertEqual(registration.registered, [1])
+    }
+
+    /// 重试还在等的时候这一路被删 / 引擎停了：旧任务作废，什么都不注册。
+    func testD07_unregisterOrStopCancelsPendingRetry() {
+        let clock = ManualClock()
+        let engine = FadingRegistrar(clock: clock, fadeMs: 16)
+        let registration = makeRegistration(clock, engine)
+        let a = CAudioRing(channelCount: 2), b = CAudioRing(channelCount: 2)
+        registration.register(number: 1, ring: a, hints: AudioInputHints())
+        registration.unregister(number: 1)
+        registration.register(number: 1, ring: b, hints: AudioInputHints())   // 撞淡出，排重试
+        registration.unregister(number: 1)                                     // 删掉这一路（B 还没注册上）
+        clock.advance(to: 1000)
+        XCTAssertNil(engine.current[1], "删掉的那一路不该再被重试注册上")
+        XCTAssertEqual(registration.registered, [])
+        // 引擎停了：同样作废
+        registration.register(number: 2, ring: a, hints: AudioInputHints())
+        registration.unregister(number: 2)
+        registration.register(number: 2, ring: b, hints: AudioInputHints())
+        registration.removeAll()
+        clock.advance(to: 2000)
+        XCTAssertFalse(engine.successes.contains(ObjectIdentifier(b)), "停了之后的重试不能注册")
+        XCTAssertEqual(registration.registered, [])
     }
 
     // MARK: D16 LastSession 的相对素材
