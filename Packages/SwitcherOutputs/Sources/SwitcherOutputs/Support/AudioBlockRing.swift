@@ -5,8 +5,12 @@ import SwitcherContracts
 
 /// 音频块的有界环（录制器 / 编码器的入口缓冲）：泵线程 push 拷贝一块进来，消费线程 pop 取走。
 /// 存储在 init 时按（块数 × 每块最大帧数 × 声道）一次分配，之后零分配；满了丢最旧并计数。
+///
+/// 出口块（D05，Codex 2026-10-13 审查）：pop 在锁内把最旧那一槽拷进消费者独占的出口块（init 时分配，push 从不碰它），
+/// 交出去的是出口块的视图。以前交的是槽内指针：pop 已经把槽还给队列，队列原本满时下一次 push 的尾槽正好是这一格，
+/// 消费者还没读完就被覆盖（样本变成新块的、PTS 还是旧块的）。只许一个消费者（录制器的 writer 队列）；pop / push 都不分配。
 final class AudioBlockRing: @unchecked Sendable {
-    /// 一块的视图：planes 里每个指针指向 frameCount 个 float。只在 pop 后到下一次 pop 前有效。
+    /// 一块的视图：planes 里每个指针指向 frameCount 个 float，指的是消费者独占的出口块——到下一次 pop 之前有效，期间 push 不会改它。
     struct Block {
         var hostTime: HostTime
         var frameCount: Int
@@ -19,6 +23,8 @@ final class AudioBlockRing: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock()
     private let storage: UnsafeMutablePointer<Float>           // capacity × channelCount × maxFrames
     private let planeTable: UnsafeMutablePointer<UnsafeMutablePointer<Float>> // capacity × channelCount
+    private let outStorage: UnsafeMutablePointer<Float>        // 出口块：channelCount × maxFrames，只有消费者（pop 的调用方）碰
+    private let outPlanes: UnsafeMutablePointer<UnsafeMutablePointer<Float>>  // channelCount
     private var hostTimes: [HostTime]
     private var frameCounts: [Int]
     private var head = 0
@@ -44,6 +50,10 @@ final class AudioBlockRing: @unchecked Sendable {
                 planeTable[slot * channelCount + ch] = storage + (slot * channelCount + ch) * maxFrames
             }
         }
+        outStorage = .allocate(capacity: channelCount * maxFrames)
+        outStorage.initialize(repeating: 0, count: channelCount * maxFrames)
+        outPlanes = .allocate(capacity: channelCount)
+        for ch in 0..<channelCount { outPlanes[ch] = outStorage + ch * maxFrames }
         hostTimes = Array(repeating: .zero, count: capacity)
         frameCounts = Array(repeating: 0, count: capacity)
     }
@@ -51,6 +61,8 @@ final class AudioBlockRing: @unchecked Sendable {
     deinit {
         storage.deallocate()
         planeTable.deallocate()
+        outStorage.deallocate()
+        outPlanes.deallocate()
     }
 
     /// 拷贝一块进来（frameCount > maxFrames 的部分截掉）。返回是否因满而丢了最旧的一块。
@@ -76,15 +88,18 @@ final class AudioBlockRing: @unchecked Sendable {
         return droppedOne
     }
 
-    /// 取最旧的一块。返回的视图指向环内存储，下一次 push 可能覆盖它 —— 消费者要在下一次 pop 前用完
-    /// （环深度 ≥ 2 且单消费者时，pop 出来的槽要再过 capacity − 1 次 push 才会被覆盖）。
+    /// 取最旧的一块：锁内拷进出口块、把槽还给队列，返回出口块的视图（到下一次 pop 之前有效）。单消费者。
     func pop() -> Block? {
         lock.lock()
         guard count > 0 else { lock.unlock(); return nil }
         let slot = head
+        let n = frameCounts[slot]
+        for ch in 0..<channelCount {
+            outPlanes[ch].update(from: planeTable[slot * channelCount + ch], count: n)
+        }
+        let block = Block(hostTime: hostTimes[slot], frameCount: n, planes: outPlanes)
         head = (head + 1) % capacity
         count -= 1
-        let block = Block(hostTime: hostTimes[slot], frameCount: frameCounts[slot], planes: planeTable + slot * channelCount)
         lock.unlock()
         #if DEBUG
         let stall = Self.consumerStallMicrosecondsForTesting.load(ordering: .relaxed)
