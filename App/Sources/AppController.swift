@@ -225,21 +225,25 @@ final class AppController {
     /// 换 session 的事务队列（D04，Codex 2026-10-13 审查）：新建 / 打开 / 打开上次退出时的节目 / 启动 / 换格式 / 换节目音频 / 重起引擎都排进这里，
     /// 一次只做一个，后来的等前一个做完再做——原来 replaceSession 对重入直接 return（打开 B 被丢掉），打开 A 的 load 却已经把 currentURL 改成了 B，
     /// 之后保存把还在跑的 A 写进 B 的文件。读文件 / 取当前节目都在轮到时才做（排队期间前一个事务换上的 session 才是要接手的那份）。
-    private var sessionQueueTail: Task<Void, Never>?
+    /// 做法同 SwitcherSession 的 acquireLifecycle：一个"在做"标志 + 按先后排的续体，body 在调用方自己的任务里跑（队列空着时不多一跳）。
+    private var sessionChangeBusy = false
+    private var sessionChangeWaiters: [CheckedContinuation<Void, Never>] = []
     /// shutdown 一次加 1：排在它之前、还没轮到的事务作废。
     private var sessionEpoch = 0
 
     /// 把一段换 session 的活排进队列，做完才返回。body 里只能调 performReplace（不能再排队，否则等自己）。
-    private func enqueueSessionChange(_ body: @escaping @MainActor () async -> Void) async {
-        let previous = sessionQueueTail
+    private func enqueueSessionChange(_ body: @MainActor () async -> Void) async {
         let epoch = sessionEpoch
-        let task = Task { @MainActor [weak self] in
-            await previous?.value
-            guard let self, self.sessionEpoch == epoch else { return }
-            await body()
+        if sessionChangeBusy {
+            await withCheckedContinuation { sessionChangeWaiters.append($0) }   // 轮到时 busy 仍是 true（交接）
+        } else {
+            sessionChangeBusy = true
         }
-        sessionQueueTail = task
-        await task.value
+        defer {
+            if sessionChangeWaiters.isEmpty { sessionChangeBusy = false } else { sessionChangeWaiters.removeFirst().resume() }
+        }
+        guard sessionEpoch == epoch else { return }
+        await body()
     }
 
     /// 测试 / 内部直接换一个 session（文档身份不变）；排队，不再因为上一个还在做就丢掉。
