@@ -70,6 +70,34 @@ final class W5PFixesTests: XCTestCase {
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }
 
+    /// 快速起停：停的命令刚发、封口还没完就再开录——第二次等第一次封完才起（OutputRuntime 的"停的过程中又被打开"），落点照样避开刚封好的那个文件。
+    func testK01_quickRestartWhileStoppingGetsNewName() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 1)
+        session.send(.setProgram(input: 1))
+        let directory = try temporaryDirectory("quick")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try pointRecord(session, to: directory, pattern: "fixed")
+        session.send(.startRecord(output: 1))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[1] != nil })
+        let firstURL = try XCTUnwrap(session.outputs.recorders[1]?.url)
+        AppTest.pump(seconds: 0.5)
+        session.send(.stopRecord(output: 1))
+        XCTAssertTrue(AppTest.waitUntil(2) { session.outputs.recorders[1]?.stopping == true }, "停的命令生效、在封口")
+        session.send(.startRecord(output: 1))   // 封口还没完就再开
+        XCTAssertTrue(AppTest.waitUntil(15) { session.outputs.recorders[1].map { $0.url != firstURL && !$0.stopping } ?? false }, "第二次起来了")
+        let secondURL = try XCTUnwrap(session.outputs.recorders[1]?.url)
+        let firstBytes = try Data(contentsOf: firstURL)
+        AppTest.pump(seconds: 0.5)
+        session.send(.stopRecord(output: 1))
+        XCTAssertTrue(AppTest.waitUntil(15) { session.outputs.recorders[1] == nil })
+        print("W5P K01 快速起停：\(firstURL.lastPathComponent)（\(firstBytes.count) 字节）→ \(secondURL.lastPathComponent)")
+        XCTAssertEqual(firstURL.lastPathComponent, "fixed.mov")
+        XCTAssertEqual(secondURL.lastPathComponent, "fixed-2.mov")
+        XCTAssertEqual(try Data(contentsOf: firstURL), firstBytes, "第一次的文件没被第二次删掉")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path))
+    }
+
     /// 转封装成 MP4 的路：磁盘上只有同名 .mp4（上一次转封装留下的，.mov 已经不在）也算占了——Remux 会先删同名 .mp4（prompt 119 交付 2）。
     func testK01_remuxTargetWithSameNameIsKept() throws {
         let session = try AppTest.freshSession()
