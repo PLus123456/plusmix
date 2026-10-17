@@ -65,6 +65,7 @@ final class PanelCoordinator: NSObject {
             self.settingsWindow?.model.outputs.apply(stats: stats)
             self.statsWindow?.model.apply(stats: stats, state: self.state)
             self.outputStatus.apply(stats: stats, state: self.state)   // 状态面板关着也喂：事件记录要连着（W5-N）
+            for (_, w) in self.inputSettingsWindows { w.model.refreshRuntime() }   // 文件播完不出快照：每秒看一次（W4C3 第 5 条）
         }
     }
 
@@ -223,6 +224,7 @@ final class PanelCoordinator: NSObject {
         }
         let model = InputSettingsModel(config: config)
         model.send = { [weak session] c in session?.send(c) }
+        model.runtimeState = { [weak session] in session?.inputs.runtimeState(of: number) }   // "播完"要看跑着的那个（W5-P，W4C3 第 5 条）
         let w = InputSettingsWindowController(model: model)
         w.attach(source: session.displaySource, format: session.format)   // 本路画面：多画面纹理裁这一格（W5-K / H3）
         w.apply(state: state.input(number) != nil ? state : session.state)

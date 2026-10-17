@@ -239,6 +239,43 @@ final class W5PCopyTests: XCTestCase {
         XCTAssertFalse(hint.contains("“Speed”"), hint)
     }
 
+    /// 第 5 条：输入设置窗"播放"一节的按钮与格子同一口径——播完（不循环、跑着的那个已经无信号）= "▶ 播放"、点了从头播（seekPlayback 0）；
+    /// 原来只看 paused，播完时仍写"⏸ 暂停"、点了发 setPlayback(true)，再点"▶ 播放"也只是取消暂停、画面不动。
+    func testW4C3_5_settingsPlayButtonKnowsPlaybackEnded() {
+        var runtime: InputState? = .live
+        func model(endAction: FileEndAction, paused: Bool = false) -> (InputSettingsModel, () -> [Command]) {
+            var config = InputConfig(number: 3, name: "片子", source: .file(path: "/tmp/w5p.mov", endAction: endAction, rate: 1))
+            config.settings.playback.paused = paused
+            let m = InputSettingsModel(config: config)
+            var sent: [Command] = []
+            m.send = { sent.append($0) }
+            m.runtimeState = { runtime }
+            m.refreshRuntime()
+            return (m, { sent })
+        }
+        let play = L("inputSettings.playback.play"), pause = L("inputSettings.playback.pause")
+        // 播着：⏸ 暂停 → setPlayback(true)
+        var (m, sent) = model(endAction: .holdLastFrame)
+        XCTAssertEqual(m.playButtonTitle, pause)
+        m.togglePaused()
+        XCTAssertEqual(sent(), [.setPlayback(input: 3, paused: true)])
+        // 播完了（不循环、无信号）：▶ 播放 → 从头播
+        runtime = .noSignal
+        (m, sent) = model(endAction: .holdLastFrame)
+        XCTAssertEqual(m.playButtonTitle, play, "播完 = ▶，同格子")
+        m.togglePaused()
+        XCTAssertEqual(sent(), [.seekPlayback(input: 3, seconds: 0)], "播完点 ▶ = 从头播")
+        // 循环的不会"播完"：无信号也照旧按暂停翻
+        (m, sent) = model(endAction: .loop)
+        XCTAssertEqual(m.playButtonTitle, pause)
+        // 暂停中：▶ 播放 → 取消暂停
+        runtime = .live
+        (m, sent) = model(endAction: .holdLastFrame, paused: true)
+        XCTAssertEqual(m.playButtonTitle, play)
+        m.togglePaused()
+        XCTAssertEqual(sent(), [.setPlayback(input: 3, paused: false)])
+    }
+
     /// 状态行（W4C3 第 11 条）：failed 的推流不算在跑——原来取码率最低的那一路，起不来 / 鉴权停下的码率 0，写"推流 0 b/s"；状态窗写 —，两处不一致。
     func testW5P111_statusLineIgnoresFailedStreams() {
         func stats(_ entries: [Stats.EncoderEntry]) -> Stats {
