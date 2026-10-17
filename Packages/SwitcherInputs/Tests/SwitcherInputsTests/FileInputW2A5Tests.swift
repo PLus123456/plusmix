@@ -145,6 +145,7 @@ final class FileInputW2A5Tests: XCTestCase {
             sleepMs(400)
             let fc = input.fileCountersSnapshot
             let c = input.counters
+            print("D14 第 \(hits) 次：开循环时 received \(before.framesReceived) pushed \(before.framesPushed)；0.4 s 后 \(input.state) pushed \(c.framesPushed) loops \(fc.loops) seeks \(fc.seeks) 没跟上 \(fc.ticksStarved)")
             XCTAssertEqual(input.state, .live, "第 \(hits) 次：开了循环不该进 noSignal（开之前 received \(before.framesReceived) pushed \(before.framesPushed)）：\(fc) \(c)")
             XCTAssertEqual(c.noSignalTransitions, 0, "第 \(hits) 次：中途也没进过 noSignal：\(c)")
             XCTAssertGreaterThanOrEqual(fc.loops, 1, "第 \(hits) 次：loops 该涨：\(fc)")
@@ -159,6 +160,7 @@ final class FileInputW2A5Tests: XCTestCase {
             XCTAssertEqual(input.state, .live)
             input.stop()
         }
+        print("D14 窗口里开循环：\(attempts) 次尝试卡进窗口 \(hits) 次")
         XCTAssertEqual(hits, 2, "\(attempts) 次里只卡进窗口 \(hits) 次")
     }
 
@@ -371,6 +373,7 @@ final class FileInputW2A5Tests: XCTestCase {
         XCTAssertEqual([later.width, later.height], [240, 320])
         XCTAssertEqual(Quadrants.of(later.pixelBuffer), "GWRB")
         XCTAssertLessThanOrEqual(input.counters.distinctSurfaces, 16, "转正用的像素池稳定复用（渲染器纹理表每路 16 项）：\(input.counters)")
+        print("D15 夹具：\(frame.width)×\(frame.height) 四角 \(Quadrants.of(frame.pixelBuffer))，\(input.fileCountersSnapshot.loops) 圈后面数 \(input.counters.distinctSurfaces)，lastError \(input.lastError ?? "nil")")
     }
 
     /// 八种轴对齐方向（四个旋转 × 是否镜像，带手机录像那样的平移）各写一段四色象限（AVAssetWriterInput.transform），
