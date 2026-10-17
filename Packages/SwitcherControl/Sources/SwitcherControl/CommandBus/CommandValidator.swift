@@ -15,7 +15,7 @@ public enum CommandValidator {
             return nil
         case .autoTransition:
             // 提案 029：空闲时要执行的当前那组是没选输入的 Stinger → 拒（空闲时它只随命令变）；进行中照旧交给 reducer
-            //（进行中再发本来就忽略，完成那一拍当前那组还可能按槽重拷）
+            //（进行中再发本来就忽略，完成或取消那一拍当前那组还可能按槽重拷）
             let t = s.transition
             guard !t.isActive, t.currentGroup.isStingerWithoutInput else { return nil }
             return t.currentSlot.map { "转场 \($0) 是 Stinger、还没选输入" } ?? "当前转场是 Stinger、还没选输入"

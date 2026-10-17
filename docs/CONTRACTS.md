@@ -205,12 +205,12 @@ P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的�
 
 **转场槽（提案 020，用户 2026-10-11 批，P5-2 落地；"请用户定的点"按提案默认）**：`TransitionState.slots` 恰好 4 个（`validate()` 查，`MixerStateError.transitionSlotCount`）、`currentSlot` nil 或 1…4（`transitionSlotIndex`）；
 currentSlot = 当前那组（type / durationTicks / wipe / stinger）对应哪个槽，nil = `setTransition` / `fade` / `setTransitionParams` / API 直接给的、不对应任何槽。T-bar / 回车 / `autoTransition` 用的永远是当前那组，所以"跟当前槽"不需要别的字段；渲染器只看当前那组。
-- `setTransitionSlot(slot:config:)`：只改 `slots[slot − 1]`，**转场进行中也收**；durationTicks 钳 ≥ 0、softness 钳 0–1、cutAtTick 钳 ≥ 0（与 016 同口径）；slot 不在 1…4、stinger.input 指向不存在的输入由校验器拒；改的若正好是 currentSlot 且空闲，当前那组同时重拷；进行中的那一次按开始时的参数走完，**完成那一拍重拷**（`completeTransition` 在 currentSlot 非 nil 时总是按槽重拷，幂等；cut / T-bar 提交同样走它）；相同配置 applied = false。
+- `setTransitionSlot(slot:config:)`：只改 `slots[slot − 1]`，**转场进行中也收**；durationTicks 钳 ≥ 0、softness 钳 0–1、cutAtTick 钳 ≥ 0（与 016 同口径）；slot 不在 1…4、stinger.input 指向不存在的输入由校验器拒；改的若正好是 currentSlot 且空闲，当前那组同时重拷；进行中的那一次按开始时的参数走完，**完成或取消那一拍重拷**（完成：`completeTransition` 在 currentSlot 非 nil 时总是按槽重拷，幂等，cut / T-bar 提交同样走它；取消：T-bar 拉回 0 那一拍 reducer 的 `tbar` 同一句重拷——020 追加，用户 2026-10-17 定、P5-4 落地，原来取消不重拷、下一次回车执行改之前的配置）；currentSlot = nil 时两处都不重拷；相同配置 applied = false。
 - `useTransitionSlot(slot:start:)`：把槽拷进当前那组、currentSlot = slot；start = true 同时开始 auto 转场（cut 或时长 0 = 原子对调），一拍内原子完成，代替 UI 一次发三条；start = false 只选中；转场进行中被拒；start = false 且已是当前槽、当前那组与槽相同 → applied = false。**start = true 而槽是没选输入的 Stinger 时拒收**（提案 029，下一条；020 原来是照常开始）。
 - **没选输入的 Stinger 不执行（提案 029，用户 2026-10-12 定，P5-3 落地）**：判定只有一条 `TransitionSlot.isStingerWithoutInput`（type = stinger 且 stinger.input = nil；出厂槽 4 就是）。
-  `useTransitionSlot(slot, start: true)` 遇到这种槽、`autoTransition` 遇到要执行的当前那组是这种（当前槽是这种槽，**或 setTransition / setTransitionParams 直接给的、currentSlot = nil 的也算**——否则从这条路绕过去还是一次延迟硬切）：
+  `useTransitionSlot(slot, start: true)` 遇到这种槽、`autoTransition` 遇到要执行的当前那组是这种（当前槽是这种槽，**或 setTransition / setTransitionParams 直接给的、currentSlot = nil 的也算**——否则从这条路绕过去还是一次延迟硬切；按"要执行的当前那组"判比提案正文"当前槽是这种槽"多拒这一种，用户 2026-10-17 定维持）：
   校验器 HTTP 400（文案"转场 n 是 Stinger、还没选输入"，当前那组不对应槽时"当前转场是 Stinger、还没选输入"）、reducer 原样返回（applied = false；不选中、不开始）。
-  这两个条件只随命令变（槽的配置 / 空闲时的当前那组），所以入口就拒（与 `setOutputEnabled` 对录制 / 推流输出的做法一样），`testValidator_agreesWithReducer` 两边一致；autoTransition 在转场**进行中**校验器不判（本来就由 reducer 忽略，完成那一拍当前那组还可能按槽重拷）。
+  这两个条件只随命令变（槽的配置 / 空闲时的当前那组），所以入口就拒（与 `setOutputEnabled` 对录制 / 推流输出的做法一样），`testValidator_agreesWithReducer` 两边一致；autoTransition 在转场**进行中**校验器不判（本来就由 reducer 忽略，完成或取消那一拍当前那组还可能按槽重拷）。
   不受影响：`useTransitionSlot(start: false)`（只选中，之后 T-bar 用）、`cut`（原子对调，不看类型）、`fade`（总是 Fade）、`tbar`。**T-bar 推这样的当前那组（P5-3 核对）**：reducer 照收（progress = 推杆位置、source = tbar，到 1 提交、拉回 0 取消，与别的类型同一条路）；
   渲染器（`TransitionRenderer.stingerShowsNewUnder`）在 round(progress × durationTicks) ≥ max(cutAtTick, 1) 时把底换成 PVW、不叠任何东西——即推过换底拍对应的那一格画面就整个换成新画面，拉回去又换回旧的；cutAtTick ≥ durationTicks 时推的过程中不换、到 1 提交才换；durationTicks = 0 时一推就换。
   控制层 / 兼容层 / Stream Deck 的提示（feedback、Transition n → 409、showAlert）归 W5-O（prompt 112）；App 界面三处本来就先弹输入选择（X18），不变。
@@ -431,9 +431,9 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 | — | `.setTransitionParams(wipe:stinger:)` | 加的（提案 016）：Wipe 方向 / 软边、Stinger 输入 / 换底拍两组整体替换；转场进行中被拒，softness 钳 0–1、cutAtTick 钳 ≥ 0；之前只能 loadShow 整体替换（会盖掉别人的改动、打断进行中的动画） |
 | setPreview(input) | `.setPreview(input:)` | 转场进行中（`TransitionState.isActive`）被拒（提案 023）：渲染器按当前的 program / preview 画两路，中途换掉是 PGM 跳变 |
 | setProgram(input) | `.setProgram(input:)` | 硬切 PGM，PVW 不变；转场进行中被拒（提案 023） |
-| tbar(progress) | `.tbar(progress:)` | 到 1 提交；没选输入的 Stinger 照推（029 不管 T-bar，画面口径见 §2.5 转场槽） |
+| tbar(progress) | `.tbar(progress:)` | 到 1 提交、拉回 0 取消，两处都按 currentSlot 重拷当前那组（取消那半是 020 追加，用户 2026-10-17，P5-4）；没选输入的 Stinger 照推（029 不管 T-bar，画面口径见 §2.5 转场槽） |
 | ftb | `.ftb(on:)` | 显式开关，脚本可重放；时长走 setFTBDuration |
-| — | `.setTransitionSlot(slot:config:)` | 加的（提案 020，P5-2）：改转场槽 1–4 之一（`TransitionSlot` 整体替换），进行中也收；改当前槽：空闲时当前那组同时重拷、进行中的完成那一拍重拷；钳位同 016；槽号 / Stinger 引用由校验器拒；相同配置 applied = false |
+| — | `.setTransitionSlot(slot:config:)` | 加的（提案 020，P5-2）：改转场槽 1–4 之一（`TransitionSlot` 整体替换），进行中也收；改当前槽：空闲时当前那组同时重拷、进行中的完成或取消（T-bar 拉回 0）那一拍重拷；钳位同 016；槽号 / Stinger 引用由校验器拒；相同配置 applied = false |
 | — | `.useTransitionSlot(slot:start:)` | 加的（提案 020）：把槽拷进当前那组、currentSlot = slot；start = true 同时开始 auto 转场（一拍内原子完成，cut / 时长 0 = 立即对调）；start = true 而槽是没选输入的 Stinger 被拒（提案 029，P5-3：校验器 400、reducer 原样返回）；start = false 只选中；转场进行中被拒；已是当前槽且相同 applied = false |
 | — | `.setFTBDuration(ticks:)` | 加的（提案 020）：`ftb.durationTicks`；渐变进行中回拨起点不跳变、0 立即到位；相同值 applied = false；负数校验器拒；不并进 ftb |
 | overlay(n, on, input) | `.overlay(channel:on:input:)` | input nil = 不换输入 |

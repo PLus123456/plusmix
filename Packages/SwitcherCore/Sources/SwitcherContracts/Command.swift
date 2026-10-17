@@ -26,12 +26,14 @@ public enum Command: Hashable, Codable, Sendable {
     case setPreview(input: Int)
     /// 直接把 PGM 换成该输入（硬切），PVW 不变。转场进行中被拒（提案 023）。
     case setProgram(input: Int)
-    /// 推杆位置 0–1；到 1 提交（对调并回到 0）。当前那组是没选输入的 Stinger 照推（提案 029 不管 T-bar）：渲染器什么都不叠，推过换底拍那一格就是新画面。
+    /// 推杆位置 0–1；到 1 提交（对调并回到 0）；拉回 0 = 取消（不换人）。提交与取消那一拍都把当前那组按 currentSlot 重拷（020，取消那半是用户 2026-10-17 追加：
+    /// 推到一半时 setTransitionSlot 改了当前槽的，取消后回车用改过的配置；相同时无感、幂等）。当前那组是没选输入的 Stinger 照推（提案 029 不管 T-bar）：
+    /// 渲染器什么都不叠，推过换底拍那一格就是新画面。
     case tbar(progress: Double)
     case ftb(on: Bool)
     /// 改转场槽 1–4 之一的配置（提案 020）：只改 `TransitionState.slots[slot − 1]`，**转场进行中也收**（只是改配置）；
     /// durationTicks 钳 ≥ 0、wipe.softness 钳 0–1、stinger.cutAtTick 钳 ≥ 0（与 016 同口径）；stinger.input 非 nil 时须是存在的输入（校验器拒）；
-    /// 改的若正好是 currentSlot 且没在转场，当前那组同时按槽重拷（T-bar / 回车马上用新配置）；正在转场的那一次按开始时的参数走完，完成那一拍重拷。
+    /// 改的若正好是 currentSlot 且没在转场，当前那组同时按槽重拷（T-bar / 回车马上用新配置）；正在转场的那一次按开始时的参数走完，完成或取消（T-bar 拉回 0）那一拍重拷。
     /// 相同配置原样返回（applied = false）。
     case setTransitionSlot(slot: Int, config: TransitionSlot)
     /// 把槽拷进当前那组、`currentSlot = slot`（提案 020）；start = true 同时开始 auto 转场（类型 cut 或时长 0 = 原子对调，与 autoTransition 同口径），

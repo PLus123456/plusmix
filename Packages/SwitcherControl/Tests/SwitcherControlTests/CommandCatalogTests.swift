@@ -89,6 +89,17 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(CommandCatalog.entry(for: .autoTransition).fields, [])
     }
 
+    /// P5-4：020 追加（用户 2026-10-17 裁定）——T-bar 拉回 0 取消那一拍也按当前槽重拷：tbar 写明取消与重拷，setTransitionSlot 的口径从"完成那一拍重拷"改成"完成或取消那一拍重拷"；
+    /// 字段不变、命令数仍 42。
+    func testCatalog_020_tbarCancelRecopyDocumented() {
+        XCTAssertEqual(CommandKind.allCases.count, 42, "P5-4 不加命令")
+        let tbar = CommandCatalog.entry(for: .tbar)
+        XCTAssertTrue(tbar.summary.contains("拉回 0") && tbar.summary.contains("取消") && tbar.summary.contains("重拷"), tbar.summary)
+        XCTAssertEqual(tbar.fields, [CommandField(name: "progress", type: .fraction)])
+        let slot = CommandCatalog.entry(for: .setTransitionSlot).summary
+        XCTAssertTrue(slot.contains("完成或取消"), slot)
+    }
+
     func testCatalog_generatedMarkdownMatchesCommittedDocsApiMd() throws {
         // docs/api.md 在仓库根：Packages/SwitcherControl/Tests/SwitcherControlTests/ → 上四级
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

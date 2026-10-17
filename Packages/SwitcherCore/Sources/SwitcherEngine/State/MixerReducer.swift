@@ -18,6 +18,7 @@ import SwitcherContracts
 // preview 画切进来的画面，中途换掉就是 PGM 上的跳变。
 //
 // 转场槽（提案 020，P5-2）：`completeTransition` 在 currentSlot 非 nil 时总是把当前那组按槽重拷（幂等）——进行中改了当前槽的，完成那一拍生效；
+// T-bar 拉回 0（取消）那一拍同一句重拷（020 追加，用户 2026-10-17，P5-4：否则取消之后回车执行的是改之前的配置）；
 // fade / setTransition / setTransitionParams 执行后 currentSlot = 当前那组仍对得上的槽（优先原来那个），对不上任何槽 → nil。
 // 没选输入的 Stinger（提案 029，P5-3；`TransitionSlot.isStingerWithoutInput`）不执行：useTransitionSlot(start: true) 对这种槽、autoTransition 对这种当前那组原样返回
 //（否则是一次延迟硬切）；只选中、T-bar、cut、fade 照旧。
@@ -128,7 +129,7 @@ public struct MixerReducer: MixerReducing {
             s.transition.stinger = stinger
             Self.refreshCurrentSlot(&s)
         case .setTransitionSlot(let slot, var config):
-            // 020：只改槽，转场进行中也收；钳位与 016 同口径；改的是当前槽且空闲 → 当前那组同时重拷（进行中的在完成那一拍重拷）
+            // 020：只改槽，转场进行中也收；钳位与 016 同口径；改的是当前槽且空闲 → 当前那组同时重拷（进行中的在完成或取消那一拍重拷）
             guard TransitionSlot.indexRange.contains(slot), slot - 1 < s.transition.slots.count else { return state }
             if let input = config.stinger.input, !Self.inputExists(input, in: s) { return state }
             config.durationTicks = max(config.durationTicks, 0)
@@ -178,6 +179,8 @@ public struct MixerReducer: MixerReducing {
                 s.transition.source = .tbar
                 s.transition.progress = p
                 s.transition.startTick = nil
+                // 020 追加（用户 2026-10-17）：拉回 0 = 取消，与完成那一拍同一句按当前槽重拷（进行中改了当前槽的在这里生效；相同时无感，幂等）
+                if p <= 0, let slot = s.transition.currentSlot { s.transition.select(slot: slot) }
             }
         case .ftb(let on):
             guard on != s.ftb.on else { return state }
