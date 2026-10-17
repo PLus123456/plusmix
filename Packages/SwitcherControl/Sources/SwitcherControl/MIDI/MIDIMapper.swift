@@ -97,6 +97,13 @@ public struct MIDIMapper: Sendable {
         return name
     }
 
+    /// 音符按下时绑的按钮动作（松开、力度 0、没映射、绑的是推杆 / 推子都给 nil）：解析不出时 MIDIController 用它判要不要提示（W2-C4）。
+    public func noteAction(for message: MIDIMessage) -> ControlAction? {
+        guard case .note = message.trigger, !message.isNoteOff, message.value > 0,
+              case .action(let action)? = table.mapping(for: message.trigger)?.action else { return nil }
+        return action
+    }
+
     /// 一条消息对应的命令（W5-J：Note 绑的组合动作按顺序多条）；没映射、Note 松开、动作解析不出（引用不存在）都返回空。
     public mutating func commands(for message: MIDIMessage, state: MixerState) -> [Command] {
         switch message.trigger {
