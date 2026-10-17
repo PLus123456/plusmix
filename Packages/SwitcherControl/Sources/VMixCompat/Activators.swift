@@ -17,7 +17,10 @@ public enum Activators {
             }
             return "\(name) \(current) 1"
         case "Overlay1", "Overlay2", "Overlay3", "Overlay4":
-            let channel = Int(name.dropFirst("Overlay".count))!
+            // 兼容层里不强制解包、不越界取（W2-C4 / D02 过了一遍）：名字是 canonical 过的四个之一，叠加恰好 4 个（validate 保证），这里仍按失败即返回写
+            guard let channel = Int(name.dropFirst("Overlay".count)), state.overlays.indices.contains(channel - 1) else {
+                throw CompatError(code: .unknownActivator, message: "unknown activator \(rawName)")
+            }
             let o = state.overlays[channel - 1]
             let visible = o.isVisible ? o.input : nil
             if let input {
@@ -42,8 +45,7 @@ public enum Activators {
             return "\(name) 0"   // 没有总线独听
         case "InputAudio", "InputVolume", "InputSolo", "InputPlaying", "InputMasterAudio", "InputBusAAudio", "InputBusBAudio":
             guard let input else { throw CompatError(code: .badParameter, message: "ACTS \(name) needs an input number") }
-            try requireInput(input, state)
-            let a = state.input(input)!.settings.audio
+            let a = try requireInput(input, state).settings.audio
             switch name {
             case "InputAudio": return "InputAudio \(input) \(bit(!a.muted))"
             case "InputVolume": return "InputVolume \(input) \(VolumeScale.format(VolumeScale.amplitude(fromDb: a.gainDb), decimals: 4))"
@@ -117,8 +119,11 @@ public enum Activators {
         knownNames.first { $0.lowercased() == name.lowercased() } ?? name
     }
 
-    static func requireInput(_ number: Int, _ state: MixerState) throws(CompatError) {
-        guard state.input(number) != nil else { throw CompatError(code: .inputNotFound, message: "input \(number) does not exist") }
+    /// 这一路的配置；不在抛 inputNotFound。
+    @discardableResult
+    static func requireInput(_ number: Int, _ state: MixerState) throws(CompatError) -> InputConfig {
+        guard let config = state.input(number) else { throw CompatError(code: .inputNotFound, message: "input \(number) does not exist") }
+        return config
     }
 
     static func bit(_ b: Bool) -> String { b ? "1" : "0" }

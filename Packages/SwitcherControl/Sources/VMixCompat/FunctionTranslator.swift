@@ -156,14 +156,14 @@ public enum FunctionTranslator {
             return FunctionPlan(name: "SetVolume", commands: [.audioGain(input: input, dB: VolumeScale.dB(fromFader: fader))])
         case "audio", "audioon", "audiooff":
             let input = try ctx.input()
-            let muted = state.input(input)!.settings.audio.muted
+            let muted = try ctx.inputConfig(input).settings.audio.muted
             let mode = Self.toggleMode(suffixOf: n)
             let on: Bool = mode == .toggle ? !muted : (mode == .on ? false : true)
             return FunctionPlan(name: "Audio" + mode.suffix, commands: [.mute(input: input, on: on)])
         case "audiobus", "audiobuson", "audiobusoff":
             let input = try ctx.input()
             let value = try ctx.required("Value").uppercased()
-            var settings = state.input(input)!.settings
+            var settings = try ctx.inputConfig(input).settings
             let mode = Self.toggleMode(suffixOf: n)
             func set(_ current: Bool) -> Bool { mode == .toggle ? !current : mode == .on }
             switch value {
@@ -175,14 +175,14 @@ public enum FunctionTranslator {
             return FunctionPlan(name: "AudioBus" + mode.suffix, commands: [.setInputSettings(input: input, settings: settings)])
         case "solo", "soloon", "solooff":
             let input = try ctx.input()
-            var settings = state.input(input)!.settings
+            var settings = try ctx.inputConfig(input).settings
             let mode = Self.toggleMode(suffixOf: n)
             settings.audio.solo = mode == .toggle ? !settings.audio.solo : mode == .on
             return FunctionPlan(name: "Solo" + mode.suffix, commands: [.setInputSettings(input: input, settings: settings)])
         case "setbalance":
             let input = try ctx.input()
             let pan = try ctx.double("Value", range: -1...1)
-            var settings = state.input(input)!.settings
+            var settings = try ctx.inputConfig(input).settings
             settings.audio.pan = pan
             return FunctionPlan(name: "SetBalance", commands: [.setInputSettings(input: input, settings: settings)])
         default:
@@ -208,6 +208,10 @@ public enum FunctionTranslator {
     }
 
     // MARK: 辅助
+
+    /// 毫秒参数（Fade / Wipe / Zoom 的 Duration、SetTransitionDuration1–4 的 Value）可收的范围：0…3 600 000 ms（1 小时；W2-C4 / D03）。
+    /// 上限之内任何帧率换出来的拍数都远小于 Int.max（240 fps 也才 864 000 拍）。
+    static let durationMillisecondsRange: ClosedRange<Double> = 0...3_600_000
 
     enum ToggleMode {
         case toggle, on, off
@@ -284,18 +288,27 @@ public enum FunctionTranslator {
             return n
         }
 
-        /// Input 参数（可选）。
+        /// Input 参数（可选）：给了就必须是一路存在的输入（InputReference.resolve 保证，0 / -1 落空也回 InputNotFound——D02）。
         func optionalInput() throws(CompatError) -> Int? {
             guard let text = request.parameter("Input"), !text.isEmpty else { return nil }
             return try InputReference.resolve(text, in: state)
         }
 
-        /// 毫秒 → 拍（四舍五入）。
+        /// 一路输入的配置。resolve 已保证它在，这里仍按"找不到就回错误"写——兼容层里不强制解包（D02：原来 `state.input(input)!`，空节目整个进程崩）。
+        func inputConfig(_ number: Int) throws(CompatError) -> InputConfig {
+            guard let config = state.input(number) else { throw CompatError(code: .inputNotFound, message: "input \(number) does not exist") }
+            return config
+        }
+
+        /// 毫秒 → 拍（四舍五入）。只收有限、0 ≤ ms ≤ 3 600 000（1 小时）的数，换拍用可失败的整数转换，换不出同样回 BadParameter
+        /// （D03：原来只查有限非负，1e300 过了检查、`Int(…)` 越过 Int.max 整个进程崩）。
         func durationTicks(parameter key: String = "Duration", default defaultMs: Double? = nil) throws(CompatError) -> Int {
             let ms: Double
+            let range = FunctionTranslator.durationMillisecondsRange
+            let rangeText = "\(VolumeScale.format(range.lowerBound))…\(VolumeScale.format(range.upperBound))"
             if let text = request.parameter(key), !text.isEmpty {
-                guard let v = Double(text.trimmingCharacters(in: .whitespaces)), v.isFinite, v >= 0 else {
-                    throw CompatError(code: .badParameter, message: "\(request.name): \(key) must be a non-negative number of milliseconds (got \(text))")
+                guard let v = Double(text.trimmingCharacters(in: .whitespaces)), v.isFinite, range.contains(v) else {
+                    throw CompatError(code: .badParameter, message: "\(request.name): \(key) must be a number of milliseconds within \(rangeText) (got \(text))")
                 }
                 ms = v
             } else if let defaultMs {
@@ -303,12 +316,15 @@ public enum FunctionTranslator {
             } else {
                 throw CompatError(code: .badParameter, message: "\(request.name): missing parameter \(key)")
             }
-            return Int((ms / 1000 * frameRate.framesPerSecond.doubleValue).rounded())
+            guard let ticks = Int(exactly: (ms / 1000 * frameRate.framesPerSecond.doubleValue).rounded()) else {
+                throw CompatError(code: .badParameter, message: "\(request.name): \(key) \(VolumeScale.format(ms)) ms cannot be expressed in frames (milliseconds within \(rangeText))")
+            }
+            return ticks
         }
 
         /// 转场 n 现在的配置（节目文件 / 状态机保证恰好 4 个槽；万一缺了回 NotConfigured）。
         func slot(_ index: Int, function: String) throws(CompatError) -> TransitionSlot {
-            guard index - 1 < state.transition.slots.count else {
+            guard index >= 1, index - 1 < state.transition.slots.count else {
                 throw CompatError(code: .notConfigured, message: "\(function): transition \(index) does not exist in this show")
             }
             return state.transition.slots[index - 1]
@@ -368,7 +384,7 @@ public enum FunctionTranslator {
 
         /// OverlayInput<N>[后缀]。
         func overlay(channel: Int, suffix: String) throws(CompatError) -> FunctionPlan {
-            guard (1...MixerState.overlayCount).contains(channel) else {
+            guard (1...MixerState.overlayCount).contains(channel), state.overlays.indices.contains(channel - 1) else {
                 throw CompatError(code: .badParameter, message: "\(request.name): overlay channel must be 1…\(MixerState.overlayCount)")
             }
             let current = state.overlays[channel - 1]

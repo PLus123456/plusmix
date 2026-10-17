@@ -49,7 +49,7 @@ public enum StatusXML {
         out += "<transitions>\n"
         let slots = state.transition.slots.isEmpty ? [state.transition.currentGroup] : state.transition.slots
         for (i, slot) in slots.enumerated() {
-            let ms = Int((Double(slot.durationTicks) * 1000 / frameRate.framesPerSecond.doubleValue).rounded())
+            let ms = milliseconds(ticks: slot.durationTicks, frameRate: frameRate)
             out += "<transition number=\"\(i + 1)\" effect=\"\(effectName(slot.type))\" duration=\"\(ms)\" />\n"
         }
         out += "</transitions>\n"
@@ -124,6 +124,14 @@ public enum StatusXML {
     }
 
     static func bool(_ b: Bool) -> String { b ? "True" : "False" }
+
+    /// 拍 → 毫秒（四舍五入），越过 Int 的封顶（W2-C4，D03 的反方向：主 API 只拒负的 durationTicks，原来超大值在这里 `Int(…)` 越过 Int.max，
+    /// 每 250 ms 轮询一次 XML 的 Companion 一连上整个进程就崩）。
+    static func milliseconds(ticks: Int, frameRate: FrameRate) -> Int {
+        let ms = (Double(ticks) * 1000 / frameRate.framesPerSecond.doubleValue).rounded()
+        if let exact = Int(exactly: ms) { return exact }
+        return ms > 0 ? Int.max : (ms < 0 ? Int.min : 0)
+    }
 
     /// dBFS 峰值 → 0–1 幅度文本；没有读数写 0。
     static func meterText(_ peakDb: [Double]?, _ channel: Int) -> String {
