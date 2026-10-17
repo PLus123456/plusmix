@@ -807,6 +807,8 @@ public enum MixerStateError: Error, Equatable {
     case transitionSlotCount(Int)
     /// currentSlot 不在 1…4（提案 020）。
     case transitionSlotIndex(Int)
+    /// 某路文件输入的播放速率不在 `FileSource.rateRange`（0.1…8）里或不是有限数（提案 031，用户 2026-10-17 批）。
+    case fileRate(input: Int, rate: Double)
 }
 
 /// 不可变快照（设计方案 §4）。相比 §4 多了 `format` 和 `inputs`：addInput / removeInput / setInputSettings 要在 reduce 里落地，
@@ -865,7 +867,8 @@ public struct MixerState: Hashable, Codable, Sendable {
         return s
     }
 
-    /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复、转场槽恰好 4 个且 currentSlot 为 nil 或 1…4（020）。
+    /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复、转场槽恰好 4 个且 currentSlot 为 nil 或 1…4（020）；
+    /// 外加一条取值：文件来源的播放速率在 `FileSource.rateRange` 里（031：越界的速率在 FileInput 里崩进程，节目文件不许绕过 API 的校验）。
     /// 不查引用（PGM / PVW / 叠加 / Stinger 指向的输入在不在）：悬空引用由 reducer 的 removeInput 清，渲染器按"没有这路"画（用户 2026-09-27 定）。
     public func validate() throws {
         guard overlays.count == MixerState.overlayCount else { throw MixerStateError.overlayCount(overlays.count) }
@@ -876,6 +879,7 @@ public struct MixerState: Hashable, Codable, Sendable {
         for i in inputs {
             guard i.number != MixerState.noInput, i.number > 0 else { throw MixerStateError.reservedInputNumber(i.number) }
             guard seen.insert(i.number).inserted else { throw MixerStateError.duplicateInput(i.number) }
+            if case .file(_, _, let rate) = i.source, !FileSource.rateRange.contains(rate) { throw MixerStateError.fileRate(input: i.number, rate: rate) }
         }
         var seenOut = Set<Int>()
         for o in outputs {

@@ -125,6 +125,10 @@ final class CommandBusTests: XCTestCase {
             .addInput(config: InputConfig(number: 5, name: "五", source: .synthetic(settings: SyntheticSourceSettings()))), .removeInput(input: 4),
             .addOutput(config: OutputState(number: 3, kind: .ndi, name: "NDI")), .removeOutput(output: 2), .setOutputSettings(output: 1, settings: OutputSettings()),
             .loadShow(show: Show(name: "s", state: state)),
+            // 提案 031（P5-4）：文件速率 0.1–8 的两端、定位一周整都放行
+            .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 0.1)), .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 8)),
+            .addInput(config: InputConfig(number: 7, name: "片 2", source: .file(path: "/b.mov", endAction: .loop, rate: 2))),
+            .seekPlayback(input: 6, seconds: PlaybackLimits.maxSeekSeconds),
         ]
         for c in legal {
             XCTAssertNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应放行")
@@ -142,6 +146,12 @@ final class CommandBusTests: XCTestCase {
             .setPlayback(input: 1, paused: true), .setPlayback(input: 9, paused: true),   // 不是文件输入 / 不存在
             .seekPlayback(input: 2, seconds: 1), .seekPlayback(input: 6, seconds: -1), .seekPlayback(input: 6, seconds: .nan), .seekPlayback(input: 9, seconds: 0),
             .setInputAudio(input: 9, solo: true), .setInputColor(input: 9, color: .red),
+            // 提案 031（P5-4，Codex D01）：rate 0 / −1 / 极小 / 1e300 / NaN、addInput 带越界速率的文件来源、定位 1e300 / 超一周 / +∞，入口拒，reducer 同判
+            .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 0)), .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: -1)),
+            .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 0.0001)), .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 1e300)),
+            .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: .nan)), .setInputSource(input: 1, source: .file(path: "/a.mov", endAction: .loop, rate: 9)),
+            .addInput(config: InputConfig(number: 7, name: "片 2", source: .file(path: "/b.mov", endAction: .loop, rate: 0))),
+            .seekPlayback(input: 6, seconds: 1e300), .seekPlayback(input: 6, seconds: PlaybackLimits.maxSeekSeconds + 1), .seekPlayback(input: 6, seconds: .infinity),
         ]
         for c in illegal {
             XCTAssertNotNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应拒绝")
@@ -173,6 +183,39 @@ final class CommandBusTests: XCTestCase {
         pushing.transition.source = .tbar
         XCTAssertNil(CommandValidator.reason(rejecting: .autoTransition, in: pushing), "进行中交给 reducer")
         XCTAssertEqual(reducer.reduce(pushing, .autoTransition, at: .zero), pushing, "进行中 reducer 本来就忽略")
+    }
+
+    /// 提案 031（用户 2026-10-17 批，P5-4；Codex 审查 D01）：越界的文件速率 / 定位秒数在总线入口就拒（API 回 400，见 APIServerTests.test031_*），不占 sequence、状态不变——
+    /// 原来 rate = 0 / −1 / 1e300 与 seconds = 1e300 都放行，运行时在 FileInput 的 precondition / Int64 换算上整个进程崩（底层钳位归 117）。
+    func test031_fileRateAndSeekSecondsOutOfRange_rejectedWithReason() async throws {
+        var state = TestStates.base()
+        state.inputs.append(InputConfig(number: 6, name: "片", source: .file(path: "/clip.mov", endAction: .loop, rate: 1)))
+        let f = BusFixture(state: state)
+        defer { f.stop() }
+        let cases: [(Command, String)] = [
+            (.setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 0)), "播放速率必须在 0.1–8 之间"),
+            (.setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: -1)), "播放速率必须在 0.1–8 之间"),
+            (.setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 1e300)), "播放速率必须在 0.1–8 之间"),
+            (.seekPlayback(input: 6, seconds: 1e300), "定位秒数必须在 0–604800"),
+            (.addInput(config: InputConfig(number: 7, name: "片 2", source: .file(path: "/b.mov", endAction: .loop, rate: 0.0001))), "播放速率必须在 0.1–8 之间"),
+        ]
+        for (command, keyword) in cases {
+            do {
+                _ = try await f.bus.submit(command, source: .api)
+                XCTFail("应被拒绝：\(command)")
+            } catch let e as CommandRejection {
+                XCTAssertTrue(e.reason.contains(keyword), "\(command) 的理由「\(e.reason)」应含「\(keyword)」")
+            }
+        }
+        XCTAssertEqual(f.bus.lastSequence, 0, "被拒的命令不占 sequence")
+        XCTAssertEqual(f.bus.counters.rejected, UInt64(cases.count))
+        let after = await f.stateMachine.state
+        XCTAssertEqual(after, state, "状态未变")
+        // 边界值照收
+        let ok = try await f.bus.submit(.setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 8)), source: .api)
+        XCTAssertTrue(ok.applied)
+        let seek = try await f.bus.submit(.seekPlayback(input: 6, seconds: PlaybackLimits.maxSeekSeconds), source: .api)
+        XCTAssertTrue(seek.applied)
     }
 
     // MARK: C4（进程内形态）：每秒 100 条带序号命令，两个并发"客户端"

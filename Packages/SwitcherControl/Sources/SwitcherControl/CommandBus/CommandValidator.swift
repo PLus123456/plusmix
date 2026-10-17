@@ -2,7 +2,8 @@ import SwitcherContracts
 
 // 结构性校验：reducer（W1-B）对非法命令是"原样返回、不出声"（契约 MixerReducing 的约定），API 用户会以为成功了。
 // 总线在入口按同一套规则先查一遍，给出理由（HTTP 400）。只查"看一眼状态就能判定、且不随拍变化"的条件：
-// 引用的输入 / 输出是否存在、输出 kind 是否匹配、叠加通道范围、负时长、编号重复、节目文件不变量。
+// 引用的输入 / 输出是否存在、输出 kind 是否匹配、叠加通道范围、负时长、编号重复、节目文件不变量、文件速率 / 定位秒数的边界（提案 031：`FileSource.rateRange` /
+// `PlaybackLimits.maxSeekSeconds`，与 `MixerState.validate()`、reducer、FileInput 的钳位同一组常量）。
 // 不查随时间变的条件（转场进行中再 fade、FTB 目标已相同）——那些在应用那一拍才有定论，仍由 reducer 决定。
 // CommandBusTests.testValidator_agreesWithReducer 保证：这里拒绝的，reducer 也一定原样返回。
 
@@ -48,14 +49,17 @@ public enum CommandValidator {
         case .setOverlay(let channel, _, _), .setOverlayDecoration(let channel, _, _, _):
             return overlayChannel(channel)
         case .audioGain(let input, _), .mute(let input, _), .setInputSettings(let input, _), .renameInput(let input, _),
-             .removeInput(let input), .setInputSource(let input, _), .setInputAudio(let input, _, _, _), .setInputColor(let input, _):
+             .removeInput(let input), .setInputAudio(let input, _, _, _), .setInputColor(let input, _):
             return s.input(input) == nil ? "输入 \(input) 不存在" : nil
+        case .setInputSource(let input, let source):
+            if s.input(input) == nil { return "输入 \(input) 不存在" }
+            return fileRate(source)
         case .setPlayback(let input, _):
             return fileInputReference(input, in: s)
         case .seekPlayback(let input, let seconds):
-            // 提案 021：只对文件输入；秒数负 / 非有限入口就拒
+            // 提案 021：只对文件输入；提案 031：秒数负 / 非有限 / 超过一周入口就拒（原来只查有限非负，1e300 在 FileInput 的 Int64 换算上崩进程）
             if let r = fileInputReference(input, in: s) { return r }
-            return seconds.isFinite && seconds >= 0 ? nil : "定位秒数必须是 ≥ 0 的有限数：\(seconds)"
+            return (0...PlaybackLimits.maxSeekSeconds).contains(seconds) ? nil : "定位秒数必须在 0–\(maxSeekText) 之间（一周）：\(seconds)"
         case .busGain(let bus, _), .busMute(let bus, _), .setBusEffects(let bus, _):
             return s.audio.buses.contains { $0.bus == bus } ? nil : "总线 \(bus) 不存在"
         case .setMonitorMode, .setMonitorSource:
@@ -68,7 +72,7 @@ public enum CommandValidator {
         case .addInput(let config):
             if config.number <= MixerState.noInput { return "输入编号必须 ≥ 1：\(config.number)" }
             if s.input(config.number) != nil { return "输入 \(config.number) 已存在" }
-            return nil
+            return fileRate(config.source)
         case .addOutput(let config):
             if config.number <= 0 { return "输出编号必须 ≥ 1：\(config.number)" }
             if s.output(config.number) != nil { return "输出 \(config.number) 已存在" }
@@ -88,6 +92,17 @@ public enum CommandValidator {
             return nil
         }
     }
+
+    /// 提案 031：文件来源的播放速率不在 `FileSource.rateRange`（非有限也算）→ 理由；别的 kind 不查。与 `MixerState.validate()` / reducer 同一条边界。
+    private static func fileRate(_ source: InputSource) -> String? {
+        guard case .file(_, _, let rate) = source, !FileSource.rateRange.contains(rate) else { return nil }
+        return "播放速率必须在 \(fileRateRangeText) 之间：\(rate)"
+    }
+
+    /// 031 两个常量的文字（理由与命令目录共用）："0.1–8" / "604800"。
+    static let fileRateRangeText = "\(plain(FileSource.rateRange.lowerBound))–\(plain(FileSource.rateRange.upperBound))"
+    static let maxSeekText = plain(PlaybackLimits.maxSeekSeconds)
+    private static func plain(_ x: Double) -> String { x == x.rounded() && abs(x) < 1e15 ? String(Int64(x)) : String(x) }
 
     private static func fileInputReference(_ number: Int, in s: MixerState) -> String? {
         guard let input = s.input(number) else { return "输入 \(number) 不存在" }

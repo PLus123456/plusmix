@@ -100,6 +100,18 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertTrue(slot.contains("完成或取消"), slot)
     }
 
+    /// P5-4：提案 031——setInputSource / addInput 写明文件来源的速率范围、seekPlayback 写明上限（与校验器 400 的文案同一组常量）；字段不变。
+    func testCatalog_031_fileRateAndSeekLimitsDocumented() {
+        for kind in [CommandKind.setInputSource, .addInput] {
+            let summary = CommandCatalog.entry(for: kind).summary
+            XCTAssertTrue(summary.contains("0.1–8"), "\(kind)：\(summary)")
+        }
+        let seek = CommandCatalog.entry(for: .seekPlayback)
+        XCTAssertTrue(seek.summary.contains("604800"), seek.summary)
+        XCTAssertTrue(seek.parameters.first { $0.name == "seconds" }?.note.contains("604800") == true, "\(seek.parameters)")
+        XCTAssertEqual(seek.fields, [CommandField(name: "input", type: .input(allowsBlack: false)), CommandField(name: "seconds", type: .seconds)])
+    }
+
     func testCatalog_generatedMarkdownMatchesCommittedDocsApiMd() throws {
         // docs/api.md 在仓库根：Packages/SwitcherControl/Tests/SwitcherControlTests/ → 上四级
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

@@ -34,6 +34,22 @@ public enum FileEndAction: String, Codable, Sendable {
     case holdLastFrame, loop, black
 }
 
+/// `InputSource.file` 的播放速率范围（提案 031，用户 2026-10-17 批；Codex 审查 D01：非正 / 极小 / 极大的速率让 FileInput 整个进程崩）。
+/// 界面的"播放速率"控件没有自己的范围（App 的添加输入 / 输入设置里是不设范围的数字框），按 031 默认 0.1…8（W2-A4 实测 8 倍速带音频不饿）。
+/// 非有限数、不在范围 = 非法（`rateRange.contains` 对 NaN / ±∞ 给 false）。同一条边界三处共用：`MixerState.validate()`（节目文件，`MixerStateError.fileRate`）、
+/// `CommandValidator`（setInputSource / addInput 的 file 来源，HTTP 400；reducer 同判、原样返回）、FileInput 底层钳位（117）。
+public enum FileSource {
+    /// 合法的播放速率（1 = 正常）。
+    public static let rateRange: ClosedRange<Double> = 0.1...8
+}
+
+/// 文件播放定位的上限（提案 031）：一周。文件本身的时长再由 FileInput 钳（契约不知道时长）。
+/// `seekPlayback(seconds:)` 非有限、负数、超上限 = 非法（校验器 400、reducer 同判）；`InputSettings.clamped()` 把整体带进来的 `playback.seekSeconds` 钳到 [0, 上限]。
+public enum PlaybackLimits {
+    /// 定位秒数上限：7 × 86 400 = 604 800 秒。
+    public static let maxSeekSeconds: Double = 7 * 86_400
+}
+
 /// 合成测试源（引擎内置输入，测试标准 §2.1）的配置。TestKit 的 SyntheticVideoInput / SyntheticAudioInput 读它。
 public struct SyntheticSourceSettings: Hashable, Codable, Sendable {
     /// 合成源帧率（30 / 59.94 / 60）。
@@ -108,7 +124,7 @@ public enum InputSource: Hashable, Codable, Sendable {
     case decklink(deviceID: String, connection: DeckLinkConnection? = nil, channels: [Int] = [])
     /// 屏幕 / 窗口 / 应用；frameRate nil = 跟节目帧率。
     case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
-    /// 视频文件；rate = 播放速率（1 = 正常）。
+    /// 视频文件；rate = 播放速率（1 = 正常；合法范围 `FileSource.rateRange` = 0.1…8，提案 031；老文件缺键 = 1）。
     case file(path: String, endAction: FileEndAction, rate: Double)
     case image(path: String)
     /// NDI 源名（"机器名 (源名)"）+ 带宽模式 + 抖动缓冲深度（帧，0–2；提案 008）。
@@ -142,15 +158,15 @@ public enum InputSource: Hashable, Codable, Sendable {
 
     /// JSON 形态的镜像。带默认值的参数在这里都是 Optional：合成的 Codable 对 Optional 用 decodeIfPresent / encodeIfPresent，
     /// 所以老文件缺键能按默认值解、默认值可以不写键。
-    /// - 解码：缺 `connection` → nil，缺 `bandwidth` → highest，缺 `jitterBufferFrames` → 1，缺 `channels` → []。
+    /// - 解码：缺 `connection` → nil，缺 `bandwidth` → highest，缺 `jitterBufferFrames` → 1，缺 `channels` → []，file 缺 `rate` → 1（提案 031）。
     /// - 编码：`connection` nil 不写键；`channels` 为空不写键（014 之前能表达的值编出来与之前逐字节相同）；
-    ///   ndi 的 `bandwidth` / `jitterBufferFrames` 照旧总是写（提案 008 落地时的形态）。
-    ///   键名快照在 `ContractsP3Tests.testP3_008_*` 与 `Contracts014Tests` 里钉住。
+    ///   ndi 的 `bandwidth` / `jitterBufferFrames` 照旧总是写（提案 008 落地时的形态）；file 的 `rate` 照旧总是写。
+    ///   键名快照在 `ContractsP3Tests.testP3_008_*`、`Contracts014Tests`、`Contracts031Tests` 里钉住。
     private enum Form: Codable {
         case camera(uniqueID: String)
         case decklink(deviceID: String, connection: DeckLinkConnection?, channels: [Int]?)
         case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
-        case file(path: String, endAction: FileEndAction, rate: Double)
+        case file(path: String, endAction: FileEndAction, rate: Double?)
         case image(path: String)
         case ndi(sourceName: String, bandwidth: NDIBandwidth?, jitterBufferFrames: Int?)
         case audio(deviceUID: String, channels: [Int]?)
@@ -163,7 +179,7 @@ public enum InputSource: Hashable, Codable, Sendable {
         case .decklink(let id, let connection, let channels):
             self = .decklink(deviceID: id, connection: connection, channels: channels ?? [])
         case .screen(let target, let rate, let audio): self = .screen(target: target, frameRate: rate, captureAudio: audio)
-        case .file(let path, let end, let rate): self = .file(path: path, endAction: end, rate: rate)
+        case .file(let path, let end, let rate): self = .file(path: path, endAction: end, rate: rate ?? 1)
         case .image(let path): self = .image(path: path)
         case .ndi(let name, let bandwidth, let jitter):
             self = .ndi(sourceName: name, bandwidth: bandwidth ?? .highest,
@@ -481,10 +497,11 @@ public struct InputSettings: Hashable, Codable, Sendable {
     public static let jsonKeys = ["crop", "transform", "audio", "effects", "keyer", "playback"]
 
     /// 把所有数值钳到合法范围（reducer 应用 setInputSettings 时调）：
-    /// 延迟 0–500 ms、增益 −96…+24 dB、声像 −1…1、裁切各边 0–1 且对边之和 ≤ 1（右 / 下让位）、缩放 > 0、定位秒数 ≥ 0（021）。
+    /// 延迟 0–500 ms、增益 −96…+24 dB、声像 −1…1、裁切各边 0–1 且对边之和 ≤ 1（右 / 下让位）、缩放 > 0、
+    /// 定位秒数 0…`PlaybackLimits.maxSeekSeconds`（021 钳 ≥ 0、非有限给 0；031 加上限一周——与 seekPlayback 入口拒同一条边界）。
     public func clamped() -> InputSettings {
         var s = self
-        if let seek = s.playback.seekSeconds { s.playback.seekSeconds = seek.isFinite ? max(0, seek) : 0 }
+        if let seek = s.playback.seekSeconds { s.playback.seekSeconds = seek.isFinite ? min(max(0, seek), PlaybackLimits.maxSeekSeconds) : 0 }
         s.audio.delayMs = min(max(s.audio.delayMs, InputAudioSettings.delayRangeMs.lowerBound), InputAudioSettings.delayRangeMs.upperBound)
         s.audio.gainDb = min(max(s.audio.gainDb, InputAudioSettings.gainRangeDb.lowerBound), InputAudioSettings.gainRangeDb.upperBound)
         s.audio.pan = min(max(s.audio.pan, -1), 1)

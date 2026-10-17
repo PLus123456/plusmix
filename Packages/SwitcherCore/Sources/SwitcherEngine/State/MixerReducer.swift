@@ -24,6 +24,8 @@ import SwitcherContracts
 //（否则是一次延迟硬切）；只选中、T-bar、cut、fade 照旧。
 // 文件播放（提案 021）：reducer 只记状态（paused / 一次定位请求 (seekTick, seekSeconds)），真正的 pause / seek 由组装方交给 FileInput；
 // 新 PGM 那一路若 restartOnProgram，四处换人（cut / auto 完成 / T-bar 提交 / setProgram）在同一拍写定位 0，与手发 seekPlayback(0) 同一条路。
+// 文件速率 / 定位的边界（提案 031，P5-4）：addInput / setInputSource 的 file 来源速率不在 `FileSource.rateRange`、seekPlayback 不在 [0, `PlaybackLimits.maxSeekSeconds`] 原样返回
+//（与 CommandValidator 同判；越界的值在 FileInput 里崩进程，底层钳位归 117）。
 
 /// `MixerReducing` 的实现。
 public struct MixerReducer: MixerReducing {
@@ -284,7 +286,7 @@ public struct MixerReducer: MixerReducing {
             guard let i = Self.inputIndex(input, in: s) else { return state }
             s.inputs[i].name = name
         case .addInput(let config):
-            guard config.number > MixerState.noInput, !Self.inputExists(config.number, in: s) else { return state }
+            guard config.number > MixerState.noInput, !Self.inputExists(config.number, in: s), Self.isValidFileRate(config.source) else { return state }
             var c = config
             c.settings = Self.strippingLegacyBorder(c.settings.clamped())
             let at = s.inputs.firstIndex { $0.number > c.number } ?? s.inputs.count
@@ -300,16 +302,17 @@ public struct MixerReducer: MixerReducing {
             // 020：四个槽里的 Stinger 引用同样清
             for k in s.transition.slots.indices where s.transition.slots[k].stinger.input == input { s.transition.slots[k].stinger.input = nil }
         case .setInputSource(let input, let source):
-            // 编号 / 名字 / 设置 / PGM / PVW / 叠加引用全部保留；kind 由 source 推出，不另存
-            guard let i = Self.inputIndex(input, in: s) else { return state }
+            // 编号 / 名字 / 设置 / PGM / PVW / 叠加引用全部保留；kind 由 source 推出，不另存；文件来源的速率越界与校验器同判、原样返回（031）
+            guard let i = Self.inputIndex(input, in: s), Self.isValidFileRate(source) else { return state }
             s.inputs[i].source = source
         case .setPlayback(let input, let paused):
             // 021：只对文件输入；相同值状态不变
             guard let i = Self.inputIndex(input, in: s), s.inputs[i].kind == .file else { return state }
             s.inputs[i].settings.playback.paused = paused
         case .seekPlayback(let input, let seconds):
-            // 021：一次定位请求 = (seekTick, seekSeconds)；负数 / 非有限与校验器同判、原样返回（setInputSettings 整体带进来的负值才钳 0）；同一拍同一位置再发状态不变
-            guard let i = Self.inputIndex(input, in: s), s.inputs[i].kind == .file, seconds.isFinite, seconds >= 0 else { return state }
+            // 021：一次定位请求 = (seekTick, seekSeconds)；负数 / 非有限 / 超过一周（031）与校验器同判、原样返回（setInputSettings 整体带进来的才钳到 [0, 一周]）；
+            // 同一拍同一位置再发状态不变
+            guard let i = Self.inputIndex(input, in: s), s.inputs[i].kind == .file, (0...PlaybackLimits.maxSeekSeconds).contains(seconds) else { return state }
             s.inputs[i].settings.playback.seekSeconds = seconds
             s.inputs[i].settings.playback.seekTick = tick
         case .setInputColor(let input, let color):
@@ -359,6 +362,11 @@ public struct MixerReducer: MixerReducing {
         (1...MixerState.overlayCount).contains(channel) ? channel - 1 : nil
     }
     private static func inputExists(_ number: Int, in s: MixerState) -> Bool { s.input(number) != nil }
+    /// 031：文件来源的播放速率在 `FileSource.rateRange` 里（别的 kind 恒 true）；与 `MixerState.validate()` / CommandValidator 同一条边界。
+    private static func isValidFileRate(_ source: InputSource) -> Bool {
+        if case .file(_, _, let rate) = source { return FileSource.rateRange.contains(rate) }
+        return true
+    }
     private static func isValidReference(_ number: Int, in s: MixerState) -> Bool { number == MixerState.noInput || inputExists(number, in: s) }
     private static func inputIndex(_ number: Int, in s: MixerState) -> Int? { s.inputs.firstIndex { $0.number == number } }
     private static func busIndex(_ bus: Bus, in s: MixerState) -> Int? { s.audio.buses.firstIndex { $0.bus == bus } }

@@ -556,6 +556,23 @@ final class ReducerTests: XCTestCase {
                 .seekPlayback(input: 5, seconds: 4)) { _ in },
             Row("seekPlayback 非有限拒绝", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: .nan)) { _ in },
             Row("seekPlayback 非文件输入拒绝", .seekPlayback(input: 2, seconds: 1)) { _ in },
+            // 提案 031（P5-4，Codex D01）：文件速率 0.1–8、定位 ≤ 一周；越界与校验器同判、原样返回；setInputSettings 整体带进来的定位秒数钳到一周
+            Row("setInputSource 文件速率 0 拒绝（031）", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSource(input: 5, source: .file(path: "/clip5.mov", endAction: .loop, rate: 0))) { _ in },
+            Row("setInputSource 文件速率 1e300 拒绝（031）", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSource(input: 5, source: .file(path: "/clip5.mov", endAction: .loop, rate: 1e300))) { _ in },
+            Row("setInputSource 文件速率 8 = 上限照收", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSource(input: 5, source: .file(path: "/clip5.mov", endAction: .loop, rate: 8))) { $0.inputs[4].source = .file(path: "/clip5.mov", endAction: .loop, rate: 8) },
+            Row("setInputSource 换成文件来源、速率越界拒绝（031）", .setInputSource(input: 3, source: .file(path: "/a.mov", endAction: .loop, rate: 0.0001))) { _ in },
+            Row("addInput 文件速率 −1 拒绝（031）", .addInput(config: InputConfig(number: 6, name: "片", source: .file(path: "/a.mov", endAction: .loop, rate: -1)))) { _ in },
+            Row("addInput 文件速率 0.1 = 下限照收", .addInput(config: InputConfig(number: 6, name: "片", source: .file(path: "/a.mov", endAction: .loop, rate: 0.1)))) {
+                $0.inputs.append(InputConfig(number: 6, name: "片", source: .file(path: "/a.mov", endAction: .loop, rate: 0.1))) },
+            Row("seekPlayback 1e300 拒绝（031）", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: 1e300)) { _ in },
+            Row("seekPlayback 一周整照收（031 上限）", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: PlaybackLimits.maxSeekSeconds)) {
+                $0.inputs[4].settings.playback.seekSeconds = PlaybackLimits.maxSeekSeconds; $0.inputs[4].settings.playback.seekTick = tick },
+            Row("setInputSettings 定位秒数超过一周钳到一周（031）", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSettings(input: 5, settings: InputSettings(playback: PlaybackSettings(seekSeconds: 1e300, seekTick: tick)))) {
+                $0.inputs[4].settings = InputSettings(playback: PlaybackSettings(seekSeconds: PlaybackLimits.maxSeekSeconds, seekTick: tick)) },
 
             // 提案 023 四 / 五（P5-2）：分类颜色、细粒度音频
             Row("setInputColor", .setInputColor(input: 1, color: .red)) { $0.inputs[0].color = .red },

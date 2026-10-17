@@ -148,6 +148,30 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual((r6["commands"] as? [Any])?.count, 42)   // 提案 026（P5）：setMonitorSource → 35；P5-2：020 / 021 / 023 → 42
     }
 
+    /// 提案 031（P5-4，Codex 审查 D01 的复现路径）：主 API 上 rate = 0 / −1 / 1e300、seconds = 1e300 → HTTP 400 带理由，不占 sequence；边界值 200。
+    func test031_postCommand_fileRateAndSeekOutOfRange_400() async throws {
+        var state = TestStates.base()
+        state.inputs.append(InputConfig(number: 6, name: "片", source: .file(path: "/clip.mov", endAction: .loop, rate: 1)))
+        let s = try await Server.start(state: state)
+        defer { Task { await s.stop() } }
+        let url = s.baseURL.appending(path: "/api/v1/command")
+        for rate in ["0", "-1", "1e300"] {
+            let body = #"{"command":{"setInputSource":{"input":6,"source":{"file":{"endAction":"loop","path":"/clip.mov","rate":"# + rate + "}}}}}"
+            let (st, r) = try await post(url, body: body)
+            XCTAssertEqual(st, 400, "rate \(rate)")
+            XCTAssertTrue((r["error"] as? String ?? "").contains("播放速率必须在 0.1–8 之间"), "\(r)")
+        }
+        let (stSeek, rSeek) = try await post(url, body: #"{"command":{"seekPlayback":{"input":6,"seconds":1e300}}}"#)
+        XCTAssertEqual(stSeek, 400)
+        XCTAssertTrue((rSeek["error"] as? String ?? "").contains("定位秒数"), "\(rSeek)")
+        XCTAssertEqual(s.fixture.bus.lastSequence, 0, "被拒的不占 sequence")
+        let (stOK, rOK) = try await post(url, body: #"{"command":{"setInputSource":{"input":6,"source":{"file":{"endAction":"loop","path":"/clip.mov","rate":8}}}}}"#)
+        XCTAssertEqual(stOK, 200)
+        XCTAssertEqual(rOK["applied"] as? Bool, true)
+        let after = await s.fixture.stateMachine.state
+        XCTAssertEqual(after.input(6)?.source, .file(path: "/clip.mov", endAction: .loop, rate: 8))
+    }
+
     // MARK: 批量、日志、tally
 
     func testAPI_batchCommands_logAndTally() async throws {
