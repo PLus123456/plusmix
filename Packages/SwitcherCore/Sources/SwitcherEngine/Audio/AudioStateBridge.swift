@@ -5,9 +5,10 @@ import SwitcherContracts
 // W2-E 引擎侧：把状态机的变化翻译成 `AudioControlEvent`（拍 → host time）。
 //
 // 两条路：
-//   1. 转场事件（cut / started / completed / cancelled）走状态机自带的 `TransitionEventSink`：状态一变就在状态机线程上同步到达，
-//      音频侧能在起始拍的拍点之前拿到交叉淡变命令（状态机比渲染线程领先一拍准备快照）。
-//   2. 其余（每路音频参数、总线、监听方式、AFV 开关、FTB、T-bar 进度、输入表增删）由音频控制线程定期 `pollSnapshot()`：
+//   1. 转场事件（cut / started / completed / cancelled）与 FTB 斜坡变化走状态机自带的 `TransitionEventSink`：状态一变就在状态机线程上
+//      同步到达、带确切的拍，音频侧能在起始拍的拍点之前拿到交叉淡变命令（状态机比渲染线程领先一拍准备快照）。FTB 原来走轮询、只比 on，
+//      途中改时长漏掉（D11）；轮询也拿不到"改的那一拍"（快照的拍可能已经往后走了），音频分段换斜坡要的正是它。
+//   2. 其余（每路音频参数、总线、监听方式、AFV 开关、T-bar 进度、输入表增删）由音频控制线程定期 `pollSnapshot()`：
 //      读 `publisher.latest`，与上次看到的状态做 diff。快照发布是原子指针交换，读方不进 actor、不阻塞状态机线程。
 //      两次轮询之间的中间态可能被合并（A→B→A 看不到），对这些"目标值"类的量无所谓：音频侧永远向最新状态收敛。
 // 事件里的 host time 一律用 `TickClockSpec.time(of:)`（128 位整数，与引擎时钟同一算式）。
@@ -60,12 +61,16 @@ public final class AudioStateBridge: TransitionEventSink, @unchecked Sendable {
         case .started(let tick, let type, let d, let from, let to, let source):
             return .transitionStarted(from: from, to: to, type: type, source: source, tick: tick, at: clock.time(of: tick),
                                       durationTicks: d, duration: clock.duration(ofTicks: max(d, 0)))
-        case .completed(let tick, let from, let to):
-            // 对调已发生：新 PGM = to，新 PVW = from
-            return .transitionEnded(program: to, preview: from, tick: tick, at: clock.time(of: tick), completed: true)
+        case .completed(let tick, let from, let to, let completion):
+            // 对调已发生：新 PGM = to，新 PVW = from；怎么完成的照带（D10：被打断的要音频侧短淡收口）
+            return .transitionEnded(program: to, preview: from, tick: tick, at: clock.time(of: tick), completion: completion)
         case .cancelled(let tick):
             // 被取消：新的 PGM / PVW 由随后的快照 diff 给出；这里只报告"结束了"，program / preview 用 0 占位由音频侧按最新快照重新门控
-            return .transitionEnded(program: MixerState.noInput, preview: MixerState.noInput, tick: tick, at: clock.time(of: tick), completed: false)
+            return .transitionEnded(program: MixerState.noInput, preview: MixerState.noInput, tick: tick, at: clock.time(of: tick), completion: nil)
+        case .fadeToBlack(let tick, let on, let start, let d):
+            // D11：新斜坡从改的那一拍起生效（之前那段内容音频仍按旧斜坡走）
+            return .fadeToBlack(on: on, startTick: start, at: clock.time(of: start), durationTicks: d, duration: clock.duration(ofTicks: d),
+                                effectiveTick: tick, effectiveAt: clock.time(of: tick))
         }
     }
 
@@ -90,8 +95,8 @@ public final class AudioStateBridge: TransitionEventSink, @unchecked Sendable {
     /// 上次轮询看到的状态（音频侧重新门控时用）。
     public var lastSeenState: MixerState? { seen.withLock { $0?.hasSeen == true ? $0?.state : nil } }
 
-    /// 纯函数：从 `from` 到 `to` 的音频相关差异（不含转场开始 / 结束，那些走 TransitionEventSink）。`from` 为 nil = 全量。
-    /// 顺序：输入表 → 每路参数 → 总线 → 监听 → AFV → FTB → T-bar 进度。
+    /// 纯函数：从 `from` 到 `to` 的音频相关差异（不含转场开始 / 结束与 FTB 斜坡变化，那些走 TransitionEventSink）。`from` 为 nil = 全量。
+    /// 顺序：输入表 → 每路参数 → 总线 → 监听 → AFV → FTB（只在全量时）→ T-bar 进度。
     public static func diff(from: MixerState?, to: MixerState, tick: Tick, clock: TickClockSpec) -> [AudioControlEvent] {
         var out: [AudioControlEvent] = []
         // 输入表
@@ -118,13 +123,12 @@ public final class AudioStateBridge: TransitionEventSink, @unchecked Sendable {
         if from == nil || from!.audio.buses != to.audio.buses { out.append(.buses(to.audio.buses)) }
         if from == nil || from!.audio.monitorMode != to.audio.monitorMode { out.append(.monitorMode(to.audio.monitorMode)) }
         if from == nil || from!.audio.afv != to.audio.afv { out.append(.afv(on: to.audio.afv)) }
-        // FTB：目标翻转才发（进度变化不发）；全量时若 on 则报告一个已到位的斜坡
-        let ftbFlipped = from.map { $0.ftb.on != to.ftb.on } ?? to.ftb.on
-        if ftbFlipped {
+        // FTB：只在全量时报告当前斜坡（进行中）或已到位的斜坡（on 或还在走）；之后的变化走 TransitionEventSink（D11，带改的那一拍）
+        if from == nil && (to.ftb.on || to.ftb.startTick != nil) {
             let startTick = to.ftb.startTick ?? tick
             let d = to.ftb.startTick == nil ? 0 : max(to.ftb.durationTicks, 0)
             out.append(.fadeToBlack(on: to.ftb.on, startTick: startTick, at: clock.time(of: startTick), durationTicks: d,
-                                    duration: clock.duration(ofTicks: d)))
+                                    duration: clock.duration(ofTicks: d), effectiveTick: tick, effectiveAt: clock.time(of: tick)))
         }
         // T-bar 进度
         if to.transition.source == .tbar && to.transition.isActive {

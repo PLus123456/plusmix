@@ -13,8 +13,9 @@ import SwitcherAudio
 //      生产者相位），就绪后读它的年龄（InputSlotStats.ageSetpoint），用延迟线补齐剩下的 alignmentFrames − 年龄（默认 P 256 时 2048 − 959 = 1089，
 //      确定值；相位不利被钳到安全下限的输入才有不同的值）；Master / ISO 块的 PTS = 块首样本 host time − 对齐延迟 = 内容被采集的时刻，
 //      与视频拍点同一 host 时基（G2 问题单 A2 的修法）。耳机总线默认不经这条延迟线（monitorPoint），监听延迟只有环年龄 + 设备。
-//   3. AFV：状态机的转场事件（AudioStateBridge）→ 同一拍点的 host time 起做等幅交叉淡变，长度 = 转场时长；Cut = 1 块短淡；
-//      T-bar 跟推杆；FTB 同步淡出 Master。**所有跟视频对齐的音频动作都在混音时间 = 拍点 + 对齐延迟 处应用**：混音块 T 里流过的
+//   3. AFV：状态机的转场事件（AudioStateBridge）→ 同一拍点的 host time 起做等幅交叉淡变，长度 = 转场时长；Cut = 1 块短淡（≤ 1 拍）；
+//      T-bar 跟推杆；Auto 被 Cut / T-bar 推到底打断、T-bar 提交 = 在那一拍替换还在走的淡变、短淡收口（W1-B5，D10）；FTB 同步淡出 Master，
+//      斜坡途中改了（反向 / 改时长 / 归零）从改的那一拍起换（D11）。**所有跟视频对齐的音频动作都在混音时间 = 拍点 + 对齐延迟 处应用**：混音块 T 里流过的
 //      内容是 T − 对齐延迟 时刻采集的（PTS 也是它），要让录制文件 / 扬声器里的音频转场与画面同一时刻，增益变化就得晚对齐延迟这么多
 //      （离线用例第一版没加这个偏移，音频淡变在文件里领先画面 42.7 ms）。
 //   4. 每路参数 / 总线 / 监听方式：从状态快照 diff 落到混音命令。总线效果链（W5-C）：`BusState.effects` → 每条总线三个 AU 格
@@ -90,6 +91,10 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private var afvOn = false
     private var monitorMode: MonitorMode = .afl
     private var ftbRamp: (on: Bool, start: HostTime, duration: HostDuration)?
+    /// D11：还没生效的新斜坡（生效时刻 = 改的那一拍的拍点，按到达顺序）。到生效时刻之前的内容仍按 ftbRamp 走。
+    private var ftbPending: [(effective: HostTime, ramp: (on: Bool, start: HostTime, duration: HostDuration))] = []
+    /// 收到过 FTB 事件没有：第一条（起引擎时的全量同步）没有旧斜坡可续，立即用。
+    private var ftbSynced = false
     private var ftbFactor: Float = 1
     private var ftbLevel: Double = 0
     private var activeTransition: (from: Int, to: Int, source: TransitionSource, at: HostTime)?
@@ -478,7 +483,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             applyGates()
         case .cut(let from, let to, _, let at):
             guard afvOn, from != to else { return }
-            crossfade(from: from, to: to, frames: max(1, configuration.cutFadeBlocks) * configuration.blockFrames, start: at + alignmentDuration)
+            crossfade(from: from, to: to, frames: cutFadeFrames, start: at + alignmentDuration)
         case .transitionStarted(let from, let to, _, let source, _, let at, _, let duration):
             lock.lock(); activeTransition = (from, to, source, at); lock.unlock()
             guard afvOn, source == .auto, from != to else { return }
@@ -494,22 +499,62 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             if participatesInAFV(from) { deferredGates.append((due, from, Float(cos(pp * Double.pi / 2)))) }
             if participatesInAFV(to) { deferredGates.append((due, to, Float(sin(pp * Double.pi / 2)))) }
             lock.unlock()
-        case .transitionEnded(_, _, _, _, let completed):
+        case .transitionEnded(let program, let preview, _, let at, let completion):
             lock.lock()
-            let was = activeTransition
             activeTransition = nil
+            // T-bar 排着还没落下的推杆位置都过时了：提交 / 取消之后再落下去，旧源 / PVW 会停在那一档（快推到底、快拉回 0 时 −16 dB 残留）
+            deferredGates.removeAll()
             lock.unlock()
             guard afvOn else { return }
-            // auto 转场由 C 侧的淡变自己收口（时长按块取整可能比拍晚 < 1 块，这里不要去打断）；T-bar / 取消按最新状态重新门控
-            if was?.source == .tbar || !completed { applyGates() }
-        case .fadeToBlack(let on, _, let at, _, let duration):
+            switch completion {
+            case .elapsed?:
+                // auto 走满：C 侧等长的淡变在同一刻自己走满（W1-D2 起按帧精确），不去打断。只有途中被直接门控过的（AFV 中途才开、
+                // 每路 AFV 位途中翻过）两路记录对不上终值，没有淡变会收口——像被打断一样短淡收到终值
+                if !gatesAtFinal(from: preview, to: program) { shortFade(from: preview, to: program, at: at) }
+            case .interrupted?, .tbar?:
+                // D10：Cut / T-bar 一下推到底打断 auto、T-bar 提交（含接管 auto 之后、进行中按 Cut）：画面这一拍已全是新画面。
+                // 替换 C 侧还在走的长淡变（或 T-bar 停在的那一档）：短淡（≤ 1 拍）从这一拍的对齐时刻起、从那一刻的增益接着走到 0 / 1，
+                // 起点之前旧的照走（不回弹）。原来 auto 的 completed 只清活动标记，长淡变再走完剩下的时长（10 s Auto 第 1 秒 Cut → 声音再淡 9 s）
+                shortFade(from: preview, to: program, at: at)
+            case nil:
+                // 被取消（中途 removeInput、T-bar 拉回 0）：按最新状态重新门控
+                applyGates()
+            }
+        case .fadeToBlack(let on, _, let at, _, let duration, _, let effectiveAt):
             guard configuration.fadeMasterWithFTB else { return }
-            lock.lock(); ftbRamp = (on, at, duration); lock.unlock()
+            lock.lock()
+            // D11：新斜坡从改的那一拍的内容时刻起才换（stepFadeToBlack）——之前那段内容按旧斜坡走，一收到就换会在换点之前就用上新斜坡
+            if ftbSynced { ftbPending.append((effectiveAt, (on, at, duration))) } else { ftbRamp = (on, at, duration); ftbSynced = true }
+            lock.unlock()
         }
     }
 
+    /// Cut 与转场收口的短淡（帧）：cutFadeBlocks 块，但不超过 1 拍（D10："≤ 1 拍、与视频同一拍"；默认 256 帧 = 5.3 ms，60 fps 一拍 800 帧）。
+    private var cutFadeFrames: Int {
+        let frames = max(1, configuration.cutFadeBlocks) * configuration.blockFrames
+        guard let clock else { return frames }
+        let tickFrames = Int(Double(clock.duration(ofTicks: 1).ticks) / mixer.hostTicksPerFrame)
+        return max(1, min(frames, tickFrames))
+    }
+
+    /// 转场被打断 / 提交（D10）：from（旧 PGM）→ to（新 PGM）在第 at 拍的对齐时刻起短淡，**替换**两路上还在走的淡变（起点那一刻才取消旧的、
+    /// 从当时的增益起走，`AudioMixer.crossfade(replacing:)`）。
+    private func shortFade(from: Int, to: Int, at: HostTime) {
+        crossfade(from: from, to: to, frames: cutFadeFrames, start: at + alignmentDuration, replacing: true)
+    }
+
+    /// 转场结束时 from（旧 PGM）/ to（新 PGM）两路的门控记录是不是已经是终值（参与 AFV 的 0 / 1；不参与、没注册的不算）：
+    /// 设淡变时记录就写成了终值（`crossfade`），途中被直接门控过的才对不上。
+    private func gatesAtFinal(from: Int, to: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if participatesInAFV(from), let r = slots[from], r.removing == nil, r.afvGain != 0 { return false }
+        if participatesInAFV(to), let r = slots[to], r.removing == nil, r.afvGain != 1 { return false }
+        return true
+    }
+
     /// 切换 / 转场的交叉淡变。`InputAudioSettings.afv = false` 的路不进 from / to：它的门控增益恒 1（用户 2026-09-22 批）。
-    private func crossfade(from: Int, to: Int, frames: Int, start: HostTime) {
+    /// `replacing`：替换两路上已经开始的淡变（D10 的收口，见 `shortFade`）。
+    private func crossfade(from: Int, to: Int, frames: Int, start: HostTime, replacing: Bool = false) {
         lock.lock()
         let fromRec = participatesInAFV(from) ? slots[from] : nil
         let toRec = participatesInAFV(to) ? slots[to] : nil
@@ -517,7 +562,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         toRec?.afvGain = 1
         lock.unlock()
         guard fromRec != nil || toRec != nil else { return }
-        mixer.crossfade(from: fromRec?.slot, to: toRec?.slot, durationFrames: frames, startHostTime: start)
+        mixer.crossfade(from: fromRec?.slot, to: toRec?.slot, durationFrames: frames, startHostTime: start, replacing: replacing)
     }
 
     /// 这一路参不参与 AFV 门控（`InputAudioSettings.afv`；不认识的路当参与）。调用方持锁。
@@ -534,12 +579,16 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     }
 
     /// 到点的延后门控：命令在下一块开始时应用，所以 due 落在下一块内的现在就发。
+    /// 到点时最新快照里已经没有进行中的 T-bar（提交 / 取消了）就丢掉：结束时排着的已经清了（transitionEnded），这里兜"结束事件先进队列、
+    /// 同一轮轮询又读到结束前那一档"的那一下（状态机先发事件后发布快照，D10 附带）。
     private func applyDeferredGates(now: HostTime) {
         lock.lock()
         let horizon = now + blockDuration
         let ready = deferredGates.filter { $0.due <= horizon }
         deferredGates.removeAll { $0.due <= horizon }
         lock.unlock()
+        guard !ready.isEmpty else { return }
+        if let state = bridge?.lastSeenState, !(state.transition.isActive && state.transition.source == .tbar) { return }
         for g in ready { setGate(g.number, g.gain) }
     }
 
@@ -686,9 +735,15 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
 
     private func stepFadeToBlack(now: HostTime) {
         lock.lock()
+        // 混音块 T 里的内容是 T − 对齐延迟 采集的，斜坡按内容时刻评估；再提前 3 ms（总线增益一阶平滑 τ = 3 ms）+ 半块（目标每块才设一次，
+        // 一块里是台阶：只补 τ 时块内平均还落后半块 2.7 ms，30 拍斜坡到 −20 dB 那头差 0.5 dB，D11 的分段用例量出来的），曲线就对上斜坡
+        let at = now - alignmentDuration + HostDuration(milliseconds: 3, timebase: timebase) + blockDuration / 2
+        // D11：生效时刻到了的新斜坡接替（画面从改的那一拍起按它走，内容时刻同一拍点）
+        while let next = ftbPending.first, next.effective <= at {
+            ftbRamp = next.ramp
+            ftbPending.removeFirst()
+        }
         guard let ramp = ftbRamp else { lock.unlock(); return }
-        // 混音块 T 里的内容是 T − 对齐延迟 采集的，斜坡按内容时刻评估；再提前 3 ms（总线增益一阶平滑 τ = 3 ms），曲线就对上斜坡
-        let at = now - alignmentDuration + HostDuration(milliseconds: 3, timebase: timebase)
         let level = AudioProgramGate.fadeToBlackLevel(at: at, on: ramp.on, start: ramp.start, duration: ramp.duration)
         ftbLevel = level
         let factor = Float(1 - level)

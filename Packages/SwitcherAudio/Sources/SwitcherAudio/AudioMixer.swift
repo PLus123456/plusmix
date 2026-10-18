@@ -438,8 +438,10 @@ public final class AudioMixer: @unchecked Sendable {
     /// 曲线 cos / sin（中点各 −3 dB），起点 = 首样本 host time ≥ startHostTime 的那一块里按样本定位，
     /// 长度 durationFrames 帧（样本精确，不按块取整；W1-D2 前只收块数），走满那一刻起 from 严格 0、to 严格 1。
     /// 迟到时跳到该在的位置，终点仍与视频对齐。任一方可为 nil。
-    public func crossfade(from: Int?, to: Int?, durationFrames: Int, startHostTime: HostTime) {
-        push(cmd(SW_CMD_CROSSFADE, i0: from.map(Int32.init) ?? -1, i1: to.map(Int32.init) ?? -1,
+    /// 同一槽位上已有的淡变：默认在命令应用时取消；`replacing = true`（W1-B5，D10：Auto 中途按 Cut 的短淡收口）时已经开始的那条照走到
+    /// 新淡变的起点，起点那一刻才取消、新淡变从当时的增益起走——起点之前不回弹到转场前的增益，起点不跳变（`SW_CMD_CROSSFADE_REPLACE`）。
+    public func crossfade(from: Int?, to: Int?, durationFrames: Int, startHostTime: HostTime, replacing: Bool = false) {
+        push(cmd(replacing ? SW_CMD_CROSSFADE_REPLACE : SW_CMD_CROSSFADE, i0: from.map(Int32.init) ?? -1, i1: to.map(Int32.init) ?? -1,
                  i2: Int32(max(1, durationFrames)), u0: startHostTime.ticks))
     }
     /// 便利写法：durationBlocks × 名义块（`configuration.blockFrames`）。

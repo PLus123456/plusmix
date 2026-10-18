@@ -14,7 +14,9 @@ import SwitcherContracts
 //   - 发布：`publisher`（HazardPublisher）原子指针交换；渲染线程 / 音频线程借用指针，不进 actor。快照带 publishedAt（提案 003 §B），
 //     发布后同步通知 SnapshotObserver（API 推送 / App 主线程分发挂这里，提案 003 §D1）。
 //   - 回执：applied = 状态是否真的变了（提案 003 §A）；结构性非法的命令到不了这里（总线入口拒绝）。
-//   - 事件：转场开始 / 完成 / 瞬时切换随每次状态变化发给 TransitionEventSink（AFV，W2-E）。
+//   - 事件：转场开始 / 完成 / 瞬时切换随每次状态变化发给 TransitionEventSink（AFV，W2-E）。完成分三种（D10，W1-B5）：auto 走满时长、
+//     auto 没走满就被 Cut / T-bar 一下推到底切完、T-bar 带着的转场提交——音频侧对第一种什么都不用做（C 侧淡变自己在同一刻走满），
+//     后两种要在这一拍收到终值。FTB 的目标斜坡变了（方向翻转、途中改时长 / 归零，D11）也走这里，带改的那一拍。
 
 /// 状态机对一次 `submit` 的答复。
 public enum SubmitOutcome: Sendable, Hashable {
@@ -32,10 +34,23 @@ public enum TransitionEvent: Sendable, Hashable {
     case cut(tick: Tick, from: Int, to: Int)
     /// 转场开始：from（当前 PGM）→ to（PVW）。
     case started(tick: Tick, type: TransitionType, durationTicks: Int, from: Int, to: Int, source: TransitionSource)
-    /// 转场完成（对调已发生）。
-    case completed(tick: Tick, from: Int, to: Int)
+    /// 转场完成（对调已发生）。`completion` = 怎么完成的（D10：自然走满 / 被打断 / T-bar 提交）。
+    case completed(tick: Tick, from: Int, to: Int, completion: TransitionCompletion)
     /// 转场被取消（例如中途 removeInput）。
     case cancelled(tick: Tick)
+    /// FTB 的目标斜坡变了（方向翻转；途中改时长 / 归零，D11）：从第 tick 拍起画面按新斜坡走——起点 startTick（反向 / 改时长时是
+    /// reducer 回拨的等效起点，≤ tick）、时长 durationTicks（0 = 这一拍就到位）、向 on 走。进度变化、自然走完、空闲时改时长都不发。
+    case fadeToBlack(tick: Tick, on: Bool, startTick: Tick, durationTicks: Int)
+}
+
+/// 转场怎么完成的（D10，Codex 2026-10-13 审查，W1-B5）：状态机按完成前那一拍的转场状态判，音频侧（AFV）据此决定要不要收口。
+public enum TransitionCompletion: Sendable, Hashable {
+    /// auto 走满时长（advance 到 开始拍 + 时长 的那一拍）：音频那条等长的交叉淡变恰好在同一刻走满。
+    case elapsed
+    /// auto 没走满就被切完（进行中按 Cut、T-bar 一下推到底）：画面这一拍已全是新画面，音频还在走的长淡变要在同一拍短淡收口。
+    case interrupted
+    /// T-bar 带着的转场提交（推到底；进行中按 Cut 也是这里；含 T-bar 接管 auto 之后）：音频跟推杆走的门控收到终值。
+    case tbar
 }
 
 /// 转场事件的接收方。在状态机线程上被同步调用，必须快速返回。
@@ -259,7 +274,7 @@ public actor StateMachine {
         let swapped = a.program == b.preview && a.preview == b.program && a.program != b.program
         if wasActive && !isActive {
             if swapped {
-                out.append(.completed(tick: tick, from: b.program, to: a.program))
+                out.append(.completed(tick: tick, from: b.program, to: a.program, completion: completion(of: b.transition, at: tick)))
             } else if a.program != b.program {
                 out.append(.cut(tick: tick, from: b.program, to: a.program))
             } else {
@@ -271,6 +286,30 @@ public actor StateMachine {
         } else if !isActive && a.program != b.program {
             out.append(.cut(tick: tick, from: b.program, to: a.program))
         }
+        if ftbRampChanged(from: b.ftb, to: a.ftb) {
+            let start = a.ftb.startTick ?? tick
+            out.append(.fadeToBlack(tick: tick, on: a.ftb.on, startTick: start, durationTicks: a.ftb.startTick == nil ? 0 : max(a.ftb.durationTicks, 0)))
+        }
         return out
+    }
+
+    /// FTB 的目标斜坡（方向、起点、时长）变没变（D11）。原来只在快照轮询里比 on，漏掉途中改时长（提案 020：reducer 按当前电平回拨起点、
+    /// 换时长，或时长 0 直接到位），声音继续走旧斜坡：
+    /// - on 翻了：变（反向时起点已回拨成等效起点）；
+    /// - 还在走（after.startTick 非 nil）：起点或时长变了就是变（途中改时长；同一拍里来回翻两下也在这里）；
+    /// - 走完了（after.startTick 为 nil）：before 也空闲 = 没变（空闲时改时长只是设置，下次翻转的事件会带上）；before 在走、时长没变 = 自然走完，
+    ///   不发（发了音频会提前一个对齐延迟到位）；before 在走、时长变了 = 归零（时长 0 这一拍到位）。
+    static func ftbRampChanged(from b: FadeToBlack, to a: FadeToBlack) -> Bool {
+        if b.on != a.on { return true }
+        guard a.startTick != nil else { return b.startTick != nil && b.durationTicks != a.durationTicks }
+        return b.startTick != a.startTick || b.durationTicks != a.durationTicks
+    }
+
+    /// D10：完成前那一拍的转场 → 怎么完成的。auto 且这一拍 ≥ 开始拍 + 时长 = 走满（advance 完成的）；auto 还没到 = 被命令打断
+    /// （Cut / T-bar 推到底；排程路与命令路一样：排在第 t 拍的 Cut 先 advance 到 t、转场还在进行，再被 Cut 对调）；
+    /// source = tbar（含接管了 auto 的）= T-bar 提交，不管是推到底还是按 Cut。
+    static func completion(of t: TransitionState, at tick: Tick) -> TransitionCompletion {
+        guard t.source == .auto, let start = t.startTick else { return .tbar }
+        return tick >= start + t.durationTicks ? .elapsed : .interrupted
     }
 }

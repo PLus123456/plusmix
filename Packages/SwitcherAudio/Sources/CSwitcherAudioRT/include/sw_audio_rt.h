@@ -237,6 +237,10 @@ enum sw_cmd_type {
     SW_CMD_FX_POST_GAIN,      ///< index=宿主编号 i0=格 i2=sw_fx_target f0=线性：格内输出增益（peakLimiter.ceilingDb，渲染完乘系数，一阶平滑）
     SW_CMD_MONITOR_SOURCE,    ///< i0=总线号：耳机出口（out 平面 6 / 7）放这条总线（0 Master / 1 A / 2 B）；3 = 耳机总线自己（旧行为，默认）。有独听时总是耳机总线（提案 026）
     SW_CMD_MONITOR_BORROW_MASTER, ///< i0=0/1：开着且有独听时 Master 出口（out 平面 0 / 1）放耳机总线（2 声道设备上听独听，X09）；消费者队列不受影响
+    // ---- W1-B5（prompt 120，D10）起 ----
+    SW_CMD_CROSSFADE_REPLACE, ///< 参数同 SW_CMD_CROSSFADE，替换语义（Auto 中途按 Cut 的短淡收口）：同槽位上**已经开始**的淡变照走到新淡变的起点，
+                              ///< 起点那一块里取消它们、从那一刻的 afv 起按 cos / sin 走到 0 / 1（起点之前不回弹到转场前的增益、起点不跳变）；
+                              ///< 同槽位上还没开始的淡变在应用时就取消（同 SW_CMD_CROSSFADE）
 };
 
 typedef struct sw_cmd {
