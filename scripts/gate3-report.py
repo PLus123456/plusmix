@@ -365,9 +365,14 @@ def main():
     a3_ok = a3_8h is not None and abs(a3_8h) <= 16
     multi = av_multi.get("multi", {}) if av_multi else {}
     a4_max = multi.get("maxClickSpreadMs")
-    a4_ok = a4_max is not None and a4_max <= frame_ms
+    # 判定事件里有文件缺 click（W1-A6，用户 2026-10-17 定）/ 缺闪光（用户 2026-10-18 裁定 #22）时 frameprobe 给 passA4 = false，
+    # 但那一格不进极差、maxClickSpreadMs 数字不变——只看极差会判过（G10 胶水 ⑦）。老 JSON 没有两个计数、passA4 一直有，`is not False` 对新老都对。
+    a4_ok = a4_max is not None and a4_max <= frame_ms and multi.get("passA4") is not False
+    a4_missing = [f"{n} 个判定事件有文件缺{what}" for what, n in ((" click", multi.get("missingClickEventCount") or 0),
+                                                              ("闪光", multi.get("missingFlashEventCount") or 0)) if n > 0]
     a4_value = (f"{len(av_multi.get('sources', []))} 个文件（PGM + ISO 音轨），{len(multi.get('events', []))} 个事件：click 时刻极差最大 {fmt(a4_max)} ms，"
-                f"闪光极差最大 {fmt(multi.get('maxFlashSpreadMs'))} ms") if av_multi else "没有 ISO 文件（--iso-audio 0）"
+                f"闪光极差最大 {fmt(multi.get('maxFlashSpreadMs'))} ms"
+                + (f"；{'、'.join(a4_missing)}（frameprobe passA4 = false）" if a4_missing else "")) if av_multi else "没有 ISO 文件（--iso-audio 0）"
 
     # ---- E1 / E2 / E3 / E5 ----
     e1 = key.get("e1_skipped")
