@@ -9,3 +9,5 @@
 
 不做：拍号来源（pts0 / 逐帧累加）的改法；阈值；gate 脚本（归 G10）。
 报告 reports/w1-testkit-6.md 五段；不 push、不 merge，做完交 G10（prompt 122）。
+
+**G9 追加（2026-10-18）**：Opus 5.5 子代理做完、未合并——`w1-testkit-6` = 8e96883，报告 reports/w1-testkit-6.md，等 G10（122）合入。用户 2026-10-18 裁定（reports/G9.md §7.4 表）：§4 四条裁定：全无 click 的事件不算缺、Cut 前一拍漏帧只标 + 报漏帧、V7 只判有样本的拍——维持；缺闪光算 A4 不过——G10 胶水（TestKit ≤ 30 行）。gate3-report.py 看 passA4 归 G10（问题单 W1A6-g10-gate3-report-a4-reads-passA4）。

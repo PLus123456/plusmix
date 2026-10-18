@@ -55,6 +55,12 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 | S3 | 111 留下的：鉴权失败停下的推流底栏写"推流 · 起不来"、状态窗写"失败"（两处不一致）；"应用 + 密钥"写法推 MediaMTX 平均约两次尝试才停（HaishinKit 每次 connect 白等 3 s + MediaMTX 随机等 0–4 s）；服务器断开不回状态的拒绝（nginx-rtmp / SRS 回调）认不出、照旧退避 | 鉴权失败的推流 | 看状态窗；MediaMTX 用"只写路径、密钥留空" | reports/w2-stream-4.md §3 第 1 / 3 / 4 条、§4 | 底栏 → **119**（用户 2026-10-17 定改"失败"）；后两条用户同日定接受、手册已写、不修 |
 | S3 | 112 留下的：MIDI 音符执行没选输入的 Stinger 槽被拒但没提示（MIDI/ 不在 112 目录）；格子"转场"遇当前那组是这种槽时 PVW 换了、转场被拒（两条命令一半生效）；T-bar 推这种槽照契约硬切、界面不拦；英文小档（160）格子 "Transition" 仍截 | 外部控制 / 直播中误触 | 槽里先选输入 | reports/w5-app-followups.md §3 第 2 / 6 / 7 / 9 条 | MIDI 提示 → **116**；格子先弹选择整条不发、T-bar 灰掉并提示 → **119**（用户 2026-10-17 定）；截尾留着不修 |
 | S3 | 020 的缺口：T-bar 推到一半改了当前槽、再拉回 0 取消，当前那组不按槽重拷，下一次回车执行的是旧配置（完成那一次后才拷上）| 改槽又取消的人 | 完成一次转场 | reports/p5-contracts-3.md §4 第 2 条（探针） | **115**（用户 2026-10-17 定：取消那一拍也重拷，020 文件末尾有裁定段） |
+| S1 | **输入编号没有上限**：主 API `addInput` 加一路编号极大的输入后，兼容层生成 TALLY / XML 时按编号分配失败崩溃或卡死（116 W2-C4 2026-10-18 发现，未修；App"添加输入"自己限 16 路，API 没限） | 开 API + 兼容层 | 别发极大编号 | reports/w2-control-4.md §3 | **123 P5-5**（提案 032：`InputConfig.numberRange` 1…16 进契约 + validate + 校验器，用户 2026-10-18 批） |
+| S3 | 拼音输入法下不带 ⇧ 的标点键（`, ; [` 等）打出全角 / 中文标点，绑这些键的快捷键行按不出来（116 修 ⇧ 数字时发现） | 中文输入法 + 标点键绑定 | 切英文输入法，或绑字母 / 数字 / 功能键 | reports/w2-control-4.md §3 | 记录（W2-C 系）；手册 124 照实写 |
+| S3 | 推流"最后错误"连不上 / 断线那一半仍带 Swift 枚举原样（`连接失败：connectFailed("…")`、`断线：sendFailed("…")`）；鉴权失败那一半 111 已是干净一句（W4C3 第 8 条；119 开的问题单） | 看状态窗 / API 的人 | — | reports/w5-app-fixes.md §3 的问题单 | **G10 胶水**（`StreamTransportError` 加 `CustomStringConvertible`，Streaming ≤ 15 行） |
+| S3 | D06 的两个边角：录着 ISO 时把这一路删了再加同编号仍定格；换源瞬间若正好有别的路注册、ISO 音轨的混音器槽位可能换（119 修 D06 时留下） | 录着 ISO 做这些操作 | 先停 ISO | reports/w5-app-fixes.md §3 | **126 W5-Q** |
+| S3 | 文件输入任意角度（非 90° 倍数）的方向矩阵不支持：按原样出 + lastError 一句；App"添加输入"的文件信息摘要对竖拍仍显示编码尺寸（117 留下） | 带奇怪矩阵的素材 | 先转码 | reports/w2-inputs-5.md §3 | 前者记录；摘要 **126** |
+| S3 | 音频收口四条：普通 Cut / Auto 起点仍用旧淡变（60 ms 内连切两次会回弹）；Auto 进行中才开 AFV 中段不跟剩下的曲线；Cut 恰落在 Auto 走满那一拍被报成取消；压缩器换掉后 `AudioEngineStatus.InputEffects.compressorMeasuredLatencyFrames` 留旧值 | 边角操作 | — | reports/w1-core-5.md §3、reports/p5-contracts-4.md §5 | **125 W1-D4**（用户 2026-10-18 定裁定 #17 做） |
 
 ### 界面对照调研（UIA，2026-09-29）查出、尚未修的
 
@@ -196,6 +202,7 @@ S1 里的 X06 总线那一半、X10、X11、X13 修了，S2 的 X14（界面半�
 - `SwitcherInputsTests.FileInputTests` 的两条解码计时用例（`testFile_60fpsProgram_frameNumbersConsecutiveFromZero`：60 进 60 帧号连续、推帧线程不该被解码器饿；`testW2A4_highRate_withAudio_keepsUp`：8 倍速带音频饿 ≤ 3 拍）在桌面忙（Photos / WindowServer / Spotlight 抢核）时偶发红：G8b 2026-10-11 六遍里两遍各红一条、单独复跑都绿（reports/G8.md §5 L1）；先单独复跑再判，跑 gate4 / perf 前的 `ps` 也看桌面进程。
 - ~~frameprobe 多文件 A4 半秒平局误报~~ **已修（2026-10-17 G9 合入 W1-A5）**：以第一个文件的 click 为锚、半秒事件只列不判（测试标准 §2.3 多了一条）；G8 产物重算 0.187 ms，G9 的 gate4 不再 waive。判定事件里缺 click 算不过归 **121 W1-A6**（用户 10-17 定）。
 - **frameprobe 的转场分析把数组下标当拍号**（Codex T02）：Cut / Fade 落点按 index 判，前序漏 2 帧就把第 60 拍的 Cut 报成 58、30 拍 Fade 判 2 帧偏差——与 A4 半秒平局、视频延后整体错开都不是一回事；V6 / V7 的判定在缺帧的录像上会误报。归 **121 W1-A6**（按 PTS 换算拍号、缺帧单独报）。
+- **gate3-report.py 的 A4 只看 `maxClickSpreadMs`**（第 366–368 行），121 加的"判定事件里有文件缺 click → passA4 false"到不了 gate 的判定；App `ISOAppTests` 与 Outputs `ISOAlignmentTests` 同样只断言两个极差（reports/issues/W1A6-g10-gate3-report-a4-reads-passA4.md）→ **G10 胶水**（脚本加 `passA4 is not False`、两组用例加断言；缺闪光也算不过按用户 2026-10-18 裁定 #22 一起做）。
 - **Xcode 27.1（10-16 升的）把 Metal 工具链拆成单独下载的组件**：没装时 App / frameprobe / 任何带 SwitcherRender 的目标编 `.metal` 直接 "cannot execute tool 'metal' due to missing Metal Toolchain"（release frameprobe 旧二进制还在，就会悄悄用旧的——T04 那条）；G9 用 `xcodebuild -downloadComponent MetalToolchain` 装了 27A266a（`xcodebuild -showComponent MetalToolchain` 看状态）。换机器 / 升 Xcode 先查这个。
 - ~~`make lint` 在用户终端（UTF-8 locale）里退出~~ **已修（G9，Codex T03）**：历次会话 Bash 没设 LANG、都是 C locale 跑的，所以从没撞到；现在 scripts/ 下所有 `$var` 后紧跟全角字符都写成 `${var}`，`test_soakjudge.test_S1_shellScriptsBraceVariablesBeforeNonASCII` 扫全部脚本防回潮；G9 的 lint 两种 locale 各跑了一遍。
 - ~~`make test` 用旧 frameprobe~~ **已修（G9，Codex T04）**：`test-packages` / `test-app` 先 `make frameprobe-release`（`swift build -c release --package-path Tools/frameprobe`），`make test` 三组改成 test-tools → test-packages → test-app。单跑包测试仍要自己先编 release frameprobe（用例只看二进制在不在，不看新不新）。

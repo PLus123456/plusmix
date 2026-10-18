@@ -41,3 +41,5 @@ SwitcherEngine reducer + CommandValidator（Core）、Contracts020Tests / Reduce
 
 **2026-10-17 用户裁定：维持**落地时的判法——`autoTransition` 按"要执行的当前那组"判（比正文"当前槽是这种槽"多拒"API 直接 `setTransition(.stinger)` + `autoTransition` 又没设输入"一种，老用法以前是延迟硬切，现在 400）；正文不改、代码不改。
 同日另定：T-bar 推这种槽照契约放行、由 App 把 T-bar 灰掉并提示（prompt 119）；MIDI 执行它被拒要提示（prompt 116）；格子"转场"遇它先弹输入选择、整条不发（119）。
+
+**2026-10-18 用户裁定**（止血七路做完后）：**不连 T-bar 一起拒**——界面把 T-bar 灰掉 + 提示（119 已做），MIDI 推子 / API 推杆推这种槽照契约硬切；不再为此写提案。

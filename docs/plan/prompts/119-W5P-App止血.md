@@ -15,3 +15,5 @@
 
 不做：Stream Deck（116）；包里的东西（D05 / D08 归 118，D13–D15 归 117）；LastSession"崩溃后恢复"（用户没定）；任何阈值。
 报告 reports/w5-app-fixes.md 五段；不 push、不 merge，做完交 G10（prompt 122）。
+
+**G9 追加（2026-10-18）**：Opus 5.5 子代理做完、未合并——`w5-app-fixes` = 7e94924，报告 reports/w5-app-fixes.md，等 G10（122）合入。用户 2026-10-18 裁定（reports/G9.md §7.4 表）：§4 三条裁定全维持（换源 PGM 停旧画面、029 不连 T-bar 拒、查询串参数名只记本机）；W4C3 第 8 条（推流 last_error 枚举原文）归 G10 胶水；D06 两个边角归 126；它说的 ToolbarMenuTests 环境红 = D04，G10 从名单拿掉。
