@@ -6,6 +6,7 @@ import SwitcherContracts
 /// 打开的媒体文件：轨道信息 + 按需建 AVAssetReader（每次 seek / 循环重开一个；探针实测重开 2 ms + 从关键帧解到目标帧）。
 /// 解码走 AVAssetReaderTrackOutput（内部是 VideoToolbox；macOS 26 探针：H.264 1080p60 解 2700 fps，硬解）。
 /// 输出 NV12 '420v'（源是 full range 时 '420f'），带 alpha 的源（ProRes 4444 / HEVC alpha：格式描述 ContainsAlphaChannel）输出 BGRA。
+/// 视频轨的 `preferredTransform`（手机竖拍的方向矩阵）归成 `FileOrientation`，`FileReader.nextVideo` 出的帧已按它转正（`PixelRotator`，D15）。
 /// 打开后的文件信息。
 public struct FileInfo: Sendable, Hashable {
         /// 视频时长（秒，视频轨的 timeRange）。
@@ -13,8 +14,16 @@ public struct FileInfo: Sendable, Hashable {
         /// 一帧时长（秒，minFrameDuration；没有时按 nominalFrameRate）。
         public let frameDuration: Rational
         public let nominalFrameRate: Double
+        /// 编码宽（解码器原样给的像素宽；转正之前）。
         public let width: Int
+        /// 编码高。
         public let height: Int
+        /// 视频轨方向矩阵归成的方向（D15）；FileInput 出的帧已按它转正。认不出的矩阵（任意角度）按 `.identity`（原样出）。
+        public let orientation: FileOrientation
+        /// 转正后的宽 = FileInput 出帧的宽。
+        public var displayWidth: Int { orientation.swapsAxes ? height : width }
+        /// 转正后的高。
+        public var displayHeight: Int { orientation.swapsAxes ? width : height }
         public let hasAlpha: Bool
         public let fullRange: Bool
         public let color: ColorInfo
@@ -30,6 +39,10 @@ final class FileAsset: @unchecked Sendable {
     let videoTrack: AVAssetTrack
     let audioTrack: AVAssetTrack?
     let info: Info
+    /// 转正器（方向不是 identity 时有；只在解码线程用）。
+    let rotator: PixelRotator?
+    /// 方向矩阵认不出（任意角度）或转正器建不出来时的一句话（按原样出帧）；FileInput 放进 lastError 的提示。
+    let orientationNote: String?
 
     enum Failure: Error, CustomStringConvertible {
         case notFound(String)
@@ -58,6 +71,7 @@ final class FileAsset: @unchecked Sendable {
             out.range = try await v.load(.timeRange)
             out.minDur = try await v.load(.minFrameDuration)
             out.nominal = try await v.load(.nominalFrameRate)
+            out.transform = try await v.load(.preferredTransform)
             out.vdesc = try await v.load(.formatDescriptions)
             out.adesc = try await out.audio?.load(.formatDescriptions) ?? []
             return out
@@ -101,7 +115,20 @@ final class FileAsset: @unchecked Sendable {
         if minDur.isValid, minDur.value > 0 { frameDuration = Rational(minDur.value, Int64(minDur.timescale)) }
         else if nominal > 0 { frameDuration = Rational(approximating: 1 / Double(nominal), maxDenominator: 60_000) }
         else { frameDuration = Rational(1, 30) }
+        // 方向（D15）：只认轴对齐的八种；认不出的按原样出、说一句
+        let t0 = t.transform
+        let recognized = FileOrientation(transform: t0)
+        let orientation = recognized ?? .identity
+        rotator = PixelRotator(orientation: orientation)
+        if recognized == nil {
+            orientationNote = "视频方向矩阵 (\(t0.a), \(t0.b), \(t0.c), \(t0.d)) 不是 90° 的整数倍，按编码方向原样出"
+        } else if orientation != .identity && rotator == nil {
+            orientationNote = "建不出转正用的 VTPixelRotationSession，按编码方向原样出（方向 \(orientation.rawValue)）"
+        } else {
+            orientationNote = nil
+        }
         info = Info(duration: duration, frameDuration: frameDuration, nominalFrameRate: Double(nominal), width: width, height: height,
+                    orientation: rotator == nil ? .identity : orientation,
                     hasAlpha: hasAlpha, fullRange: fullRange, color: hasAlpha ? .sRGBFull : color,
                     hasAudio: a != nil && channels > 0, audioChannels: channels, codec: codec)
     }
@@ -140,6 +167,7 @@ final class FileAsset: @unchecked Sendable {
         var range = CMTimeRange.zero
         var minDur = CMTime.zero
         var nominal: Float = 0
+        var transform = CGAffineTransform.identity
         var vdesc: [CMFormatDescription] = []
         var adesc: [CMFormatDescription] = []
     }
@@ -152,10 +180,12 @@ final class FileReader: @unchecked Sendable {
     let audio: AVAssetReaderTrackOutput?
     let start: Rational
     private let assetInfo: FileAsset.Info
+    private let rotator: PixelRotator?
 
     init(asset: FileAsset, start: Rational) throws {
         self.start = start
         assetInfo = asset.info
+        rotator = asset.rotator
         reader = try AVAssetReader(asset: asset.asset)
         let settings: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: asset.videoPixelFormat,
@@ -189,7 +219,7 @@ final class FileReader: @unchecked Sendable {
         }
     }
 
-    /// 下一帧视频：(文件内媒体位置, 像素缓冲)；结尾 / 出错返回 nil。
+    /// 下一帧视频：(文件内媒体位置, 像素缓冲)；结尾 / 出错返回 nil。方向不是 identity 的已转正（D15）；转不了的这一帧原样出（`rotator.failures`）。
     func nextVideo() -> (Rational, CVPixelBuffer)? {
         while let sb = video.copyNextSampleBuffer() {
             let pts = CMSampleBufferGetPresentationTimeStamp(sb)
@@ -197,6 +227,7 @@ final class FileReader: @unchecked Sendable {
             let t = Rational(pts.value, Int64(pts.timescale))
             // 有的 reader 配置会在结尾多给一个 pts == 时长的样本（探针：supportsRandomAccess 时），跳过
             if t >= assetInfo.duration { continue }
+            if let rotator, let upright = rotator.rotate(pb) { return (t, upright) }
             return (t, pb)
         }
         return nil

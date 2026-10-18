@@ -25,6 +25,9 @@ import SwitcherContracts
 /// - 音频：每 256 帧一块，块首 host time = 锚点拍时刻 + 块序号 × 256 / 48000，块在它的样本"发生之后"写（像真设备，
 ///   混音器的年龄设定点才对得上）；速率 ≠ 1 时按有理数位置线性插值变速（音调随之变）。
 /// - 带 alpha 的素材（ProRes 4444 / HEVC alpha）输出 BGRA；解码器标 StraightAlpha 的就地预乘（渲染器约定预乘）。
+/// - 方向：视频轨 `preferredTransform`（手机竖拍）归成 `FileOrientation`，解码帧先转正再进帧槽（`PixelRotator`，D15）；
+///   用户在输入设置里设的旋转由渲染器叠在转正之后（这里不碰 InputSettings）。
+/// - 速率 / 定位越界不崩：速率钳进 `FileSource.rateRange`、定位先在 Double 里钳到 [0, 时长]，`lastError` 说一句（提案 031，D01）。
 /// - 线程：解码线程（普通优先级）+ 推帧线程（time-constraint，周期 = 一拍）。都允许锁和分配；帧槽 push / 环 write 无锁。
 ///   两条都是裸 pthread（InputThread），每轮迭代各包一个自动释放池：AVFoundation 每次 copyNextSampleBuffer 都会 autorelease
 ///   reader / track output，没有池就攒到停机（S2 每圈 +0.5 MB；W2-A3）。
@@ -91,6 +94,12 @@ public final class FileInput: Input, @unchecked Sendable {
     private let playback: Mutex<Playback>
     private let assetBox = Mutex<FileAsset?>(nil)
     private let errorBox = Mutex<String?>(nil)
+    /// 参数被钳的提示（速率 / 定位不在契约范围，提案 031、Codex D01）：不改 state、不算出错，`lastError` 在没有真错误时给它；
+    /// 下一次合法的速率 / 定位清掉。start 不清（构造时钳的速率开播之后仍要看得见）。
+    private let noteBox = Mutex<String?>(nil)
+    /// 方向的提示（D15：方向矩阵认不出 / 转正器建不出来 / 有帧转正失败，这些帧按编码方向原样出）：start 按这次打开的文件重置，解码线程追加；
+    /// 优先级在参数提示之后（合法的速率 / 定位不清它）。
+    private let orientationNoteBox = Mutex<String?>(nil)
     private var decoderThread: InputThread?
     private var pacerThread: InputThread?
     private var videoQueue: DecodedVideoQueue?
@@ -116,18 +125,35 @@ public final class FileInput: Input, @unchecked Sendable {
         var pauseApplied: Bool
         /// 本代已经播完（推帧线程按结束动作收了尾：停在末帧 / 黑场）；start / seek 清掉。播完之后再把结束动作改成循环 = 从头来（W5-N）。
         var reachedEnd = false
+        /// 不循环时解码线程读到尾、放了结尾哨兵（在等换代）那一刻记下的结尾位置（展开后）；接着下一圈 / 换代清掉。
+        /// `positionSeconds` 用它判"已过尾"（推帧线程收尾那一拍之前的空档不取余）。
+        var endMedia: Rational?
+        /// D14：推帧线程播到结尾哨兵时循环已经开了——作废这个哨兵、接着下一圈，记下它的位置；解码线程看到它就接着读下一圈
+        /// （哪怕之后又关了循环：推帧线程已经越过哨兵，这一圈得有人接上，不然一直空等）。换代清掉；每圈的结尾位置不同（k × 时长），旧值不会误配。
+        var loopResumeEnd: Rational?
+    }
+
+    /// 推帧线程播到结尾哨兵时的判定（与 endAction setter 同一把锁：两边谁先谁后结果都自洽）。
+    enum EndDecision {
+        /// 按结束动作收尾（reachedEnd 已置上）；带当时的结束动作（hold / black）。
+        case end(FileEndAction)
+        /// 哨兵放下之后循环开了：作废哨兵、接着下一圈（D14）。
+        case loopOn
+        /// 已换代：哨兵是上一代的，下一轮按新代来。
+        case stale
     }
 
     /// - Parameters:
     ///   - path: 文件路径。
     ///   - endAction: 结束动作。
-    ///   - rate: 播放速率（> 0；按分母 ≤ 1000 的有理数近似）。
+    ///   - rate: 播放速率（`FileSource.rateRange` = 0.1…8，提案 031；越界 / 非有限的钳进去、`lastError` 说一句，不崩——Codex D01；
+    ///     按分母 ≤ 1000 的有理数近似）。
     ///   - timing: 节目时钟。
     ///   - videoSlot / audioRing: 组装方注入。audioRing 为 nil 时不解音频。
     public init(number: Int, name: String, path: String, endAction: FileEndAction = .loop, rate: Double = 1,
                 timing: ProgramTiming, videoSlot: any FrameSlot, audioRing: (any AudioRing)? = nil, options: Options = Options()) throws {
         precondition(number >= 1, "输入编号从 1 起")
-        precondition(rate > 0 && rate.isFinite, "速率必须为正")
+        let (clamped, note) = FileInput.clampRate(rate)
         self.number = number
         self.name = name
         self.path = path
@@ -136,10 +162,35 @@ public final class FileInput: Input, @unchecked Sendable {
         slot = videoSlot
         self.videoSlot = videoSlot
         self.audioRing = audioRing
-        let r = Rational(approximating: rate)
+        let r = Rational(approximating: clamped)
         let tl = FileTimeline(anchorTick: .zero, anchorMedia: .zero, rate: r, programFrame: timing.format.frameDuration)
         playback = Mutex(Playback(timeline: tl, paused: false, generation: 0, restartMedia: .zero, version: 0, endAction: endAction, anchorPending: true, pauseApplied: false))
+        noteBox.withLock { $0 = note }
     }
+
+    /// 速率钳进 `FileSource.rateRange`（提案 031 第 5 条；Codex D01：0 / 负数原来在 precondition 崩、1e-4 近似成 0 后取倒数崩、1e300 换 Int64 溢出）。
+    /// NaN 没有方向，按 1（正常速度）；±∞ 按两端。返回钳后的值与提示（合法值提示为 nil）。
+    static func clampRate(_ rate: Double) -> (value: Double, note: String?) {
+        let range = FileSource.rateRange
+        if range.contains(rate) { return (rate, nil) }
+        let value = rate.isNaN ? 1 : min(max(rate, range.lowerBound), range.upperBound)
+        return (value, "播放速率 \(shortNumber(rate)) 不在 \(shortNumber(range.lowerBound))–\(shortNumber(range.upperBound)) 之间，按 \(shortNumber(value)) 播")
+    }
+
+    /// 定位秒数 → 文件内位置（Codex D01：原来 1e300 在钳到时长之前就 × 1e6 换 Int64，溢出崩）：先在 Double 里钳到 [0, 时长]
+    /// （非有限 / 负数给 0，与 `InputSettings.clamped()` 同口径；时长未知时上限按 `PlaybackLimits.maxSeekSeconds`；再兜一道 Int64 能表示的上限），
+    /// 再换 Rational。钳完 ≥ 时长（过尾、1e300）与原来一样 = 从头。
+    static func seekTarget(seconds: Double, duration: Rational) -> Rational {
+        guard seconds.isFinite, seconds > 0 else { return .zero }
+        let known = duration.numerator > 0
+        let upper = min(known ? duration.doubleValue : PlaybackLimits.maxSeekSeconds, Double(Int64.max) / 2_000_000)
+        var target = Rational(approximating: min(seconds, upper), maxDenominator: 1_000_000)
+        if known, target >= duration { target = .zero }
+        return target
+    }
+
+    /// 提示里的数：1e+300、0.1、8、nan、inf。
+    private static func shortNumber(_ v: Double) -> String { String(format: "%g", v) }
 
     /// 从 InputSource.file 构造。
     public convenience init(config: InputConfig, timing: ProgramTiming, videoSlot: any FrameSlot, audioRing: (any AudioRing)? = nil,
@@ -171,7 +222,8 @@ public final class FileInput: Input, @unchecked Sendable {
     /// 时长（秒）。
     public var durationSeconds: Double { info?.duration.doubleValue ?? 0 }
     /// 结束动作（可运行中改）。播完之后（停在末帧 / 黑场）改成循环 = 当场从头接着循环（"到尾从头来"，尾已经到了；W5-N，格子的"循环"开关）；
-    /// 没播完时只换结束动作、位置接着走。
+    /// 没播完时只换结束动作、位置接着走——包括解码线程已经读到尾、推帧线程还在播最后几帧的那个窗口（D14：解码线程等尾时也看循环开没开，
+    /// 推帧线程到结尾哨兵时同一把锁里再看一次，开了就接着下一圈，不进 noSignal）。
     public var endAction: FileEndAction {
         get { playback.withLock { $0.endAction } }
         set {
@@ -183,39 +235,48 @@ public final class FileInput: Input, @unchecked Sendable {
             if restart { seek(toMedia: .zero) }
         }
     }
-    /// 播放速率。设置时在下一拍重新锚定。
+    /// 播放速率。设置时在下一拍重新锚定。越界 / 非有限的钳进 `FileSource.rateRange` 并在 `lastError` 说一句（不崩，Codex D01）；读回来是钳后的值。
     public var rate: Double {
         get { playback.withLock { $0.timeline.rate.doubleValue } }
         set {
-            precondition(newValue > 0 && newValue.isFinite)
+            let (clamped, note) = FileInput.clampRate(newValue)
+            noteBox.withLock { $0 = note }
             let timing = self.timing
             playback.withLock { p in
                 let tick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
                 if !p.paused { p.timeline.anchorMedia = p.timeline.position(at: tick) }
                 p.timeline.anchorTick = tick
-                p.timeline.rate = Rational(approximating: newValue)
+                p.timeline.rate = Rational(approximating: clamped)
                 p.version += 1
             }
         }
     }
     /// 是否暂停。
     public var isPaused: Bool { playback.withLock { $0.paused } }
+    /// 暂停已由推帧线程落实（测试看 D13 的触发条件：暂停还没落实就来了定位）。
+    var pauseIsApplied: Bool { playback.withLock { $0.paused && $0.pauseApplied } }
+    /// 解码线程读到尾、放了结尾哨兵在等（测试看 D14 的触发条件：此刻推帧线程还没播到哨兵）。
+    var decoderParkedAtEnd: Bool { playback.withLock { $0.endMedia != nil } }
     /// 当前时间线的锚点拍：start / seek / resume / 改速率之后，从这一拍起按新时间线出帧。
     /// start / seek 后要等目标位置的第一帧解出来才定，之前为 nil。
     public var playbackStartTick: Tick? {
         guard running.load(ordering: .relaxed) else { return nil }
         return playback.withLock { $0.anchorPending ? nil : $0.timeline.anchorTick }
     }
-    /// 当前播放位置（文件内秒）。
+    /// 当前播放位置（文件内秒）。循环中对时长取余（展开后的位置折回文件内）；不循环播完（推帧线程已收尾，或解码线程放了结尾哨兵、
+    /// 位置已过尾）= 时长、之后不变（Codex §5 末段：原来播完仍取余、继续走，1 s 文件读出 0.53）。
     public var positionSeconds: Double {
-        let timing = self.timing
-        let pos = playback.withLock { p in p.paused ? p.timeline.anchorMedia : p.timeline.position(at: timing.tick(at: HostClock.now())) }
+        let tick = timing.tick(at: HostClock.now())
+        let (pos, ended, end) = playback.withLock { p in
+            (p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick), p.reachedEnd, p.endMedia)
+        }
         guard let d = info?.duration, d.numerator > 0 else { return max(0, pos.doubleValue) }
+        if ended || end.map({ pos >= $0 }) == true { return d.doubleValue }
         let v = pos.doubleValue
         return v < 0 ? 0 : v.truncatingRemainder(dividingBy: d.doubleValue)
     }
-    /// 最近一次错误文案。
-    public var lastError: String? { errorBox.withLock { $0 } }
+    /// 最近一次错误文案；没有错误时是参数被钳的提示（速率 / 定位越界，见 `noteBox`），再没有是方向的提示（`orientationNoteBox`）。
+    public var lastError: String? { errorBox.withLock { $0 } ?? noteBox.withLock { $0 } ?? orientationNoteBox.withLock { $0 } }
     /// 计数。
     public var counters: InputCounters { countersBox.snapshot(state: stateBox) }
     /// 文件专属计数。
@@ -238,6 +299,7 @@ public final class FileInput: Input, @unchecked Sendable {
         }
         assetBox.withLock { $0 = asset }
         errorBox.withLock { $0 = nil }
+        orientationNoteBox.withLock { $0 = asset.orientationNote }
         let timing = self.timing
         let vq = DecodedVideoQueue(depth: options.predecodeDepth)
         let channels = audioRing?.channelCount ?? 0
@@ -254,6 +316,8 @@ public final class FileInput: Input, @unchecked Sendable {
             p.version += 1
             p.anchorPending = true
             p.reachedEnd = false
+            p.endMedia = nil
+            p.loopResumeEnd = nil
         }
         hasPushed.store(false, ordering: .relaxed)
         let d = InputThread(name: "file-decode-\(number)", period: nil, qos: QOS_CLASS_USER_INITIATED) { [self] t in
@@ -284,19 +348,23 @@ public final class FileInput: Input, @unchecked Sendable {
 
     // MARK: 控制
 
-    /// 定位到文件内某秒（钳到 [0, 时长)）。目标帧解出来之后 seekLead 之后的第一拍生效，从那一拍起显示目标位置的帧；
-    /// 之前帧槽里还是旧帧。
+    /// 定位到文件内某秒：先在 Double 里钳到 [0, 时长]（非有限 / 负数 = 0），过尾（≥ 时长）= 从头（`seekTarget`）。不在契约范围
+    /// （0…`PlaybackLimits.maxSeekSeconds`，提案 031）的照做、`lastError` 说一句；合法的定位清掉提示。
+    /// 目标帧解出来之后 seekLead 之后的第一拍生效，从那一拍起显示目标位置的帧；之前帧槽里还是旧帧。暂停中定位 = 停在目标那一帧、仍暂停。
     public func seek(toSeconds seconds: Double) {
         guard let info else { return }
-        var target = Rational(approximating: max(0, seconds), maxDenominator: 1_000_000)
-        if info.duration.numerator > 0, target >= info.duration { target = .zero }
-        seek(toMedia: target)
+        let inContract = (0...PlaybackLimits.maxSeekSeconds).contains(seconds)
+        noteBox.withLock {
+            $0 = inContract ? nil : "定位秒数 \(FileInput.shortNumber(seconds)) 不在 0–\(FileInput.shortNumber(PlaybackLimits.maxSeekSeconds))（一周）之间，按从头处理"
+        }
+        seek(toMedia: FileInput.seekTarget(seconds: seconds, duration: info.duration))
     }
 
-    /// 定位到第 n 帧（按文件的帧时长）。
+    /// 定位到第 n 帧（按文件的帧时长）。帧号先钳到文件的帧数（帧时长 × n 不在 Int64 里溢出，D01 同一类）；过尾 = 从头。
     public func seek(toFrame n: Int) {
         guard let info else { return }
-        var target = info.frameDuration.scaled(by: Int64(max(0, n)))
+        let frames = info.duration.numerator > 0 ? FileInput.ceilInt(info.duration / info.frameDuration) : Int(Int32.max)
+        var target = info.frameDuration.scaled(by: Int64(min(max(0, n), frames)))
         if info.duration.numerator > 0, target >= info.duration { target = .zero }
         seek(toMedia: target)
     }
@@ -311,6 +379,11 @@ public final class FileInput: Input, @unchecked Sendable {
             p.version += 1
             p.anchorPending = true
             p.reachedEnd = false
+            p.endMedia = nil
+            p.loopResumeEnd = nil
+            // 暂停中定位 = 冻结在目标上，暂停就此落实——不管推帧线程落没落实之前那次暂停请求：新定位的代次优先于旧的暂停请求。
+            // 原来留着"待落实"，推帧线程随后拿上一代最后推出的帧覆盖目标（D13：1 s 文件定位 0.5 s，0.4 s 后仍停在 0.1 s）
+            if p.paused { p.pauseApplied = true }
         }
         fileCounters.seeks.add(1, ordering: .relaxed)
     }
@@ -363,6 +436,7 @@ public final class FileInput: Input, @unchecked Sendable {
         var pendingAudio: (start: Int64, frames: Int)?   // FIFO 前面的空洞比容量大、还没放进去的那块（audioPlanes 里）
         var audioPlanes: [[Float]] = Array(repeating: [], count: fifo?.channels ?? 0)
         var queueDepth = queue.depth
+        var rotationFailuresSeen = 0
         let sampleRate = Int64(AudioFormat.sampleRate)
         let duration = asset.info.duration
         let frameDuration = asset.info.frameDuration
@@ -424,7 +498,12 @@ public final class FileInput: Input, @unchecked Sendable {
                 if !queue.isFull, let src = videoSource, !src.videoDone {
                     if let (t, pb) = src.reader.nextVideo() {
                         countersBox.framesReceived.add(1, ordering: .relaxed)
-                        countersBox.surfaces.note(pb)
+                        countersBox.surfaces.note(pb)   // 转正过的是池里的缓冲（推进帧槽的就是它）
+                        if let r = asset.rotator, r.failures != rotationFailuresSeen {
+                            rotationFailuresSeen = r.failures
+                            let reason = r.lastFailure ?? "?"
+                            orientationNoteBox.withLock { $0 = "转正失败 \(rotationFailuresSeen) 帧（\(reason)），这些帧按编码方向原样出" }
+                        }
                         src.lastVideoMedia = t
                         let media = src.base + t
                         if shouldDrop(media: media, playback: p, timing: timing, frameDuration: frameDuration) {
@@ -488,10 +567,30 @@ public final class FileInput: Input, @unchecked Sendable {
                     } else {
                         next?.cancel()   // 预开之后结束动作改成了 hold / black
                         next = nil
-                        _ = queue.push(.init(media: cur.base + duration, buffer: nil, generation: p.generation, isEnd: true))
-                        // 等换代（seek）或停止
-                        while !thread.isStopRequested && playback.withLock({ $0.generation }) == p.generation {
-                            thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 20))
+                        let endMedia = cur.base + duration
+                        _ = queue.push(.init(media: endMedia, buffer: nil, generation: p.generation, isEnd: true))
+                        playback.withLock { q in if q.generation == p.generation { q.endMedia = endMedia } }
+                        // 等换代（seek）/ 停止 / 循环开了（D14：哨兵放下、推帧线程还没播到它的那几帧里开的循环——原来这里只等换代，
+                        // setter 又只在 reachedEnd 已为真时才从头来，哨兵照旧按"停在末帧"收尾、进 noSignal）。推帧线程到哨兵时同一把锁里
+                        // 再看一次：开着就作废哨兵、记 loopResumeEnd，这边据此接着读下一圈（那之后哪怕又关了循环也照接——推帧线程已越过哨兵）。
+                        // 5 ms 一看：窗口只有最后几帧（30 fps 文件 ≥ 33 ms），要在推帧线程播到下一圈第 0 帧之前把 reader 开好。
+                        while !thread.isStopRequested {
+                            let (generation, action, resumeAt) = playback.withLock { ($0.generation, $0.endAction, $0.loopResumeEnd) }
+                            if generation != p.generation { break }
+                            if canLoop && (action == .loop || resumeAt == endMedia) {
+                                cur.cancel()
+                                do {
+                                    current = LoopReader(reader: try asset.makeReader(from: .zero), base: endMedia)
+                                } catch {
+                                    fail("循环重开失败：\(error)")
+                                    current = nil
+                                }
+                                prerollFailed = false
+                                playback.withLock { q in if q.generation == p.generation, q.endMedia == endMedia { q.endMedia = nil } }
+                                fileCounters.loops.add(1, ordering: .relaxed)
+                                break
+                            }
+                            thread.sleep(until: HostClock.now() + HostDuration(milliseconds: 5))
                         }
                     }
                     return
@@ -535,11 +634,28 @@ public final class FileInput: Input, @unchecked Sendable {
         stateBox.set(.error(message: message))
     }
 
+    /// 推帧线程播到结尾哨兵（位置 `media`）时判定收尾还是接着循环——与 endAction setter 同一把锁：setter 先 = 这里看见循环、
+    /// 作废哨兵（记 loopResumeEnd，解码线程据此接着读下一圈）；这里先 = reachedEnd 置上、setter 看见"已播完"再从头来。两种顺序都不会停在
+    /// "开关开着却 noSignal"（D14）。
+    private func endDecision(at media: Rational, generation: UInt64, canLoop: Bool) -> EndDecision {
+        playback.withLock { q in
+            guard q.generation == generation else { return .stale }
+            if q.endAction == .loop && canLoop {
+                q.loopResumeEnd = media
+                q.endMedia = nil
+                return .loopOn
+            }
+            q.reachedEnd = true
+            return .end(q.endAction)
+        }
+    }
+
     // MARK: 推帧线程
 
     private func paceLoop(thread: InputThread, asset: FileAsset, queue: DecodedVideoQueue, fifo: DecodedAudioFIFO?) {
         let timing = self.timing
         let info = asset.info
+        let canLoop = info.duration.numerator > 0
         let phaseLead = options.phaseLead ?? timing.frameDuration / 2
         let pushLead = options.pushLead
         let frameTicks = timing.frameDuration
@@ -547,6 +663,7 @@ public final class FileInput: Input, @unchecked Sendable {
         let sampleRate = Int64(AudioFormat.sampleRate)
         let chunkDuration = Rational(Int64(chunk), sampleRate).hostDuration
         var held: (media: Rational, buffer: CVPixelBuffer)?
+        var heldGeneration: UInt64 = 0   // held 是哪一代推出的（暂停落实只认本代的，D13）
         var ended = false
         var seenGeneration: UInt64 = 0
         var seenVersion: UInt64 = 0
@@ -625,30 +742,66 @@ public final class FileInput: Input, @unchecked Sendable {
                 if woke >= videoWake {
                     let tickTime = timing.time(of: tick)
                     if p.paused && !p.pauseApplied {
-                        // 落实暂停：位置冻结在最近推出的那一帧（没有推过就冻结在本拍的位置）
-                        let frozen = held?.media ?? p.timeline.position(at: tick)
-                        playback.withLock { q in
-                            guard q.paused, !q.pauseApplied else { return }
+                        // 落实暂停：位置冻结在本代最近推出的那一帧。本代还没推过（刚开播 / 刚定位）就冻结在本拍的位置、但不早于锚点位置
+                        // （= 定位目标：锚点拍在 seekLead 之后时本拍位置比目标早，冻在那里就永远等不到目标那帧）。上一代推出的帧不算——
+                        // 原来拿它冻结，"定位后紧跟暂停"会把位置冻回定位之前（D13 的反向顺序）
+                        let heldMedia = heldGeneration == p.generation ? held?.media : nil
+                        let frozen = heldMedia ?? max(p.timeline.position(at: tick), p.timeline.anchorMedia)
+                        let generation = p.generation
+                        let applied = playback.withLock { q -> Bool in
+                            guard q.paused, !q.pauseApplied, q.generation == generation else { return false }
                             q.timeline.anchorMedia = frozen
                             q.timeline.anchorTick = tick
                             q.pauseApplied = true
+                            return true
                         }
+                        // 没落成 = 读快照之后来了定位 / 恢复（定位会把暂停直接落在目标上）：这一拍不按旧快照出帧，下一轮按新状态来
+                        if !applied { return true }
                         p.timeline.anchorMedia = frozen
                         p.timeline.anchorTick = tick
+                        p.pauseApplied = true
                     }
-                    let position = p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick)
+                    var position = p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick)
                     var newest: DecodedVideoQueue.Item?
                     var rejected: UInt64 = 0
-                    var endItem: DecodedVideoQueue.Item?
-                    while let head = queue.peek() {
-                        if head.generation != p.generation { _ = queue.pop(); continue }   // 旧代
-                        if head.isEnd { endItem = head; break }
+                    var endItem: (item: DecodedVideoQueue.Item, action: FileEndAction)?   // 本拍按结束动作收尾的哨兵（锁里判定过）
+                    drain: while let head = queue.peek() {
+                        if head.generation < p.generation { _ = queue.pop(); continue }   // 旧代
+                        // 比本轮快照还新的代：读快照、睡到拍点的这段时间里又定位了，解码线程已经给出新代的帧——留给下一轮。
+                        // 原来按"代数不等 = 旧代"扔掉，定位目标那一帧就丢了（小文件重开 reader + 解首帧只要几 ms，比推帧线程的一拍短；D13 实测）
+                        if head.generation > p.generation { break drain }
+                        if head.isEnd {
+                            // 末帧显示期结束：本拍没有别的帧要出时判定——按结束动作收尾，或者哨兵放下之后循环开了（D14）：作废它、
+                            // 接着出后面下一圈的帧（解码线程按 loopResumeEnd / 循环开关接着读）
+                            if !ended, newest == nil, head.media <= position {
+                                switch endDecision(at: head.media, generation: p.generation, canLoop: canLoop) {
+                                case .loopOn:
+                                    _ = queue.pop()
+                                    continue drain
+                                case .end(let action):
+                                    endItem = (head, action)
+                                case .stale:
+                                    break
+                                }
+                            }
+                            break drain
+                        }
                         if head.media <= position {
                             _ = queue.pop()
                             if newest != nil { rejected += 1 }
                             newest = head
+                        } else if p.paused, newest == nil, heldGeneration != p.generation {
+                            // 暂停中定位后，新代的第一帧比冻结位置还晚（目标早于文件首帧的 pts）：照样出它、冻结位置挪到它——
+                            // 不然一直重推上一代的旧帧
+                            _ = queue.pop()
+                            newest = head
+                            position = head.media
+                            let generation = p.generation
+                            playback.withLock { q in if q.paused, q.generation == generation { q.timeline.anchorMedia = head.media } }
+                            p.timeline.anchorMedia = head.media
+                            break drain
                         } else {
-                            break
+                            break drain
                         }
                     }
                     if rejected > 0 { countersBox.framesRejected.add(rejected, ordering: .relaxed) }
@@ -664,6 +817,7 @@ public final class FileInput: Input, @unchecked Sendable {
                                         inputNumber: number, sequence: sequence, ingressTime: ingress))
                         countersBox.framesPushed.add(1, ordering: .relaxed)
                         held = (f.media, pb)
+                        heldGeneration = p.generation
                         hasPushed.store(true, ordering: .releasing)
                         if ended { ended = false }
                         stateBox.set(.live)
@@ -672,13 +826,12 @@ public final class FileInput: Input, @unchecked Sendable {
                         slot.push(Frame(pixelBuffer: h.buffer, pts: tickTime, duration: frameTicks, color: info.color,
                                         inputNumber: number, sequence: sequence, ingressTime: HostClock.now()))
                         countersBox.framesPushed.add(1, ordering: .relaxed)
-                    } else if let e = endItem, !ended, position >= e.media {
-                        // 末帧显示期结束：按结束动作收尾（loop 的话解码线程不会给哨兵）
+                    } else if let (e, action) = endItem {
+                        // 收尾（reachedEnd 已在 endDecision 里置上；循环着的话解码线程不会给哨兵）
                         ended = true
-                        let generation = p.generation
-                        playback.withLock { q in if q.generation == generation { q.reachedEnd = true } }
-                        if p.endAction == .black {
-                            if black == nil, let b = try? PixelBuffers.make(width: max(info.width, 2), height: max(info.height, 2), format: asset.videoPixelFormat) {
+                        if action == .black {
+                            if black == nil, let b = try? PixelBuffers.make(width: max(info.displayWidth, 2), height: max(info.displayHeight, 2),
+                                                                            format: asset.videoPixelFormat) {
                                 PixelBuffers.fill(black: b)
                                 black = b
                             }
@@ -688,6 +841,7 @@ public final class FileInput: Input, @unchecked Sendable {
                                                 inputNumber: number, sequence: sequence, ingressTime: HostClock.now()))
                                 countersBox.framesPushed.add(1, ordering: .relaxed)
                                 held = (e.media, b)
+                                heldGeneration = p.generation
                             }
                         }
                         stateBox.set(.noSignal)

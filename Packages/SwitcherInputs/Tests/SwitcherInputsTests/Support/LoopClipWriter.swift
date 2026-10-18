@@ -19,11 +19,14 @@ enum LoopClipWriter {
         case solidColor
         /// 测试图案（TestPattern）：帧号 = 帧序号，输入 ID 0，不闪光；底色自选。
         case testPattern(background: TestPattern.Background)
+        /// 四色象限（W2-A5 / D15 方向用例）：编码方向上左上红、右上绿、左下蓝、右下白，四个角两两不同，八种旋转 / 镜像各得一种排列。
+        case quadrants
     }
 
+    /// - transform: 写进视频轨的 `preferredTransform`（D15：手机竖拍那样的方向矩阵；默认恒等）。
     static func write(to url: URL, width: Int = 320, height: Int = 240, fps: Int32 = 30, frames: Int = 30,
                       sampleRate: Int = 48_000, channels: Int = 2, codec: AVVideoCodecType = .h264,
-                      content: FrameContent = .solidColor) throws {
+                      content: FrameContent = .solidColor, transform: CGAffineTransform = .identity) throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -32,6 +35,7 @@ enum LoopClipWriter {
             AVVideoHeightKey: height,
         ])
         video.expectsMediaDataInRealTime = false
+        video.transform = transform
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: video, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: width,
@@ -115,6 +119,22 @@ enum LoopClipWriter {
             case .testPattern(let background):
                 let c = TestPattern.Content(frameNumber: UInt32(i), hostTimeMs: 0, inputID: 0, flash: false, background: background)
                 guard TestPattern.draw(c, into: pb) else { throw Failure(description: "图案画不进像素缓冲") }
+            case .quadrants:
+                CVPixelBufferLockBaseAddress(pb, [])
+                let base = CVPixelBufferGetBaseAddress(pb)!, stride = CVPixelBufferGetBytesPerRow(pb)
+                for y in 0..<height {
+                    let row = (base + y * stride).assumingMemoryBound(to: UInt32.self)
+                    for x in 0..<width {
+                        // BGRA 小端：0xAARRGGBB
+                        switch (x < width / 2, y < height / 2) {
+                        case (true, true): row[x] = 0xFFFF_0000    // 红
+                        case (false, true): row[x] = 0xFF00_FF00   // 绿
+                        case (true, false): row[x] = 0xFF00_00FF   // 蓝
+                        case (false, false): row[x] = 0xFFFF_FFFF  // 白
+                        }
+                    }
+                }
+                CVPixelBufferUnlockBaseAddress(pb, [])
             }
             guard adaptor.append(pb, withPresentationTime: CMTime(value: Int64(i), timescale: fps)) else {
                 throw writer.error ?? Failure(description: "append video 失败")
