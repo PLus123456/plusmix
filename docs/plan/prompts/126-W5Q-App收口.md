@@ -13,4 +13,4 @@
 不做：Stream Deck / 控制层；包里的东西；任何阈值。
 报告 reports/w5-app-closeout.md 五段；不 push、不 merge。
 
-**G10 追加（2026-10-19）**：G10 胶水做了 ⑤（`AddInputModel.clampedFileRate`：`source()` 与两处速率数字框的 Binding 都过它，填 10 → 8、0.05 → 0.1、≤ 0 / 非数 → 1；用例 `PlaybackStatusTests.testG10_fileRateFieldClampedToContractRange`）与 ④（`ISOAppTests` 断言 `passA4 == true`）——交付 1 只剩"打开含越界速率的老节目时先按界面口径提示"，交付 5 不用做。
+**G10 追加（2026-10-19）**：G10 胶水做了 ⑤（`AddInputModel.clampedFileRate`：`makeSource()` 与两处速率数字框的 Binding 都过它，填 10 → 8、0.05 → 0.1、≤ 0 / 非数 → 1；用例 `PlaybackStatusTests.testG10_fileRateFieldClampedToContractRange`）与 ④（`ISOAppTests` 断言 `passA4 == true`）——交付 1 只剩"打开含越界速率的老节目时先按界面口径提示"，交付 5 不用做。
