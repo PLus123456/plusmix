@@ -5,7 +5,7 @@ import SwitcherAudio
 @testable import SwitcherAudioIntegration
 
 /// 提案 030（用户 2026-10-17 批，P5-4 / prompt 115）：`Stats.audio.effects` 由 `AudioEngine.audioCounters` 在出 Stats 行时从 `AudioEngineStatus` 拷（铁律 4：
-/// App 音频设置窗的"延迟自测"读的也是这份状态）。buses = Master / Bus A / Bus B 总是列（没装效果 = 0）；inputs 只列装了效果的路；
+/// App 音频设置窗的"延迟自测"读的也是这份状态）。buses = 四条总线总是列（含耳机总线，G10 胶水 ①；没装效果 = 0）；inputs 只列装了效果的路；
 /// measured_latency_ms 只在链里有自写压缩器时写。
 final class EffectsLatencyStatsTests: XCTestCase {
     typealias FX = BusEffectsTests
@@ -24,15 +24,16 @@ final class EffectsLatencyStatsTests: XCTestCase {
         for n in 1...4 { try rig.addSource(number: n) }
         await rig.run(seconds: 0.5)
 
-        // 没装任何效果：三条总线都列、延迟 0、没有 measured；inputs 空
+        // 没装任何效果：四条总线都列（含耳机总线，G10 胶水 ①）、延迟 0、没有 measured；inputs 空
         var c = rig.engine.audioCounters
-        XCTAssertEqual(c.effects.buses.map(\.bus), ["master", "busA", "busB"], "listedBuses 的顺序，耳机总线不列")
-        XCTAssertEqual(c.effects.buses, E.listedBuses.map { E.BusLatency(bus: $0.name, latencyMs: 0) })
+        XCTAssertEqual(c.effects.buses.map(\.bus), ["master", "busA", "busB", "headphones"], "Bus.allCases 的顺序，耳机总线也列（用户 2026-10-18 裁定 #1）")
+        XCTAssertEqual(c.effects.buses, Bus.allCases.map { E.BusLatency(bus: $0.name, latencyMs: 0) })
         XCTAssertEqual(c.effects.inputs, [:])
 
         // Master 一格限幅（起音 12 ms）、Bus A 一格自写压缩器；输入 2 一格 EQ、输入 3 动态格 = 压缩器、输入 4 动态格 = DynamicsProcessor；输入 1 不装
         _ = await rig.sm.apply(.setBusEffects(bus: .master, effects: [FX.limiter(attackSeconds: 0.012)]))
         _ = await rig.sm.apply(.setBusEffects(bus: .busA, effects: [InputEffectsIntegrationTests.compressor(thresholdDb: 0)]))
+        _ = await rig.sm.apply(.setBusEffects(bus: .headphones, effects: [FX.limiter(attackSeconds: 0.012)]))   // 调音台耳机条的"效果"
         await setInputEffects(rig, 2, [FX.eq(1000, gainDb: 3)])
         await setInputEffects(rig, 3, [InputEffectsIntegrationTests.compressor(thresholdDb: 0)])
         await setInputEffects(rig, 4, [FX.dynamics(thresholdDb: 0, headroomDb: 5)])
@@ -56,6 +57,9 @@ final class EffectsLatencyStatsTests: XCTestCase {
         XCTAssertEqual(busA.measuredLatencyMs, busStatus(.busA).compressorMeasuredLatencyFrames.map(ms), "装着压缩器：写实测（按设计 0）")
         XCTAssertEqual(busA.measuredLatencyMs, 0)
         XCTAssertEqual(c.effects.buses.first { $0.bus == "busB" }, E.BusLatency(bus: "busB", latencyMs: 0), "没装效果 = 0")
+        let phones = try XCTUnwrap(c.effects.buses.first { $0.bus == "headphones" }, "耳机总线也列")
+        XCTAssertEqual(phones.latencyMs, ms(busStatus(.headphones).latencyFrames), accuracy: 1e-9)
+        XCTAssertEqual(phones.latencyMs, 12, accuracy: 0.5, "耳机条一格限幅 = 起音 12 ms")
 
         // 每路：只列装了效果的路；值 = status 的 latencyFrames；measured 只在动态格是压缩器时写
         XCTAssertEqual(Set(c.effects.inputs.keys), [2, 3, 4], "没装效果的 1 号不列")

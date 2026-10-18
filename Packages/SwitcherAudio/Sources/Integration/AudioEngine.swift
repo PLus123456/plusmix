@@ -798,11 +798,11 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         return c
     }
 
-    /// 提案 030：AudioEngineStatus → Stats 的效果链延迟。buses = Master / Bus A / Bus B 总是列（没装 = 0）；inputs 只列契约链里装进了 EQ / 动态格的路；
+    /// 提案 030：AudioEngineStatus → Stats 的效果链延迟。buses = 四条总线（Bus.allCases，含耳机总线：用户 2026-10-18 裁定 #1、G10 胶水 ①；契约的 listedBuses 与文字归 123）总是列（没装 = 0）；inputs 只列契约链里装进了 EQ / 动态格的路；
     /// measured 只在链里有自写压缩器时给——每路的看 dynamicsKind（`InputEffects.compressorMeasuredLatencyFrames` 换掉压缩器后还留着上一次的值）。
     private func statsEffects(_ st: AudioEngineStatus) -> Stats.AudioCounters.EffectsLatency {
         typealias E = Stats.AudioCounters.EffectsLatency
-        let buses = E.listedBuses.map { b -> E.BusLatency in
+        let buses = Bus.allCases.map { b -> E.BusLatency in
             let fx = st.buses.first { $0.bus == b }?.effects ?? .empty
             return E.BusLatency(bus: b.name, latencyMs: E.milliseconds(frames: fx.latencyFrames), measuredLatencyMs: fx.compressorMeasuredLatencyFrames.map(E.milliseconds))
         }
