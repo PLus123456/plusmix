@@ -523,7 +523,8 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         }
         #if canImport(NDI)
         if let sender {   // dryRun 时是 nil：只验能不能读、只计数
-            var v = videoFrame(fourCC: route == .directBGRA ? NDIlib_FourCC_video_type_BGRA : NDIlib_FourCC_video_type_UYVY,
+            // BGRA 按 BGRX（不透明）送：本仓库的 BGRA 是预乘 alpha、NDI 的 BGRA 要非预乘，照送半透明边到下游会偏暗（用户 2026-10-18 裁定 #11，G10 胶水 ②）
+            var v = videoFrame(fourCC: route == .directBGRA ? NDIlib_FourCC_video_type_BGRX : NDIlib_FourCC_video_type_UYVY,
                                width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb), stride: CVPixelBufferGetBytesPerRow(pb),
                                data: base, time: item.time)
             NDIlib_send_send_video_async_v2(sender, &v)

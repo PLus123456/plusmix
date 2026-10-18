@@ -142,6 +142,7 @@ final class NDIDirectFormatTests: XCTestCase {
                 continue
             }
             print("D08 回环 \(c.label)：收到 \(got.width)×\(got.height) FourCC \(got.fourCC) 中心 RGB \(got.rgb)，期望 \(c.rgb)")
+            if c.label == "BGRA" { XCTAssertEqual(got.fourCC, "BGRX", "BGRA 的输入按不透明送（用户 2026-10-18 裁定 #11）") }
             XCTAssertEqual(abs(got.rgb.0 - c.rgb.0), 0, accuracy: 14, "\(c.label) R")
             XCTAssertEqual(abs(got.rgb.1 - c.rgb.1), 0, accuracy: 14, "\(c.label) G")
             XCTAssertEqual(abs(got.rgb.2 - c.rgb.2), 0, accuracy: 14, "\(c.label) B")
