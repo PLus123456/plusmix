@@ -17,3 +17,5 @@
 报告 reports/w5-app-fixes.md 五段；不 push、不 merge，做完交 G10（prompt 122）。
 
 **G9 追加（2026-10-18）**：Opus 5.5 子代理做完、未合并——`w5-app-fixes` = 7e94924，报告 reports/w5-app-fixes.md，等 G10（122）合入。用户 2026-10-18 裁定（reports/G9.md §7.4 表）：§4 三条裁定全维持（换源 PGM 停旧画面、029 不连 T-bar 拒、查询串参数名只记本机）；W4C3 第 8 条（推流 last_error 枚举原文）归 G10 胶水；D06 两个边角归 126；它说的 ToolbarMenuTests 环境红 = D04，G10 从名单拿掉。
+
+**G10 追加（2026-10-19）**：已合入 `g10`（合并提交 7de05e2），0 冲突（最后合）；合入顺序 115 → 117 → 116 → 118 → 120 → 121 → 119，每一路合完跑了被改动的包整包 + App 相关类 + lint（reports/G10.md §4.2）。KNOWN_ISSUES 的销号在"2026-10-19 G10 合入已修"表；本路 §3 / §4 留下的归 123–126（reports/G10.md §7）。agent worktree 已清（分支 `w5-app-fixes` 与 harness 分支留着）。

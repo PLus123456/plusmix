@@ -11,3 +11,5 @@
 报告 reports/w1-testkit-6.md 五段；不 push、不 merge，做完交 G10（prompt 122）。
 
 **G9 追加（2026-10-18）**：Opus 5.5 子代理做完、未合并——`w1-testkit-6` = 8e96883，报告 reports/w1-testkit-6.md，等 G10（122）合入。用户 2026-10-18 裁定（reports/G9.md §7.4 表）：§4 四条裁定：全无 click 的事件不算缺、Cut 前一拍漏帧只标 + 报漏帧、V7 只判有样本的拍——维持；缺闪光算 A4 不过——G10 胶水（TestKit ≤ 30 行）。gate3-report.py 看 passA4 归 G10（问题单 W1A6-g10-gate3-report-a4-reads-passA4）。
+
+**G10 追加（2026-10-19）**：已合入 `g10`（合并提交 ecabd56），0 冲突；合入顺序 115 → 117 → 116 → 118 → 120 → 121 → 119，每一路合完跑了被改动的包整包 + App 相关类 + lint（reports/G10.md §4.2）。KNOWN_ISSUES 的销号在"2026-10-19 G10 合入已修"表；本路 §3 / §4 留下的归 123–126（reports/G10.md §7）。agent worktree 已清（分支 `w1-testkit-6` 与 harness 分支留着）。
