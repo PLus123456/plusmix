@@ -28,8 +28,10 @@ public struct NDISendCounters: Hashable, Sendable {
     public var framesSent: UInt64 = 0
     /// 队列满丢的最旧帧（E1 口径，Stats.encoder[i].skipped）。
     public var skipped: UInt64 = 0
-    /// 转换失败的帧。
+    /// 没送出去的帧：NV12 → UYVY 转换失败、直送的像素缓冲锁不住、像素格式送不了（D08）。
     public var conversionFailures: UInt64 = 0
+    /// 连续 `NDISender.failureStreakLimit` 帧没送出去（D08）：Stats 的 state = failed、last_error 写像素格式；送出去一帧就清，下一次 start 也清。
+    public var sendFailing: Bool = false
     /// 送出去的音频块。
     public var audioBlocksSent: UInt64 = 0
     /// 音频环满丢的块。
@@ -61,15 +63,16 @@ public struct NDISendCounters: Hashable, Sendable {
 
     /// Stats.encoder 的一项：NDI 没有码率控制，bitrate = 窗口内送出的 UYVY 字节 × 8 / 秒（原始码率，报告用）。
     /// 提案 001 + 002（P2 落地）：frames = framesSent、dropped = skipped（NDI 没有编码器，队列满丢的帧就是"落地之前丢的"）、
-    /// reconnects = 0、disk_free_mb = 0、state = startFailed ? "failed" : unavailable ? "unavailable" : (running ? "publishing" : "idle")。
+    /// reconnects = 0、disk_free_mb = 0、state = startFailed ? "failed" : unavailable ? "unavailable" : (running ? (sendFailing ? "failed" : "publishing") : "idle")。
     /// 提案 019：output = 这路在 MixerState.outputs 里的编号（组装方给，不给 = 0）；connections = 当前接收方数（SDK 没给 / 负数当 0）。
+    /// D08：在跑但连续送不出去（`sendFailing`，比如源是送不了的像素格式）也报 failed，last_error 写像素格式；uptime_s 与其他 failed 一样写 0。
     public func statsEntry(previous: NDISendCounters?, windowSeconds: Double, bytesPerFrame: Int, running: Bool = true, output: Int = 0) -> Stats.EncoderEntry {
         let frames = framesSent &- (previous?.framesSent ?? 0)
         let bitrate = windowSeconds > 0 ? Double(frames * UInt64(bytesPerFrame)) * 8 / windowSeconds : 0
-        let publishing = !startFailed && !unavailable && running
+        let publishing = !startFailed && !unavailable && running && !sendFailing
         return Stats.EncoderEntry(output: output, skipped: skipped, bitrate: bitrate, frames: framesSent, dropped: skipped, diskFreeMb: 0, reconnects: 0,
                                   connections: UInt64(max(0, connections)),
-                                  state: startFailed ? "failed" : (unavailable ? "unavailable" : (running ? "publishing" : "idle")),
+                                  state: startFailed ? "failed" : (unavailable ? "unavailable" : (running ? (sendFailing ? "failed" : "publishing") : "idle")),
                                   uptimeS: publishing ? (startedAt.map { max(0, (HostClock.now() - $0).seconds) } ?? 0) : 0, lastError: lastError)   // 022
     }
 }
@@ -77,9 +80,40 @@ public struct NDISendCounters: Hashable, Sendable {
 /// NDI 发送（设计方案 §8 NDI 发送行；prompt 交付 3）。
 ///
 /// 线程：`consume`（引擎派发线程）只入有界队列（深度 2–3，满了丢最旧计 skipped）并唤醒；`consumeAudio`（泵线程）拷进音频环。
-/// 自己的线程：取帧 → NV12 → UYVY（GPU / CPU）→ NDIlib_send_send_video_async_v2；取音频块 → NDIlib_send_send_audio_v3（同步，几十微秒）。
-/// 视频异步发送要求缓冲在下一次调用前有效：GPU 版双缓冲、CPU 版双缓冲，都在 init 分配好。
+/// 自己的线程：取帧 → 按像素格式分路（`VideoRoute`，D08）→ NDIlib_send_send_video_async_v2；取音频块 → NDIlib_send_send_audio_v3（同步，几十微秒）。
+///   NV12（引擎的 PGM / PVW / 多画面，以及 NV12 的输入）：→ UYVY（GPU / CPU），按帧尺寸（不超过节目尺寸）送；
+///   UYVY / BGRA 的输入（图片、屏幕、NDI / DeckLink 输入，源选"输入 n"时原样送进来）：不转、不拷，按帧的原尺寸直接交给 NDI；
+///   别的格式送不了。没送出去的帧计 conversionFailures，连续 `failureStreakLimit` 帧 → Stats failed + last_error 写像素格式。
+/// 视频异步发送要求缓冲在下一次调用前有效：GPU 版双缓冲、CPU 版双缓冲，都在 init 分配好；直送的输入帧锁着只读、留着引用，下一帧送出去（同步点）之后才放。
 public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Sendable {
+    /// 一帧怎么送（D08）：NV12（'420v' / '420f'）转 UYVY；UYVY（CoreVideo '2vuy'，字节序 Cb Y0 Cr Y1 = NDI 的 UYVY）与 BGRA 直接交给 NDI
+    /// （SDK 原生认这两种）；别的格式送不了（输入只出这三种，见契约 `PixelFormat`；'yuvs' 之类以后有输入出了再加）。
+    public enum VideoRoute: Equatable, Sendable {
+        case convertNV12
+        case directUYVY
+        case directBGRA
+        case unsupported
+
+        public init(pixelFormat: OSType) {
+            switch pixelFormat {
+            case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange: self = .convertNV12
+            case kCVPixelFormatType_422YpCbCr8: self = .directUYVY
+            case kCVPixelFormatType_32BGRA: self = .directBGRA
+            default: self = .unsupported
+            }
+        }
+    }
+
+    /// 连续多少帧没送出去就把这一路报成 failed（D08）。偶尔一两帧（GPU 纹理建不出来之类）不翻状态；源是送不了的格式时每拍都失败，60 fps 下约 0.17 s 就报。
+    public static let failureStreakLimit = 10
+
+    /// CoreVideo 像素格式的四字符名（'BGRA'、'2vuy'、'420v'、'yuvs'），不是可打印四字符的写十六进制（last_error 用）。
+    public static func pixelFormatName(_ type: OSType) -> String {
+        let bytes = [UInt8((type >> 24) & 0xFF), UInt8((type >> 16) & 0xFF), UInt8((type >> 8) & 0xFF), UInt8(type & 0xFF)]
+        if bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) { return String(decoding: bytes, as: UTF8.self) }
+        return String(format: "0x%08X", type)
+    }
+
     /// 参数。
     public struct Configuration: Sendable {
         /// NDI 源名（在网络上显示为 "<机器名> (name)"）。
@@ -167,12 +201,17 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
     private var activeGPU = false          // 当前这帧用哪个（发送线程）
     private var framesSinceProbe = 0
     private var probedOnce = false
+    /// 连续没送出去的帧数（发送线程；start 清）。到 `failureStreakLimit` 时翻 failed（D08）。
+    private var failureStreak = 0
     #if canImport(NDI)
     private var sender: NDIlib_send_instance_t?
     private var nameCString: UnsafeMutablePointer<CChar>?
     private var groupsCString: UnsafeMutablePointer<CChar>?
     private var audioPlanar: UnsafeMutablePointer<Float>?    // no_channels × maxFrames，FLTP
     private let audioMaxFrames = 4096
+    /// 上一帧直送的输入像素缓冲（D08）：NDI 异步发送要它的内存保持到下一次 send_video_async（同步点），所以锁着只读、留着引用，
+    /// 下一帧送出去之后、或 stop 冲掉之后才解锁放掉。发送线程碰；stop 在发送线程退出之后碰。
+    private var inFlightDirect: CVPixelBuffer?
     #endif
 
     public init(configuration: Configuration) {
@@ -215,6 +254,8 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
             guard !running else { throw NDISendError.alreadyRunning }
             let haveSDK = Self.isAvailable
             counters.startFailed.store(false, ordering: .relaxed)   // 019：上一次起失败的记号到这次 start 为止
+            counters.sendFailing.store(false, ordering: .relaxed)   // D08：上一次连续送不出去的记号也到这次 start 为止
+            failureStreak = 0
             counters.startedAtTicks.store(HostClock.now().ticks, ordering: .relaxed)   // 022：uptime_s 起点；上一次的错误到这次 start 为止
             counters.lastErrorText.withLock { $0 = haveSDK ? "" : "NDI SDK 不在（编译时没探测到）" }
             #if canImport(NDI)
@@ -284,6 +325,7 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
                 NDIlib_send_destroy(sender)
             }
             sender = nil
+            releaseInFlightDirect()   // 冲掉之后 SDK 不再读最后一帧直送的输入缓冲
             #endif
         }
     }
@@ -332,7 +374,9 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
     }
 
     private func convertCPU(_ pixelBuffer: CVPixelBuffer) throws -> NV12ToUYVY.UYVYBuffer {
-        let out = NV12ToUYVY.UYVYBuffer(width: configuration.format.width, height: configuration.format.height, base: cpuBuffers[cpuNext])
+        // 按帧尺寸（不超过节目尺寸）转、行距紧排，与 GPU 版一样（D08：源是比节目小的 NV12 输入时，以前送的是节目尺寸、右边 / 下边是上一帧的残留）
+        let out = NV12ToUYVY.UYVYBuffer(width: min(CVPixelBufferGetWidth(pixelBuffer), configuration.format.width),
+                                        height: min(CVPixelBufferGetHeight(pixelBuffer), configuration.format.height), base: cpuBuffers[cpuNext])
         cpuNext = (cpuNext + 1) % cpuBuffers.count
         try NV12ToUYVY.convertCPU(pixelBuffer, into: out)
         return out
@@ -426,13 +470,28 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         }
     }
 
+    /// 一帧：按像素格式分路（D08）。
     private func sendVideo(_ item: QueuedFrame) {
+        let pixelFormat = CVPixelBufferGetPixelFormatType(item.frame.pixelBuffer)
+        switch VideoRoute(pixelFormat: pixelFormat) {
+        case .convertNV12: sendConverted(item, pixelFormat: pixelFormat)
+        case .directUYVY: sendDirect(item, route: .directUYVY, pixelFormat: pixelFormat)
+        case .directBGRA: sendDirect(item, route: .directBGRA, pixelFormat: pixelFormat)
+        case .unsupported: noteFailure(.unsupported(pixelFormat))
+        }
+    }
+
+    /// NV12 → UYVY（GPU / CPU，双缓冲）→ 送。
+    private func sendConverted(_ item: QueuedFrame, pixelFormat: OSType) {
         let t0 = HostClock.now()
         let out: NV12ToUYVY.UYVYBuffer
         do {
             out = try convert(item.frame.pixelBuffer)
+        } catch let error as NV12ToUYVY.Error {
+            noteFailure(.conversion(pixelFormat, error))
+            return
         } catch {
-            counters.conversionFailures.add(1, ordering: .relaxed)
+            noteFailure(.conversion(pixelFormat, .metal("\(error)")))
             return
         }
         let convertMs = (HostClock.now() - t0).milliseconds
@@ -440,22 +499,110 @@ public final class NDISender: FrameConsumer, AudioBlockConsumer, @unchecked Send
         autoProbeIfDue(item.frame.pixelBuffer, currentMs: convertMs)
         #if canImport(NDI)
         if let sender {   // dryRun 时是 nil：只转换、只计数
-        var v = NDIlib_video_frame_v2_t()
-        v.xres = Int32(out.width)
-        v.yres = Int32(out.height)
-        v.FourCC = NDIlib_FourCC_video_type_UYVY
-        v.frame_rate_N = Int32(configuration.format.frameRate.framesPerSecond.numerator)
-        v.frame_rate_D = Int32(configuration.format.frameRate.framesPerSecond.denominator)
-        v.picture_aspect_ratio = Float(out.width) / Float(out.height)
-        v.frame_format_type = NDIlib_frame_format_type_progressive
-        v.timecode = NDIlib_send_timecode_synthesize
-        v.p_data = out.base.assumingMemoryBound(to: UInt8.self)
-        v.line_stride_in_bytes = Int32(out.bytesPerRow)
-        v.timestamp = NDITime.utc100ns(hostTime: item.time)
-        NDIlib_send_send_video_async_v2(sender, &v)
+            var v = videoFrame(fourCC: NDIlib_FourCC_video_type_UYVY, width: out.width, height: out.height, stride: out.bytesPerRow,
+                               data: out.base, time: item.time)
+            NDIlib_send_send_video_async_v2(sender, &v)
+            releaseInFlightDirect()   // 这次调用是同步点：上一帧要是直送的输入缓冲，SDK 已经用完
         }
         #endif
+        noteSent()
+    }
+
+    /// UYVY / BGRA 的输入帧：不转、不拷，按帧的原尺寸与行距直接交给 NDI；缓冲锁着只读、留到下一帧送出去之后（NDI 异步发送的要求）。
+    private func sendDirect(_ item: QueuedFrame, route: VideoRoute, pixelFormat: OSType) {
+        let pb = item.frame.pixelBuffer
+        let r = CVPixelBufferLockBaseAddress(pb, .readOnly)
+        guard r == kCVReturnSuccess else {
+            noteFailure(.lock(pixelFormat, r))
+            return
+        }
+        guard let base = CVPixelBufferGetBaseAddress(pb) else {
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            noteFailure(.noBaseAddress(pixelFormat))
+            return
+        }
+        #if canImport(NDI)
+        if let sender {   // dryRun 时是 nil：只验能不能读、只计数
+            var v = videoFrame(fourCC: route == .directBGRA ? NDIlib_FourCC_video_type_BGRA : NDIlib_FourCC_video_type_UYVY,
+                               width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb), stride: CVPixelBufferGetBytesPerRow(pb),
+                               data: base, time: item.time)
+            NDIlib_send_send_video_async_v2(sender, &v)
+            releaseInFlightDirect()   // 上一帧直送的缓冲：这次调用之后 SDK 不再读（同一缓冲连送两拍时锁计数 2 → 1，照样平衡）
+            inFlightDirect = pb
+            noteSent()
+            return
+        }
+        #endif
+        CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+        noteSent()
+    }
+
+    #if canImport(NDI)
+    private func videoFrame(fourCC: NDIlib_FourCC_video_type_e, width: Int, height: Int, stride: Int, data: UnsafeMutableRawPointer,
+                            time: HostTime) -> NDIlib_video_frame_v2_t {
+        var v = NDIlib_video_frame_v2_t()
+        v.xres = Int32(width)
+        v.yres = Int32(height)
+        v.FourCC = fourCC
+        v.frame_rate_N = Int32(configuration.format.frameRate.framesPerSecond.numerator)
+        v.frame_rate_D = Int32(configuration.format.frameRate.framesPerSecond.denominator)
+        v.picture_aspect_ratio = height > 0 ? Float(width) / Float(height) : 0
+        v.frame_format_type = NDIlib_frame_format_type_progressive
+        v.timecode = NDIlib_send_timecode_synthesize
+        v.p_data = data.assumingMemoryBound(to: UInt8.self)
+        v.line_stride_in_bytes = Int32(stride)
+        v.timestamp = NDITime.utc100ns(hostTime: time)
+        return v
+    }
+
+    /// 解锁、放掉上一帧直送的输入缓冲（发送线程；stop 在发送线程退出、SDK 冲掉之后调）。
+    private func releaseInFlightDirect() {
+        guard let pb = inFlightDirect else { return }
+        CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+        inFlightDirect = nil
+    }
+    #endif
+
+    /// 没送出去的原因（文案只在翻 failed 那一帧拼，失败的每一帧本身不拼字符串）。
+    private enum SendFailure {
+        case unsupported(OSType)
+        case conversion(OSType, NV12ToUYVY.Error)
+        case lock(OSType, CVReturn)
+        case noBaseAddress(OSType)
+
+        func describe(streak: Int) -> String {
+            switch self {
+            case .unsupported(let t):
+                "NDI 送不了像素格式 '\(NDISender.pixelFormatName(t))'（只认 NV12 / UYVY / BGRA），连续 \(streak) 帧没送出"
+            case .conversion(let t, let e):
+                "NDI 的 '\(NDISender.pixelFormatName(t))' → UYVY 转换失败（\(e)），连续 \(streak) 帧没送出"
+            case .lock(let t, let r):
+                "NDI 直送的 '\(NDISender.pixelFormatName(t))' 像素缓冲锁不住（CVReturn \(r)），连续 \(streak) 帧没送出"
+            case .noBaseAddress(let t):
+                "NDI 直送的 '\(NDISender.pixelFormatName(t))' 像素缓冲没有内存地址，连续 \(streak) 帧没送出"
+            }
+        }
+    }
+
+    /// 送出去一帧（发送线程）：计数；之前连续失败报了 failed 的，这里回到 publishing（last_error 留着，start 才清）。
+    private func noteSent() {
         counters.framesSent.add(1, ordering: .relaxed)
+        if failureStreak >= Self.failureStreakLimit {
+            counters.sendFailing.store(false, ordering: .relaxed)
+            logger.info("[\(self.consumerName, privacy: .public)] 恢复送出（之前连续 \(self.failureStreak) 帧没送出）")
+        }
+        failureStreak = 0
+    }
+
+    /// 一帧没送出去（发送线程）：计 conversionFailures；连续到 `failureStreakLimit` 那一帧翻 failed、写 last_error（只写一次）。
+    private func noteFailure(_ failure: SendFailure) {
+        counters.conversionFailures.add(1, ordering: .relaxed)
+        failureStreak += 1
+        guard failureStreak == Self.failureStreakLimit else { return }
+        let text = failure.describe(streak: failureStreak)
+        counters.lastErrorText.withLock { $0 = text }
+        counters.sendFailing.store(true, ordering: .relaxed)
+        logger.error("[\(self.consumerName, privacy: .public)] \(text, privacy: .public)")
     }
 
     private func sendAudio(_ block: PCMRing.Block) {
@@ -538,7 +685,11 @@ final class FrameRing: @unchecked Sendable {
 }
 
 /// 音频块环（同 SwitcherStreaming 的 PCMBlockRing；两个模块互不依赖，各自一份）。
+/// 出口块（D05，Codex 2026-10-13 审查）：pop 在锁内把最旧那一槽拷进发送线程独占的出口块（init 时分配，push 从不碰它），
+/// 交出去的是出口块的视图。以前交的是槽内指针：队列原本满时下一次 push（泵线程的 consumeAudio）的尾槽正好是刚 pop 出来的那一格，
+/// 发送线程还没拷完就被覆盖。只许一个消费者（发送线程）；pop / push 都不分配。
 final class PCMRing: @unchecked Sendable {
+    /// pop 出来的块：planes 指向发送线程独占的出口块，到下一次 pop 之前有效，期间 push 不会改它。
     struct Block {
         var hostTime: HostTime
         var frameCount: Int
@@ -551,6 +702,8 @@ final class PCMRing: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock()
     private let storage: UnsafeMutablePointer<Float>
     private let planeTable: UnsafeMutablePointer<UnsafePointer<Float>>
+    private let outStorage: UnsafeMutablePointer<Float>          // 出口块：channelCount × maxFrames，只有消费者碰
+    private let outPlanes: UnsafeMutablePointer<UnsafePointer<Float>>
     private var hostTimes: [HostTime]
     private var frameCounts: [Int]
     private var head = 0
@@ -568,6 +721,10 @@ final class PCMRing: @unchecked Sendable {
                 planeTable[slot * channelCount + ch] = UnsafePointer(storage + (slot * channelCount + ch) * maxFrames)
             }
         }
+        outStorage = .allocate(capacity: channelCount * maxFrames)
+        outStorage.initialize(repeating: 0, count: channelCount * maxFrames)
+        outPlanes = .allocate(capacity: channelCount)
+        for ch in 0..<channelCount { outPlanes[ch] = UnsafePointer(outStorage + ch * maxFrames) }
         hostTimes = Array(repeating: .zero, count: capacity)
         frameCounts = Array(repeating: 0, count: capacity)
     }
@@ -575,6 +732,8 @@ final class PCMRing: @unchecked Sendable {
     deinit {
         storage.deallocate()
         planeTable.deallocate()
+        outStorage.deallocate()
+        outPlanes.deallocate()
     }
 
     /// 返回 true = 满了丢了最旧的一块。
@@ -599,14 +758,19 @@ final class PCMRing: @unchecked Sendable {
         return dropped
     }
 
+    /// 取最旧的一块：锁内拷进出口块、把槽还给队列，返回出口块的视图（到下一次 pop 之前有效）。单消费者。
     func pop() -> Block? {
         lock.lock()
         defer { lock.unlock() }
         guard count > 0 else { return nil }
         let slot = head
+        let n = frameCounts[slot]
+        for ch in 0..<channelCount {
+            (outStorage + ch * maxFrames).update(from: planeTable[slot * channelCount + ch], count: n)
+        }
         head = (head + 1) % capacity
         count -= 1
-        return Block(hostTime: hostTimes[slot], frameCount: frameCounts[slot], planes: UnsafePointer(planeTable + slot * channelCount))
+        return Block(hostTime: hostTimes[slot], frameCount: n, planes: UnsafePointer(outPlanes))
     }
 }
 
@@ -616,6 +780,7 @@ final class AtomicNDICounters: @unchecked Sendable {
     let framesSent = Atomic<UInt64>(0)
     let skipped = Atomic<UInt64>(0)
     let conversionFailures = Atomic<UInt64>(0)
+    let sendFailing = Atomic<Bool>(false)           // D08
     let audioBlocksSent = Atomic<UInt64>(0)
     let audioBlocksDropped = Atomic<UInt64>(0)
     let lastConvertTicks = Atomic<Int64>(0)
@@ -651,6 +816,7 @@ final class AtomicNDICounters: @unchecked Sendable {
         c.framesSent = framesSent.load(ordering: .relaxed)
         c.skipped = skipped.load(ordering: .relaxed)
         c.conversionFailures = conversionFailures.load(ordering: .relaxed)
+        c.sendFailing = sendFailing.load(ordering: .relaxed)
         c.audioBlocksSent = audioBlocksSent.load(ordering: .relaxed)
         c.audioBlocksDropped = audioBlocksDropped.load(ordering: .relaxed)
         c.lastConvertMs = HostDuration(ticks: lastConvertTicks.load(ordering: .relaxed)).milliseconds

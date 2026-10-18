@@ -7,8 +7,11 @@
 // 日志用英文（包 / 扩展里不写中文字面量，W3-C3）。
 // 常量（设备名 / UID / 流 UID / 允许写 sink 的签名 ID 前缀）来自 Packages/SwitcherOutputs/Sources/VirtualCamera/Shared/（project.yml 按路径编进来）。
 // 线程：CMIOExtension 在自己的队列上调 start / stop / 属性；占位画面在 timerQueue；consumeSampleBuffer 的回调在扩展队列。共享状态用一把锁。
+// sink 的起停（D09，Codex 2026-10-13 审查）：按本机 SDK 的 CMIOExtensionStreamSource 协议——授权回调 authorizedToStartStream(for:) 记下获准的
+// client，startStream() / stopStream()（协议里不带 client）用记下的那个开始 / 停止 consumeNext；状态机在 SinkStreamState.swift（纯逻辑，有单元测试）。
+// CMIOExtensionClient 没标 Sendable，但它的属性都是 atomic、只读，consumeSampleBuffer 的回调要捕获它续链，所以 @preconcurrency import。
 import CoreMedia
-import CoreMediaIO
+@preconcurrency import CoreMediaIO
 import CoreVideo
 import Foundation
 import IOKit.audio
@@ -69,8 +72,8 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
 
     private let lock = NSLock()
     private var sourceClients = 0
-    private var sinkStreaming = false
-    private var sinkClient: CMIOExtensionClient?
+    /// sink 的起停状态（lock）：获准的 client、正在消费的一轮、代次。
+    private var sink = SinkStreamState<CMIOExtensionClient>()
     private var placeholderTimer: DispatchSourceTimer?
     private let timerQueue = DispatchQueue(label: "app.switcher.camera-extension.placeholder", qos: .userInteractive)
     private var placeholderIndex: UInt64 = 0
@@ -122,54 +125,67 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
 
     // MARK: 流的起停（CameraStreamSource 调）
 
-    func startStreaming(_ stream: CameraStreamSource, client: CMIOExtensionClient?) {
+    /// source stream（给 FaceTime 等读）起：没有主程序在送就产占位画面。
+    func startSource() {
         lock.lock()
-        if stream === sourceStream {
-            sourceClients += 1
-            let needPlaceholder = !sinkStreaming && placeholderTimer == nil
-            lock.unlock()
-            if needPlaceholder { startPlaceholder() }
-        } else {
-            sinkStreaming = true
-            sinkClient = client
-            lock.unlock()
-            stopPlaceholder()
-            if let client { consumeNext(from: client) }
-        }
+        sourceClients += 1
+        let needPlaceholder = !sink.isStreaming && placeholderTimer == nil
+        lock.unlock()
+        if needPlaceholder { startPlaceholder() }
     }
 
-    func stopStreaming(_ stream: CameraStreamSource) {
+    func stopSource() {
         lock.lock()
-        if stream === sourceStream {
-            sourceClients = max(0, sourceClients - 1)
-            let stopNow = sourceClients == 0
-            lock.unlock()
-            if stopNow { stopPlaceholder() }
-        } else {
-            sinkStreaming = false
-            sinkClient = nil
-            let restart = sourceClients > 0
-            lock.unlock()
-            if restart { startPlaceholder() }
-        }
+        sourceClients = max(0, sourceClients - 1)
+        let stopNow = sourceClients == 0
+        lock.unlock()
+        if stopNow { stopPlaceholder() }
     }
 
+    /// sink stream 起（协议的 startStream()，不带 client）：用授权回调记下的 client 开一轮 consumeNext；没有获准的 client 就抛错，
+    /// 主程序的 CMIODeviceStartStream 失败（以前传 nil、静悄悄地从不消费）。
+    func startSink() throws {
+        lock.lock()
+        let session = sink.start()
+        lock.unlock()
+        guard let session else {
+            os_log(.error, log: log, "sink startStream without an authorized client")
+            throw CameraExtensionError.noAuthorizedSinkClient
+        }
+        stopPlaceholder()
+        consumeNext(from: session.client, generation: session.generation)
+    }
+
+    /// sink stream 停：这一轮的链看到代次变了自己停；还有人在读 source 就回到占位画面。
+    func stopSink() {
+        lock.lock()
+        let wasStreaming = sink.stop()
+        let restart = wasStreaming && sourceClients > 0
+        lock.unlock()
+        if restart { startPlaceholder() }
+    }
+
+    /// provider 的 disconnect(from:)：按 clientID 认（CMIOExtensionClient 是 NSCopying，给的未必是授权时那个对象）。
     func clientDisconnected(_ client: CMIOExtensionClient) {
         lock.lock()
-        let wasSink = sinkClient === client
+        let stopped = sink.disconnect(id: client.clientID)
+        let restart = stopped && sourceClients > 0
         lock.unlock()
-        if wasSink { stopStreaming(sinkStream) }
+        if restart { startPlaceholder() }
     }
 
-    /// sink 只让 Switcher 主程序写（签名 ID 前缀）；开发期 ad-hoc 签名的 signingID 也是 bundle ID，能过；拿不到签名 ID 的放行并记日志。
+    /// sink 的授权回调：只让 Switcher 主程序写（签名 ID 前缀；开发期 ad-hoc 签名的 signingID 也是 bundle ID，能过；拿不到签名 ID 的放行并记日志）。
+    /// 获准的 client 记进 SinkStreamState——startStream() 不带 client，只能用这里记下的（D09）。
     func authorizeSink(client: CMIOExtensionClient) -> Bool {
-        guard let id = client.signingID else {
+        let allowed: Bool
+        if let id = client.signingID {
+            allowed = id.hasPrefix(VirtualCameraConstants.allowedClientSigningIDPrefix)
+            if !allowed { os_log(.error, log: log, "rejected sink client: %{public}@", id) }
+        } else {
             os_log(.info, log: log, "sink client has no signing ID; allowed (development)")
-            return true
+            allowed = true
         }
-        let ok = id.hasPrefix(VirtualCameraConstants.allowedClientSigningIDPrefix)
-        if !ok { os_log(.error, log: log, "rejected sink client: %{public}@", id) }
-        return ok
+        return lock.withLock { sink.authorize(client, id: client.clientID, allowed: allowed) }
     }
 
     // MARK: 主程序 → sink → source
@@ -182,11 +198,12 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
     /// 扩展自己决定丢的帧（以后要是加"没有 source 客户端时不转发"之类）就不要为它回报——跳号就是丢帧的记账方式，不另开计数。
     /// 没挂序号（kCMIOInvalidSequenceNumber = UInt64.max，CMIOSampleBuffer.h 不在 Swift 模块里）的不回报。
     /// 回报的时刻按头文件是"这一帧输出的 host time（纳秒）"，所以是发出去那一刻，不是 PTS。探针：进程内对没接服务的流调它不崩、什么也不做。
-    private func consumeNext(from client: CMIOExtensionClient) {
+    /// 代次（D09）：回调里先看开链时的这一代还是不是当前的——stop / 断开 / 不 stop 再 start 之后旧链不转发、不再续，任何时候只有一条链在读。
+    private func consumeNext(from client: CMIOExtensionClient, generation: UInt64) {
         sinkStream.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, sequenceNumber, _, _, error in
             guard let self else { return }
-            let streaming = self.lock.withLock { self.sinkStreaming }
-            guard streaming else { return }
+            let current = self.lock.withLock { self.sink.isCurrent(generation) }
+            guard current else { return }
             if let sampleBuffer {
                 let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                 let ns = pts.isNumeric ? UInt64(max(0, CMTimeGetSeconds(pts)) * 1_000_000_000) : mach_absolute_time_nanoseconds()
@@ -199,7 +216,7 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
             } else if let error {
                 os_log(.error, log: log, "sink consume failed: %{public}@", "\(error)")
             }
-            self.consumeNext(from: client)
+            self.consumeNext(from: client, generation: generation)
         }
     }
 
@@ -257,6 +274,12 @@ final class CameraDeviceSource: NSObject, CMIOExtensionDeviceSource, @unchecked 
     }
 }
 
+/// 扩展自己的错误（startStream 抛给系统，主程序的 CMIODeviceStartStream 拿到失败）。
+enum CameraExtensionError: Error {
+    /// sink 的 startStream() 之前没有获准的 client（授权回调没来过 / 签名不符被拒 / 已断开）。
+    case noAuthorizedSinkClient
+}
+
 /// mach_absolute_time → 纳秒。
 private func mach_absolute_time_nanoseconds() -> UInt64 {
     var info = mach_timebase_info_data_t()
@@ -299,20 +322,17 @@ final class CameraStreamSource: NSObject, CMIOExtensionStreamSource, @unchecked 
         if let index = streamProperties.activeFormatIndex { activeFormatIndex = index }
     }
 
+    /// 协议的授权回调（带 client）：sink 方向在这里记下获准的 client（D09）；source 方向谁都能读。
     func authorizedToStartStream(for client: CMIOExtensionClient) -> Bool {
         direction == .sink ? device.authorizeSink(client: client) : true
     }
 
+    /// 协议的起流入口（本机 SDK 只有这个不带 client 的版本；以前另写的 startStream(for:) 不在协议里，系统不会调）。
     func startStream() throws {
-        device.startStreaming(self, client: nil)
+        if direction == .sink { try device.startSink() } else { device.startSource() }
     }
 
     func stopStream() throws {
-        device.stopStreaming(self)
-    }
-
-    /// sink 方向：系统告诉我们是哪个客户端在写（macOS 13+ 的带 client 版本）。
-    func startStream(for client: CMIOExtensionClient) throws {
-        device.startStreaming(self, client: client)
+        if direction == .sink { device.stopSink() } else { device.stopSource() }
     }
 }
