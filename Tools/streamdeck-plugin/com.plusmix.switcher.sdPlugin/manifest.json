@@ -32,7 +32,7 @@
       "Name": "Auto / Fade",
       "UUID": "com.plusmix.switcher.auto",
       "Icon": "imgs/actions/auto/icon",
-      "Tooltip": "按已选转场开始，或指定时长的 Fade",
+      "Tooltip": "执行当前转场槽，或指定时长的 Fade",
       "PropertyInspectorPath": "ui/auto.html",
       "Controllers": ["Keypad"],
       "States": [{ "Image": "imgs/keys/default", "TitleAlignment": "middle" }],

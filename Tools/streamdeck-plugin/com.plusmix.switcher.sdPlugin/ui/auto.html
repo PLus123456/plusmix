@@ -2,13 +2,13 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>Switcher 转场</title>
+  <title>PlusMix 转场</title>
   <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
 </head>
 <body>
   <sdpi-item label="方式">
     <sdpi-select setting="mode" default="auto">
-      <option value="auto">按 Switcher 里已选的转场（Auto）</option>
+      <option value="auto">执行当前转场槽（Auto）</option>
       <option value="fade">Fade，指定时长</option>
     </sdpi-select>
   </sdpi-item>
@@ -16,7 +16,7 @@
     <sdpi-textfield setting="durationMs" placeholder="500" default="500" pattern="[0-9]*"></sdpi-textfield>
   </sdpi-item>
   <hr />
-  <sdpi-item label="Switcher 地址">
+  <sdpi-item label="PlusMix 地址">
     <sdpi-textfield setting="host" global placeholder="127.0.0.1" default="127.0.0.1"></sdpi-textfield>
   </sdpi-item>
   <sdpi-item label="API 端口">

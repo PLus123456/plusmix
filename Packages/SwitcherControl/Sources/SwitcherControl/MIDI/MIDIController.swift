@@ -13,6 +13,7 @@ import SwitcherContracts
 // 派发：接收线程只解析、决定命令，然后放进一个 AsyncStream；一条常驻 Task 顺序 submit——保证 CC 的顺序不乱（tbar 不能倒退）。
 // learn：设了 learn 回调后的下一条 CC / Note 交给回调、不派发。
 // W5-J：音符绑的组合动作按顺序几条一起入队（同一条派发 Task 顺序 submit，前一条被拒就丢掉同一组后面的）；绑的是界面动作就交给 App 设的 handler、不进总线。
+// W2-C4：按下去没做成、要在状态行说一句的（ControlFeedback：执行没选输入的 Stinger 被拒、叠加空通道 + PVW 黑场）照 HotkeyDispatcher 交给 App 设的 feedback handler。
 
 /// 一个 MIDI 源。
 public struct MIDISourceInfo: Hashable, Sendable {
@@ -59,6 +60,8 @@ public final class MIDIController: @unchecked Sendable {
     private let pipeline = Mutex<(queue: AsyncStream<[Command]>.Continuation, task: Task<Void, Never>)?>(nil)
     /// 界面动作（ControlAction.ui）交给谁（App 设，在 CoreMIDI 接收线程上调——要回主线程自己转）。
     private let uiHandler = Mutex<(@Sendable (String) -> Void)?>(nil)
+    /// 按下去没做成、要说一句的（ControlFeedback）交给谁（App 设；W2-C4）。
+    private let feedbackHandler = Mutex<(@Sendable (ControlFeedback) -> Void)?>(nil)
     /// 测试挂钩：每条解析出的消息（learn 之前）。
     public var onMessage: (@Sendable (MIDIMessage) -> Void)?
 
@@ -100,6 +103,7 @@ public final class MIDIController: @unchecked Sendable {
                         self.commandsCount.add(1, ordering: .relaxed)
                     } catch {
                         self.rejected.add(1, ordering: .relaxed)
+                        self.noteRejected(error)
                         break   // 组合动作：前一条被拒，后面的不发
                     }
                 }
@@ -136,6 +140,21 @@ public final class MIDIController: @unchecked Sendable {
     /// 音符绑的界面动作（ControlAction.ui）交给谁：App 设；在 CoreMIDI 接收线程上调。nil = 不做事（计入 ignored）。
     public func setUIActionHandler(_ handler: (@Sendable (String) -> Void)?) {
         uiHandler.withLock { $0 = handler }
+    }
+
+    // MARK: 反馈
+
+    /// 按下去没做成、要在状态行说一句时交给谁（W2-C4，照 HotkeyDispatcher.setFeedbackHandler、同一个 ControlFeedback）：App 设。
+    /// 被总线拒（执行没选输入的 Stinger，提案 029）在派发的 Task 里调；音符解析不出（叠加空通道 + PVW 黑场）在 CoreMIDI 接收线程上调——App 要回主线程自己转。
+    public func setFeedbackHandler(_ handler: (@Sendable (ControlFeedback) -> Void)?) {
+        feedbackHandler.withLock { $0 = handler }
+    }
+
+    /// 被总线拒：要说的那一句（按拒的那一刻的快照，与快捷键同一判定 ControlAction.rejectionFeedback）交给 App；别的拒绝只记计数。
+    private func noteRejected(_ error: any Error) {
+        guard let rejection = error as? CommandRejection, let state = bus.stateMachine.publisher.latest?.state,
+              let feedback = ControlAction.rejectionFeedback(for: rejection.command, in: state) else { return }
+        feedbackHandler.withLock { $0 }?(feedback)
     }
 
     // MARK: 宿主线程
@@ -252,6 +271,10 @@ public final class MIDIController: @unchecked Sendable {
         let commands = mapper.withLock { $0.commands(for: message, state: state) }
         guard !commands.isEmpty else {
             ignored.add(1, ordering: .relaxed)
+            // 音符按下、动作解析不出：要说一句的那一种（⌃n 同口径）交给 App
+            if let feedback = mapper.withLock({ $0.noteAction(for: message) })?.unresolvedFeedback(in: state) {
+                feedbackHandler.withLock { $0 }?(feedback)
+            }
             return
         }
         pipeline.withLock { _ = $0?.queue.yield(commands) }
