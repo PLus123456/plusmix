@@ -413,6 +413,16 @@ final class ReducerTests: XCTestCase {
             Row("setPreview auto 转场进行中拒绝（W5-E）", before: { $0.transition.startTick = Tick(40); $0.transition.progress = 2.0 / 30.0 }, .setPreview(input: 3)) { _ in },
             Row("setProgram T-bar 推到一半拒绝（W5-E）", before: { $0.transition.progress = 0.4; $0.transition.source = .tbar }, .setProgram(input: 4)) { _ in },
             Row("tbar", .tbar(progress: 0.3)) { $0.transition.progress = 0.3; $0.transition.source = .tbar },
+            // 020 追加（用户 2026-10-17，P5-4）：推到一半改了当前槽，拉回 0 取消那一拍按 currentSlot 重拷当前那组；还在推不重拷；currentSlot nil 不重拷
+            Row("tbar 推到一半改过当前槽、推杆还在中间：不重拷",
+                before: { $0.transition.progress = 0.4; $0.transition.source = .tbar; $0.transition.slots[0] = TransitionSlot(type: .zoom, durationTicks: 12) },
+                .tbar(progress: 0.6)) { $0.transition.progress = 0.6 },
+            Row("tbar 拉回 0 取消：按当前槽重拷（020 追加）",
+                before: { $0.transition.progress = 0.4; $0.transition.source = .tbar; $0.transition.slots[0] = TransitionSlot(type: .zoom, durationTicks: 12) },
+                .tbar(progress: 0)) { $0.transition.progress = 0; $0.transition.type = .zoom; $0.transition.durationTicks = 12 },
+            Row("tbar 拉回 0、当前那组不对应槽（currentSlot nil）：不重拷",
+                before: { $0.transition.progress = 0.4; $0.transition.source = .tbar; $0.transition.durationTicks = 45; $0.transition.currentSlot = nil },
+                .tbar(progress: 0)) { $0.transition.progress = 0 },
             Row("ftb on", .ftb(on: true)) { $0.ftb.on = true; $0.ftb.startTick = tick },
             Row("ftb off 已经是 off", .ftb(on: false)) { _ in },
             Row("overlay", .overlay(channel: 3, on: true, input: 2)) { $0.overlays[2].on = true; $0.overlays[2].input = 2; $0.overlays[2].animProgress = 1 },
@@ -546,6 +556,23 @@ final class ReducerTests: XCTestCase {
                 .seekPlayback(input: 5, seconds: 4)) { _ in },
             Row("seekPlayback 非有限拒绝", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: .nan)) { _ in },
             Row("seekPlayback 非文件输入拒绝", .seekPlayback(input: 2, seconds: 1)) { _ in },
+            // 提案 031（P5-4，Codex D01）：文件速率 0.1–8、定位 ≤ 一周；越界与校验器同判、原样返回；setInputSettings 整体带进来的定位秒数钳到一周
+            Row("setInputSource 文件速率 0 拒绝（031）", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSource(input: 5, source: .file(path: "/clip5.mov", endAction: .loop, rate: 0))) { _ in },
+            Row("setInputSource 文件速率 1e300 拒绝（031）", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSource(input: 5, source: .file(path: "/clip5.mov", endAction: .loop, rate: 1e300))) { _ in },
+            Row("setInputSource 文件速率 8 = 上限照收", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSource(input: 5, source: .file(path: "/clip5.mov", endAction: .loop, rate: 8))) { $0.inputs[4].source = .file(path: "/clip5.mov", endAction: .loop, rate: 8) },
+            Row("setInputSource 换成文件来源、速率越界拒绝（031）", .setInputSource(input: 3, source: .file(path: "/a.mov", endAction: .loop, rate: 0.0001))) { _ in },
+            Row("addInput 文件速率 −1 拒绝（031）", .addInput(config: InputConfig(number: 6, name: "片", source: .file(path: "/a.mov", endAction: .loop, rate: -1)))) { _ in },
+            Row("addInput 文件速率 0.1 = 下限照收", .addInput(config: InputConfig(number: 6, name: "片", source: .file(path: "/a.mov", endAction: .loop, rate: 0.1)))) {
+                $0.inputs.append(InputConfig(number: 6, name: "片", source: .file(path: "/a.mov", endAction: .loop, rate: 0.1))) },
+            Row("seekPlayback 1e300 拒绝（031）", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: 1e300)) { _ in },
+            Row("seekPlayback 一周整照收（031 上限）", before: { $0.inputs.append(Self.fileInput(5)) }, .seekPlayback(input: 5, seconds: PlaybackLimits.maxSeekSeconds)) {
+                $0.inputs[4].settings.playback.seekSeconds = PlaybackLimits.maxSeekSeconds; $0.inputs[4].settings.playback.seekTick = tick },
+            Row("setInputSettings 定位秒数超过一周钳到一周（031）", before: { $0.inputs.append(Self.fileInput(5)) },
+                .setInputSettings(input: 5, settings: InputSettings(playback: PlaybackSettings(seekSeconds: 1e300, seekTick: tick)))) {
+                $0.inputs[4].settings = InputSettings(playback: PlaybackSettings(seekSeconds: PlaybackLimits.maxSeekSeconds, seekTick: tick)) },
 
             // 提案 023 四 / 五（P5-2）：分类颜色、细粒度音频
             Row("setInputColor", .setInputColor(input: 1, color: .red)) { $0.inputs[0].color = .red },
@@ -896,6 +923,48 @@ final class ReducerTests: XCTestCase {
         var broken = Self.baseState()
         broken.transition.slots.removeLast()
         XCTAssertEqual(reducer.reduce(Self.baseState(), .loadShow(show: Show(name: "3 个槽", state: broken)), at: Tick(1)), Self.baseState(), "slots 不是 4 个（且非空）被拒")
+    }
+
+    /// 020 追加（用户 2026-10-17 裁定，P5-4）：T-bar 推到一半时改了当前槽（进行中只改槽），之后拉回 0 **取消**——取消那一拍按 currentSlot 重拷当前那组
+    /// （与 completeTransition 同一句、幂等），下一次回车执行的是改过的配置（P5-3 探针：原来回车执行改之前的 Fade 30）。推杆还在中间不重拷；
+    /// 推到负数钳到 0 同样算取消；T-bar 接管 auto 转场后拉回 0 一样；currentSlot = nil（当前那组是老命令直接给的）不重拷。
+    func test020_tbarCancelRecopiesCurrentSlot() {
+        let s0 = Self.baseState()   // 当前槽 1 = Fade 30
+        let bar = reducer.reduce(s0, .tbar(progress: 0.4), at: Tick(10))
+        let changed = reducer.reduce(bar, .setTransitionSlot(slot: 1, config: TransitionSlot(type: .zoom, durationTicks: 12)), at: Tick(11))
+        XCTAssertEqual(changed.transition.slots[0], TransitionSlot(type: .zoom, durationTicks: 12), "槽改了")
+        XCTAssertEqual(changed.transition.currentGroup, TransitionSlot(type: .fade, durationTicks: 30), "推到一半只改槽，当前那组不动")
+        let pushed = reducer.reduce(changed, .tbar(progress: 0.6), at: Tick(12))
+        XCTAssertEqual(pushed.transition.type, .fade, "推杆还在中间：不重拷")
+        let cancelled = reducer.reduce(pushed, .tbar(progress: 0), at: Tick(13))
+        XCTAssertFalse(cancelled.transition.isActive)
+        XCTAssertEqual(cancelled.program, 1); XCTAssertEqual(cancelled.preview, 2, "取消不换人")
+        XCTAssertEqual(cancelled.transition.currentGroup, TransitionSlot(type: .zoom, durationTicks: 12), "取消那一拍按当前槽重拷")
+        XCTAssertEqual(cancelled.transition.currentSlot, 1)
+        XCTAssertEqual(reducer.reduce(cancelled, .tbar(progress: 0), at: Tick(14)), cancelled, "重拷幂等")
+        // 回车执行的是改过的配置：Zoom 12 拍
+        let enter = reducer.reduce(cancelled, .autoTransition, at: Tick(20))
+        XCTAssertEqual(enter.transition.type, .zoom)
+        XCTAssertEqual(enter.transition.durationTicks, 12)
+        XCTAssertEqual(enter.transition.startTick, Tick(20))
+        XCTAssertEqual(reducer.advance(enter, to: Tick(26)).transition.progress, 0.5, accuracy: 1e-12, "按 12 拍走")
+        XCTAssertEqual(reducer.advance(enter, to: Tick(32)).program, 2, "第 12 拍对调")
+        // 推到负数钳到 0：同样算取消
+        XCTAssertEqual(reducer.reduce(pushed, .tbar(progress: -0.3), at: Tick(13)).transition.currentGroup, TransitionSlot(type: .zoom, durationTicks: 12))
+        // T-bar 接管进行中的 auto 转场（auto 进行中改了当前槽）后拉回 0：同样重拷
+        let auto = reducer.advance(reducer.reduce(s0, .autoTransition, at: Tick(100)), to: Tick(110))
+        XCTAssertTrue(auto.transition.isActive)
+        let autoChanged = reducer.reduce(auto, .setTransitionSlot(slot: 1, config: TransitionSlot(type: .wipe, durationTicks: 20)), at: Tick(110))
+        let takenBack = reducer.reduce(autoChanged, .tbar(progress: 0), at: Tick(111))
+        XCTAssertFalse(takenBack.transition.isActive)
+        XCTAssertEqual(takenBack.program, 1)
+        XCTAssertEqual(takenBack.transition.currentGroup, TransitionSlot(type: .wipe, durationTicks: 20))
+        // currentSlot = nil（setTransition 直接给的 Wipe 45 不对应任何槽）：取消不重拷
+        let legacy = reducer.reduce(s0, .setTransition(type: .wipe, durationTicks: 45), at: Tick(1))
+        XCTAssertNil(legacy.transition.currentSlot)
+        let legacyBack = reducer.reduce(reducer.reduce(legacy, .tbar(progress: 0.5), at: Tick(2)), .tbar(progress: 0), at: Tick(3))
+        XCTAssertEqual(legacyBack.transition.currentGroup, legacy.transition.currentGroup)
+        XCTAssertNil(legacyBack.transition.currentSlot)
     }
 
     // MARK: 提案 029（用户 2026-10-12 定，P5-3）：没选输入的 Stinger 槽拒收
