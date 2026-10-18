@@ -122,9 +122,11 @@ public enum SelfCheck {
     }
 
     /// 按五样证据把合成帧判成解不出。`readings` 与 `frames` 一一对应。
-    /// - Parameter startTick: 第 0 帧的拍号（只用于报告里的拍号）。
+    /// - Parameters:
+    ///   - startTick: 第 0 帧的拍号（只用于报告里的拍号）。
+    ///   - fps: 报告里拍号用的帧率；nil = 按相邻帧 pts 差估。拍号 = `FrameAnalysis.programTick`（W1-A6：原来是 startTick + 序号，漏帧之后错开）。
     public static func apply(frames: [ProbeFrame], readings: [PatternProbe.Reading], options: Options,
-                             startTick: Int64 = 0, maxEvents: Int = 200) -> (frames: [ProbeFrame], report: Report) {
+                             startTick: Int64 = 0, maxEvents: Int = 200, fps: Double? = nil) -> (frames: [ProbeFrame], report: Report) {
         var out = frames
         var reasons = [Reason?](repeating: nil, count: frames.count)
         var values = [Double](repeating: 0, count: frames.count)
@@ -233,12 +235,15 @@ public enum SelfCheck {
         var examples: [Rejection] = []
         var truncated = false
         var rejected = 0
+        let tickFps = fps ?? FrameAnalysis.programFps(frames) ?? 60
+        let pts0 = frames.first?.ptsSeconds ?? 0
         for i in frames.indices {
             guard let reason = reasons[i] else { continue }
             rejected += 1
             byReason[reason.rawValue, default: 0] += 1
             if examples.count < maxEvents {
-                examples.append(Rejection(index: frames[i].index, tick: startTick + Int64(frames[i].index), reason: reason,
+                let tick = FrameAnalysis.programTick(pts: frames[i].ptsSeconds, pts0: pts0, fps: tickFps, startTick: startTick)
+                examples.append(Rejection(index: frames[i].index, tick: tick, reason: reason,
                                           inputID: readings[i].decoded.inputID, frameNumber: readings[i].decoded.frameNumber, value: values[i]))
             } else {
                 truncated = true

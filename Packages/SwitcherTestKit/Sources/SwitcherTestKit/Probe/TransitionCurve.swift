@@ -49,6 +49,10 @@ extension FrameAnalysis {
         public var passV7: Bool
         /// 量不出来时的说明。
         public var note: String?
+        /// 窗口 [s, s + D] 里漏掉的拍（文件里没有这些拍的帧，如 missed_render）：那些拍没有样本，单独列（W1-A6，Codex T02）。
+        /// 拍号本来就按 pts（下面 `curve` 的 indexByTick），这里只补"缺帧单独报"。
+        public var missingFrames: [Int64]? = nil
+        public var missingFrameCount: Int? = nil
     }
 
     /// 两端归一化时要求的最小对比度（full-range 灰度电平）。
@@ -81,13 +85,20 @@ extension FrameAnalysis {
         var report = TransitionCurve(kind: kind, direction: direction, startTick: commandTick, durationTicks: d, samples: [],
                                      maxDeviationFrames: 0, maxProgressError: 0, monotonic: true, passV7: false, note: nil)
         guard d >= 2 else { report.note = "时长要 ≥ 2 拍"; return report }
+        // 拍号按 pts（与剖面窗口 `FrameProbe.profilePredicate`、`--blank-ticks` 同一个式子：startTick + round(pts × fps)）
+        let ticks = frames.map { startTick + (fps > 0 ? Int64(($0.ptsSeconds * fps).rounded()) : Int64($0.index)) }
         var indexByTick: [Int64: Int] = [:]
-        for f in frames { indexByTick[startTick + (fps > 0 ? Int64((f.ptsSeconds * fps).rounded()) : Int64(f.index))] = f.index }
+        for (f, t) in zip(frames, ticks) { indexByTick[t] = f.index }
+        let window = commandTick...(commandTick + Int64(d))
+        let missing = missingTicks(ticks, within: window)
+        report.missingFrames = missing.list
+        report.missingFrameCount = missing.count
+        let missingNote = missing.count > 0 ? "（窗口里漏了 \(missing.count) 拍：" + missing.list.map(String.init).joined(separator: ", ") + "）" : ""
         guard let i0 = indexByTick[commandTick], let p0 = profiles[i0] else {
-            report.note = "第 \(commandTick) 拍（progress 0 的纯旧画面）没有剖面"; return report
+            report.note = "第 \(commandTick) 拍（progress 0 的纯旧画面）没有剖面" + missingNote; return report
         }
         guard let i1 = indexByTick[commandTick + Int64(d)], let p1 = profiles[i1] else {
-            report.note = "第 \(commandTick + Int64(d)) 拍（转场完成的纯新画面）没有剖面"; return report
+            report.note = "第 \(commandTick + Int64(d)) 拍（转场完成的纯新画面）没有剖面" + missingNote; return report
         }
         var last = -1.0
         for k in 1..<d {
@@ -102,8 +113,8 @@ extension FrameAnalysis {
             if m.progress < last - 1e-9 { report.monotonic = false }
             last = m.progress
         }
-        if report.samples.isEmpty && report.note == nil { report.note = "转场中间拍一帧剖面都没有" }
-        if report.samples.count < d - 1 && report.note == nil { report.note = "只量到 \(report.samples.count) / \(d - 1) 拍" }
+        if report.samples.isEmpty && report.note == nil { report.note = "转场中间拍一帧剖面都没有" + missingNote }
+        if report.samples.count < d - 1 && report.note == nil { report.note = "只量到 \(report.samples.count) / \(d - 1) 拍" + missingNote }
         report.passV7 = !report.samples.isEmpty && report.maxDeviationFrames <= v7MaximumDeviationFrames
         return report
     }
