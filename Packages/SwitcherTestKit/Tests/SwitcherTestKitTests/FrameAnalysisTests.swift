@@ -604,6 +604,25 @@ extension FrameAnalysisTests {
     /// 用户 2026-10-17 对 113 的裁定（测试标准 §2.3）：判定事件里某个文件在锚 ±0.5 s 内没有 click，A4 不过；
     /// 那一格照旧 nil、极差只在剩下的文件里算（gate 脚本读的 maxClickSpreadMs 数字不变）。半秒事件照旧只列不判；
     /// 五个文件都没配上 click 的事件没有锚，不算"缺 click"（G8 / G9 的第 0 s 就是这样，A2 那边是各文件没配上的闪光）。
+    /// 用户 2026-10-18 裁定 #22（G10 胶水 ⑥）：判定事件里某个文件缺这个事件的闪光（别的文件都有）与缺 click 对称，A4 不过；半秒事件照旧只列不判。
+    /// 闪光帧都带 genTimeMs（按事件键对齐，缺的那一格才是 nil；按序号对齐时缺一个会整体错位、极差本来就红）。
+    func testA4_avMulti_fileMissingFlashInJudgedEvent_failsA4() throws {
+        func file(_ i: Int, drop: Int? = nil) -> (name: String, frames: [ProbeFrame], clicks: [ClickEvent]) {
+            let frames = (0..<(10 * 60)).map { t in ProbeFrame(index: t, ptsSeconds: Double(t) / 60, frameNumber: UInt32(t), inputID: 1,
+                                                             genTimeMs: UInt32(t * 1000 / 60), flash: (t % 60 == 0 || t == 330) && t != drop, gray: 128) }
+            return ("f\(i)", frames, (0..<10).map { ClickEvent(sampleIndex: Int64($0 * 48000), timeSeconds: Double($0), peak: 1) })
+        }
+        let ok = FrameAnalysis.avMulti(files: (0..<3).map { file($0) })
+        XCTAssertEqual(ok.passA4, true); XCTAssertEqual(ok.missingFlashEventCount, 0)
+        let r = FrameAnalysis.avMulti(files: (0..<3).map { file($0, drop: $0 == 2 ? 300 : nil) })   // [2] 缺第 5 s 的闪光
+        let e = try XCTUnwrap(r.events.first { $0.key == "gen:5000" })
+        XCTAssertNil(e.flashTimes[2]); XCTAssertEqual(e.missingFlashFiles, [2]); XCTAssertNil(e.missingClickFiles, "缺的是闪光，不是 click")
+        XCTAssertEqual(r.missingFlashEventCount, 1); XCTAssertEqual(r.passA4, false)
+        XCTAssertTrue(r.note?.contains("gen:5000 缺 [2]") ?? false, r.note ?? "nil")
+        let half = FrameAnalysis.avMulti(files: (0..<3).map { file($0, drop: $0 == 1 ? 330 : nil) })   // 5.5 s 的半秒事件缺：只列不判
+        XCTAssertEqual(half.missingFlashEventCount, 0); XCTAssertEqual(half.passA4, true)
+    }
+
     func testA4_avMulti_fileMissingClickInJudgedEvent_failsA4() {
         func g8Like() -> [(name: String, frames: [ProbeFrame], clicks: [ClickEvent])] {
             (0..<5).map { a4File("f\($0)", lateSeconds: $0 == 3 ? 20e-6 : 0) }

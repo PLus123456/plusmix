@@ -466,6 +466,7 @@ public enum FrameProbe {
         let half = m.halfSecondEventCount ?? 0
         s += "\n判定事件 \(m.events.count - half) 个（半秒事件 \(half) 个只列不判）：最大闪光极差 \(f(m.maxFlashSpreadMs)) ms，最大 click 极差 \(f(m.maxClickSpreadMs)) ms，阈值 \(f(m.thresholdMs, 2)) ms"
         if let n = m.missingClickEventCount, n > 0 { s += "；其中 \(n) 个有文件缺 click" }
+        if let n = m.missingFlashEventCount, n > 0 { s += "；其中 \(n) 个有文件缺闪光" }
         if let n = m.unanchoredEventCount, n > 0 { s += "；没有锚（一个文件都没配上 click）的事件 \(n) 个只比闪光" }
         s += "：A4 \(mark(m.passA4))\n"
         if let n = m.note { s += "\n\(n)\n" }
