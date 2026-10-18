@@ -96,6 +96,8 @@ struct AddInputModel {
     var filePath: String = ""
     var fileEndAction: FileEndAction = .loop
     var fileRate: Double = 1
+    /// 速率框钳进契约的 0.1–8（提案 031；用户 2026-10-18 裁定 (c)，G10 胶水 ⑤）：越界的值写不进节目、不再被总线 400；≤ 0 / 非数当没填 = 1。
+    static func clampedFileRate(_ r: Double) -> Double { r > 0 ? min(max(r, FileSource.rateRange.lowerBound), FileSource.rateRange.upperBound) : 1 }
     var imagePath: String = ""
     /// 图片页一次多选时第一张以外的那几张（W5-H，01a G14）：每张加一路，编号依次取空号、名字用文件名。改了路径框就清掉。
     var extraImagePaths: [String] = []
@@ -232,7 +234,7 @@ struct AddInputModel {
             return .screen(target: target, frameRate: screenFrameRate, captureAudio: captureAudio)
         case .file:
             guard !filePath.isEmpty else { throw ModelError.missing(L("addInput.field.filePath")) }
-            return .file(path: filePath, endAction: fileEndAction, rate: fileRate > 0 ? fileRate : 1)
+            return .file(path: filePath, endAction: fileEndAction, rate: Self.clampedFileRate(fileRate))
         case .image:
             guard !imagePath.isEmpty else { throw ModelError.missing(L("addInput.field.imagePath")) }
             return .image(path: imagePath)
@@ -975,7 +977,7 @@ struct InputSourceFormView: View {
             Picker(L("addInput.file.endAction"), selection: $form.model.fileEndAction) {
                 ForEach(AddInputModel.fileEndActions, id: \.self) { Text(L("addInput.file.endAction.\($0.rawValue)")).tag($0) }
             }
-            TextField(L("addInput.file.rate"), value: $form.model.fileRate, format: .number)
+            TextField(L("addInput.file.rate"), value: Binding(get: { form.model.fileRate }, set: { form.model.fileRate = AddInputModel.clampedFileRate($0) }), format: .number)
         }
         recentFilesSection
     }

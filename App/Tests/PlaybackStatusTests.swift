@@ -207,6 +207,21 @@ final class PlaybackStatusTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(3) { session.inputs.entries[1].map { ObjectIdentifier($0.input as AnyObject) != identity } ?? false }, "路径变了要重建")
     }
 
+    /// 031（用户 2026-10-18 裁定 (c)，G10 胶水 ⑤）：速率框钳进 0.1–8——填 10 当场发出去的是 8、总线不再 400；0.05 → 0.1，≤ 0 / 非数 → 1。
+    func testG10_fileRateFieldClampedToContractRange() throws {
+        XCTAssertEqual([10, 0.05, 0, -1, .nan, .infinity, 1.5].map(AddInputModel.clampedFileRate), [8, 0.1, 1, 1, 1, 8, 1.5])
+        let fixture = try patternMov()
+        let session = try AppTest.freshSession()
+        session.send(.addInput(config: InputConfig(number: 1, name: "pattern", source: .file(path: fixture.path, endAction: .loop, rate: 1))))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
+        let window = try XCTUnwrap(AppTest.controller.panels.showInputSettings(input: 1))
+        window.model.section = .source
+        window.model.sourceFormModel().model.fileRate = 10
+        XCTAssertTrue(AppTest.waitUntil(2) { if case .file(_, _, let r)? = session.state.input(1)?.source { return r == 8 } else { return false } },
+                      "越界的速率钳到 8 再发：\(String(describing: session.state.input(1)?.source))")
+        XCTAssertEqual(session.control.bus.counters.rejected, 0, "不再被总线 400")
+    }
+
     /// 三档格子宽（160 / 200 / 256）里第一行六颗都放得下：转场 / Cut 的字不被截（按钮宽 ≥ 字宽 + 6）、⏮ ▶ 🔁 各 20 pt、最后一颗不出格子。
     func testUI_fileCellButtonsFitSmallestCell() throws {
         let cell = InputCellView(config: InputConfig(number: 1, name: "pattern", source: .file(path: "/tmp/w5n.mov", endAction: .loop, rate: 1)))
