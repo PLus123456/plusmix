@@ -62,6 +62,17 @@ public enum StreamTransportError: Swift.Error, Equatable {
     case authenticationFailed(StreamAuthFailure, message: String)
 }
 
+/// last_error / 日志用的一句：只取原因本身（W4C3 第 8 条，G10 胶水 ③：原来 `"\(error)"` 把 `connectFailed("…")` 的 case 名和引号带进状态窗）。
+extension StreamTransportError: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .connectFailed(let m), .sendFailed(let m), .authenticationFailed(_, let m): return m
+        case .connectTimedOut: return "连接超时"
+        case .notConnected: return "没连上"
+        }
+    }
+}
+
 /// 协议层抽象：连接 + 封装，接已编码样本。StreamOutput 的发送 Task 串行调用（一次只有一个 await 在途）。
 /// 生产实现 HaishinKitTransport（RTMP / RTMPS / SRT），测试用 FakeTransport。
 public protocol StreamTransport: AnyObject, Sendable {

@@ -375,7 +375,18 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
 
     // MARK: 发送 Task：重连状态机
 
-    private enum ExitReason: Equatable { case stopped, disconnected, stalled, sendFailed(String) }
+    private enum ExitReason: Equatable, CustomStringConvertible {
+        case stopped, disconnected, stalled, sendFailed(String)
+        /// last_error 的"断线：…"（G10 胶水 ③）：不带 Swift 枚举原样。
+        var description: String {
+            switch self {
+            case .stopped: return "已停止"
+            case .disconnected: return "连接断开"
+            case .stalled: return "发送停滞"
+            case .sendFailed(let m): return "发送失败：\(m)"
+            }
+        }
+    }
 
     private func setState(_ s: StreamState) {
         atomicCounters.state = s

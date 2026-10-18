@@ -76,6 +76,19 @@ final class StreamOutputTests: XCTestCase {
         XCTAssertLessThan(p99, 0.1, "consume p99 \(p99) ms 必须 < 0.1 ms（三路都不阻塞派发线程）")
     }
 
+    /// W4C3 第 8 条（G10 胶水 ③）：last_error 是干净的一句——连不上 = "连接失败：<传输层原因>"、断线 = "断线：连接断开"，不带 `connectFailed("…")` / `disconnected` 这种枚举原样。
+    func testG10_lastErrorIsPlainTextForConnectFailureAndDisconnect() throws {
+        let factory = FakeTransportFactory { $0 == 1 ? .init(connectError: .connectFailed("RTMP 握手超时")) : .init(disconnectAfterVideoFrames: 30) }
+        let o = try StreamOutput.makeForTest(name: "plain", factory: factory)
+        try o.start()
+        XCTAssertTrue(waitUntil(timeout: 2) { o.statsEntry(previous: nil, windowSeconds: 1).lastError == "连接失败：RTMP 握手超时" }, o.statsEntry(previous: nil, windowSeconds: 1).lastError)
+        XCTAssertTrue(waitUntil(timeout: 2) { o.state == .publishing })
+        _ = try feed(outputs: [o], seconds: 1)
+        XCTAssertTrue(waitUntil(timeout: 2) { o.statsEntry(previous: nil, windowSeconds: 1).lastError == "断线：连接断开" }, o.statsEntry(previous: nil, windowSeconds: 1).lastError)
+        o.stop()
+        XCTAssertEqual(["\(StreamTransportError.sendFailed("retime"))", "\(StreamTransportError.connectTimedOut)"], ["retime", "连接超时"])
+    }
+
     /// E8（逻辑版）：发 60 帧后传输层断开 → 退避 0.1 s 重连失败 → 退避 0.2 s 重连成功；重连后第一帧是关键帧、重连计数 1、断线期间的帧记为网络丢帧。
     func testE8_reconnectWithBackoffAndKeyframeFirst() throws {
         let factory = FakeTransportFactory { attempt in
