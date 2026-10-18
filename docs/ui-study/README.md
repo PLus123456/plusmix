@@ -12,7 +12,7 @@
 
 ## 落地情况（G7，2026-10-04 加）
 
-这组文档写于 2026-09-29（代码基线 c836cce）。之后按 [05 落地拆分](05-落地拆分.md) 分三波开工：止血五路（prompt 86–90）2026-10-02 由 G6 合入 main（reports/G6.md），骨架七路（92–98）2026-10-04 由 G7 合入 `g7`（reports/G7.md），契约后各路 2026-10-11 全部合入 main，续做五路（109–113）2026-10-17 由 G9 合入 main（reports/G9.md）：99 / 105 / 106 → G8a，108 → G8a-2，100–103 → G8b（reports/G8.md）。下面按文档编号写每一条落在哪个 prompt / 分支 / 报告，正文不改（它记录的是 9-29 的实情）。
+这组文档写于 2026-09-29（代码基线 c836cce）。之后按 [05 落地拆分](05-落地拆分.md) 分三波开工：止血五路（prompt 86–90）2026-10-02 由 G6 合入 main（reports/G6.md），骨架七路（92–98）2026-10-04 由 G7 合入 `g7`（reports/G7.md），契约后各路 2026-10-11 全部合入 main，续做五路（109–113）2026-10-17 由 G9 合入 main（reports/G9.md），止血七路（115–121，Codex 2026-10-13 审查的 22 条 + 109–113 留下的口径）2026-10-19 由 G10 合入 `g10`（reports/G10.md）：99 / 105 / 106 → G8a，108 → G8a-2，100–103 → G8b（reports/G8.md）。下面按文档编号写每一条落在哪个 prompt / 分支 / 报告，正文不改（它记录的是 9-29 的实情）。
 
 | 文档里的条目 | 落在 | 报告 |
 |---|---|---|
@@ -35,9 +35,13 @@
 | 02 X51（31 个函数名 400 → 501）、J7 耳机"监听"菜单四项、X18 的外部入口（没选输入的 Stinger 槽从快捷键 / MIDI / 兼容层 / Stream Deck / API 执行拒收 + 提示）、W4-C2 查出的两条 S2（外部显示 Esc 只关、设置页只存改了的键）与 S3 一批、分类颜色切 InputConfig.color、024 (b) 压缩器简单模式界面 | 110 P5-3 `p5-contracts-3`（026 允许 headphones、029）+ 112 W5-O `w5-app-followups` | reports/p5-contracts-3.md、reports/w5-app-followups.md |
 | 推流密码错一直退避重试（W5-N §4 第 1 条） | 111 W2-D4 `w2-stream-4`：类型化的鉴权失败第一次就停 + 状态行提示；顺带补了 App 推流 Stats 的 last_error / uptime_s | reports/w2-stream-4.md |
 | 手册里 100–102 的几节、两张主窗口截图、docs/api/README.md 命令数 42、兼容层覆盖表 | 109 W4-C3 `w4-docs-3`（三轮核对 agent 逐句对代码） | reports/w4-docs-3.md |
-| 仍没落的 | 底栏对鉴权停下的推流写"起不来"（119）；格子"转场"/ T-bar 遇没选输入的 Stinger 先弹选择 / 灰（119）；MIDI 被拒提示（116）；⇧1–⇧0 实体键盘（116）；W4-C3 问题单的 14 条 S3（119）；030 效果延迟进 Stats（115）；020 的 T-bar 取消重拷（115）；**Codex 2026-10-13 审查的 22 条**（reports/codex-debug-audit-20261013.md，S0 / S1 十来条，止血 115–121）；状态窗 / 鉴权表两张截图（L3 §12） | 2026-10-17 用户裁定，prompt 115–122 | reports/G9.md §7.1 |
+| 底栏对鉴权停下的推流写"失败"、格子"转场"/ T-bar 遇没选输入的 Stinger 先弹选择 / 灰、W4-C3 问题单的 S3 一批（显示日志、状态窗 / 统计窗 / 多画面转发快捷键、输入效果页去掉限幅节、英文 T-bar 行……）、Codex D04 / D06 / D07 / D16 / K01 | 119 W5-P `w5-app-fixes` | reports/w5-app-fixes.md |
+| MIDI 被拒提示、⇧1–⇧0 实体键盘、Stream Deck 改连接设置（D17）与面板文案、兼容层 D02 / D03 | 116 W2-C4 `w2-control-4` | reports/w2-control-4.md |
+| 030 效果延迟进 Stats、020 的 T-bar 取消重拷、031 文件速率 / 定位不变量（D01 的 API / 节目文件半） | 115 P5-4 `p5-contracts-4`（030 列耳机总线与速率框钳位是 G10 胶水） | reports/p5-contracts-4.md、reports/G10.md §4.3 |
+| 文件输入 D13 / D14 / D15（竖拍转正）/ D01 底层；输出 D05 / D08 / D09 / D12；音画 D10 / D11；frameprobe T02 / A4 缺 click | 117 / 118 / 120 / 121 | reports/w2-inputs-5.md、w3-outputs-5.md、w1-core-5.md、w1-testkit-6.md |
+| 仍没落的 | 输入编号上限（S1，提案 032）、030 的契约文字与界面展示、NDI failed 的契约文字（123 / 126）；Cut / Auto 起点替换淡变等音频收口四条（125）；竖拍文件信息摘要、D06 两个边角（126）；手册跟改（124）；改后的截图（L3 §12） | prompt 123–126（G10 之后并行）→ G11（127） | reports/G10.md §7 |
 
-改后的截图：docs/ui-study/img/改后/（G7 用隔离截图法截的那一套；没截到的列在 docs/checklists/G7.md §12）；100–103 / 109–113 之后的界面还没截，清单在 docs/checklists/G9.md §12（G8b / G9 都没跑 L3，等在机器前的人；109 拍了两张主窗口截图在 docs/user/img/）。
+改后的截图：docs/ui-study/img/改后/（G7 用隔离截图法截的那一套；没截到的列在 docs/checklists/G7.md §12）；100–103 / 109–121 之后的界面还没截，清单在 docs/checklists/G10.md §12（G8b / G9 / G10 都没跑 L3，等在机器前的人；109 拍了两张主窗口截图在 docs/user/img/）。
 
 ## 结论速览
 
