@@ -86,6 +86,7 @@ final class ISOAppTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(maxFlash, 0)
         XCTAssertLessThanOrEqual(maxFlash, 1000.0 / 60, "A4：闪光极差 ≤ 1 帧")
         XCTAssertLessThanOrEqual(maxClick, 1000.0 / 60, "A4：click 极差 ≤ 1 帧")
+        XCTAssertEqual(multi["passA4"] as? Bool, true, "A4：判定事件里没有文件缺 click / 闪光（frameprobe passA4；G10 胶水 ④）")
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
         AppTest.controller.panels.closeAll()
     }

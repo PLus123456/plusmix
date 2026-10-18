@@ -108,6 +108,7 @@ final class ISOAlignmentTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(maxClick, 0)
         XCTAssertLessThanOrEqual(maxFlash, thresholdMs, "A4 必须：闪光时刻极差 ≤ 1 帧")
         XCTAssertLessThanOrEqual(maxClick, thresholdMs, "A4 必须：click 时刻极差 ≤ 1 帧")
+        XCTAssertEqual(multi["passA4"] as? Bool, true, "A4：判定事件里没有文件缺 click / 闪光（frameprobe passA4；G10 胶水 ④）")
         if maxFlash <= 1 && maxClick <= 1 { print("A4 目标（≤ 1 ms）也达到") } else { print("A4 目标（≤ 1 ms）未达到") }
     }
 }
