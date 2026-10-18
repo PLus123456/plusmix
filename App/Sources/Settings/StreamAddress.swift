@@ -11,6 +11,27 @@ import Foundation
 import SwitcherContracts
 import SwitcherStreaming
 
+/// 查询串鉴权用过的参数名（W5-P，W4C3 第 9 条）：鉴权表里的"用户名参数 / 密码参数"可以改成任意名字（SRS、nginx-rtmp 按回调的规矩起名），
+/// 节目里只存整条地址，重新读地址时原来只认 user / pass 那几个——用了别的名字，按钮旁写"没有鉴权"、再打开小表停在 Adobe，换写法也去不掉。
+/// 表里存过的名字记在本机（最近 8 对，新的在前；不分大小写去重），认写法、换写法时先按它们。不进节目文件（契约不动）：换一台机器打开要重新在表里填一次。
+struct StreamAuthParamMemory {
+    static let key = "streamAuthQueryParams"
+    static let limit = 8
+    let defaults: UserDefaults
+
+    var pairs: [(user: String, pass: String)] {
+        (defaults.array(forKey: Self.key) as? [[String]] ?? []).compactMap { $0.count == 2 ? ($0[0], $0[1]) : nil }
+    }
+
+    /// 记下一对（已有就挪到最前）；认得的默认名字（user / pass 那几个）不用记。
+    func remember(user: String, pass: String) {
+        guard !(StreamAddress.queryUserParamNames.contains(user.lowercased()) && StreamAddress.queryPassParamNames.contains(pass.lowercased())) else { return }
+        var list = pairs.filter { $0.user.lowercased() != user.lowercased() || $0.pass.lowercased() != pass.lowercased() }
+        list.insert((user, pass), at: 0)
+        defaults.set(list.prefix(Self.limit).map { [$0.user, $0.pass] }, forKey: Self.key)
+    }
+}
+
 enum StreamAddress {
     /// 地址框里代替 userinfo 的记号。
     static let maskToken = "•••"
@@ -30,10 +51,16 @@ enum StreamAddress {
     static let queryPassParamNames: Set<String> = ["pass", "password", "pwd", "passwd"]
 
     /// 地址现在是哪种写法：有 userinfo = Adobe；查询串里有认得的账号参数 = 查询串（参数名照地址里的）；都没有 = Adobe（默认）。
-    static func authStyle(of url: String) -> AuthStyle {
+    /// remembered = 本机表里用过的参数名（StreamAuthParamMemory，W4C3 第 9 条），先按它们认（新的在前），再按默认那几个名字。
+    static func authStyle(of url: String, remembered: [(user: String, pass: String)] = []) -> AuthStyle {
         let trimmed = url.trimmingCharacters(in: .whitespaces)
         if userinfoRange(in: trimmed) != nil { return .adobe }
         let items = URLComponents(string: trimmed)?.percentEncodedQueryItems ?? []
+        for pair in remembered {
+            guard let user = items.first(where: { $0.name.lowercased() == pair.user.lowercased() }) else { continue }
+            let pass = items.first { $0.name.lowercased() == pair.pass.lowercased() }
+            return .query(userParam: user.name, passParam: pass?.name ?? pair.pass)
+        }
         guard let user = items.first(where: { queryUserParamNames.contains($0.name.lowercased()) }) else { return .adobe }
         let pass = items.first { queryPassParamNames.contains($0.name.lowercased()) }
         return .query(userParam: user.name, passParam: pass?.name ?? defaultQueryPassParam)
@@ -49,16 +76,17 @@ enum StreamAddress {
     /// 查询串的值只留 RFC 3986 的非保留字符，其余百分号编码（& = + # ? @ / 空格都编码，不同服务器对 + 的解释不一样）。
     private static let queryValueAllowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
-    /// 写查询串账号（RTMP / RTMPS）：去掉 userinfo（两种写法互斥）与查询串里旧的账号参数（新给的两个名字 + 认得的那几个），别的查询项原样；
-    /// 用户名空 = 只去掉、不写；密码空 = 只写用户名。
-    static func withQueryCredentials(_ url: String, user: String, password: String, userParam: String, passParam: String) throws(EditError) -> String {
+    /// 写查询串账号（RTMP / RTMPS）：去掉 userinfo（两种写法互斥）与查询串里旧的账号参数（新给的两个名字 + 认得的那几个 + alsoDrop——
+    /// 换写法 / 换名字之前认出来的那一对，W4C3 第 9 条），别的查询项原样；用户名空 = 只去掉、不写；密码空 = 只写用户名。
+    static func withQueryCredentials(_ url: String, user: String, password: String, userParam: String, passParam: String,
+                                     alsoDrop: Set<String> = []) throws(EditError) -> String {
         guard var c = URLComponents(string: url.trimmingCharacters(in: .whitespaces)), let scheme = c.scheme?.lowercased() else { throw .invalidURL }
         guard scheme == "rtmp" || scheme == "rtmps" else { throw .notRTMP }
         let u = userParam.trimmingCharacters(in: .whitespaces), p = passParam.trimmingCharacters(in: .whitespaces)
         guard !u.isEmpty, !p.isEmpty, u != p, (u + p).allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "-._~".contains($0)) }) else { throw .invalidParamName }
         c.user = nil
         c.password = nil
-        let drop = queryUserParamNames.union(queryPassParamNames).union([u.lowercased(), p.lowercased()])
+        let drop = queryUserParamNames.union(queryPassParamNames).union([u.lowercased(), p.lowercased()]).union(alsoDrop.map { $0.lowercased() })
         var items = (c.percentEncodedQueryItems ?? []).filter { !drop.contains($0.name.lowercased()) }
         if !user.isEmpty {
             items.append(URLQueryItem(name: u, value: user.addingPercentEncoding(withAllowedCharacters: queryValueAllowed)))

@@ -167,6 +167,7 @@
 "addInput.add" = "添加";
 "addInput.addNote.install" = "加上后先显示错误，装好后自动恢复";
 "addInput.addNote.permission" = "加上后先显示错误，授权后自动恢复";
+"addInput.addNote.unsupportedBuild" = "加上后一直显示错误（这一版不支持）";
 "addInput.audio.about" = "只有声音的输入：话筒、声卡、调音台的 USB 输出。格子里显示话筒和电平表；第一次用要麦克风权限。";
 "addInput.audio.detail" = "%@（%@）\n%d 个输入声道，%@";
 "addInput.audio.detailNoTransport" = "%@\n%d 个输入声道，%@";
@@ -392,6 +393,7 @@
 "audioSettings.limiter.ceiling" = "天花板 %.1f dBFS";
 "audioSettings.limiter.ceilingHint" = "限幅之后的输出最高到这里（0 = 0 dBFS）。";
 "audioSettings.limiter.latencyHint" = "起音就是前瞻：这条总线会晚这么多毫秒。录制 / 推流 / NDI® 的音画已经对齐，耳机 / 扬声器监听会晚这么多。";
+"audioSettings.limiter.latencyHintMaster" = "起音就是前瞻：Master 会晚这么多毫秒，画面跟着一起延后对齐（状态窗写着“视频延后 n ms”）——录制 / 推流 / NDI® 与耳机 / 扬声器监听的音画都是齐的。";
 "audioSettings.meterPost" = "推子后";
 "audioSettings.page.compressor" = "压缩";
 "audioSettings.page.eq" = "均衡";
@@ -463,6 +465,7 @@
 "bottom.tip.line" = "%@：%@";
 "bottom.tip.lineReason" = "%@：%@ — %@";
 "bottom.tip.retryHint" = "点一下：重试起不来的路，正常的路不受影响";
+"bottom.tip.retryHintStopped" = "点一下：重试起不来 / 失败的路，正常的路不受影响";
 "bottom.waitingStats" = "等待第一行 Stats…";
 "bus.busA" = "Bus A";
 "bus.busB" = "Bus B";
@@ -521,6 +524,12 @@
 "cell.transition" = "转场";
 "cell.transition.a11y" = "把输入 %d 按当前转场送上 PGM";
 "cell.transition.tip" = "按当前转场送上 PGM（%@）";
+"cell.transition.stingerUnsetTip" = "转场 %d 是 Stinger、还没选输入：点一下先选输入（不换 PVW、不执行）";
+"cell.transition.stingerUnsetTipNoSlot" = "当前转场是 Stinger、还没选输入：先在转场列 ▾ 里选一路";
+"tbar.stingerUnsetHint" = "转场 %d 是 Stinger、还没选输入";
+"tbar.stingerUnsetHintNoSlot" = "当前转场是 Stinger、还没选输入";
+"tbar.stingerUnsetTip" = "转场 %d 是 Stinger、还没选输入：推 T-bar 会是一次硬切，所以先灰着；在这个槽的 ▾ 里选一路输入，或在上面一行换一个转场";
+"tbar.stingerUnsetTipNoSlot" = "当前转场是 Stinger、还没选输入：推 T-bar 会是一次硬切，所以先灰着；在上面一行换一个转场";
 "channels.summary.mono" = "第 %d 路（单声道）";
 "channels.summary.pair" = "第 %d、%d 路";
 "codec.aac" = "AAC";
@@ -1022,13 +1031,15 @@
 "outputSettings.stream.hint" = "协议看地址开头（rtmp://、rtmps://、srt://）；每个目的地单独编码、断了单独重连。";
 "outputSettings.stream.disable" = "停用这一路";
 "outputSettings.stream.failedHint" = "改好地址 / 密钥（回车或离开输入框）会自动重试；也可以先停用这一路。";
+"outputSettings.stream.failedHintStopped" = "这一路已停止、不再自己重连（服务器拒绝了鉴权）：改对地址 / 账号后点「重试」，光改设置不会自己重试；也可以先停用这一路。";
 "outputSettings.stream.key" = "密钥";
 "outputSettings.stream.lockedNote" = "正在推流：地址、密钥和编码停止后可改。";
 "outputSettings.stream.name" = "推流 %d";
-"outputSettings.stream.reconnect" = "重试间隔最长 %.0f s（一直重试）";
+"outputSettings.stream.reconnect" = "重试间隔最长 %.0f s（一直重试，鉴权失败除外）";
 "outputSettings.stream.remove" = "删除目的地";
 "outputSettings.stream.retry" = "重试";
 "outputSettings.stream.statusFailed" = "起不来：%@";
+"outputSettings.stream.statusStopped" = "失败：%@";
 "outputSettings.stream.url" = "地址";
 "outputSettings.stream.urlPrompt" = "rtmp:// rtmps:// srt://";
 "outputSettings.tab.external" = "外部显示";
@@ -1544,6 +1555,7 @@
 "outputSettings.stream.auth.title" = "RTMP 鉴权（用户名 / 密码）";
 "outputSettings.stream.auth.user" = "用户名";
 "outputSettings.stream.auth.userSet" = "鉴权：用户 %@（密码已设）";
+"outputSettings.stream.auth.userSetNoPassword" = "鉴权：用户 %@（没有密码）";
 "outputSettings.stream.encodeDetails" = "编码详情…";
 "outputSettings.stream.followFirst" = "与推流 1 相同（编码跟着推流 1 改）";
 "outputSettings.stream.lockedHelp" = "正在推流：停止后可改";
@@ -1590,6 +1602,7 @@
 "slot.stingerMenu.header" = "转场 %d · Stinger：先选一路输入（选了才执行）";
 "slot.stingerMenu.noInputs" = "还没有输入";
 "slot.tbarRow" = "%@ ▾";
+"slot.tbarRowSlot" = "转场 %d · %@ ▾";
 "slot.tbarRowAX" = "T-bar 和回车用的转场：%@";
 "slot.tbarMenu.header" = "执行转场（之后 T-bar 和回车也用它）";
 "slot.tbarMenu.hint" = "只选不执行：在转场按钮的 ▾ 里点“用于 T-bar”";
@@ -1638,14 +1651,14 @@
 "cell.menu.restart" = "回到开头";
 "cell.menu.loop" = "循环";
 "cell.menu.restartOnProgram" = "切上 PGM 时从头播";
-"cell.menu.restartOnProgram.tip" = "这一路切上 PGM（Cut / 转场做完 / T-bar 推到顶）的那一拍从头播，首帧晚 1–2 拍；在 PVW 上预览时不动。随节目保存。";
+"cell.menu.restartOnProgram.tip" = "这一路切上 PGM（Cut / 转场做完 / T-bar 推到顶）的那一拍从头播，首帧晚几拍（约 3 拍）；在 PVW 上预览时不动。随节目保存。";
 "inputSettings.source.fileInPlaceHint" = " 文件输入只改“播完”或“播放速率”：当场生效、不重建这一路（接着播），不用点“应用来源”。";
 "inputSettings.playback.title" = "播放";
 "inputSettings.playback.play" = "▶ 播放";
 "inputSettings.playback.pause" = "⏸ 暂停";
 "inputSettings.playback.restart" = "⏮ 回到开头";
 "inputSettings.playback.restartOnProgram" = "切上 PGM 时从头播";
-"inputSettings.playback.hint" = "暂停 = 画面停在这一帧（仍每拍出帧，不算无信号）；回到开头：暂停中就停在第一帧。切上 PGM 时从头播：Cut / 转场做完 / T-bar 推到顶那一拍从头，首帧晚 1–2 拍；在 PVW 上预览时不动。格子第一行与右键是同一组动作。";
+"inputSettings.playback.hint" = "暂停 = 画面停在这一帧（仍每拍出帧，不算无信号）；回到开头：暂停中就停在第一帧。切上 PGM 时从头播：Cut / 转场做完 / T-bar 推到顶那一拍从头，首帧晚几拍（约 3 拍）；在 PVW 上预览时不动。格子第一行与右键是同一组动作。";
 "bottom.recordingTime" = "● 录制 %@";
 "bottom.recordingTimeMany" = "● 录制 %@（%d 路）";
 "bottom.streamingTime" = "● 推流 %@";
@@ -1664,7 +1677,7 @@
 "outputStatus.noEvents" = "还没有事件。";
 "outputStatus.hint" = "数字全读统计（与 API 读的是同一份）；事件由每秒一次的统计里状态的变化推出，一秒内来回的看不到。";
 "outputStatus.showLogs" = "显示日志…";
-"outputStatus.showLogsTip" = "打开诊断文件夹（帮助 › 打开诊断文件夹），推流 / 录制的日志在里面";
+"outputStatus.showLogsTip" = "推流 / 录制的日志在系统日志里：把最近 10 分钟本程序的系统日志导出成一份文本（放在诊断文件夹里）并打开。诊断文件夹（帮助 › 打开诊断文件夹）里平时只有崩溃 / 卡死记录";
 "outputStatus.noStreams" = "没有推流目的地。";
 "outputStatus.noRecords" = "没有录制输出。";
 "outputStatus.col.name" = "名称";

@@ -499,8 +499,8 @@ final class LiveSafetyTests: XCTestCase {
         check("zh-Hans")
         XCTAssertEqual(OutputButtonSummary.record([OutputRouteStatus(number: 1, name: "R", enabled: true, state: "stopping")]).title, "录制 · 封口中")
         XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "stopping")]).title, "推流 · 正在停")
-        // X38：推流页"重连上限"改叫"重试间隔最长"（App 里推流一直重试，不是"超过就放弃"）
-        XCTAssertEqual(L("outputSettings.stream.reconnect", 30.0), "重试间隔最长 30 s（一直重试）")
+        // X38：推流页"重连上限"改叫"重试间隔最长"（App 里推流一直重试，不是"超过就放弃"）；W2-D4 起服务器拒绝鉴权第一次就停，括号里补上（W5-P，111 留下的）
+        XCTAssertEqual(L("outputSettings.stream.reconnect", 30.0), "重试间隔最长 30 s（一直重试，鉴权失败除外）")
         // X37："推流 n 开始"只在连上时提示
         XCTAssertEqual(L("notice.streamConnecting", 2), "推流 2 连接中…")
         XCTAssertEqual(L("notice.streamStarted", 2), "推流 2 已开始")

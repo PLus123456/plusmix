@@ -2,6 +2,8 @@
 // W5-B（02 X03 / X04 / X30，01a A3 / F5，04 Q67 (a)）：新建 / 打开 / 退出 / 偏好设置里换引擎之前，录制 / 推流在跑先确认"会停止 n 路录制、m 路推流"；
 // 节目有未保存的改动（documentContent 口径）时问 保存 / 不保存 / 取消，窗口用 isDocumentEdited 标出来；退出不再静默写回已打开的文件，LastSession 照存。
 // 这些问只在界面入口（菜单 / 偏好设置 / 关主窗口）上；newShow / openShow / changeProgramFormat 等直接调用的路径（测试、内部）不问。
+// W5-P（D04，Codex 2026-10-13 审查）：换 session 的每一种（启动 / 新建 / 打开 / 打开上次退出时的节目 / 换格式 / 换节目音频 / 重起）是一个串行事务：
+// 排队、轮到时才读文件或取当前节目，文档身份（保存写到哪）与新 session 一起提交；重入的打开不再被丢、也不会提前改掉保存目标。
 import AppKit
 import SwitcherContracts
 import SwitcherControl
@@ -48,7 +50,6 @@ final class AppController {
     let updateController: UpdateController
     /// 引擎运行时拿着的"别睡"（W5-L，P1）：系统睡眠 + App Nap 一条、显示器休眠一条，按设置"性能与电源"的两个开关。
     let engineActivity = EngineActivity()
-    private var replacing = false
     /// 未保存判定的基准：上次新建 / 打开 / 保存时的"节目内容"（documentContent）；与当前的不同 = 有未保存的改动（W5-B）。
     private var documentBaseline: Show?
     private var documentToken: ObserverToken?
@@ -157,29 +158,43 @@ final class AppController {
     // MARK: 启动 / 退出
 
     /// 启动：命令行指定的文件 → 恢复上次的文件 → 没有就恢复退出时自动存的 → 再没有就空节目。测试宿主永远空节目。
+    /// 读文件也在换 session 的事务里（D04）；轮到时已经有 session 了（启动过程中 Finder 双击打开的文件排在了前面）就不再恢复上次的。
     func launch(showURL: URL? = nil) async {
         windowController.showWindow(nil)
         windowController.window?.makeKeyAndOrderFront(nil)
         windowController.window?.makeFirstResponder(nil)   // 快捷键直接到窗口；搜索框要点了才有焦点
-        var show = documents.emptyShow()
-        var baseline = DocumentBaseline.current
-        if let showURL {
-            do { show = try documents.load(from: showURL) } catch { presentError(error, context: L("error.open", showURL.lastPathComponent)) }
-        } else if !isTestHost {
-            if let url = documents.lastURL, let loaded = try? documents.load(from: url) {
-                show = loaded
-            } else if let auto = documents.loadAutosave() {
-                show = auto
-                documents.startNew()
-                baseline = .empty   // 从 LastSession 恢复的没存成文件：有内容就算未保存
+        await enqueueSessionChange { [self] in
+            guard session == nil else { return }
+            var show = documents.emptyShow()
+            var baseline = DocumentBaseline.current
+            var identity = DocumentIdentity.keep
+            if let showURL {
+                do {
+                    show = try documents.read(from: showURL)
+                    identity = .file(showURL)
+                } catch {
+                    presentError(error, context: L("error.open", showURL.lastPathComponent))
+                }
+            } else if !isTestHost {
+                if let url = documents.lastURL, let loaded = try? documents.read(from: url) {
+                    show = loaded
+                    identity = .file(url)
+                } else if let auto = documents.loadAutosave() {
+                    show = auto
+                    identity = .untitled
+                    baseline = .empty   // 从 LastSession 恢复的没存成文件：有内容就算未保存
+                }
             }
+            await performReplace(show: show, baseline: baseline, identity: identity)
         }
-        await replaceSession(show: show, baseline: baseline)
     }
 
     /// 退出（退出前那一问已经过了）：LastSession 照存——崩溃恢复、下次启动没有上次的文件时从它恢复；不再静默写回已打开的节目文件，
     /// 要不要存由退出前那一问定（W5-B，Q67 (a)，X30）。然后停引擎。
+    /// 不排队：起到一半的 session 照旧当场叫停（W3-E6，testW3E6_stopDuringStart_leavesNothingRunning）；排着还没轮到的换节目作废（D04），
+    /// 正在做的那个停完旧 session 之后看到作废也不再起新的。之后再发的新建 / 打开照常。
     func shutdown() async {
+        sessionEpoch &+= 1
         if let session { documents.autosave(session.makeShow()) }
         await stopSession()
     }
@@ -196,11 +211,56 @@ final class AppController {
         case keep
     }
 
+    /// 换 session 时文档身份（保存写到哪、素材相对路径按哪个目录找）怎么变（D04）：与换上的 session 在同一个事务里提交——
+    /// 旧 session 停完、新 session 建出来之前那一下，中间没有 await，保存看到的永远是配对的一份。
+    enum DocumentIdentity: Equatable {
+        /// 不变（同一个节目换引擎；测试直接换 session）。
+        case keep
+        /// 换成这个文件（打开；启动时打开命令行 / 上次的文件）：currentURL + 最近列表。
+        case file(URL)
+        /// 没有文件（新建；从 LastSession 恢复）。
+        case untitled
+    }
+
+    /// 换 session 的事务队列（D04，Codex 2026-10-13 审查）：新建 / 打开 / 打开上次退出时的节目 / 启动 / 换格式 / 换节目音频 / 重起引擎都排进这里，
+    /// 一次只做一个，后来的等前一个做完再做——原来 replaceSession 对重入直接 return（打开 B 被丢掉），打开 A 的 load 却已经把 currentURL 改成了 B，
+    /// 之后保存把还在跑的 A 写进 B 的文件。读文件 / 取当前节目都在轮到时才做（排队期间前一个事务换上的 session 才是要接手的那份）。
+    /// 做法同 SwitcherSession 的 acquireLifecycle：一个"在做"标志 + 按先后排的续体，body 在调用方自己的任务里跑（队列空着时不多一跳）。
+    private var sessionChangeBusy = false
+    private var sessionChangeWaiters: [CheckedContinuation<Void, Never>] = []
+    /// shutdown 一次加 1：排在它之前、还没轮到的事务作废。
+    private var sessionEpoch = 0
+
+    /// 把一段换 session 的活排进队列，做完才返回。body 里只能调 performReplace（不能再排队，否则等自己）。
+    private func enqueueSessionChange(_ body: @MainActor () async -> Void) async {
+        let epoch = sessionEpoch
+        if sessionChangeBusy {
+            await withCheckedContinuation { sessionChangeWaiters.append($0) }   // 轮到时 busy 仍是 true（交接）
+        } else {
+            sessionChangeBusy = true
+        }
+        defer {
+            if sessionChangeWaiters.isEmpty { sessionChangeBusy = false } else { sessionChangeWaiters.removeFirst().resume() }
+        }
+        guard sessionEpoch == epoch else { return }
+        await body()
+    }
+
+    /// 测试 / 内部直接换一个 session（文档身份不变）；排队，不再因为上一个还在做就丢掉。
     func replaceSession(show: Show, baseline: DocumentBaseline = .current) async {
-        guard !replacing else { return }
-        replacing = true
-        defer { replacing = false }
+        await enqueueSessionChange { [self] in await performReplace(show: show, baseline: baseline, identity: .keep) }
+    }
+
+    /// 换 session 的本体（只在 enqueueSessionChange 的 body 里调）：停旧的 → 提交文档身份 → 建新的、绑界面 → 起。
+    private func performReplace(show: Show, baseline: DocumentBaseline, identity: DocumentIdentity) async {
+        let epoch = sessionEpoch
         await stopSession()
+        guard sessionEpoch == epoch else { return }   // 停旧 session 的时候退出了：不再起新的
+        switch identity {
+        case .keep: break
+        case .file(let url): documents.adopt(url)
+        case .untitled: documents.startNew()
+        }
         do {
             // 素材相对路径按节目文件所在目录找（W3-E5）；新建 / 从 LastSession 恢复的没有文件，退到默认录制目录
             let s = try SwitcherSession(show: show, settings: settings, hotkeyTable: hotkeyTable, midiTable: midiTable,
@@ -395,12 +455,18 @@ final class AppController {
         guard documents.hasAutosave else { return }
         confirmLeavingShow(.openShow(L("menu.show.lastSessionName")), proceed: { [weak self] in
             Task { @MainActor in
-                guard let self, let show = self.documents.loadAutosave() else { return }
-                self.documents.startNew()
-                await self.replaceSession(show: show, baseline: .empty)
+                await self?.openLastSession()
                 completion?()
             }
         })
+    }
+
+    /// 打开 LastSession 本体（排队；读那一份在轮到时才读，D04）。没有那一份就什么都不做。
+    func openLastSession() async {
+        await enqueueSessionChange { [self] in
+            guard let show = documents.loadAutosave() else { return }
+            await performReplace(show: show, baseline: .empty, identity: .untitled)
+        }
     }
 
     /// 退出之前（菜单退出 / ⌘Q / 关主窗口）：录制 / 推流在跑先确认，有未保存的改动问保存。completion(true) = 可以退了（AppDelegate 接着 shutdown）。
@@ -435,41 +501,41 @@ final class AppController {
 
     /// 改节目格式（偏好设置）：引擎的格式在 init 定死，所以换一个 session；输入 / 输出原样带过去，录制 / 推流的目标状态清掉（不自动续录）。
     func changeProgramFormat(_ format: ProgramFormat) async {
-        guard let session else { return }
-        var show = ShowDocuments.stoppingOutputs(session.makeShow())
-        show.mixer.format = format
-        show.layout = currentLayout()
-        await replaceSession(show: show, baseline: .keep)
+        await restartCurrentShow { show in show.mixer.format = format }
     }
 
     /// 改节目音频的对齐延迟 / 监听点（提案 007，存在 Show.audio 里）：运行期改要重建延迟线，AudioRuntime 建引擎时才读，所以换一个 session
     /// （同 changeProgramFormat：输入 / 输出原样带过去，录制 / 推流的目标状态清掉）。
     func changeShowAudio(alignmentFrames: Int, monitorPoint: MonitorPoint) async {
-        guard let session else { return }
-        var show = ShowDocuments.stoppingOutputs(session.makeShow())
-        show.audio.alignmentFrames = max(0, alignmentFrames)
-        show.audio.monitorPoint = monitorPoint
-        show.layout = currentLayout()
-        await replaceSession(show: show, baseline: .keep)
+        await restartCurrentShow { show in
+            show.audio.alignmentFrames = max(0, alignmentFrames)
+            show.audio.monitorPoint = monitorPoint
+        }
     }
 
     /// 用当前节目重起引擎（偏好设置里 API / 音频设备 / 兼容层改了要立刻生效）。
     func restartSession() async {
-        guard let session else { return }
-        var show = ShowDocuments.stoppingOutputs(session.makeShow())
-        show.layout = currentLayout()
-        await replaceSession(show: show, baseline: .keep)
+        await restartCurrentShow { _ in }
     }
 
     /// 设置窗"应用并重起引擎"（W5-J，F4）：节目格式、节目音频按给的，本机的项读 settings，一次换一个 session（输入 / 输出原样带过去，录制 / 推流的目标状态清掉）。
     func restartSession(format: ProgramFormat, alignmentFrames: Int, monitorPoint: MonitorPoint) async {
-        guard let session else { return }
-        var show = ShowDocuments.stoppingOutputs(session.makeShow())
-        show.mixer.format = format
-        show.audio.alignmentFrames = max(0, alignmentFrames)
-        show.audio.monitorPoint = monitorPoint
-        show.layout = currentLayout()
-        await replaceSession(show: show, baseline: .keep)
+        await restartCurrentShow { show in
+            show.mixer.format = format
+            show.audio.alignmentFrames = max(0, alignmentFrames)
+            show.audio.monitorPoint = monitorPoint
+        }
+    }
+
+    /// 同一个节目换引擎（上面四个）：排队，轮到时才取当前节目（D04：排在打开之后的，接手的是刚打开的那份，不是发请求时那份）；没有 session 不做。
+    private func restartCurrentShow(_ change: @escaping @MainActor (inout Show) -> Void) async {
+        await enqueueSessionChange { [self] in
+            guard let session else { return }
+            var show = ShowDocuments.stoppingOutputs(session.makeShow())
+            change(&show)
+            show.layout = currentLayout()
+            await performReplace(show: show, baseline: .keep, identity: .keep)
+        }
     }
 
     /// 即时生效的几节（性能与电源 / Tally / 提醒，W5-L）：改内存里的设置、只写这一节自己的键（save），马上落到跑着的 session（settings 的 didSet）。
@@ -538,17 +604,25 @@ final class AppController {
 
     // MARK: 节目文件
 
+    /// 新建（排队，D04）：轮到时才忘掉当前文件，与换上空节目同一个事务。
     func newShow() async {
-        documents.startNew()
-        await replaceSession(show: documents.emptyShow())
+        await enqueueSessionChange { [self] in
+            await performReplace(show: documents.emptyShow(), baseline: .current, identity: .untitled)
+        }
     }
 
+    /// 打开文件（排队，D04）：轮到时才读文件；读不出来什么都不变（保存目标、跑着的 session 都还是原来那份）。
+    /// 读出来了才在停掉旧 session 之后、建新 session 之前把文件身份换成它（performReplace）。
     func openShow(url: URL) async {
-        do {
-            let show = try documents.load(from: url)
-            await replaceSession(show: show)
-        } catch {
-            presentError(error, context: L("error.open", url.lastPathComponent))
+        await enqueueSessionChange { [self] in
+            let show: Show
+            do {
+                show = try documents.read(from: url)
+            } catch {
+                presentError(error, context: L("error.open", url.lastPathComponent))
+                return
+            }
+            await performReplace(show: show, baseline: .current, identity: .file(url))
         }
     }
 

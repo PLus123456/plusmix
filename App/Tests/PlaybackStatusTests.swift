@@ -298,7 +298,7 @@ final class PlaybackStatusTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(2) { panels.outputStatusWindow?.window?.isVisible == true && panels.outputStatus.page == .stream }, "推流页也能开")
         // "显示日志…" = 帮助 › 打开诊断文件夹（不在测试里真开 Finder：看动作接的是哪一个）
         XCTAssertEqual(OutputStatusModel.showLogsTitle, "显示日志…")
-        XCTAssertNotNil(panels.outputStatus.showLogs, "“显示日志…”接到诊断文件夹")
+        XCTAssertNotNil(panels.outputStatus.showLogs, "“显示日志…”接到导出最近的系统日志（W5-P，W4C3 第 1 条）")
     }
 
     // MARK: - 3. 录制 / 推流时长（E10）

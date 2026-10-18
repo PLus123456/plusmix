@@ -314,6 +314,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         inputStrip.onAddInput = { [weak self] in self?.presentAddInput() }
         inputStrip.onDropFiles = { [weak self] result in self?.addInputs(from: result) }
         inputStrip.onNotice = { [weak self] message in self?.bottomBar.showNotice(message) }
+        inputStrip.onStingerUnset = { [weak self] slot, anchor in self?.transitionPanel.showStingerInputs(slot: slot, below: anchor) }   // W5-P：格子"转场"先选输入
         inputStrip.onRenameCategory = { [weak self] color in self?.presentRenameCategory(color) }
         inputStrip.onClearCategoryName = { [weak self] color in self?.renameCategory(color, to: "") }
         inputStrip.onThumbnailSizeChange = { [weak self] size in self?.setThumbnailSize(size) }
@@ -356,7 +357,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         // 调音台头部：设备没有耳机声道时写明（W5-K / X09，音频设备页同一句）
         mixerPanel.model.setOutputInfo(outputChannels: session?.audio.outputChannelCount, map: session?.audio.effectiveOutputMap)
         // 底栏主体按钮：起不来的原因（运行表）、重试起不来的那几路（W5-B）；第几次连接 W5-N 起读 Stats 的 attempt
-        bottomBar.routeFailure = session.map { s in { [weak s] n in s?.outputs.failureReason(output: n) } }
+        bottomBar.routeFailure = session.map { s in { [weak s] n in s?.outputs.routeFailure(output: n) } }
         bottomBar.onRetryOutputs = session.map { s in { [weak s] numbers in s?.retryFailedOutputs(numbers) } }
         mainToolbar.setSessionAvailable(session != nil)   // 没有 session 时节目组以外置灰（W5-G）
         refreshToolbarStatus()
@@ -589,6 +590,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         if multiviewWindow == nil {
             let w = MultiviewWindowController(source: session?.displaySource)
             if let session { w.restore(from: session.layout) }
+            (w.window as? PanelWindow)?.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }   // 多画面窗口在前照样派发快捷键（W4C3 第 2 条）
             w.onOpenChange = { [weak self] open in self?.bottomBar.setMultiviewOpen(open) }
             multiviewWindow = w
         }

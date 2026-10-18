@@ -42,8 +42,9 @@ final class BottomBarView: NSView {
     }
     /// 停录制 / 停推流之前要不要先问（AppController 读偏好设置；W5-B）。
     var shouldConfirmStop: () -> Bool = { true }
-    /// 一路起不来的原因（session 的运行表；W5-B）。推流正在第几次连接 W5-N 起读 Stats.encoder 的 attempt（提案 022 B1，G6 追加 ②），不再问运行表。
-    var routeFailure: ((Int) -> String?)?
+    /// 一路起不来 / 停住的原因（session 的运行表；W5-B；W5-P 起带"是不是停在 failed 的推流对象"）。推流正在第几次连接 W5-N 起读 Stats.encoder 的 attempt
+    /// （提案 022 B1，G6 追加 ②），不再问运行表。
+    var routeFailure: ((Int) -> OutputRouteFailure?)?
     /// 打开推流 / 录制状态面板（W5-N；▴ 里的"推流状态… / 录制状态…"）。
     var onOutputStatus: ((OutputStatusModel.Page) -> Void)?
     /// 重试起不来的那几路（session.retryFailedOutputs）。
@@ -474,7 +475,7 @@ struct StreamMenuRow: Equatable {
     var toolTip: String?
 
     @MainActor
-    static func rows(state: MixerState, encoder: [Stats.EncoderEntry], failure: (Int) -> String?) -> [StreamMenuRow] {
+    static func rows(state: MixerState, encoder: [Stats.EncoderEntry], failure: (Int) -> OutputRouteFailure?) -> [StreamMenuRow] {
         state.outputs.filter { $0.kind == .stream }.map { o in
             let entry = OutputRuntime.encoderEntry(encoder, forOutput: o.number)
             let route = OutputRouteStatus(output: o, entry: entry, failure: failure(o.number))

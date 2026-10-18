@@ -65,6 +65,7 @@ final class PanelCoordinator: NSObject {
             self.settingsWindow?.model.outputs.apply(stats: stats)
             self.statsWindow?.model.apply(stats: stats, state: self.state)
             self.outputStatus.apply(stats: stats, state: self.state)   // 状态面板关着也喂：事件记录要连着（W5-N）
+            for (_, w) in self.inputSettingsWindows { w.model.refreshRuntime() }   // 文件播完不出快照：每秒看一次（W4C3 第 5 条）
         }
     }
 
@@ -149,7 +150,8 @@ final class PanelCoordinator: NSObject {
         if let stats = session?.stats { model.apply(stats: stats) }
         model.send = { [weak self] c in self?.session?.send(c) }
         // 起不来的原因 / 重试（W5-B：推流页那一段写明原因，起不来的路不锁、可以重试或停用）；第几次连接 W5-N 起读 Stats 的 attempt
-        model.routeFailure = { [weak self] n in self?.session?.outputs.failureReason(output: n) }
+        model.routeFailure = { [weak self] n in self?.session?.outputs.routeFailure(output: n) }
+        model.authParamMemory = StreamAuthParamMemory(defaults: controller.defaults)   // 查询串鉴权用过的参数名记在本机（W5-P，W4C3 第 9 条）
         model.showOutputStatus = { [weak self] page in self?.showOutputStatus(page) }
         model.onRetry = { [weak self] numbers in self?.session?.retryFailedOutputs(numbers) }
         model.refreshRouteDetails()
@@ -223,6 +225,7 @@ final class PanelCoordinator: NSObject {
         }
         let model = InputSettingsModel(config: config)
         model.send = { [weak session] c in session?.send(c) }
+        model.runtimeState = { [weak session] in session?.inputs.runtimeState(of: number) }   // "播完"要看跑着的那个（W5-P，W4C3 第 5 条）
         let w = InputSettingsWindowController(model: model)
         w.attach(source: session.displaySource, format: session.format)   // 本路画面：多画面纹理裁这一格（W5-K / H3）
         w.apply(state: state.input(number) != nil ? state : session.state)
@@ -302,6 +305,7 @@ final class PanelCoordinator: NSObject {
             return w
         }
         let w = OutputStatusWindowController(model: outputStatus)
+        forwardHotkeys(w)   // 直播中盯着看的窗：开着它按空格照样切（W5-P，W4C3 第 2 条，X12 同一类）
         w.onClose = { [weak self] in self?.outputStatusWindow = nil }
         outputStatusWindow = w
         w.present()
@@ -318,6 +322,7 @@ final class PanelCoordinator: NSObject {
         let model = StatsWindowModel()
         if let stats = session?.stats { model.apply(stats: stats, state: state) }
         let w = StatsWindowController(model: model)
+        forwardHotkeys(w)   // 同上（W4C3 第 2 条）
         w.onClose = { [weak self] in self?.statsWindow = nil }
         statsWindow = w
         w.present()

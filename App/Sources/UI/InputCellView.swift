@@ -25,6 +25,9 @@ final class InputCellView: NSView {
     var onSetCategory: ((Int, InputCategories.Color?) -> Void)?
     /// 状态行提示（转场进行中点了缩略图）。
     var onNotice: ((String) -> Void)?
+    /// "转场"遇当前那组是没选输入的 Stinger（W5-P，112 留下的，用户 2026-10-17 定）：先弹这个槽的输入选择、整条不发（PVW 也不换）。
+    /// 参数 = 当前槽号（当前那组不对应槽为 nil）与弹菜单的锚点（这颗"转场"按钮）。
+    var onStingerUnset: ((Int?, NSView) -> Void)?
     /// 底行 Overlay k 小按钮的右键"叠加设置…"（W5-K / I1：直达第 k 路）。
     var onOverlaySettings: ((Int) -> Void)?
     /// 删这一路会碰到的地方（InputStripView 按快照填；空 = 直接删，W5-B）。
@@ -332,9 +335,11 @@ final class InputCellView: NSView {
     /// ▶ / ⏸ 现在画的是 ▶（暂停中或播完；测试看）。
     var playButtonShowsPlay: Bool { playKey.map { $0.paused || $0.ended } ?? false }
 
-    /// 切换相关的状态（每个快照由输入条给）：PGM 是哪一路、转场是否在进行、当前那组转场怎么写（"Fade · 0.5 秒" / "Cut"）。没变就不动按钮。
-    func applySwitching(program: Int, transitionActive: Bool, transitionLabel: String) {
-        let key = SwitchingKey(onProgram: program == number, transitionActive: transitionActive, label: transitionLabel)
+    /// 切换相关的状态（每个快照由输入条给）：PGM 是哪一路、转场是否在进行、当前那组转场怎么写（"Fade · 0.5 秒" / "Cut"）、
+    /// 当前那组是不是没选输入的 Stinger（W5-P）与它对应的槽。没变就不动按钮。
+    func applySwitching(program: Int, transitionActive: Bool, transitionLabel: String, unsetStinger: Bool = false, currentSlot: Int? = nil) {
+        let key = SwitchingKey(onProgram: program == number, transitionActive: transitionActive, label: transitionLabel,
+                               unsetStinger: unsetStinger, currentSlot: currentSlot)
         guard key != switching else { return }
         switching = key
         let enabled = !key.transitionActive && !key.onProgram
@@ -346,6 +351,9 @@ final class InputCellView: NSView {
         } else if key.onProgram {
             transitionButton.toolTip = L("cell.onProgram")
             cutButton.toolTip = L("cell.onProgram")
+        } else if key.unsetStinger {
+            transitionButton.toolTip = key.currentSlot.map { L("cell.transition.stingerUnsetTip", $0) } ?? L("cell.transition.stingerUnsetTipNoSlot")
+            cutButton.toolTip = L("cell.cut.tip")
         } else {
             transitionButton.toolTip = L("cell.transition.tip", transitionLabel)
             cutButton.toolTip = L("cell.cut.tip")
@@ -358,6 +366,8 @@ final class InputCellView: NSView {
         var onProgram: Bool
         var transitionActive: Bool
         var label: String
+        var unsetStinger = false
+        var currentSlot: Int?
     }
     private var switching: SwitchingKey?
 
@@ -598,8 +608,14 @@ final class InputCellView: NSView {
     }
 
     /// 转场：按当前转场送上 PGM（Q39；W5-M 起 = 当前槽，转场列 T-bar 那一行写着的那个）= 先送 PVW 再 autoTransition；已在 PVW 上就只 autoTransition。
+    /// 当前那组是没选输入的 Stinger（提案 029，校验器会拒 autoTransition）：先弹这个槽的输入选择、整条不发——原来 setPreview 照常生效、
+    /// autoTransition 被拒，PVW 换了却没转场（W5-P，112 留下的）。选了输入只改槽，再点一次才执行。
     @objc private func transitionPressed() {
         guard !blockedByTransition(), switching?.onProgram != true else { return }
+        if let key = switching, key.unsetStinger {
+            onStingerUnset?(key.currentSlot, transitionButton)
+            return
+        }
         if !tally.preview { send?(.setPreview(input: number)) }
         send?(.autoTransition)
     }

@@ -12,6 +12,8 @@
 // - 磁盘（S7）：RecordingDiskMonitor 每秒看每路的剩余空间（DiskGuard.freeBytes，非启动卷也对）：跌破警戒线提示；跌破下限或写满 →
 //   有备用目录就在下一拍把那一路切到备用目录继续录（S7 目标档），否则只停那一路（发 stopRecord 让快照一致）并提示；推流 / 渲染不在这条链上。
 //   Recorder 自己的 minimumFreeBytes 设 0（它的 freeBytes 在非启动卷上是 0，见 reports/issues/W3C-w1-outputs-recorder-freebytes-nonboot-volume.md）。
+// - 落点（K01，W5-P）：模板展开的名字被占（磁盘上已有同名 .mov、转封装的路连同名 .mp4，或这一批 / 在录 / 在停的别的路要用）就依次加 -2、-3……
+//   （RecordingPaths），切备用目录同样避让；Recorder 的库接口约定覆盖，永不删旧文件只能在这一层保证（用户 2026-10-17 定：自动加后缀）。
 // - 推流：StreamOutput 自己有编码器 + 有界队列 + 重连；起 = start() + 挂消费者，停 = 摘消费者 + stopAsync()。
 // - NDI 发送（W3-E3）：kind = ndi 且 enabled 的输出 = 一个 NDISender（W2-D）。源名 = 输出名，分组 = extra["ndi.groups"]，转换方式 = extra["ndi.conversion"]。
 //   PGM / PVW / 多画面：sender 自己是 PGM 帧的消费者，从 RenderedFrame 挑（PVW / 多画面帧由渲染器按状态自动填：有 enabled 的输出要它才转，开头可能缺一两帧）；
@@ -143,7 +145,7 @@ final class OutputRuntime {
         var phase = Phase.starting
         /// 挂在引擎上的消费者：PGM / PVW / 多画面 = sender 本身；输入 n = inputTap。
         var consumer: (any FrameConsumer)?
-        /// 源是输入 n 时：该路分支槽上按拍挑帧的 tap（下游 NDIInputFeed → sender），分支槽，接上时那一路的来源（换了来源要换到新 tee 上）。
+        /// 源是输入 n 时：该路分支槽上按拍挑帧的 tap（下游 NDIInputFeed → sender），分支槽，接上时那一路的来源（换了来源摘下重挂；W5-P 起换源 tee 不换，删了再加同编号时 tee 才是新的）。
         var inputTap: ISOFrameTap?
         var branch: LockFreeFrameSlot?
         var inputSource: InputSource?
@@ -308,13 +310,18 @@ final class OutputRuntime {
         rebuildStats()
     }
 
-    /// 一路起不来的原因（没有为 nil）：底栏提示、推流页那一段照着写，底栏主体按钮按它决定"重试"还是"停"。
-    /// 起不来的（failed 表）之外，推流的重连放弃了（StreamOutput 停在 failed；App 里不给重连上限，正常不会出现）也算。
-    func failureReason(output number: Int) -> String? {
-        if let reason = failed[number] { return reason }
-        if let e = streams[number], !e.stopping, case .failed(let why) = e.stream.state { return L("notice.streamGaveUp", number, why) }
+    /// 一路起不来 / 停住的原因（没有为 nil）：底栏提示、推流页那一段照着写，底栏主体按钮按它决定"重试"还是"停"。
+    /// 起不来的（failed 表）之外，推流对象自己停在 failed 也算——服务器拒绝鉴权（W2-D4）、重连放弃（App 里不给重连上限，正常不会出现）；
+    /// 这一种带 stoppedStream：界面写"失败"（同 Stats / 状态窗），改设置不自动重试（reconcile 只重试 failed 表里的），要点"重试"（W5-P，111 留下的）。
+    func routeFailure(output number: Int) -> OutputRouteFailure? {
+        if let reason = failed[number] { return OutputRouteFailure(reason: reason) }
+        if let e = streams[number], !e.stopping, case .failed(let why) = e.stream.state {
+            return OutputRouteFailure(reason: L("notice.streamGaveUp", number, why), stoppedStream: true)
+        }
         return nil
     }
+
+    func failureReason(output number: Int) -> String? { routeFailure(output: number)?.reason }
 
     /// 每行 Stats（主线程）：推流第一次报 publishing 时提示"已开始"（X37：start() 之后先提示"连接中"，连上才算开始）。
     func noteStats(_ stats: Stats) {
@@ -378,18 +385,16 @@ final class OutputRuntime {
         let start = RecordingStart(tick: startTick, tickTime: clock.time(of: startTick) + engine.videoDelayApplied)   // 开录起点按节目输出时间线（提案 028：拍点 + 当时的视频延后 L），两轨都从 0 起、没有空 edit（G8b）
         // 建录制器（主线程：算路径、分支槽、音轨）
         var prepared: [(OutputState, Recorder, LockFreeFrameSlot?)] = []
-        var usedURLs = Set(recorders.values.map(\.url))
+        // K01：落点避让——磁盘上已有的（转封装的路连同名 .mp4）、正在录 / 在停的、这一批前面分出去的都算占了，依次加 -2、-3……；永不删旧文件
+        var taken = Set(recorders.values.map { RecordingPaths.key($0.url) })
         for output in outputs {
             var record = output.settings.record ?? RecordSettings(directory: ShowDocuments.defaultRecordDirectory)
             // 相对目录（headless 的场景文件写 "."，那是相对仓库根）在 App 里没有可靠的 cwd（Finder 起的是 /），一律挂到默认录制目录下
             if !record.directory.hasPrefix("/") {
                 record.directory = (ShowDocuments.defaultRecordDirectory as NSString).appendingPathComponent(record.directory)
             }
-            var url = record.outputURL(showName: showName, outputName: output.name)
-            if usedURLs.contains(url) {   // 同一秒起的几路模板里没有 {output} 时会同名：加编号
-                url = url.deletingPathExtension().appendingPathExtension("\(output.number).mov")
-            }
-            usedURLs.insert(url)
+            let url = RecordingPaths.unique(record.outputURL(showName: showName, outputName: output.name), remuxToMP4: record.remuxToMP4, taken: taken)
+            taken.insert(RecordingPaths.key(url))
             var branch: LockFreeFrameSlot?
             var hasAudio = audio != nil
             if let n = output.settings.source.inputNumber {
@@ -575,7 +580,9 @@ final class OutputRuntime {
         entry.stopping = true
         entry.onFallback = true
         let boundary = clock.tick(at: .now()) + 2
-        let url = RecordingFallback.url(for: entry.url, directory: dir)
+        // 备用目录里同名的照样避让（K01）：RecordingFallback 只看磁盘上的 .mov，这里再算上转封装的 .mp4 与正在录的别的路
+        let others = Set(recorders.values.filter { $0 !== entry }.map { RecordingPaths.key($0.url) })
+        let url = RecordingPaths.unique(RecordingFallback.url(for: entry.url, directory: dir), remuxToMP4: entry.recorder.configuration.remuxToMP4, taken: others)
         var cfg = entry.recorder.configuration
         cfg.url = url
         let rec = Recorder(configuration: cfg)
@@ -668,7 +675,7 @@ final class OutputRuntime {
     // MARK: NDI 发送（W3-E3）
 
     /// 一路 NDI 输出跟上快照：enabled 且没有 sender 的起；关掉 / 名字 / 分组 / 源变了的停（停完按最新快照再起）；转换方式运行时改；
-    /// 源是输入 n、那一路换了来源（InputRuntime 重建了它的 tee）的把分支换到新 tee 上。起 / 停进行中的不动，做完会再对一次。
+    /// 源是输入 n、那一路换了来源的摘下重挂一个分支（W5-P 起换源不换 tee，重挂只差一拍；删了再加同编号时挂到新 tee 上）。起 / 停进行中的不动，做完会再对一次。
     private func reconcileNDI(_ output: OutputState) {
         let n = output.number
         let key = NDIKey(output)

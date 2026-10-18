@@ -90,6 +90,7 @@ final class InputSettingsModel: ObservableObject {
         guard let c = state.input(number) else { return }
         let oldSource = config.source
         if c != config { config = c }   // 快照每拍都来（转场中），没变不重画
+        refreshRuntime()
         // 来源被别处换了（API / 另一个窗口）且表单没被动过：表单跟着换；动过的留着（用户还没点应用）
         if c.source != oldSource, let form = sourceForm, (try? form.model.makeSource()) == oldSource {
             var m = AddInputModel(source: c.source)
@@ -292,8 +293,33 @@ final class InputSettingsModel: ObservableObject {
 
     // MARK: 播放（文件输入，提案 021）
 
-    /// ▶ / ⏸：按快照里的目标翻（与格子同一条命令）。
-    func togglePaused() { send?(.setPlayback(input: number, paused: !config.settings.playback.paused)) }
+    /// 这一路跑着的输入对象现在的状态（PanelCoordinator 接到 session 的运行表；"播完"要看它）。
+    var runtimeState: (() -> InputState?)?
+    /// 文件播完了（不循环、跑着的那个已经 noSignal：停在末帧 / 黑场）——与格子上的 ▶ 同一口径（InputCellView.hasEnded；W5-P，W4C3 第 5 条）。
+    /// 运行状态不在快照里：快照来的时候与每秒一行 Stats 来的时候（PanelCoordinator）各取一次。
+    @Published private(set) var playbackEnded = false
+
+    func refreshRuntime() {
+        let ended: Bool
+        if case .file(_, let endAction, _) = config.source, endAction != .loop { ended = runtimeState?() == .noSignal } else { ended = false }
+        if ended != playbackEnded { playbackEnded = ended }
+    }
+
+    /// "播放"一节那颗按钮画 ▶ 吗：暂停中 / 播完 = ▶ 播放，播着 = ⏸ 暂停（同格子）。
+    var playButtonShowsPlay: Bool { config.settings.playback.paused || playbackEnded }
+    var playButtonTitle: String { playButtonShowsPlay ? L("inputSettings.playback.play") : L("inputSettings.playback.pause") }
+
+    /// ▶ / ⏸（与格子同一套，InputCellView.playPressed）：暂停中 → 继续；播完不循环 → 从头播（seekPlayback 0）；播着 → 暂停。
+    /// 原来只看 paused：播完时写"⏸ 暂停"、点了发暂停，再点"▶ 播放"也只是取消暂停、画面不动。
+    func togglePaused() {
+        if config.settings.playback.paused {
+            send?(.setPlayback(input: number, paused: false))
+        } else if playbackEnded {
+            send?(.seekPlayback(input: number, seconds: 0))
+        } else {
+            send?(.setPlayback(input: number, paused: true))
+        }
+    }
 
     /// 回到开头（seekPlayback 0；暂停中就停在第一帧）。
     func restartPlayback() { send?(.seekPlayback(input: number, seconds: 0)) }
@@ -378,6 +404,8 @@ struct SliderField: View {
 }
 
 struct InputSettingsView: View {
+    /// 效果页显示"限幅器"那一节吗：每路不装限幅（W5-P，W4C3 第 3 条），不显示；已有的限幅格列在"其他效果"里原样留着。
+    static let effectsShowLimiter = false
     @ObservedObject var model: InputSettingsModel
     let preview: InputPreviewContainer
     @FocusState private var nameFocused: Bool
@@ -465,7 +493,7 @@ struct InputSettingsView: View {
                     Text(L("effects.notEffectiveHelp")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            EffectChainView(editor: model.effectsBinding)
+            EffectChainView(editor: model.effectsBinding, showsLimiter: Self.effectsShowLimiter)
         case .source: source
         }
     }
@@ -579,7 +607,7 @@ struct InputSettingsView: View {
         if model.isFileSource {
             Section(L("inputSettings.playback.title")) {
                 HStack {
-                    Button(model.config.settings.playback.paused ? L("inputSettings.playback.play") : L("inputSettings.playback.pause")) { model.togglePaused() }
+                    Button(model.playButtonShowsPlay ? L("inputSettings.playback.play") : L("inputSettings.playback.pause")) { model.togglePaused() }
                     Button(L("inputSettings.playback.restart")) { model.restartPlayback() }
                 }
                 Toggle(L("inputSettings.playback.restartOnProgram"), isOn: model.bind(\.playback.restartOnProgram))

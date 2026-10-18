@@ -37,7 +37,7 @@ final class DiskProtectionAppTests: XCTestCase {
     }
 
     private func start(_ show: Show) throws -> SwitcherSession {
-        _ = try AppTest.runningSession()   // 等启动时的 replaceSession 完成，否则这次 replaceSession 会被 replacing 挡掉
+        _ = try AppTest.runningSession()   // 等启动时的 replaceSession 完成（W5-P / D04 起换 session 排队、不再丢，等它是为了从跑着的会话开始）
         let done = AppTest.expectationBox()
         Task { await AppTest.controller.replaceSession(show: show); done.value = true }
         guard AppTest.waitUntil(20, { done.value && AppTest.controller.session?.isRunning == true }) else { throw XCTSkip("节目没起来") }

@@ -25,8 +25,9 @@ final class MultiviewWindowController: NSWindowController {
 
     init(source: (any DisplayFrameSource)?) {
         let size = NSSize(width: 960, height: 540)
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable, .miniaturizable],
-                              backing: .buffered, defer: false)
+        // PanelWindow：能拦按键（W5-P，W4C3 第 2 条）——多画面窗口在前时按键照样走快捷键表，MainWindowController 接 keyHandler
+        let window = PanelWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                                 backing: .buffered, defer: false)
         window.title = L("multiview.windowTitle")
         window.contentAspectRatio = NSSize(width: 16, height: 9)
         window.isReleasedWhenClosed = false

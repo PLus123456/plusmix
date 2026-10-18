@@ -64,6 +64,8 @@ struct AddInputBanner: Equatable {
     var title: String
     var message: String
     var action: Action
+    /// 这一版编译时就没带这种输入（NDI® / DeckLink SDK 没编进来）：装什么都不会好，"添加"旁不许诺"装好后自动恢复"（W5-P，W4C3 第 14 条）。
+    var buildLacksSupport = false
     var actionTitle: String {
         switch action {
         case .openSystemSettings: L("addInput.banner.openSettings")
@@ -125,9 +127,10 @@ struct AddInputEnvironment {
             return AddInputBanner(title: L("addInput.banner.screen.title"), message: L("addInput.banner.screen.message"),
                                   action: .openSystemSettings(Self.privacyURL(.screenRecording)))
         case .ndi where !ndiAvailable():
-            return AddInputBanner(title: L("addInput.banner.ndi.title"), message: L("addInput.banner.ndi.message"), action: .showHelp("ndi"))
+            return AddInputBanner(title: L("addInput.banner.ndi.title"), message: L("addInput.banner.ndi.message"), action: .showHelp("ndi"), buildLacksSupport: true)
         case .decklink where !decklinkSDKAvailable():
-            return AddInputBanner(title: L("addInput.banner.decklinkSDK.title"), message: L("addInput.banner.decklinkSDK.message"), action: .showHelp("decklink"))
+            return AddInputBanner(title: L("addInput.banner.decklinkSDK.title"), message: L("addInput.banner.decklinkSDK.message"), action: .showHelp("decklink"),
+                                  buildLacksSupport: true)
         case .decklink where !decklinkDriverPresent():
             return AddInputBanner(title: L("addInput.banner.decklinkDriver.title"), message: L("addInput.banner.decklinkDriver.message"), action: .showHelp("decklink"))
         default:

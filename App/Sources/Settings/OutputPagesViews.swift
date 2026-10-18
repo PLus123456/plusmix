@@ -371,17 +371,7 @@ struct StreamDestinationSection: View {
         draftURL = StreamAddress.masked(url)
     }
 
-    private var authSummary: String {
-        if StreamAddress.scheme(of: savedURL) == "srt" {
-            return StreamAddress.srtPassphrase(of: savedURL).isEmpty ? L("outputSettings.stream.auth.none") : L("outputSettings.stream.auth.passphraseSet")
-        }
-        if case .query(let u, let p) = model.streamAuthStyle(number) {
-            guard let c = StreamAddress.queryCredentials(of: savedURL, userParam: u, passParam: p) else { return L("outputSettings.stream.auth.none") }
-            return L("outputSettings.stream.auth.userSetQuery", c.user)
-        }
-        guard let c = model.streamCredentials(number) else { return L("outputSettings.stream.auth.none") }
-        return L("outputSettings.stream.auth.userSet", c.user)
-    }
+    private var authSummary: String { model.streamAuthSummary(number) }
 
     var body: some View {
         let video = OutputSettingsView.video(of: number, in: model)
@@ -395,8 +385,8 @@ struct StreamDestinationSection: View {
                     .disabled(!output.enabled && !model.canStartStream(number))
                 Text(model.streamStatusLine(output: number)).foregroundStyle(.secondary).lineLimit(1)
             }
-            if output.enabled, model.failures[number] != nil {
-                Text(L("outputSettings.stream.failedHint")).font(.caption).foregroundStyle(.red)
+            if let hint = model.streamFailureHint(number) {
+                Text(hint).font(.caption).foregroundStyle(.red)
                 HStack {
                     Button(L("outputSettings.stream.retry")) { model.retryStream(number) }
                     Button(L("outputSettings.stream.disable")) { model.disableStream(number) }

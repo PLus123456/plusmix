@@ -73,6 +73,18 @@ enum SlotText {
         return L("source.input", input.number, input.name)
     }
 
+    /// T-bar 那一行按钮上的字（W5-P，W4C3 第 6 条）：这一行只有 134 pt——中文"转场 2 · Wipe → 1 秒 ▾"，英文写短"T2 · Wipe → 1 s ▾"
+    /// （原来"Transition 1 · Fade 0.5…"出厂就截尾）；没选输入的 Stinger 这一行只写"Stinger"（"转场 4 · Stinger（未设）"中文也放不下 1 pt）——
+    /// 没选输入那一句在 T-bar 下面那行橙字里（W5-P，112 留下的）和上面槽的按钮上。当前那组不在槽里时只写效果与时长。
+    /// 悬停提示 / 辅助功能标签照旧写全（current）。
+    static func tbarRowTitle(_ transition: TransitionState, rate: FrameRate) -> String {
+        if let n = transition.currentSlot, n - 1 < transition.slots.count {
+            let slot = transition.slots[n - 1]
+            return L("slot.tbarRowSlot", n, isUnsetStinger(slot) ? L("transition.type.stinger") : description(slot, rate: rate))
+        }
+        return L("slot.tbarRow", current(transition, rate: rate))
+    }
+
     /// T-bar 那一行 / "执行当前转场"括号里：当前槽（"转场 2 · Wipe → 1 秒"），当前那组不在槽里时只写效果与时长。
     static func current(_ transition: TransitionState, rate: FrameRate) -> String {
         if let n = transition.currentSlot, n - 1 < transition.slots.count {

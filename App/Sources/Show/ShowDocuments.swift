@@ -65,11 +65,22 @@ final class ShowDocuments {
         stoppingOutputs(show).migratingLegacyAppFlags().migratingLegacyInputCategories()
     }
 
+    /// 读文件 + 把它当成当前文件（read + adopt；启动、用例读回）。App 换节目走 read，身份由 AppController 在换 session 的事务里 adopt（D04）。
     func load(from url: URL) throws -> Show {
-        let show = Self.prepared(try store.load(from: url))
+        let show = try read(from: url)
+        adopt(url)
+        return show
+    }
+
+    /// 只读文件（做过 prepared），不碰当前文件 / 最近列表。
+    func read(from url: URL) throws -> Show {
+        Self.prepared(try store.load(from: url))
+    }
+
+    /// 把 url 当成当前节目的文件（保存写到这里、素材相对路径按它所在目录找），记进最近列表。
+    func adopt(_ url: URL) {
         currentURL = url
         noteRecent(url)
-        return show
     }
 
     func save(_ show: Show, to url: URL) throws {
@@ -114,8 +125,14 @@ final class ShowDocuments {
     /// （W3-E5；0.1.0 没发布过，改名前的老目录里的 LastSession 不迁移）。
     static var autosaveURL: URL { UserConfig.directory.appending(path: "LastSession.\(fileExtension)") }
 
+    /// 存 LastSession。素材（图片 / 视频文件）的相对路径先按当前节目的基准目录（节目文件所在目录，没文件 = 默认录制目录）落成绝对（D16，
+    /// Codex 2026-10-13 审查）：LastSession 不在节目文件旁边，恢复出来的又没有文件身份（startNew），留着相对路径就解析到默认的 ~/Movies/PlusMix 去了。
+    /// 只改 LastSession 这一份；节目文件里照旧存相对路径。
     func autosave(_ show: Show) {
-        try? store.save(show, to: autosaveURL)
+        var snapshot = show
+        let base = mediaBaseDirectory
+        snapshot.inputs = show.inputs.map { InputRuntime.resolvingMediaPaths($0, against: base) }
+        try? store.save(snapshot, to: autosaveURL)
     }
 
     /// 有没有退出时自动存的那份（"打开上次退出时的节目"灰不灰，W5-G）。
