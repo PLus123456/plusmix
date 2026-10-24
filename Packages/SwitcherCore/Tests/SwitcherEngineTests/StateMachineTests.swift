@@ -255,3 +255,60 @@ extension StateMachineTests {
         XCTAssertEqual(runner.seen.withLock { $0 }, Array(1...3015), "每一拍都被观察一次、按序")
     }
 }
+
+extension StateMachineTests {
+    /// W1-D4 第 3 条（prompt 125，reports/w1-core-5.md §3 第 5 条）：Cut 恰好落在 Auto 走满的那一拍（第 s + d 拍）——reducer 先走满对调、
+    /// 再被 Cut 对调回去。修前 advance 与这一拍的命令混成一次前后比较，PGM 前后相同，报成"取消"：音频立即按最新状态门控，
+    /// 比画面早一个对齐延迟回到旧源。应报 auto 自然完成（elapsed，C 侧等长淡变同一刻自己走满）+ 同一拍的瞬时切换（新 PGM 切回旧 PGM）。
+    /// 排程路、每拍观察者（场景执行器）注入、命令路三条都要一样；命令路修前就对（apply 先 prepare 到目标拍、再 reduce）。
+    func testW1D4_3_cutOnTheTickTheAutoElapses_isElapsedThenCut_notCancelled() async {
+        let expected: [TransitionEvent] = [
+            .started(tick: Tick(300), type: .fade, durationTicks: 30, from: 1, to: 2, source: .auto),
+            .completed(tick: Tick(330), from: 1, to: 2, completion: .elapsed),
+            .cut(tick: Tick(330), from: 2, to: 1),
+        ]
+        // 排程路
+        do {
+            let sm = makeMachine()
+            defer { sm.stop() }
+            let c = EventCollector()
+            await sm.addTransitionSink(c)
+            await sm.schedule(.fade(durationTicks: 30), at: Tick(300))
+            await sm.schedule(.cut, at: Tick(330))
+            await sm.prepare(upTo: Tick(400))
+            XCTAssertEqual(c.events.map(\.0), expected, "排程路")
+            let s = await sm.state
+            XCTAssertEqual([s.program, s.preview], [1, 2])
+        }
+        // 每拍观察者在第 330 拍注入 Cut（场景执行器的挂点）：修前 apply 自己报一次 cut(2→1)、prepare 再从 advance 之前的状态比一次报"取消"
+        do {
+            final class Injector: TickObserver, @unchecked Sendable {
+                func stateMachine(_ machine: isolated StateMachine, willApplyTick tick: Tick) {
+                    if tick == Tick(330) { machine.schedule(.cut, at: tick) }
+                }
+            }
+            let sm = makeMachine()
+            defer { sm.stop() }
+            let c = EventCollector()
+            await sm.addTransitionSink(c)
+            let injector = Injector()
+            await sm.addTickObserver(injector)
+            await sm.schedule(.fade(durationTicks: 30), at: Tick(300))
+            await sm.prepare(upTo: Tick(400))
+            XCTAssertEqual(c.events.map(\.0), expected, "每拍观察者注入")
+        }
+        // 命令路：渲染线程消费到第 329 拍，apply 落在第 330 拍
+        do {
+            let sm = makeMachine()
+            defer { sm.stop() }
+            let c = EventCollector()
+            await sm.addTransitionSink(c)
+            await sm.schedule(.fade(durationTicks: 30), at: Tick(300))
+            await sm.prepare(upTo: Tick(329))
+            sm.noteRendered(Tick(329))
+            let r = await sm.apply(.cut)
+            XCTAssertEqual(r.appliedTick, Tick(330))
+            XCTAssertEqual(c.events.map(\.0), expected, "命令路")
+        }
+    }
+}

@@ -348,3 +348,53 @@ final class InputEffectsIntegrationTests: XCTestCase {
         await rig.shutdown()
     }
 }
+
+extension InputEffectsIntegrationTests {
+    /// W1-D4 第 4 条（prompt 125；reports/p5-contracts-4.md §5 第 3 条）：动态格换掉压缩器之后（换成 dynamicsProcessor / 链里只剩 EQ / 清空），
+    /// 状态里的 `compressorMeasuredLatencyFrames` 回到 nil——文档注释"没装压缩器为 nil"。修前每路那一份留着上一次的实测值
+    /// （`rack.measured` 是换回同一组参数时不重测的缓存）；换回压缩器又给出来。总线那一份跟着格里装着的效果走，一并钉住。
+    /// 030 的 Stats（audio.effects.measured_latency_ms）一直按种类判，一并核对没受影响。
+    func testW1D4_4_compressorSwappedOut_measuredLatencyBackToNil() async throws {
+        let rig = try await EngineRig(state: States.fourInputs(afv: false))
+        try rig.addSource(number: 1)
+        func input() throws -> AudioEngineStatus.InputEffects { try XCTUnwrap(rig.engine.inputEffectsStatus(1)) }
+        func snapshot() -> AudioEngineStatus.InputEffects? { rig.engine.status.inputs.first { $0.number == 1 }?.effects }
+        // 每路：压缩器 → 有实测值
+        await setInputEffects(rig, 1, [Self.compressor()])
+        await rig.run(seconds: 0.2)
+        XCTAssertEqual(try input().dynamicsKind, .compressor)
+        let measured = try input().compressorMeasuredLatencyFrames
+        XCTAssertNotNil(measured, "装着压缩器：有冲激法实测值")
+        XCTAssertNotNil(rig.engine.audioCounters.effects.inputs[1]?.measuredLatencyMs)
+        // 换成 dynamicsProcessor / 只剩 EQ / 清空：nil（状态快照里同一份）
+        for (chain, what) in [([FX.dynamics()], "换成 dynamicsProcessor"), ([FX.eq(1000, gainDb: 3)], "只剩 EQ"), ([], "清空")] as [([EffectSlot], String)] {
+            await setInputEffects(rig, 1, chain)
+            await rig.run(seconds: 0.2)
+            XCTAssertNotEqual(try input().dynamicsKind, .compressor, what)
+            XCTAssertNil(try input().compressorMeasuredLatencyFrames, "\(what)：每路的压缩器实测值应回到 nil")
+            XCTAssertNil(snapshot()?.compressorMeasuredLatencyFrames, "\(what)：状态快照里同一份")
+            XCTAssertNil(rig.engine.audioCounters.effects.inputs[1]?.measuredLatencyMs, "\(what)：Stats 不列实测值（030 按种类判）")
+        }
+        // 换回压缩器（同一组参数，用缓存不重测）：又给出来
+        await setInputEffects(rig, 1, [Self.compressor()])
+        await rig.run(seconds: 0.2)
+        XCTAssertEqual(try input().compressorMeasuredLatencyFrames, measured, "换回压缩器：实测值回来")
+        // 总线：Master 的 1 号格装压缩器 → 有；换成 dynamicsProcessor（换格确认之后）/ 清空 → nil
+        _ = await rig.sm.apply(.setBusEffects(bus: .master, effects: [Self.compressor()]))
+        await rig.run(seconds: 0.3)
+        XCTAssertEqual(rig.engine.effectsStatus(.master).slots, [nil, .compressor, nil])
+        XCTAssertNotNil(rig.engine.effectsStatus(.master).compressorMeasuredLatencyFrames)
+        for (chain, what) in [([FX.dynamics()], "总线换成 dynamicsProcessor"), ([], "总线清空")] as [([EffectSlot], String)] {
+            _ = await rig.sm.apply(.setBusEffects(bus: .master, effects: chain))
+            await rig.run(seconds: 0.3)
+            let st = rig.engine.effectsStatus(.master)
+            XCTAssertEqual(st.pendingSwaps, 0, what)
+            XCTAssertFalse(st.slots.contains(.compressor), what)
+            XCTAssertNil(st.compressorMeasuredLatencyFrames, "\(what)：总线的压缩器实测值应是 nil")
+            XCTAssertNil(rig.engine.audioCounters.effects.buses.first { $0.bus == Bus.master.name }?.measuredLatencyMs, "\(what)：Stats")
+        }
+        print("W1-D4 第 4 条：压缩器实测 \(measured.map(String.init) ?? "nil") 帧；换成 dynamicsProcessor / 只剩 EQ / 清空后每路与总线都是 nil，换回又是 \(measured.map(String.init) ?? "nil")")
+        XCTAssertEqual(rig.engine.status.realtimeViolations, 0)
+        await rig.shutdown()
+    }
+}

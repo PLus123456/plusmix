@@ -7,7 +7,8 @@ import SwitcherContracts
 ///   1. 短淡起点之前长淡变照走（逐样本仍在 cos / sin 上）——默认语义在命令应用时就把长淡变撤了，afv 会向转场前的目标（旧 PGM 1、旧 PVW 0）
 ///      平滑回去，起点再跳回来；
 ///   2. 起点从当时的增益接着走（起点那一块里起点之前的几个样本按块首的值保持，不跳变），走满那一刻起 from 严格 0、to 严格 1；
-///   3. 同槽位上还没开始的淡变在应用时就取消（同默认语义）。
+///   3. 同槽位上还没开始的淡变：起点比新的一条早的照走、到新的一条起点再被接管（W1-D4，裁定 #17：Cut / Auto 起点也用替换语义，
+///      隔不到 ~60 ms 的两次切换前一条通常还没开始）；起点不早于新的一条的在应用时取消（最新的命令说了算）。
 /// 两路直流 1.0：A 全左、B 全右，左右声道各看一路的 AFV 增益（同 MixerTapAndAgeTests）。
 final class CrossfadeReplaceTests: XCTestCase {
     let tpf = 1e9 / 48_000
@@ -98,27 +99,100 @@ final class CrossfadeReplaceTests: XCTestCase {
         XCTAssertEqual(l[short.index + 300], 0)
     }
 
-    /// 同槽位上还没开始的替换淡变，被更新的那条在应用时取消：只有后一条在走，前一条的起点那里长淡变照走、不起短淡。
-    func testD10_pendingReplaceIsCancelledByANewerOne() {
+    /// W1-D4 第 1 条（裁定 #17，Cut / Auto 起点也用替换语义之后）：同槽位上**还没开始、但起点比新的一条早**的替换淡变不在应用时撤——
+    /// 它到自己的起点照走，新的一条到自己的起点再接管。两次切换隔不到 ~60 ms 时后一条的命令到这里那一刻前一条通常还没开始（起点 = 拍点 + 对齐延迟），
+    /// 原来（W1-B5 的语义，也是本用例的前身 testD10_pendingReplaceIsCancelledByANewerOne）在应用时就把它撤了：前一次切换整个听不见。
+    /// 这里两条同方向（长淡变 → 第一条短淡收口 → 第二条）：第一条起点之后 256 帧 from 就是 0，一直到最后（第二条接管时已是 0）。
+    func testW1D4_1_pendingEarlierReplaceRunsAtItsStart_newerTakesOverAtItsOwn() {
         let rig = makeDCPair()
         let base = rig.driver.blockIndex
         let long = point(rig, aheadBlocks: 5, sample: 100, base: base)
         let dur = 24_000
         rig.mixer.crossfade(from: 0, to: 1, durationFrames: dur, startHostTime: long.time)
-        var l = [Float]()
-        rig.run(blocks: 40) { b in l.append(contentsOf: b.bus(.master).left) }
+        var l = [Float](), r = [Float]()
+        let collect: (OfflineBlock) -> Void = { b in l.append(contentsOf: b.bus(.master).left); r.append(contentsOf: b.bus(.master).right) }
+        rig.run(blocks: 40, afterEach: collect)
         let first = point(rig, aheadBlocks: 6, sample: 10, base: base)
         let second = point(rig, aheadBlocks: 12, sample: 30, base: base)
         rig.mixer.crossfade(from: 0, to: 1, durationFrames: 256, startHostTime: first.time, replacing: true)
         rig.mixer.crossfade(from: 0, to: 1, durationFrames: 256, startHostTime: second.time, replacing: true)
-        rig.run(blocks: 30) { b in l.append(contentsOf: b.bus(.master).left) }
-        // 第一条的起点之后（到第二条起点所在块之前）仍是长淡变
-        let secondBlock = (second.index / 256) * 256
-        for i in stride(from: first.index, to: secondBlock, by: 53) {
+        rig.run(blocks: 30, afterEach: collect)
+        // 第一条起点所在块之前：长淡变照走
+        let firstBlock = (first.index / 256) * 256
+        for i in stride(from: 40 * 256, to: firstBlock, by: 37) {
             let e = Double.pi / 2 * Double(i - long.index) / Double(dur)
-            XCTAssertEqual(Double(l[i]), cos(e), accuracy: 2e-6, "样本 \(i)：被取消的那条不该起短淡")
+            XCTAssertEqual(Double(l[i]), cos(e), accuracy: 2e-6, "样本 \(i)：第一条起点之前仍在长淡变上")
         }
-        for i in (second.index + 256)..<l.count { XCTAssertEqual(l[i], 0, "样本 \(i)") }
+        // 第一条起点起短淡：从块首保持的值 a 按 a·cos 走到 0
+        let a = l[firstBlock - 1]
+        for k in [0, 64, 128, 255] {
+            XCTAssertEqual(Double(l[first.index + k]), Double(a) * cos(Double.pi / 2 * Double(k) / 256), accuracy: 2e-6, "第一条短淡 +\(k)")
+        }
+        // 第一条走满起（到第二条起点、之后第二条接管）：from 严格 0、to 满
+        let tail = (first.index + 256)..<l.count
+        let badL = tail.filter { l[$0] != 0 }, badR = tail.filter { abs(Double(r[$0]) - 1) > 2e-7 }
+        XCTAssertEqual(badL.count, 0, "第一条走满之后 from 应严格 0（被提前撤掉的话这里还在长淡变上）：\(badL.count) 个样本不是，第一个 \(badL.first.map { "样本 \($0) = \(l[$0])" } ?? "—")")
+        XCTAssertEqual(badR.count, 0, "第一条走满之后 to 应满：\(badR.count) 个样本不是")
+        XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
+    }
+
+    /// 对照：起点**不早于**新的一条的、还没开始的同槽位淡变，新的一条应用时就撤掉（最新的命令说了算；引擎只会在"开 AFV 时补的跟随淡变"
+    /// 起点落在过去时碰到）。这里旧的一条起点更晚、方向相反：留着它的话起点处 L / R 会对调；撤掉之后只有新的一条（from 已是 0、to 已是 1，不变）。
+    func testW1D4_1_pendingLaterReplaceIsSupersededByANewerOne() {
+        let rig = makeDCPair()
+        let base = rig.driver.blockIndex
+        let later = point(rig, aheadBlocks: 12, sample: 30, base: base)
+        let sooner = point(rig, aheadBlocks: 6, sample: 10, base: base)
+        rig.mixer.crossfade(from: 0, to: 1, durationFrames: 256, startHostTime: later.time, replacing: true)   // 旧：L → 0、R → 1
+        rig.mixer.crossfade(from: 1, to: 0, durationFrames: 256, startHostTime: sooner.time, replacing: true)  // 新：L 留 1、R 留 0
+        var l = [Float](), r = [Float]()
+        rig.run(blocks: 30) { b in l.append(contentsOf: b.bus(.master).left); r.append(contentsOf: b.bus(.master).right) }
+        let badL = l.indices.filter { abs(Double(l[$0]) - 1) > 2e-7 }, badR = r.indices.filter { r[$0] != 0 }
+        XCTAssertEqual(badL.count, 0, "被新命令盖掉的旧淡变不该在它的起点对调：L \(badL.count) 个样本不是 1，第一个 \(badL.first.map { "样本 \($0) = \(l[$0])" } ?? "—")")
+        XCTAssertEqual(badR.count, 0, "R \(badR.count) 个样本不是 0")
+        XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
+    }
+
+    /// 第 1 条的另一种相位（连按两下 Cut、第二条命令到时第一条正在走）：反方向的替换淡变不撤正在走的那条，第一条照走到第二条的起点，
+    /// 第二条从那一刻的增益接着走回去。默认语义在这里会撤掉第一条、afv 向转场前的目标回弹约 60 ms、起点再跳回（testD10_plainCrossfadeStillCancelsAtApply_contrast）。
+    func testW1D4_1_reverseReplaceWhileTheFirstIsRunning_noRebound() {
+        let rig = makeDCPair()
+        let base = rig.driver.blockIndex
+        let first = point(rig, aheadBlocks: 5, sample: 100, base: base)
+        let dur = 4_800
+        rig.mixer.crossfade(from: 0, to: 1, durationFrames: dur, startHostTime: first.time, replacing: true)
+        var l = [Float](), r = [Float]()
+        let collect: (OfflineBlock) -> Void = { b in l.append(contentsOf: b.bus(.master).left); r.append(contentsOf: b.bus(.master).right) }
+        rig.run(blocks: 11, afterEach: collect)                       // 第一条走到约 30%
+        let back = point(rig, aheadBlocks: 5, sample: 70, base: base) // 第一条约 57% 处切回
+        rig.mixer.crossfade(from: 1, to: 0, durationFrames: 256, startHostTime: back.time, replacing: true)
+        rig.run(blocks: 20, afterEach: collect)
+        let backBlock = (back.index / 256) * 256
+        // 起点所在块之前：逐样本仍在第一条上（不回弹）
+        for i in stride(from: first.index, to: backBlock, by: 29) {
+            let e = Double.pi / 2 * Double(i - first.index) / Double(dur)
+            XCTAssertEqual(Double(l[i]), cos(e), accuracy: 2e-6, "样本 \(i)：L 应仍在第一条的 cos 上")
+            XCTAssertEqual(Double(r[i]), sin(e), accuracy: 2e-6, "样本 \(i)：R 应仍在第一条的 sin 上")
+        }
+        // 第二条：from = R（从 b 起 b·cos → 0），to = L（从 a 起 a + (1 − a)·sin → 1）
+        let a = l[backBlock - 1], b = r[backBlock - 1]
+        for k in [0, 1, 64, 128, 255] {
+            let e = Double.pi / 2 * Double(k) / 256
+            XCTAssertEqual(Double(r[back.index + k]), Double(b) * cos(e), accuracy: 2e-6, "第二条 +\(k) from（R）")
+            XCTAssertEqual(Double(l[back.index + k]), Double(a) + (1 - Double(a)) * sin(e), accuracy: 2e-6, "第二条 +\(k) to（L）")
+        }
+        let tail = (back.index + 256)..<l.count
+        XCTAssertEqual(tail.filter { r[$0] != 0 }.count, 0, "第二条走满之后 R 应严格 0")
+        XCTAssertEqual(tail.filter { abs(Double(l[$0]) - 1) > 2e-7 }.count, 0, "第二条走满之后 L 应满")
+        // 全程：L 在第二条起点之前不升、之后不降；相邻样本没有跳变
+        var maxJump: Float = 0
+        var rebound: Float = 0
+        for i in (first.index + 1)..<l.count {
+            if i < back.index { rebound = max(rebound, l[i] - l[i - 1]) }
+            maxJump = max(maxJump, abs(l[i] - l[i - 1]), abs(r[i] - r[i - 1]))
+        }
+        XCTAssertLessThanOrEqual(rebound, 1e-6, "第二条起点之前 L 回弹 \(rebound)")
+        XCTAssertLessThan(maxJump, 0.01)
         XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
     }
 }
