@@ -48,6 +48,26 @@ final class CompatBrowserOriginTests: XCTestCase {
         XCTAssertEqual(state.program, 2)
     }
 
+    /// DNS 重绑定：网页把自己的域名改解析到 127.0.0.1 之后，它的 `GET /api?Function=Cut` 在浏览器看来是同源、不带 Origin，只有 Host 是它的域名——
+    /// 403、Cut 不执行（这正是"GET 改状态"最怕的那一种）；Host 是本机地址的同源请求照旧。
+    func testNS05_dnsRebindingSameOriginFunctionCut_403() async throws {
+        let f = try await CompatFixture.start()
+        defer { Task { await f.stop() } }
+        let port = try XCTUnwrap(f.server.boundHTTPPort)
+        func statusLine(host: String) throws -> String? {
+            let c = try LineClient(port: port)
+            try c.sendRaw("GET /api/?Function=Cut HTTP/1.1\r\nHost: \(host)\r\nSec-Fetch-Site: same-origin\r\nConnection: close\r\n\r\n")
+            return try c.readLine()
+        }
+        XCTAssertEqual(try statusLine(host: "rebind.attacker.invalid:\(port)"), "HTTP/1.1 403 Forbidden")
+        var state = await f.stateMachine.state
+        XCTAssertEqual(state.program, 1, "Cut 没执行")
+        XCTAssertEqual(f.server.counters.functions, 0)
+        XCTAssertEqual(try statusLine(host: "127.0.0.1:\(port)"), "HTTP/1.1 200 OK")
+        state = await f.stateMachine.state
+        XCTAssertEqual(state.program, 2)
+    }
+
     /// 白名单里的来源放行（跨站也放），白名单外的照拦。
     func testNS05_allowlistedOriginPasses_othersStillRefused() async throws {
         let f = try await CompatFixture.start { $0.allowedOrigins = ["http://companion.local:8000"] }

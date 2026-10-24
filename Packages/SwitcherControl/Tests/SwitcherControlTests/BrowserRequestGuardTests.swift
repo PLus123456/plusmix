@@ -37,26 +37,54 @@ final class BrowserRequestGuardTests: XCTestCase {
 
     // MARK: 规则表
 
-    /// `BrowserOriginPolicy` 的规则：带 Origin 只看白名单（`null` 永远不在）；不带 Origin 只看 Sec-Fetch-Site（none / same-origin 放）；都不带放。
+    /// `BrowserOriginPolicy` 的规则：带 Origin 只看白名单（`null` 永远不在）；不带 Origin 看 Sec-Fetch-Site——none 放、
+    /// same-origin 只在 Host 是 IP 字面量 / localhost 时放（DNS 重绑定的网页 Host 是它自己的域名）、别的拦；都不带放。
     func testNS02_originPolicy_rules() {
+        let local = "127.0.0.1:8765"
         let none = BrowserOriginPolicy(allowedOrigins: [])
-        XCTAssertTrue(none.allows(origin: nil, secFetchSite: nil), "不是浏览器")
-        for site in ["none", "same-origin", "None", " same-origin "] { XCTAssertTrue(none.allows(origin: nil, secFetchSite: site), site) }
-        for site in ["cross-site", "same-site", "", "none, cross-site"] { XCTAssertFalse(none.allows(origin: nil, secFetchSite: site), site) }
+        XCTAssertTrue(none.allows(origin: nil, secFetchSite: nil, host: "rebind.attacker.invalid:8765"), "不是浏览器：不看 Host")
+        for site in ["none", "None", " none "] { XCTAssertTrue(none.allows(origin: nil, secFetchSite: site, host: "rebind.attacker.invalid"), site) }
+        for site in ["same-origin", " same-origin "] { XCTAssertTrue(none.allows(origin: nil, secFetchSite: site, host: local), site) }
+        for site in ["cross-site", "same-site", "", "none, cross-site"] { XCTAssertFalse(none.allows(origin: nil, secFetchSite: site, host: local), site) }
+        for host in ["127.0.0.1", "127.0.0.1:8765", "192.168.1.20:8088", "[::1]:8765", "[fe80::1]", "localhost:8765", "LOCALHOST", "studio.localhost:1",
+                     "localhost.:8765"] {
+            XCTAssertTrue(none.allows(origin: nil, secFetchSite: "same-origin", host: host), "\(host)：本机 / IP 字面量上的同源")
+        }
+        for host: String? in ["rebind.attacker.invalid:8765", "attacker.invalid", "studio.local:8765", "127.0.0.1.attacker.invalid", "1.2.3", "1.2.3.256",
+                              "[evil.example]", "", nil] {
+            XCTAssertFalse(none.allows(origin: nil, secFetchSite: "same-origin", host: host), "\(host ?? "nil")：域名上的同源 = DNS 重绑定")
+        }
         for origin in [Self.attacker, "null", "", "http://127.0.0.1:8765"] {
-            XCTAssertFalse(none.allows(origin: origin, secFetchSite: nil), origin)
-            XCTAssertFalse(none.allows(origin: origin, secFetchSite: "same-origin"), "\(origin)：带 Origin 只看白名单")
+            XCTAssertFalse(none.allows(origin: origin, secFetchSite: nil, host: local), origin)
+            XCTAssertFalse(none.allows(origin: origin, secFetchSite: "same-origin", host: local), "\(origin)：带 Origin 只看白名单")
         }
         let some = BrowserOriginPolicy(allowedOrigins: ["HTTP://Panel.Local:8080/", "https://ops.example:443", "http://lan.example:80", "null", " "])
         XCTAssertEqual(some.allowedOrigins, ["http://panel.local:8080", "https://ops.example", "http://lan.example"], "规范化；null / 空白不进白名单")
         for origin in ["http://panel.local:8080", "http://PANEL.local:8080", "https://ops.example", "https://ops.example:443", "http://lan.example"] {
-            XCTAssertTrue(some.allows(origin: origin, secFetchSite: "cross-site"), "\(origin)：白名单里的跨站也放")
+            XCTAssertTrue(some.allows(origin: origin, secFetchSite: "cross-site", host: local), "\(origin)：白名单里的跨站也放")
         }
         for origin in ["null", "http://panel.local:8081", "https://panel.local:8080", "http://panel.local:8080, https://attacker.invalid", Self.attacker] {
-            XCTAssertFalse(some.allows(origin: origin, secFetchSite: nil), origin)
+            XCTAssertFalse(some.allows(origin: origin, secFetchSite: nil, host: local), origin)
         }
         XCTAssertEqual(BrowserOriginPolicy.normalize("https://x.example:4443/"), "https://x.example:4443", "非默认端口留着")
         XCTAssertEqual(BrowserOriginPolicy.normalize("http://[::1]:80"), "http://[::1]")
+    }
+
+    /// DNS 重绑定：网页 http://rebind.attacker.invalid:<端口> 把自己的域名改解析到 127.0.0.1 之后，它的 GET 在浏览器看来是同源、不带 Origin，
+    /// 只有 Host 是它的域名——403、不漏状态；同样的请求 Host 是本机地址（地址栏 / 本机调试页）照旧 200。
+    func testNS02_dnsRebindingSameOriginGet_403() async throws {
+        let s = try await startServer()
+        defer { Task { await s.stop() } }
+        let port = try XCTUnwrap(s.server.boundPort)
+        for (host, expected) in [("rebind.attacker.invalid:\(port)", 403), ("127.0.0.1:\(port)", 200), ("localhost:\(port)", 200)] {
+            for path in ["/api/v1/state", "/api/v1/log"] {
+                let (status, body) = try RawWSClient.httpGet(port: port, path: path, headers: ["Host": host, "Sec-Fetch-Site": "same-origin"])
+                XCTAssertEqual(status, expected, "\(host) \(path)")
+                if expected == 403 { XCTAssertFalse(body.contains("\"preview\""), "\(host) \(path)：不漏状态") }
+            }
+        }
+        let (status, _) = try RawWSClient.httpGet(port: port, path: "/api/v1/state", headers: ["Host": "rebind.attacker.invalid:\(port)"])
+        XCTAssertEqual(status, 200, "不带 Sec-Fetch-Site 的（不是浏览器）不看 Host")
     }
 
     // MARK: WS 升级
@@ -240,6 +268,43 @@ final class RawWSClient: @unchecked Sendable {
 
     func close() {
         if fd >= 0 { Darwin.close(fd); fd = -1 }
+    }
+
+    /// 一次原始 HTTP GET（Host 也能写成别的——URLSession 不让改 Host）：读到对端关为止，回 (状态码, 正文)；`headers` 里没写 Host 就用本机地址。
+    static func httpGet(port: Int, path: String, headers: [String: String]) throws -> (status: Int, body: String) {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw error("socket 失败") }
+        defer { Darwin.close(fd) }
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(port).bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let rc = withUnsafePointer(to: &addr) { p in
+            p.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard rc == 0 else { throw error("connect 127.0.0.1:\(port) 失败") }
+        var all = headers
+        if all["Host"] == nil { all["Host"] = "127.0.0.1:\(port)" }
+        var request = "GET \(path) HTTP/1.1\r\n"
+        for (name, value) in all.sorted(by: { $0.key < $1.key }) { request += "\(name): \(value)\r\n" }
+        request += "Connection: close\r\n\r\n"
+        let bytes = Array(request.utf8)
+        guard bytes.withUnsafeBufferPointer({ Darwin.send(fd, $0.baseAddress, $0.count, 0) }) == bytes.count else { throw error("send 失败") }
+        var response: [UInt8] = []
+        var tmp = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let n = recv(fd, &tmp, tmp.count, 0)
+            guard n > 0 else { break }
+            response += tmp[0..<n]
+        }
+        let text = String(decoding: response, as: UTF8.self)
+        let status = text.split(separator: " ", maxSplits: 2).dropFirst().first.flatMap { Int($0) } ?? 0
+        let body = text.range(of: "\r\n\r\n").map { String(text[$0.upperBound...]) } ?? ""
+        return (status, body)
     }
 
     /// 下一条文本帧（跳过 ping / pong）；超时、对端关闭、没升级给 nil。
