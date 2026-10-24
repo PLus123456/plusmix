@@ -156,6 +156,8 @@ final class CompatCore: Sendable {
     private let functionErrors = Atomic<UInt64>(0)
     private let tcpAccepted = Atomic<UInt64>(0)
     private let tcpOpen = Atomic<Int>(0)
+    private let tcpRefused = Atomic<UInt64>(0)
+    private let linesTooLong = Atomic<UInt64>(0)
     private let xmlServed = Atomic<UInt64>(0)
     private let tallyEvents = Atomic<UInt64>(0)
     private let actsEvents = Atomic<UInt64>(0)
@@ -170,6 +172,7 @@ final class CompatCore: Sendable {
     var counters: VMixCompatServer.Counters {
         VMixCompatServer.Counters(functions: functions.load(ordering: .relaxed), functionErrors: functionErrors.load(ordering: .relaxed),
                                   tcpConnectionsAccepted: tcpAccepted.load(ordering: .relaxed), tcpConnectionsOpen: tcpOpen.load(ordering: .relaxed),
+                                  tcpConnectionsRefused: tcpRefused.load(ordering: .relaxed), tcpLinesTooLong: linesTooLong.load(ordering: .relaxed),
                                   xmlServed: xmlServed.load(ordering: .relaxed), tallyEvents: tallyEvents.load(ordering: .relaxed),
                                   actsEvents: actsEvents.load(ordering: .relaxed))
     }
@@ -195,11 +198,19 @@ final class CompatCore: Sendable {
     func noteTallyEvent() { tallyEvents.add(1, ordering: .relaxed) }
     func noteActsEvents(_ n: Int) { actsEvents.add(UInt64(n), ordering: .relaxed) }
     func noteFunctionError() { functionErrors.add(1, ordering: .relaxed) }
-    func noteConnectionOpened() {
+    /// 接一条新连接（NS07）：开着的不到 limit 就记上、给 true；满了记一次拒绝、给 false。
+    /// 只有 TCP 服务的接连接循环调——加计数没有并发，减（`noteConnectionClosed`）只会让它更小，所以不用比较交换。
+    func openConnection(limit: Int) -> Bool {
+        guard tcpOpen.load(ordering: .relaxed) < limit else {
+            tcpRefused.add(1, ordering: .relaxed)
+            return false
+        }
         tcpAccepted.add(1, ordering: .relaxed)
         tcpOpen.add(1, ordering: .relaxed)
+        return true
     }
     func noteConnectionClosed() { tcpOpen.subtract(1, ordering: .relaxed) }
+    func noteLineTooLong() { linesTooLong.add(1, ordering: .relaxed) }
 
     // MARK: 执行
 

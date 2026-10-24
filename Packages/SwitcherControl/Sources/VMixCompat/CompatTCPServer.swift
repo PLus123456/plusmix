@@ -9,6 +9,7 @@ import SwitcherContracts
 //   读方：按 \r\n（或 \n）切行 → 处理 → 写应答；QUIT 关连接。
 //   推方：订阅快照流，SUBSCRIBE TALLY 后 TALLY 串变了推 `TALLY OK …`，SUBSCRIBE ACTS 后按前后状态差推 `ACTS OK …`。
 // 应答格式：`<CMD> OK …` / `<CMD> ER <码>: <文案>` / `XML <长度>\r\n<正文>\r\n`（长度含结尾 CRLF，上游约定）。
+// 上限（NS07）：一行超过 maxLineBytes 断开这条连接，同时开着 maxConnections 条之后新连接直接关；不设空闲超时（订阅者只收不发）。
 final class CompatTCPServer: Sendable {
     /// 一行最长多少字节（不含行尾的 \r\n）：超过就断开这条连接、记一行日志（Codex 10-24 审计 NS07——原来不带换行的字节无限往 pending 里攒）。
     /// 上游协议最长的正常行是 FUNCTION 带一段文字（SetText 之类），远小于 64 KiB。
@@ -52,6 +53,12 @@ final class CompatTCPServer: Sendable {
             try await withThrowingDiscardingTaskGroup { group in
                 try await server.executeThenClose { inbound in
                     for try await connection in inbound {
+                        // 连接数上限（NS07）：计数只在这条循环里加，满了这一条不发问候、直接关
+                        guard core.openConnection(limit: Self.maxConnections) else {
+                            core.logger.notice("tcp connection refused: \(Self.maxConnections) connections already open")
+                            group.addTask { try? await connection.executeThenClose { _, _ in } }
+                            continue
+                        }
                         group.addTask { await self.handle(connection) }
                     }
                 }
@@ -62,8 +69,7 @@ final class CompatTCPServer: Sendable {
     }
 
     private func handle(_ connection: NIOAsyncChannel<ByteBuffer, ByteBuffer>) async {
-        core.noteConnectionOpened()
-        defer { core.noteConnectionClosed() }
+        defer { core.noteConnectionClosed() }   // 记开在 serve 的接连接循环里（openConnection）
         do {
             try await connection.executeThenClose { inbound, outbound in
                 let session = TCPSession(core: core, outbound: outbound)
@@ -118,11 +124,26 @@ final class TCPSession: Sendable {
                 var lineBytes = pending[pending.startIndex..<newline]
                 pending.removeSubrange(pending.startIndex...newline)
                 if lineBytes.last == 0x0D { lineBytes = lineBytes.dropLast() }
+                guard lineBytes.count <= CompatTCPServer.maxLineBytes else {
+                    lineTooLong(lineBytes.count)
+                    return
+                }
                 let line = String(decoding: lineBytes, as: UTF8.self)
                 core.logger.trace("tcp line: \(line)")
                 if try await handle(line: line) == .quit { return }
             }
+            // 还没等到换行的半行（NS07）：超过上限（多留一个 \r 的位置）就断开——原来不带换行的字节在这里无限往上攒
+            if pending.count > CompatTCPServer.maxLineBytes + 1 {
+                lineTooLong(pending.count)
+                return
+            }
         }
+    }
+
+    /// 一行超过 `CompatTCPServer.maxLineBytes`：计数、记一行日志；调用方随即从 readLoop 返回，这条连接收尾关掉。
+    private func lineTooLong(_ bytes: Int) {
+        core.noteLineTooLong()
+        core.logger.warning("tcp line longer than \(CompatTCPServer.maxLineBytes) bytes (\(bytes) so far); closing connection")
     }
 
     enum Flow { case `continue`, quit }
