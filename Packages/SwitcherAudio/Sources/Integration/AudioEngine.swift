@@ -605,12 +605,15 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     private func applyGates() {
         guard let state = bridge?.lastSeenState ?? stateMachine.publisher.latest?.state else { return }
         let gains = AudioProgramGate.gains(for: state)
+        // Auto 正在走时 PGM / PVW 的记录是淡变的终值（crossfade 写的 0 / 1），不是此刻的增益：比记录会漏——PVW 的 AFV 位途中关掉、全局 AFV 途中关掉时
+        // 记录恰好就是 1，原来不发命令，它接着沿 sin 走，不回到恒 1。这两路照发（参与的下面再补跟随接管）
+        let autoPair: Set<Int> = state.transition.isActive && state.transition.source == .auto ? [state.program, state.preview] : []
         lock.lock()
         let afv = afvOn
         var changes: [(Int, Float)] = []
         for (n, rec) in slots where rec.removing == nil {
             let g = gains[n] ?? (afv && rec.settings.afv ? 0 : 1)
-            if g != rec.afvGain { rec.afvGain = g; changes.append((rec.slot, g)) }
+            if g != rec.afvGain || autoPair.contains(n) { rec.afvGain = g; changes.append((rec.slot, g)) }
         }
         lock.unlock()
         for (slot, g) in changes { mixer.setAFVGain(slot: slot, g) }

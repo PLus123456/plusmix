@@ -318,6 +318,82 @@ final class AFVCloseoutTests: XCTestCase {
         await rig.shutdown()
     }
 
+    /// 第 2 条的延伸（Auto 途中 AFV 开关翻、与别的切换叠在一起）：
+    ///   a. Auto 中途开 AFV（第 150 拍）之后又被 Cut 打断（第 160 拍）：开了之后到打断那一拍跟着曲线走，打断那一拍的短淡从那里接管，
+    ///      +1 块起旧源严格 0、新源满（D10 不回退）；
+    ///   b. 全局 AFV 一直开着，PVW 那一路的 AFV 位途中关掉再打开（第 135 拍关、第 150 拍开）：关着时它恒 1（不跟随）、PGM 照走 cos；重新参与之后两路都跟剩下的曲线走，
+    ///      走满那一刻旧源到 −∞。修前：关掉时 PVW 的门控记录恰好是淡变终值 1，applyGates 比记录"没变"、不发命令，它接着沿 sin 走；打开时停在那一刻的 sin 上；
+    ///   c. 全局 AFV 途中关掉（第 150 拍）：两路都回到恒 1（不跟随）。修前 PVW 同 b 的原因接着沿 sin 走。
+    /// "恒 1" 按 AFV 增益与 1 差 1e-4 判（直接门控到 1 的一阶平滑停在 1 − 4.3e-6，不与 ISO 逐样本相同，见报告 §5）。
+    func testW1D4_2_followThenInterrupt_andPerInputFlipMidAuto() async throws {
+        let s = Tick(120), d = 60
+        var problems: [String] = []
+        // a
+        do {
+            let (rig, taps) = try await makeRig(afv: false)
+            await rig.sm.schedule(.fade(durationTicks: d), at: s)
+            await rig.sm.schedule(.setAFV(on: true), at: Tick(150))
+            await rig.sm.schedule(.cut, at: Tick(160))
+            await rig.run(seconds: 4)
+            let clock = rig.clock, fade = rig.engine.blockDuration
+            let tS = clock.time(of: s), D = clock.duration(ofTicks: d), tCut = clock.time(of: Tick(160))
+            var p = Problems()
+            let e1 = Self.gainError(taps.p1, taps.iso1, from: clock.time(of: Tick(152)), to: tCut - fade) { Self.curve($0, start: tS, duration: D, toPath: false) }
+            let e2 = Self.gainError(taps.p2, taps.iso2, from: clock.time(of: Tick(152)), to: tCut - fade) { Self.curve($0, start: tS, duration: D, toPath: true) }
+            p.check(e1.n > 3_000 && e2.n > 3_000, "样本太少")
+            p.check(e1.maxErr < 1e-3 && e2.maxErr < 1e-3, "开 AFV 到打断之间应在曲线上（最大差 \(String(format: "%.4f / %.4f", e1.maxErr, e2.maxErr))）")
+            let after = min(tCut + HostDuration(seconds: 0.5), rig.lastDeliveredWindow(blocks: 1).1)
+            p.check(Self.nonzero(taps.p1, from: tCut + fade, to: after) == 0, "打断 + 1 块起旧源应严格 0")
+            p.none(Self.same(taps.p2, taps.iso2, from: tCut + fade, to: after), "打断 + 1 块起新源应满")
+            problems += p.list.map { "a（开 AFV 后打断）：" + $0 }
+            print("W1-D4 第 2 条延伸 a：开 AFV（第 150 拍）到打断（第 160 拍）逐样本曲线最大差 \(String(format: "%.1e", max(e1.maxErr, e2.maxErr)))；\(p.list.isEmpty ? "打断 +1 块起旧源 0、新源满" : p.list.joined(separator: "；"))")
+            await rig.shutdown()
+        }
+        // b
+        do {
+            let (rig, taps) = try await makeRig(afv: true)
+            var off = InputSettings(); off.audio.afv = false
+            await rig.sm.schedule(.fade(durationTicks: d), at: s)
+            await rig.sm.schedule(.setInputSettings(input: 2, settings: off), at: Tick(135))
+            await rig.sm.schedule(.setInputSettings(input: 2, settings: InputSettings()), at: Tick(150))
+            await rig.run(seconds: 4.5)
+            let clock = rig.clock
+            let tS = clock.time(of: s), D = clock.duration(ofTicks: d), tE = tS + D
+            var p = Problems()
+            let e1 = Self.gainError(taps.p1, taps.iso1, from: tS, to: tE) { Self.curve($0, start: tS, duration: D, toPath: false) }
+            let e2 = Self.gainError(taps.p2, taps.iso2, from: clock.time(of: Tick(152)), to: tE) { Self.curve($0, start: tS, duration: D, toPath: true) }
+            p.check(e1.n > 20_000 && e2.n > 10_000, "样本太少")
+            p.check(e1.maxErr < 1e-3, "PGM（没翻过）全程应在 cos 上（最大差 \(String(format: "%.4f", e1.maxErr))）")
+            p.check(e2.maxErr < 1e-3, "PVW 重新参与之后应在 sin 上（最大差 \(String(format: "%.4f", e2.maxErr))）")
+            let one = Self.gainError(taps.p2, taps.iso2, from: clock.time(of: Tick(136)), to: clock.time(of: Tick(145))) { _ in 1 }
+            p.check(one.n > 3_000 && one.maxErr < 1e-4, "PVW 的 AFV 位关着时应恒 1（与 1 最大差 \(String(format: "%.4f", one.maxErr))）")
+            let silent = Self.silenceMs(taps.p1, after: tE)
+            p.check(abs(silent) <= 0.05, "走满那一刻旧源应到 −∞（实测 \(String(format: "%+.3f", silent)) ms）")
+            problems += p.list.map { "b（PVW 的 AFV 位途中关再开）：" + $0 }
+            print("W1-D4 第 2 条延伸 b：PGM 全程逐样本曲线最大差 \(String(format: "%.1e", e1.maxErr))、PVW 关着时与 1 差 \(String(format: "%.1e", one.maxErr))、重新参与后与曲线差 \(String(format: "%.1e", e2.maxErr))；旧源 t_e \(String(format: "%+.3f", silent)) ms 到 −∞")
+            await rig.shutdown()
+        }
+        // c
+        do {
+            let (rig, taps) = try await makeRig(afv: true)
+            await rig.sm.schedule(.fade(durationTicks: d), at: s)
+            await rig.sm.schedule(.setAFV(on: false), at: Tick(150))
+            await rig.run(seconds: 4)
+            let clock = rig.clock
+            var p = Problems()
+            let from = clock.time(of: Tick(150)), to = clock.time(of: Tick(200))
+            let g1 = Self.gainError(taps.p1, taps.iso1, from: from, to: to) { _ in 1 }
+            let g2 = Self.gainError(taps.p2, taps.iso2, from: from, to: to) { _ in 1 }
+            p.check(g1.n > 20_000 && g2.n > 20_000, "样本太少")
+            p.check(g1.maxErr < 1e-4, "AFV 关掉之后 PGM 应恒 1（最大差 \(String(format: "%.4f", g1.maxErr))）")
+            p.check(g2.maxErr < 1e-4, "AFV 关掉之后 PVW 应恒 1（最大差 \(String(format: "%.4f", g2.maxErr))）")
+            problems += p.list.map { "c（全局 AFV 途中关掉）：" + $0 }
+            print("W1-D4 第 2 条延伸 c：第 150 拍关 AFV，第 150–200 拍两路与 1 最大差 \(String(format: "%.1e / %.1e", g1.maxErr, g2.maxErr))")
+            await rig.shutdown()
+        }
+        XCTAssertEqual(problems, [], problems.joined(separator: "\n"))
+    }
+
     // MARK: 第 3 条：Cut 恰好落在 Auto 走满那一拍
 
     /// 30 拍 Auto（第 120 拍起，1→2），Cut 恰好排在走满那一拍（第 150 拍）：画面第 149 拍还差 1/30 走满、第 150 拍切回 1 号。
