@@ -384,6 +384,8 @@
 "audioSettings.compressor.ratio" = "Ratio %.1f:1";
 "audioSettings.enabled" = "Enabled";
 "audioSettings.eq.band" = "Band %d";
+"audioSettings.general.effectLatency" = "Effect chain latency";
+"audioSettings.general.effectLatencyNone" = "0 ms (no effects)";
 "audioSettings.general.fader" = "Fader";
 "audioSettings.general.format" = "Format";
 "audioSettings.general.formatValue" = "48 kHz · stereo";
@@ -1679,6 +1681,12 @@
 "outputStatus.page.record" = "Recording";
 "outputStatus.pagePicker" = "Page";
 "outputStatus.waiting" = "Waiting for stats…";
+"outputStatus.effectLatency" = "Effect chain latency: %@";
+"outputStatus.effectLatency.input" = "Input %d %@";
+"outputStatus.effectLatency.inputNoName" = "Input %d";
+"outputStatus.effectLatency.item" = "%@ %@";
+"outputStatus.effectLatency.itemMeasured" = "%@ %@ (compressor measured %@)";
+"outputStatus.effectLatency.separator" = " · ";
 "outputStatus.events" = "Events";
 "outputStatus.noEvents" = "No events yet.";
 "outputStatus.hint" = "All numbers come from the stats (the same data the API reads); events are derived from state changes in the once-a-second stats, so changes that come and go within a second are not shown.";

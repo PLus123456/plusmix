@@ -4,7 +4,8 @@
 //   最后错误原样显示 StreamOutput / Recorder / 运行表填的那一行（鉴权失败的三种文字已能区分，reports/w5-stream-auth.md §5 第 3 条）。
 // - 下面带时间的事件记录（连接中 → 推流中 → 断开 → 重连中 → 重连上 / 已停止 / 失败）：由相邻两行 Stats 里同一路的状态变化推出，时间 = 那一行的 ts；
 //   只做显示，不计数（次数看上面那几列）。1 Hz 采样，一秒内来回的变化看不到。窗口关着也照记（PanelCoordinator 每行 Stats 都喂），换 session 清空。
-// - "显示日志…"= 帮助 › 打开诊断文件夹（推流 / 录制的日志在里面）。底部一行"视频延后 n ms"读 Stats 的 video_delay_ms（W1-B4，带效果的监听同步）。
+// - "显示日志…"= 帮助 › 打开诊断文件夹（推流 / 录制的日志在里面）。底部一行"视频延后 n ms"读 Stats 的 video_delay_ms（W1-B4，带效果的监听同步）；
+//   上面一行"效果链延迟"读 Stats 的 audio.effects（提案 030，W5-Q）：每条总线、装了效果的每路的处理延迟与压缩器实测值。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -56,7 +57,8 @@ final class OutputStatusModel: ObservableObject {
     @Published private(set) var events: [Event] = []
     /// "视频延后 n ms"（Stats.video_delay_ms > 0 时）。
     @Published private(set) var videoDelayText: String?
-    /// 提案 030 的效果链延迟（W5-Q 桩：还没接 Stats）。
+    /// "效果链延迟：Master 12.0 ms · Bus A 0.0 ms（压缩器实测 0.00 ms）· …"（Stats 的 audio.effects，提案 030，W5-Q）：每条总线一项（列几条看 Stats）、
+    /// 装了效果的每路一项（名字从快照对号），压缩器的实测值跟在后面。没有这一节（没有音频引擎 / 老 stats）为 nil。
     @Published private(set) var effectLatencyText: String?
     /// 收到过 Stats（没收到时窗里写"等待统计…"）。
     @Published private(set) var hasStats = false
@@ -88,6 +90,7 @@ final class OutputStatusModel: ObservableObject {
         recordRows = []
         events = []
         videoDelayText = nil
+        effectLatencyText = nil
         hasStats = false
         seen = [:]
     }
@@ -120,6 +123,25 @@ final class OutputStatusModel: ObservableObject {
         }
         let delay = stats.videoDelayMs > 0 ? L("outputStatus.videoDelay", Int(stats.videoDelayMs.rounded())) : nil
         if delay != videoDelayText { videoDelayText = delay }
+        let effects = Self.effectLatencyText(stats.audio.effects, state: state)
+        if effects != effectLatencyText { effectLatencyText = effects }
+    }
+
+    /// 效果链延迟那一行：数原样来自 Stats（延迟一位小数、压缩器实测两位）；总线按 Stats 列的顺序，输入按编号。
+    static func effectLatencyText(_ effects: Stats.AudioCounters.EffectsLatency, state: MixerState) -> String? {
+        func item(_ name: String, _ latencyMs: Double, _ measuredMs: Double?) -> String {
+            let latency = String(format: "%.1f ms", latencyMs)
+            return measuredMs.map { L("outputStatus.effectLatency.itemMeasured", name, latency, String(format: "%.2f ms", $0)) }
+                ?? L("outputStatus.effectLatency.item", name, latency)
+        }
+        var items = effects.buses.map { b in
+            item(Bus.allCases.first { $0.name == b.bus }.map { L("bus.\($0.name)") } ?? b.bus, b.latencyMs, b.measuredLatencyMs)
+        }
+        for (n, i) in effects.inputs.sorted(by: { $0.key < $1.key }) {
+            let name = state.input(n).map { L("outputStatus.effectLatency.input", n, $0.name) } ?? L("outputStatus.effectLatency.inputNoName", n)
+            items.append(item(name, i.latencyMs, i.measuredLatencyMs))
+        }
+        return items.isEmpty ? nil : L("outputStatus.effectLatency", items.joined(separator: L("outputStatus.effectLatency.separator")))
     }
 
     private static func row(_ o: OutputState, entry e: Stats.EncoderEntry?, stateText: String, severity: OutputButtonSeverity) -> Row {
@@ -201,6 +223,9 @@ struct OutputStatusView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minHeight: 120)
+            if let effects = model.effectLatencyText {
+                Text(effects).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 if let delay = model.videoDelayText { Text(delay).font(.caption).foregroundStyle(.secondary) }
                 Text(L("outputStatus.hint")).font(.caption).foregroundStyle(.secondary)

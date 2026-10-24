@@ -384,6 +384,8 @@
 "audioSettings.compressor.ratio" = "比例 %.1f:1";
 "audioSettings.enabled" = "启用";
 "audioSettings.eq.band" = "第 %d 段";
+"audioSettings.general.effectLatency" = "效果链延迟";
+"audioSettings.general.effectLatencyNone" = "0 ms（没装效果）";
 "audioSettings.general.fader" = "推子";
 "audioSettings.general.format" = "格式";
 "audioSettings.general.formatValue" = "48 kHz · 立体声";
@@ -1679,6 +1681,12 @@
 "outputStatus.page.record" = "录制";
 "outputStatus.pagePicker" = "页";
 "outputStatus.waiting" = "等待统计…";
+"outputStatus.effectLatency" = "效果链延迟：%@";
+"outputStatus.effectLatency.input" = "输入 %d %@";
+"outputStatus.effectLatency.inputNoName" = "输入 %d";
+"outputStatus.effectLatency.item" = "%@ %@";
+"outputStatus.effectLatency.itemMeasured" = "%@ %@（压缩器实测 %@）";
+"outputStatus.effectLatency.separator" = " · ";
 "outputStatus.events" = "事件";
 "outputStatus.noEvents" = "还没有事件。";
 "outputStatus.hint" = "数字全读统计（与 API 读的是同一份）；事件由每秒一次的统计里状态的变化推出，一秒内来回的看不到。";

@@ -66,6 +66,7 @@ final class PanelCoordinator: NSObject {
             self.statsWindow?.model.apply(stats: stats, state: self.state)
             self.outputStatus.apply(stats: stats, state: self.state)   // 状态面板关着也喂：事件记录要连着（W5-N）
             for (_, w) in self.inputSettingsWindows { w.model.refreshRuntime() }   // 文件播完不出快照：每秒看一次（W4C3 第 5 条）
+            for (_, w) in self.audioSettingsWindows { w.model.apply(stats: stats) }   // 效果链延迟 / 延迟自测（提案 030，W5-Q）
         }
     }
 
@@ -271,7 +272,8 @@ final class PanelCoordinator: NSObject {
     /// 叠加设置窗上次停在哪一路（关了再从底栏开，还是那一路；换节目回到 1）。
     private var lastOverlayChannel = 1
 
-    /// 音频设置窗（J2 / J3）：每条总线 / 每路输入一个，同一条再点 = 置前（page 给了就切到那一页）。表读调音台同一份 50 ms 读数。
+    /// 音频设置窗（J2 / J3）：每条总线 / 每路输入一个，同一条再点 = 置前（page 给了就切到那一页）。表读调音台同一份 50 ms 读数；
+    /// 效果链延迟 / 延迟自测读 Stats（提案 030，1 Hz，bind 里每行喂；开窗时先给最近一行）。
     @discardableResult
     func showAudioSettings(_ strip: AudioStrip, page: AudioSettingsPage? = nil) -> AudioSettingsWindowController? {
         guard let session else { return nil }
@@ -282,6 +284,7 @@ final class PanelCoordinator: NSObject {
             return w
         }
         let model = AudioSettingsModel(strip: strip, state: session.state, page: page ?? .general)
+        if let stats = session.stats { model.apply(stats: stats) }
         model.send = { [weak session] c in session?.send(c) }
         model.onOpenInputSettings = { [weak self] n in self?.showInputSettings(input: n) }
         let w = AudioSettingsWindowController(model: model, meters: controller.windowController.mixerPanel.meters)
