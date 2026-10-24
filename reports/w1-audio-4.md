@@ -125,7 +125,8 @@ SwitcherEngine/Audio/（AudioStateBridge、AudioControlEvent）、SwitcherContra
 | SwitcherCore 整包 `swift test`（14:38–14:47，负载 3–4.5，同机另有 App 的 xcodebuild） | Render 101 / Engine 131 / Contracts 115 | — | **347 = 346 过 + 1 跳 + 0 红**（跳的是原有 `testP2_stats_oldGateFilesParse`：新 worktree 没有老 gate 产物）；比 G10 多 1 条（StateMachineTests） | 全绿 | ✅ |
 | SwitcherAudio 整包 `swift test`（14:47–14:55，负载 1–3） | SwitcherAudioTests 92 / IntegrationTests 98 | — | **190 = 183 过 + 7 跳 + 0 红**（跳的都是原有：真设备 A2 / A3 三条、回环 A5 两条 BLOCKED-硬件、改系统默认输出 / 输入设备两条）；比 G10 的 178 多 12 条（CrossfadeReplaceTests +4、AFVCloseoutTests 6、InputEffects +1、FTB 实时 +1）。A1：`testA1A2_nullDevice_clickOffsetAndContinuity` 30 s click 29 个均值 −0.006 ms、dropouts / underruns / 不连续 / 违规 0；`testLifecycle_nullDevice_addRemove100Times_A1Zero` 全 0；`DeviceTests.testA1_builtInOutput_dropoutsAndUnderrunsZero` 过 | 全绿；A1 = 0 | ✅ |
 | `scripts/check-rt-symbols.sh` / `--release` | CSwitcherAudioRT 4 个目标文件 | — | 无 malloc / 锁 / 日志 / ObjC / Swift 运行时 / 系统调用符号 | 0 违规 | ✅ |
-| `make lint BRANCH=w1-audio-4` | 禁词 / 版本号 / Package.swift / check-deps / check-ownership / check-help / check-links / check-rt-symbols | — | （待填） | 全绿 | （待填） |
+| `make lint BRANCH=w1-audio-4`（C locale 与 `LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8` 各一遍） | 禁词 / 版本号 / Package.swift / check-deps / check-ownership / check-help / check-links / check-rt-symbols | — | 两遍都过；check-ownership："13 个改动文件都在允许范围内"（含本报告）；check-deps 8 个包方向正确 | 全绿 | ✅ |
+| 下游编译 | `swift build` SwitcherTestKit、Tools/switcher-headless（`AudioMixer.crossfade` 多了带默认值的参数、状态机事件推导变了；App 源码 grep 过不调 crossfade / TickObserver） | — | 两包都编过（47 s / 34 s） | 能编 | ✅ |
 
 ## 3. 没做的和原因
 
