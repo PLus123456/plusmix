@@ -244,6 +244,11 @@ final class AudioSettingsModel: ObservableObject {
         return L("audioSettings.compressor.latency", frames, Double(frames) / 48.0)
     }
 
+    /// 提案 030 的读数（W5-Q 桩：还没接 Stats）。
+    func apply(stats: Stats) {}
+    var effectLatencyText: String { "—" }
+    var compressorSelfTestText: String? { editor.dynamicsKind == .compressor ? L("audioSettings.compressor.latencyPending") : nil }
+
     func resetLimiter() {
         edit { e in
             let (present, enabled) = (e.limiter.present, e.limiter.enabled)

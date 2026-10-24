@@ -56,6 +56,8 @@ final class OutputStatusModel: ObservableObject {
     @Published private(set) var events: [Event] = []
     /// "视频延后 n ms"（Stats.video_delay_ms > 0 时）。
     @Published private(set) var videoDelayText: String?
+    /// 提案 030 的效果链延迟（W5-Q 桩：还没接 Stats）。
+    @Published private(set) var effectLatencyText: String?
     /// 收到过 Stats（没收到时窗里写"等待统计…"）。
     @Published private(set) var hasStats = false
     /// "显示日志…"：把最近 10 分钟本程序的系统日志导出成文本、放进诊断文件夹并打开（W5-P，W4C3 第 1 条：推流 / 录制的日志只在系统日志里，

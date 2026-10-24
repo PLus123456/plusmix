@@ -138,7 +138,10 @@ final class ShowDocuments {
     /// 有没有退出时自动存的那份（"打开上次退出时的节目"灰不灰，W5-G）。
     var hasAutosave: Bool { FileManager.default.fileExists(atPath: autosaveURL.path) }
 
-    func loadAutosave() -> Show? {
-        (try? store.load(from: autosaveURL)).map(Self.prepared)
+    /// 读退出时自动存的那份（做过 prepared）；没有这份 / 读不出来抛错。
+    func readAutosave() throws -> Show {
+        Self.prepared(try store.load(from: autosaveURL))
     }
+
+    func loadAutosave() -> Show? { try? readAutosave() }
 }
