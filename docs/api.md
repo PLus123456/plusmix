@@ -101,11 +101,11 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `fade`
 
-选 Fade 并立即开始 auto 转场（= setTransition(fade, d) + autoTransition）。
+选 Fade 并立即开始 auto 转场（= setTransition(fade, d) + autoTransition）；时长不在 0–864000 拍之间被拒（400，提案 034）。
 
 | 参数 | 含义 |
 |---|---|
-| `durationTicks` | 时长（拍）；0 等于 Cut |
+| `durationTicks` | 时长（拍，0–864000）；0 等于 Cut |
 
 ```json
 {
@@ -117,12 +117,12 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setTransition`
 
-选下一次转场的类型和时长，不开始；T-bar 用的也是它选的类型。
+选下一次转场的类型和时长，不开始；T-bar 用的也是它选的类型；时长不在 0–864000 拍之间被拒（400，提案 034）。
 
 | 参数 | 含义 |
 |---|---|
 | `type` | cut / fade / wipe / zoom / stinger |
-| `durationTicks` | 时长（拍） |
+| `durationTicks` | 时长（拍，0–864000） |
 
 ```json
 {
@@ -240,7 +240,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 | 参数 | 含义 |
 |---|---|
 | `slot` | 1–4 |
-| `config` | {type: cut / fade / wipe / zoom / stinger, durationTicks: 时长（拍，≥ 0），wipe: {direction, softness 0–1}, stinger: {input 或不写, cutAtTick ≥ 0}} |
+| `config` | {type: cut / fade / wipe / zoom / stinger, durationTicks: 时长（拍，负数钳 0，超过 864000 被拒——提案 034），wipe: {direction, softness 0–1}, stinger: {input 或不写, cutAtTick ≥ 0}} |
 
 ```json
 {
@@ -281,11 +281,11 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setFTBDuration`
 
-改 FTB 淡入 / 淡出黑的时长（拍）；渐变进行中电平从当前值按新时长继续走、不跳变；相同值 applied = false；不跟随转场时长。
+改 FTB 淡入 / 淡出黑的时长（拍）；渐变进行中电平从当前值按新时长继续走、不跳变；相同值 applied = false；不跟随转场时长；不在 0–864000 拍之间被拒（400，提案 034）。
 
 | 参数 | 含义 |
 |---|---|
-| `ticks` | 时长（拍，≥ 0） |
+| `ticks` | 时长（拍，0–864000） |
 
 ```json
 {
@@ -299,13 +299,13 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `overlay`
 
-开关叠加通道 1–4；input 非 null 时同时换该通道用的输入。
+开关叠加通道 1–4；input 是输入编号时同时换该通道用的输入，0 = 清空这一路的输入（开关照 on 走；开着清空画面立刻没有，没有退出动画），null = 不换（提案 034）。
 
 | 参数 | 含义 |
 |---|---|
 | `channel` | 1–4 |
 | `on` | 开 / 关 |
-| `input` | 输入编号或 null（不换） |
+| `input` | 输入编号、0 = 清空，或 null（不换） |
 
 ```json
 {
@@ -319,13 +319,13 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setOverlay`
 
-改叠加通道的位置尺寸与进出动画。
+改叠加通道的位置尺寸与进出动画；进 / 出动画进行中改了时长，从当前进度按新时长接着走、不跳（提案 034）。
 
 | 参数 | 含义 |
 |---|---|
 | `channel` | 1–4 |
 | `rect` | {x, y, width, height} 都是 0–1 比例 |
-| `animation` | {kind: cut/fade/slide/zoom, durationTicks} |
+| `animation` | {kind: cut/fade/slide/zoom, durationTicks: 拍，负数钳 0、超过 864000 被拒} |
 
 ```json
 {
@@ -739,7 +739,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `addInput`
 
-加一路输入；编号须在 1–16 之间（提案 032）、已存在则拒绝；文件来源的播放速率须在 0.1–8 之间（提案 031），否则 400。
+加一路输入；编号须在 1–16 之间（提案 032）、已存在则拒绝；文件来源的播放速率须在 0.1–8 之间（提案 031）；屏幕输入给的帧率与合成源的帧率须在 1–240 fps、合成源宽高须在 16–8192 之间（提案 034），否则 400。
 
 | 参数 | 含义 |
 |---|---|
@@ -844,7 +844,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `setInputSource`
 
-换一路输入的来源（文件路径 / 播完动作 / 播放速率 / 屏幕目标 / 帧率 / NDI 源名与带宽 / DeckLink 接口……）；编号、名字、设置、PGM / PVW / 叠加引用全部保留。文件来源的播放速率须在 0.1–8 之间（提案 031），否则 400。
+换一路输入的来源（文件路径 / 播完动作 / 播放速率 / 屏幕目标 / 帧率 / NDI 源名与带宽 / DeckLink 接口……）；编号、名字、设置、PGM / PVW / 叠加引用全部保留。文件来源的播放速率须在 0.1–8 之间（提案 031）；屏幕 / 合成源的帧率须在 1–240 fps、合成源宽高须在 16–8192 之间（提案 034），否则 400。
 
 | 参数 | 含义 |
 |---|---|
@@ -1029,7 +1029,7 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `loadShow`
 
-用节目文件整体替换状态；旧写法按读节目文件同一套规则先搬迁（show.migratingLegacyKeys().makeState()），不合法的节目文件被拒。
+用节目文件整体替换状态；旧写法按读节目文件同一套规则先搬迁（show.migratingLegacyKeys().makeValidatedState()：先查叠加个数这类结构、再查不变量与取值范围），不合法的节目文件被拒；节目格式（宽高 / 帧率）与当前不同被拒——运行中不能换格式，用打开节目 / 重启 headless（400，提案 034）。
 
 | 参数 | 含义 |
 |---|---|

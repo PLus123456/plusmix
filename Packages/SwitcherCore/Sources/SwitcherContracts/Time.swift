@@ -231,11 +231,15 @@ public struct Rational: Hashable, Comparable, Sendable {
 
 extension Rational: Codable {
     enum CodingKeys: String, CodingKey { case numerator, denominator }
+    /// 分母 0、分子或分母是 `Int64.min` 抛 `DecodingError`（提案 034 ①）：`Int64.min` 变号（分母为负时归一化、取倒数）超出 Int64，
+    /// 正好是"约分 / 变号后超出 Int64"的全部情形；原来走带 precondition 的 init，节目文件 / API 的一个数就让进程 SIGTRAP（Codex N01）。
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let n = try c.decode(Int64.self, forKey: .numerator)
         let d = try c.decode(Int64.self, forKey: .denominator)
         guard d != 0 else { throw DecodingError.dataCorruptedError(forKey: .denominator, in: c, debugDescription: "分母不能为 0") }
+        guard n != .min else { throw DecodingError.dataCorruptedError(forKey: .numerator, in: c, debugDescription: "分子不能是 Int64.min") }
+        guard d != .min else { throw DecodingError.dataCorruptedError(forKey: .denominator, in: c, debugDescription: "分母不能是 Int64.min") }
         self.init(n, d)
     }
     public func encode(to encoder: Encoder) throws {
@@ -280,6 +284,11 @@ public struct FrameRate: Hashable, Sendable {
     /// 测试标准 §2.1 要求合成源支持的三档。
     public static let standard: [FrameRate] = [.fps30, .fps5994, .fps60]
 
+    /// 节目格式、屏幕输入、合成源的帧率合法范围（提案 034 ②，用户 2026-10-25 批）：1…240 fps，按 `framesPerSecond` 比（59.94 = 60000/1001 在里面，1/2 不在）。
+    /// 同一条边界三处共用：`MixerState.validate()`（节目文件，`MixerStateError.format` / `.inputFrameRate`）、`CommandValidator`（addInput / setInputSource / loadShow，HTTP 400）、reducer（同判、原样返回）。
+    /// 240 也让 `DurationLimits.maxTicks`（1 小时 @ 240 fps）在任何合法帧率下都 ≥ 1 小时。
+    public static let programRange: ClosedRange<Rational> = Rational(1)...Rational(240)
+
     /// 一帧的时长（秒），例如 1001/60000。
     public var frameDuration: Rational { framesPerSecond.reciprocal }
     /// 四舍五入后的整数帧率：59.94 → 60。闪光周期（"每秒第 0 帧"）按它算，见 `TestPattern.isFlashTick`。
@@ -291,8 +300,13 @@ public struct FrameRate: Hashable, Sendable {
 }
 
 extension FrameRate: Codable {
-    /// JSON 形态就是 Rational：{"numerator":60000,"denominator":1001}。
-    public init(from decoder: Decoder) throws { self.init(try Rational(from: decoder)) }
+    /// JSON 形态就是 Rational：{"numerator":60000,"denominator":1001}。分子 ≤ 0 抛"帧率必须为正"（提案 034 ①；约分后分母恒正，所以 −60/−1 = 60 照收）——
+    /// 原来调带 precondition 的 init，节目格式 / 屏幕输入的 0、负帧率在解码时就让进程 SIGTRAP（Codex N01）。超大正数照解，范围在 validate / 校验器里查（`programRange`）。
+    public init(from decoder: Decoder) throws {
+        let rate = try Rational(from: decoder)
+        guard rate.numerator > 0 else { throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "帧率必须为正")) }
+        self.init(rate)
+    }
     public func encode(to encoder: Encoder) throws { try framesPerSecond.encode(to: encoder) }
 }
 

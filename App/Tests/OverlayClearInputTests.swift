@@ -21,4 +21,16 @@ final class OverlayClearInputTests: XCTestCase {
         XCTAssertNil(session.state.overlays[0].input, "叠加设置选\"（无）\"要清掉这一路的输入")
         XCTAssertEqual(session.control.bus.counters.rejected, 0, "清空的命令不该被总线拒")
     }
+
+    /// 提案 034 附带（用户 2026-10-25 批）：叠加时长的秒数框没有范围，`Int((秒 × 帧率).rounded())` 填一个 20 位数就溢出、App 崩；钳进 0…`DurationLimits.maxTicks`。
+    func test034_overlayDurationSecondsClampedToTickLimit() {
+        let model = OverlaySettingsModel(state: MixerState(format: .hd1080p60), channel: 1)
+        XCTAssertEqual(model.ticks(seconds: 0.5), 30, "合法值照旧按帧率换拍")
+        XCTAssertEqual(model.ticks(seconds: 99_999_999_999_999_999_999), DurationLimits.maxTicks)
+        XCTAssertEqual(model.ticks(seconds: .infinity), DurationLimits.maxTicks)
+        XCTAssertEqual(model.ticks(seconds: 14_400), DurationLimits.maxTicks, "60 fps 下 4 小时正好是上限")
+        XCTAssertEqual(model.ticks(seconds: 14_401), DurationLimits.maxTicks)
+        XCTAssertEqual(model.ticks(seconds: -3), 0)
+        XCTAssertEqual(model.ticks(seconds: .nan), 0)
+    }
 }

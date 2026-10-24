@@ -1,9 +1,9 @@
 import XCTest
 @testable import SwitcherContracts
 
-/// 提案 034（数值入口加固；Codex 2026-10-22 审查 N01 / N02 + "验证到的其他行为"）：节目文件 / API 进来的帧率、尺寸、叠加数组，
-/// 非法时要抛可捕获的错误、进程在——原来 `Rational` / `FrameRate` 的 Codable 调到带 precondition 的 init、`Show.load → makeState → MixerState.init`
-/// 先断言再 validate，try / catch 兜不住（SIGTRAP）。
+/// 提案 034（数值入口加固，用户 2026-10-25 批；Codex 2026-10-22 审查 N01 / N02 + "验证到的其他行为"）：节目文件 / API 进来的帧率、尺寸、叠加数组、时长、
+/// 音频对齐帧数，非法时要抛可捕获的错误、进程在——原来 `Rational` / `FrameRate` 的 Codable 调到带 precondition 的 init、`Show.load → makeState → MixerState.init`
+/// 先断言再 validate，try / catch 兜不住（SIGTRAP）。reducer / 校验器那一侧在 ReducerTests / CommandBusTests 的 testN0x_ / test034_。
 /// 夹具 Fixtures/audit-20261022/ 是 Codex 探针写出的七份 JSON 原样（reports/codex-bug-audit-20261022-tests/，逐字节相同）：
 /// valid 对照、fpsZero / fpsNegative / rationalMin（N01）、overlays0（N02）、dimensions（宽 −1 高 0 能加载）、fpsHuge（帧率 Int64.max/1 能解码、newShow 换拍时崩）。
 final class Contracts034Tests: XCTestCase {
@@ -95,12 +95,177 @@ final class Contracts034Tests: XCTestCase {
         }
     }
 
-    // MARK: 尺寸 / 超大正帧率（"验证到的其他行为"）
+    // MARK: ② 尺寸 / 帧率范围（"验证到的其他行为"）
 
-    /// 宽 −1 高 0、帧率 Int64.max/1：原来都能 Show.load（后者在 `MixerState.newShow(format:)` 按帧率换拍时崩）。范围进 validate 之后读到不打开。
+    /// 宽 −1 高 0、帧率 Int64.max/1：原来都能 Show.load（后者在 `MixerState.newShow(format:)` 按帧率换拍时崩）。范围进 validate 之后读到不打开（`.format`）。
+    /// 没有 slots 的老文件带同样的帧率：搬迁按帧率补出厂槽的换拍原来也溢出，现在钳住、照样走到 validate 报 `.format`。
     func test034_showLoad_badDimensionsAndHugeFrameRate_refused() throws {
         for mode in ["dimensions", "fpsHuge"] {
-            XCTAssertThrowsError(try Show.load(from: try Self.fixture(mode)), mode)
+            XCTAssertThrowsError(try Show.load(from: try Self.fixture(mode)), mode) {
+                guard case .format? = $0 as? MixerStateError else { return XCTFail("\(mode)：\($0)") }
+            }
+        }
+        var obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: try Self.fixture("fpsHuge")) as? [String: Any])
+        var mixer = try XCTUnwrap(obj["mixer"] as? [String: Any])
+        var transition = try XCTUnwrap(mixer["transition"] as? [String: Any])
+        transition["slots"] = nil
+        transition["currentSlot"] = nil
+        mixer["transition"] = transition
+        obj["mixer"] = mixer
+        XCTAssertThrowsError(try Show.load(from: try JSONSerialization.data(withJSONObject: obj)), "020 之前的写法 + 超大帧率") {
+            guard case .format? = $0 as? MixerStateError else { return XCTFail("\($0)") }
+        }
+        let huge = MixerState.newShow(format: ProgramFormat(width: 1920, height: 1080, frameRate: FrameRate(Int64.max)))
+        XCTAssertEqual(huge.transition.slots.map(\.durationTicks), Array(repeating: DurationLimits.maxTicks, count: 4), "换拍钳到上限，不溢出")
+        XCTAssertEqual(huge.overlays[0].animation.durationTicks, DurationLimits.maxTicks)
+    }
+
+    /// 常量与 validate：宽高各 16…8192、帧率 1…240 fps（按有理数比）；节目格式越界 → `.format(格式)`；App 的格式预设与边界值都合法。
+    func test034_formatRange_constantsAndValidate() {
+        XCTAssertEqual(ProgramFormat.sizeRange, 16...8192)
+        XCTAssertEqual(FrameRate.programRange, Rational(1)...Rational(240))
+        for rate in [FrameRate(1), .fps24, .fps25, .fps2997, .fps30, .fps50, .fps5994, .fps60, FrameRate(120), FrameRate(240), FrameRate(Rational(240_000, 1_001))] {
+            XCTAssertTrue(FrameRate.programRange.contains(rate.framesPerSecond), "\(rate)")
+        }
+        for rate in [FrameRate(Rational(1, 2)), FrameRate(Rational(999, 1_000)), FrameRate(241), FrameRate(Rational(240_001, 1_000)), FrameRate(Int64.max)] {
+            XCTAssertFalse(FrameRate.programRange.contains(rate.framesPerSecond), "\(rate)")
+        }
+        for format in [ProgramFormat.hd1080p60, .hd1080p5994, .hd1080p30, .hd720p60, .uhd2160p30,
+                       ProgramFormat(width: 16, height: 16, frameRate: FrameRate(1)), ProgramFormat(width: 8192, height: 8192, frameRate: FrameRate(240)),
+                       ProgramFormat(width: 1080, height: 1920, frameRate: .fps30), ProgramFormat(width: 8192, height: 4320, frameRate: .fps24)] {
+            XCTAssertNoThrow(try MixerState.newShow(format: format).validate(), "\(format)")
+        }
+        for format in [ProgramFormat(width: -1, height: 0, frameRate: .fps60), ProgramFormat(width: 15, height: 1080, frameRate: .fps60),
+                       ProgramFormat(width: 1920, height: 8193, frameRate: .fps60), ProgramFormat(width: Int.max, height: 1080, frameRate: .fps60),
+                       ProgramFormat(width: 1920, height: 1080, frameRate: FrameRate(241)), ProgramFormat(width: 1920, height: 1080, frameRate: FrameRate(Rational(1, 2)))] {
+            var s = MixerState(format: .hd1080p60)
+            s.format = format
+            XCTAssertThrowsError(try s.validate(), "\(format)") { XCTAssertEqual($0 as? MixerStateError, .format(format)) }
+        }
+    }
+
+    /// 屏幕输入给了帧率（nil = 跟节目，不查）与合成源（②b）的帧率 / 宽高同一组范围：越界 → `.inputFrameRate(input:)` / `.inputSize(input:)`，
+    /// 判定在契约的 `InputSource.rangeError(input:)`（validate / reducer / 校验器共用）；文件速率仍是 `.fileRate`（031）。
+    func test034_inputSourceRanges_screenAndSynthetic() {
+        func show(_ source: InputSource) -> MixerState {
+            var s = MixerState(format: .hd1080p60)
+            s.inputs = [InputConfig(number: 3, name: "源", source: source)]
+            return s
+        }
+        let screen: (FrameRate?) -> InputSource = { .screen(target: .display(id: 1), frameRate: $0, captureAudio: false) }
+        let synthetic: (FrameRate, Int, Int) -> InputSource = { .synthetic(settings: SyntheticSourceSettings(frameRate: $0, width: $1, height: $2)) }
+        for ok in [screen(nil), screen(.fps30), screen(FrameRate(240)), screen(FrameRate(1)), synthetic(.fps5994, 1920, 1080), synthetic(FrameRate(240), 16, 8192)] {
+            XCTAssertNil(ok.rangeError(input: 3), "\(ok)")
+            XCTAssertNoThrow(try show(ok).validate(), "\(ok)")
+        }
+        let bad: [(InputSource, MixerStateError)] = [
+            (screen(FrameRate(241)), .inputFrameRate(input: 3)), (screen(FrameRate(Rational(1, 2))), .inputFrameRate(input: 3)),
+            (synthetic(FrameRate(Int64.max), 1920, 1080), .inputFrameRate(input: 3)), (synthetic(.fps60, 0, 1080), .inputSize(input: 3)),
+            (synthetic(.fps60, 1920, 9000), .inputSize(input: 3)), (synthetic(FrameRate(300), -1, -1), .inputFrameRate(input: 3)),
+            (.file(path: "/a.mov", endAction: .loop, rate: 0), .fileRate(input: 3, rate: 0)),
+        ]
+        for (source, error) in bad {
+            XCTAssertEqual(source.rangeError(input: 3), error, "\(source)")
+            XCTAssertThrowsError(try show(source).validate(), "\(source)") { XCTAssertEqual($0 as? MixerStateError, error) }
+        }
+        for other in [InputSource.image(path: "/a.png"), .camera(uniqueID: "x"), .ndi(sourceName: "A (B)"), .audio(deviceUID: ""), .decklink(deviceID: "")] {
+            XCTAssertNil(other.rangeError(input: 3), "\(other)")
+        }
+    }
+
+    // MARK: ④ 时长上限
+
+    /// `DurationLimits.maxTicks` = 864 000（1 小时 @ 240 fps）；节目里四处时长（转场、四个槽、FTB、四路叠加动画）要在 0…上限，越界 → `.durationTicks(值)`。
+    func test034_durationLimits_validateFourPlaces() {
+        XCTAssertEqual(DurationLimits.maxTicks, 864_000)
+        XCTAssertEqual(DurationLimits.maxTicks, 3_600 * 240, "1 小时 @ 240 fps")
+        XCTAssertEqual(DurationLimits.tickRange, 0...864_000)
+        let base = MixerState.newShow(format: .hd1080p60)
+        XCTAssertNoThrow(try base.validate())
+        let edits: [(String, (inout MixerState, Int) -> Void)] = [
+            ("转场", { $0.transition.durationTicks = $1 }), ("槽 3", { $0.transition.slots[2].durationTicks = $1 }),
+            ("FTB", { $0.ftb.durationTicks = $1 }), ("叠加 2", { $0.overlays[1].animation.durationTicks = $1 }),
+        ]
+        for (name, edit) in edits {
+            for ok in [0, 1, DurationLimits.maxTicks] {
+                var s = base
+                edit(&s, ok)
+                XCTAssertNoThrow(try s.validate(), "\(name) = \(ok)")
+            }
+            for bad in [DurationLimits.maxTicks + 1, Int.max, -1, Int.min] {
+                var s = base
+                edit(&s, bad)
+                XCTAssertThrowsError(try s.validate(), "\(name) = \(bad)") { XCTAssertEqual($0 as? MixerStateError, .durationTicks(bad)) }
+            }
+        }
+    }
+
+    // MARK: ⑧ 音频对齐帧数
+
+    /// `AudioState.alignmentRange` = 0…24 000（App 设置面板的范围）；节目里越界 → `.alignmentFrames(值)`、Show.load 不打开（原来极大值让 AudioEngine 起 session 时 Int64 换算溢出）。
+    func test034_alignmentFrames_validateAndShowLoad() throws {
+        XCTAssertEqual(AudioState.alignmentRange, 0...24_000)
+        XCTAssertTrue(AudioState.alignmentRange.contains(AudioState.defaultAlignmentFrames))
+        var s = MixerState(format: .hd1080p60)
+        for ok in [0, 2048, 24_000] {
+            s.audio.alignmentFrames = ok
+            XCTAssertNoThrow(try s.validate(), "\(ok)")
+        }
+        for bad in [24_001, -1, 1 << 62] {
+            s.audio.alignmentFrames = bad
+            XCTAssertThrowsError(try s.validate(), "\(bad)") { XCTAssertEqual($0 as? MixerStateError, .alignmentFrames(bad)) }
+        }
+        var obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: try Self.fixture("valid")) as? [String: Any])
+        var audio = try XCTUnwrap(obj["audio"] as? [String: Any])
+        audio["alignmentFrames"] = 1 << 62
+        obj["audio"] = audio
+        XCTAssertThrowsError(try Show.load(from: try JSONSerialization.data(withJSONObject: obj))) {
+            XCTAssertEqual($0 as? MixerStateError, .alignmentFrames(1 << 62))
+        }
+    }
+
+    // MARK: ③ 结构检查在 makeState 之前
+
+    /// `Show.validateStructure()`：叠加恰好 4 个、转场槽 4 个或空（空的搬迁补齐）；`makeValidatedState()` = 结构检查 + makeState + validate，
+    /// 合法节目的结果与 `makeState()` 相同。代码里能直接造出叠加 0 个的 `MixerSettings`（它的 init 没有断言），这种 Show 原来 makeState 就崩。
+    func test034_validateStructure_beforeMakeState() throws {
+        let good = Show(name: "好", state: MixerState.newShow(format: .hd1080p60))
+        XCTAssertNoThrow(try good.validateStructure())
+        XCTAssertEqual(try good.makeValidatedState(), good.makeState())
+        for count in [0, 3, 5] {
+            var bad = good
+            bad.mixer.overlays = Array(repeating: OverlayState(), count: count)
+            XCTAssertThrowsError(try bad.validateStructure(), "\(count)") { XCTAssertEqual($0 as? MixerStateError, .overlayCount(count)) }
+            XCTAssertThrowsError(try bad.makeValidatedState(), "\(count)") { XCTAssertEqual($0 as? MixerStateError, .overlayCount(count)) }
+        }
+        var legacy = good
+        legacy.mixer.transition.slots = []
+        XCTAssertNoThrow(try legacy.validateStructure(), "空槽 = 020 之前的写法，搬迁补齐")
+        XCTAssertEqual(try legacy.migratingLegacyKeys().makeValidatedState().transition.slots.count, 4)
+        var three = good
+        three.mixer.transition.slots.removeLast()
+        XCTAssertThrowsError(try three.validateStructure()) { XCTAssertEqual($0 as? MixerStateError, .transitionSlotCount(3)) }
+        var wide = good
+        wide.mixer.format = ProgramFormat(width: 9000, height: 1080, frameRate: .fps60)
+        XCTAssertNoThrow(try wide.validateStructure(), "结构检查只管个数，取值在 validate")
+        XCTAssertThrowsError(try wide.makeValidatedState()) { XCTAssertEqual($0 as? MixerStateError, .format(wide.mixer.format)) }
+    }
+
+    // MARK: 护栏
+
+    /// 仓库里带的节目（Samples/ 三份、scenarios/ 四份、契约测试的 g4 老节目）与 Codex 的 valid 对照：034 的范围都不让它们打不开。
+    func test034_shippedShowsStillLoad() throws {
+        let files = ["Samples/church/church.switcher.json", "Samples/classroom/classroom.switcher.json", "Samples/event/event.switcher.json",
+                     "scenarios/m0-show.json", "scenarios/g3-show.json", "scenarios/g4-show.json", "scenarios/g4-ndi-show.json",
+                     "Packages/SwitcherCore/Tests/SwitcherContractsTests/Fixtures/g4-show-before-p3.json",
+                     "Packages/SwitcherCore/Tests/SwitcherContractsTests/Fixtures/audit-20261022/Audit20261022-valid.json"]
+        for f in files {
+            let show = try Show.load(from: try Data(contentsOf: Self.repoRoot.appendingPathComponent(f)))
+            let state = show.makeState()
+            XCTAssertTrue(ProgramFormat.sizeRange.contains(state.format.width) && ProgramFormat.sizeRange.contains(state.format.height), f)
+            XCTAssertTrue(FrameRate.programRange.contains(state.format.frameRate.framesPerSecond), f)
+            XCTAssertTrue(state.inputs.allSatisfy { $0.source.rangeError(input: $0.number) == nil }, f)
+            XCTAssertTrue(DurationLimits.tickRange.contains(state.transition.durationTicks) && DurationLimits.tickRange.contains(state.ftb.durationTicks), f)
         }
     }
 }

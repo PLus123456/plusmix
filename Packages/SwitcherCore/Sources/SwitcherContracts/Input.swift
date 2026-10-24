@@ -51,6 +51,7 @@ public enum PlaybackLimits {
 }
 
 /// 合成测试源（引擎内置输入，测试标准 §2.1）的配置。TestKit 的 SyntheticVideoInput / SyntheticAudioInput 读它。
+/// 帧率 / 宽高与节目格式同一组范围（`FrameRate.programRange` / `ProgramFormat.sizeRange`，提案 034 ②b）：API 的 addInput 与 App 的"测试图案"都能进来。
 public struct SyntheticSourceSettings: Hashable, Codable, Sendable {
     /// 合成源帧率（30 / 59.94 / 60）。
     public var frameRate: FrameRate
@@ -122,7 +123,7 @@ public enum InputSource: Hashable, Codable, Sendable {
     /// `connection` nil = 不改卡上的当前设置（Desktop Video Setup 里选的那个）。
     /// `channels` = SDI / HDMI 内嵌音频取哪几路（提案 014，口径见上面"声道映射"；内嵌音频最多 16 路）。
     case decklink(deviceID: String, connection: DeckLinkConnection? = nil, channels: [Int] = [])
-    /// 屏幕 / 窗口 / 应用；frameRate nil = 跟节目帧率。
+    /// 屏幕 / 窗口 / 应用；frameRate nil = 跟节目帧率，给了就要在 `FrameRate.programRange`（1…240 fps，提案 034 ②）里。
     case screen(target: ScreenTarget, frameRate: FrameRate?, captureAudio: Bool)
     /// 视频文件；rate = 播放速率（1 = 正常；合法范围 `FileSource.rateRange` = 0.1…8，提案 031；老文件缺键 = 1）。
     case file(path: String, endAction: FileEndAction, rate: Double)
@@ -146,6 +147,24 @@ public enum InputSource: Hashable, Codable, Sendable {
         case .ndi: .ndi
         case .audio: .audio
         case .synthetic: .synthetic
+        }
+    }
+
+    /// 来源里的数值越界时对应的不变量错误；nil = 都在范围里。文件速率不在 `FileSource.rateRange` → `fileRate`（031）；屏幕输入给了帧率、或合成源的帧率不在
+    /// `FrameRate.programRange` → `inputFrameRate`；合成源宽高不在 `ProgramFormat.sizeRange` → `inputSize`（034 ② / ②b）。别的 kind 恒 nil。
+    /// 一个判定三处用：`MixerState.validate()`（节目文件）、reducer 的 addInput / setInputSource（原样返回）、`CommandValidator`（按它出 400 的文案），两侧判得一致。
+    public func rangeError(input number: Int) -> MixerStateError? {
+        switch self {
+        case .file(_, _, let rate) where !FileSource.rateRange.contains(rate):
+            return .fileRate(input: number, rate: rate)
+        case .screen(_, let rate?, _) where !FrameRate.programRange.contains(rate.framesPerSecond):
+            return .inputFrameRate(input: number)
+        case .synthetic(let s):
+            if !FrameRate.programRange.contains(s.frameRate.framesPerSecond) { return .inputFrameRate(input: number) }
+            if !ProgramFormat.sizeRange.contains(s.width) || !ProgramFormat.sizeRange.contains(s.height) { return .inputSize(input: number) }
+            return nil
+        default:
+            return nil
         }
     }
 

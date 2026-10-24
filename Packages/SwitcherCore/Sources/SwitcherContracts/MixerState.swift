@@ -1,5 +1,26 @@
 // 状态模型（设计方案 §4、§9.1）：不可变快照，每拍读一次；只通过 Command → reduce 改。
 
+// MARK: - 时长上限
+
+/// 拍数时长的上限（提案 034 ④，用户 2026-10-25 批；Codex N03 = 10-24 审计 NS01：主 API 只拒负时长，`setFTBDuration(Int.max)` 之后 FTB 反转在 reducer 的 Double → Int 上崩）。
+/// 864 000 拍 = 1 小时 @ 240 fps（`FrameRate.programRange` 的上限），60 fps 下 4 小时；**按拍不按秒**。兼容层的毫秒参数上限（1 小时，D03）在 240 fps 下换出来正好是它。
+/// 管四处时长：`TransitionState.durationTicks`、`TransitionSlot.durationTicks`、`FadeToBlack.durationTicks`、`OverlayAnimation.durationTicks`——
+/// fade / setTransition / setTransitionSlot / setFTBDuration / setOverlay 超上限校验器 400、reducer 原样返回（拒，不钳）；`MixerState.validate()` 查节目里这四处在 0…上限。
+public enum DurationLimits {
+    /// 时长上限（拍）。
+    public static let maxTicks = 864_000
+    /// 合法的时长（拍）：0…`maxTicks`。
+    public static let tickRange: ClosedRange<Int> = 0...maxTicks
+}
+
+/// 秒 → 拍（按帧率四舍五入）再钳进 `DurationLimits.tickRange`（NaN / 负数 → 0）。出厂转场槽、新节目的默认淡入用它：搬迁在 validate 之前跑，
+/// 节目文件里越界的帧率（Int64.max/1）原来在 `Int((秒 × 帧率).rounded())` 上溢出（Codex"fpsHuge：newShow 换拍时崩"）；合法帧率下结果与原来逐拍相同。
+private func clampedTicks(seconds: Double, framesPerSecond fps: Double) -> Int {
+    let ticks = (seconds * fps).rounded()
+    guard ticks > 0 else { return 0 }
+    return ticks >= Double(DurationLimits.maxTicks) ? DurationLimits.maxTicks : Int(ticks)
+}
+
 // MARK: - 转场
 
 /// §1.1 Transition：Cut、Fade、Wipe、Zoom、Stinger。
@@ -50,7 +71,7 @@ public struct StingerParams: Hashable, Codable, Sendable {
 public struct TransitionSlot: Hashable, Codable, Sendable {
     /// 转场类型（cut 也允许，但出厂槽与搬迁不用它）。
     public var type: TransitionType
-    /// 时长（拍）。
+    /// 时长（拍）；0…`DurationLimits.maxTicks`（提案 034 ④）。
     public var durationTicks: Int
     /// Wipe 参数。
     public var wipe: WipeParams
@@ -75,7 +96,7 @@ public struct TransitionSlot: Hashable, Codable, Sendable {
     /// 与 020 之前的四个按钮等价，老用户察觉不到变化。
     public static func factoryDefaults(for format: ProgramFormat) -> [TransitionSlot] {
         let fps = format.frameRate.approximateFramesPerSecond
-        func ticks(_ i: Int) -> Int { Int((factoryDefaultSeconds[i] * fps).rounded()) }
+        func ticks(_ i: Int) -> Int { clampedTicks(seconds: factoryDefaultSeconds[i], framesPerSecond: fps) }
         return [
             TransitionSlot(type: .fade, durationTicks: ticks(0)),
             TransitionSlot(type: .wipe, durationTicks: ticks(1), wipe: WipeParams(direction: .leftToRight, softness: 0)),
@@ -107,7 +128,7 @@ public struct TransitionSlot: Hashable, Codable, Sendable {
 public struct TransitionState: Hashable, Codable, Sendable {
     /// 转场类型。
     public var type: TransitionType
-    /// 转场时长（拍）。
+    /// 转场时长（拍）；0…`DurationLimits.maxTicks`（提案 034 ④）。
     public var durationTicks: Int
     /// 进度 0–1，含义见类型说明。
     public var progress: Double
@@ -195,7 +216,7 @@ public struct TransitionState: Hashable, Codable, Sendable {
 public struct FadeToBlack: Hashable, Codable, Sendable {
     /// 目标：是否黑。
     public var on: Bool
-    /// 淡入 / 淡出黑的时长（拍）。
+    /// 淡入 / 淡出黑的时长（拍）；0…`DurationLimits.maxTicks`（提案 034 ④）。
     public var durationTicks: Int
     /// 当前黑的比例 0–1。
     public var level: Double
@@ -247,7 +268,7 @@ public enum OverlayEdge: String, Codable, Sendable, CaseIterable {
 public struct OverlayAnimation: Hashable, Codable, Sendable {
     /// 动画方式。
     public var kind: OverlayAnimationKind
-    /// 动画时长（拍）；0 = cut。
+    /// 动画时长（拍）；0 = cut；上限 `DurationLimits.maxTicks`（提案 034 ④）。进 / 出动画进行中改它，reducer 按当前进度重锚（034 ⑦）。
     public var durationTicks: Int
     /// slide 从哪条边进出（提案 010）；nil = 离 rect 最近的边（并列时底 > 顶 > 左 > 右，
     /// 所以整幅 rect 一律从底边、下三分之一自然向上滑入）。只对 kind = slide 有意义。
@@ -278,7 +299,7 @@ public struct OverlayAnimation: Hashable, Codable, Sendable {
     /// `OverlayAnimation()` 无参默认仍是 cut 0 拍（它不知道帧率；API / 脚本直接构造的不受影响）；已存文件里的 animation 照读不变。
     /// App 新建节目（emptyShow）、`MixerState.newShow(format:outputs:)` 都用它，三方一致。
     public static func defaultFade(for format: ProgramFormat) -> OverlayAnimation {
-        OverlayAnimation(kind: .fade, durationTicks: Int((defaultFadeSeconds * format.frameRate.approximateFramesPerSecond).rounded()))
+        OverlayAnimation(kind: .fade, durationTicks: clampedTicks(seconds: defaultFadeSeconds, framesPerSecond: format.frameRate.approximateFramesPerSecond))
     }
 }
 
@@ -322,7 +343,7 @@ public enum OverlayAnchor: String, Codable, Sendable, CaseIterable {
 /// Overlay 1–4 之一（§1.1）。`on` 是目标，`animProgress` 是当前显示比例 0（全隐）… 1（全显）；
 /// 状态机每拍向目标推进，渲染器按 `animation.kind` 解释 animProgress。
 public struct OverlayState: Hashable, Codable, Sendable {
-    /// 叠在上面的输入；nil = 该通道没有指定输入。
+    /// 叠在上面的输入；nil = 该通道没有指定输入。命令 `overlay(input: 0)` 把它清成 nil（提案 034 ⑤；`input: nil` 是"不换"）。
     public var input: Int?
     /// 目标：是否显示。
     public var on: Bool
@@ -457,6 +478,9 @@ public struct AudioState: Hashable, Codable, Sendable {
 
     /// 对齐延迟的默认值（帧）。
     public static let defaultAlignmentFrames = 2048
+    /// 对齐延迟的合法范围（帧；提案 034 ⑧，用户 2026-10-25 批）：0…24 000（= 0.5 s，App 设置面板的范围 `PreferencesModel.alignmentRange`）。
+    /// 节目文件里没有上限时，极大值让 AudioEngine 把帧数换成 host time 的 Int64 换算溢出、起 session 就崩；没有命令改它，所以只在 `MixerState.validate()` 查（`MixerStateError.alignmentFrames`）。
+    public static let alignmentRange: ClosedRange<Int> = 0...24_000
 
     public init(buses: [BusState] = Bus.allCases.map { BusState(bus: $0) }, afv: Bool = false, monitorMode: MonitorMode = .afl,
                 alignmentFrames: Int = AudioState.defaultAlignmentFrames, monitorPoint: MonitorPoint = .preDelayLine, monitorSource: Bus = .master) {
@@ -811,6 +835,16 @@ public enum MixerStateError: Error, Equatable {
     case fileRate(input: Int, rate: Double)
     /// 输入编号超出 `InputConfig.numberRange`（1…16）的上限（提案 032，用户 2026-10-18 批）；0 与负数照旧是 `reservedInputNumber`。
     case inputNumber(input: Int)
+    /// 节目格式的宽 / 高不在 `ProgramFormat.sizeRange`（16…8192）或帧率不在 `FrameRate.programRange`（1…240 fps）里（提案 034 ②，用户 2026-10-25 批）。
+    case format(ProgramFormat)
+    /// 某路屏幕输入给了帧率、或合成源的帧率，不在 `FrameRate.programRange` 里（提案 034 ② / ②b）。
+    case inputFrameRate(input: Int)
+    /// 某路合成源的宽 / 高不在 `ProgramFormat.sizeRange` 里（提案 034 ②b）。
+    case inputSize(input: Int)
+    /// 转场 / 转场槽 / FTB / 叠加动画的时长不在 `DurationLimits.tickRange`（0…864 000 拍）里（提案 034 ④）；值是第一个越界的时长。
+    case durationTicks(Int)
+    /// 音频对齐帧数不在 `AudioState.alignmentRange`（0…24 000）里（提案 034 ⑧：极大值让 AudioEngine 的 host time 换算溢出）。
+    case alignmentFrames(Int)
 }
 
 /// 不可变快照（设计方案 §4）。相比 §4 多了 `format` 和 `inputs`：addInput / removeInput / setInputSettings 要在 reduce 里落地，
@@ -870,20 +904,30 @@ public struct MixerState: Hashable, Codable, Sendable {
     }
 
     /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号在 1…16（032）且不重复、输出编号不重复、转场槽恰好 4 个且 currentSlot 为 nil 或 1…4（020）；
-    /// 外加一条取值：文件来源的播放速率在 `FileSource.rateRange` 里（031：越界的速率在 FileInput 里崩进程，节目文件不许绕过 API 的校验）。
+    /// 外加几条取值：文件来源的播放速率在 `FileSource.rateRange` 里（031：越界的速率在 FileInput 里崩进程，节目文件不许绕过 API 的校验）；
+    /// 节目格式的宽高 / 帧率、屏幕输入与合成源的帧率 / 宽高在 `ProgramFormat.sizeRange` / `FrameRate.programRange` 里，四处时长在 `DurationLimits.tickRange` 里，
+    /// 音频对齐帧数在 `AudioState.alignmentRange` 里（034：都是一个数就能让时钟 / 渲染 / 音频的整数换算溢出或断言的值）。
     /// 输入编号的上限（032）：编号极大的输入让兼容层按编号分配的 TALLY / XML 崩或卡，节目文件同样不许绕过 addInput 的校验。
     /// 不查引用（PGM / PVW / 叠加 / Stinger 指向的输入在不在）：悬空引用由 reducer 的 removeInput 清，渲染器按"没有这路"画（用户 2026-09-27 定）。
+    /// 叠加数组的个数在这里查到之前，构造 `MixerState` 时就断言了——不可信的节目先过 `Show.validateStructure()`（034 ③，`Show.makeValidatedState()` 把两步连起来）。
     public func validate() throws {
         guard overlays.count == MixerState.overlayCount else { throw MixerStateError.overlayCount(overlays.count) }
         guard transition.slots.count == TransitionSlot.count else { throw MixerStateError.transitionSlotCount(transition.slots.count) }
         if let i = transition.currentSlot, !TransitionSlot.indexRange.contains(i) { throw MixerStateError.transitionSlotIndex(i) }
         guard audio.buses.map(\.bus) == Bus.allCases else { throw MixerStateError.busOrder }
+        guard ProgramFormat.sizeRange.contains(format.width), ProgramFormat.sizeRange.contains(format.height),
+              FrameRate.programRange.contains(format.frameRate.framesPerSecond) else { throw MixerStateError.format(format) }
+        for d in [transition.durationTicks, ftb.durationTicks] + transition.slots.map(\.durationTicks) + overlays.map(\.animation.durationTicks)
+        where !DurationLimits.tickRange.contains(d) {
+            throw MixerStateError.durationTicks(d)
+        }
+        guard AudioState.alignmentRange.contains(audio.alignmentFrames) else { throw MixerStateError.alignmentFrames(audio.alignmentFrames) }
         var seen = Set<Int>()
         for i in inputs {
             guard i.number != MixerState.noInput, i.number > 0 else { throw MixerStateError.reservedInputNumber(i.number) }
             guard InputConfig.numberRange.contains(i.number) else { throw MixerStateError.inputNumber(input: i.number) }
             guard seen.insert(i.number).inserted else { throw MixerStateError.duplicateInput(i.number) }
-            if case .file(_, _, let rate) = i.source, !FileSource.rateRange.contains(rate) { throw MixerStateError.fileRate(input: i.number, rate: rate) }
+            if let e = i.source.rangeError(input: i.number) { throw e }
         }
         var seenOut = Set<Int>()
         for o in outputs {

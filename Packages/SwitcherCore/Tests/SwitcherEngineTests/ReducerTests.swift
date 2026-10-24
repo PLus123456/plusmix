@@ -547,6 +547,18 @@ final class ReducerTests: XCTestCase {
             Row("setFTBDuration 负拒绝", .setFTBDuration(ticks: -1)) { _ in },
             Row("setFTBDuration 相同值原样返回", .setFTBDuration(ticks: 30)) { _ in },
 
+            // 提案 034（P5-7，Codex N03 / N08 / N11）：时长上限 864000 拍（拒，不钳；= 上限照收）、overlay input 0 = 清空、loadShow 换格式拒、来源帧率越界拒
+            Row("fade 时长超上限拒绝（034）", .fade(durationTicks: DurationLimits.maxTicks + 1)) { _ in },
+            Row("setTransition 时长 Int.max 拒绝（034）", .setTransition(type: .wipe, durationTicks: Int.max)) { _ in },
+            Row("setTransitionSlot 时长超上限拒绝（034：拒不是钳）", .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: DurationLimits.maxTicks + 1))) { _ in },
+            Row("setFTBDuration = 上限照收（034）", .setFTBDuration(ticks: DurationLimits.maxTicks)) { $0.ftb.durationTicks = DurationLimits.maxTicks },
+            Row("setFTBDuration Int.max 拒绝（034，N03）", .setFTBDuration(ticks: Int.max)) { _ in },
+            Row("setOverlay 时长超上限拒绝（034）", .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: DurationLimits.maxTicks + 1))) { _ in },
+            Row("overlay input 0 = 清空（034 ⑤，N11）", before: { $0.overlays[2].input = 2 }, .overlay(channel: 3, on: false, input: 0)) { $0.overlays[2].input = nil },
+            Row("loadShow 换格式拒绝（034 ⑥，N08）", .loadShow(show: Show(name: "720p", state: { var s = Self.baseState(); s.format = .hd720p60; return s }()))) { _ in },
+            Row("addInput 屏幕帧率 241 拒绝（034 ②）",
+                .addInput(config: InputConfig(number: 6, name: "屏幕", source: .screen(target: .display(id: 1), frameRate: FrameRate(241), captureAudio: false)))) { _ in },
+
             // 提案 021（P5-2）：文件输入播放控制（基础状态都是合成源，先加一路文件输入 5）
             Row("setPlayback", before: { $0.inputs.append(Self.fileInput(5)) }, .setPlayback(input: 5, paused: true)) { $0.inputs[4].settings.playback.paused = true },
             Row("setPlayback 相同值原样返回", before: { $0.inputs.append(Self.fileInput(5)) }, .setPlayback(input: 5, paused: false)) { _ in },
@@ -807,6 +819,87 @@ final class ReducerTests: XCTestCase {
         let instant = reducer.reduce(mid, .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: 0)), at: Tick(160))
         XCTAssertEqual(instant.overlays[0].animProgress, 0)
         XCTAssertNil(instant.overlays[0].startTick)
+    }
+
+    /// N11：叠加设置里选"（无）"原来发 overlay(input: nil)——nil 是"不换输入"（testV7_overlay 钉着），清不掉。034 ⑤：input 0 = 清空这一路
+    /// （`MixerState.noInput`，与 setPreview(0) 一致）；nil 仍是不换；负数 / 不存在照旧拒。开关照 on 走，与清空互不影响：开着清空 → 开关还开着、画面上没有了。
+    func testN11_overlayInputZero_clearsRoute_nilStillKeeps() {
+        let s0 = Self.baseState()
+        let routed = reducer.reduce(s0, .overlay(channel: 2, on: false, input: 3), at: Tick(1))
+        XCTAssertEqual(routed.overlays[1].input, 3)
+        let cleared = reducer.reduce(routed, .overlay(channel: 2, on: false, input: 0), at: Tick(2))
+        XCTAssertNil(cleared.overlays[1].input, "0 = 清空")
+        XCTAssertEqual(reducer.reduce(routed, .overlay(channel: 2, on: false, input: nil), at: Tick(2)), routed, "nil = 不换（开关也没变 → 原样）")
+        XCTAssertEqual(reducer.reduce(cleared, .overlay(channel: 2, on: false, input: 0), at: Tick(3)), cleared, "已经是空的再清 → 原样返回")
+        let shown = reducer.reduce(routed, .overlay(channel: 2, on: true, input: nil), at: Tick(2))   // 默认 cut 0 拍 → 立即全显
+        XCTAssertTrue(shown.overlays[1].isVisible)
+        XCTAssertTrue(shown.tally(ofInput: 3).program)
+        let blank = reducer.reduce(shown, .overlay(channel: 2, on: true, input: 0), at: Tick(3))
+        XCTAssertTrue(blank.overlays[1].on, "开关不动")
+        XCTAssertNil(blank.overlays[1].input)
+        XCTAssertFalse(blank.overlays[1].isVisible, "没有输入就画不出来（没有退出动画）")
+        XCTAssertEqual(blank.tally(ofInput: 3), .off)
+        XCTAssertEqual(reducer.reduce(blank, .overlay(channel: 2, on: true, input: 4), at: Tick(4)).overlays[1].input, 4, "再选一路立刻接上")
+        XCTAssertEqual(reducer.reduce(routed, .overlay(channel: 2, on: false, input: -1), at: Tick(2)), routed, "负数仍非法")
+        XCTAssertEqual(reducer.reduce(routed, .overlay(channel: 2, on: false, input: 9), at: Tick(2)), routed, "不存在仍非法")
+    }
+
+    /// 034 ④：fade / setTransition / setTransitionSlot / setFTBDuration / setOverlay 的时长 > `DurationLimits.maxTicks` 原样返回（拒，不钳）、= 上限照收；
+    /// 负数照旧：前三条拒、setTransitionSlot / setOverlay 钳 0。状态机层面回执 applied = false。
+    func test034_durationAboveLimit_refusedByFiveCommands() async {
+        let s0 = Self.baseState()
+        let limit = DurationLimits.maxTicks
+        let refused: [Command] = [
+            .fade(durationTicks: limit + 1), .fade(durationTicks: Int.max), .setTransition(type: .wipe, durationTicks: limit + 1),
+            .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: limit + 1)), .setTransitionSlot(slot: 1, config: TransitionSlot(type: .fade, durationTicks: Int.max)),
+            .setFTBDuration(ticks: limit + 1), .setFTBDuration(ticks: Int.max),
+            .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: limit + 1)),
+            .setOverlay(channel: 4, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .slide, durationTicks: Int.max)),
+        ]
+        for c in refused { XCTAssertEqual(reducer.reduce(s0, c, at: Tick(1)), s0, "\(c)") }
+        XCTAssertEqual(reducer.reduce(s0, .fade(durationTicks: limit), at: Tick(1)).transition.durationTicks, limit)
+        XCTAssertEqual(reducer.reduce(s0, .setTransition(type: .zoom, durationTicks: limit), at: Tick(1)).transition.durationTicks, limit)
+        XCTAssertEqual(reducer.reduce(s0, .setTransitionSlot(slot: 3, config: TransitionSlot(type: .zoom, durationTicks: limit)), at: Tick(1)).transition.slots[2].durationTicks, limit)
+        XCTAssertEqual(reducer.reduce(s0, .setFTBDuration(ticks: limit), at: Tick(1)).ftb.durationTicks, limit)
+        XCTAssertEqual(reducer.reduce(s0, .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: limit)), at: Tick(1)).overlays[0].animation.durationTicks, limit)
+        XCTAssertEqual(reducer.reduce(s0, .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: -5)), at: Tick(1)).overlays[0].animation.durationTicks, 0, "负数照旧钳 0")
+        XCTAssertEqual(reducer.reduce(s0, .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: -5)), at: Tick(1)).transition.slots[1].durationTicks, 0, "负数照旧钳 0")
+        // 状态机：校验器不在这一层，回执 applied = false、状态不变
+        let sm = StateMachine(initialState: s0)
+        sm.start()
+        defer { sm.stop() }
+        guard case .applied(let receipt) = await sm.submit(IssuedCommand(sequence: 1, issuedAt: .now(), command: .setFTBDuration(ticks: Int.max))) else {
+            return XCTFail("setFTBDuration 应走到 reducer")
+        }
+        XCTAssertFalse(receipt.applied)
+        let after = await sm.state
+        XCTAssertEqual(after.ftb.durationTicks, s0.ftb.durationTicks)
+    }
+
+    /// 034 ② / ②b：addInput / setInputSource 的屏幕帧率、合成源帧率 / 宽高越界原样返回（与校验器同判，判定是契约的 `InputSource.rangeError`）；边界值照收；
+    /// loadShow 的节目里格式 / 时长 / 对齐帧数越界走 validate 被拒。
+    func test034_sourceAndShowRanges_refused() {
+        let s0 = Self.baseState()
+        let screen241 = InputSource.screen(target: .display(id: 1), frameRate: FrameRate(241), captureAudio: false)
+        let synth0 = InputSource.synthetic(settings: SyntheticSourceSettings(width: 0, height: 1080))
+        let synthHuge = InputSource.synthetic(settings: SyntheticSourceSettings(frameRate: FrameRate(Int64.max)))
+        for source in [screen241, synth0, synthHuge] {
+            XCTAssertEqual(reducer.reduce(s0, .addInput(config: InputConfig(number: 6, name: "越界", source: source)), at: Tick(1)), s0, "\(source)")
+            XCTAssertEqual(reducer.reduce(s0, .setInputSource(input: 2, source: source), at: Tick(1)), s0, "\(source)")
+        }
+        let screen240 = InputSource.screen(target: .display(id: 1), frameRate: FrameRate(240), captureAudio: true)
+        XCTAssertEqual(reducer.reduce(s0, .setInputSource(input: 2, source: screen240), at: Tick(1)).inputs[1].source, screen240)
+        let synthEdge = InputSource.synthetic(settings: SyntheticSourceSettings(frameRate: FrameRate(1), width: 16, height: 8192))
+        XCTAssertEqual(reducer.reduce(s0, .addInput(config: InputConfig(number: 6, name: "边界", source: synthEdge)), at: Tick(1)).inputs.map(\.number), [1, 2, 3, 4, 6])
+        let edits: [(String, (inout MixerState) -> Void)] = [
+            ("FTB 时长超上限", { $0.ftb.durationTicks = DurationLimits.maxTicks + 1 }), ("叠加时长负数", { $0.overlays[2].animation.durationTicks = -1 }),
+            ("对齐帧数", { $0.audio.alignmentFrames = 1 << 62 }), ("屏幕帧率", { $0.inputs[0].source = screen241 }),
+        ]
+        for (name, edit) in edits {
+            var bad = s0
+            edit(&bad)
+            XCTAssertEqual(reducer.reduce(s0, .loadShow(show: Show(name: name, state: bad)), at: Tick(1)), s0, name)
+        }
     }
 
     // MARK: P4：reducer 的两条小规则（prompt 67 交付 3）

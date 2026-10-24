@@ -132,6 +132,15 @@ final class CommandBusTests: XCTestCase {
             // 提案 032（P5-5）：输入编号 16 = 上限放行
             .addInput(config: InputConfig(number: 16, name: "满", source: .synthetic(settings: SyntheticSourceSettings()))),
             .loadShow(show: Show(name: "16 路", state: { var s = state; s.inputs.append(InputConfig(number: 16, name: "满", source: .image(path: "/a.png"))); return s }())),
+            // 提案 034（P5-7）：时长 = 上限照收、setTransitionSlot / setOverlay 的负数照旧钳 0（不拒）、overlay input 0 = 清空、来源帧率 / 尺寸的边界值
+            .fade(durationTicks: DurationLimits.maxTicks), .setTransition(type: .fade, durationTicks: DurationLimits.maxTicks), .setFTBDuration(ticks: DurationLimits.maxTicks),
+            .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: DurationLimits.maxTicks)),
+            .setTransitionSlot(slot: 2, config: TransitionSlot(type: .wipe, durationTicks: -3)),
+            .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: DurationLimits.maxTicks)),
+            .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: -3)),
+            .overlay(channel: 2, on: false, input: 0), .overlay(channel: 2, on: true, input: 0),
+            .addInput(config: InputConfig(number: 8, name: "屏幕", source: .screen(target: .display(id: 1), frameRate: FrameRate(240), captureAudio: false))),
+            .setInputSource(input: 2, source: .synthetic(settings: SyntheticSourceSettings(frameRate: FrameRate(1), width: 16, height: 8192))),
         ]
         for c in legal {
             XCTAssertNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应放行")
@@ -162,6 +171,18 @@ final class CommandBusTests: XCTestCase {
             .addInput(config: InputConfig(number: Int.max, name: "极大", source: .synthetic(settings: SyntheticSourceSettings()))),
             .loadShow(show: Show(name: "17 路", state: { var s = state; s.inputs.append(InputConfig(number: 17, name: "超", source: .image(path: "/a.png"))); return s }())),
             .setInputSource(input: 17, source: .image(path: "/a.png")), .setPreview(input: 1 << 62), .removeInput(input: Int.max), .audioGain(input: 17, dB: 0),
+            // 提案 034（P5-7，Codex N03 / N08 / N02）：时长超上限（五条）、overlay 负数输入、来源帧率 / 尺寸越界、loadShow 换格式 / 叠加不是 4 个 / 时长与对齐帧数越界
+            .fade(durationTicks: DurationLimits.maxTicks + 1), .fade(durationTicks: Int.max), .setTransition(type: .wipe, durationTicks: Int.max), .setFTBDuration(ticks: Int.max),
+            .setTransitionSlot(slot: 3, config: TransitionSlot(type: .zoom, durationTicks: DurationLimits.maxTicks + 1)),
+            .setOverlay(channel: 3, rect: .full, animation: OverlayAnimation(kind: .zoom, durationTicks: Int.max)),
+            .overlay(channel: 1, on: true, input: -1),
+            .addInput(config: InputConfig(number: 8, name: "屏幕", source: .screen(target: .display(id: 1), frameRate: FrameRate(241), captureAudio: false))),
+            .setInputSource(input: 2, source: .synthetic(settings: SyntheticSourceSettings(width: 0, height: 1080))),
+            .setInputSource(input: 2, source: .synthetic(settings: SyntheticSourceSettings(frameRate: FrameRate(Int64.max)))),
+            .loadShow(show: Show(name: "720p", state: { var s = state; s.format = .hd720p60; return s }())),
+            .loadShow(show: { var show = Show(name: "没叠加", state: state); show.mixer.overlays = []; return show }()),
+            .loadShow(show: Show(name: "FTB 超长", state: { var s = state; s.ftb.durationTicks = Int.max; return s }())),
+            .loadShow(show: Show(name: "对齐帧数", state: { var s = state; s.audio.alignmentFrames = 24_001; return s }())),
         ]
         for c in illegal {
             XCTAssertNotNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应拒绝")
@@ -282,6 +303,103 @@ final class CommandBusTests: XCTestCase {
         for text in [#"{"fade":{"durationTicks":9223372036854775807}}"#, #"{"setFTBDuration":{"ticks":9223372036854775807}}"#] {
             let command = try CommandEnvelope.decode(Data(text.utf8))
             XCTAssertNotNil(CommandValidator.reason(rejecting: command, in: TestStates.base()), "\(text)：超出可安全计算的时长要在 API 入口拒")
+        }
+        // 034 ④：五条带时长的命令同一个上限、同一句理由（fade / setTransition / setFTBDuration 的负数也走这一句）
+        let over = DurationLimits.maxTicks + 1
+        let commands: [Command] = [
+            .fade(durationTicks: over), .setTransition(type: .zoom, durationTicks: over), .setFTBDuration(ticks: over),
+            .setTransitionSlot(slot: 1, config: TransitionSlot(type: .fade, durationTicks: over)),
+            .setOverlay(channel: 2, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: over)),
+        ]
+        for command in commands {
+            XCTAssertEqual(CommandValidator.reason(rejecting: command, in: TestStates.base()), "时长必须在 0–864000 拍之间：864001", "\(command)")
+        }
+        for negative in [Command.fade(durationTicks: -1), .setTransition(type: .wipe, durationTicks: -1), .setFTBDuration(ticks: -1)] {
+            XCTAssertEqual(CommandValidator.reason(rejecting: negative, in: TestStates.base()), "时长必须在 0–864000 拍之间：-1", "\(negative)")
+        }
+    }
+
+    /// N08：运行中 loadShow 换格式（1080p60 → 720p30）原来 200、状态报新格式，引擎时钟 / 渲染器 / App 的 session 还是旧的。034 ⑥：400 带两边的格式、不占 sequence、状态不变；同格式照载。
+    func testN08_loadShowFormatChange_rejectedWithReason() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        var other = TestStates.base()
+        other.format = ProgramFormat(width: 1280, height: 720, frameRate: .fps30)
+        do {
+            _ = try await f.bus.submit(.loadShow(show: Show(name: "720p30", state: other)), source: .api)
+            XCTFail("换格式的 loadShow 应被拒")
+        } catch let e as CommandRejection {
+            XCTAssertEqual(e.reason, "节目格式不同（1920×1080@60 → 1280×720@30）：运行中不能换格式，用打开节目 / 重启 headless")
+        }
+        var fractional = TestStates.base()
+        fractional.format = .hd1080p5994
+        XCTAssertEqual(CommandValidator.reason(rejecting: .loadShow(show: Show(name: "59.94", state: fractional)), in: TestStates.base()),
+                       "节目格式不同（1920×1080@60 → 1920×1080@59.94）：运行中不能换格式，用打开节目 / 重启 headless")
+        XCTAssertEqual(f.bus.lastSequence, 0, "被拒的命令不占 sequence")
+        let unchanged = await f.stateMachine.state
+        XCTAssertEqual(unchanged.format, .hd1080p60)
+        var same = TestStates.base()
+        same.program = 3
+        let ok = try await f.bus.submit(.loadShow(show: Show(name: "同格式", state: same)), source: .api)
+        XCTAssertTrue(ok.applied)
+        let loaded = await f.stateMachine.state
+        XCTAssertEqual(loaded.program, 3)
+    }
+
+    /// N11：`overlay(input: 0)` 原来被总线以"输入 0 不存在"拒（叠加设置的"（无）"发 nil 又是"不换"，两头都清不掉）。034 ⑤：0 = 清空，放行并生效；nil 仍是不换。
+    func testN11_overlayInputZero_passesBusAndClears() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        _ = try await f.bus.submit(.overlay(channel: 1, on: true, input: 3), source: .api)
+        let routed = await f.stateMachine.state
+        XCTAssertEqual(routed.overlays[0].input, 3)
+        let clear = try await f.bus.submit(.overlay(channel: 1, on: true, input: 0), source: .api)
+        XCTAssertTrue(clear.applied)
+        let cleared = await f.stateMachine.state
+        XCTAssertNil(cleared.overlays[0].input)
+        XCTAssertTrue(cleared.overlays[0].on, "开关不动")
+        let keep = try await f.bus.submit(.overlay(channel: 1, on: true, input: nil), source: .api)
+        XCTAssertFalse(keep.applied, "nil = 不换（开关也没变）")
+        XCTAssertEqual(CommandValidator.reason(rejecting: .overlay(channel: 1, on: true, input: -1), in: TestStates.base()), "输入 -1 不存在")
+        XCTAssertEqual(f.bus.counters.rejected, 0)
+    }
+
+    /// 034 ② / ②b / ③ / ⑧：来源的帧率 / 尺寸、loadShow 的结构 / 格式 / 时长 / 对齐帧数，总线入口拒并给人话（API 400），不占 sequence、状态不变；边界值照收。
+    func test034_numericLimits_rejectedWithReason() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        let screen = { (rate: FrameRate) in InputSource.screen(target: .display(id: 1), frameRate: rate, captureAudio: false) }
+        var noOverlays = Show(name: "没叠加", state: TestStates.base())
+        noOverlays.mixer.overlays = []
+        let tooBig = { (edit: (inout MixerState) -> Void) -> Show in var s = TestStates.base(); edit(&s); return Show(name: "越界", state: s) }
+        let cases: [(Command, String)] = [
+            (.addInput(config: InputConfig(number: 5, name: "屏幕", source: screen(FrameRate(241)))), "帧率必须在 1–240 之间：241"),
+            (.setInputSource(input: 2, source: screen(FrameRate(Rational(1, 2)))), "帧率必须在 1–240 之间：0.50"),
+            (.addInput(config: InputConfig(number: 5, name: "合成", source: .synthetic(settings: SyntheticSourceSettings(frameRate: FrameRate(1_000))))), "帧率必须在 1–240 之间：1000"),
+            (.setInputSource(input: 2, source: .synthetic(settings: SyntheticSourceSettings(width: 0, height: 0))), "画面尺寸必须在 16–8192 之间：0×0"),
+            (.loadShow(show: noOverlays), "节目文件不合法：overlayCount(0)"),
+            (.loadShow(show: tooBig { $0.format = ProgramFormat(width: -1, height: 0, frameRate: .fps60) }), "节目文件不合法：节目尺寸必须在 16–8192 之间：-1×0"),
+            (.loadShow(show: tooBig { $0.format = ProgramFormat(width: 1920, height: 1080, frameRate: FrameRate(Int64.max)) }), "节目文件不合法：帧率必须在 1–240 之间：9223372036854775807"),
+            (.loadShow(show: tooBig { $0.ftb.durationTicks = Int.max }), "节目文件不合法：时长必须在 0–864000 拍之间：9223372036854775807"),
+            (.loadShow(show: tooBig { $0.audio.alignmentFrames = 1 << 62 }), "节目文件不合法：音频对齐帧数必须在 0–24000 之间：4611686018427387904"),
+            (.loadShow(show: tooBig { $0.inputs[0].source = screen(FrameRate(300)) }), "节目文件不合法：输入 1 的帧率必须在 1–240 之间"),
+        ]
+        for (command, reason) in cases {
+            do {
+                _ = try await f.bus.submit(command, source: .api)
+                XCTFail("应被拒绝：\(command)")
+            } catch let e as CommandRejection {
+                XCTAssertEqual(e.reason, reason, "\(command)")
+            }
+        }
+        XCTAssertEqual(f.bus.lastSequence, 0, "被拒的命令不占 sequence")
+        let before = await f.stateMachine.state
+        XCTAssertEqual(before, TestStates.base(), "状态未变")
+        // 边界值照收
+        for command in [Command.fade(durationTicks: DurationLimits.maxTicks), .setFTBDuration(ticks: DurationLimits.maxTicks),
+                        .addInput(config: InputConfig(number: 5, name: "屏幕", source: screen(FrameRate(240))))] {
+            let r = try await f.bus.submit(command, source: .api)
+            XCTAssertTrue(r.applied, "\(command)")
         }
     }
 

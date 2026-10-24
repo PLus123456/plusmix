@@ -12,7 +12,7 @@ public struct MixerSettings: Hashable, Codable, Sendable {
     public var transition: TransitionState
     /// FTB。
     public var ftb: FadeToBlack
-    /// 叠加通道，恰好 4 个。
+    /// 叠加通道，恰好 4 个（`Show.validateStructure()` 在构造 MixerState 之前查，提案 034 ③）。
     public var overlays: [OverlayState]
 
     public init(format: ProgramFormat, program: Int, preview: Int, transition: TransitionState, ftb: FadeToBlack, overlays: [OverlayState]) {
@@ -85,12 +85,31 @@ public struct Show: Hashable, Codable, Sendable {
         self.init(name: name, inputs: state.inputs, mixer: MixerSettings(state: state), audio: state.audio, outputs: state.outputs, layout: layout)
     }
 
-    /// 生成运行时状态：瞬态（转场进度等）清零，目标值直接到位。
+    /// 生成运行时状态：瞬态（转场进度等）清零，目标值直接到位。叠加不是 4 个会在 `MixerState.init` 里断言——那是写错代码；
+    /// 文件 / API 进来的节目走 `makeValidatedState()`。
     public func makeState() -> MixerState {
         var s = MixerState(format: mixer.format, inputs: inputs, program: mixer.program, preview: mixer.preview,
                            transition: mixer.transition, ftb: mixer.ftb, overlays: mixer.overlays, audio: audio, outputs: outputs)
         s.resetTransientState()
         return s
+    }
+
+    /// 构造 MixerState 之前的结构检查（提案 034 ③，用户 2026-10-25 批；Codex N02）：叠加恰好 4 个（`MixerStateError.overlayCount`）、
+    /// 转场槽恰好 4 个或空（空的由 `migratingLegacyKeys()` 补出厂槽；否则 `.transitionSlotCount`）。原来 `makeState()` 的 precondition 跑在 `validate()` 之前，
+    /// overlayCount 这个错误永远到不了、一份 `"overlays": []` 的文件就让进程 SIGTRAP。搬迁前后调都对（搬迁不改叠加个数、只把空槽补成 4 个）。
+    public func validateStructure() throws {
+        guard mixer.overlays.count == MixerState.overlayCount else { throw MixerStateError.overlayCount(mixer.overlays.count) }
+        let slots = mixer.transition.slots.count
+        guard slots == TransitionSlot.count || slots == 0 else { throw MixerStateError.transitionSlotCount(slots) }
+    }
+
+    /// 不可信的节目（文件、API 的 loadShow）生成运行时状态：`validateStructure()` → `makeState()` → `validate()`，哪一步不过就抛、进程在（提案 034 ③）。
+    /// Show.load / migrate、CommandValidator 与 reducer 的 loadShow 四处都是先 `migratingLegacyKeys()` 再调它，判得一致。
+    public func makeValidatedState() throws -> MixerState {
+        try validateStructure()
+        let state = makeState()
+        try state.validate()
+        return state
     }
 
     /// 文件编码：缩进、键排序，方便 diff。
@@ -114,7 +133,7 @@ public struct Show: Hashable, Codable, Sendable {
         guard let version = header.schemaVersion else { throw ShowError.malformed("缺少 schemaVersion") }
         if version == currentSchemaVersion {
             let show = try fileDecoder.decode(Show.self, from: data).migratingLegacyKeys()
-            try show.makeState().validate()
+            _ = try show.makeValidatedState()
             return show
         }
         return try migrate(from: try fileDecoder.decode(JSONValue.self, from: data), schemaVersion: version)
@@ -189,7 +208,7 @@ public struct Show: Hashable, Codable, Sendable {
         case currentSchemaVersion:
             let data = try JSONEncoder().encode(document)
             let show = try fileDecoder.decode(Show.self, from: data).migratingLegacyKeys()
-            try show.makeState().validate()
+            _ = try show.makeValidatedState()
             return show
         default:
             throw ShowError.unsupportedSchemaVersion(schemaVersion)
