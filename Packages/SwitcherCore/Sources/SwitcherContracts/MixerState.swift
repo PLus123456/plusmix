@@ -809,6 +809,8 @@ public enum MixerStateError: Error, Equatable {
     case transitionSlotIndex(Int)
     /// 某路文件输入的播放速率不在 `FileSource.rateRange`（0.1…8）里或不是有限数（提案 031，用户 2026-10-17 批）。
     case fileRate(input: Int, rate: Double)
+    /// 输入编号超出 `InputConfig.numberRange`（1…16）的上限（提案 032，用户 2026-10-18 批）；0 与负数照旧是 `reservedInputNumber`。
+    case inputNumber(input: Int)
 }
 
 /// 不可变快照（设计方案 §4）。相比 §4 多了 `format` 和 `inputs`：addInput / removeInput / setInputSettings 要在 reduce 里落地，
@@ -867,8 +869,9 @@ public struct MixerState: Hashable, Codable, Sendable {
         return s
     }
 
-    /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复、转场槽恰好 4 个且 currentSlot 为 nil 或 1…4（020）；
+    /// 不变量检查（解码 / 载入节目文件后调）。只查结构：叠加恰好 4 个、总线顺序、输入编号在 1…16（032）且不重复、输出编号不重复、转场槽恰好 4 个且 currentSlot 为 nil 或 1…4（020）；
     /// 外加一条取值：文件来源的播放速率在 `FileSource.rateRange` 里（031：越界的速率在 FileInput 里崩进程，节目文件不许绕过 API 的校验）。
+    /// 输入编号的上限（032）：编号极大的输入让兼容层按编号分配的 TALLY / XML 崩或卡，节目文件同样不许绕过 addInput 的校验。
     /// 不查引用（PGM / PVW / 叠加 / Stinger 指向的输入在不在）：悬空引用由 reducer 的 removeInput 清，渲染器按"没有这路"画（用户 2026-09-27 定）。
     public func validate() throws {
         guard overlays.count == MixerState.overlayCount else { throw MixerStateError.overlayCount(overlays.count) }
@@ -878,6 +881,7 @@ public struct MixerState: Hashable, Codable, Sendable {
         var seen = Set<Int>()
         for i in inputs {
             guard i.number != MixerState.noInput, i.number > 0 else { throw MixerStateError.reservedInputNumber(i.number) }
+            guard InputConfig.numberRange.contains(i.number) else { throw MixerStateError.inputNumber(input: i.number) }
             guard seen.insert(i.number).inserted else { throw MixerStateError.duplicateInput(i.number) }
             if case .file(_, _, let rate) = i.source, !FileSource.rateRange.contains(rate) { throw MixerStateError.fileRate(input: i.number, rate: rate) }
         }

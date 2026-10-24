@@ -27,6 +27,7 @@ final class EffectsLatencyStatsTests: XCTestCase {
         // 没装任何效果：四条总线都列（含耳机总线，G10 胶水 ①）、延迟 0、没有 measured；inputs 空
         var c = rig.engine.audioCounters
         XCTAssertEqual(c.effects.buses.map(\.bus), ["master", "busA", "busB", "headphones"], "Bus.allCases 的顺序，耳机总线也列（用户 2026-10-18 裁定 #1）")
+        XCTAssertEqual(c.effects.buses.map(\.bus), E.listedBuses.map(\.name), "填数与契约的 listedBuses 同一张表（P5-5 / prompt 123 把常量改成四条）")
         XCTAssertEqual(c.effects.buses, Bus.allCases.map { E.BusLatency(bus: $0.name, latencyMs: 0) })
         XCTAssertEqual(c.effects.inputs, [:])
 

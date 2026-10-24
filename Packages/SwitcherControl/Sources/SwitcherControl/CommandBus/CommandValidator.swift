@@ -3,7 +3,8 @@ import SwitcherContracts
 // 结构性校验：reducer（W1-B）对非法命令是"原样返回、不出声"（契约 MixerReducing 的约定），API 用户会以为成功了。
 // 总线在入口按同一套规则先查一遍，给出理由（HTTP 400）。只查"看一眼状态就能判定、且不随拍变化"的条件：
 // 引用的输入 / 输出是否存在、输出 kind 是否匹配、叠加通道范围、负时长、编号重复、节目文件不变量、文件速率 / 定位秒数的边界（提案 031：`FileSource.rateRange` /
-// `PlaybackLimits.maxSeekSeconds`，与 `MixerState.validate()`、reducer、FileInput 的钳位同一组常量）。
+// `PlaybackLimits.maxSeekSeconds`，与 `MixerState.validate()`、reducer、FileInput 的钳位同一组常量）、addInput 的编号范围（提案 032：`InputConfig.numberRange`，
+// 与 `MixerState.validate()`、reducer 同一个常量；按编号取输入的命令遇到越界编号照旧"不存在"——越界的编号进不了状态）。
 // 不查随时间变的条件（转场进行中再 fade、FTB 目标已相同）——那些在应用那一拍才有定论，仍由 reducer 决定。
 // CommandBusTests.testValidator_agreesWithReducer 保证：这里拒绝的，reducer 也一定原样返回。
 
@@ -70,7 +71,8 @@ public enum CommandValidator {
         case .startStream(let output), .stopStream(let output):
             return outputReference(output, kind: .stream, name: "推流", in: s)
         case .addInput(let config):
-            if config.number <= MixerState.noInput { return "输入编号必须 ≥ 1：\(config.number)" }
+            // 提案 032：编号不在 1…16 入口就拒（原来只查 ≥ 1：2^62 号进了状态，兼容层按编号分配的 TALLY / XML 崩或卡）
+            if !InputConfig.numberRange.contains(config.number) { return "输入编号必须在 \(inputNumberRangeText) 之间：\(config.number)" }
             if s.input(config.number) != nil { return "输入 \(config.number) 已存在" }
             return fileRate(config.source)
         case .addOutput(let config):
@@ -102,6 +104,8 @@ public enum CommandValidator {
     /// 031 两个常量的文字（理由与命令目录共用）："0.1–8" / "604800"。
     static let fileRateRangeText = "\(plain(FileSource.rateRange.lowerBound))–\(plain(FileSource.rateRange.upperBound))"
     static let maxSeekText = plain(PlaybackLimits.maxSeekSeconds)
+    /// 032 的输入编号范围的文字（理由与命令目录共用）："1–16"。
+    static let inputNumberRangeText = "\(InputConfig.numberRange.lowerBound)–\(InputConfig.numberRange.upperBound)"
     private static func plain(_ x: Double) -> String { x == x.rounded() && abs(x) < 1e15 ? String(Int64(x)) : String(x) }
 
     private static func fileInputReference(_ number: Int, in s: MixerState) -> String? {

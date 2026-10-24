@@ -172,6 +172,33 @@ final class APIServerTests: XCTestCase {
         XCTAssertEqual(after.input(6)?.source, .file(path: "/clip.mov", endAction: .loop, rate: 8))
     }
 
+    /// 提案 032（用户 2026-10-18 批，P5-5）：W2-C4 报告 §3 第 4 条的触发条件——主 API `POST /api/v1/command` 加一路 2^62 号输入——现在回 400 带理由、不占 sequence、
+    /// 状态里没有它（原来 200 照收，开着兼容层时 TALLY / XML 按编号分配崩或卡）；17 号同样 400；16 号 200；GET state 里的编号都在 1…16。
+    func test032_postCommand_inputNumberAboveRange_400() async throws {
+        let s = try await Server.start()
+        defer { Task { await s.stop() } }
+        let url = s.baseURL.appending(path: "/api/v1/command")
+        func addInput(_ number: Int) throws -> String {
+            let command = Command.addInput(config: InputConfig(number: number, name: "极大", source: .image(path: "/a.png")))
+            let body = #"{"command":"# + String(decoding: try JSONEncoder().encode(command), as: UTF8.self) + "}"
+            XCTAssertTrue(body.contains(#""number":\#(number)"#), body)
+            return body
+        }
+        for number in [1 << 62, 17] {
+            let (st, r) = try await post(url, body: try addInput(number))
+            XCTAssertEqual(st, 400, "\(number)：\(r)")
+            XCTAssertTrue((r["error"] as? String ?? "").contains("输入编号必须在 1–16 之间：\(number)"), "\(r)")
+        }
+        XCTAssertEqual(s.fixture.bus.lastSequence, 0, "被拒的不占 sequence")
+        let (stOK, rOK) = try await post(url, body: try addInput(16))
+        XCTAssertEqual(stOK, 200, "\(rOK)")
+        XCTAssertEqual(rOK["applied"] as? Bool, true)
+        let (stState, state) = try await get(s.baseURL.appending(path: "/api/v1/state"))
+        XCTAssertEqual(stState, 200)
+        let inputs = try XCTUnwrap((state["state"] as? [String: Any])?["inputs"] as? [[String: Any]], "\(state.keys)")
+        XCTAssertEqual(inputs.compactMap { $0["number"] as? Int }, [1, 2, 3, 4, 16])
+    }
+
     // MARK: 批量、日志、tally
 
     func testAPI_batchCommands_logAndTally() async throws {

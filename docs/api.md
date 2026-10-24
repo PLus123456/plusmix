@@ -739,11 +739,11 @@ PGM 与 PVW 原子对调，无中间态；转场进行中发 Cut 立即完成对
 
 #### `addInput`
 
-加一路输入；编号已存在则拒绝；文件来源的播放速率须在 0.1–8 之间（提案 031），否则 400。
+加一路输入；编号须在 1–16 之间（提案 032）、已存在则拒绝；文件来源的播放速率须在 0.1–8 之间（提案 031），否则 400。
 
 | 参数 | 含义 |
 |---|---|
-| `config` | InputConfig：number, name, source, settings |
+| `config` | InputConfig：number（1–16）, name, source, settings |
 
 ```json
 {

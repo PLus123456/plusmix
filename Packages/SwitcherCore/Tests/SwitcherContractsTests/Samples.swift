@@ -125,11 +125,12 @@ enum Samples {
             inputs: [1: Stats.AudioCounters.InputMeter(peakDb: [-12, -12.5], rmsDb: [-18, -18.5]), 3: Stats.AudioCounters.InputMeter(peakDb: silent)])
     }
 
-    /// 提案 030：Master 一格限幅（起音 12 ms = 576 帧）、Bus A 一格自写压缩器（实测 0）、Bus B 没装；输入 1 动态格是压缩器（实测 1 ms）、输入 3 只有 EQ（0）。
+    /// 提案 030：Master 一格限幅（起音 12 ms = 576 帧）、Bus A 一格自写压缩器（实测 0）、Bus B 没装、耳机总线一格限幅（起音 5.5 ms；P5-5 起四条总线都列）；
+    /// 输入 1 动态格是压缩器（实测 1 ms）、输入 3 只有 EQ（0）。
     static func effects() -> Stats.AudioCounters.EffectsLatency {
         typealias E = Stats.AudioCounters.EffectsLatency
         return E(buses: [E.BusLatency(bus: Bus.master.name, latencyMs: 12), E.BusLatency(bus: Bus.busA.name, latencyMs: 0, measuredLatencyMs: 0),
-                         E.BusLatency(bus: Bus.busB.name, latencyMs: 0)],
+                         E.BusLatency(bus: Bus.busB.name, latencyMs: 0), E.BusLatency(bus: Bus.headphones.name, latencyMs: 5.5)],
                  inputs: [1: E.InputLatency(latencyMs: 1, measuredLatencyMs: 1), 3: E.InputLatency(latencyMs: 0)])
     }
 

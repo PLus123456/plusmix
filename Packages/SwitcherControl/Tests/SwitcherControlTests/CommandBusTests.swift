@@ -129,6 +129,9 @@ final class CommandBusTests: XCTestCase {
             .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 0.1)), .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: 8)),
             .addInput(config: InputConfig(number: 7, name: "片 2", source: .file(path: "/b.mov", endAction: .loop, rate: 2))),
             .seekPlayback(input: 6, seconds: PlaybackLimits.maxSeekSeconds),
+            // 提案 032（P5-5）：输入编号 16 = 上限放行
+            .addInput(config: InputConfig(number: 16, name: "满", source: .synthetic(settings: SyntheticSourceSettings()))),
+            .loadShow(show: Show(name: "16 路", state: { var s = state; s.inputs.append(InputConfig(number: 16, name: "满", source: .image(path: "/a.png"))); return s }())),
         ]
         for c in legal {
             XCTAssertNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应放行")
@@ -152,6 +155,13 @@ final class CommandBusTests: XCTestCase {
             .setInputSource(input: 6, source: .file(path: "/clip.mov", endAction: .loop, rate: .nan)), .setInputSource(input: 1, source: .file(path: "/a.mov", endAction: .loop, rate: 9)),
             .addInput(config: InputConfig(number: 7, name: "片 2", source: .file(path: "/b.mov", endAction: .loop, rate: 0))),
             .seekPlayback(input: 6, seconds: 1e300), .seekPlayback(input: 6, seconds: PlaybackLimits.maxSeekSeconds + 1), .seekPlayback(input: 6, seconds: .infinity),
+            // 提案 032（P5-5，S1）：addInput 编号超过 16（17 / 2^62 / Int.max）、loadShow 的节目里有 17 号，入口拒，reducer 同判；
+            // 按编号取输入的命令遇到越界编号照旧"不存在"（越界的编号进不了状态，所以永远取不到）
+            .addInput(config: InputConfig(number: 17, name: "超", source: .synthetic(settings: SyntheticSourceSettings()))),
+            .addInput(config: InputConfig(number: 1 << 62, name: "极大", source: .synthetic(settings: SyntheticSourceSettings()))),
+            .addInput(config: InputConfig(number: Int.max, name: "极大", source: .synthetic(settings: SyntheticSourceSettings()))),
+            .loadShow(show: Show(name: "17 路", state: { var s = state; s.inputs.append(InputConfig(number: 17, name: "超", source: .image(path: "/a.png"))); return s }())),
+            .setInputSource(input: 17, source: .image(path: "/a.png")), .setPreview(input: 1 << 62), .removeInput(input: Int.max), .audioGain(input: 17, dB: 0),
         ]
         for c in illegal {
             XCTAssertNotNil(CommandValidator.reason(rejecting: c, in: state), "\(c) 应拒绝")
@@ -216,6 +226,52 @@ final class CommandBusTests: XCTestCase {
         XCTAssertTrue(ok.applied)
         let seek = try await f.bus.submit(.seekPlayback(input: 6, seconds: PlaybackLimits.maxSeekSeconds), source: .api)
         XCTAssertTrue(seek.applied)
+    }
+
+    /// 提案 032（用户 2026-10-18 批，P5-5；W2-C4 报告 §3 第 4 条的 S1）：addInput 的编号超过 16 在总线入口就拒（API 回 400，见 APIServerTests.test032_*），
+    /// 不占 sequence、状态不变——原来只查 ≥ 1，2^62 号进了状态，开着兼容层时 TALLY 串 `reserveCapacity(最大编号)`、XML 按 1…最大编号写占位 → 分配失败崩或卡死。
+    /// loadShow 的节目里有越界编号同样拒（validate 不过）；按编号取输入的命令遇到越界编号照旧"输入 n 不存在"；16 照收，16 路满了再加 17 号仍拒。
+    func test032_inputNumberAboveRange_rejectedWithReason() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        var wide = TestStates.base()
+        wide.inputs.append(InputConfig(number: 17, name: "超", source: .image(path: "/a.png")))
+        let cases: [(Command, String)] = [
+            (.addInput(config: InputConfig(number: 17, name: "超", source: .synthetic(settings: SyntheticSourceSettings()))), "输入编号必须在 1–16 之间：17"),
+            (.addInput(config: InputConfig(number: 1 << 62, name: "极大", source: .synthetic(settings: SyntheticSourceSettings()))), "输入编号必须在 1–16 之间：4611686018427387904"),
+            (.addInput(config: InputConfig(number: Int.max, name: "极大", source: .synthetic(settings: SyntheticSourceSettings()))), "输入编号必须在 1–16 之间"),
+            (.addInput(config: InputConfig(number: -5, name: "负", source: .synthetic(settings: SyntheticSourceSettings()))), "输入编号必须在 1–16 之间：-5"),
+            (.loadShow(show: Show(name: "17 路", state: wide)), "节目文件不合法"),
+            (.setInputSource(input: 17, source: .image(path: "/a.png")), "输入 17 不存在"),
+            (.setPreview(input: 1 << 62), "输入 4611686018427387904 不存在"),
+            (.removeInput(input: Int.max), "不存在"),
+        ]
+        for (command, keyword) in cases {
+            do {
+                _ = try await f.bus.submit(command, source: .api)
+                XCTFail("应被拒绝：\(command)")
+            } catch let e as CommandRejection {
+                XCTAssertTrue(e.reason.contains(keyword), "\(command) 的理由「\(e.reason)」应含「\(keyword)」")
+            }
+        }
+        XCTAssertEqual(f.bus.lastSequence, 0, "被拒的命令不占 sequence")
+        XCTAssertEqual(f.bus.counters.rejected, UInt64(cases.count))
+        let before = await f.stateMachine.state
+        XCTAssertEqual(before, TestStates.base(), "状态未变")
+        // 上限照收：5…16 加满 16 路，再加 17 仍拒
+        for n in 5...16 {
+            let r = try await f.bus.submit(.addInput(config: InputConfig(number: n, name: "机位 \(n)", source: .synthetic(settings: SyntheticSourceSettings()))), source: .api)
+            XCTAssertTrue(r.applied, "\(n)")
+        }
+        do {
+            _ = try await f.bus.submit(.addInput(config: InputConfig(number: 17, name: "超", source: .synthetic(settings: SyntheticSourceSettings()))), source: .api)
+            XCTFail("16 路之后的 17 号应被拒")
+        } catch let e as CommandRejection {
+            XCTAssertTrue(e.reason.contains("1–16"), e.reason)
+        }
+        let after = await f.stateMachine.state
+        XCTAssertEqual(after.inputs.map(\.number), Array(1...16))
+        XCTAssertNoThrow(try after.validate())
     }
 
     // MARK: C4（进程内形态）：每秒 100 条带序号命令，两个并发"客户端"

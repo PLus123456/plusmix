@@ -117,7 +117,9 @@ public struct Stats: Hashable, Codable, Sendable {
         /// JSON 键 connections（提案 019）：NDI = 当前接收方数（NDIlib_send_get_no_connections，每秒查一次的值）；推流 / 录制写 0。
         public var connections: UInt64
         /// JSON 键 state（提案 002）：输出的运行状态。推流：idle / connecting / publishing / backoff / stopping / stopped / failed；
-        /// NDI：publishing / idle / unavailable（SDK 不在）/ failed（SDK 在但 initialize / send_create 失败，019）；录制：idle / recording / stopping / stopped / failed。
+        /// NDI：publishing / idle / unavailable（SDK 不在）/ failed（SDK 在但 initialize / send_create 失败，019；**或在跑但连续 `NDISender.failureStreakLimit` = 10 帧
+        /// 没送出去**——像素格式送不了、NV12 → UYVY 转换失败、直送的缓冲锁不住，D08 / 118，用户 2026-10-18 裁定 #10 只补文字；送出去一帧回 publishing）；
+        /// 录制：idle / recording / stopping / stopped / failed。取值集合不变。
         public var state: String
         /// JSON 键 uptime_s（提案 022）：这一路**本次运行**的时长（秒）= 采样那一刻 − `start()` 成功那一刻（host time 差）。推流含握手 / 退避 / 重连期间
         ///（"运行着"就算，与 state 一起看）；idle / stopped / failed 写 0。填数：录制 `Recorder`、推流 `StreamOutput`、NDI `NDISender` 各自记 startedAt。
@@ -126,8 +128,10 @@ public struct Stats: Hashable, Codable, Sendable {
         /// 与 `reconnects` 的区别：reconnects 只记成功连回来的，断了没连回来的只有这里能看出来。
         public var disconnects: UInt64
         /// JSON 键 last_error（提案 022）：最近一次错误的文案，空串 = 没出过错；**下一次 `start()` 清空**（与 019 的 NDI startFailed 同口径）。
-        /// 推流 = 最近一次断线 / 连接失败的原因（退出原因 / 连接错误的描述）或 failed 的原因；录制 = `State.failed(String)` 的文案或 writer 失败的原因；
-        /// NDI = SDK 不在 / initialize / send_create 失败的文案；起不来的路（`start()` 抛错、Stats 里报 failed）由组装方（App `OutputRuntime`）把原因填进来。
+        /// 推流 = 最近一次断线 / 连接失败的原因（退出原因 / 连接错误的描述，例如"断线：发送停滞""连接失败：连接超时"，不带 Swift 枚举原样）或 failed 的原因；
+        /// 录制 = `State.failed(String)` 的文案或 writer 失败的原因；
+        /// NDI = SDK 不在 / initialize / send_create 失败的文案，或连续送不出去那一次的像素格式与原因（"NDI 送不了像素格式 'yuvs'……，连续 10 帧没送出"，D08；恢复送出后留着、下一次 start 清）；
+        /// 起不来的路（`start()` 抛错、Stats 里报 failed）由组装方（App `OutputRuntime`）把原因填进来。
         public var lastError: String
         /// JSON 键 attempt（提案 022 B1）：推流**这一轮**连接是第几次尝试（`StreamState.connecting(attempt)` / `.backoff(attempt)` 的 attempt，从 1 起）；
         /// 在推 / 空闲 / 停止 / failed = 0；录制 / NDI 写 0。底栏"连接中 / 重连中（第 n 次）"从此读它（铁律 4）。
@@ -262,7 +266,7 @@ public struct Stats: Hashable, Codable, Sendable {
         /// JSON 键名（effects 是 030 加在末尾的）。
         public static let jsonKeys = ["dropouts", "underruns", "discontinuities", "meters", "effects"]
 
-        /// 效果链的处理延迟（提案 030）：`buses` = Master / Bus A / Bus B 各一项（`listedBuses`，没装效果 = 0），`inputs` = 装了效果的那几路（键 = 输入编号）。
+        /// 效果链的处理延迟（提案 030）：`buses` = 四条总线 Master / Bus A / Bus B / 耳机各一项（`listedBuses`，没装效果 = 0），`inputs` = 装了效果的那几路（键 = 输入编号）。
         /// 延迟 = 已打开的格的延迟之和换成毫秒（`milliseconds(frames:)`，48 kHz）：NBandEQ 0、DynamicsProcessor 256 帧（5.33 ms）、PeakLimiter = 起音（默认 12 ms）、
         /// 自写压缩器 = 冲激法实测（按设计 0）。总线的延迟由泵补到这条总线消费者流的 PTS 上（W5-C；Master 的在 videoDelay 补偿下改成把视频延后，见顶层 `video_delay_ms`），
         /// 每路的从这一路的对齐延迟线里扣（W1-D3）。
@@ -286,14 +290,15 @@ public struct Stats: Hashable, Codable, Sendable {
             }
             /// JSON 键名。
             public static let jsonKeys = ["buses", "inputs"]
-            /// `buses` 列哪几条总线（顺序即写出顺序）：Master / Bus A / Bus B（提案 030 正文；耳机总线不列）。
-            public static let listedBuses: [Bus] = [.master, .busA, .busB]
+            /// `buses` 列哪几条总线（顺序即写出顺序）：四条都列 = `Bus.allCases`。030 正文只列 Master / Bus A / Bus B；耳机总线也能装效果（调音台耳机条有"效果"按钮），
+            /// 用户 2026-10-18 裁定 #1 定列进来（填数 G10 胶水、本常量 P5-5）。JSON 形态不变，老读者按 `bus` 认、不受影响。
+            public static let listedBuses: [Bus] = Bus.allCases
             /// 帧（@ `AudioFormat.sampleRate`）→ 毫秒：frames / 采样率 × 1000。填数方都用它，口径只有一处。
             public static func milliseconds(frames: Int) -> Double { Double(frames) * 1000 / Double(AudioFormat.sampleRate) }
 
             /// 一条总线的效果链延迟。
             public struct BusLatency: Hashable, Codable, Sendable {
-                /// JSON 键 bus：`Bus.name`（master / busA / busB），与 `meters.buses[].bus` 同一写法。
+                /// JSON 键 bus：`Bus.name`（master / busA / busB / headphones），与 `meters.buses[].bus` 同一写法。
                 public var bus: String
                 /// JSON 键 latency_ms：这条总线效果链当前的总处理延迟 = `AudioEngineStatus.BusEffects.latencyFrames` / 采样率 × 1000；没装效果 / 格都关着 = 0。
                 public var latencyMs: Double

@@ -112,6 +112,15 @@ final class CommandCatalogTests: XCTestCase {
         XCTAssertEqual(seek.fields, [CommandField(name: "input", type: .input(allowsBlack: false)), CommandField(name: "seconds", type: .seconds)])
     }
 
+    /// P5-5：提案 032——addInput 写明输入编号的范围 1–16（与校验器 400 的文案同一个常量）；字段不变、命令数仍 42。
+    func testCatalog_032_inputNumberRangeDocumented() {
+        XCTAssertEqual(CommandKind.allCases.count, 42, "P5-5 不加命令")
+        let add = CommandCatalog.entry(for: .addInput)
+        XCTAssertTrue(add.summary.contains("1–16") && add.summary.contains("032"), add.summary)
+        XCTAssertTrue(add.parameters.first { $0.name == "config" }?.note.contains("1–16") == true, "\(add.parameters)")
+        XCTAssertEqual(add.fields, [CommandField(name: "config", type: .json("InputConfig"))])
+    }
+
     func testCatalog_generatedMarkdownMatchesCommittedDocsApiMd() throws {
         // docs/api.md 在仓库根：Packages/SwitcherControl/Tests/SwitcherControlTests/ → 上四级
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

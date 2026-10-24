@@ -44,3 +44,16 @@
 - P5-4（29a64ad）：`FileSource.rateRange` = 0.1…8、`PlaybackLimits.maxSeekSeconds` = 7 × 86 400、`MixerStateError.fileRate`、校验器三条 400；**老文件缺 rate 键读成 1**（main 上原来整份读不进来，探针证实，按本提案的意思补）；`clamped()` 顺带把 `setInputSettings` 的定位秒数钳到一周（第二条定位入口，钳不是拒）——用户 2026-10-18 定**维持**。
 - W2-A5（7a35448，叠在 P5-4 上）：FileInput 的 precondition 改成钳进范围 + lastError、seek 先用 Double 钳再换 Rational / Int64；**定位过尾仍 = 从头**（1e300 / +∞ / 过尾都从第 0 帧播，不是停在末帧）——用户 2026-10-18 定**维持**；NaN 速率按 1 播。
 - 迁移副作用比正文写的大：App 的速率数字框没设范围，0.05 / 10 能写进节目文件，这种老节目现在打不开、界面填了被 400——用户 2026-10-18 定 **(c) App 把数字框钳到 0.1–8**（G10 胶水 ≤ 20 行，超了归 126 W5-Q）。
+
+## P5-5 核对（prompt 123，2026-10-24）：三条实情与 App 数字框的落处
+
+按 prompt 123 交付 4 核对 g10 快进后的 main（1f9be64）上的代码，上一段写的都成立；各条在哪、哪条用例钉着：
+
+| 实情 | 谁做的 | 代码 | 用例 |
+|---|---|---|---|
+| 定位过尾 = 从头（1e300 / +∞ / 过了片尾都从第 0 帧播；非有限 / 负数按 0；不在 0…一周的给 lastError 一句，只是过了片尾的不提示） | 117 W2-A5 | FileInput 的 seek 先用 Double 钳再换整数 | `SwitcherInputsTests.FileInputW2A5Tests.testD01_hugeOrNonFiniteSeek_clampedBeforeConversion_noOverflow` |
+| 老文件 file 来源缺 rate 读成 1（写出照旧写 rate） | 115 P5-4 | `InputSource` 内部 Form 的 rate 可选、缺键 = 1 | `Contracts031Tests.test031_legacyFileSourceMissingRateReadsAsOne_jsonShapeUnchanged` |
+| `setInputSettings` / `addInput` 整体带进来的定位秒数钳到 [0, 一周]（钳，不拒） | 115 P5-4 | `InputSettings.clamped()` | `Contracts031Tests.test031_clampedSeekSecondsCappedAtMaxSeek`、`ReducerTests` everyCommand 表"setInputSettings 定位秒数超过一周钳到一周" |
+| App 速率数字框钳到 0.1–8（裁定 #2 (c)） | **G10 胶水 ⑤**（App 21 行，reports/G10.md §4.3） | `AddInputModel.clampedFileRate`：添加输入与输入设置"来源"两处的 Binding 和 `makeSource()` 都过它，≤ 0 / 非数当没填 = 1 | `App/Tests/PlaybackStatusTests.testG10_fileRateFieldClampedToContractRange` |
+
+还没做的一条归 **126 W5-Q**：打开含越界速率的老节目（P5-4 之前存的 0.05 / 10）时，现在走"节目文件不合法"那一路被拒，界面怎么提示由 126 定（prompt 126、reports/G10.md §4.3 末尾）。契约这边没有要改的。

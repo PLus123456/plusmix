@@ -43,3 +43,6 @@ SwitcherEngine reducer + CommandValidator（Core）、Contracts020Tests / Reduce
 同日另定：T-bar 推这种槽照契约放行、由 App 把 T-bar 灰掉并提示（prompt 119）；MIDI 执行它被拒要提示（prompt 116）；格子"转场"遇它先弹输入选择、整条不发（119）。
 
 **2026-10-18 用户裁定**（止血七路做完后）：**不连 T-bar 一起拒**——界面把 T-bar 灰掉 + 提示（119 已做），MIDI 推子 / API 推杆推这种槽照契约硬切；不再为此写提案。
+
+**P5-5 核对（prompt 123，2026-10-24）**：上面 2026-10-18 那一段（不连 T-bar 一起拒）与代码一致——reducer 对 `tbar` 不看槽的类型（`MixerReducer` 的 tbar 分支，`ReducerTests.test029_autoTransition_currentStingerWithoutInput_refused_tbarUnaffected` 钉着"T-bar 推这样的当前那组照收"）、
+校验器对 `tbar` 不判（`CommandBusTests.testValidator_agreesWithReducer` 里"T-bar 不管（029 不动 T-bar）"那一句）；界面的 T-bar 灰掉 + 提示是 119 做的（App，已随 G10 进 main）；MIDI 推子 / API 推杆推这种槽照契约硬切。契约与文字都不用再改。

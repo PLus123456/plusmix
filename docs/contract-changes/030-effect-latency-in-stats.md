@@ -1,6 +1,7 @@
 # 030 效果链延迟进 Stats（铁律 4：统计只有一份）
 
-状态：**已落地**（P5-4 / prompt 115，2026-10-18，分支 `p5-contracts-4`：契约 87a5bab、填数 26e8d3d、文字 75c4fb4；见文末落地记录）。原状态：**已批**（用户 2026-10-17 "ABC 按照你说的来"：批，归 P5-4 落地，prompt 115）。提出：reports/w1-audio-3.md §4 第 5 条、reports/w5-audio-bus-effects.md §4 第 5 条；G8 2026-10-12 列为待定（当时只有编号没有文件）；G9 2026-10-17 写成提案。
+状态：**已落地**（P5-4 / prompt 115，2026-10-18，分支 `p5-contracts-4`：契约 87a5bab、填数 26e8d3d、文字 75c4fb4；见文末落地记录）。
+耳机总线也列（用户 2026-10-18 裁定 #1）：填数 G10 胶水 ①、契约常量与文字 P5-5（prompt 123，2026-10-24，分支 `p5-contracts-5`；见文末最后一段）。原状态：**已批**（用户 2026-10-17 "ABC 按照你说的来"：批，归 P5-4 落地，prompt 115）。提出：reports/w1-audio-3.md §4 第 5 条、reports/w5-audio-bus-effects.md §4 第 5 条；G8 2026-10-12 列为待定（当时只有编号没有文件）；G9 2026-10-17 写成提案。
 
 ## 改什么
 
@@ -63,3 +64,12 @@
 ## 2026-10-18 用户裁定：`buses` 也列耳机总线
 
 P5-4 落地时按正文只列 master / busA / busB（reports/p5-contracts-4.md §4 第 1 条）；耳机总线也能装效果（调音台耳机条有"效果"按钮），用户 2026-10-18 定**列进来**：`buses[].bus` 四个值（与 `meters.buses[].bus` 同一取值），改一行常量、JSON 形态不变。填数那一行归 G10 胶水（没做就 123 P5-5 做），本文与 CONTRACTS.md / 测试标准 §7 的文字归 123。
+
+## 落地记录：耳机总线（G10 胶水 ① + P5-5 / prompt 123，2026-10-24）
+
+- **填数**（G10 胶水 ①，reports/G10.md §4.3）：`AudioEngine.statsEffects` 改按 `Bus.allCases` 填，`buses` 总是四条（master / busA / busB / headphones，没装 = 0）；`EffectsLatencyStatsTests` 加了耳机条一格限幅（12 ms）那一项。P5-5 没再碰 AudioEngine.swift。
+- **契约**（P5-5，b9b87ff）：`EffectsLatency.listedBuses = Bus.allCases`（原来 `[.master, .busA, .busB]`，与 G10 之后的填数对不上），`BusLatency.bus` 的取值注释加 headphones；JSON 形态不变，老读者按 `bus` 认、不受影响。
+- **用例**（先红后绿）：`Contracts030Tests.test030_jsonKeysSnapshot_listedBuses_millisecondsFromFrames`（listedBuses = 四条、名字含 headphones；修前三条 → 红）、JSON 形态那一条的样例补耳机项；
+  `IntegrationTests.EffectsLatencyStatsTests` 加一句"填数的 bus 列表 = listedBuses 的名字"（修前 4 ≠ 3 → 红），以后两边谁改了另一边都会红；`Samples.effects()` 补耳机那一项、`CodableTests` 整行字面量跟着改。
+- **文字**：CONTRACTS.md §2.7 P5-4 那一条、测试标准 §7 的字段行改成"四条总线"。
+- prompt 123 交付 1 原写"Integration 用例：耳机总线装一格 EQ → buses 里有 headphones 项"：G10 胶水用的是一格限幅（延迟 12 ms，能看出确实拷到了耳机那一条；一格 EQ 的延迟是 0、与没装分不出来），P5-5 没另加 EQ 那一条。
