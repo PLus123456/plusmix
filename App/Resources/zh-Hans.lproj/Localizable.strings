@@ -1490,6 +1490,7 @@
 "outputSettings.iso.column.directory" = "目录";
 "outputSettings.iso.column.dropped" = "丢帧";
 "outputSettings.iso.column.name" = "名称";
+"outputSettings.iso.audioOnlyHint" = "纯音频：画面为黑";
 "outputSettings.iso.column.record" = "录";
 "outputSettings.iso.column.status" = "状态";
 "outputSettings.iso.formatLine" = "格式 %@ · %@ Mb/s · %@（同录制 1）";

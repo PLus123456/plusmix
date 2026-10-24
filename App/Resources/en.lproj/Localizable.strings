@@ -1490,6 +1490,7 @@
 "outputSettings.iso.column.directory" = "Folder";
 "outputSettings.iso.column.dropped" = "Dropped";
 "outputSettings.iso.column.name" = "Name";
+"outputSettings.iso.audioOnlyHint" = "Audio only: the picture is black";
 "outputSettings.iso.column.record" = "Rec";
 "outputSettings.iso.column.status" = "Status";
 "outputSettings.iso.formatLine" = "Format %@ · %@ Mb/s · %@ (same as Recording 1)";

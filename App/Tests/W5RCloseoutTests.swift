@@ -17,6 +17,19 @@ import SwitcherInputs
 import SwitcherTestKit
 @testable import Switcher
 
+/// 纯音频输入的替身：合成 PCM 写进 CAudioRing，videoSlot 恒为 nil、从不往帧槽推（同 AudioDeviceInput），不要麦克风权限（Codex 的 AO02 探针）。
+private struct W5RAudioOnlyFactory: InputFactory {
+    func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput {
+        guard case .audio = config.source else {
+            return try DefaultInputFactory().makeInput(config: config, slot: slot, timing: timing)
+        }
+        let ring = CAudioRing(channelCount: 2)
+        let source = SyntheticAudioInput(number: config.number, name: config.name, frameRate: timing.format.frameRate,
+                                         audioRing: ring, timeline: SyntheticTimeline(t0: timing.clock.t0, frameRate: timing.format.frameRate))
+        return MadeInput(input: source, audioRing: ring, audioBlockFrames: source.blockFrames)
+    }
+}
+
 @MainActor
 final class W5RCloseoutTests: XCTestCase {
     /// 16 TiB（= 2^24 MB）：换算成字节 2^44，离 UInt64 的上限远着；溢出点是 2^44 MB。
@@ -199,5 +212,119 @@ final class W5RCloseoutTests: XCTestCase {
         let fallbackFiles = (try? FileManager.default.contentsOfDirectory(atPath: base.appendingPathComponent("fallback").path)) ?? []
         XCTAssertTrue(fallbackFiles.isEmpty, "备用目录里没有新文件：\(fallbackFiles)")
         XCTAssertTrue(AppTest.waitUntil(2) { tee.branchCount == 3 }, "ISO 自己那个分支还了，剩下用例占的 3 个：\(tee.branchCount)")
+    }
+
+    // MARK: N07 纯音频输入的 ISO
+
+    /// N07（Codex AO02 的宿主用例）：勾"显示全部输入"后给纯音频输入勾 ISO、录 2 s——要有文件：黑画面（开分支时推的那一帧，tap 每拍重复）+ 本路声音。
+    /// 原来 AudioDeviceInput 没有 videoSlot、空分支没人推帧，tap 每拍 noFrame，Recorder 从没建 writer，停止时"没有写入任何视频帧"。
+    func testN07_audioOnlyISO_recordsBlackVideoWithAudio() throws {
+        _ = try AppTest.runningSession()   // 别跟宿主起它自己那个 session 抢
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("plusmix-w5r-n07-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var show = ShowDocuments.emptyShow(name: "w5r-n07-audio-iso", recordDirectory: directory.path)
+        show.mixer.format = ProgramFormat(width: 320, height: 240, frameRate: .fps30)
+        show.inputs = [InputConfig(number: 1, name: "话筒", source: .audio(deviceUID: "w5r-synthetic-audio"))]
+        show.outputs = []   // 只录 ISO 页上勾的那一路
+        show.mixer.program = 1
+        var settings = Self.isolatedSettings()
+        settings.recordMinimumFreeMB = 0
+        let session = try SwitcherSession(show: show, settings: settings, inputFactory: W5RAudioOnlyFactory(),
+                                          hotkeyTable: .init(bindings: []), midiTable: .init(mappings: []))
+        defer {
+            let stopped = AppTest.expectationBox()
+            Task { await session.stop(); stopped.value = true }
+            let didStop = AppTest.waitUntil(20) { stopped.value }
+            XCTAssertTrue(didStop, "session 收得掉")
+            if didStop { try? FileManager.default.removeItem(at: directory) }
+        }
+        final class StartOutcome { var done = false; var error: (any Error)? }
+        let started = StartOutcome()
+        Task {
+            do { try await session.start() } catch { started.error = error }
+            started.done = true
+        }
+        XCTAssertTrue(AppTest.waitUntil(20) { started.done }, "session 起得来")
+        if let error = started.error { throw error }
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.runtimeState(of: 1) == .live && session.audio.registeredInputs.contains(1) })
+        let source = try XCTUnwrap(session.inputs.entries[1]?.input as? SyntheticAudioInput)
+        XCTAssertNil(source.videoSlot, "替身是纯音频")
+        XCTAssertTrue(AppTest.waitUntil(5) {
+            source.counters.framesWritten > 48_000 && session.audio.status.inputs.first(where: { $0.number == 1 })?.primed == true
+        }, "混音器收到这一路的声音")
+
+        // 与界面同一条路：ISO 页勾"显示全部输入"→ 勾这一路
+        let model = OutputSettingsModel(state: session.state, tab: .iso, defaultRecordDirectory: directory.path,
+                                        showName: show.name, queriesSystemExtensions: false)
+        model.send = { [weak session] command in session?.send(command) }
+        XCTAssertFalse(model.isoRows.contains { $0.input == 1 }, "纯音频默认收起")
+        model.isoShowAllInputs = true
+        let row = try XCTUnwrap(model.isoRows.first { $0.input == 1 })
+        model.setISORow(row.id, on: true)
+        XCTAssertTrue(AppTest.waitUntil(3) { ISORoutes.isoRecord(in: session.state, input: 1) != nil })
+        let iso = try XCTUnwrap(ISORoutes.isoRecord(in: session.state, input: 1))
+        session.send(.startRecord(output: iso.number))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[iso.number] != nil })
+        let entry = try XCTUnwrap(session.outputs.recorders[iso.number])
+        let tap = try XCTUnwrap(entry.consumer as? ISOFrameTap)
+        XCTAssertNotNil(entry.audio?.token, "ISO 音轨挂在这一路上")
+        AppTest.pump(seconds: 2)
+        let counters = tap.counters
+        session.send(.stopRecord(output: iso.number))
+        XCTAssertTrue(AppTest.waitUntil(15) { session.state.output(iso.number)?.enabled == false && session.outputs.recorders[iso.number] == nil })
+        print("W5R N07 纯音频 ISO：forwarded=\(counters.forwarded) repeated=\(counters.repeated) noFrame=\(counters.noFrame)，"
+              + "录制器 \(entry.recorder.state) / \(entry.recorder.counters.lastError)，结果 \(session.outputs.lastResults[iso.number].map { "\($0.videoFrames) 帧 / \($0.audioFrames) 音频帧 / \($0.durationSeconds) s" } ?? "nil")")
+        XCTAssertGreaterThan(counters.forwarded, 30, "tap 每拍交出那一帧黑")
+        XCTAssertGreaterThan(counters.repeated, 30, "同一帧黑每拍重复（repeated 记账）")
+        let result = try XCTUnwrap(session.outputs.lastResults[iso.number], "纯音频输入的 ISO 停了要有录像")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path), "文件在")
+        XCTAssertGreaterThan(result.audioFrames, 0, "有这一路的声音")
+        XCTAssertEqual(Int(result.videoFrames), Int(result.stopTick.rawValue - result.start.tick.rawValue), "每拍一帧，没有洞")
+        XCTAssertEqual(result.durationSeconds, 2, accuracy: 0.6, "≈ 录的 2 s × 30 fps")
+        let luma = try XCTUnwrap(Self.meanLuma(of: result.url, at: 1), "读得出第 1 秒的画面")
+        XCTAssertLessThan(luma, 0.05, "画面是黑的：平均亮度 \(luma)")
+    }
+
+    /// N07：ISO 表里纯音频输入那一行写明录出来是黑画面（副标题；视频输入没有）。
+    func testN07_isoRowForAudioOnlyInputSaysBlackPicture() {
+        var state = MixerState()
+        state.inputs = [InputConfig(number: 1, name: "话筒", source: .audio(deviceUID: "")),
+                        InputConfig(number: 2, name: "机位", source: .synthetic(settings: SyntheticSourceSettings()))]
+        let model = OutputSettingsModel(state: state, tab: .iso, defaultRecordDirectory: NSTemporaryDirectory(), showName: "w5r", queriesSystemExtensions: false)
+        model.isoShowAllInputs = true
+        XCTAssertEqual(model.isoRows.first { $0.input == 1 }?.subtitle, "纯音频：画面为黑")
+        XCTAssertNil(model.isoRows.first { $0.input == 2 }?.subtitle)
+        XCTAssertEqual(L10n.string("outputSettings.iso.audioOnlyHint", language: "en"), "Audio only: the picture is black")
+    }
+
+    /// 录像里第 `seconds` 秒那一帧的平均亮度（0…1）。
+    private static func meanLuma(of url: URL, at seconds: Double) -> Double? {
+        var result: Double?
+        var done = false
+        Task { @MainActor in
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            if let image = try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image {
+                let width = image.width, height = image.height
+                var pixels = [UInt8](repeating: 0, count: width * height * 4)
+                let drawn = pixels.withUnsafeMutableBytes { raw -> Bool in
+                    guard let context = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                    return true
+                }
+                if drawn {
+                    var sum = 0.0
+                    for i in stride(from: 0, to: pixels.count, by: 4) {
+                        sum += 0.2126 * Double(pixels[i]) + 0.7152 * Double(pixels[i + 1]) + 0.0722 * Double(pixels[i + 2])
+                    }
+                    result = sum / Double(width * height) / 255
+                }
+            }
+            done = true
+        }
+        AppTest.waitUntil(10) { done }
+        return result
     }
 }
