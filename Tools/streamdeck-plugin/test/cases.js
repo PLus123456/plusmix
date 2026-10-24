@@ -1,6 +1,6 @@
 // 断言用例：node --test 和 JXA 共用。每个用例 run(assert) 只用 assert.equal / deepEqual / ok / match，同步跑完（JXA 没有事件循环）。
 import { COLORS, classifyMessage, commandFor, fpsFrom, inputName, keyStyle, outputOf, pressFeedback, slotSublabel, svgDataURI, svgKey, tallyFor } from "../com.plusmix.switcher.sdPlugin/lib/tally.js";
-import { SwitcherClient } from "../com.plusmix.switcher.sdPlugin/lib/api-client.js";
+import { SwitcherClient, redactToken } from "../com.plusmix.switcher.sdPlugin/lib/api-client.js";
 
 export const snapshot = {
   type: "snapshot",
@@ -335,6 +335,14 @@ export const cases = [
         assert.ok(line.indexOf(token) < 0 && line.indexOf(encodeURIComponent(token)) < 0, line);
         assert.ok(!/token=/i.test(line), line);
       }
+      assert.equal(redactToken("ws://h:1/api/v1/events?token=abc"), "ws://h:1/api/v1/events");
+      assert.equal(redactToken("ws://h:1/x?token=abc&b=2"), "ws://h:1/x?b=2");
+      assert.equal(redactToken("ws://h:1/x?a=1&token=abc"), "ws://h:1/x?a=1");
+      assert.equal(redactToken("ws://h:1/x?a=1&TOKEN=abc&b=2 之后"), "ws://h:1/x?a=1&b=2 之后");
+      assert.equal(redactToken("ws://h:1/x?token=abc#f"), "ws://h:1/x#f");
+      assert.equal(redactToken("出错 token=abc 了"), "出错  了");
+      assert.equal(redactToken("ws://h:1/x?mytoken=1&a=2"), "ws://h:1/x?mytoken=1&a=2", "名字只是包含 token 的不动");
+      assert.equal(redactToken(undefined), "undefined");
     },
   },
   {
