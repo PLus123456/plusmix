@@ -35,6 +35,30 @@ final class BrowserRequestGuardTests: XCTestCase {
 
     func json(_ text: String) -> [String: Any]? { try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] }
 
+    // MARK: 规则表
+
+    /// `BrowserOriginPolicy` 的规则：带 Origin 只看白名单（`null` 永远不在）；不带 Origin 只看 Sec-Fetch-Site（none / same-origin 放）；都不带放。
+    func testNS02_originPolicy_rules() {
+        let none = BrowserOriginPolicy(allowedOrigins: [])
+        XCTAssertTrue(none.allows(origin: nil, secFetchSite: nil), "不是浏览器")
+        for site in ["none", "same-origin", "None", " same-origin "] { XCTAssertTrue(none.allows(origin: nil, secFetchSite: site), site) }
+        for site in ["cross-site", "same-site", "", "none, cross-site"] { XCTAssertFalse(none.allows(origin: nil, secFetchSite: site), site) }
+        for origin in [Self.attacker, "null", "", "http://127.0.0.1:8765"] {
+            XCTAssertFalse(none.allows(origin: origin, secFetchSite: nil), origin)
+            XCTAssertFalse(none.allows(origin: origin, secFetchSite: "same-origin"), "\(origin)：带 Origin 只看白名单")
+        }
+        let some = BrowserOriginPolicy(allowedOrigins: ["HTTP://Panel.Local:8080/", "https://ops.example:443", "http://lan.example:80", "null", " "])
+        XCTAssertEqual(some.allowedOrigins, ["http://panel.local:8080", "https://ops.example", "http://lan.example"], "规范化；null / 空白不进白名单")
+        for origin in ["http://panel.local:8080", "http://PANEL.local:8080", "https://ops.example", "https://ops.example:443", "http://lan.example"] {
+            XCTAssertTrue(some.allows(origin: origin, secFetchSite: "cross-site"), "\(origin)：白名单里的跨站也放")
+        }
+        for origin in ["null", "http://panel.local:8081", "https://panel.local:8080", "http://panel.local:8080, https://attacker.invalid", Self.attacker] {
+            XCTAssertFalse(some.allows(origin: origin, secFetchSite: nil), origin)
+        }
+        XCTAssertEqual(BrowserOriginPolicy.normalize("https://x.example:4443/"), "https://x.example:4443", "非默认端口留着")
+        XCTAssertEqual(BrowserOriginPolicy.normalize("http://[::1]:80"), "http://[::1]")
+    }
+
     // MARK: WS 升级
 
     /// 外来网页的 WS 握手（带 Origin / `Origin: null` / `Sec-Fetch-Site: cross-site`）不升级、收不到 hello 和快照、不订阅，
@@ -48,6 +72,7 @@ final class BrowserRequestGuardTests: XCTestCase {
         for headers in foreign {
             let ws = try RawWSClient(port: port, headers: headers)
             defer { ws.close() }
+            print("NS02 \(headers) 的 WS 握手应答 = \(ws.status)")
             XCTAssertNotEqual(ws.status, 101, "\(headers)：外来来源的握手不能升级")
             XCTAssertTrue((400..<500).contains(ws.status), "\(headers)：拒绝要是 4xx，实际 \(ws.status)")
             XCTAssertNil(try ws.nextText(timeout: 0.3), "\(headers)：没升级就收不到 hello / 快照")

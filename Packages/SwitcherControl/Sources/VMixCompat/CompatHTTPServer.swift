@@ -4,10 +4,12 @@ import Hummingbird
 import Logging
 import NIOCore
 import ServiceLifecycle
+import SwitcherControl
 
 /// HTTP 入口（Hummingbird 2）：GET /api（也认 /api/、/API、/API/）。
 ///   带 Function=… → 执行，200 "OK <名字>[ (no change)]"；出错按错误码给状态码，正文 "<码>: <文案>"（text/plain）。
 ///   不带 → XML 状态（text/xml）。
+///   浏览器来源（Origin 不在 `allowedOrigins`、或 Sec-Fetch-Site 不是 none / same-origin）→ 403 "Forbidden"（text/plain），什么都不执行。
 final class CompatHTTPServer: Sendable {
     let core: CompatCore
     let host: String
@@ -27,6 +29,8 @@ final class CompatHTTPServer: Sendable {
 
     func start() async throws {
         let router = Router()
+        // 浏览器来源（NS05）：与主 API 同一套规则；上游协议就是 GET、没有 token，网页一个 <img> 就能切节目，所以连 XML 状态一起拦
+        router.add(middleware: BrowserRequestGuard(allowedOrigins: core.configuration.allowedOrigins) { Self.text("Forbidden", status: 403) })
         for path in ["/api", "/API"] {   // Hummingbird 把结尾斜杠归一：/api/ 也落到 /api
             router.get(RouterPath(path)) { [core] request, _ in
                 await Self.handle(request, core: core)

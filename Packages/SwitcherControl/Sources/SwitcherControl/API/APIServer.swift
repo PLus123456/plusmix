@@ -15,7 +15,8 @@ import SwitcherEngine
 //   GET  /api/v1/log       最近走过总线的命令（?limit=）
 //   GET  /api/v1/tally     PGM / PVW / 每路 tally 的小应答（外部 tally 轮询用）
 //   WS   /api/v1/events    hello → 快照（整快照 + 版本号）/ tally / 每秒 Stats；连接上也能发命令（单条或批量）
-// 默认只监听 127.0.0.1:8765；token 鉴权默认关。所有应答都是手工编码的 JSON（APIJSON：键排序、不转义斜杠），
+// 默认只监听 127.0.0.1:8765；token 鉴权默认关；浏览器来源（Origin / Sec-Fetch-Site）不在白名单的一律 403（BrowserRequestGuard，NS02）。
+// 所有应答都是手工编码的 JSON（APIJSON：键排序、不转义斜杠），
 // 不用 Hummingbird 的默认编码器，保证和 stats.jsonl / 节目文件同一种写法。
 
 /// API 服务。
@@ -49,6 +50,10 @@ public final class APIServer: Sendable {
         guard !isRunning else { return }
         let router = Router()
         let wsRouter = Router(context: BasicWebSocketRequestContext.self)
+        // 浏览器来源先查（NS02）、token 后查：网页拿到了 token 也进不来。被拒的 WS 升级 hummingbird-websocket 一律回 400（不转发路由器的 403），
+        // 不升级、不订阅；普通 HTTP 回 403 forbidden-origin
+        router.add(middleware: BrowserRequestGuard(allowedOrigins: configuration.allowedOrigins) { Self.forbiddenOrigin() })
+        wsRouter.add(middleware: BrowserRequestGuard(allowedOrigins: configuration.allowedOrigins) { Self.forbiddenOrigin() })
         if let token = configuration.token {
             router.add(middleware: TokenAuthMiddleware(token: token))
             wsRouter.add(middleware: TokenAuthMiddleware(token: token))
@@ -230,6 +235,9 @@ public final class APIServer: Sendable {
     private struct IDOnly: Decodable { var id: JSONValue? }
 
     // MARK: 应答编码
+
+    /// 浏览器来源不放行（`BrowserRequestGuard`）：403 `{"error":"forbidden-origin"}`。
+    static func forbiddenOrigin() -> Response { json(ErrorResponse("forbidden-origin"), status: .forbidden) }
 
     static func json<T: Encodable>(_ value: T, status: HTTPResponse.Status = .ok) -> Response {
         let data: Data
