@@ -1,4 +1,4 @@
-# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017 / 019，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则；P5 落地 023 一 / 024 / 025 / 026 / 027；P5-2 落地 020 / 021 / 022 / 023 二–五与 028 的口径文字；P5-3 落地 026 允许 headphones 与 029；P5-4 落地 030 / 031 与 020 的 T-bar 取消重拷）
+# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017 / 019，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则；P5 落地 023 一 / 024 / 025 / 026 / 027；P5-2 落地 020 / 021 / 022 / 023 二–五与 028 的口径文字；P5-3 落地 026 允许 headphones 与 029；P5-4 落地 030 / 031 与 020 的 T-bar 取消重拷；P5-5 落地 032 与 030 列耳机总线）
 
 代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
@@ -35,6 +35,9 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 → **P5-4（2026-10-18，分支 p5-contracts-4，prompt 115；用户 2026-10-17 批 030 / 031 与 020 追加）：030（`Stats.audio.effects`：buses[{bus, latency_ms, measured_latency_ms?}] Master / Bus A / Bus B + inputs{n: {latency_ms, measured_latency_ms?}}，集成层从 `AudioEngineStatus` 拷）、
 031（`FileSource.rateRange` = 0.1…8、`PlaybackLimits.maxSeekSeconds` = 一周、`MixerStateError.fileRate`；`validate()` / 校验器 / reducer 同一条边界；file 来源缺 rate = 1；`clamped()` 定位秒数钳到一周）、
 020 追加（T-bar 拉回 0 取消那一拍也按当前槽重拷）。不加命令（仍 42 个 case）；JSON 只多 audio.effects 一节，别的形态不变**
+→ **P5-5（2026-10-24，分支 p5-contracts-5，prompt 123；用户 2026-10-18 定"22 条都按建议"）：032（`InputConfig.numberRange` = 1…16、`MixerStateError.inputNumber`；`validate()` / 校验器的 addInput / reducer 同一条边界——0.1.1 唯一的 S1）、
+030 列耳机总线（`EffectsLatency.listedBuses` = `Bus.allCases`，填数 G10 胶水已改）、NDI 的 failed 也指"在跑但连续 10 帧送不出"与推流 last_error 的新写法（118 / G10 胶水的行为，只改文字）。
+不加字段、不加命令（仍 42 个 case），JSON 形态不变**
 
 ---
 
@@ -42,7 +45,7 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 
 | 术语 | 标识符 | 备注 |
 |---|---|---|
-| Input（输入） | `InputConfig`（配置）/ `Input` 协议（运行对象）/ `InputKind` / `InputSource` | 编号从 1 起，`MixerState.noInput = 0` 表示黑场 |
+| Input（输入） | `InputConfig`（配置）/ `Input` 协议（运行对象）/ `InputKind` / `InputSource` | 编号 1…16（`InputConfig.numberRange`，提案 032），`MixerState.noInput = 0` 表示黑场 |
 | Program / PGM | `MixerState.program`（输入编号） | |
 | Preview / PVW | `MixerState.preview` | |
 | Transition（转场） | `TransitionType` {cut, fade, wipe, zoom, stinger}、`TransitionState` | 只在拍点边界发生；Cut 无中间态 |
@@ -113,7 +116,7 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 | `InputSettings` | {crop, transform, audio: `InputAudioSettings`, effects: [`EffectSlot`]（键表见下，**只放音频效果**——023 三；每路的接线归 W1-D3）, keyer: `KeyerSettings`（提案 009）, playback: `PlaybackSettings`（提案 021，缺键默认）}；`clamped()` 钳范围（含 seekSeconds 0…一周：021 钳 ≥ 0，031 加上限） | 状态机（setInputSettings / setInputAudio / setPlayback / seekPlayback） | 渲染（crop/transform/keyer）、混音（audio / effects）、组装方（playback → FileInput） | 从快照读 |
 | `InputAudioSettings` | {routing: `BusRouting`, gainDb, muted, solo, pan, delayMs 0–500, afv}（提案 012 顺带项，用户 2026-09-22 批）；solo / afv / routing 单独改走 `setInputAudio`（023 五） | 同上 | 混音（W2-E 转成 C 参数） | 从快照读 |
 | `PlaybackSettings` | {paused, restartOnProgram, seekSeconds?, seekTick?}（提案 021）：前两个是目标随文件存，后两个是一次定位请求的瞬态（`resetTransientState` 清、nil 不写键）；只对 `InputSource.file` 有意义 | 状态机（setPlayback / seekPlayback / 换 PGM 时的 restartOnProgram） | 组装方（App InputRuntime / headless 看到 (seekTick, seekSeconds) 变了就 seek 一次，paused 变了就 pause / resume，不重建） | 从快照读 |
-| `InputConfig` | {number, name, source, settings, color?（提案 023 四：`InputColor`，nil / 缺键 = 无分类、nil 不写键）}；`MixerState.inputs` 和 `Show.inputs` 的元素 | 状态机 | 所有人 | 值类型 |
+| `InputConfig` | {number, name, source, settings, color?（提案 023 四：`InputColor`，nil / 缺键 = 无分类、nil 不写键）}；number 合法范围 `numberRange` = 1…16（提案 032，见下"输入编号的上限"）；`MixerState.inputs` 和 `Show.inputs` 的元素 | 状态机 | 所有人 | 值类型 |
 | `InputColor` | {red, orange, yellow, green, blue, purple}（Finder 标签那六种 = W5-H 的 rawValue；023 四）；分类**名字**留在 `Show.layout["inputCategoryNames"]`，契约不解释 | setInputColor / addInput | 多画面标签、Stream Deck、API | — |
 | `Input` 协议 | 运行对象：number / name / kind / state / videoSlot / audioRing / start / stop；纯音频输入 videoSlot = nil（口径见下） | 输入实现 | 引擎、UI | start/stop 普通线程 |
 
@@ -154,6 +157,12 @@ reducer 只记状态，真正的 pause / resume / seek 由组装方（App `Input
   `setInputSettings` / `addInput` 整体带进来的 `playback.seekSeconds` 由 `clamped()` 钳到 [0, 一周]（不拒，与 021 钳负数同一做法）；
 - FileInput（117）：`precondition(rate > 0)` 改成钳进 `rateRange` + `lastError`，seek 先用 Double 钳到 [0, 时长] 再换整数——117 合入之前直接构造 FileInput 的路径仍会崩。
 老文件 file 来源缺 `rate` 键 = 1 照读（P5-4 之前缺键直接 keyNotFound、整份节目读不进来；写出照旧总是写 rate，JSON 形态不变）。
+
+**输入编号的上限（提案 032，用户 2026-10-18 批，P5-5 落地；W2-C4 查出的 S1：主 API 加一路 2^62 号输入后，开着兼容层时 TALLY 串按最大编号 `reserveCapacity` 分配失败崩、XML 按 1…最大编号写占位卡死）**：
+`InputConfig.numberRange` = 1…16（App"添加输入满 16 路"、引擎默认 `maxInputs`）。同一条边界两处共用——
+- 节目文件：`MixerState.validate()` 对编号超过 16 的输入抛 `MixerStateError.inputNumber(input:)`（0 / 负数照旧 `reservedInputNumber`；Show.load / loadShow 先搬迁再 validate，读到不打开，与别的不变量同一处理）；
+- API：`CommandValidator` 对 `addInput` 的编号不在 1…16"输入编号必须在 1–16 之间：<n>"（HTTP 400，原来的"必须 ≥ 1"并进这一句），reducer 同判、原样返回；按编号取输入的命令照旧"输入 n 不存在"（越界的编号进不了状态）。
+解码不拒（编号仍是一个整数，JSON 形态不变）；兼容层 TALLY / XML、App / headless 的 `Engine(maxInputs: max(16, 最大编号))` 等按编号分配的读者从此最多 16。引用（叠加 / Stinger / 多画面格子 / 输出来源里写的编号）不查，照旧按"没有这路"处理。
 
 **输入分类颜色（提案 023 四，用户 2026-10-11 批，P5-2 落地）**：`InputConfig.color: InputColor?`（nil / 缺键 = 无分类，nil 不写键）；`setInputColor(input:color:)`（nil = 清掉；输入不存在拒；相同值 applied = false）；`addInput` 带的照收；`removeInput` 删掉这一路就没了（编号再给别的输入用不继承）。
 分类名字按 (a) 留在 `Show.layout["inputCategoryNames"]`（名字只是界面标签，API / Stream Deck / 多画面要的是颜色；要 API 也能改名再升 (b) `Show.categoryNames` + 命令）。W5-H 存的 `Show.layout["inputCategories"]`（`{"<编号>": "<颜色>"}`）由 `Show.migratingLegacyInputCategories()` 搬进各路 `color`（有键按原值搬、认不出的颜色 / 不存在的编号跳过、正式字段已有值的不动、搬完删键、幂等），**不并进 `Show.load` / `migratingLegacyKeys()`**（与 025 同一做法：现在的 App 还在读写 layout 键，App 切换时在 Show.load 后调一次，归 100 之后的 App 会话或 G8 胶水）。多画面标签画色点（渲染器读 `InputConfig.color`）、Stream Deck 按钮颜色归各自的会话；VMixCompat 不映射。
@@ -212,7 +221,7 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 `StingerParams.cutAtTick`（W3-B 口径，用户 2026-09-22 定）：第 s 拍应用命令时 progress = 0（渲染器什么都不叠），第 s + 1 拍才是 stinger 第一帧，所以 **cutAtTick 0 与 1 等价**；cutAtTick ≥ durationTicks 等于"完成时换"。`TransitionRenderer.stingerShowsNewUnder` 是定义。
 
 **输入引用的口径（P4，用户 2026-09-27 定）**：状态里四处引用输入编号——`program`、`preview`、`overlays[k].input`、`transition.stinger.input`。removeInput 把前两个置 0（黑场）、后两个置 nil；
-`validate()` 只查结构不变量（叠加恰好 4 个、总线顺序、输入编号 ≥ 1 且不重复、输出编号不重复、转场槽 4 个，外加 031 的一条取值：file 来源的速率在 `FileSource.rateRange` 里），**不查引用**，渲染器对不存在的输入按"没有这路"画（跳过）。
+`validate()` 只查结构不变量（叠加恰好 4 个、总线顺序、输入编号在 1…16（032）且不重复、输出编号不重复、转场槽 4 个，外加 031 的一条取值：file 来源的速率在 `FileSource.rateRange` 里），**不查引用**，渲染器对不存在的输入按"没有这路"画（跳过）。
 P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的悬空编号由搬迁清掉（§2.8）；引用存在与否在命令入口由 `CommandValidator` 查（setTransitionParams / overlay / setPreview……）。
 
 **转场槽（提案 020，用户 2026-10-11 批，P5-2 落地；"请用户定的点"按提案默认）**：`TransitionState.slots` 恰好 4 个（`validate()` 查，`MixerStateError.transitionSlotCount`）、`currentSlot` nil 或 1…4（`transitionSlotIndex`）；
@@ -265,7 +274,7 @@ currentSlot = 当前那组（type / durationTicks / wipe / stinger）对应哪�
 
 P2 加的字段（口径全文在 Stats.swift 的文档注释）：
 - `per_input[n].latency_ms` / `latency_max_ms`（提案 005）：窗口内 L1（帧交给第一个 FrameConsumer 的时刻 − 该帧 `Frame.ingressTime`）的平均 / 最大 ms，只算每拍第一次用到的帧，窗口内没样本写 0；引擎侧算法归 W1-B2（prompt 42），之前引擎写 0。定义不变、但含视频延后（提案 028 第 4 条）：videoDelay 补偿下"交给第一个 FrameConsumer 的那一刻"在延后之后，L1 含当时的 L（开着压缩 / 限幅时多 5–35 ms）；**判定 L1 时扣掉同一行的顶层 `video_delay_ms`，阈值数字不动**（用户 2026-10-11 定；gate4 报告脚本的判定归 G8b）。
-- `encoder[i].frames`（001）：写进文件 / 交给传输层的帧数累计；`dropped`（001）：编码之后、落地之前丢的帧累计（录制 = writer 不接的 `videoFramesRejected`；推流 = E9 网络丢帧 `networkDropped`；NDI = 队列满丢的帧），与编码前的 E1 `skipped` 是两回事；`disk_free_mb`（001）：录制目录所在卷剩余 MB（2^20 字节，与 rss_mb 同口径），非录制输出 0；`reconnects`（002）：推流重连成功次数累计，录制 / NDI 0；`state`（002）：推流 idle / connecting / publishing / backoff / stopping / stopped / failed，NDI publishing / idle / unavailable（SDK 不在）/ failed（SDK 在但 initialize / send_create 失败，019），录制 idle / recording / stopping / stopped / failed；`output`（019）：这一项对应的输出在 MixerState.outputs 里的编号（与 display[].output 同口径，0 = 填数方没给 / 不在输出表里，如 headless 的 ISO 音轨），读的一方按它对号、不再靠数组顺序；`connections`（019）：NDI 当前接收方数，推流 / 录制 0。
+- `encoder[i].frames`（001）：写进文件 / 交给传输层的帧数累计；`dropped`（001）：编码之后、落地之前丢的帧累计（录制 = writer 不接的 `videoFramesRejected`；推流 = E9 网络丢帧 `networkDropped`；NDI = 队列满丢的帧），与编码前的 E1 `skipped` 是两回事；`disk_free_mb`（001）：录制目录所在卷剩余 MB（2^20 字节，与 rss_mb 同口径），非录制输出 0；`reconnects`（002）：推流重连成功次数累计，录制 / NDI 0；`state`（002）：推流 idle / connecting / publishing / backoff / stopping / stopped / failed，NDI publishing / idle / unavailable（SDK 不在）/ failed（SDK 在但 initialize / send_create 失败，019；**或在跑但连续 10 帧（`NDISender.failureStreakLimit`）没送出去**——像素格式送不了、NV12 → UYVY 转换失败、直送的缓冲锁不住，last_error 写像素格式与原因，送出去一帧就回 publishing；D08 / 118，用户 2026-10-18 裁定 #10 只补文字、取值集合不变。另：BGRA 的输入按 BGRX（不透明）送，本仓库的 BGRA 是预乘 alpha、NDI 的 BGRA 要非预乘，下游拿不到 alpha——裁定 #11、G10 胶水），录制 idle / recording / stopping / stopped / failed；`output`（019）：这一项对应的输出在 MixerState.outputs 里的编号（与 display[].output 同口径，0 = 填数方没给 / 不在输出表里，如 headless 的 ISO 音轨），读的一方按它对号、不再靠数组顺序；`connections`（019）：NDI 当前接收方数，推流 / 录制 0。
 - `audio.discontinuities`（004）：A1 第三项，Master 消费者流上相邻样本跳变 > 0.5 满幅的次数累计（集成层泵线程的流式检测，合成信号的 click 按平台启发式排除；正式判定用离线口径）；`audio.meters`（004）：采样那一刻的表读数，`buses` 顺序 = `Bus.allCases`（`bus` = `Bus.name`：master / busA / busB / headphones），`inputs` 键 = 输入编号；峰值 / 真峰值 dBFS / dBTP、响度 LUFS、LRA LU，dB / LUFS 下限 −120（`Stats.AudioCounters.Meters.floorDb`，静音也钳到它，JSON 写不了 −inf），来源只有 `AudioMixer.meters`。
 - 兼容：老 stats.jsonl 缺这些键时解码给 0 / "idle" / 空（`decodeIfPresent`），写出总是写全；Show 文件不受影响（Stats 不在 Show 里）。
 
@@ -293,18 +302,20 @@ G4 续做落地的字段（提案 019，用户 2026-09-27 批）：
 - `encoder[].output`：与 display[].output 同口径的输出编号，jsonKeys 里排最前；缺键 = 0。填数：包里各 `statsEntry` 多一个 `output:` 参数（默认 0），组装方（App OutputRuntime、headless）给编号——headless 的 PGM 录制器 = 节目里第一个 record 输出、NDI = 第一个 ndi 输出、ISO 音轨 0；App 的填法归 W3-E4。
 - `encoder[].connections`：NDI 当前接收方数（`NDISendCounters.connections`），推流 / 录制 0；缺键 = 0。
 - NDI 的 `state` 多一个 `failed`：SDK 在但 `NDIlib_initialize` / `NDIlib_send_create` 失败（`NDISendCounters.startFailed`，下一次 start 清）；`unavailable` 仍只表示 SDK 不在。
+  118 起 failed 也指"在跑但连续 10 帧没送出去"（`sendFailing`，送出去一帧回 publishing；见上 P2 那一条），P5-5 补的文字。
 - reducer（019 D）：addInput / setInputSettings 带进来的 `EffectSlot(id: "border")` 剥掉（`MixerReducer.strippingLegacyBorder`），与 Show.load 的搬迁同口径；校验器不改。
 
 P5-2 加的字段（提案 022，用户 2026-10-11 批；"请用户定的点"按默认：三字段 + B1 attempt + B2 video_delay_ms，uptime 含重连期）：
 - `encoder[].uptime_s`：这一路**本次运行**的时长（秒）= 采样那一刻 − `start()` 成功那一刻（host time 差）；推流含握手 / 退避 / 重连期间（"运行着"就算，与 state 一起看）；idle / stopped / failed 写 0。填数：`Recorder`（`RecorderCounters.uptimeSeconds`，recording / stopping 之外 0）、`StreamOutput`（自己记 startedAt，`statsEntry(counters:previous:…)` 让组装方用同一份快照）、`NDISender`（`NDISendCounters.startedAt`，publishing 之外 0）。
 - `encoder[].disconnects`：推流连上之后掉线 / 停滞被判断线的次数，自启动累计（`StreamCounters.disconnects`，早就在数、只是没进 Stats）；录制 / NDI 0。与 `reconnects` 的区别：reconnects 只记成功连回来的，断了没连回来的只有它能看出来。
-- `encoder[].last_error`：最近一次错误的文案，空串 = 没出过错，**下一次 `start()` 清**（与 019 的 NDI startFailed 同口径）。推流 = 最近一次断线原因（`断线：disconnected / stalled / sendFailed(…)`）/ 连接失败 / 建传输层失败 / 放弃的原因；录制 = `State.failed(String)` 的文案（磁盘不足、编码器起不来、writer 失败、没写入任何视频帧……）；NDI = SDK 不在（编译时没探测到）/ NDIlib_initialize 失败 / NDIlib_send_create 失败；起不来的路（`start()` 抛错、Stats 报 failed）由组装方填（App `OutputRuntime` 把 `failureReason` 填进去，P5-2 胶水；headless 透传）。
+- `encoder[].last_error`：最近一次错误的文案，空串 = 没出过错，**下一次 `start()` 清**（与 019 的 NDI startFailed 同口径）。推流 = 最近一次断线原因（`断线：连接断开` / `断线：发送停滞` / `断线：发送失败：<原因>`）/ 连接失败（`连接失败：<原因>`，如"连接超时""没连上"或传输层回的那一句）/ 鉴权失败（`鉴权失败（…）：<服务器回的状态>`，W2-D4：第一次就停在 failed）/ 建传输层失败（`建传输层失败：…`）的原因——只写原因本身、不带 Swift 枚举原样（G10 胶水 ③ 之前是 `断线：disconnected / stalled / sendFailed(…)`、`连接失败：connectFailed("…")`）；录制 = `State.failed(String)` 的文案（磁盘不足、编码器起不来、writer 失败、没写入任何视频帧……）；NDI = SDK 不在（编译时没探测到）/ NDIlib_initialize 失败 / NDIlib_send_create 失败，或连续送不出去那一次的像素格式与原因（"NDI 送不了像素格式 'yuvs'（只认 NV12 / UYVY / BGRA），连续 10 帧没送出"，118；恢复送出后留着、下一次 start 清）；起不来的路（`start()` 抛错、Stats 报 failed）由组装方填（App `OutputRuntime` 把 `failureReason` 填进去，P5-2 胶水；headless 透传）。
 - `encoder[].attempt`（B1）：推流**这一轮**连接是第几次尝试，从 1 起：`connecting(n)` = n，退避期间 = 即将进行的那一次 = failures + 1（与 App 底栏"连接中 / 重连中（第 n 次）"原来的读法一致，底栏从此读它——铁律 4）；在推 / 空闲 / 停止 / failed = 0；录制 / NDI 0。
 - 顶层 `video_delay_ms`（B2 / 提案 028）：采样那一刻为监听同步把视频延后的毫秒数 L（W1-B4：按 Master 效果链的实测延迟延后派发；audioPTS 补偿、没有效果、或组装方没接视频延后时 0）；瞬时值不累计；引擎 `EngineCounters.videoDelayMs` → `StatsAssembler` 填。
 - 缺键 = 0 / 0 / "" / 0 / 0，写出总是写全；`Stats.EncoderEntry.init` 四个参数带默认值（现有调用点不改）；`StatsWriter.sanitized` 把非有限的 uptime_s / video_delay_ms 换 0；`StatsSummary.DeliverySummary` 多可选 `uptimeS`（末行）/ `disconnects`（末行 − 首行）/ `lastError`（最后一个非空）/ `lastAttempt`（末行），顶层多可选 `videoDelayMs`（序列），老基线缺键解 nil。界面改读归 101。
 
 P5-4 加的字段（提案 030，用户 2026-10-17 批，字段定稿）：
-- `audio.effects`：采样那一刻效果链的处理延迟，瞬时值不累计。`buses[]` = Master / Bus A / Bus B 各一项（`Stats.AudioCounters.EffectsLatency.listedBuses`，顺序即写出顺序，按 `bus` 认；`bus` = `Bus.name`，与 `meters.buses[].bus` 同一写法；耳机总线不列），
+- `audio.effects`：采样那一刻效果链的处理延迟，瞬时值不累计。`buses[]` = 四条总线 Master / Bus A / Bus B / 耳机各一项（`Stats.AudioCounters.EffectsLatency.listedBuses` = `Bus.allCases`，顺序即写出顺序，按 `bus` 认；`bus` = `Bus.name`，与 `meters.buses[].bus` 同一写法；
+  耳机总线也能装效果——调音台耳机条的"效果"——030 正文没列，用户 2026-10-18 裁定 #1 定列：填数 G10 胶水、常量与文字 P5-5，JSON 形态不变），
   `latency_ms` = 这条总线已打开的格的延迟之和（`AudioEngineStatus.BusEffects.latencyFrames` / 48 000 × 1000，`EffectsLatency.milliseconds(frames:)` 是唯一的换算），没装效果 / 格都关着 = 0；
   `measured_latency_ms` = 链里装着自写压缩器 `compressor` 时它冲激法自测的延迟（按设计 0，≠ 自报时按量到的记；格关着也写），链里没有它就缺键。
   `inputs{n}` 只列装了效果的路（契约链里至少有一格装进了这一路的 EQ / 动态格；格关着也列、延迟 0），值同上（`InputEffects.latencyFrames`；measured 只在动态格是压缩器时写）。
@@ -353,7 +364,7 @@ P5-2 起 `migratingLegacyKeys()` 多一条（提案 020）：文件没有 `trans
 - **切换**：`reduce` 只在拍点边界应用；Cut 原子换号。每拍先 `advance` 再 `reduce` 该拍命令，命令按 sequence 严格顺序。
 - **C1 的两种口径**：`生效拍点时刻 − IssuedCommand.issuedAt` 是"服务端收到 → 生效"；客户端口径（客户端发出 → 画面生效）由客户端自己记发送时刻（scripts/apitest），多一个单程网络延迟。
 - **音频块**：`AudioRing.write` 的 hostTime 是块首帧时刻；混音输出块的首样本 host time 作音频 PTS，与视频同一时基。
-- **编号**：输入 / 输出编号从 1 起，0 = 无；overlay channel 1–4；`Bus.rawValue` = `AudioState.buses` 下标。
+- **编号**：输入 / 输出编号从 1 起，0 = 无；输入编号最大 16（`InputConfig.numberRange`，提案 032）；overlay channel 1–4；`Bus.rawValue` = `AudioState.buses` 下标。
 - **范围**：tbar/progress 0–1；pan −1…1；gainDb −96…+24；delayMs 0–500；crop 各边 0–1 且对边之和 ≤ 1（`InputSettings.clamped()`）。
 - **无信号**：`InputState.noSignal`，帧槽保留最后一帧；渲染不阻塞。noSignal 与 error 的分界见 §2.4（会不会自己好）。
 - **纯音频输入**：没有帧槽，能切进 Program（画黑、音频按 AFV 走），多画面画占位格 + 电平表（§2.4，用户 2026-09-23 定）；声道映射口径见 §2.4 提案 014。
@@ -471,7 +482,7 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 | — | `.setOutputEnabled(output:on:)`、`.renameOutput(output:name:)` | 加的（提案 012）：ndi / externalDisplay / virtualCamera / multiview 的目标开关与改名；record / stream 的 setOutputEnabled 被拒（起停与拍绑定）；multiview 的开关 = 要不要把多画面 NV12 送给下游，布局与它无关 |
 | setInputSetting(...) | `.setInputSettings(input:settings:)` | 整体替换，reducer 先 clamped() |
 | — | `.renameInput(input:name:)` | 加的 |
-| addInput / removeInput | `.addInput(config:)` / `.removeInput(input:)` | addInput 的 file 来源速率不在 0.1–8 校验器拒（提案 031，reducer 同判）；removeInput 把 PGM / PVW 用它的置 0、叠加与 Stinger 对它的引用置 nil（Stinger 是 P4 加的） |
+| addInput / removeInput | `.addInput(config:)` / `.removeInput(input:)` | addInput 的编号不在 1–16（提案 032）、file 来源速率不在 0.1–8（提案 031）校验器拒（reducer 同判）；removeInput 把 PGM / PVW 用它的置 0、叠加与 Stinger 对它的引用置 nil（Stinger 是 P4 加的） |
 | — | `.setInputSource(input:source:)` | 加的（提案 012）：换来源，编号 / 名字 / 设置 / PGM / PVW / 叠加引用全保留（removeInput 会清引用，直播中不能用）；"设循环"也走它（endAction: .loop，运行表就地改不重建，101）；file 来源速率不在 0.1–8 校验器拒（提案 031，reducer 同判） |
 | — | `.setPlayback(input:paused:)` | 加的（提案 021，P5-2）：文件输入播放 / 暂停（`settings.playback.paused`）；输入不存在 / kind != file 校验器拒；相同值 applied = false |
 | — | `.seekPlayback(input:seconds:)` | 加的（提案 021）：文件输入定位（0 = 从头播），记一次定位请求 (seekTick = 这一拍, seekSeconds)，组装方交给 FileInput；kind != file / 秒数负、非有限或超过一周（604 800，提案 031）校验器拒（reducer 同判）；同一拍同一位置再发 applied = false。"切上 PGM 时从头播"是每路 `playback.restartOnProgram`，reducer 在换人那一拍写同一种定位 |

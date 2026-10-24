@@ -27,7 +27,7 @@
   App 写不出超过 16 的编号；headless `make-scenario --inputs n` 的 n > 16 写出的节目从此载入被拒（仓库里没有脚本这么用）。
 - App / headless：`Engine(maxInputs: max(16, 最大编号))` 从此恒为 16（validate 过的节目最大编号 ≤ 16），不用改；打开越界老节目时走现有"节目文件不合法"那一路的提示。
 - 兼容层 / Tally：代码不改。"主 API 加极大编号之后 TALLY / XML 照常应答"的回归用例按 prompt 123 应进 VMixCompatTests，但 VMixCompat 不在 P5-5 的目录——P5-5 用临时探针在本分支上跑过（落地记录），
-  用例全文交 G 类会话或 W2-C 系：reports/issues/P55-vmixcompat-huge-input-number-test.md。
+  用例全文交 G 类会话或 W2-C 系：reports/issues/P55-w2-control-vmixcompat-huge-input-number-test.md。
 
 ## 不做
 
