@@ -626,7 +626,7 @@ final class W5OFollowupTests: XCTestCase {
         let panel = AppTest.controller.windowController.transitionPanel
         let previewBefore = session.state.preview
         _ = AppTest.measurePoppedMenu(open: { cell.transitionButton.performClick(nil) }, menu: { panel.activeMenu })
-        XCTAssertEqual(panel.activeMenu?.items.first?.title, "转场 4 · Stinger：先选一路输入（选了才执行）", "格子转场先弹这个槽的输入选择")
+        XCTAssertEqual(panel.activeMenu?.items.first?.title, "转场 4 · Stinger：先选一路输入，选好后再点一次才执行", "格子转场先弹这个槽的输入选择")
         AppTest.pump(seconds: 0.2)
         XCTAssertFalse(session.state.transition.isActive)
         XCTAssertEqual(session.state.program, 1, "PGM 没换")

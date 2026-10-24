@@ -83,6 +83,14 @@ final class InputRuntime {
     /// 某路输入自己报的最近一句原因（lastError；这一类不报 / 没有为 nil）。
     func lastError(of number: Int) -> String? { (entries[number]?.input as? InputLastErrorReporting)?.lastError }
 
+    /// 出画面时这一路自己报的提示（W4-C4 第 1 条）：只有文件输入的 lastError 在播放中也有意义——方向矩阵不是 90° 的整数倍按原样出、转正失败、
+    /// 速率被钳、定位越界，FileInput 把这几句放进 lastError、不改 state；别的输入的 lastError 讲的是无信号的原因，出画面了不该再挂着（有的类不清）。
+    /// 不是文件输入、不在出画面、没有提示为 nil。
+    func liveNote(of number: Int) -> String? {
+        guard let file = entries[number]?.input as? FileInput, file.state == .live, let note = file.lastError, !note.isEmpty else { return nil }
+        return note
+    }
+
     /// 让运行表跟上快照：新编号建 + 注册（+ start），消失的编号 stop + 注销，来源变了的换输入对象（`replaceSource`：帧出口不换）。名字 / 设置变化不重建；
     /// 文件输入只有结束动作 / 速率变了（路径没变）也不重建：改在跑着的 FileInput 上（两样都运行中可改），播放位置接着走（W5-H 的循环、W5-N 的速率）。
     /// 播放目标（暂停 / 定位）随后由 `applyPlayback` 对上去。

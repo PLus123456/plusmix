@@ -268,7 +268,7 @@ final class TransitionColumnTests: XCTestCase {
         let since = lastSequence(session)
         _ = AppTest.measurePoppedMenu(open: { panel.slotButtons[3].bodyButton.performClick(nil) }, menu: { panel.activeMenu })
         let menu = try XCTUnwrap(panel.activeMenu, "点主体应弹出输入选择")
-        XCTAssertEqual(menu.items.first?.title, "转场 4 · Stinger：先选一路输入（选了才执行）", "停在输入选择上：\(menu.items.map(\.title))")
+        XCTAssertEqual(menu.items.first?.title, "转场 4 · Stinger：先选一路输入，选好后再点一次才执行", "停在输入选择上：\(menu.items.map(\.title))")
         XCTAssertEqual(menu.items.filter { $0.action != nil }.map(\.title), ["输入 1 合成 1", "输入 2 合成 2"])
         AppTest.pump(seconds: 0.3)
         XCTAssertFalse(session.state.transition.isActive, "不执行（不然是一次延迟硬切）")

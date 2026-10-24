@@ -55,6 +55,7 @@ final class PanelCoordinator: NSObject {
         self.session = session
         linkage.reset()
         outputStatus.reset()   // 事件记录只属于这一场（W5-N）
+        outputStatus.routeFailure = { [weak self] n in self?.session?.outputs.routeFailure(output: n) }   // 状态列与底栏 / 推流页同字（W4-C4 第 5 条）
         guard let session else { state = MixerState(); return }
         state = session.state
         settingsWindow?.model.rebind()
@@ -227,6 +228,10 @@ final class PanelCoordinator: NSObject {
         let model = InputSettingsModel(config: config)
         model.send = { [weak session] c in session?.send(c) }
         model.runtimeState = { [weak session] in session?.inputs.runtimeState(of: number) }   // "播完"要看跑着的那个（W5-P，W4C3 第 5 条）
+        model.runtimeNote = { [weak session] in   // "来源"一节写这一路自己报的那句（W4-C4 第 1 条）
+            guard let session else { return nil }
+            return session.inputs.runtimeState(of: number) == .noSignal ? session.inputs.lastError(of: number) : session.inputs.liveNote(of: number)
+        }
         let w = InputSettingsWindowController(model: model)
         w.attach(source: session.displaySource, format: session.format)   // 本路画面：多画面纹理裁这一格（W5-K / H3）
         w.apply(state: state.input(number) != nil ? state : session.state)

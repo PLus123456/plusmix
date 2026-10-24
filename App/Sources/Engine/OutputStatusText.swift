@@ -51,6 +51,7 @@ enum OutputStatusText {
 
     /// NDI 发送一行（输出设置 NDI 页）。enabled = 输出的目标开关；entry = Stats.encoder 里它那一项（state：publishing / idle / unavailable / failed，提案 002 / 019）。
     /// publishing 带接收方数（`connections`，019）；unavailable = SDK 不在（要做的事是装 SDK），failed = SDK 在但 initialize / send_create 失败（要做的事是看日志）——两句分开。
+    /// failed 带着 Stats 的 last_error（118 起在跑但连续 10 帧送不出去也报 failed，原因在那里）就照它写"失败：原因"（同推流页）；没有才用那句通用的（W4-C4 第 2 条）。
     static func ndi(enabled: Bool, entry: Stats.EncoderEntry?) -> String {
         guard enabled else { return L("ndi.status.disabled") }
         guard let e = entry else { return L("ndi.status.starting") }
@@ -59,7 +60,7 @@ enum OutputStatusText {
             let base = L("ndi.status.publishing", Int(clamping: e.frames)) + L("ndi.status.connections", Int(clamping: e.connections))
             return e.dropped > 0 ? base + L("ndi.status.dropped", Int(clamping: e.dropped)) : base
         case "unavailable": return L("ndi.status.unavailable")
-        case "failed": return L("ndi.status.failed")
+        case "failed": return e.lastError.isEmpty ? L("ndi.status.failed") : L("ndi.status.failedReason", e.lastError)
         case "idle": return L("ndi.status.starting")
         default: return e.state
         }

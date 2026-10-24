@@ -212,8 +212,10 @@ final class TransitionPanelView: NSView {
         TransitionSlot.indexRange.contains(n) && n - 1 < state.transition.slots.count ? state.transition.slots[n - 1] : nil
     }
 
-    /// 当前槽（当前那组）是没选输入的 Stinger 时 T-bar 灰掉、下面写一行（W5-P，112 留下的，用户 2026-10-17 定）：推 T-bar 照契约（提案 029 只拒
-    /// autoTransition / useTransitionSlot(start)）推到顶是一次硬切，界面拦；选了输入 / 换了当前槽就恢复。转场进行中不动它（进行中的不是这种组）。
+    /// 当前槽（当前那组）是没选输入的 Stinger 时 T-bar 灰掉、下面写一行（W5-P，112 留下的，用户 2026-10-17 定）：契约不拦 T-bar（提案 029 只拒
+    /// autoTransition / useTransitionSlot(start)），推下去等于一次硬切——渲染器推过换底拍的位置（出厂 cutAtTick 0 = 一推动）就整幅画新画面
+    /// （CompositorPasses 的 stingerShowsNewUnder；没有 Stinger 画面可叠），推到顶只是对调 PGM / PVW；界面拦。选了输入 / 换了当前槽就恢复。
+    /// 转场进行中不动它（进行中的不是这种组）。
     private func updateTbarGuard() {
         let t = state.transition
         let unset = !t.isActive && t.currentGroup.isStingerWithoutInput

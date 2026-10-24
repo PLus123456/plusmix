@@ -736,6 +736,7 @@
 "inputSettings.source.changeHint" = "Changing the source = setInputSource: number, name, settings and PGM / PVW / overlay references are kept; this input is rebuilt from the new source (the picture drops out briefly).";
 "inputSettings.source.channels" = " (%@)";
 "inputSettings.source.current" = "Current";
+"inputSettings.source.note" = "This input reports: %@";
 "inputSettings.source.decklink" = "DeckLink: %@, connection %@";
 "inputSettings.source.file" = "File: %@, at end %@, rate %.2f";
 "inputSettings.source.image" = "Image: %@";
@@ -916,6 +917,7 @@
 "ndi.status.disabled" = "Not sending (off)";
 "ndi.status.dropped" = " (%ld dropped in queue)";
 "ndi.status.failed" = "Failed to start: NDI SDK present, but initialize / send_create failed (see the log)";
+"ndi.status.failedReason" = "Failed: %@";
 "ndi.status.publishing" = "Sending · %ld frames";
 "ndi.status.starting" = "Starting…";
 "ndi.status.unavailable" = "Unavailable: no NDI SDK (install the NDI SDK for Apple and rebuild)";
@@ -947,11 +949,11 @@
 "notice.recordingFinishFailed" = "Recording %d failed to finalize: %@";
 "notice.recordingStarted" = "Recording %d started: %@";
 "notice.recordingStopped" = "Recording %d stopped: %@, %d frames / %.2f s";
+"notice.recordingStoppedBecause" = "%@ — saved: %@, %d frames / %.2f s";
 "notice.streamAuthFailed" = "Stream %d authentication failed (wrong user name or password) and stopped: fix it on the Streaming page, then click “Stream” in the bottom bar to retry";
 "notice.streamConnecting" = "Stream %d connecting…";
 "notice.streamFailed" = "Stream %d failed to start: %@";
 "notice.streamGaveUp" = "Stream %d stopped retrying: %@";
-"notice.streamNoURL" = "Stream %d has no URL";
 "notice.streamStarted" = "Stream %d is live";
 "notice.streamStopped" = "Stream %d stopped";
 "notice.unknownUIAction" = "Unknown interface action in the shortcut / MIDI table: %@";
@@ -1262,6 +1264,7 @@
 "status.render" = "Render";
 "stream.error.invalidURL" = "Malformed address: %@";
 "stream.error.missingHost" = "The address has no server";
+"stream.error.noURL" = "No URL";
 "stream.error.unsupportedScheme" = "Unsupported address: %@:// (only rtmp://, rtmps://, srt://)";
 "streamMenu.addDestination" = "Add Stream Destination…";
 "streamMenu.item" = "%@ · %@";
@@ -1273,6 +1276,7 @@
 "streamMenu.tip.address" = "Address: %@";
 "streamMenu.tip.failed" = "Can't start: %@";
 "streamMenu.tip.retry" = "Click: retry just this one; the others are not affected";
+"streamMenu.tip.stopped" = "Stopped: %@";
 "streamMenu.tip.start" = "Click: start just this one";
 "streamMenu.tip.stop" = "Click: stop just this one (asks first)";
 "strip.add.a11y" = "Add Input";

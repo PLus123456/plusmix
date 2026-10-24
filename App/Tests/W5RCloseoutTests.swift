@@ -366,4 +366,179 @@ final class W5RCloseoutTests: XCTestCase {
         XCTAssertEqual(L10n.string("prefs.remote.cleartextWarning", language: "en"),
                        "The token and the whole state travel as plain HTTP / WebSocket (no TLS): only allow the local network on a network you trust.")
     }
+
+    // MARK: W4-C4 写手册查出的 App 口径缺口（reports/issues/W4C4-w5-app-gaps-found-by-docs.md）
+
+    private func stats(_ encoder: [Stats.EncoderEntry]) -> Stats {
+        Stats(ts: 1, tick: Tick(60), renderMs: 1, missedRender: 0, jitterMs: 0, perInput: [:], encoder: encoder,
+              audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 1, cpuPct: 1, gpuPct: 1)
+    }
+
+    /// 第 1 条：播放中的文件输入自己报的提示（FileInput 放进 lastError、不改 state：方向矩阵 / 转正失败 / 速率钳 / 定位越界）格子底边一行能看到、
+    /// 全文在悬停提示；输入设置窗"来源"一节也写。原来只在无信号时显示 lastError。这里用定位越界那一句（契约拦得住，直接调对象；与方向矩阵那一句
+    /// 走同一个 lastError。速率钳那句不行：钳到 8 倍速，解码追不上、这一路一会儿就无信号了）。
+    func testW4C4_1_liveFileInputNoteShownOnCellAndInInputSettings() throws {
+        let session = try AppTest.freshSession()
+        let fixture = try AppTest.repoRoot().appendingPathComponent("Tests/Fixtures/pattern.mov")
+        session.send(.addInput(config: InputConfig(number: 1, name: "片子", source: .file(path: fixture.path, endAction: .loop, rate: 1))))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 10), .live)
+        let file = try XCTUnwrap(session.inputs.entries[1]?.input as? FileInput)
+        let strip = AppTest.controller.windowController.inputStrip
+        XCTAssertTrue(AppTest.waitUntil(2) { strip.cells[1] != nil })
+        let cell = try XCTUnwrap(strip.cells[1])
+        XCTAssertTrue(AppTest.waitUntil(3) { cell.displayedStatus == "" }, "出了画面就不再写无信号（快照不变时每秒对一遍）：\(cell.displayedStatus)")
+        XCTAssertEqual(cell.displayedNote, "", "没提示时没有这一行")
+        let panels = AppTest.controller.panels
+        defer { panels.closeAll() }
+        let window = try XCTUnwrap(panels.showInputSettings(input: 1))
+        XCTAssertNil(window.model.sourceNote)
+
+        file.seek(toSeconds: -1)   // 按从头处理、lastError 说一句，照常播
+        let note = try XCTUnwrap(session.inputs.liveNote(of: 1), "FileInput 说了一句：\(String(describing: file.lastError))")
+        XCTAssertTrue(note.contains("-1"), note)
+        XCTAssertTrue(AppTest.waitUntil(3) { cell.displayedNote == note }, "格子底边（空闲时快照不变，靠每秒那一遍）：\(cell.displayedNote)")
+        XCTAssertEqual(cell.noteToolTip, note, "全文在悬停提示")
+        XCTAssertEqual(cell.displayedStatus, "", "出画面时中间那行照旧空着（不压画面）")
+        window.model.refreshRuntime()
+        XCTAssertEqual(window.model.sourceNote, note, "输入设置窗的来源一节")
+        XCTAssertEqual(L("inputSettings.source.note", note), "这一路报告：" + note)
+
+        file.seek(toSeconds: 0)   // 合法的定位清掉提示
+        XCTAssertTrue(AppTest.waitUntil(3) { cell.displayedNote == "" }, "提示没了这一行就收起：\(cell.displayedNote)")
+        window.model.refreshRuntime()
+        XCTAssertNil(window.model.sourceNote)
+        // 别的输入的 lastError 讲的是无信号原因：出画面时不挂（合成源没有 lastError，这里只验文件以外的类给 nil）
+        try AppTest.addSynthetics(session, count: 2)
+        XCTAssertEqual(AppTest.waitLive(session, input: 2, timeout: 5), .live)
+        XCTAssertNil(session.inputs.liveNote(of: 2))
+    }
+
+    /// 第 2 条：NDI 发送页的 failed 有 Stats 的 last_error 就照它写"失败：原因"（118 起在跑但连续 10 帧送不出去也报 failed）；没有才用那句通用的。
+    func testW4C4_2_ndiFailedShowsStatsLastError() {
+        let reason = "NDI 送不了像素格式 'yuvs'，连续 10 帧没送出"
+        let failed = Stats.EncoderEntry(output: 3, skipped: 0, bitrate: 0, state: "failed", lastError: reason)
+        XCTAssertEqual(OutputStatusText.ndi(enabled: true, entry: failed), "失败：" + reason)
+        XCTAssertEqual(OutputStatusText.ndi(enabled: true, entry: Stats.EncoderEntry(output: 3, skipped: 0, bitrate: 0, state: "failed")),
+                       "起不来：有 NDI SDK，但初始化 / 建发送实例失败（看日志）", "没有 last_error：照旧那句")
+        XCTAssertEqual(L10n.string("ndi.status.failedReason", language: "en", "x"), "Failed: x")
+        let model = OutputSettingsModel(state: MixerState(outputs: [OutputState(number: 3, kind: .ndi, name: "NDI", enabled: true)]), tab: .ndi,
+                                        defaultRecordDirectory: NSTemporaryDirectory(), showName: "w5r", queriesSystemExtensions: false)
+        model.apply(stats: stats([failed]))
+        XCTAssertEqual(model.ndiStatus(output: 3), "失败：" + reason, "NDI 页那一行")
+    }
+
+    /// 第 3 条：推流 ▴ 菜单的悬停，推流对象自己停住的（服务器拒绝鉴权）写"已停：鉴权失败（…）"，起不来的照旧"起不来：原因"。
+    func testW4C4_3_streamMenuTipSaysStoppedForAuthFailure() {
+        let mixer = MixerState(outputs: [OutputState(number: 2, kind: .stream, name: "主平台", enabled: true),
+                                         OutputState(number: 3, kind: .stream, name: "备用", enabled: true)])
+        let stopped = OutputRouteFailure(reason: "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized", stoppedStream: true)
+        let rows = StreamMenuRow.rows(state: mixer, encoder: [Stats.EncoderEntry(output: 2, skipped: 0, bitrate: 0, state: "failed"),
+                                                              Stats.EncoderEntry(output: 3, skipped: 0, bitrate: 0, state: "failed")]) { n in
+            n == 2 ? stopped : (n == 3 ? "没有地址" : nil)
+        }
+        XCTAssertEqual(rows.first { $0.number == 2 }?.toolTip?.components(separatedBy: "\n").first, "已停：鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized")
+        XCTAssertEqual(rows.first { $0.number == 3 }?.toolTip?.components(separatedBy: "\n").first, "起不来：没有地址")
+        XCTAssertEqual(L10n.string("streamMenu.tip.stopped", language: "en", "x"), "Stopped: x")
+    }
+
+    /// 第 4 / 5 条（端到端）：地址不认的推流起不来——failed 表、Stats 的 last_error 只存原因，状态行的整句另拼；推流页 / 底栏悬停 / ▴ 悬停 / 状态窗
+    /// 各写一次"起不来"（原来页上是"起不来：推流 3 起不来：不认这种地址…"），状态窗与底栏 / 推流页同一个字（原来状态窗写"失败"）。
+    func testW4C4_4_5_startFailureSaysCouldNotStartOnceEverywhere() throws {
+        let session = try AppTest.freshSession()
+        let controller = AppTest.controller
+        let bar = controller.windowController.bottomBar
+        var notices: [String] = []
+        let token = session.observeNotices { notices.append($0) }
+        defer {
+            token.invalidate()
+            controller.panels.closeAll()
+        }
+        session.send(.addOutput(config: AppTest.streamOutput(number: 3, url: "foo://example.com/live", name: "备用")))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(3) != nil })
+        session.send(.startStream(output: 3))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.failureReason(output: 3) != nil }, "\(session.outputs.failed)")
+        let reason = try XCTUnwrap(session.outputs.failureReason(output: 3))
+        XCTAssertEqual(reason, "不认这种地址：foo://（只支持 rtmp:// rtmps:// srt://）", "表里只存原因")
+        XCTAssertTrue(notices.contains("推流 3 起不来：" + reason), "状态行整句另拼：\(notices)")
+        func count(_ text: String?) -> Int { (text ?? "").components(separatedBy: "起不来").count - 1 }
+        // Stats 的 last_error 也只是原因（022：最近一次错误的文案）
+        XCTAssertTrue(AppTest.waitUntil(3) { bar.encoderEntry(forOutput: 3)?.lastError == reason }, "\(String(describing: bar.encoderEntry(forOutput: 3)))")
+        // 底栏悬停 / ▴ 悬停
+        XCTAssertTrue(AppTest.waitUntil(3) { bar.streamSummary.toolTip?.contains("备用：起不来 — " + reason) == true }, bar.streamSummary.toolTip ?? "")
+        XCTAssertEqual(count(bar.streamSummary.toolTip?.components(separatedBy: "\n").first), 1, bar.streamSummary.toolTip ?? "")
+        let item = try XCTUnwrap(bar.streamMenu().items.first { $0.title.hasPrefix("备用") })
+        XCTAssertEqual(item.toolTip?.components(separatedBy: "\n").first, "起不来：" + reason)
+        // 推流页
+        let page = controller.panels.showOutputSettings(tab: .stream).model
+        page.refreshRouteDetails()
+        XCTAssertEqual(page.streamStatus(output: 3), "起不来：" + reason)
+        // 状态窗（第 5 条）：同字"起不来"，事件"起不来：原因"
+        let status = controller.panels.outputStatus
+        XCTAssertTrue(AppTest.waitUntil(3) { status.streamRows.first { $0.number == 3 }?.state == "起不来" },
+                      "状态窗：\(status.streamRows.map { "\($0.number) \($0.state)" })")
+        XCTAssertEqual(status.streamRows.first { $0.number == 3 }?.lastError, reason)
+        XCTAssertEqual(OutputButtonSummary.routeState(OutputRouteStatus(output: try XCTUnwrap(session.state.output(3)), entry: bar.encoderEntry(forOutput: 3),
+                                                                       failure: session.outputs.routeFailure(output: 3)), kind: .stream).text, "起不来")
+        session.send(.stopStream(output: 3))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.outputs.failureReason(output: 3) == nil }, "停用了就不算起不来")
+    }
+
+    /// 第 5 条（纯模型）：状态窗按运行表的原因写——起不来的"起不来"、推流对象自己停住的"失败"、没有原因只看 Stats 的照旧（录制页同一套）。
+    func testW4C4_5_statusWindowUsesRouteFailureWording() {
+        let state = MixerState(outputs: [OutputState(number: 2, kind: .stream, name: "主平台", enabled: true),
+                                         OutputState(number: 3, kind: .stream, name: "备用", enabled: true),
+                                         OutputState(number: 4, kind: .record, name: "ISO 4", enabled: true),
+                                         OutputState(number: 5, kind: .record, name: "录制 5", enabled: true)])
+        let model = OutputStatusModel()
+        model.routeFailure = { n in
+            switch n {
+            case 2: OutputRouteFailure(reason: "鉴权失败（用户名或密码不对）", stoppedStream: true)
+            case 3: "没有地址"
+            case 4: "ISO 输入 9 不存在或分支用完（每路最多 4 个 ISO / Aux）"
+            default: nil
+            }
+        }
+        model.apply(stats: stats([Stats.EncoderEntry(output: 2, skipped: 0, bitrate: 0, state: "failed", lastError: "鉴权失败（用户名或密码不对）"),
+                                  Stats.EncoderEntry(output: 3, skipped: 0, bitrate: 0, state: "failed", lastError: "没有地址"),
+                                  Stats.EncoderEntry(output: 4, skipped: 0, bitrate: 0, state: "failed", lastError: "ISO 输入 9 不存在或分支用完（每路最多 4 个 ISO / Aux）"),
+                                  Stats.EncoderEntry(output: 5, skipped: 0, bitrate: 0, state: "failed", lastError: "写盘失败")]), state: state)
+        XCTAssertEqual(model.streamRows.map(\.state), ["失败", "起不来"])
+        XCTAssertEqual(model.recordRows.map(\.state), ["起不来", "失败"], "录制页：运行表起不来的写起不来，录制器自己失败的照旧失败")
+        XCTAssertTrue(model.events(for: .stream).contains { $0.text == "备用 · 起不来" }, "\(model.events(for: .stream).map(\.text))")
+    }
+
+    /// 第 6 条：中文 Stinger 选输入菜单的标题不再读着像"选了就执行"（选一路只改槽，要再点一次才执行；英文 119 已改）。
+    func testW4C4_6_stingerMenuHeaderSaysClickAgain() {
+        XCTAssertEqual(L("slot.stingerMenu.header", 4), "转场 4 · Stinger：先选一路输入，选好后再点一次才执行")
+        XCTAssertEqual(L10n.string("slot.stingerMenu.header", language: "en", 4), "Transition 4 · Stinger: choose an input first, then click again to run it")
+    }
+
+    /// 第 7 条：ISO 读的那一路被删——录像封好口时状态行留着为什么停（合成一句"…删掉了…——已封口：文件，n 帧 / x s"），不被"录制 n 已停"盖掉。
+    func testW4C4_7_isoInputRemovedNoticeSurvivesSeal() throws {
+        let session = try AppTest.freshSession()
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 1, gray: 80, audio: true)))
+        XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 5), .live)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("plusmix-w5r-w4c4-7-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let iso = ISORoutes.makeISOOutput(for: try XCTUnwrap(session.state.input(1)), in: session.state, defaultDirectory: directory.path)
+        session.send(.addOutput(config: iso))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(iso.number) != nil })
+        session.send(.startRecord(output: iso.number))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[iso.number] != nil })
+        AppTest.pump(seconds: 0.8)
+        var notices: [String] = []
+        let token = session.observeNotices { notices.append($0) }
+        defer { token.invalidate() }
+        session.send(.removeInput(input: 1))
+        XCTAssertTrue(AppTest.waitUntil(8) { session.outputs.recorders[iso.number] == nil && session.outputs.lastResults[iso.number] != nil }, "封好口")
+        AppTest.pump(seconds: 0.3)
+        let result = try XCTUnwrap(session.outputs.lastResults[iso.number])
+        print("W5R W4C4-7 提示：\(notices)")
+        let last = try XCTUnwrap(session.lastNotice)
+        XCTAssertTrue(last.contains("删") && last.contains("输入 1"), "最后那句还说着为什么停：\(last)")
+        XCTAssertTrue(last.contains("已封口：" + result.url.lastPathComponent), "并带上文件：\(last)")
+        XCTAssertFalse(notices.contains { $0.hasPrefix("录制 \(iso.number) 已停") }, "不再单发一句盖掉它：\(notices)")
+        XCTAssertEqual(AppTest.controller.windowController.bottomBar.noticeLabel.stringValue, last, "状态行显示的是这一句")
+    }
 }

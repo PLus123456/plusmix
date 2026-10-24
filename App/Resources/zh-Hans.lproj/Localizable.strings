@@ -736,6 +736,7 @@
 "inputSettings.source.changeHint" = "换来源 = setInputSource：编号 / 名字 / 设置 / PGM / PVW / 叠加引用都保留，这一路按新来源重建（画面会断一下）。";
 "inputSettings.source.channels" = "（%@）";
 "inputSettings.source.current" = "现在";
+"inputSettings.source.note" = "这一路报告：%@";
 "inputSettings.source.decklink" = "DeckLink：%@，接口 %@";
 "inputSettings.source.file" = "文件：%@，播完 %@，速率 %.2f";
 "inputSettings.source.image" = "图片：%@";
@@ -916,6 +917,7 @@
 "ndi.status.disabled" = "没在发（开关关着）";
 "ndi.status.dropped" = "（队列丢 %ld）";
 "ndi.status.failed" = "起不来：有 NDI SDK，但初始化 / 建发送实例失败（看日志）";
+"ndi.status.failedReason" = "失败：%@";
 "ndi.status.publishing" = "发送中 · %ld 帧";
 "ndi.status.starting" = "启动中…";
 "ndi.status.unavailable" = "不可用：没有 NDI SDK（装 NDI SDK for Apple 后重新编译）";
@@ -947,11 +949,11 @@
 "notice.recordingFinishFailed" = "录制 %d 封口失败：%@";
 "notice.recordingStarted" = "录制 %d 开始：%@";
 "notice.recordingStopped" = "录制 %d 已停：%@，%d 帧 / %.2f s";
+"notice.recordingStoppedBecause" = "%@——已封口：%@，%d 帧 / %.2f s";
 "notice.streamAuthFailed" = "推流 %d 鉴权失败（用户名或密码不对），已停止：在推流页改对后点底栏「推流」重试";
 "notice.streamConnecting" = "推流 %d 连接中…";
 "notice.streamFailed" = "推流 %d 起不来：%@";
 "notice.streamGaveUp" = "推流 %d 不再重连：%@";
-"notice.streamNoURL" = "推流 %d 没有地址";
 "notice.streamStarted" = "推流 %d 已开始";
 "notice.streamStopped" = "推流 %d 已停";
 "notice.unknownUIAction" = "快捷键 / MIDI 表里有认不出的界面动作：%@";
@@ -1262,6 +1264,7 @@
 "status.render" = "渲染";
 "stream.error.invalidURL" = "地址格式不对：%@";
 "stream.error.missingHost" = "地址里没有服务器";
+"stream.error.noURL" = "没有地址";
 "stream.error.unsupportedScheme" = "不认这种地址：%@://（只支持 rtmp:// rtmps:// srt://）";
 "streamMenu.addDestination" = "添加推流目的地…";
 "streamMenu.item" = "%@ · %@";
@@ -1273,6 +1276,7 @@
 "streamMenu.tip.address" = "地址：%@";
 "streamMenu.tip.failed" = "起不来：%@";
 "streamMenu.tip.retry" = "点一下：只重试这一路，别的路不受影响";
+"streamMenu.tip.stopped" = "已停：%@";
 "streamMenu.tip.start" = "点一下：只开这一路";
 "streamMenu.tip.stop" = "点一下：只停这一路（先确认）";
 "strip.add.a11y" = "添加输入";
@@ -1610,7 +1614,7 @@
 "slot.menu.factory" = "恢复出厂";
 "slot.duration.seconds" = "%@ 秒";
 "slot.duration.customTitle" = "转场 %d 的时长";
-"slot.stingerMenu.header" = "转场 %d · Stinger：先选一路输入（选了才执行）";
+"slot.stingerMenu.header" = "转场 %d · Stinger：先选一路输入，选好后再点一次才执行";
 "slot.stingerMenu.noInputs" = "还没有输入";
 "slot.tbarRow" = "%@ ▾";
 "slot.tbarRowSlot" = "转场 %d · %@ ▾";
