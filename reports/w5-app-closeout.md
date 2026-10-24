@@ -50,6 +50,9 @@ prompt 126 的 G10 追加：交付 1 的速率数字框钳位（`AddInputModel.c
 
 **两遍 0 红：第 2 遍与第 4 遍**（第 1、3 遍各一条名单里的环境红，都单独复跑过；没为它们改任何用例）。
 
+lint：`make lint BRANCH=w5-app-closeout` 在 C 与 zh_CN.UTF-8 两种 locale 下都 rc 0（禁词 / 版本 0.1.0 / Package 约束 / 依赖方向 8 包 / 归属 14 个文件（含本报告）在范围 /
+Help 18 个文件一致 / 链接 206 个 Markdown / RT 符号）。
+
 跳过的都是老的：键盘导航 BLOCKED-系统设置、空闲唤醒探针（要 `SWITCHER_IDLE_PROBE_MINUTES`）、虚拟摄像头 BLOCKED-签名；第 1 遍多跳一条内置摄像头 BLOCKED-权限（TCC 还没授权），第 2 遍起有了权限、跑过了。
 
 ## 3. 没做的和原因
