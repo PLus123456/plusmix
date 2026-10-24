@@ -1,7 +1,7 @@
 # 035 API 对外的状态里推流凭据打码：streamKey 换标记、url 打码，要原文带 token 加 `?secrets=1`（Codex 10-24 审计 NS03 = W5D 问题单 ②）
 
 提出会话 / 分支：131 W2-C5（`w2-control-5`）
-状态：**待批**（写完按 prompt 131 第 4 条停下来问用户；没批之前本分支只做 1–3 / 5，这一条不落）
+状态：**已批方案 A1**（用户 2026-10-25 在 131 会话里批，原话与落地顺序见文末"裁定"）；**还没落**——要等 132 合入，131 分支不落这一条
 来源：reports/issues/W5D-w2-control-api-state-exposes-stream-credentials.md；reports/codex-network-security-audit-20261024.md [3]（NS03，medium）；
 docs/KNOWN_ISSUES.md"推流凭据外泄两处"一行的 ②（③ 诊断包那一处归 132 W2-D5）。
 
@@ -65,3 +65,17 @@ docs/KNOWN_ISSUES.md"推流凭据外泄两处"一行的 ②（③ 诊断包那�
 - GET state / WS snapshot / GET log 里找不到测试密钥、userinfo 里的密码、`pass=` 的值、密钥栏空时路径里的发布名；键名与 `MixerState` 的 `jsonKeys` 一致。
 - 配了 token：`?secrets=1` 三处都给原文；没配 token：`?secrets=1` → 403 `secrets-require-token`，WS 不升级。
 - `setOutputSettings` 带标记往返：密钥 / 地址保留原值，别的字段照改；`addOutput` 带标记 → 400，状态不变。
+
+## 裁定（用户 2026-10-25，131 会话）
+
+原话："035 批方案 A1：等 132 合入后，由契约会话把 StreamURLRedaction 搬进 SwitcherContracts（SwitcherStreaming 留 typealias），再由 W2-C 系把 API 状态 / WS 快照 / 命令日志按提案打码，?secrets=1 要配 token。"
+
+落地顺序（三步，前一步合进 main 才开下一步）：
+
+1. **132 W2-D5 合入**（G12）：`StreamURLRedaction` 先在原地带上 NS12（参数名解百分号）与 NS09（`publishNameInPath`）的新口径。
+2. **契约会话（P5 系）**：`StreamURLRedaction` 原样搬进 SwitcherContracts（只用 Foundation），SwitcherStreaming 留 `public typealias StreamURLRedaction = SwitcherContracts.StreamURLRedaction`，
+   推流日志、App 的 ShowRedaction / 底栏提示等调用点不改；CONTRACTS.md 的 API 一节加"对外状态与命令日志里推流凭据打码；`setOutputSettings` 收到打码值 = 保留原值"一句；用例证明搬迁前后打码结果逐字相同。
+3. **W2-C 系**：按正文"改什么"第 1–4 条落 API 打码（APIModels / StateFeed / APIServer），用例照"批了之后的用例"；docs/api.md 重生成。KNOWN_ISSUES"推流凭据外泄两处"的 ② 到这一步销号。
+
+正文里没单独问到的细节（没配 token 时 `?secrets=1` 回 `403 secrets-require-token`、WS 不升级；`addOutput` / `loadShow` 带标记回 400；打码只改 API 写出去的样子、节目文件与界面不变）按正文的建议做。
+131（`w2-control-5`）只记下这次裁定，不落代码；三步的 prompt 由 G12（134）或之后的排期会话写。
