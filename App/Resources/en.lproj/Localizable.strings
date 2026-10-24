@@ -1387,6 +1387,7 @@
 "prefs.remote.localOnlyHint" = "Only programs on this Mac can connect; choose “Allow local network” when the control panel runs on another machine.";
 "prefs.remote.noLAN" = "No local network address found (is Ethernet / Wi-Fi connected?)";
 "prefs.remote.noTokenWarning" = "The local network is allowed but no token is set: anyone on the same network can switch the program or stop recordings. Set a token.";
+"prefs.remote.cleartextWarning" = "The token and the whole state travel as plain HTTP / WebSocket (no TLS): only allow the local network on a network you trust.";
 "prefs.remote.compatLANWarning" = "The compatibility layer has no authentication: once the local network is allowed, anyone on the same network can control the switcher. Only enable it on a trusted network.";
 "prefs.tally.title" = "Tally";
 "prefs.tally.enabled" = "Provide the read-only tally stream (tally lights / displays on the local network can connect)";

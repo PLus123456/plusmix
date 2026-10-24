@@ -200,6 +200,9 @@ final class PreferencesModel: ObservableObject {
     var apiWarning: String? {
         apiEnabled && apiScope == .lan && apiToken.trimmingCharacters(in: .whitespaces).isEmpty ? L("prefs.remote.noTokenWarning") : nil
     }
+    /// 允许局域网时的第二句黄字（NS08，网络安全审计 2026-10-24 [8]）：API 只有 HTTP / ws://，令牌（Stream Deck 插件放在 ws://…?token=）和全部状态
+    /// 在网上都是明文，同一链路上看得见的人拿了令牌就能重放——设了 token 也提醒；仅本机 / API 关着不提醒。TLS / WSS 等用户定，不在这一版。
+    var apiCleartextWarning: String? { apiEnabled && apiScope == .lan ? L("prefs.remote.cleartextWarning") : nil }
     /// 兼容层的 HTTP 地址（…/api）与 TCP 地址（地址:端口）。
     var compatHTTPAddress: String {
         NetworkAddresses.reachableHosts(listenHost: compatLayerHost).first.map { "http://\($0):\(compatLayerHTTPPort)/api" } ?? ""

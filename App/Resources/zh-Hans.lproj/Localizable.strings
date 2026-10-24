@@ -1387,6 +1387,7 @@
 "prefs.remote.localOnlyHint" = "只有这台 Mac 上的程序连得上；控制面板装在别的机器上时选“允许局域网”。";
 "prefs.remote.noLAN" = "没找到局域网地址（网线 / Wi-Fi 没连上？）";
 "prefs.remote.noTokenWarning" = "允许了局域网但没设 token：同一网络里谁都能切画面、停录制。建议设一个 token。";
+"prefs.remote.cleartextWarning" = "令牌和全部状态走明文 HTTP / WebSocket（没有 TLS），只在可信局域网里开。";
 "prefs.remote.compatLANWarning" = "兼容层没有鉴权：允许局域网后，同一网络里谁都能控制。只在可信的网络里打开。";
 "prefs.tally.title" = "Tally";
 "prefs.tally.enabled" = "提供只读 tally 流（局域网上的 tally 灯 / 提词屏可以连）";

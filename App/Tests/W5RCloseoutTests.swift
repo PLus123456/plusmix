@@ -327,4 +327,43 @@ final class W5RCloseoutTests: XCTestCase {
         AppTest.waitUntil(10) { done }
         return result
     }
+
+    // MARK: NS08 局域网明文
+
+    /// NS08（网络安全审计 [8]）：允许局域网时，令牌（ws://…?token=）和全部状态都是明文 HTTP / WebSocket——有没有 token 都提醒一句；仅本机不提醒。
+    func testNS08_lanScopeWarnsCleartextWithOrWithoutToken() throws {
+        _ = try AppTest.freshSession()
+        let controller = AppTest.controller
+        let defaults = controller.defaults
+        let keys = [AppSettings.Keys.apiEnabled, AppSettings.Keys.apiListen, AppSettings.Keys.apiToken]
+        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
+        let savedSettings = controller.settings
+        addTeardownBlock { @MainActor in
+            for (key, value) in saved {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+            AppTest.controller.settings = savedSettings
+            AppTest.controller.panels.closeAll()
+        }
+        let m = controller.panels.showPreferences().model
+        let cleartext = "令牌和全部状态走明文 HTTP / WebSocket（没有 TLS），只在可信局域网里开。"
+        m.apiEnabled = true
+        XCTAssertEqual(m.apiScope, .localOnly)
+        XCTAssertNil(m.apiCleartextWarning, "仅本机不提醒")
+        m.apiPort = 18765
+        m.apiToken = "secret"
+        m.apiScope = .lan
+        XCTAssertNil(m.apiWarning, "设了 token：不再说没设 token")
+        XCTAssertEqual(m.apiCleartextWarning, cleartext, "设了 token 也提醒明文")
+        m.apiToken = ""
+        XCTAssertNotNil(m.apiWarning, "没设 token 的那句照旧")
+        XCTAssertEqual(m.apiCleartextWarning, cleartext)
+        m.apiEnabled = false
+        XCTAssertNil(m.apiCleartextWarning, "API 关着不提醒")
+        m.apiEnabled = true
+        m.apiScope = .localOnly
+        XCTAssertNil(m.apiCleartextWarning)
+        XCTAssertEqual(L10n.string("prefs.remote.cleartextWarning", language: "en"),
+                       "The token and the whole state travel as plain HTTP / WebSocket (no TLS): only allow the local network on a network you trust.")
+    }
 }

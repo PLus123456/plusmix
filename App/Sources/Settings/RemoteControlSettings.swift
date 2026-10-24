@@ -1,5 +1,6 @@
 // 设置"远程控制"页（W5-L，01a P3 / 02 X33）：本地 API 与第三方 API 兼容层各"仅本机 / 允许局域网"二选一（代替自由填监听地址），
 // 下面只读显示别的机器该连的地址 http://<本机局域网 IP>:<端口>（带"复制"）；允许局域网又没设 token 时黄字提醒（兼容层没有鉴权，允许局域网就提醒）；
+// 允许局域网时（有没有 token）再提醒一句令牌和状态走明文（NS08）；
 // 兼容层的 HTTP 端口可改（原来写死 127.0.0.1 / 8088）。改动走设置窗底部的"应用 / 应用并重起引擎"（与原来的 API 一节同一口径）。
 // 本机局域网地址：开着、在跑、不是回环 / 点对点隧道（VPN）、不是 169.254 自分配的 IPv4；默认路由那块网卡排第一（SCDynamicStore 的 PrimaryInterface）。
 // 写成独立的几节（RemoteControlSection 等），96 合窗时整节挂进"远程控制"页。
@@ -115,6 +116,7 @@ struct RemoteControlSection: View {
             SecureField(L("prefs.api.token"), text: $model.apiToken)
             addressRows(label: L("prefs.remote.address"), first: model.apiAddress, others: model.apiOtherAddresses, lan: model.apiScope == .lan)
             if let warning = model.apiWarning { Text(warning).font(.caption).foregroundStyle(.yellow) }
+            if let warning = model.apiCleartextWarning { Text(warning).font(.caption).foregroundStyle(.yellow) }
             Text(L("prefs.api.hint")).font(.caption).foregroundStyle(.secondary)
         }
         Section(L("prefs.compat.title")) {
