@@ -717,6 +717,98 @@ final class ReducerTests: XCTestCase {
         XCTAssertEqual(after.inputs.map(\.number), [1, 2, 3, 4])
     }
 
+    // MARK: 提案 034（Codex 2026-10-22 审查 N02 / N03 / N08 + 叠加中途改时长；探针 reports/codex-bug-audit-20261022-tests/Audit20261022ReducerMain.swift.txt）
+
+    /// N03（= 10-24 审计 NS01）：默认状态 ftb(true) → setFTBDuration(Int.max) → ftb(false)（直接调 reducer、不 advance，探针 ftbMax 的原序列）
+    /// 原来在 equivalentStart 的 `Int((progressed * Double(duration)).rounded())` 上 SIGTRAP（progressed = 1，Double(Int.max) 舍入成 2^63）。
+    /// 时长超上限原样返回（与校验器同判），之后 ftb(false) 照常从当前电平往回走。
+    func testN03_ftbMaxDurationSequence_refusedAndNoTrap() {
+        var s = MixerState()
+        s = reducer.reduce(s, .ftb(on: true), at: Tick(1))
+        let fading = s
+        s = reducer.reduce(s, .setFTBDuration(ticks: Int.max), at: Tick(2))
+        XCTAssertEqual(s, fading, "Int.max 超上限：原样返回")
+        s = reducer.reduce(s, .ftb(on: false), at: Tick(3))
+        XCTAssertFalse(s.ftb.on)
+        XCTAssertEqual(s.ftb.durationTicks, 30)
+        XCTAssertEqual(reducer.advance(s, to: Tick(100)).ftb.level, 0)
+    }
+
+    /// N03 第二道：绕过校验器与 reducer、直接造出时长 Int.max 的状态（脚本 / 测试 / 老代码能这么做），FTB 与叠加在电平 0 时反转（progressed = 1）也不许溢出。
+    func testN03_reversalWithHugeDurationInState_doesNotTrap() {
+        var s = MixerState()
+        s.ftb.durationTicks = Int.max
+        s.overlays[0].animation = OverlayAnimation(kind: .fade, durationTicks: Int.max)
+        s = reducer.reduce(s, .ftb(on: true), at: Tick(1))
+        s = reducer.reduce(s, .ftb(on: false), at: Tick(3))
+        XCTAssertFalse(s.ftb.on)
+        XCTAssertEqual(s.ftb.level, 0)
+        s = reducer.reduce(s, .overlay(channel: 1, on: true, input: nil), at: Tick(4))
+        s = reducer.reduce(s, .overlay(channel: 1, on: false, input: nil), at: Tick(6))
+        XCTAssertFalse(s.overlays[0].on)
+        XCTAssertEqual(s.overlays[0].animProgress, 0)
+        s = reducer.advance(s, to: Tick(1_000))
+        XCTAssertEqual(s.ftb.level, 0)
+        XCTAssertEqual(s.overlays[0].animProgress, 0)
+    }
+
+    /// N02：loadShow 的节目叠加不是 4 个——reducer 原来先 makeState（`MixerState.init` 的 precondition）再 validate，直接发给状态机的脚本 / 测试也能把进程弄崩。
+    /// 先查结构、原样返回（与 Show.load / 校验器同一顺序）。
+    func testN02_loadShowOverlayCountNotFour_refusedBeforeMakeState() {
+        let s0 = Self.baseState()
+        var show = Show(name: "坏", state: s0)
+        show.mixer.overlays = []
+        XCTAssertEqual(reducer.reduce(s0, .loadShow(show: show), at: Tick(1)), s0, "0 个")
+        show.mixer.overlays = Array(repeating: OverlayState(), count: 5)
+        XCTAssertEqual(reducer.reduce(s0, .loadShow(show: show), at: Tick(1)), s0, "5 个")
+    }
+
+    /// N08：运行中 loadShow 换格式（探针 loadFormat：1080p60 → 1080p30；App 实测 1080p60 → 720p30）原来校验器 / reducer 都收，状态报新格式、
+    /// 引擎时钟 / 渲染器 / App 的 session.format 还是旧的。格式不同原样返回（打开节目走 App 重建 session，headless 从文件起）；同格式照载。
+    func testN08_loadShowWithDifferentFormat_refused_sameFormatLoads() {
+        let s0 = Self.baseState()   // 1080p60
+        for format in [ProgramFormat.hd1080p30, ProgramFormat(width: 1280, height: 720, frameRate: .fps30), .hd720p60, .hd1080p5994] {
+            var other = Self.baseState()
+            other.format = format
+            XCTAssertEqual(reducer.reduce(s0, .loadShow(show: Show(name: "\(format)", state: other)), at: Tick(1)), s0, "\(format)")
+        }
+        var same = Self.baseState()
+        same.program = 3
+        XCTAssertEqual(reducer.reduce(s0, .loadShow(show: Show(name: "同格式", state: same)), at: Tick(1)).program, 3, "同格式照载")
+    }
+
+    /// 叠加动画进行中改时长（Codex"验证到的其他行为"，探针 overlayDuration）：60 拍 fade 第 30 拍 = 0.5，改成 120 拍后第 31 拍原来是 0.258（沿用旧起点、倒退）。
+    /// 照 FTB（提案 020 的 setFTBDuration）按当前进度重锚：改的那一拍进度不变、之后按新时长继续；时长没变（只改位置 / 方式）起点不动；改成 0 立即到位。
+    func test034_setOverlayDurationMidAnimation_reanchorsWithoutGoingBack() {
+        var s = MixerState()
+        s = reducer.reduce(s, .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: 60)), at: .zero)
+        s = reducer.reduce(s, .overlay(channel: 1, on: true, input: nil), at: .zero)
+        s = reducer.advance(s, to: Tick(30))
+        XCTAssertEqual(s.overlays[0].animProgress, 0.5, accuracy: 1e-12)
+        let slow = reducer.reduce(s, .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: 120)), at: Tick(30))
+        XCTAssertEqual(slow.overlays[0].animProgress, 0.5, accuracy: 1e-12, "改的那一拍进度不变")
+        XCTAssertEqual(slow.overlays[0].startTick, Tick(-30), "等效起点 = 30 − round(0.5 × 120)")
+        XCTAssertEqual(reducer.advance(slow, to: Tick(31)).overlays[0].animProgress, 61.0 / 120.0, accuracy: 1e-12, "按新时长继续（原来 0.258）")
+        let shown = reducer.advance(slow, to: Tick(90))
+        XCTAssertEqual(shown.overlays[0].animProgress, 1)
+        XCTAssertNil(shown.overlays[0].startTick)
+        // 退出动画中改短：同样从当前进度往回走
+        let off = reducer.reduce(shown, .overlay(channel: 1, on: false, input: nil), at: Tick(100))
+        let mid = reducer.advance(off, to: Tick(160))   // 120 拍退出走了一半
+        XCTAssertEqual(mid.overlays[0].animProgress, 0.5, accuracy: 1e-12)
+        let fast = reducer.reduce(mid, .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: 20)), at: Tick(160))
+        XCTAssertEqual(fast.overlays[0].animProgress, 0.5, accuracy: 1e-12)
+        XCTAssertEqual(reducer.advance(fast, to: Tick(165)).overlays[0].animProgress, 0.25, accuracy: 1e-12)
+        // 只改位置（时长不变）：起点不动
+        let moved = reducer.reduce(mid, .setOverlay(channel: 1, rect: .bottomRightQuarter, animation: OverlayAnimation(kind: .fade, durationTicks: 120)), at: Tick(160))
+        XCTAssertEqual(moved.overlays[0].startTick, mid.overlays[0].startTick)
+        XCTAssertEqual(moved.overlays[0].rect, .bottomRightQuarter)
+        // 改成 0：立即到位
+        let instant = reducer.reduce(mid, .setOverlay(channel: 1, rect: .full, animation: OverlayAnimation(kind: .fade, durationTicks: 0)), at: Tick(160))
+        XCTAssertEqual(instant.overlays[0].animProgress, 0)
+        XCTAssertNil(instant.overlays[0].startTick)
+    }
+
     // MARK: P4：reducer 的两条小规则（prompt 67 交付 3）
 
     /// removeInput 删掉 Stinger 用的那一路：`transition.stinger.input` 置 nil，与叠加引用同口径（W3-E2 报告 §4 第 1 条）；换底拍不动，删别的输入不碰它。

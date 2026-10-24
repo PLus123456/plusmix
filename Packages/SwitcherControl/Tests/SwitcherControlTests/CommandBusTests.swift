@@ -274,6 +274,17 @@ final class CommandBusTests: XCTestCase {
         XCTAssertNoThrow(try after.validate())
     }
 
+    // MARK: 提案 034（Codex 2026-10-22 审查 N03 = 10-24 审计 NS01）
+
+    /// N03：主 API 的时长只拒负数——`{"fade":{"durationTicks":Int.max}}` / `{"setFTBDuration":{"ticks":Int.max}}` 解码得出来、校验器放行，
+    /// 之后 FTB 反转在 reducer 的 Double → Int 上崩（Codex 审查树上的 `testAudit20261022_primaryAPIDurationBoundaryDecoder`，原样搬来改名）。入口要拒。
+    func testN03_primaryAPIDurationAboveLimit_rejectedAtBoundary() throws {
+        for text in [#"{"fade":{"durationTicks":9223372036854775807}}"#, #"{"setFTBDuration":{"ticks":9223372036854775807}}"#] {
+            let command = try CommandEnvelope.decode(Data(text.utf8))
+            XCTAssertNotNil(CommandValidator.reason(rejecting: command, in: TestStates.base()), "\(text)：超出可安全计算的时长要在 API 入口拒")
+        }
+    }
+
     // MARK: C4（进程内形态）：每秒 100 条带序号命令，两个并发"客户端"
 
     func testC4_hundredCommandsPerSecond_twoConcurrentClients_noLossNoReorder() async throws {
