@@ -1191,7 +1191,7 @@
 "settings.advanced.listenHint" = "127.0.0.1 = 只有本机能连；0.0.0.0 = 局域网里的机器也能连（记得设访问令牌）。兼容层的 HTTP 端口固定 8088。";
 "settings.advanced.listenInvalid" = "认不出的地址：%@（写成 host:port，端口 0–65535）";
 "settings.advanced.minimumFree" = "磁盘下限（MB）";
-"settings.advanced.minimumFreeHint" = "录制目录剩余空间低于这个数就停那一路（设了备用目录就切过去接着录）。从下一次开录起生效，在录的路照旧。默认 200。";
+"settings.advanced.minimumFreeHint" = "录制目录剩余空间低于这个数就停那一路（设了备用目录就切过去接着录）。从下一次开录起生效，在录的路照旧。默认 200，最大 16777216（16 TiB）。";
 "settings.advanced.recording" = "录制";
 "settings.format.custom" = "自定义…";
 "settings.format.customHint" = "自定义的宽、高按偶数取（编码器要求），范围 320×240 … 7680×4320。";

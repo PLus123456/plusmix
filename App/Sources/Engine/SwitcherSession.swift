@@ -147,7 +147,7 @@ final class SwitcherSession {
         self.inputs = inputs
         outputs = OutputRuntime(engine: engine, audio: audio, inputs: inputs, format: format, showName: show.name)
         outputs.fallbackDirectory = settings.recordFallbackDirectory
-        outputs.minimumFreeBytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
+        outputs.minimumFreeBytes = settings.recordMinimumFreeBytes   // N04：MB → 字节只在 AppSettings 一处算（钳过再乘）
         aux = AuxOutputRuntime(engine: engine, source: renderer, format: format)
         // W3-C2：Aux = 本包自己画输入帧。每个 Aux 窗口给那一路开一个 InputFrameTee 分支（与 ISO 共用每路 4 个的额度），窗口换输入 / 关掉时还回去；
         // 占位与多画面缩略格子同一个来源、同一句文案（reports/issues/W3C2-app-aux-wiring.md，G4 续做合入时接的胶水）

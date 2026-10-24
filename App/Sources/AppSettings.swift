@@ -6,7 +6,7 @@
 //   --api-token <token>      API 的简单 token 鉴权（默认关）
 //   --no-api                 不起 API
 //   --record-fallback <目录>  录制目标盘满 / 低于下限时自动切到这个目录继续录（W3-C，S7 目标档）；不设 = 只停录制并提示
-//   --record-min-free-mb <N> 录制目录剩余空间低于 N MB 就停该路录制（默认 200）
+//   --record-min-free-mb <N> 录制目录剩余空间低于 N MB 就停该路录制（默认 200；钳到 0…maxRecordMinimumFreeMB，N04）
 //   --tally-port <N>         起只读 tally 流（WS /tally、GET /tally），听这个端口（与 headless 同名；不给 = 看设置 › Tally）
 // 同名 UserDefaults 键：audioOutputDevice / apiEnabled / apiListen / apiToken / recordFallbackDirectory / recordMinimumFreeMB；
 // W3-E 加 compatLayerEnabled / compatLayerPort（第三方 API 兼容层 VMixCompat，默认关；G4 合并后由 ControlRuntime 按这两个键起）；
@@ -91,7 +91,8 @@ struct AppSettings: Equatable, Sendable {
     var statsURL: URL?
     /// 磁盘满时的备用录制目录（nil = 只停录制）。
     var recordFallbackDirectory: String?
-    /// 录制目录剩余空间下限（MB），低于就停该路。
+    /// 录制目录剩余空间下限（MB），低于就停该路。写进来的每一条路（defaults、启动参数、设置窗、设置导入）都先钳到 0…maxRecordMinimumFreeMB；
+    /// 换成字节只用 recordMinimumFreeBytes（N04）。
     var recordMinimumFreeMB = 200
     /// PVW 预览全部叠加（渲染器总开关，与每通道 OverlayState.previewOn 取或；默认关）。
     var overlaysInPreview = false
@@ -141,6 +142,28 @@ struct AppSettings: Equatable, Sendable {
 
     static let defaultCompatLayerPort = 8099
 
+    /// 录制磁盘下限的上限（MB）：16 TiB（= 2^24 MB，换成字节 2^44）。MB → 字节在 UInt64 里的溢出点是 2^44 MB（N04，Codex 2026-10-22：
+    /// 设置窗填 17592186044416 就 trap，commitSettings 先落盘，下次启动建 session 再崩），离它远着；再大的盘也用不着更高的下限。
+    static let maxRecordMinimumFreeMB = 16_777_216
+
+    /// 磁盘下限钳到 0…maxRecordMinimumFreeMB（同 ReminderSettings.clampMinutes 的写法）。
+    static func clampMinimumFreeMB(_ mb: Int) -> Int { min(max(0, mb), maxRecordMinimumFreeMB) }
+
+    /// 磁盘下限换成字节：MB → 字节只在这里算一处（AppController.applySettings 与 SwitcherSession.init 都用它）。钳过再乘，乘法再用
+    /// multipliedReportingOverflow 兜底（钳过之后不会溢出；溢出就当 UInt64.max，不 trap）。
+    var recordMinimumFreeBytes: UInt64 {
+        let (bytes, overflow) = UInt64(Self.clampMinimumFreeMB(recordMinimumFreeMB)).multipliedReportingOverflow(by: 1_048_576)
+        return overflow ? .max : bytes
+    }
+
+    /// 落盘 / 换上之前把有范围的项钳一遍（AppController.updateSettings / commitSettings 的入口；N04：先存后用，存进去一个会溢出的磁盘下限，
+    /// 下次启动建 session 就崩）。
+    var clampedForSaving: AppSettings {
+        var s = self
+        s.recordMinimumFreeMB = Self.clampMinimumFreeMB(recordMinimumFreeMB)
+        return s
+    }
+
     /// 第三方 API 兼容层（W3-D VMixCompat）的配置；开关关着 = nil（不监听任何端口）。地址 / TCP 端口 / HTTP 端口都来自设置（W5-L 起地址与 HTTP 端口可改）。
     var compatConfiguration: VMixCompatConfiguration? {
         guard compatLayerEnabled else { return nil }
@@ -170,7 +193,7 @@ struct AppSettings: Equatable, Sendable {
         }
         if let token = defaults.string(forKey: Keys.apiToken), !token.isEmpty { s.apiToken = token }
         if let dir = defaults.string(forKey: Keys.recordFallbackDirectory), !dir.isEmpty { s.recordFallbackDirectory = dir }
-        if defaults.object(forKey: Keys.recordMinimumFreeMB) != nil { s.recordMinimumFreeMB = max(0, defaults.integer(forKey: Keys.recordMinimumFreeMB)) }
+        if defaults.object(forKey: Keys.recordMinimumFreeMB) != nil { s.recordMinimumFreeMB = clampMinimumFreeMB(defaults.integer(forKey: Keys.recordMinimumFreeMB)) }
         if defaults.object(forKey: Keys.compatLayerEnabled) != nil { s.compatLayerEnabled = defaults.bool(forKey: Keys.compatLayerEnabled) }
         if defaults.object(forKey: Keys.compatLayerPort) != nil, defaults.integer(forKey: Keys.compatLayerPort) > 0 {
             s.compatLayerPort = defaults.integer(forKey: Keys.compatLayerPort)
@@ -212,7 +235,7 @@ struct AppSettings: Equatable, Sendable {
         if let v = value(after: "--api-token") { s.apiToken = v.isEmpty ? nil : v }
         if arguments.contains("--no-api") { s.apiEnabled = false }
         if let v = value(after: "--record-fallback") { s.recordFallbackDirectory = v.isEmpty ? nil : v }
-        if let v = value(after: "--record-min-free-mb"), let n = Int(v) { s.recordMinimumFreeMB = max(0, n) }
+        if let v = value(after: "--record-min-free-mb"), let n = Int(v) { s.recordMinimumFreeMB = clampMinimumFreeMB(n) }
         if let v = value(after: "--tally-port"), let n = Int(v), (0...65535).contains(n) {
             s.tallyEnabled = true
             s.tallyPort = n

@@ -1191,7 +1191,7 @@
 "settings.advanced.listenHint" = "127.0.0.1 = this Mac only; 0.0.0.0 = machines on the network too (set a token). The compatibility layer’s HTTP port is fixed at 8088.";
 "settings.advanced.listenInvalid" = "Unrecognized address: %@ (write host:port, port 0–65535)";
 "settings.advanced.minimumFree" = "Free space minimum (MB)";
-"settings.advanced.minimumFreeHint" = "When the recording volume drops below this, that recording stops (or moves to the fallback folder). Applies from the next recording start; running recordings keep their limit. Default 200.";
+"settings.advanced.minimumFreeHint" = "When the recording volume drops below this, that recording stops (or moves to the fallback folder). Applies from the next recording start; running recordings keep their limit. Default 200, at most 16777216 (16 TiB).";
 "settings.advanced.recording" = "Recording";
 "settings.format.custom" = "Custom…";
 "settings.format.customHint" = "Custom sizes are rounded down to even numbers (an encoder requirement), from 320×240 to 7680×4320.";

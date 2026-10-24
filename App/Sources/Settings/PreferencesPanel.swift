@@ -45,6 +45,8 @@ final class PreferencesModel: ObservableObject {
     static func resolutionTitle(width: Int, height: Int) -> String { "\(width)×\(height)" }
     /// 端口这类整数输入框的格式：不加千分位（"8098"，不是"8,098"，V-12）。
     static let plainInteger = IntegerFormatStyle<Int>.number.grouping(.never)
+    /// 高级页磁盘下限框的格式：同 plainInteger，解析时钳进 0…AppSettings.maxRecordMinimumFreeMB（N04）。
+    static let minimumFreeFormat = ClampedIntegerFormat(range: 0...AppSettings.maxRecordMinimumFreeMB)
 
     // MARK: 本节目（改了要换引擎：待应用）
 
@@ -79,7 +81,7 @@ final class PreferencesModel: ObservableObject {
     /// 底栏停录制 / 停推流前先确认（W5-B，默认开）。
     @Published var confirmBeforeStop: Bool { didSet { commit() } }
     /// 录制目录剩余空间下限（MB）：低于就停那一路（或切到备用目录）。即时生效，跑着的引擎从下一次开录起用（在录的路照旧）。
-    @Published var recordMinimumFreeMB: Int { didSet { commit() } }   // 负数按 0 存（commit 里钳）；页上的框也钳
+    @Published var recordMinimumFreeMB: Int { didSet { commit() } }   // 钳到 0…AppSettings.maxRecordMinimumFreeMB 再存、页上换成钳后的值（commit；N04）；页上的框解析时也钳
     /// 磁盘满 / 低于下限时自动切过去继续录的目录；空 = 只停录制并提示。即时生效。
     @Published var recordFallbackDirectory: String { didSet { commit() } }
     /// 高级页的两个监听地址框（host:port）：写对了才存，写错了 listenError 说明、不存。
@@ -255,10 +257,17 @@ final class PreferencesModel: ObservableObject {
         s.overlaysInPreview = overlaysInPreview
         s.externalBehindInterface = externalBehindInterface
         s.confirmBeforeStop = confirmBeforeStop
-        s.recordMinimumFreeMB = max(0, recordMinimumFreeMB)
+        let minimumFreeMB = AppSettings.clampMinimumFreeMB(recordMinimumFreeMB)   // N04：2^44 MB 起换成字节就溢出；先钳再存（commitSettings 先落盘）
+        s.recordMinimumFreeMB = minimumFreeMB
         let fallback = recordFallbackDirectory.trimmingCharacters(in: .whitespaces)
         s.recordFallbackDirectory = fallback.isEmpty ? nil : fallback
         controller.commitSettings(s)   // 只写这次真变了的键：内存里带着启动参数（--no-api……），不顺手存成本机设置（W5-O）
+        if recordMinimumFreeMB != minimumFreeMB {
+            // 页上也换成钳后的值（存下的、跑着的引擎用的是它）；loading 挡住这次回写再提交一遍
+            loading = true
+            recordMinimumFreeMB = minimumFreeMB
+            loading = false
+        }
         status = L("prefs.status.saved")
         refreshPending()
     }
@@ -678,8 +687,8 @@ struct AdvancedPage: View {
                 Text(L("settings.advanced.intro")).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section(L("settings.advanced.recording")) {
-                TextField(L("settings.advanced.minimumFree"), value: Binding(get: { model.recordMinimumFreeMB }, set: { model.recordMinimumFreeMB = max(0, $0) }),
-                          format: PreferencesModel.plainInteger)
+                TextField(L("settings.advanced.minimumFree"), value: Binding(get: { model.recordMinimumFreeMB }, set: { model.recordMinimumFreeMB = AppSettings.clampMinimumFreeMB($0) }),
+                          format: PreferencesModel.minimumFreeFormat)
                 Text(L("settings.advanced.minimumFreeHint")).font(.caption).foregroundStyle(.secondary)
                 LabeledContent(L("settings.advanced.fallback")) {
                     HStack {
@@ -699,5 +708,32 @@ struct AdvancedPage: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// 带范围的整数格式（不加千分位）：解析时钳进 range（N04：磁盘下限框填 17592186044416 MB，原来照样解析得出来、到换算成字节才溢出）。
+/// 先按不分组的整数解析；解析不出来但整串是数字（比 Int 还大）按符号取 Int.max / Int.min，最后钳进 range。显示同不分组的整数。
+struct ClampedIntegerFormat: ParseableFormatStyle {
+    var range: ClosedRange<Int>
+
+    var parseStrategy: Strategy { Strategy(range: range) }
+
+    func format(_ value: Int) -> String { value.formatted(.number.grouping(.never)) }
+
+    struct Strategy: ParseStrategy {
+        var range: ClosedRange<Int>
+
+        func parse(_ value: String) throws -> Int {
+            let text = value.trimmingCharacters(in: .whitespaces)
+            let n: Int
+            do {
+                n = try IntegerFormatStyle<Int>.number.grouping(.never).parseStrategy.parse(text)
+            } catch {
+                let digits = text.first == "-" || text.first == "+" ? text.dropFirst() : Substring(text)
+                guard !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }) else { throw error }
+                n = text.first == "-" ? .min : .max
+            }
+            return min(max(n, range.lowerBound), range.upperBound)
+        }
     }
 }
