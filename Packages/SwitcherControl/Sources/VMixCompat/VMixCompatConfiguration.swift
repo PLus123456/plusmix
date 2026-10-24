@@ -12,6 +12,9 @@ public struct VMixCompatConfiguration: Sendable, Hashable {
     public var enabled = false
     /// 监听地址（HTTP 与 TCP 共用）；默认只听本机，Companion 在别的机器上时改 0.0.0.0。
     public var host = "127.0.0.1"
+    /// HTTP 入口放行的浏览器来源（`Origin` 头的值）；默认空 = 不放任何网页（Codex 10-24 审计 NS05，与主 API 同一套 `BrowserRequestGuard`）。
+    /// Companion / curl 这类不是浏览器的客户端不带来源头，不受它管；TCP 入口没有浏览器能发的请求，也不受它管。
+    public var allowedOrigins: [String] = []
     /// HTTP 入口开关与端口（0 = 系统分配，测试用）。
     public var httpEnabled = true
     public var httpPort = VMixCompatConfiguration.defaultHTTPPort

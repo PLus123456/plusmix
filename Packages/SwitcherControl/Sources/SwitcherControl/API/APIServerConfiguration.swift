@@ -11,14 +11,18 @@ public struct APIServerConfiguration: Sendable, Hashable {
     public var port: Int = defaultPort
     /// 简单 token 鉴权；nil = 关（默认）。
     public var token: String? = nil
+    /// 放行的浏览器来源（`Origin` 头的值，例如 "http://panel.local:8080"）；默认空 = 不放任何网页（Codex 10-24 审计 NS02，见 `BrowserRequestGuard`）。
+    public var allowedOrigins: [String] = []
     /// Hummingbird 的日志级别（默认只报 warning 以上，headless 的标准输出留给统计）。
     public var logLevel: Logger.Level = .warning
 
-    public init(host: String = "127.0.0.1", port: Int = APIServerConfiguration.defaultPort, token: String? = nil, logLevel: Logger.Level = .warning) {
+    public init(host: String = "127.0.0.1", port: Int = APIServerConfiguration.defaultPort, token: String? = nil, logLevel: Logger.Level = .warning,
+                allowedOrigins: [String] = []) {
         self.host = host
         self.port = port
         self.token = token
         self.logLevel = logLevel
+        self.allowedOrigins = allowedOrigins
     }
 
     /// 解析 "host:port"、":port"、"port"、"host"。

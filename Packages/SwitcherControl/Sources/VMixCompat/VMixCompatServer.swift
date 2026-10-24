@@ -62,6 +62,10 @@ public final class VMixCompatServer: Sendable {
         public var functionErrors: UInt64 = 0
         public var tcpConnectionsAccepted: UInt64 = 0
         public var tcpConnectionsOpen: Int = 0
+        /// 连接数满了（`CompatTCPServer.maxConnections`）被直接关掉的新连接。
+        public var tcpConnectionsRefused: UInt64 = 0
+        /// 一行超过 `CompatTCPServer.maxLineBytes` 被断开的连接。
+        public var tcpLinesTooLong: UInt64 = 0
         /// 送出的 XML 状态次数（HTTP + TCP）。
         public var xmlServed: UInt64 = 0
         /// 推给订阅者的 TALLY 事件数。

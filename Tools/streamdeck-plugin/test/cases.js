@@ -17,6 +17,27 @@ export const snapshot = {
   tally: { "1": { program: true, preview: false }, "2": { program: false, preview: true }, "3": { program: true, preview: false } },
 };
 
+/** 连上了的 SwitcherClient（假 socket + 假计时器，事件由用例按顺序触发）；logs 收它的 "log" 事件，timers 收排的计时器。 */
+function connectedClient(options) {
+  const made = [];
+  function FakeSocket(url) { this.url = url; this.handlers = {}; this.sent = []; made.push(this); }
+  FakeSocket.prototype.on = function (event, f) { (this.handlers[event] = this.handlers[event] || []).push(f); return this; };
+  FakeSocket.prototype.fire = function (event, arg) { for (const f of this.handlers[event] || []) f(arg); };
+  FakeSocket.prototype.close = function () {};
+  FakeSocket.prototype.send = function (text) { this.sent.push(text); };
+  const timers = [];
+  const client = new SwitcherClient(Object.assign({
+    WebSocket: FakeSocket,
+    setTimer: (f, ms) => { timers.push({ f, ms }); return timers.length; },
+    clearTimer: () => {},
+  }, options || {}));
+  const logs = [];
+  client.on("log", (line) => logs.push(line));
+  client.connect();
+  made[0].fire("open");
+  return { client, socket: made[0], logs, timers };
+}
+
 export const cases = [
   {
     name: "tallyFor 按快照的 tally 表；没有表时退回 program / preview",
@@ -262,6 +283,58 @@ export const cases = [
       assert.equal(made.length, 4, "重连起一条");
       assert.deepEqual(open(), [made[3]]);
       assert.equal(oldError === null || oldError === "连接断了", true, "旧命令按断开作废");
+    },
+  },
+  {
+    name: "NS10（Codex 10-24 审计）：state.inputs / outputs 不是数组（或元素不是对象）的快照丢掉、记一行、不抛、快照不变；合法快照照旧重画",
+    run(assert) {
+      const { client, socket, logs } = connectedClient();
+      // 与 bin/plugin.js 的 paintAll 同一条路：按当前快照算一个 PVW 1 按钮、一个推流按钮
+      const painted = [];
+      client.on("snapshot", () => painted.push([keyStyle("preview", client.snapshot, { input: "1" }, true).sublabel,
+        keyStyle("stream", client.snapshot, {}, true).sublabel]));
+      socket.fire("message", JSON.stringify(snapshot));
+      assert.deepEqual(painted, [["机位 1", "推流"]]);
+      const bad = [{ inputs: {} }, { outputs: {} }, { inputs: "abc" }, { outputs: 5 }, { inputs: [null] }, { outputs: [1] }];
+      for (const b of bad) socket.fire("message", JSON.stringify({ type: "snapshot", sequence: 6, state: Object.assign({}, snapshot.state, b) }));
+      assert.equal(client.snapshot.sequence, 5, "畸形快照不收");
+      assert.equal(painted.length, 1, "不重画");
+      assert.equal(logs.length, bad.length, "每条记一行");
+      socket.fire("message", JSON.stringify(Object.assign({}, snapshot, { sequence: 7 })));
+      assert.equal(client.snapshot.sequence, 7, "之后的合法快照照收");
+      assert.equal(painted.length, 2);
+      socket.fire("message", JSON.stringify({ type: "snapshot", sequence: 8, state: { program: 1, preview: 2 } }));
+      assert.equal(client.snapshot.sequence, 8, "没有 inputs / outputs 键的精简快照照收（tally.js 按空表算）");
+    },
+  },
+  {
+    name: "NS10：快照 / 断开的回调抛异常不带走进程——记一行，快照照收，断开后照样排重连",
+    run(assert) {
+      const { client, socket, logs, timers } = connectedClient();
+      client.on("snapshot", () => { throw new Error("重画炸了"); });
+      socket.fire("message", JSON.stringify(snapshot));
+      assert.equal(client.snapshot.sequence, 5, "快照照收");
+      assert.ok(logs.some((l) => /重画炸了/.test(l)), JSON.stringify(logs));
+      client.on("disconnected", () => { throw new Error("断开回调炸了"); });
+      socket.fire("close");
+      assert.equal(client.connected, false);
+      assert.ok(logs.some((l) => /断开回调炸了/.test(l)), JSON.stringify(logs));
+      assert.equal(timers.filter((t) => t.ms === 2000).length, 1, "回调炸了也照样 2 s 后重连");
+    },
+  },
+  {
+    name: "NS11（Codex 10-24 审计）：日志里没有 token——连上只写 host:port（client.endpoint），出错日志去掉 token= 查询项",
+    run(assert) {
+      const token = "s3cr3t/+=";
+      const { client, socket, logs } = connectedClient({ host: "10.0.0.5", port: 8765, token });
+      assert.match(client.url, /\?token=/, "连接地址照旧带 token（服务端要）");
+      assert.equal(client.endpoint, "10.0.0.5:8765");
+      socket.fire("error", { message: `Unexpected server response: 401 (${client.url})` });
+      assert.equal(logs.length, 1);
+      for (const line of logs) {
+        assert.ok(line.indexOf(token) < 0 && line.indexOf(encodeURIComponent(token)) < 0, line);
+        assert.ok(!/token=/i.test(line), line);
+      }
     },
   },
   {

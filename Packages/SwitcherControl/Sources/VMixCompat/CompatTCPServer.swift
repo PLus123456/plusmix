@@ -10,6 +10,12 @@ import SwitcherContracts
 //   推方：订阅快照流，SUBSCRIBE TALLY 后 TALLY 串变了推 `TALLY OK …`，SUBSCRIBE ACTS 后按前后状态差推 `ACTS OK …`。
 // 应答格式：`<CMD> OK …` / `<CMD> ER <码>: <文案>` / `XML <长度>\r\n<正文>\r\n`（长度含结尾 CRLF，上游约定）。
 final class CompatTCPServer: Sendable {
+    /// 一行最长多少字节（不含行尾的 \r\n）：超过就断开这条连接、记一行日志（Codex 10-24 审计 NS07——原来不带换行的字节无限往 pending 里攒）。
+    /// 上游协议最长的正常行是 FUNCTION 带一段文字（SetText 之类），远小于 64 KiB。
+    static let maxLineBytes = 64 * 1024
+    /// 同时开着的连接上限：满了新连接直接关、不发问候。不加空闲超时——订阅 TALLY 的客户端本来就只收不发。
+    static let maxConnections = 64
+
     let core: CompatCore
     let host: String
     let port: Int
