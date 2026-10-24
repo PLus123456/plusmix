@@ -2,7 +2,7 @@
 
 分支 `w5-app-closeout`（= harness 分支 `claude/brave-tharp-63fca8`，worktree `.claude/worktrees/brave-tharp-63fca8`，两个名字指同一提交），
 从 main 2ec2c05 开（G10 快进后的 1f9be64 + 一个只加 reports/ 审计存档的提交；`git merge-base --is-ancestor 1f9be64 HEAD` 成立）。
-只动了 App/ 和本报告。不 push、不 merge，交 127 G11。同机并行：123 / 124 / 125（全量那两遍时 125 在跑音频包的用例，§6）。
+只动了 App/ 和本报告。不 push、不 merge，交 127 G11。同机并行：123 / 124 / 125（第 1、3 遍全量时 125 在跑音频包的用例，见 §2）。
 
 prompt 126 的 G10 追加：交付 1 的速率数字框钳位（`AddInputModel.clampedFileRate`）与交付 5（`ISOAppTests` 断言 `passA4 == true`）G10 胶水已做，本会话**没有重做**；
 交付 1 只做"打开含越界速率的老节目时提示"。
