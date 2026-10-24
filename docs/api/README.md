@@ -91,7 +91,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 | `encoder[].state` | 录制 idle / recording / stopping / stopped / failed；推流 idle / connecting / publishing / backoff / stopping / stopped / failed；NDI publishing / idle / **unavailable**（SDK 不在）/ **failed**（SDK 在但起不来，或在发但连续 10 帧送不出去——送出去一帧回到 publishing，`last_error` 写原因、留到下一次开始） |
 | `display[]` | 每个显示类输出一项（`output` 编号，主界面监视器用 0）：`kind` ∈ externalDisplay / virtualCamera / multiviewWindow / monitor；`frames` 已呈现 / 已送出累计；`dropped` 在呈现 / 发布时没赶上的；`undelivered` 不在呈现 / 发布（显示器不在、扩展没连上、窗口收起）时没送出去的；`state` ∈ idle / presenting / noDisplay / waitingExtension / publishing / stopped / failed |
 | `audio{dropouts, underruns, discontinuities, meters}` | 输出回调超时累计、缓冲欠载累计、Master 流上相邻样本跳变 > 0.5 满幅的次数（流式启发式，信息项）；`meters.buses[{bus, peak_db, rms_db, true_peak_db, lufs_m, lufs_s, lufs_i, lra}]`（顺序 master / busA / busB / headphones，dB 下限 −120）、`meters.inputs{n: {peak_db, rms_db}}` |
-| `audio.effects{buses[{bus, latency_ms, measured_latency_ms}], inputs{n: {latency_ms, measured_latency_ms}}}` | 采样那一刻各效果链的处理延迟（毫秒，瞬时值、不累计；提案 030）。`buses` 总是四条（master / busA / busB / headphones，没装效果 = 0）；`inputs` 只列装了均衡或动态格的那几路（键 = 输入编号）。`latency_ms` = 链上打开的格的延迟之和（`dynamicsProcessor` 5.3 ms、限幅 = 起音，`compressor` 0）；`measured_latency_ms` 只在链里装着 `compressor` 时有（它装上 / 改参数时的冲激法自测，按设计 0），别的时候不写这个键。Master 那一条就是监听同步要补的那一段（实际延后了多少看 `video_delay_ms`） |
+| `audio.effects{buses[{bus, latency_ms, measured_latency_ms}], inputs{n: {latency_ms, measured_latency_ms}}}` | 采样那一刻各效果链的处理延迟（毫秒，瞬时值、不累计；提案 030）。有音频引擎时 `buses` 总是四条（master / busA / busB / headphones，没装效果 = 0；没有音频引擎的组装方写空表）；`inputs` 只列装了均衡或动态格的那几路（键 = 输入编号）。`latency_ms` = 链上打开的格的延迟之和（`dynamicsProcessor` 5.3 ms、限幅 = 起音，`compressor` 0）；`measured_latency_ms` 只在链里装着 `compressor` 时有（它装上 / 改参数时的冲激法自测，按设计 0），别的时候不写这个键。Master 那一条就是监听同步要补的那一段（实际延后了多少看 `video_delay_ms`） |
 | `rss_mb`、`cpu_pct`、`gpu_pct` | 进程常驻内存、进程 CPU、GPU 利用率（IOKit Device Utilization） |
 | `video_delay_ms` | 采样那一刻为监听同步把视频延后的毫秒数（= Master 效果链的实测延迟；没开压缩 / 限幅为 0，无界面引擎 `--av-compensation audioPTS` 或组装方没接视频延后时也是 0）。瞬时值，不累计 |
 
@@ -104,8 +104,9 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 - **转场进行中**（`transition.isActive`，T-bar 推到一半也算）`setPreview` / `setProgram` 被忽略（`applied = false`，PVW / PGM 不变）；`cut` 立即完成正在进行的转场。
 - **转场槽**：`useTransitionSlot {slot, start}` 选中槽 n（`start: true` 同一拍开始 auto 转场 = 界面上点"转场 n"、⌥n；`false` = 只给 T-bar / 回车用），转场进行中被忽略；
   `setTransitionSlot` 改槽的整份配置，**转场进行中也收**（进行中的那一次按开始时的参数走完；改的是当前槽时，做完那一拍、或 `tbar` 拉回 0 取消的那一拍起按新配置）；`autoTransition` / T-bar 用的是当前那组 = 当前槽（`transition.currentSlot`；对不上任何槽时快照里没有这个键）。
-  老命令 `fade` / `setTransition` / `setTransitionParams` 改的是当前那组，之后 `currentSlot` = 仍对得上的槽，对不上就没有这个键。**没选输入的 Stinger**（提案 029）不执行：`useTransitionSlot(start: true)` 对这种槽、`autoTransition` 在要执行的当前那组是这种时都回 400（"转场 n 是 Stinger、还没选输入"，当前那组不对应槽时"当前转场是…"）——不然画面在换底拍那一拍（出厂 0 = 第 1 拍）就硬切、状态机却要等满时长才对调；`start: false`、`tbar`、`cut`、`fade` 照常（App 的 T-bar 这时灰着不发 `tbar`，API / MIDI 推这种槽推到顶就是一次硬切）。
-- **AFV 的声音**：`cut` 打断进行中的 auto 转场、`tbar` 推到 1 提交时，跟随视频的声音在画面对调的那一拍（拍点 + 对齐延迟）用一条约 5 ms 的短淡收口，不再接着走原来的长淡变；FTB 进行中改时长（`setFTBDuration`），声音从改的那一拍起跟着画面的新斜坡走。
+  老命令 `fade` / `setTransition` / `setTransitionParams` 改的是当前那组，之后 `currentSlot` = 仍对得上的槽，对不上就没有这个键。**没选输入的 Stinger**（提案 029）不执行：`useTransitionSlot(start: true)` 对这种槽、`autoTransition` 在要执行的当前那组是这种时都回 400（"转场 n 是 Stinger、还没选输入"，当前那组不对应槽时"当前转场是…"）——不然画面在换底拍那一拍（出厂 0 = 第 1 拍）就硬切、状态机却要等满时长才对调；`start: false`、`tbar`、`cut`、`fade` 照常（App 的 T-bar 这时灰着不发 `tbar`；API / MIDI 推这种槽，推过换底拍对应的位置——出厂 0 = 一推动——画面就整幅硬切成 PVW，推到 1 PGM / PVW 才对调）。
+- **AFV 的声音**：`cut` 打断进行中的 auto 转场或 T-bar 转场、`tbar` 推到 1 提交时，跟随视频的声音在画面对调的那一拍（拍点 + 对齐延迟）用一条约 5 ms 的短淡收口，不再接着走原来的长淡变。
+- **FTB 的声音**（Master 跟着淡，与 AFV 开不开无关）：FTB 进行中改时长（`setFTBDuration`），声音从改的那一拍起跟着画面的新斜坡走。
 - **文件播放**：`setPlayback {input, paused}` 暂停 / 继续（画面停在那一帧，仍每拍出帧）；`seekPlayback {input, seconds}` 定位（暂停中定位就停在那一帧）；
   `settings.playback.restartOnProgram` 开着的文件输入在被切上 PGM 的那一拍从头播（首帧晚约 3 拍）。只对文件输入有意义。
   - **定位秒数**收 0–604 800（一周，`PlaybackLimits.maxSeekSeconds`），非有限 / 负数 / 超上限回 400"定位秒数必须在 0–604800 之间（一周）：<值>"；在范围里但到了片长或更后面 = 从头播。`setInputSettings` 整体带进来的 `playback.seekSeconds` 不拒、钳进 [0, 一周]。
@@ -125,8 +126,9 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 - **起不来的录制 / 推流路**：`stats.encoder[]` 里那一项报 `failed`（不是 `idle`），原因在那一项的 `last_error`（App 的界面提示与日志里也有）。
 - **推流被服务器拒绝鉴权**：被拒的那一次就停在 `failed`（`attempt` 0），不按退避重试；`last_error` 以 `鉴权失败（用户名或密码不对）`、`鉴权失败（服务器要用户名和密码，地址里没写）` 或 `鉴权失败（服务器要的鉴权方式不支持）` 开头，冒号后面是服务器回的原文（不带密码；地址里写了 Adobe 账号而服务器要 Limelight 时是一句"服务器要 Limelight（authmod=llnw）"）。
   改对之后要重新开始这一路：App 里先 `stopStream`，等 `stats.encoder[]` 里这一路不再是 `failed` 再 `startStream`（两条紧挨着发，App 按 60 Hz 看快照、可能看不到中间那一下，就什么也不做），或点底栏推流主体；改设置本身不会让它重试。其余连不上 / 断线照旧在 `connecting` / `backoff` 之间一直重试。
-- **推流 `last_error` 的另外几种**：连不上 `连接失败：<原因>`（如 `连接失败：连接超时`；服务器回了状态时是状态码与描述原文，开始推的阶段前面带 `publish: `），推上过又断了 `断线：连接断开` / `断线：发送停滞` / `断线：发送失败：<原因>`。不带程序内部的写法，可以直接显示给人看。
-- **NDI 发送**：来源是 NV12 的画面（PGM / PVW / 多画面、摄像头 / 文件这类输入）转 UYVY 送；BGRA 的输入（图片、屏幕）按 **BGRX**（不透明，下游没有 alpha）、UYVY 的输入（NDI 接收）原样直送，都按输入自己的尺寸。`bitrate` 一律按节目尺寸的 UYVY 估。
+- **推流 `last_error` 的另外几种**：连不上 `连接失败：<原因>`（如 `连接失败：连接超时`；服务器回了状态时是它的状态码（多数还带描述，开始推的阶段多数前面带 `publish: `）），推上过又断了 `断线：连接断开` / `断线：发送停滞` / `断线：发送失败：<原因>`。
+  外层不再带程序内部的枚举写法；`<原因>` 是底层库或服务器的原话，个别是英文标识（如 `连接失败：publish: requestTimedOut`），按原文显示即可、别拿它做字符串匹配。
+- **NDI 发送**：来源是 NV12 的画面（PGM / PVW / 多画面、摄像头 / 文件这类输入）转 UYVY 送，按帧尺寸、不超过节目尺寸（比节目大的 NV12 输入只送左上一块，已知问题）；UYVY / BGRA 的输入（图片、屏幕、NDI / DeckLink 接收）不转、按输入自己的尺寸直送，其中 BGRA 按 **BGRX**（不透明，下游没有 alpha）。`bitrate` 一律按节目尺寸的 UYVY 估。
 
 ## 7. 版本
 

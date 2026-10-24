@@ -45,7 +45,7 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 |---|---|---|
 | 成功 | 200 | `OK <名字>`；命令全被状态机忽略（已是目标状态）时 `OK <名字> (no change)` |
 | 参数缺失 / 越界 / 不认识的函数 | 400 | `BadParameter: …` / `UnknownFunction: …` |
-| 输入 / 输出不存在（含 `Input=0` / `-1` 落在黑场或已删的输入上，见 §6 末） | 404 | `InputNotFound: …` / `OutputNotFound: …` |
+| 输入 / 输出不存在（含 `Input=0` / `-1` 落在黑场或已删的输入上，见 §6 表下） | 404 | `InputNotFound: …` / `OutputNotFound: …` |
 | 当前状态做不了（没有录制输出、叠加通道没输入、stinger 没设输入） | 409 | `NotConfigured: …` |
 | 对方有、这里没做 | 501 | `NotImplemented: …` |
 
@@ -101,7 +101,7 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 | 函数 | 参数 | 映射 |
 |---|---|---|
 | Cut | Input? | `.cut`；带 Input 先 `.setPreview` 再 `.cut`（旧 PGM 进 PVW，与对方一致）。**转场进行中（T-bar 推到一半也算）带 Input → 409 NotConfigured、一条都不发**（这时 PVW 改不了，`.cut` 会把正在进行的那次做完、落不到点名的那一路）；不带 Input 照旧把当前转场做完（PVW 是黑场时就把黑场切上去）。`Input=0` 而 PVW 是黑场 → 404 InputNotFound、一条都不发（原来会把黑场切上去） |
-| Fade / Wipe / Zoom | Duration?（ms，默认 500；只收 0–3 600 000，见下）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition`（改的是当前那组，之后它可能对不上任何转场槽）。`Input=` 的规矩同 Cut |
+| Fade / Wipe / Zoom | Duration?（ms，默认 500；只收 0–3 600 000，见下）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition`（改的是当前那组，之后它可能对不上任何转场槽）。`Input=` 同样要落到一路存在的输入（404 的规矩同 Cut）；但转场进行中带 Input **不回 409**：`.setPreview` 与 `.fade` / `.autoTransition` 都被状态机忽略，回 `OK Fade (no change)` 这样的成功、什么都没变 |
 | Stinger1 | | 执行**第一个选了输入的 Stinger 转场槽**（`.useTransitionSlot(k, start: true)`）；没有这种槽时用当前那组的 stinger 输入（`.setTransition(.stinger)` + `.autoTransition`）；都没有 → NotConfigured |
 | Transition1–4 | | `.useTransitionSlot(n, start: true)`：执行转场 n（一拍内选中并开始，之后 T-bar / 回车也用它）；转场进行中 → `OK TransitionN (no change)`。转场 n 是没选输入的 Stinger 槽 → 409 NotConfigured（"…is a Stinger with no input; pick an input for it first"，与 Stinger1 没配好同口径），一条都不发。Transition5 起 → NotImplemented |
 | SetTransitionEffect1–4 | Value=Cut/Fade/Wipe/Zoom/Stinger（不分大小写） | `.setTransitionSlot(n, 槽 n 只换效果)`：时长、Wipe 方向 / 软边、Stinger 输入 / 换底拍原样带上；只改设置、不执行，转场进行中也收（进行中的那一次照原样走完）。对方的其他效果名 → NotImplemented，谁都没有的名字 → BadParameter |
