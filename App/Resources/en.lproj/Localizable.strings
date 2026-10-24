@@ -261,6 +261,7 @@
 "addInput.fileInfo.missing" = "File not found";
 "addInput.fileInfo.noAudio" = "no audio";
 "addInput.fileInfo.noTracks" = "No video or audio in this file";
+"addInput.fileInfo.sizeRotated" = "%@ (encoded %@)";
 "addInput.fileInfo.unreadable" = "Can’t read the file: %@";
 "addInput.full" = "This show already has the maximum of %d inputs";
 "addInput.group.devices" = "Devices";

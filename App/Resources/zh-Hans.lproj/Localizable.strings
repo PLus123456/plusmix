@@ -261,6 +261,7 @@
 "addInput.fileInfo.missing" = "文件不在了";
 "addInput.fileInfo.noAudio" = "没有声音";
 "addInput.fileInfo.noTracks" = "文件里没有画面也没有声音";
+"addInput.fileInfo.sizeRotated" = "%@（编码 %@）";
 "addInput.fileInfo.unreadable" = "读不出文件信息：%@";
 "addInput.full" = "本节目的输入已满（%d 路）";
 "addInput.group.devices" = "设备";
