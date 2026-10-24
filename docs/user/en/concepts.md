@@ -4,7 +4,7 @@ One vocabulary is used everywhere: interface, show files, API and this manual ([
 
 | Term | Meaning |
 |---|---|
-| **Input** | A numbered signal source: camera / capture device, DeckLink, screen, video file, image, NDI®, audio-only device, synthetic test source. Numbers start at 1; 0 means "black" |
+| **Input** | A numbered signal source: camera / capture device, DeckLink, screen, video file, image, NDI®, audio-only device, synthetic test source. Numbers are 1–16 (a show holds at most 16 inputs); 0 means "black" |
 | **Program / PGM** | What the audience sees (the large monitor on the right, red title bar) |
 | **Preview / PVW** | What goes on air next (the large monitor on the left, green title bar) |
 | **Transition** | How PVW becomes PGM: Cut, Fade, Wipe, Zoom, Stinger. A show has four **transition slots** (Transition 1–4), each holding an effect, a duration and parameters |

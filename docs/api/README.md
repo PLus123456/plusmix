@@ -101,6 +101,7 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 
 [命令参考](../api.md) 由代码生成，只写命令的形态；下面几条是实现上的口径，写代码时会碰到：
 
+- **输入编号 1–16**（`InputConfig.numberRange`，提案 032）：`addInput` 的编号不在 1–16（含 0 与负数）回 400"输入编号必须在 1–16 之间：<n>"；节目文件里有越界编号的整份不打开（`loadShow` 同样拒）。按编号取输入的命令遇到大于 16 的编号照旧回"输入 n 不存在"（越界的编号进不了状态；`setPreview` / `setProgram` 的 0 仍是黑场，负数回"输入编号不能为负：n"）。
 - **转场进行中**（`transition.isActive`，T-bar 推到一半也算）`setPreview` / `setProgram` 被忽略（`applied = false`，PVW / PGM 不变）；`cut` 立即完成正在进行的转场。
 - **转场槽**：`useTransitionSlot {slot, start}` 选中槽 n（`start: true` 同一拍开始 auto 转场 = 界面上点"转场 n"、⌥n；`false` = 只给 T-bar / 回车用），转场进行中被忽略；
   `setTransitionSlot` 改槽的整份配置，**转场进行中也收**（进行中的那一次按开始时的参数走完；改的是当前槽时，做完那一拍、或 `tbar` 拉回 0 取消的那一拍起按新配置）；`autoTransition` / T-bar 用的是当前那组 = 当前槽（`transition.currentSlot`；对不上任何槽时快照里没有这个键）。
