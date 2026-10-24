@@ -7,7 +7,7 @@
 |---|---|
 | [测试标准（公开版）](测试标准.md) | 指标定义（V 视频 / A 音频 / E 编码录制推流 / L 延迟 / S 稳定性 / C 控制接口）、测试信号与工装、每个指标的测法、必须 / 目标两档阈值、测试层级、缺陷分级与发布门槛、`stats.jsonl` 字段 |
 | [设备兼容性](设备兼容性.md) | 已验证的设备与提交模板（型号、固件、macOS、通过项） |
-| 本页 §2 | 每次检查点（G2 → G7）报告的索引 |
+| 本页 §2 | 每次检查点（G2 → G10）报告的索引 |
 
 内部版本（含各会话的口径讨论与修订记录）在 [docs/spec/导播台测试标准.md](../spec/导播台测试标准.md)；两者阈值相同，公开版只是去掉了内部引用。**阈值只有项目维护者能改**，任何会话不得为了让测试通过放宽阈值。
 
@@ -17,7 +17,7 @@
 make test
 ```
 
-六个包的单元 / 组件测试 + 两个命令行工具冒烟 + App 的 `xcodebuild test`（G7 时：六包 777 个用例、App 228 个；DeckLink 实卡、外接屏、签名相关的用例没有条件时 `XCTSkip` 并注明 BLOCKED-硬件 / BLOCKED-SDK / BLOCKED-签名）。
+六个包的单元 / 组件测试 + 两个命令行工具冒烟 + App 的 `xcodebuild test`（G10 时：六包 984 个用例、App 296 个；DeckLink 实卡、外接屏、签名相关的用例没有条件时 `XCTSkip` 并注明 BLOCKED-硬件 / BLOCKED-SDK / BLOCKED-签名）。
 
 10 分钟的集成场景（L2：V1–V7、A1–A4、E1–E3、E5、C1–C4，出报告 `reports/G4-run-10min.md`）：
 
@@ -34,6 +34,12 @@ make gate4
 swift build -c release --package-path Tools/frameprobe && Tools/frameprobe/.build/release/frameprobe stats Tests/Fixtures/w1a-sample-20s.mov --input-fps 0=60,1=30 --markdown
 ```
 
+几条读结果时要知道的（全文在[测试标准 §2.3](测试标准.md#23-frameprobe分析工具)）：
+
+- `switches` / `fade` 的转场落点按 PTS 换算成节目拍号，文件里漏了帧时后面的落点不挪，漏掉的拍单独列在 `missingFrames` / `missingFrameCount`（每条切换另有 `missingBetween`）；它们的帧率只认 `--fps`，没给就按相邻帧的 PTS 差估。
+- `av` / `wipe` / `zoom` / `stats` 没给 `--fps` 时用容器的标称帧率，漏了帧的文件上它偏低：量这种文件一律带 `--fps 60`（或节目的帧率）。
+- 多文件 `av`（A4）：某个判定事件里有文件缺 click 或缺闪光，`passA4` 就是 false——只看 `maxClickSpreadMs` / `maxFlashSpreadMs` 会漏掉这种情况（缺的那一格不进极差）。
+
 ## 2. 检查点报告
 
 每个里程碑合并后由一个检查点会话跑门槛测试、写报告（[测试标准 §7](测试标准.md#7-报告模板)的固定字段）。数据文件（stats.jsonl、录像）不入库，报告里写本机路径。
@@ -47,6 +53,8 @@ swift build -c release --package-path Tools/frameprobe && Tools/frameprobe/.buil
 | G6 | 2026-10-02 | 第五波止血五路（目视、直播安全、总线效果、推流鉴权、转场中拒收）合入、0.1.0 重判 | **0.1.0 仍不发**；L2 自动项 20 / 20，六包 766 用例、App 144 用例 | [reports/G6.md](../../reports/G6.md) |
 | G7 | 2026-10-04 → 10-10 | 第五波骨架七路（底栏、工具条、输入条、输出页、设置窗、面板、防睡眠 / tally / 远程控制 / 提醒 / 统计 / 锁）合入 | **0.1.0 不发，也不建议发 0.1.1**（MIDIHost.sync 崩溃、8 小时复验、签名等）；L0 / L1 六包 777 用例、App 228 用例 0 红，L2 20 / 20 | [reports/G7.md](../../reports/G7.md) |
 | G8 | 2026-10-10 → 10-12 | 契约落地（转场槽、文件播放、状态统计）+ MIDIHost 崩溃修复 + 监听同步合入（G8a），再合转场槽界面、播放控制与推流 / 录制状态窗、每路音频效果、随包手册（G8b） | **0.1.1 还不发**：只差 L3 人工清单与签名公证；8 小时长稳 10-12 复验通过（S2 2.46 MB/h）；六包 861 用例 0 产品红（1 条桌面忙时的计时用例环境红）、App 244 用例 0 红，gate4 自动项全过、性能无退步 | [reports/G8.md](../../reports/G8.md)、[人工清单](../checklists/G8.md) |
+| G9 | 2026-10-17 → 10-18 | 续做五路（契约三、App 续做、推流鉴权停、frameprobe A4 半秒、手册续做二）合入；外部 debug 审查 22 条进已知问题 | **0.1.1 不发**：审查查出 S0 / S1（文件参数崩、兼容层崩、音频环覆盖、保存写错文件、开录删旧录像等），止血七路排上；六包 883 用例 0 红、App 263 用例 0 产品红，gate4 自动项全过、A4 不再豁免 | [reports/G9.md](../../reports/G9.md)、[人工清单](../checklists/G9.md) |
+| G10 | 2026-10-19 | 止血七路（契约四、文件输入、控制层、输出、核心音频收口、frameprobe 拍号、App 止血）+ 胶水七条合入 | **0.1.1 不发**：唯一的 S1 是"输入编号没有上限"（排到下一批），L3 人工清单与 8 小时长稳没跑；六包 984 用例 0 红、App 两遍 296 用例 0 红，gate4 自动项全过、性能无退步 | [reports/G10.md](../../reports/G10.md)、[人工清单](../checklists/G10.md) |
 
 每个功能会话也有自己的报告（`reports/<分支>.md`，五段固定格式），退回的问题单在 [reports/issues/](../../reports/issues/)。
 

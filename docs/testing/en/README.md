@@ -36,6 +36,12 @@ make gate4
 The first runs unit / component tests of the six packages, the two tools and the App; the second runs the 10-minute integration scenario
 (V1–V7, A1–A4, E1–E3, E5, C1–C4) and writes `reports/G4-run-10min.md`. Use an idle machine on mains power.
 
+Reading `frameprobe` results (details in [测试标准 §2.3](../测试标准.md#23-frameprobe分析工具), Chinese):
+
+- `switches` / `fade` place transitions by program tick computed from the PTS, so frames missing from a file don't shift later transitions; the missing ticks are reported separately (`missingFrames` / `missingFrameCount`, plus `missingBetween` per switch). Their frame rate comes only from `--fps`, otherwise it is estimated from the PTS steps between frames.
+- `av` / `wipe` / `zoom` / `stats` fall back to the container's nominal frame rate without `--fps`, which reads low on a file with missing frames: always pass `--fps 60` (or the program rate) for such files.
+- Multi-file `av` (A4): if a file lacks the click or the flash of a judged event, `passA4` is false — `maxClickSpreadMs` / `maxFlashSpreadMs` alone don't show it (a missing value doesn't enter the spread).
+
 ## Checkpoint reports
 
 | Checkpoint | Date | Scope | Result |
@@ -47,5 +53,7 @@ The first runs unit / component tests of the six packages, the two tools and the
 | G6 | 2026-10-02 | Fifth wave, stop-gap fixes (visual, live safety, bus effects, stream authentication, refusing PVW / PGM changes mid-transition) | **0.1.0 still not released**; L2 automatic items 20 / 20 — [reports/G6.md](../../../reports/G6.md) |
 | G7 | 2026-10-04 → 10-10 | Fifth wave, interface redesign (bottom bar, toolbar, input strip, output pages, Settings window, panels, sleep / tally / remote control / reminders / statistics / lock) | **0.1.0 not released, 0.1.1 not recommended yet** (MIDIHost.sync crash, 8 h re-run, signing…); six packages 777 tests and App 228 tests with 0 failures, L2 20 / 20 — [reports/G7.md](../../../reports/G7.md) |
 | G8 | 2026-10-10 → 10-12 | Contract work (transition slots, file playback, status statistics), the MIDIHost crash fix and monitor sync (G8a); then the transition-slot interface, playback controls and the stream / recording status window, per-input audio effects and the bundled guide (G8b) | **0.1.1 not released yet**: only the L3 manual checklist and signing / notarisation remain; the 8 h soak re-run passed on 10-12 (S2 2.46 MB/h); six packages 861 tests with 0 product failures (one timing test failed on a busy desktop), App 244 tests with 0 failures, gate4 automatic items all pass, no performance regression — [reports/G8.md](../../../reports/G8.md) |
+| G9 | 2026-10-17 → 10-18 | Five follow-up branches merged (contracts, app follow-ups, stopping on stream authentication failures, frameprobe A4 half-second events, guide part two); an external debugging review's 22 findings filed as known issues | **0.1.1 not released**: the review found S0 / S1 defects (crashes on bad file-playback parameters and in the compatibility layer, an audio ring overwrite, saving into the wrong file, recordings deleting old files…), so seven stop-gap branches were scheduled; six packages 883 tests with 0 failures, App 263 tests with 0 product failures, gate4 automatic items all pass with A4 no longer waived — [reports/G9.md](../../../reports/G9.md) |
+| G10 | 2026-10-19 | The seven stop-gap branches (contracts, file input, control, outputs, core audio, frameprobe ticks, app fixes) plus seven glue fixes merged | **0.1.1 not released**: the only S1 left is "input numbers have no upper limit" (scheduled next), and the L3 manual checklist and the 8 h soak haven't been run; six packages 984 tests with 0 failures, App 296 tests twice with 0 failures, gate4 automatic items all pass, no performance regression — [reports/G10.md](../../../reports/G10.md) |
 
 Reports are in Chinese. The [device compatibility table](../设备兼容性.md) collects community results (model, firmware, macOS, passed items).
