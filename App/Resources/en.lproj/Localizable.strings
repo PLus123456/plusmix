@@ -925,6 +925,7 @@
 "notice.join" = "; ";
 "notice.midiTableUnreadable" = "MIDI mapping table %@ is unreadable; using an empty table: %@";
 "notice.isoBranchUnavailable" = "ISO input %d does not exist or has no free branch (at most %d ISO / Aux per input)";
+"notice.isoInputRemoved" = "ISO recording %d stopped: input %d was removed (stopped at that tick; adding an input with the same number does not resume it — start recording again if needed)";
 "notice.midiFailed" = "MIDI failed to start: %@";
 "notice.ndiBranchRestored" = "NDI output %d: a branch on input %d became free; reconnected and sending";
 "notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now, recovers automatically when one is freed";

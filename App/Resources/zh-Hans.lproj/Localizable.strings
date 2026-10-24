@@ -925,6 +925,7 @@
 "notice.join" = "；";
 "notice.midiTableUnreadable" = "MIDI 映射表 %@ 读不出来，用空表：%@";
 "notice.isoBranchUnavailable" = "ISO 输入 %d 不存在或分支用完（每路最多 %d 个 ISO / Aux）";
+"notice.isoInputRemoved" = "ISO 录制 %d 停了：输入 %d 删掉了（停在删除那一拍；再加同编号的输入不会接着录，要录再开一次）";
 "notice.midiFailed" = "MIDI 起不来：%@";
 "notice.ndiBranchRestored" = "NDI 发送 %d：输入 %d 空出了分支，已重新接上、开始送画面";
 "notice.ndiBranchUnavailable" = "NDI 发送 %d：输入 %d 的帧槽分支用完了（每路最多 %d 个，与 ISO / Aux 共用），暂时没有画面；那一路空出分支后自动恢复";

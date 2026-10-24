@@ -233,7 +233,7 @@ final class W5QCloseoutTests: XCTestCase {
     /// 换源瞬间别的路注册（119 §3 第 3 条）：InputRuntime.replaceSource 先摘旧环（AudioRuntime.unregister，淡出 3 块后 detach、实时线程确认后槽位才回空闲表）、
     /// 再注册新环（AudioRuntime.register；撞上淡出就排 30 ms 重试）——两步之间别的路注册进来，按后进先出拿走这一路原来的槽位，这一路落到另一个槽位上。
     /// ISO 音轨（推子后、AFV 前的 tap，泵按 .input(n) 共享、加第一个消费者时把编号换成槽位）要跟着输入 1 的编号走：尾段录到输入 1 的正弦（合成源 1 kHz −20 dBFS），
-    /// 不是抢了槽位的输入 2（静音）。实测合成源新输入对象建出来就要十几毫秒、多半直接注册回原槽位，窗口靠时序撞，所以这里用 replaceSource 同一对调用把窗口拉开。
+    /// 不是抢了槽位的输入 2（静音）。实测合成源新输入对象建出来就要十几毫秒、多半直接注册回原槽位，窗口靠时序撞，所以这里先单独摘旧环把窗口拉开，再走真的换源。
     func testD06_isoAudioFollowsInputNumberWhenAnotherInputTakesItsSlot() throws {
         let session = try AppTest.freshSession()
         session.send(.addInput(config: AppTest.syntheticConfig(number: 1, gray: 80, audio: true)))
@@ -250,9 +250,7 @@ final class W5QCloseoutTests: XCTestCase {
         XCTAssertNotNil(entry.recorder.configuration.audio, "这一路带音频：ISO 有音轨")
         AppTest.pump(seconds: 0.5)
 
-        // 摘旧环（换源的第一步）：等 detach、槽位回空闲表
-        let made = try XCTUnwrap(session.inputs.entries[1]?.made)
-        let ring = try XCTUnwrap(made.audioRing)
+        // 摘旧环（换源的第一步，提前做、把窗口拉开）：等 detach、槽位回空闲表
         session.audio.unregister(number: 1)
         XCTAssertTrue(AppTest.waitUntil(3) { session.audio.engine.slot(forInput: 1) == nil }, "旧环摘完")
         AppTest.pump(seconds: 0.3)   // 槽位等实时线程确认 detach 后才还回空闲表
@@ -264,8 +262,10 @@ final class W5QCloseoutTests: XCTestCase {
         XCTAssertTrue(AppTest.waitUntil(5) { session.audio.registeredInputs.contains(2) })
         XCTAssertEqual(session.audio.engine.slot(forInput: 2), oldSlot, "前提：输入 2 拿走了输入 1 原来的槽位（后进先出）")
 
-        // 注册新环（换源的第二步）：输入 1 落到另一个槽位
-        session.audio.register(number: 1, ring: ring, blockFrames: made.audioBlockFrames)
+        // 换上新来源（replaceSource 照常摘旧环——已经摘过了——停旧输入、建新输入、注册新环）：输入 1 落到另一个槽位
+        let oldInput = try XCTUnwrap(session.inputs.entries[1]?.input)
+        session.send(.setInputSource(input: 1, source: AppTest.syntheticConfig(number: 1, gray: 200, audio: true).source))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.entries[1].map { $0.input !== oldInput } ?? false })
         XCTAssertTrue(AppTest.waitUntil(3) { session.audio.registeredInputs.contains(1) })
         let newSlot = try XCTUnwrap(session.audio.engine.slot(forInput: 1))
         XCTAssertNotEqual(newSlot, oldSlot)
