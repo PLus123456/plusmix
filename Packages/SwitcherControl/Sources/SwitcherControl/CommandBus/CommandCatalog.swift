@@ -294,7 +294,7 @@ public enum CommandCatalog {
                        parameters: [("input", "输入编号"), ("settings", "InputSettings 整体")],
                        example: .setInputSettings(input: 1, settings: InputSettings(audio: InputAudioSettings(gainDb: -3, delayMs: 40)))),
             CommandDoc(kind: .renameInput, group: "输入表", summary: "改一路输入的显示名。", parameters: [("input", "输入编号"), ("name", "新名字")], example: .renameInput(input: 1, name: "主机位")),
-            CommandDoc(kind: .addInput, group: "输入表", summary: "加一路输入；编号已存在则拒绝；文件来源的播放速率须在 \(CommandValidator.fileRateRangeText) 之间（提案 031），否则 400。", parameters: [("config", "InputConfig：number, name, source, settings")], example: .addInput(config: sampleInput)),
+            CommandDoc(kind: .addInput, group: "输入表", summary: "加一路输入；编号须在 \(CommandValidator.inputNumberRangeText) 之间（提案 032）、已存在则拒绝；文件来源的播放速率须在 \(CommandValidator.fileRateRangeText) 之间（提案 031），否则 400。", parameters: [("config", "InputConfig：number（\(CommandValidator.inputNumberRangeText)）, name, source, settings")], example: .addInput(config: sampleInput)),
             CommandDoc(kind: .removeInput, group: "输入表", summary: "删一路输入；它若在 PGM / PVW / 叠加 / Stinger 上，那些位置变成 0 / null。", parameters: [("input", "输入编号")], example: .removeInput(input: 5)),
             CommandDoc(kind: .setInputSource, group: "输入表",
                        summary: "换一路输入的来源（文件路径 / 播完动作 / 播放速率 / 屏幕目标 / 帧率 / NDI 源名与带宽 / DeckLink 接口……）；编号、名字、设置、PGM / PVW / 叠加引用全部保留。文件来源的播放速率须在 \(CommandValidator.fileRateRangeText) 之间（提案 031），否则 400。",

@@ -452,6 +452,11 @@ final class ReducerTests: XCTestCase {
             Row("addInput", .addInput(config: InputConfig(number: 6, name: "图片", source: .image(path: "/a.png")))) {
                 $0.inputs.append(InputConfig(number: 6, name: "图片", source: .image(path: "/a.png"))) },
             Row("addInput 编号 0 拒绝", .addInput(config: InputConfig(number: 0, name: "黑", source: .image(path: "/a.png")))) { _ in },
+            // 提案 032（P5-5，S1）：输入编号 1…16；越界与校验器同判、原样返回（loadShow 走 validate 的那一条在下面 test032_ 里）
+            Row("addInput 编号 16 = 上限照收（032）", .addInput(config: InputConfig(number: 16, name: "满", source: .image(path: "/a.png")))) {
+                $0.inputs.append(InputConfig(number: 16, name: "满", source: .image(path: "/a.png"))) },
+            Row("addInput 编号 17 拒绝（032）", .addInput(config: InputConfig(number: 17, name: "超", source: .image(path: "/a.png")))) { _ in },
+            Row("addInput 编号 2^62 拒绝（032：116 的触发条件）", .addInput(config: InputConfig(number: 1 << 62, name: "极大", source: .image(path: "/a.png")))) { _ in },
             Row("removeInput 清引用", before: { $0.overlays[0].input = 2; $0.overlays[0].on = true }, .removeInput(input: 2)) {
                 $0.inputs.remove(at: 1); $0.preview = 0; $0.overlays[0].input = nil },
             Row("addOutput", .addOutput(config: OutputState(number: 3, kind: .ndi, name: "NDI"))) { $0.outputs.append(OutputState(number: 3, kind: .ndi, name: "NDI")) },
@@ -677,6 +682,39 @@ final class ReducerTests: XCTestCase {
         bad.inputs.append(bad.inputs[0]) // 重复编号
         let show = Show(name: "坏", state: bad)
         XCTAssertEqual(reducer.reduce(Self.baseState(), .loadShow(show: show), at: Tick(1)), Self.baseState())
+    }
+
+    // MARK: 提案 032（用户 2026-10-18 批，P5-5）：输入编号 1…16
+
+    /// addInput 编号超过 16（17、2^62、Int.max）原样返回、回执 applied = false——原来只查 ≥ 1，主 API 加一路 2^62 之后兼容层按编号分配的 TALLY / XML 崩或卡（S1，W2-C4 §3）；
+    /// 16 照收；loadShow 带越界编号的节目走 validate 被拒（直接发给状态机的脚本 / 测试同样进不去）。
+    func test032_addInputAndLoadShow_inputNumberAboveRangeRefused() async {
+        let s0 = Self.baseState()
+        for bad in [17, 99, 1 << 62, Int.max] {
+            XCTAssertEqual(reducer.reduce(s0, .addInput(config: InputConfig(number: bad, name: "超", source: .image(path: "/a.png"))), at: Tick(1)), s0, "\(bad)")
+        }
+        let full = reducer.reduce(s0, .addInput(config: InputConfig(number: 16, name: "满", source: .image(path: "/a.png"))), at: Tick(1))
+        XCTAssertEqual(full.inputs.map(\.number), [1, 2, 3, 4, 16])
+        XCTAssertNoThrow(try full.validate())
+
+        var wide = s0
+        wide.inputs.append(InputConfig(number: 17, name: "超", source: .image(path: "/a.png")))
+        XCTAssertEqual(reducer.reduce(s0, .loadShow(show: Show(name: "17 路", state: wide)), at: Tick(2)), s0, "节目里有 17 号：不载入")
+        var ok = s0
+        ok.inputs.append(InputConfig(number: 16, name: "满", source: .image(path: "/a.png")))
+        XCTAssertEqual(reducer.reduce(s0, .loadShow(show: Show(name: "16 路", state: ok)), at: Tick(2)).inputs.map(\.number), [1, 2, 3, 4, 16])
+
+        // 状态机：校验器不在这一层，命令走到 reducer，回执 applied = false、状态不变
+        let sm = StateMachine(initialState: s0)
+        sm.start()
+        defer { sm.stop() }
+        guard case .applied(let receipt) = await sm.submit(IssuedCommand(sequence: 1, issuedAt: .now(),
+                                                                       command: .addInput(config: InputConfig(number: 1 << 62, name: "极大", source: .image(path: "/a.png"))))) else {
+            return XCTFail("addInput 应走到 reducer")
+        }
+        XCTAssertFalse(receipt.applied, "2^62 号不加")
+        let after = await sm.state
+        XCTAssertEqual(after.inputs.map(\.number), [1, 2, 3, 4])
     }
 
     // MARK: P4：reducer 的两条小规则（prompt 67 交付 3）

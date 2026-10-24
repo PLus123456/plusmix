@@ -528,7 +528,7 @@ public enum InputColor: String, Codable, Sendable, CaseIterable {
 
 /// 一路输入的静态配置：编号、名字、来源、设置。节目文件和 MixerState.inputs 里存的就是它。
 public struct InputConfig: Hashable, Codable, Sendable, Identifiable {
-    /// 输入编号，从 1 起；0 保留给"无输入 / 黑场"。
+    /// 输入编号，从 1 起；0 保留给"无输入 / 黑场"。合法范围 `numberRange`（1…16，提案 032）。
     public var number: Int
     /// 显示名。
     public var name: String
@@ -561,6 +561,11 @@ public struct InputConfig: Hashable, Codable, Sendable, Identifiable {
 
     /// JSON 键名（color 可缺）。
     public static let jsonKeys = ["number", "name", "source", "settings", "color"]
+
+    /// 输入编号的合法范围（提案 032，用户 2026-10-18 批；W2-C4 查出的 S1：主 API 加一路编号极大的输入后，兼容层按编号分配的 TALLY 串 / XML 占位分配失败崩或卡死）。
+    /// 1…16 = App"添加输入满 16 路"、引擎默认 `maxInputs`。同一条边界两处共用：`MixerState.validate()`（节目文件，`MixerStateError.inputNumber`）、
+    /// `CommandValidator`（addInput，HTTP 400；reducer 同判、原样返回）。0 与负数照旧是 `MixerStateError.reservedInputNumber`；解码不查（与别的不变量一样在 validate 里报）。
+    public static let numberRange: ClosedRange<Int> = 1...16
 
     /// W5-H 把分类存在 `Show.layout` 的这个键下（`{"<输入编号>": "<颜色>"}`）；`Show.migratingLegacyInputCategories()` 把它搬进各路 `color`。
     public static let legacyCategoriesLayoutKey = "inputCategories"

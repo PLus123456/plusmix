@@ -26,6 +26,8 @@ import SwitcherContracts
 // 新 PGM 那一路若 restartOnProgram，四处换人（cut / auto 完成 / T-bar 提交 / setProgram）在同一拍写定位 0，与手发 seekPlayback(0) 同一条路。
 // 文件速率 / 定位的边界（提案 031，P5-4）：addInput / setInputSource 的 file 来源速率不在 `FileSource.rateRange`、seekPlayback 不在 [0, `PlaybackLimits.maxSeekSeconds`] 原样返回
 //（与 CommandValidator 同判；越界的值在 FileInput 里崩进程，底层钳位归 117）。
+// 输入编号的上限（提案 032，P5-5）：addInput 的编号不在 `InputConfig.numberRange`（1…16）原样返回（与 CommandValidator 同判；编号极大的输入让兼容层按编号分配的 TALLY / XML 崩或卡）；
+// 别的命令按编号取输入，越界的编号进不了状态，自然"不存在"。
 
 /// `MixerReducing` 的实现。
 public struct MixerReducer: MixerReducing {
@@ -286,7 +288,7 @@ public struct MixerReducer: MixerReducing {
             guard let i = Self.inputIndex(input, in: s) else { return state }
             s.inputs[i].name = name
         case .addInput(let config):
-            guard config.number > MixerState.noInput, !Self.inputExists(config.number, in: s), Self.isValidFileRate(config.source) else { return state }
+            guard InputConfig.numberRange.contains(config.number), !Self.inputExists(config.number, in: s), Self.isValidFileRate(config.source) else { return state }
             var c = config
             c.settings = Self.strippingLegacyBorder(c.settings.clamped())
             let at = s.inputs.firstIndex { $0.number > c.number } ?? s.inputs.count
