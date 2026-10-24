@@ -29,7 +29,7 @@ Settings › Recording (⚙ Record › Recording Settings… in the bottom bar, 
 | Item | Notes |
 |---|---|
 | Directory | Default `~/Movies/PlusMix`; a relative directory in the show file lives under it. Long paths are shortened in the middle; hover for the full path |
-| File name pattern | `{show}` `{date}` `{time}` `{output}`; default `{show}-{date}-{time}`; an example is shown below. Recordings other than Recording 1 automatically get `-{output}` so names never collide |
+| File name pattern | `{show}` `{date}` `{time}` `{output}`; default `{show}-{date}-{time}`; an example is shown below. Recordings other than Recording 1 automatically get `-{output}`. **If a file of that name already exists when recording starts** (no time in the pattern, recording again within the same second, stopping and starting right away, an .mp4 of that name for a route converted to .mp4, a file of that name in the fallback folder when switching there), `-2`, `-3`… are appended — **old recordings are never deleted or overwritten**; routes in the same batch whose names collide are kept apart the same way (names are compared case-insensitively) |
 | File format | One choice: **".mov (written in fragments while recording; crash-recoverable)"** or **".mov, converted to .mp4 after stopping"**. Always written as .mov first (fragment by fragment: a killed process recovers up to the last fragment); if converting to .mp4 fails, the .mov is kept. A "container .mp4" written in an old show file has no effect (the page says so); this choice is what's used |
 | Fragment interval | 1 s by default |
 
@@ -63,6 +63,9 @@ Settings › ISO (⚙ Record › ISO Recording… in the bottom bar, or Output �
 - The ISO audio track is that input after its fader and before AFV (recorded even when off air).
 - A 30 fps input recorded into a 60 fps program repeats each frame, on the same grid as PGM.
 - Each input has at most 4 branches (ISO / Aux external displays / NDI® input sources share them); the UI warns when they run out.
+- **Changing an input's source while it is being recorded** (Input Settings › Source): the ISO recording carries on with the new source in the same file, ticks continuous; a few frames of the old picture repeat at the change, then the new source's first frame takes over.
+  Switching to a source that can't start (file missing, can't be created) or to an audio-only device records black; a new source that loses its signal after starting (a device arriving late, an NDI® source not online yet) holds its last frame, just like the same source dropping out mid-way.
+  Two corner cases: **removing the input and adding one with the same number** while recording isn't a source change — that recording keeps repeating the last frame from before the removal until you stop it; and in rare cases, when another input is connecting its audio at the very moment of the change, this ISO route's audio track can end up on that other input.
 - The bottom of the page shows the folder, free space and an estimate of remaining time (sum of all recording bitrates).
 
 ### Disk protection
@@ -90,15 +93,15 @@ Each destination has a section titled "Stream k" with "Output n" and a name fiel
 | Stream key | RTMP: appended as the stream name; SRT: becomes `streamid=<key>` when the URL has none |
 | Authentication… | See [Stream authentication](#stream-authentication) below |
 | Quality | 1080p (6 Mb/s when the program runs at ≥ 48 fps, otherwise 4.5 Mb/s; audio AAC 160k), 720p (3 Mb/s; AAC 128k), Custom. A new destination defaults to the highest tier not above the program (1080p at most, never upscaled); editing the encoding by hand shows "Custom" |
-| Encoding details… | Codec, resolution, bitrate, keyframes (in seconds, 2 s for a new destination, with "= n frames" next to it), audio bitrate, **Max retry interval n s (keeps retrying)** |
+| Encoding details… | Codec, resolution, bitrate, keyframes (in seconds, 2 s for a new destination, with "= n frames" next to it), audio bitrate, **Max retry interval n s (keeps retrying, except after an authentication failure)** |
 | Same as Stream 1 | Checked by default from the second destination on: quality and encoding follow Stream 1 (URL, key and retry interval don't); both are greyed out while checked |
 | Remove Destination | Greyed out while its switch is on (connecting / reconnecting included) |
 
 - "Total upload about n Mb/s (m destinations)" at the bottom of the page: every destination is encoded separately and uses its own share of upload bandwidth, so two destinations need twice as much; leave about twice the total as headroom.
-- **A destination whose switch is on is locked** (live, connecting and reconnecting alike; only one that couldn't start is not): service, URL, key, authentication, quality, encoding details and Remove can't be changed; it says "Streaming: URL, key and encoding can be changed after it stops." — if it keeps failing to connect and you need to fix the URL or authentication, turn its switch off first.
+- **A destination whose switch is on is locked** (live, connecting and reconnecting alike; only one that couldn't start or failed is not): service, URL, key, authentication, quality, encoding details and Remove can't be changed; it says "Streaming: URL, key and encoding can be changed after it stops." — if it keeps failing to connect and you need to fix the URL or authentication, turn its switch off first.
 - URL / key edits are committed **when you press Return or leave the field**.
-- **A destination that couldn't start is not locked**: it says "Couldn't start: reason" (e.g. "Unsupported address: foo:// (only rtmp://, rtmps://, srt://)", "Stream 3 has no URL") and offers "Retry" and "Turn Off This Destination"; fixing the URL / key retries automatically.
-  A destination that stopped because the server rejected its authentication looks the same ("Couldn't start: Stream n stopped retrying: 鉴权失败（…）：…"), but fixing the URL / credentials does **not** retry it automatically (the first half of the red hint is wrong for this case): click "Retry" afterwards, see [Stream authentication](#stream-authentication).
+- **A destination that couldn't start is not locked**: it says "Couldn't start: reason" (e.g. "Unsupported address: foo:// (only rtmp://, rtmps://, srt://)", "Stream 3 has no URL"), offers "Retry" and "Turn Off This Destination", and the red hint below reads "Fix the URL / key (Return or leave the field) and it retries automatically; or turn this destination off."
+- **A destination stopped because the server rejected its authentication** isn't locked either, but says "Failed: Stream n stopped retrying: 鉴权失败（…）：…", and its red hint reads "This destination stopped and won't reconnect on its own (the server rejected the credentials): fix the URL / credentials, then click “Retry” — changing the settings alone doesn't retry; or turn this destination off." — click "Retry" once it's fixed, see [Stream authentication](#stream-authentication).
 - The "Add destination" section at the bottom: pick a service (fixed-ingest services fill in the URL, the others say where to get it), enter URL / key and click Add; with no destination in the show yet, the Stream button in the bottom bar opens this section too, with the cursor in the URL field.
 - **Reconnecting**: after a drop it reconnects with exponential back-off and never gives up (the same when it can't connect at all); "Max retry interval n s" (30 s by default) caps the wait between attempts — it is not a "give up after" limit. The first frame after reconnecting is a keyframe.
   The one exception is the server rejecting the authentication: it stops on that attempt and doesn't retry (see [Stream authentication](#stream-authentication)).
@@ -107,11 +110,11 @@ Each destination has a section titled "Stream k" with "Output n" and a name fiel
   automatically against a local MediaMTX with network impairment.
 
 **The stream status in the bottom bar and toolbar** shows the worst destination and the running time while live: with a single destination in the show it reads "● LIVE 00:10:00"; with several, "● LIVE 00:10:00 (2/3)" (live / all — "1/3" even when only one is live);
-the time comes from the statistics (how long that destination has been streaming, counted from its start, reconnects included), the longest one wins. When one is reconnecting, still not connected from the second attempt on, or couldn't start, it reads "Stream · 1 in trouble" (orange; dark red when it couldn't start), and with only one destination on it shows that destination's state directly (e.g. "Stream · Reconnecting (attempt 2)").
-A first connection reads "Connecting" ("Connecting (attempt n)" from the second try); only after a destination has been live does a drop read "Reconnecting (attempt n)" — n is the real attempt count. The tooltip lists "name: state" per destination, reasons for those that couldn't start, with passwords in URLs masked.
+the time comes from the statistics (how long that destination has been streaming, counted from its start, reconnects included), the longest one wins. When one is reconnecting, still not connected from the second attempt on, couldn't start or failed, it reads "Stream · 1 in trouble" (orange; dark red when it couldn't start or failed), and with only one destination on it shows that destination's state directly (e.g. "Stream · Reconnecting (attempt 2)", "Stream · Couldn't start", or "Stream · Failed" after the server rejected the authentication).
+A first connection reads "Connecting" ("Connecting (attempt n)" from the second try); only after a destination has been live does a drop read "Reconnecting (attempt n)" — n is the real attempt count. The tooltip lists "name: state" per destination, with reasons for those that couldn't start or failed and passwords in URLs masked; when there are such destinations it ends with "Click: retry the destinations that couldn't start; healthy ones keep going" ("…that couldn't start or failed…" when one has failed).
 When starting, the status line says "Stream n connecting…", and "Stream n is live" only once it actually is.
 ▴ has one item per destination (click = start / stop / retry just that one); "Stream Status…" opens the Stream / Recording Status window.
-In the API's `stats.encoder[]` the stream `state` is idle / connecting / publishing / backoff / stopping / stopped / failed; a destination that couldn't start reports `failed`.
+In the API's `stats.encoder[]` the stream `state` is idle / connecting / publishing / backoff / stopping / stopped / failed; a destination that couldn't start, or stopped after an authentication rejection, reports `failed`.
 
 ### Stream / Recording Status window
 
@@ -123,12 +126,15 @@ A separate window ("Stream / Recording Status") with two pages, Stream and Recor
 | Recording | Name / State / Duration / Bitrate / Frames / Dropped / Free space / Last error |
 
 - All numbers come from the statistics (`stats.encoder[]`, the same data as the API and the status line); the window computes nothing of its own. A route that is off shows "Off", with "—" for bitrate and duration; reconnecting / couldn't-start states are orange / red.
-- **Last error**: the line the streaming / recording code wrote the last time this route failed, word for word (cleared on the next start); passwords in URLs are masked. When the server rejects the authentication it reads `鉴权失败（用户名或密码不对）：NetConnection.Connect.Rejected … reason=authfailed …` (authentication failed (wrong user name or password), followed by what the server replied — the streaming engine writes these in Chinese); when it can't connect, a line like `连接失败：connectFailed("…")` (connection failed) in the program's own spelling.
+- **Last error**: the line the streaming / recording code wrote the last time this route failed, word for word (cleared on the next start); passwords in URLs are masked. The streaming engine writes these in Chinese:
+  - can't connect: `连接失败：<reason>` (connection failed), e.g. `连接失败：连接超时` (connection timed out — not connected within 5 s); when the server answered, the reason is its status code and description as sent (prefixed `publish: ` during the publish step), and for network errors it is the network library's own wording;
+  - was live, then dropped: `断线：连接断开` (disconnected: connection closed), `断线：发送停滞` (sending stalled: data waiting and not a byte sent for 5 s), `断线：发送失败：<reason>` (send failed);
+  - the server rejected the authentication: `鉴权失败（用户名或密码不对）：NetConnection.Connect.Rejected … reason=authfailed …` (authentication failed (wrong user name or password), followed by what the server replied; see [Stream authentication](#stream-authentication)).
 - **Events** below: timed state changes, newest first — Connecting → Streaming → Disconnected: reason → Reconnecting (attempt n) → Reconnected / Stopped / Failed: reason. They are derived from the once-a-second statistics, so changes that come and go within a second are not shown;
   **they are recorded while the window is closed too**, cleared when you open another show or the engine restarts, and the last 500 are kept.
 - At the bottom, "**Video delayed n ms**" appears only while the picture is delayed for monitor sync (a compressor / limiter on Master, see [Concepts › Audio](concepts.md#audio)); it is `video_delay_ms` from the statistics.
-- "**Show Logs…**" = Help › Show Diagnostics Folder (selects the `Diagnostics` folder in Finder). That folder holds the crash / hang reports macOS delivers; the streaming / recording logs are **not in it** (the button's tooltip says they are, which is wrong): use the system log, see [Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics).
-- Hotkeys are not handled while this window is in front (click the main window first).
+- "**Show Logs…**": exports the last 10 minutes of this app's system log (the virtual camera extension included) to a text file `log-yyyyMMdd-HHmmss.txt` in the diagnostics folder (`~/Library/Application Support/PlusMix/Diagnostics`) and opens it; it takes a few seconds. The streaming / recording logs are in it. You can also query the system log yourself, see [Troubleshooting › Logs and diagnostics](troubleshooting.md#9-logs-and-diagnostics).
+- Hotkeys keep working while this window is in front (keep it open to watch during a show and Space still cuts).
 
 ### Stream authentication
 
@@ -136,11 +142,12 @@ A separate window ("Stream / Recording Status") with two pages, Stream and Recor
 
 - **RTMP / RTMPS**: the form "RTMP authentication (user name / password)" starts with "Method", one of two:
   - **Adobe (user:pass@)**: for Wowza, Nimble, FMS and some authenticated CDN ingests (Adobe authentication, FMLE compatible). The user name and password go into the `user:pass@` part of the URL and the connection answers the server's challenge without sending the password in clear;
-    the URL field shows `rtmp://•••@host/app`, and next to the button it says "Authentication: user xxx (password set)".
+    the URL field shows `rtmp://•••@host/app`, and next to the button it says "Authentication: user xxx (password set)" ("(no password)" when the password is empty).
   - **Query string (?user=&pass=)**: for self-hosted servers such as MediaMTX, SRS and nginx-rtmp, written after the URL as `?user=…&pass=…`. Two more fields, "User parameter / Password parameter", default to MediaMTX's `user` / `pass`;
     for SRS and nginx-rtmp use the names your server's auth hook expects (letters, digits and `- . _ ~` only; the two must differ). The values are masked in the URL field (`?user=•••&pass=•••`), and next to the button it says "Auth (query string): user xxx".
     If the password parameter's name is not on the masking list (user, pass, password, pwd, key, token, secret, passphrase, streamid, auth, response), the form warns that the password will be shown in the address field and in logs.
-    **Limitation**: reading the URL back only recognises the names `user` / `username` / `usr` and `pass` / `password` / `pwd` / `passwd`. With other names the credentials are written, but next to the button it says "No authentication", the form reopens on Adobe with empty fields, and switching to Adobe later doesn't remove those two parameters — delete them in the URL field by hand.
+    **Parameter names are remembered on this Mac**: the show file stores only the full URL; reading it back recognises `user` / `username` / `usr` and `pass` / `password` / `pwd` / `passwd` plus the parameter names this Mac has saved in the form (the latest 8 pairs) — both for recognising the method and for switching it, and switching to Adobe removes the two parameters by the names it recognised.
+    So on **another Mac** a show that uses custom parameter names shows "No authentication" next to the button and the form reopens on Adobe with empty fields (streaming itself is unaffected; the URL is unchanged): choose "Query string" in the form and fill in the original names once, and that Mac remembers them.
   - The two methods are **exclusive**: saving one removes the other's credentials from the URL; saving with an empty user name removes both (no authentication). Other URL parameters are kept.
   - The wrong method doesn't work: with the Adobe method, MediaMTX accepts the connection and then rejects the publish (`NetStream.Publish.Unauthorized`), which stops the destination as an authentication failure (see below); servers such as SRS and nginx-rtmp that reject through an authentication callback simply drop the connection, so it keeps retrying (see below);
     a server that wants Adobe authentication and gets the query-string method stops it as "the server wants a user name and password and the URL has none".
@@ -148,7 +155,7 @@ A separate window ("Stream / Recording Status") with two pages, Stream and Recor
 - **SRT: passphrase** (encryption), written into the URL's `passphrase=` parameter; only letters, digits and `- . _ ~`, 10–79 characters (other characters don't work yet); anything else is rejected and not written.
 - **The server rejects the authentication** (wrong user name / password, the wrong method, the server wants credentials and the URL has none, or a method that isn't supported): the destination stops on that attempt and does **not** retry with back-off (the password won't fix itself) — on the first connection and on a reconnect alike.
   - The status line says "Stream n authentication failed (wrong user name or password) and stopped: fix it on the Streaming page, then click “Stream” in the bottom bar to retry"; when the server wants Limelight (llnw) it says "Stream n stopped retrying: 鉴权失败（服务器要的鉴权方式不支持）：…" (method not supported — not in this version, so changing the password won't help).
-  - The bottom bar's Stream button turns dark red "Stream · Couldn't start" ("Stream · k in trouble" with several switched on), its tooltip reads "name: Couldn't start — Stream n stopped retrying: 鉴权失败（…）：…"; the destination's section on the Streaming page says "Couldn't start: …" and is not locked.
+  - The bottom bar's Stream button turns dark red "Stream · Failed" ("Stream · k in trouble" with several switched on), its tooltip reads "name: Failed — Stream n stopped retrying: 鉴权失败（…）：…" plus "Click: retry the destinations that couldn't start or failed; healthy ones keep going"; the destination's section on the Streaming page says "Failed: Stream n stopped retrying: …" and is not locked (red hint in the [Streaming](#2-streaming) section above). The status line's stream bitrate leaves this destination out ("—" when it's the only one switched on).
     In the [status window](#stream--recording-status-window) its state is "Failed", the event is "Failed: 鉴权失败（…）：…" and "Last error" is the same line; in the API's `stats.encoder[]` its `state` is `failed`, `attempt` 0 and `last_error` the same line.
   - The start of the line tells you which case it is: `鉴权失败（用户名或密码不对）` (wrong user name or password: the server answered authfailed / nosuchuser to the Adobe method, or rejected the query-string method with `NetStream.Publish.Unauthorized`),
     `鉴权失败（服务器要用户名和密码，地址里没写）` (the server wants a user name and password and the URL has none; the status line still says "wrong user name or password" then), `鉴权失败（服务器要的鉴权方式不支持）` (method not supported); after the colon comes what the server replied, without the password (except when the URL has Adobe credentials and the server wants Limelight: then it is the sentence "服务器要 Limelight（authmod=llnw）", the server wants Limelight).
@@ -179,15 +186,19 @@ Settings › NDI® Output (Output › NDI® Output Settings…, or ⚙ External 
 |---|---|
 | Source | PGM / PVW / multiview / one input (Aux, raw picture: keying / crop / transform not applied). PVW / multiview render an extra picture on demand and may miss a frame or two at the start |
 | Groups | NDI® group names (comma separated); empty = the default group `public`. Receivers filter by group |
-| Conversion | NV12 → UYVY on the GPU, the CPU, or Auto (periodically compares both and keeps the cheaper one) |
+| Conversion | NV12 → UYVY on the GPU, the CPU, or Auto (periodically compares both and keeps the cheaper one); only applies to NV12 pictures (see below) |
 | Audio | PGM / PVW / multiview send Master; an input source sends that input after its fader |
 | Send | Switch: off = stop sending, settings kept |
 
 - "Add NDI output" at the bottom of the page: enter name, groups, conversion and source and click Add; **a new output is switched on as soon as it is added and starts sending right away**.
 - Renaming, changing the source or the groups ("Apply name / groups") rebuilds the sender (receivers must reselect it); conversion can be switched any time.
+- **The pixel format sent** follows the source: PGM / PVW / multiview and NV12 inputs (cameras, video files and the like) are converted to UYVY; **BGRA inputs (images, screen / window capture) and UYVY inputs (NDI® receive) are sent as they are, at their own size, without conversion**.
+  BGRA is always sent as **opaque** (BGRX), so receivers get no alpha: transparent parts of an image arrive black and semi-transparent edges darker. To key a title, key it in PlusMix and send PGM.
+  An NV12 input larger than the program (e.g. a 4K camera in a 1080p show) only sends the program-sized top-left part (known issue).
 - **SDK missing** (not detected at build time): the output can be added and enabled but nothing is sent; the status says "Unavailable: no NDI SDK" and `stats.encoder[].state` is `"unavailable"`.
 - SDK present but the sender cannot start (initialise / create failed): `state = "failed"` with the reason in the status line; retried when settings change.
-- `stats.encoder[].connections` is the current receiver count; `bitrate` is the raw UYVY rate (about 2 Gb/s at 1080p60 — normal).
+- Sending, but **10 frames in a row couldn't be sent** (conversion failed, a pixel format it can't send and the like) reports `failed` too, with the reason in that entry's `last_error` in the API's `stats.encoder[]` (e.g. "NDI 送不了像素格式 '…'（只认 NV12 / UYVY / BGRA），连续 10 帧没送出" — can't send pixel format '…', NV12 / UYVY / BGRA only, 10 frames in a row not sent); one frame sent and it is back to sending. The NDI® Output page then still says "Failed to start: NDI SDK present, but initialize / send_create failed (see the log)"; the actual reason is only in `last_error`.
+- `stats.encoder[].connections` is the current receiver count; `bitrate` is the raw rate computed as UYVY at the program size (about 2 Gb/s at 1080p60 — normal; it shows the same figure for directly sent BGRA or smaller inputs).
 
 ## 4. External display (second display)
 
@@ -204,7 +215,7 @@ Choosing a source switches that display's output to it and turns it on (other ou
 
 **The settings page** starts with "What each display shows": one single choice per display — the same setting as the routing menu. Below it, each output's details: name, enabled, display, source, fall back to the main display when missing, status, and finally a "Remove This Output" button — it **removes this output and its settings** (like "Remove n …" in the routing menu; nothing is asked); to blank a display only for a while, turn off "Enabled" at the top of that section, or use that display's "Off" in the routing menu or the main button.
 
-- Source: PGM / PVW / multiview / one input (Aux, full-resolution raw picture).
+- Source: PGM / PVW / multiview / one input (Aux, full-resolution raw picture; it follows that input when its source is changed in Input Settings › Source).
 - Display absent: by default stays black and waits, leaving the main display alone; "Fall back to the main display when missing" goes full screen on the main display (covering the UI) — only enable it deliberately. Settings › General › Keep external displays on the main display behind the interface keeps an external display window on the main display below the interface.
 - The window takes the latest frame at the display's own refresh; dragging the main window or entering full screen does not touch the render
   thread (missed-frame count stays flat). Pressing Esc in an external display window turns that output off (like "Off" in the routing menu: the window goes away, the display / source settings are kept, and choosing a source again turns it back on as configured).
