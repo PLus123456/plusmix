@@ -14,3 +14,5 @@
 报告 reports/w5-app-closeout.md 五段；不 push、不 merge。
 
 **G10 追加（2026-10-19）**：G10 胶水做了 ⑤（`AddInputModel.clampedFileRate`：`makeSource()` 与两处速率数字框的 Binding 都过它，填 10 → 8、0.05 → 0.1、≤ 0 / 非数 → 1；用例 `PlaybackStatusTests.testG10_fileRateFieldClampedToContractRange`）与 ④（`ISOAppTests` 断言 `passA4 == true`）——交付 1 只剩"打开含越界速率的老节目时先按界面口径提示"，交付 5 不用做。
+
+**G11 追加（2026-10-24）**：已合入 g11（56394c3 → 合并提交 8f44798，第三路）；`make gen` 后 App build + 126 相关 10 类 65 = 64 过 + 1 跳（ISOApp 的 A4 那条看 release frameprobe 在不在，此时还没编）+ 0 红。§5 第 9 条（123 合入后打开含编号 > 16 的节目弹 `inputNumber(input: 17)` 枚举原样、照 `OutOfRangeFileRates` 补一个 catch）**G11 没做**：124 的手册照实写了这一行，G11 改了行为手册就失真（docs/user 不在 G11 目录），归 prompt 128 / 下一个 App 会话与手册一起改；§3 第 4 条统计窗要不要列效果链延迟等用户定。D06 两个边角 / 竖拍摘要 / 越界速率提示 / 030 界面四条在 KNOWN_ISSUES 销号。
