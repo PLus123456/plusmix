@@ -30,8 +30,8 @@ struct FrameprobeCLI {
       wipe      Wipe 逐帧擦边位置（软边取 50% 点）与线性曲线的偏差帧数（V7）       --at S --duration D [--wipe-direction leftToRight|rightToLeft|topToBottom|bottomToTop|diagonal]
       zoom      Zoom 逐帧新画面宽度（中心行带）与线性曲线的偏差帧数（V7）          --at S --duration D
                 wipe / zoom 的拍号 = --start-tick + round(pts × fps)，窗口里漏的帧单独列；fps 不给时用容器标称帧率，漏了帧的文件要给 --fps
-      av        闪光帧 ↔ 最近 click 的时间差（A2、A3；按整秒拍配对判，全部配对另报）；多个文件比较同一事件（A4：click 以第一个文件 / PGM 配上的为锚，
-                闪光落在半秒的事件只列不判，判定事件里有文件在锚 ±0.5 s 内没有 click 算不过）
+      av        闪光帧 ↔ 最近 click 的时间差（A2、A3；按整秒拍配对判，全部配对另报）；多个文件比较同一事件（A4：锚 = 按传入顺序第一个配上 click 的文件，
+                gate4 里通常是 PGM；闪光落在半秒的事件只列不判，判定事件里有文件在锚 ±0.5 s 内没有 click、或缺这个事件的闪光，都算不过）
                 [--start-tick N] 文件第一帧的节目拍，默认 0。开录起点已按节目输出时间线（G8b），开着 Master 效果录的文件也从第 0 拍起，默认 0 就对；
                                  只在录制中途改了 Master 效果（L 变了：之后的拍号整体错开 ΔL，给了也只对改了之后那段有效）时才要给。
                                  文件本来就不从第 0 拍起（推流落盘从关键帧起录、soak 切段）照旧给第一帧的拍号
