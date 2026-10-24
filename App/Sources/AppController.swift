@@ -185,10 +185,15 @@ final class AppController {
     }
 
     /// 启动时恢复哪一份（没有命令行文件、不是测试宿主）：上次的文件 → 退出时自动存的那份（LastSession：没存成文件，有内容就算未保存）→ nil（空节目）。
+    /// 打不开的那一份提示一句（present），接着往下退（W5-Q）：原来两处 try? 静默退到空节目，含越界速率的老节目就这样不声不响地没了。
     static func restoreAtLaunch(documents: ShowDocuments, present: (any Error, String) -> Void)
         -> (show: Show, baseline: DocumentBaseline, identity: DocumentIdentity)? {
-        if let url = documents.lastURL, let loaded = try? documents.read(from: url) { return (loaded, .current, .file(url)) }
-        if let auto = documents.loadAutosave() { return (auto, .empty, .untitled) }
+        if let url = documents.lastURL {
+            do { return (try documents.read(from: url), .current, .file(url)) } catch { present(error, L("error.open", url.lastPathComponent)) }
+        }
+        if documents.hasAutosave {
+            do { return (try documents.readAutosave(), .empty, .untitled) } catch { present(error, L("error.open", L("menu.show.lastSessionName"))) }
+        }
         return nil
     }
 
@@ -464,10 +469,17 @@ final class AppController {
         })
     }
 
-    /// 打开 LastSession 本体（排队；读那一份在轮到时才读，D04）。没有那一份就什么都不做。
+    /// 打开 LastSession 本体（排队；读那一份在轮到时才读，D04）。没有那一份就什么都不做；读不出来提示一句、什么都不变（W5-Q：原来 try? 吞掉，点了没反应）。
     func openLastSession() async {
         await enqueueSessionChange { [self] in
-            guard let show = documents.loadAutosave() else { return }
+            guard documents.hasAutosave else { return }
+            let show: Show
+            do {
+                show = try documents.readAutosave()
+            } catch {
+                presentError(error, context: L("error.open", L("menu.show.lastSessionName")))
+                return
+            }
             await performReplace(show: show, baseline: .empty, identity: .untitled)
         }
     }
@@ -718,8 +730,9 @@ final class AppController {
         return ShowLayout(values: values)
     }
 
+    /// 正文：带界面口径说明的错（LocalizedError，如老节目的越界速率）用它的说明，其余照旧原样。
     private func presentError(_ error: any Error, context: String) {
-        let message = "\(error)"
+        let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         lastPresentedError = (context, message)
         NSLog("\(context)失败：\(error)")
         guard !isTestHost, let window = windowController.window else { return }

@@ -619,6 +619,10 @@
 "error.failed" = "%@ failed";
 "error.open" = "Open %@";
 "error.save" = "Save %@";
+"error.show.fileRate" = "%@. This version accepts playback rates of %@–%@× only, so the show was not opened: edit \"rate\" of these inputs in the show file with a text editor, then open it again.";
+"error.show.fileRate.item" = "Input %d: playback rate %@ is outside %@–%@";
+"error.show.fileRate.itemNamed" = "Input %d (%@): playback rate %@ is outside %@–%@";
+"error.show.fileRate.separator" = "; ";
 "error.startEngine" = "Start engine";
 "externalMenu.closeAll" = "Turn Off All External Displays";
 "externalMenu.display" = "%@ (%d×%d %d Hz)";

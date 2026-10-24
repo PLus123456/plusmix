@@ -619,6 +619,10 @@
 "error.failed" = "%@失败";
 "error.open" = "打开 %@";
 "error.save" = "保存 %@";
+"error.show.fileRate" = "%@。这一版的播放速率只收 %@–%@ 倍，越界的老节目不打开：用文本编辑器把节目文件里这几路的 \"rate\" 改到范围内再打开。";
+"error.show.fileRate.item" = "输入 %d 的播放速率 %@ 超出 %@–%@";
+"error.show.fileRate.itemNamed" = "输入 %d（%@）的播放速率 %@ 超出 %@–%@";
+"error.show.fileRate.separator" = "；";
 "error.startEngine" = "起引擎";
 "externalMenu.closeAll" = "关闭全部外部显示";
 "externalMenu.display" = "%@（%d×%d %d Hz）";
