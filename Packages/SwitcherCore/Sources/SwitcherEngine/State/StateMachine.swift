@@ -17,6 +17,7 @@ import SwitcherContracts
 //   - 事件：转场开始 / 完成 / 瞬时切换随每次状态变化发给 TransitionEventSink（AFV，W2-E）。完成分三种（D10，W1-B5）：auto 走满时长、
 //     auto 没走满就被 Cut / T-bar 一下推到底切完、T-bar 带着的转场提交——音频侧对第一种什么都不用做（C 侧淡变自己在同一刻走满），
 //     后两种要在这一拍收到终值。FTB 的目标斜坡变了（方向翻转、途中改时长 / 归零，D11）也走这里，带改的那一拍。
+//     每拍的 advance 与这一拍的命令分开推导（W1-D4）：Cut 恰落在 auto 走满那一拍 = 走满（elapsed）+ 同一拍切回（cut），不是取消。
 
 /// 状态机对一次 `submit` 的答复。
 public enum SubmitOutcome: Sendable, Hashable {
@@ -228,6 +229,8 @@ public actor StateMachine {
 
     /// 把状态逐拍推进到第 tick 拍（含）：每拍先 advance 再应用该拍的排程命令，最后发布快照。
     /// 通常由执行器线程在渲染线程 `requestPrepare` 之后调；测试可直接 await。
+    /// 事件分两段推导（W1-D4）：advance 自己的（auto 走满）先发，这一拍的命令（每拍观察者注入的走 applyNow、自己发；排程的一批）从走满之后的状态算——
+    /// 原来整拍前后只比一次，Cut 恰落在 auto 走满那一拍时"走满对调 + Cut 对调回去"前后 PGM 相同、报成取消（观察者注入的还多报一次 cut）。
     public func prepare(upTo tick: Tick) {
         guard tick > currentTick else { return }
         var t = currentTick + 1
@@ -235,11 +238,13 @@ public actor StateMachine {
             let before = current
             current = reducer.advance(current, to: t)
             currentTick = t
+            emitEvents(from: before, to: current, tick: t)
             for observer in tickObservers { observer.stateMachine(self, willApplyTick: t) }
             if let commands = scheduled.removeValue(forKey: t) {
+                let advanced = current
                 for c in commands { current = reducer.reduce(current, c, at: t) }
+                emitEvents(from: advanced, to: current, tick: t)
             }
-            emitEvents(from: before, to: current, tick: t)
             t += 1
         }
         publishIfChanged()

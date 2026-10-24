@@ -14,7 +14,8 @@ import SwitcherAudio
 //      确定值；相位不利被钳到安全下限的输入才有不同的值）；Master / ISO 块的 PTS = 块首样本 host time − 对齐延迟 = 内容被采集的时刻，
 //      与视频拍点同一 host 时基（G2 问题单 A2 的修法）。耳机总线默认不经这条延迟线（monitorPoint），监听延迟只有环年龄 + 设备。
 //   3. AFV：状态机的转场事件（AudioStateBridge）→ 同一拍点的 host time 起做等幅交叉淡变，长度 = 转场时长；Cut = 1 块短淡（≤ 1 拍）；
-//      T-bar 跟推杆；Auto 被 Cut / T-bar 推到底打断、T-bar 提交 = 在那一拍替换还在走的淡变、短淡收口（W1-B5，D10）；FTB 同步淡出 Master，
+//      T-bar 跟推杆；Auto 被 Cut / T-bar 推到底打断、T-bar 提交 = 在那一拍替换还在走的淡变、短淡收口（W1-B5，D10）；Cut / Auto 起点也是替换语义
+//      （W1-D4，裁定 #17：隔不到 ~60 ms 的两次切换前一条照走到后一条的起点，不回弹、不丢）；Auto 进行中才开 AFV 补一条跟剩下曲线走的淡变（W1-D4）；FTB 同步淡出 Master，
 //      斜坡途中改了（反向 / 改时长 / 归零）从改的那一拍起换（D11）。**所有跟视频对齐的音频动作都在混音时间 = 拍点 + 对齐延迟 处应用**：混音块 T 里流过的
 //      内容是 T − 对齐延迟 时刻采集的（PTS 也是它），要让录制文件 / 扬声器里的音频转场与画面同一时刻，增益变化就得晚对齐延迟这么多
 //      （离线用例第一版没加这个偏移，音频淡变在文件里领先画面 42.7 ms）。
@@ -483,13 +484,14 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             applyGates()
         case .cut(let from, let to, _, let at):
             guard afvOn, from != to else { return }
-            crossfade(from: from, to: to, frames: cutFadeFrames, start: at + alignmentDuration)
+            // 替换语义（用户 2026-10-18 裁定 #17，W1-D4）：隔不到 ~60 ms 的两次切换，后一条到混音器时前一条还没开始或正在走——照走到这一条的起点、
+            // 这一条从那一刻的增益接着走；默认语义在应用时就撤掉它（没开始的整个听不见，正在走的先回弹再跳回）
+            crossfade(from: from, to: to, frames: cutFadeFrames, start: at + alignmentDuration, replacing: true)
         case .transitionStarted(let from, let to, _, let source, _, let at, _, let duration):
             lock.lock(); activeTransition = (from, to, source, at); lock.unlock()
             guard afvOn, source == .auto, from != to else { return }
-            // 时长按帧（W1-D2；30 拍 @60 = 24000 帧精确，@59.94 = 24024），不再按块取整
-            let frames = max(1, Int((Double(duration.ticks) / mixer.hostTicksPerFrame).rounded()))
-            crossfade(from: from, to: to, frames: frames, start: at + alignmentDuration)
+            // 时长按帧（W1-D2；30 拍 @60 = 24000 帧精确，@59.94 = 24024），不再按块取整；替换语义同 Cut（Cut 后马上 Auto）
+            crossfade(from: from, to: to, frames: framesOf(duration), start: at + alignmentDuration, replacing: true)
         case .tbarProgress(let from, let to, let p):
             guard afvOn else { return }
             let pp = min(max(p, 0), 1)
@@ -508,8 +510,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
             guard afvOn else { return }
             switch completion {
             case .elapsed?:
-                // auto 走满：C 侧等长的淡变在同一刻自己走满（W1-D2 起按帧精确），不去打断。只有途中被直接门控过的（AFV 中途才开、
-                // 每路 AFV 位途中翻过）两路记录对不上终值，没有淡变会收口——像被打断一样短淡收到终值
+                // auto 走满：C 侧等长的淡变在同一刻自己走满（W1-D2 起按帧精确），不去打断。AFV 中途才开、每路 AFV 位途中翻过的，applyGates 补了
+                // 跟随淡变（W1-D4），同一刻也走满；剩下途中被直接门控过、记录对不上终值的（例如 Auto 中途才注册的输入）没有淡变会收口——像被打断一样短淡收到终值
                 if !gatesAtFinal(from: preview, to: program) { shortFade(from: preview, to: program, at: at) }
             case .interrupted?, .tbar?:
                 // D10：Cut / T-bar 一下推到底打断 auto、T-bar 提交（含接管 auto 之后、进行中按 Cut）：画面这一拍已全是新画面。
@@ -553,8 +555,9 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     }
 
     /// 切换 / 转场的交叉淡变。`InputAudioSettings.afv = false` 的路不进 from / to：它的门控增益恒 1（用户 2026-09-22 批）。
-    /// `replacing`：替换两路上已经开始的淡变（D10 的收口，见 `shortFade`）。
-    private func crossfade(from: Int, to: Int, frames: Int, start: HostTime, replacing: Bool = false) {
+    /// `replacing`：替换两路上已经开始的、和起点更早还没开始的淡变（D10 的收口 `shortFade`；W1-D4 起 Cut / Auto 起点也是）；
+    /// `following`：跟着一条进行中的 Auto 剩下的曲线走（W1-D4，`applyGates`）。
+    private func crossfade(from: Int, to: Int, frames: Int, start: HostTime, replacing: Bool = false, following: Bool = false) {
         lock.lock()
         let fromRec = participatesInAFV(from) ? slots[from] : nil
         let toRec = participatesInAFV(to) ? slots[to] : nil
@@ -562,8 +565,11 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         toRec?.afvGain = 1
         lock.unlock()
         guard fromRec != nil || toRec != nil else { return }
-        mixer.crossfade(from: fromRec?.slot, to: toRec?.slot, durationFrames: frames, startHostTime: start, replacing: replacing)
+        mixer.crossfade(from: fromRec?.slot, to: toRec?.slot, durationFrames: frames, startHostTime: start, replacing: replacing, following: following)
     }
+
+    /// 时长 → 帧（四舍五入，≥ 1）。
+    private func framesOf(_ d: HostDuration) -> Int { max(1, Int((Double(d.ticks) / mixer.hostTicksPerFrame).rounded())) }
 
     /// 这一路参不参与 AFV 门控（`InputAudioSettings.afv`；不认识的路当参与）。调用方持锁。
     private func participatesInAFV(_ number: Int) -> Bool {
@@ -592,19 +598,34 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         for g in ready { setGate(g.number, g.gain) }
     }
 
-    /// 按最新状态重新门控所有槽位。
+    /// 按最新状态重新门控所有槽位。Auto 正在走时（W1-D4）PGM / PVW 两路门控完再补一条跟随淡变：起点 = 那条 Auto 的起点 + 对齐延迟、时长同它，
+    /// C 侧从该在的相位接上、接上那一下按 τ 平滑——开 AFV / 每路 AFV 位途中翻过之后中段跟剩下的曲线走，走满那一刻收到终值。
+    /// 原来只按那一刻的进度直接门控成 cos / sin，之后停在那儿，走满才短淡收口（120 §3 第 4 条）。直接门控那条照发：跟随的起点还没到时
+    /// （开 AFV 恰在 Auto 起点附近）先向那一刻的 cos / sin 平滑，起点到了再接上。
     private func applyGates() {
         guard let state = bridge?.lastSeenState ?? stateMachine.publisher.latest?.state else { return }
         let gains = AudioProgramGate.gains(for: state)
+        // Auto 正在走时 PGM / PVW 的记录是淡变的终值（crossfade 写的 0 / 1），不是此刻的增益：比记录会漏——PVW 的 AFV 位途中关掉、全局 AFV 途中关掉时
+        // 记录恰好就是 1，原来不发命令，它接着沿 sin 走，不回到恒 1。这两路照发（参与的下面再补跟随接管）
+        let autoPair: Set<Int> = state.transition.isActive && state.transition.source == .auto ? [state.program, state.preview] : []
         lock.lock()
         let afv = afvOn
         var changes: [(Int, Float)] = []
         for (n, rec) in slots where rec.removing == nil {
             let g = gains[n] ?? (afv && rec.settings.afv ? 0 : 1)
-            if g != rec.afvGain { rec.afvGain = g; changes.append((rec.slot, g)) }
+            if g != rec.afvGain || autoPair.contains(n) { rec.afvGain = g; changes.append((rec.slot, g)) }
         }
         lock.unlock()
         for (slot, g) in changes { mixer.setAFVGain(slot: slot, g) }
+        if let f = autoInProgress(state) { crossfade(from: f.from, to: f.to, frames: f.frames, start: f.start, following: true) }
+    }
+
+    /// 状态里正在走的 Auto（全局 AFV 开、PGM ≠ PVW）：PGM → PVW，起点 = 转场起点的拍点 + 对齐延迟，时长按帧（与 transitionStarted 同一算法）。
+    /// T-bar 带着的（含接管了 Auto 的）不算：推杆位置自己逐档门控。
+    private func autoInProgress(_ s: MixerState) -> (from: Int, to: Int, start: HostTime, frames: Int)? {
+        guard s.audio.afv, s.transition.isActive, s.transition.source == .auto, let startTick = s.transition.startTick,
+              s.program != s.preview, let clock else { return nil }
+        return (s.program, s.preview, clock.time(of: startTick) + alignmentDuration, framesOf(clock.duration(ofTicks: max(s.transition.durationTicks, 0))))
     }
 
     /// 每路参数落到混音器：增益 / 静音（对齐前强制静音）/ 独听 / 声像 / 路由 / 延迟（对齐延迟 + 用户延迟补偿）。
@@ -799,7 +820,7 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
     }
 
     /// 提案 030：AudioEngineStatus → Stats 的效果链延迟。buses = 四条总线（Bus.allCases，含耳机总线：用户 2026-10-18 裁定 #1、G10 胶水 ①；契约的 listedBuses 与文字归 123）总是列（没装 = 0）；inputs 只列契约链里装进了 EQ / 动态格的路；
-    /// measured 只在链里有自写压缩器时给——每路的看 dynamicsKind（`InputEffects.compressorMeasuredLatencyFrames` 换掉压缩器后还留着上一次的值）。
+    /// measured 只在链里有自写压缩器时给：状态里的 `compressorMeasuredLatencyFrames` 每路 / 总线都已经是"装着压缩器才有"（每路的 W1-D4 起），照拷。
     private func statsEffects(_ st: AudioEngineStatus) -> Stats.AudioCounters.EffectsLatency {
         typealias E = Stats.AudioCounters.EffectsLatency
         let buses = Bus.allCases.map { b -> E.BusLatency in
@@ -808,8 +829,8 @@ public final class AudioEngine: AudioControlEventSink, @unchecked Sendable {
         }
         var inputs: [Int: E.InputLatency] = [:]
         for i in st.inputs where i.effects.eqBands > 0 || i.effects.dynamicsKind != nil {
-            let measured = i.effects.dynamicsKind == .compressor ? i.effects.compressorMeasuredLatencyFrames : nil
-            inputs[i.number] = E.InputLatency(latencyMs: E.milliseconds(frames: i.effects.latencyFrames), measuredLatencyMs: measured.map(E.milliseconds))
+            inputs[i.number] = E.InputLatency(latencyMs: E.milliseconds(frames: i.effects.latencyFrames),
+                                              measuredLatencyMs: i.effects.compressorMeasuredLatencyFrames.map(E.milliseconds))
         }
         return E(buses: buses, inputs: inputs)
     }

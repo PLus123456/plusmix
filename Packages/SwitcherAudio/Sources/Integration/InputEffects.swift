@@ -91,12 +91,14 @@ final class InputEffectsController: @unchecked Sendable {
         prebuild = try mixer.installInputEffects()
     }
 
+    /// 实测延迟只在动态格是压缩器时给（W1-D4，"没装压缩器为 nil"）：`measured` 本身留着——换回同一组参数时不重测。
     func status(slot: Int) -> AudioEngineStatus.InputEffects {
         lock.lock(); defer { lock.unlock() }
         guard slot >= 0, slot < racks.count else { return .none }
         let r = racks[slot]
         return AudioEngineStatus.InputEffects(eqEnabled: r.eqEnabled, eqBands: r.eqBands, dynamicsKind: r.dynamicsKind, dynamicsEnabled: r.dynamicsEnabled,
-                                              latencyFrames: r.latencyFrames, compressorMeasuredLatencyFrames: r.measured, ignored: r.ignored)
+                                              latencyFrames: r.latencyFrames, compressorMeasuredLatencyFrames: r.dynamicsKind == .compressor ? r.measured : nil,
+                                              ignored: r.ignored)
     }
 
     /// 槽位摘除且 detach 已确认：清记录（C 侧的格由下次 attach 前的 prepare_slot 复位）。
