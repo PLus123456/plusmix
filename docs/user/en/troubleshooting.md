@@ -108,6 +108,7 @@ Free space is measured on the recording's own volume. A killed process recovers 
 | The T-bar snaps back after I release it at the end | Expected: releasing past 97 % commits (PGM and PVW swap) and the T-bar returns to the left for the next one; it only stays put when released before 97 % |
 | ⌥1–⌥4 all just run the current transition instead of separate slots | This Mac has an old saved shortcut table: Settings › Shortcuts › Reset to Defaults |
 | Closing the main window asks "Save…" or "Quitting will stop…" | Closing the main window quits PlusMix, so it asks first, like ⌘Q |
+| Opening a show says "Open name.switcher.json failed" with something like `fileRate(input: 3, rate: 10.0)` below it | Input 3 (a video file) in this show has a playback rate of 10, outside the 0.1–8× this version accepts (older versions' rate field had no limits, so it could be saved): edit that input's `"rate"` in the show file with a text editor to a value in range, then open it again. Show › Open Show from Last Quit and the automatic restore at launch don't say anything about such a file — it just doesn't open (at launch the next candidate is used) |
 | Help › PlusMix User Guide is greyed out as "(not bundled yet)" | The app bundle has no `Resources/Help/`: most likely the Xcode project was generated before the bundled guide was added — run `make gen` and rebuild; the source of this manual is `docs/user/` in the repository |
 
 ## 8. API and control panels
