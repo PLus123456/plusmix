@@ -1,4 +1,4 @@
-# W2-C5（prompt 131）控制层安全与顺序：浏览器来源拦截（NS02 / NS05）、兼容层 TCP 上限（NS07）、新订阅快照顺序（N12）、Stream Deck 畸形快照与日志 token（NS10 / NS11）、提案 035（NS03，待批）
+# W2-C5（prompt 131）控制层安全与顺序：浏览器来源拦截（NS02 / NS05）、兼容层 TCP 上限（NS07）、新订阅快照顺序（N12）、Stream Deck 畸形快照与日志 token（NS10 / NS11）、提案 035（NS03，已批 A1、按顺序后落）
 
 分支 `w2-control-5`（worktree `.claude/worktrees/nostalgic-austin-2633fe`；harness 给的分支 `claude/nostalgic-austin-2633fe` 已挪到同一头当别名），从 G11 快进后的 main bf149e2 开。
 不 push、不 merge，交 G12（prompt 134）。机器：Apple M5 Max，macOS 27.0.1，Xcode 27.1（Swift 6.4），Node 26.9.0；同机并行 129 / 130（各自 worktree）。
@@ -14,7 +14,7 @@
 | 1′ DNS 重绑定 | 自动安全复查点出来、本会话写用例实测：网页把自己的域名改解析到 127.0.0.1 之后，它的 GET 在浏览器看来是同源、不带 Origin、只带 `Sec-Fetch-Site: same-origin`——按 prompt 写的"none / same-origin 都放"，兼容层的 `GET /api?Function=Cut` 照样切节目、主 API 的 state / log 照样读得到（用例在原规则上红：200、program 1 → 2）。两个服务都不出网页，真同源只可能是地址栏里用本机地址开的页面：`same-origin` 只在 Host（HTTP/1.1 的 authority）是 IPv4 / [IPv6] / localhost / *.localhost 时放（.local 不算） | 9757700 |
 | 2 NS07 TCP 上限 | `CompatTCPServer.maxLineBytes = 64 KiB`：一行（不含 \r\n）超过——一次带着换行到的、或迟迟不换行的半行（多留一个 \r 的位置）——记一行 warning、计数 `tcpLinesTooLong`、断开这条连接；`maxConnections = 64`：计数挪到接连接的循环里同步加（原来在每条连接自己的任务里加，第 65 条进来时前面的可能还没记上），满了这一条不发问候直接关、计数 `tcpConnectionsRefused`、记 notice（默认级别不打印，免得被刷屏）。不加空闲超时 | 651f8f1 |
 | 3 N12 快照顺序 | `StateFeed` 订阅者表从"流"改成"流 + 最后发出的快照键 (sequence, tick)"：`subscribe()` 补发时登记键，`fanOut` 带快照键、比订阅者已收到的**旧**才跳过；键相同的照发（不经总线的 `apply` / 每拍观察者注入 / headless 场景的 `schedule` 可以在同一拍、同一 sequence 再发布一次不同的状态），同 sequence 的新拍照发。Stats / 回执不带键 | f725c41 |
-| 4 提案 035 | `docs/contract-changes/035-api-state-stream-credentials.md`，**待批，没落**（§4） | f4c87a5 |
+| 4 提案 035 | `docs/contract-changes/035-api-state-stream-credentials.md`。写完停下来问，用户 2026-10-25 **批方案 A1**；按批的顺序（132 合入 → 契约会话搬 `StreamURLRedaction` → W2-C 系落打码）本分支不落代码，只在提案文末记下裁定与三步顺序（§4） | f4c87a5、b527e06 |
 | 5 NS10 / NS11 Stream Deck | `SwitcherClient.handle`：`state.inputs` / `outputs` 有就得是对象数组（元素是 null / 数字同样会在 find / filter 里抛），不是就丢掉这条、记一行、`snapshot` 不变；没有这两个键的精简快照照收（tally.js 本来按空表算，D17 用例就是这种）。`emit` 包 try/catch：监听回调抛的异常只记一行 log，事件照常往下走（断开回调里抛也照样排重连）。日志：`connected` 只写新加的 `client.endpoint`（host:port），出错日志过新加的 `redactToken`（整项去掉 `token=` 查询项） | 60253d8 |
 | 6 docs/api.md | 鉴权那一段加一句来源规则（`APIDocument` 改一句、重生成，`testCatalog_generatedMarkdownMatchesCommittedDocsApiMd` 过；命令目录没变，仍 42 条） | 899cf3e、18e6aa5 |
 | 7 App 用例 | `App/Tests/W2C5BrowserOriginAppTests.swift`（只加用例）：设置默认两个白名单都空；App 实际起的 API 对带 Origin 的 GET state / 跨站 POST cut 回 403、PGM 不变、总线上没有 api 来源的 cut，不带头的照旧 200。`ControlRuntime.swift` 没改（默认就是空白名单，设置页不加项） | 51a9e4f |
@@ -61,7 +61,7 @@
 
 ## 3. 没做的和原因
 
-- **提案 035（NS03 推流凭据打码）没落**：改的是 API 对外的形态，写完提案停下来问用户；本会话结束时还没批（见 §4）。批了 A2 可以在本分支接着做；批 A1 要等 132 合入、契约会话把 `StreamURLRedaction` 搬进 SwitcherContracts 之后。
+- **提案 035（NS03 推流凭据打码）没落代码**：用户 2026-10-25 批的是 A1，要先等 132 合入、契约会话把 `StreamURLRedaction` 搬进 SwitcherContracts，再由 W2-C 系落打码——三步都不在本分支（见 §4、§5）。
 - **浏览器的 WS 握手被拒回 400 不是 prompt 写的 403**：hummingbird-websocket 2.7.0 写死（§1 探针）。不升级、不订阅、命令进不了总线这几条都做到了；要 403 只能改库或另包一层 NIO 管线，不值得。
 - **prompt 的"same-origin 放"收紧了**：Host 不是 IP / localhost 的 same-origin 拦（DNS 重绑定，§1 第 1′ 行）。比 prompt 严，legit 用法（这两个服务不出网页）没有损失；用户要原样放回只要把 `BrowserOriginPolicy.allows` 里那一个 case 改回 `true`。
 - **白名单来源的浏览器 HTTP 没配 CORS**：白名单里的网页走 WS 完全能用；走 HTTP 时 JSON POST 要过预检（OPTIONS 现在 404）、读应答要 `Access-Control-Allow-Origin`，都没做。默认白名单空、App 设置里也没这一项，现在没人用得上；真有网页面板时再做（W2-C 系）。
@@ -73,7 +73,9 @@
 
 ## 4. 对契约的疑问
 
-1. **035 等用户定**（docs/contract-changes/035-api-state-stream-credentials.md）：建议方案 A（原地打码、JSON 形态不变；`?secrets=1` 要配 token；带标记的 `setOutputSettings` = 保留原值），名单放哪二选一——A1 搬进 SwitcherContracts（等 132 合入）/ A2 由 App 与 headless 注入；备选 B（换 DTO）、C（只写文档）。提案里补了 prompt 没提到的第三处泄露：`GET /api/v1/log` 回的命令原文（`setOutputSettings` / `addOutput` / `loadShow`）带同样的 url / streamKey。
+1. **035 已批方案 A1**（用户 2026-10-25："等 132 合入后，由契约会话把 StreamURLRedaction 搬进 SwitcherContracts（SwitcherStreaming 留 typealias），再由 W2-C 系把 API 状态 / WS 快照 / 命令日志按提案打码，?secrets=1 要配 token"）：
+   原地打码、JSON 形态不变；带标记的 `setOutputSettings` = 保留原值；`?secrets=1` 只在配了 token 时给原文。提案里补了 prompt 没提到的第三处泄露：`GET /api/v1/log` 回的命令原文（`setOutputSettings` / `addOutput` / `loadShow`）带同样的 url / streamKey——裁定里一起打码。
+   搬迁是契约改动（SwitcherContracts 多一个公开类型 + CONTRACTS.md 一句往返规则），由契约会话做，裁定与三步顺序记在提案文末。
 2. `APIServerConfiguration.allowedOrigins` / `VMixCompatConfiguration.allowedOrigins` 是 SwitcherControl / VMixCompat 的公开配置，不是 SwitcherContracts，没走提案；`VMixCompatServer.Counters` 多两个计数（`tcpConnectionsRefused` / `tcpLinesTooLong`）同理。`APIServerConfiguration.init` 的新参数放在最后、带默认值，App / headless 的调用不用改。
 3. 新的 API 应答（403 `forbidden-origin`、浏览器 WS 握手 400）写进了 docs/api.md；要不要进 CONTRACTS.md 的 API 一节由契约会话定。
 
@@ -84,7 +86,7 @@
 - **来源规则**：带 `Origin` 而不在 `allowedOrigins`（默认空，`null` 永远不算）→ 403；不带 `Origin` 时 `Sec-Fetch-Site` 只放 `none`（地址栏直接打开），`same-origin` 只在 Host 是 IP / localhost 时放，`cross-site` / `same-site` 拦；两个都不带（Stream Deck、Companion、curl、Python / Node 脚本、URLSession）放。先查来源再查 token。主 API → `403 {"error":"forbidden-origin"}`，浏览器的 WS 握手 → 400、不升级；兼容层 HTTP → `403 text/plain "Forbidden"`（含不带参数的 XML 状态）。TCP 8099 不涉及。
 - **结果就是**：在浏览器地址栏里直接打开 `http://127.0.0.1:8765/api/v1/state` / `http://127.0.0.1:8088/api` 照旧能看；网页（包括用户自己写的网页面板）不在白名单里就连不上，白名单目前没有设置入口。
 - **兼容层 TCP 上限**：一行最长 64 KiB（不含 \r\n），超了这条连接被断开（日志一行 warning）；同时最多 64 条连接，满了新连接连上即被关、没有 `VERSION OK` 问候；没有空闲超时（只订阅 TALLY 不发命令的客户端一直挂着没问题）。
-- **035**：没批之前 API 状态与命令日志照旧带推流密钥原文，手册里"API 只开本机 + 设 token"的提醒照旧。
+- **035**：已批 A1，但三步落完之前 API 状态 / WS 快照 / 命令日志照旧带推流密钥原文，手册里"API 只开本机 + 设 token"的提醒照旧；落完之后改写成"推流凭据打码，要原文配 token 加 `?secrets=1`"。
 - Stream Deck：收到格式不对的快照会丢掉并记一行"快照格式不对…"；日志里连上那句只写 host:port。
 
 给 G12（134）：
@@ -93,4 +95,6 @@
 - `CompatCore.noteConnectionOpened()` 换成了 `openConnection(limit:)`（计数挪到接连接的循环里），别的分支没有调用点。
 - 被拒的 WS 握手是 400：别按 403 写断言（hummingbird-websocket 升版本时值得复查一次，若它开始转发路由器的状态码，用例里的 `(400..<500)` 照样成立）。
 - 用 URLSession 造浏览器请求时 Origin / Sec-Fetch-Site 能写、Host 不能写（DNS 重绑定的用例走原始 socket：`RawWSClient.httpGet` / VMixCompat 的 `LineClient`）。
-- KNOWN_ISSUES 里 N12 / NS02 / NS05 / NS07 / NS10 / NS11 六行可以销号（NS03 ② 等 035）；NS02 的定级改口、035 的方案由用户定。
+- KNOWN_ISSUES 里 N12 / NS02 / NS05 / NS07 / NS10 / NS11 六行可以销号；NS03 ② 等 035 落完；NS02 的定级改口由用户定。
+- **035 已批 A1，要排两张 prompt**（提案文末"裁定"）：132 合入之后，① 契约会话（P5 系）把 `StreamURLRedaction` 原样搬进 SwitcherContracts、SwitcherStreaming 留 typealias、CONTRACTS.md 加往返规则一句、用例证明搬前搬后打码逐字相同；
+  ② ① 合入 main 之后，W2-C 系落 API 打码（APIModels / StateFeed / APIServer：GET state、WS 快照、GET log 三处，`?secrets=1` 要配 token，带标记的 `setOutputSettings` 保留原值，`addOutput` / `loadShow` 带标记 400）+ docs/api.md 重生成。
