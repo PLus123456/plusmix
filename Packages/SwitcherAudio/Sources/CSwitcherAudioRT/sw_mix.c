@@ -410,13 +410,17 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
     case SW_CMD_CROSSFADE:
     case SW_CMD_CROSSFADE_REPLACE:
     case SW_CMD_CROSSFADE_FOLLOW: {
-        // 同一槽位只允许一条在进行：旧的取消。替换语义（W1-B5，D10；W1-D4 起 Cut / Auto 起点、跟随也用）：已经开始的、和还没开始但起点比新的一条
+        // 同一槽位只允许一条在进行：旧的取消。替换语义（W1-B5，D10；W1-D4 起 Cut / Auto 起点也用）：已经开始的、和还没开始但起点比新的一条
         // 早的旧淡变都留到新淡变起点那一块再取消（sw_xfade_take_over），之前照走——在这里就撤，正在走的那段 afv 会向转场前的目标（旧 PGM 1、
-        // 旧 PVW 0）平滑回去、起点再跳回来；还没开始的整个没了（隔不到 ~60 ms 的两次切换，前一次切换听不到）。起点不早于新的一条的还没开始的照撤
+        // 旧 PVW 0）平滑回去、起点再跳回来；还没开始的整个没了（隔不到 ~60 ms 的两次切换，前一次切换听不到）。起点不早于新的一条的还没开始的照撤。
+        // 跟随（W1-D4）反过来：它是把一条早已开始的 Auto 重新交代一遍（起点在过去），还没开始、起点比它晚的是之后的切换（例如打断的短淡），留着、
+        // 到它们的起点再接管跟随；起点不晚于它的（这条 Auto 自己原来那条还没开始的淡变）撤掉
         const bool replace = c->type != SW_CMD_CROSSFADE;
+        const bool follow = c->type == SW_CMD_CROSSFADE_FOLLOW;
         for (int k = 0; k < (int)SW_MIX_MAX_CROSSFADES; k++) {
             sw_crossfade *x = &ctx->xfades[k];
-            if (!x->active || (replace && (x->started || x->start_host < c->u0))) continue;
+            if (!x->active) continue;
+            if (replace && (x->started || (follow ? x->start_host > c->u0 : x->start_host < c->u0))) continue;
             if (c->i0 >= 0 && (x->from == c->i0 || x->to == c->i0)) { if (x->from == c->i0) x->from = -1; else x->to = -1; }
             if (c->i1 >= 0 && (x->from == c->i1 || x->to == c->i1)) { if (x->from == c->i1) x->from = -1; else x->to = -1; }
             if (x->from < 0 && x->to < 0) x->active = 0;
@@ -431,7 +435,7 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
             x->elapsed_frames = 0;
             x->started = 0;
             x->replace = replace ? 1u : 0u;
-            x->follow = c->type == SW_CMD_CROSSFADE_FOLLOW ? 1u : 0u;
+            x->follow = follow ? 1u : 0u;
             x->resid_from = 0.0f;
             x->resid_to = 0.0f;
             x->active = (x->from >= 0 || x->to >= 0);

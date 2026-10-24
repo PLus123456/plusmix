@@ -198,6 +198,31 @@ final class CrossfadeReplaceTests: XCTestCase {
         XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
     }
 
+    /// 跟随淡变不撤起点比它晚、还没开始的淡变：那是之后的切换（例如 Auto 刚被 Cut 打断排的短淡）。集成层按快照判"Auto 还在走"补跟随，
+    /// 而状态机先发事件、后发布快照——同一个控制周期里打断的短淡已经排上、快照还说 Auto 在走时也会补一条；替换的规矩（起点不早于它的撤掉）
+    /// 套在跟随上就会把打断撤了、声音按长曲线再走完（D10 回退）。这里：先排一条 12 块之后的替换短淡（L → 0、R → 1），再补一条起点在 47 块之前的跟随：
+    /// 短淡起点那一块接管跟随、256 帧后 L 严格 0、R 满（不在长曲线上）。
+    func testW1D4_2_followKeepsALaterPendingSwitch() {
+        let rig = makeDCPair()
+        rig.mixer.setAFVGain(slot: 1, 1)
+        rig.run(blocks: 50)
+        let base = rig.driver.blockIndex
+        let cut = point(rig, aheadBlocks: 12, sample: 40, base: base)
+        let start = point(rig, aheadBlocks: -47, sample: 0, base: base)
+        rig.mixer.crossfade(from: 0, to: 1, durationFrames: 256, startHostTime: cut.time, replacing: true)
+        rig.mixer.crossfade(from: 0, to: 1, durationFrames: 24_000, startHostTime: start.time, following: true)
+        var l = [Float](), r = [Float]()
+        rig.run(blocks: 30) { b in l.append(contentsOf: b.bus(.master).left); r.append(contentsOf: b.bus(.master).right) }
+        let tail = (cut.index + 256)..<l.count
+        XCTAssertGreaterThan(tail.count, 3_000)
+        let badL = tail.filter { l[$0] != 0 }
+        XCTAssertEqual(badL.count, 0, "短淡走满之后 L 应严格 0（被跟随撤掉的话还在长曲线上）：\(badL.count) 个样本不是，第一个 \(badL.first.map { "样本 \($0) = \(l[$0])" } ?? "—")")
+        XCTAssertEqual(tail.filter { abs(Double(r[$0]) - 1) > 2e-7 }.count, 0, "短淡走满之后 R 应满")
+        // 短淡起点之前：跟随在走（L 已离开 1、在 cos 上；接上之后 50 ms 内的残差不看）
+        XCTAssertLessThan(l[(cut.index / 256) * 256 - 1], 0.75)
+        XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
+    }
+
     /// 第 1 条的另一种相位（连按两下 Cut、第二条命令到时第一条正在走）：反方向的替换淡变不撤正在走的那条，第一条照走到第二条的起点，
     /// 第二条从那一刻的增益接着走回去。默认语义在这里会撤掉第一条、afv 向转场前的目标回弹约 60 ms、起点再跳回（testD10_plainCrossfadeStillCancelsAtApply_contrast）。
     func testW1D4_1_reverseReplaceWhileTheFirstIsRunning_noRebound() {
