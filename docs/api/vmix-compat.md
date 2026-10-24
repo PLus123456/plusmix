@@ -23,11 +23,11 @@ Connections 加 "vMix" 类型的连接，Target host = PlusMix 所在机器，TC
 
 | Companion 动作 | 支持 | 说明 |
 |---|---|---|
-| Transition → Cut / Fade / Wipe / Zoom（带 Duration、可选 Input） | ✅ | 带 Input 时先选到 PVW 再切（旧 PGM 进 PVW）；转场进行中带 Input 的 Cut 回 409 NotConfigured、什么都不做 |
+| Transition → Cut / Fade / Wipe / Zoom（带 Duration、可选 Input） | ✅ | 带 Input 时先选到 PVW 再切（旧 PGM 进 PVW）；转场进行中带 Input 的 Cut 回 409 NotConfigured、什么都不做。Duration 只收 0–3 600 000 ms，越界 400 BadParameter |
 | Transition → Stinger 1 | ✅ | 执行 PlusMix 里第一个选了输入的 Stinger 转场槽；一个都没有（当前那组也没设 Stinger 输入）时 409 NotConfigured |
-| Transition → Transition 1–4 / Set transition effect 1–4 / Set transition duration 1–4 | ✅ | 对应 PlusMix 的四个转场槽：Transition n = 执行转场 n（那个槽是没选输入的 Stinger 时 409 NotConfigured）；改效果 / 时长只改那个槽、不执行；效果只认 Cut / Fade / Wipe / Zoom / Stinger，对方的其他效果名返回 NotImplemented |
+| Transition → Transition 1–4 / Set transition effect 1–4 / Set transition duration 1–4 | ✅ | 对应 PlusMix 的四个转场槽：Transition n = 执行转场 n（那个槽是没选输入的 Stinger 时 409 NotConfigured）；改效果 / 时长只改那个槽、不执行（时长同样只收 0–3 600 000 ms）；效果只认 Cut / Fade / Wipe / Zoom / Stinger，对方的其他效果名返回 NotImplemented |
 | Set fader（T-bar） | ✅ | 0–255 映射到推杆 0–1 |
-| Input → Preview input / Send input to program / Preview next / previous | ✅ | Input 可以是编号、`0` = 当前 PVW、`-1` = 当前 PGM、XML 里的 key、或整个标题 |
+| Input → Preview input / Send input to program / Preview next / previous | ✅ | Input 可以是编号、`0` = 当前 PVW、`-1` = 当前 PGM、XML 里的 key、或整个标题；**必须落到一路存在的输入上**：编号不存在、`0` / `-1` 时 PVW / PGM 是黑场（或指着已删的输入）都回 404 InputNotFound、什么都不做——切换类（Cut / Fade 带 `Input=0`）也一样，PVW 是黑场时不再把黑场切上去（要切黑场用不带 Input 的 Cut） |
 | Input → Set input name | ✅ | |
 | Output → Start / Stop / Toggle recording | ✅ | 作用于编号最小的录制输出（可在配置里指定） |
 | Output → Start / Stop / Toggle streaming（可选第几路） | ✅ | |
