@@ -310,5 +310,21 @@ extension StateMachineTests {
             XCTAssertEqual(r.appliedTick, Tick(330))
             XCTAssertEqual(c.events.map(\.0), expected, "命令路")
         }
+        // 同一个根：走满那一拍又排了一条新的 Auto（2→1）——修前前后都是"转场进行中"，一个事件都不发（音频既不收口也不起新淡变）
+        do {
+            let sm = makeMachine()
+            defer { sm.stop() }
+            let c = EventCollector()
+            await sm.addTransitionSink(c)
+            await sm.schedule(.fade(durationTicks: 30), at: Tick(300))
+            await sm.schedule(.fade(durationTicks: 30), at: Tick(330))
+            await sm.prepare(upTo: Tick(400))
+            XCTAssertEqual(c.events.map(\.0), [
+                .started(tick: Tick(300), type: .fade, durationTicks: 30, from: 1, to: 2, source: .auto),
+                .completed(tick: Tick(330), from: 1, to: 2, completion: .elapsed),
+                .started(tick: Tick(330), type: .fade, durationTicks: 30, from: 2, to: 1, source: .auto),
+                .completed(tick: Tick(360), from: 2, to: 1, completion: .elapsed),
+            ], "走满那一拍再起 Auto")
+        }
     }
 }
