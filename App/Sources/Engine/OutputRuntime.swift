@@ -622,9 +622,20 @@ final class OutputRuntime {
     }
 
     /// 切备用目录：停旧录制器（失败的直接封口），下一拍在备用目录起新的，运行表换成新的。
+    /// ISO 路（N06，Codex 2026-10-22）：新录制器要自己的分支（旧的那个录到边界拍才还），先开；这一路 4 个分支都占着就开不到——不切，
+    /// 按 stopForDisk 停这一路并提示，绝不退成 PGM 录制器 + Master 音频（原来 attach 拿到 nil 分支就那么录，配置还写着输入 n）。
+    /// 旧录制器封口时把它的分支还给那一路（同 finishRecording；原来漏了，切一次多占一个，停了以后还剩一个）。
     private func switchToFallback(_ entry: RecordEntry, reason: String, cause: FallbackCause) {
         guard let clock, let dir = fallbackDirectory else { return }
         let number = entry.output.number
+        var branch: LockFreeFrameSlot?
+        if let n = entry.inputNumber {
+            guard let b = inputs?.openBranch(input: n) else {
+                stopForDisk(entry, reason: L("notice.recordingFallbackNoBranch", reason, n, InputFrameTee.maxBranches))
+                return
+            }
+            branch = b
+        }
         entry.stopping = true
         entry.onFallback = true
         let boundary = clock.tick(at: .now()) + 2
@@ -639,10 +650,11 @@ final class OutputRuntime {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try rec.start(at: start)
         } catch {
+            if let branch, let n = entry.inputNumber { inputs?.releaseBranch(branch, input: n) }
             stopForDisk(entry, reason: L("notice.recordingFallbackFailed", reason, "\(error)"))
             return
         }
-        // 旧的停在同一边界；封口回调只做清理（运行表里已经是新的了）
+        // 旧的停在同一边界；封口回调只做清理（运行表里已经是新的了）：摘消费者、摘音频、还分支
         let old = entry
         old.recorder.stop(atTick: boundary) { [weak self] r in
             DispatchQueue.main.async {
@@ -651,12 +663,11 @@ final class OutputRuntime {
                     self.engine.removeConsumer(old.consumer)
                     self.detachAudio(old.audio)
                     old.audio = nil
+                    if let b = old.branch, let n = old.inputNumber { self.inputs?.releaseBranch(b, input: n) }
                     if case .success(let res) = r { self.lastResults[number] = res }
                 }
             }
         }
-        var branch: LockFreeFrameSlot?
-        if let n = entry.inputNumber { branch = inputs?.openBranch(input: n) }
         diskMonitor.remove(key: number)
         attach(output: entry.output, recorder: rec, branch: branch, start: start)
         recorders[number]?.onFallback = true

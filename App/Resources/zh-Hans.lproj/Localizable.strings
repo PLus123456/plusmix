@@ -943,6 +943,7 @@
 "notice.recordingFallback" = "录制 %d：磁盘满，已切到备用目录：%@";
 "notice.recordingFallbackBelowMinimum" = "录制 %d：磁盘剩余 %d MB，低于下限 %d MB，已切到备用目录：%@";
 "notice.recordingFallbackFailed" = "%@；备用目录也起不来：%@";
+"notice.recordingFallbackNoBranch" = "%@；备用目录：这一路的画面分支满了（输入 %d 每路最多 %d 个 ISO / Aux），没有切，已停这一路";
 "notice.recordingFinishFailed" = "录制 %d 封口失败：%@";
 "notice.recordingStarted" = "录制 %d 开始：%@";
 "notice.recordingStopped" = "录制 %d 已停：%@，%d 帧 / %.2f s";

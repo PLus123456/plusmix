@@ -122,4 +122,82 @@ final class W5RCloseoutTests: XCTestCase {
         XCTAssertEqual(controller.defaults.integer(forKey: AppSettings.Keys.recordMinimumFreeMB), Self.limitMB, "导进来落盘的是钳后的值")
         XCTAssertEqual(session.outputs.minimumFreeBytes, UInt64(Self.limitMB) * 1_048_576)
     }
+
+    // MARK: N06 ISO 切备用目录
+
+    /// 录 input2 的 ISO（PGM = input1），主目录与备用目录都在独立临时目录下；下限设 0（不让真的磁盘事件插进来），事件靠 DiskMonitor.onEvent 注入。
+    private func startISOOnInput2() throws -> (session: SwitcherSession, number: Int, base: URL) {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        session.send(.setProgram(input: 1))
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("plusmix-w5r-n06-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let input = try XCTUnwrap(session.state.input(2))
+        var output = ISORoutes.makeISOOutput(for: input, in: session.state, defaultDirectory: base.path)
+        output.settings.record?.directory = base.appendingPathComponent("primary").path
+        output.settings.record?.ownFormat = true
+        session.outputs.minimumFreeBytes = 0
+        session.outputs.fallbackDirectory = base.appendingPathComponent("fallback").path
+        session.send(.addOutput(config: output))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(output.number) != nil })
+        session.send(.startRecord(output: output.number))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[output.number] != nil })
+        let tap = try XCTUnwrap(session.outputs.recorders[output.number]?.consumer as? ISOFrameTap)
+        XCTAssertTrue(AppTest.waitUntil(3) { tap.counters.forwarded > 30 })
+        return (session, output.number, base)
+    }
+
+    /// N06：切备用目录时旧录制器封口要还它的分支（finishRecording 那条路一直有，切备用目录这条漏了）——切完分支数回到切之前，停了以后是 0。
+    func testN06_isoFallbackReleasesOldBranch() throws {
+        let (session, number, base) = try startISOOnInput2()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let tee = try XCTUnwrap(session.inputs.entries[2]?.tee)
+        XCTAssertEqual(tee.branchCount, 1)
+        let before = try XCTUnwrap(session.outputs.recorders[number])
+        session.outputs.diskMonitor.onEvent?(number, .belowMinimum(freeBytes: 0))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[number].map { $0 !== before && $0.onFallback } ?? false }, "切到备用目录")
+        let after = try XCTUnwrap(session.outputs.recorders[number])
+        XCTAssertTrue(after.consumer is ISOFrameTap, "仍是输入 2 的 ISO")
+        XCTAssertNotNil(after.branch)
+        XCTAssertTrue(after.url.path.hasPrefix(base.appendingPathComponent("fallback").path), after.url.path)
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.lastResults[number]?.url == before.url }, "旧文件在边界拍封口")
+        XCTAssertTrue(AppTest.waitUntil(2) { tee.branchCount == 1 }, "旧录制器封口后分支数回到切之前（1）：\(tee.branchCount)")
+        AppTest.pump(seconds: 0.5)
+        session.send(.stopRecord(output: number))
+        XCTAssertTrue(AppTest.waitUntil(10) { session.outputs.recorders[number] == nil })
+        AppTest.pump(seconds: 0.5)
+        print("W5R N06 切备用目录：停后 branchCount=\(tee.branchCount)，retired=\(tee.retiredCount)")
+        XCTAssertEqual(tee.branchCount, 0, "停了以后新旧两个分支都还了")
+    }
+
+    /// N06：这一路 4 个分支都占着（ISO 自己 1 个 + 别的 3 个）时切备用目录开不到新分支——不切：停这一路（快照 enabled 回 false）、提示"分支满了，没有切"，
+    /// 原来的文件照常封口；运行表里从不出现普通录制器 / 分支为 nil 的项（原来退成 PGM 录制器 + Master 音频，配置还写着 input 2，没提示）。
+    func testN06_isoFallbackWithBranchesFullStopsInsteadOfRecordingProgram() throws {
+        let (session, number, base) = try startISOOnInput2()
+        defer { try? FileManager.default.removeItem(at: base) }
+        var notices: [String] = []
+        let token = session.observeNotices { notices.append($0) }
+        defer { token.invalidate() }
+        let extra = try (0..<3).map { _ in try XCTUnwrap(session.inputs.openBranch(input: 2)) }
+        defer { for branch in extra { session.inputs.releaseBranch(branch, input: 2) } }
+        let tee = try XCTUnwrap(session.inputs.entries[2]?.tee)
+        XCTAssertEqual(tee.branchCount, 4)
+        let before = try XCTUnwrap(session.outputs.recorders[number])
+        session.outputs.diskMonitor.onEvent?(number, .belowMinimum(freeBytes: 0))
+        var substituted: [String] = []
+        let stopped = AppTest.waitUntil(8) {
+            if let e = session.outputs.recorders[number], e !== before {
+                substituted.append("consumer=\(type(of: e.consumer)) branchNil=\(e.branch == nil) url=\(e.url.lastPathComponent)")
+            }
+            return session.outputs.recorders[number] == nil && session.state.output(number)?.enabled == false
+        }
+        print("W5R N06 分支满：替换=\(substituted.first ?? "无")，提示 \(notices)")
+        XCTAssertTrue(substituted.isEmpty, "输入 2 的 ISO 不能悄悄换成别的录制器：\(substituted.first ?? "")")
+        XCTAssertTrue(stopped, "开不到分支：停这一路、快照的 enabled 回 false")
+        XCTAssertTrue(notices.contains { $0.contains("备用目录") && $0.contains("分支满了") && $0.contains("没有切") }, "提示为什么没切：\(notices)")
+        XCTAssertEqual(session.outputs.lastResults[number]?.url, before.url, "原来那个文件照常封口")
+        let fallbackFiles = (try? FileManager.default.contentsOfDirectory(atPath: base.appendingPathComponent("fallback").path)) ?? []
+        XCTAssertTrue(fallbackFiles.isEmpty, "备用目录里没有新文件：\(fallbackFiles)")
+        XCTAssertTrue(AppTest.waitUntil(2) { tee.branchCount == 3 }, "ISO 自己那个分支还了，剩下用例占的 3 个：\(tee.branchCount)")
+    }
 }
