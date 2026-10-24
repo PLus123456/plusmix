@@ -178,7 +178,7 @@ First row × | Transition | Cut | ⏮ | ▶⏸ | 🔁, second row 1 2 3 4 | Mute
 | Button | What it does |
 |---|---|
 | × | Remove this input. If it is on PGM / PVW / a visible overlay channel / the Stinger / an ISO recording in progress, it asks first and lists what happens ("It's on PGM: PGM will go black"…); otherwise it is removed at once. This can't be undone |
-| Transition | Takes this input to PGM with the **current transition slot** (it is put on PVW first if it isn't there) — the same slot Return, the T-bar and Run Current Transition use ([Concepts › Transition slots](concepts.md#transition-slots)). The tooltip names it, e.g. "Take to PGM with the current transition (Transition 1 · Fade 0.5 s)" |
+| Transition | Takes this input to PGM with the **current transition slot** (it is put on PVW first if it isn't there) — the same slot Return, the T-bar and Run Current Transition use ([Concepts › Transition slots](concepts.md#transition-slots)). The tooltip names it, e.g. "Take to PGM with the current transition (Transition 1 · Fade 0.5 s)". While the current slot is a Stinger with no input yet, clicking it pops up that slot's input list first and sends no command (PVW stays as it is; [Concepts › The transition column](concepts.md#the-transition-column)) |
 | Cut | Cut straight to PGM (skips PVW) |
 | ⏮ ▶⏸ 🔁 | Back to start / pause·play / loop, lit only for video files (greyed out on other inputs); see [Video file › Playback](#playback) |
 | 1 2 3 4 | Put this input on overlay channel n and show it; if it is already showing there = hide. Right-click = Overlay Settings… |
