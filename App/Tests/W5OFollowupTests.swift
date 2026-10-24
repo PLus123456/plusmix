@@ -283,7 +283,7 @@ final class W5OFollowupTests: XCTestCase {
     // MARK: 6. 压缩器简单模式界面（提案 024 (b)；问题单 W1D3-app-monitor-source-and-input-effects-wiring 第 4 条）
 
     /// 音频设置窗压缩页：新开默认装自写压缩器 compressor（阈值 / 比例 / 拐点 / 起音 / 释放 / 补偿，范围 = 引擎的 EffectParameterRanges["compressor"]），
-    /// 与 dynamicsProcessor 二选一占同一格（链里不会两个都在）；"延迟自测"一行读引擎冲激法量到的 compressorMeasuredLatencyFrames（调音台同一份 50 ms 状态）；
+    /// 与 dynamicsProcessor 二选一占同一格（链里不会两个都在）；"延迟自测"一行读引擎冲激法量到的延迟（W5-Q 起读 Stats 的 audio.effects，提案 030）；
     /// 限幅页"天花板"写 peakLimiter.ceilingDb（−20…0）。总线与每路都能装。
     func testW5O6_compressorPageSimpleModeAndLimiterCeiling() throws {
         let session = try AppTest.freshSession()
@@ -291,7 +291,6 @@ final class W5OFollowupTests: XCTestCase {
         XCTAssertEqual(AppTest.waitLive(session, input: 1, timeout: 10), .live)
         let panels = AppTest.controller.panels
         defer { panels.closeAll() }
-        let meters = AppTest.controller.windowController.mixerPanel.meters
         let w = try XCTUnwrap(panels.showAudioSettings(.bus(.master), page: .compressor))
         let m = w.model
         func master() -> [EffectSlot] { session.state.audio.buses[0].effects }
@@ -328,15 +327,16 @@ final class W5OFollowupTests: XCTestCase {
             return s.flatMap { AudioEffectParams.number($0, "ratio") } == 8 && s.flatMap { AudioEffectParams.number($0, "thresholdDb") } == -30
                 && s.flatMap { AudioEffectParams.number($0, "makeupGainDb") } == 3
         }, "\(master())")
-        // 延迟自测：引擎装上压缩器后冲激法量一次（按设计 0 帧）
-        XCTAssertTrue(AppTest.waitUntil(5) { meters.busCompressorLatencyFrames[.master] != nil }, "引擎状态里应有实测延迟")
-        XCTAssertEqual(meters.busCompressorLatencyFrames[.master], 0, "前瞻 0：按设计 0 帧")
-        XCTAssertEqual(m.compressorLatencyText(meters), L("audioSettings.compressor.latency", 0, 0.0))
+        // 延迟自测：引擎装上压缩器后冲激法量一次（按设计 0 帧）；W5-Q 起读 Stats 的 audio.effects（1 Hz，与 stats.jsonl / API 同一份）
+        func masterMeasured() -> Double? { session.stats?.audio.effects.buses.first { $0.bus == Bus.master.name }?.measuredLatencyMs }
+        XCTAssertTrue(AppTest.waitUntil(5) { masterMeasured() != nil }, "Stats 里应有实测延迟")
+        XCTAssertEqual(masterMeasured(), 0, "前瞻 0：按设计 0 帧")
+        XCTAssertTrue(AppTest.waitUntil(3) { m.compressorSelfTestText == L("audioSettings.compressor.latency", 0, 0.0) }, "\(String(describing: m.compressorSelfTestText))")
         // 二选一：换成苹果动态处理器 → 链里只剩 dynamicsProcessor（开关带过去）；再换回来
         m.setCompressorKind(.dynamicsProcessor)
         XCTAssertTrue(AppTest.waitUntil(3) { ids() == [AudioEffectParams.dynamicsProcessorID] }, "\(ids())")
         XCTAssertTrue(m.compressorEnabled)
-        XCTAssertNil(m.compressorLatencyText(meters), "动态处理器是 AU、延迟进总线延迟：这一行只给自写压缩器")
+        XCTAssertNil(m.compressorSelfTestText, "动态处理器是 AU、延迟进总线延迟：这一行只给自写压缩器")
         m.setCompressorKind(.compressor)
         XCTAssertTrue(AppTest.waitUntil(3) { ids() == [AudioEffectParams.compressorID] }, "\(ids())")
         // 复位：参数回默认，开关不动
@@ -358,8 +358,8 @@ final class W5OFollowupTests: XCTestCase {
         let wi = try XCTUnwrap(panels.showAudioSettings(.input(1), page: .compressor))
         wi.model.setCompressorEnabled(true)
         XCTAssertTrue(AppTest.waitUntil(3) { session.state.input(1)?.settings.effects.map(\.id) == [AudioEffectParams.compressorID] })
-        XCTAssertTrue(AppTest.waitUntil(5) { meters.inputCompressorLatencyFrames[1] != nil }, "每路的实测延迟也读得到")
-        XCTAssertEqual(wi.model.compressorLatencyText(meters), L("audioSettings.compressor.latency", 0, 0.0))
+        XCTAssertTrue(AppTest.waitUntil(5) { wi.model.compressorSelfTestText == L("audioSettings.compressor.latency", 0, 0.0) },
+                      "每路的实测延迟也读得到（Stats 的 audio.effects.inputs）：\(String(describing: wi.model.compressorSelfTestText))")
         XCTAssertEqual(session.control.bus.counters.rejected, 0)
     }
 

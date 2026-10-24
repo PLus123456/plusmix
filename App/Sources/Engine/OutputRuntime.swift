@@ -42,17 +42,23 @@ import SwitcherISO
 /// 在提交方的任务上同步被调（任意线程），只写一个带锁的字典。
 final class OutputCommandTicks: CommandBusObserver, @unchecked Sendable {
     private let ticks = Mutex<[Int: Tick]>([:])
+    /// removeInput 的生效拍（键 = 输入编号）：ISO 录制读的那一路被删时停在这一拍（D06 边角，W5-Q）。
+    private let removals = Mutex<[Int: Tick]>([:])
     func commandBus(_ bus: CommandBus, didApply entry: CommandLogEntry) {
         guard entry.applied else { return }
         switch entry.command {
         case .startRecord(let n), .stopRecord(let n), .startStream(let n), .stopStream(let n):
             ticks.withLock { $0[n] = entry.appliedTick }
+        case .removeInput(let n):
+            removals.withLock { $0[n] = entry.appliedTick }
         default:
             break
         }
     }
     /// 取走某输出最近一条起停命令的生效拍。
     func take(output number: Int) -> Tick? { ticks.withLock { $0.removeValue(forKey: number) } }
+    /// 取走某路输入最近一次被删的生效拍。
+    func takeRemoval(input number: Int) -> Tick? { removals.withLock { $0.removeValue(forKey: number) } }
 }
 
 /// 输出运行表（主线程）。
@@ -85,24 +91,43 @@ final class OutputRuntime {
         case belowMinimum(freeMB: Int, minimumMB: Int)
     }
 
+    /// 一个挂在混音器上的音频消费者（录制 / NDI）。来源是 .input(n) 的，这一路换了混音器槽位时由 followInputAudioSlots 摘下重挂、换 token（D06 边角）。
+    final class AudioAttachment {
+        let consumer: any AudioBlockConsuming
+        let source: AudioTapSource
+        var token: AudioConsumerToken?
+        init(consumer: any AudioBlockConsuming, source: AudioTapSource) {
+            self.consumer = consumer
+            self.source = source
+        }
+        var inputNumber: Int? {
+            switch source {
+            case .input(let n), .inputProgram(let n): n
+            default: nil
+            }
+        }
+    }
+
     /// 一路在跑的录制（主线程改，封口回调经主线程；标 @unchecked Sendable 只为能捕获进回调）。
     final class RecordEntry: @unchecked Sendable {
         let output: OutputState
         let recorder: Recorder
         /// 挂在引擎上的消费者：PGM 路 = recorder 本身；ISO 路 = ISOFrameTap（下游是 recorder）。
         let consumer: any FrameConsumer
-        /// ISO 路的分支槽（停时还给输入）。
+        /// ISO 路的分支槽（停时还给输入）与开出它的那一路 tee：这一路删了（删了又加同编号也是新 tee）就对不上了（D06 边角）。
         let branch: LockFreeFrameSlot?
+        let sourceTee: InputFrameTee?
         let start: RecordingStart
-        var audioToken: AudioConsumerToken?
+        var audio: AudioAttachment?
         var stopping = false
         /// 已经切到备用目录（不再切第二次）。
         var onFallback = false
-        init(output: OutputState, recorder: Recorder, consumer: any FrameConsumer, branch: LockFreeFrameSlot?, start: RecordingStart) {
+        init(output: OutputState, recorder: Recorder, consumer: any FrameConsumer, branch: LockFreeFrameSlot?, sourceTee: InputFrameTee?, start: RecordingStart) {
             self.output = output
             self.recorder = recorder
             self.consumer = consumer
             self.branch = branch
+            self.sourceTee = sourceTee
             self.start = start
         }
         var url: URL { recorder.configuration.url }
@@ -151,7 +176,7 @@ final class OutputRuntime {
         var inputSource: InputSource?
         /// 源是输入 n、那一路分支用完了：在等 InputRuntime 还分支（W3-E4）；接上 / 摘下时清。
         var branchPending = false
-        var audioToken: AudioConsumerToken?
+        var audio: AudioAttachment?
         init(number: Int, key: NDIKey, sender: NDISender) {
             self.number = number
             self.key = key
@@ -204,6 +229,11 @@ final class OutputRuntime {
     private var lastInputs: [InputConfig] = []
     private let stats = EncoderStatsSource()
     let diskMonitor = RecordingDiskMonitor(warnBelowBytes: 1024 * 1024 * 1024, interval: 1)
+    /// 来源是 .input(n) 的音频消费者（ISO 录制、源是输入 n 的 NDI）与挂上时这一路的混音器槽位。泵按来源共享一个 tap、加第一个消费者时把编号换成槽位，
+    /// 之后不再换（包里的口径）；这一路换源重注册落到了别的槽位（摘除淡出期间别的路注册、按后进先出拿走了原来那个，或正好注册在 detach 与槽位回收之间），
+    /// tap 就还挂在旧槽位上、录到别人。任何一路注册上来都对一遍（followInputAudioSlots）。D06 边角（119 §3，W5-Q）。
+    private var inputAudio: [AudioAttachment] = []
+    private var inputAudioSlots: [Int: Int] = [:]
 
     init(engine: Engine, audio: AudioRuntime?, inputs: InputRuntime?, format: ProgramFormat, showName: String) {
         self.engine = engine
@@ -220,6 +250,8 @@ final class OutputRuntime {
         inputs?.onBranchReleased = { [weak self] m in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.retryPendingNDIBranches(input: m) } }
         }
+        // 某路音频注册上来（新加 / 换源重注册 / 重试成功）：.input(n) 的消费者跟上这一路现在的槽位（D06 边角）
+        audio?.registration.onRegistered = { [weak self] _ in self?.followInputAudioSlots() }
     }
 
     /// Stats.encoder（采样线程上调）。
@@ -235,6 +267,10 @@ final class OutputRuntime {
     func reconcile(_ state: MixerState) {
         lastOutputs = state.outputs
         lastInputs = state.inputs
+        // ISO 录制读的那一路被删了（删了又加同编号也算：新的一路是新 tee）：停在删除那一拍（D06 边角）
+        for e in recorders.values.sorted(by: { $0.output.number < $1.output.number }) where !e.stopping {
+            if let n = e.inputNumber, e.sourceTee != nil, inputs?.entries[n]?.tee !== e.sourceTee { stopForInputRemoved(e, input: n) }
+        }
         let wanted = Dictionary(uniqueKeysWithValues: state.outputs.map { ($0.number, $0) })
         var toStop: [Int] = []
         for (n, e) in recorders where wanted[n]?.kind != .record && !e.stopping { toStop.append(n) }
@@ -457,17 +493,17 @@ final class OutputRuntime {
         let number = output.number
         let consumer: any FrameConsumer
         var audioSource: AudioTapSource = .master
+        var sourceTee: InputFrameTee?
         if let n = output.settings.source.inputNumber, let branch {
             consumer = ISOFrameTap(inputNumber: n, branch: branch, sink: rec, name: "iso\(number)")
             audioSource = .input(number: n)
+            sourceTee = inputs?.entries[n]?.tee
         } else {
             consumer = rec
         }
         engine.addConsumer(consumer)
-        let entry = RecordEntry(output: output, recorder: rec, consumer: consumer, branch: branch, start: start)
-        if let audio, rec.configuration.audio != nil {
-            do { entry.audioToken = try audio.engine.addConsumer(rec, source: audioSource) } catch { NSLog("录制 \(number) 挂不上音频：\(error)") }
-        }
+        let entry = RecordEntry(output: output, recorder: rec, consumer: consumer, branch: branch, sourceTee: sourceTee, start: start)
+        if rec.configuration.audio != nil { entry.audio = attachAudio(rec, source: audioSource) }
         recorders[number] = entry
         finishedRecorders.removeValue(forKey: number)
         diskEvents.removeValue(forKey: number)
@@ -500,10 +536,8 @@ final class OutputRuntime {
 
     private func finishRecording(_ number: Int, entry: RecordEntry, result: Result<RecordingResult, any Error>) {
         engine.removeConsumer(entry.consumer)
-        if let token = entry.audioToken {
-            audio?.engine.removeConsumer(token)
-            entry.audioToken = nil
-        }
+        detachAudio(entry.audio)
+        entry.audio = nil
         if let branch = entry.branch, let n = entry.inputNumber { inputs?.releaseBranch(branch, input: n) }
         diskMonitor.remove(key: number)
         if recorders[number] === entry { recorders.removeValue(forKey: number) }
@@ -573,6 +607,20 @@ final class OutputRuntime {
         }
     }
 
+    /// ISO 录制读的那一路被删了（D06 边角，119 §3；W5-Q）：录制器停在删除那一拍（removeInput 的生效拍；主线程看到快照之前已经录进去的一两拍撤不回，
+    /// Recorder 按已收的帧往后取整），提示一句；同 stopForDisk 置 failed、发 stopRecord 让快照的 enabled 回 false——之后再加同编号的输入是新的 tee，
+    /// 旧录制器不接上去，也不按"仍 enabled"自动再起一个录新的一路。原来旧录制器挂在没人推的分支上，每拍重复最后一帧、一直定格到手动停。
+    private func stopForInputRemoved(_ entry: RecordEntry, input n: Int) {
+        let number = entry.output.number
+        entry.stopping = true
+        fail(output: number, L("notice.isoInputRemoved", number, n))
+        sendCommand?(.stopRecord(output: number))
+        let tick = commandTicks.takeRemoval(input: n) ?? clock?.tick(at: .now())
+        entry.recorder.stop(atTick: tick) { [weak self] r in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.finishRecording(number, entry: entry, result: r) } }
+        }
+    }
+
     /// 切备用目录：停旧录制器（失败的直接封口），下一拍在备用目录起新的，运行表换成新的。
     private func switchToFallback(_ entry: RecordEntry, reason: String, cause: FallbackCause) {
         guard let clock, let dir = fallbackDirectory else { return }
@@ -601,7 +649,8 @@ final class OutputRuntime {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.engine.removeConsumer(old.consumer)
-                    if let token = old.audioToken { self.audio?.engine.removeConsumer(token) }
+                    self.detachAudio(old.audio)
+                    old.audio = nil
                     if case .success(let res) = r { self.lastResults[number] = res }
                 }
             }
@@ -614,6 +663,51 @@ final class OutputRuntime {
         onEvent?(.recordingSwitchedToFallback(output: number, url: url, cause: cause))
         NSLog("%@", reason + "，已切到备用目录 \(url.path)")
         rebuildStats()
+    }
+
+    // MARK: 音频消费者
+
+    /// 把消费者挂到混音器上；来源是 .input(n) 的记进 inputAudio，跟着这一路的槽位走。没有音频引擎为 nil。
+    private func attachAudio(_ consumer: any AudioBlockConsuming, source: AudioTapSource) -> AudioAttachment? {
+        guard let audio else { return nil }
+        let a = AudioAttachment(consumer: consumer, source: source)
+        if let n = a.inputNumber {
+            if !inputAudio.contains(where: { $0.inputNumber == n && $0.token != nil }) { inputAudioSlots[n] = audio.engine.slot(forInput: n) }
+            inputAudio.append(a)
+        }
+        do { a.token = try audio.engine.addConsumer(consumer, source: source) } catch { NSLog("\(consumer.consumerName) 挂不上音频：\(error)") }
+        return a
+    }
+
+    private func detachAudio(_ a: AudioAttachment?) {
+        guard let a else { return }
+        if let t = a.token { audio?.engine.removeConsumer(t) }
+        a.token = nil
+        guard let n = a.inputNumber else { return }
+        inputAudio.removeAll { $0 === a }
+        if !inputAudio.contains(where: { $0.inputNumber == n }) { inputAudioSlots.removeValue(forKey: n) }
+    }
+
+    /// .input(n) 的消费者跟上这一路现在的混音器槽位（某路音频注册上来时调）：槽位与挂上时的不同 → 这一路的消费者全部摘下（泵里这个来源没人要了才摘旧 tap），
+    /// 注册着的话按现在的槽位重挂（泵新建 tap）；这一路此刻没注册（换源重试中、新来源没有声音）就先空着——录制器按时间轴补静音，不录到占了旧槽位的别人——
+    /// 等它注册上来再挂。槽位没变（最常见：换源后按后进先出拿回原来那个）什么都不动。
+    private func followInputAudioSlots() {
+        guard let audio else { return }
+        for n in Set(inputAudio.compactMap(\.inputNumber)).sorted() {
+            let slot = audio.engine.slot(forInput: n)
+            guard slot != inputAudioSlots[n] else { continue }
+            let group = inputAudio.filter { $0.inputNumber == n }
+            for a in group {
+                if let t = a.token { audio.engine.removeConsumer(t) }
+                a.token = nil
+            }
+            inputAudioSlots[n] = slot
+            guard let slot else { continue }
+            for a in group {
+                do { a.token = try audio.engine.addConsumer(a.consumer, source: a.source) } catch { NSLog("输入 \(n) 的音频消费者重挂不上：\(error)") }
+            }
+            NSLog("输入 \(n) 的音频换了混音器槽位：\(group.count) 个消费者（ISO / NDI）跟到槽位 \(slot)")
+        }
     }
 
     // MARK: 推流
@@ -760,9 +854,7 @@ final class OutputRuntime {
             entry.consumer = sender
             engine.addConsumer(sender)
         }
-        if let audio, let audioSource {
-            do { entry.audioToken = try audio.engine.addConsumer(sender, source: audioSource) } catch { NSLog("NDI 发送 \(entry.number) 挂不上音频：\(error)") }
-        }
+        if let audioSource { entry.audio = attachAudio(sender, source: audioSource) }
     }
 
     /// 给源是输入 m 的 NDI 发送开一个分支 + tap、挂到引擎上；那一路分支用完（或没有这路）返回 false。
@@ -797,8 +889,8 @@ final class OutputRuntime {
         entry.branch = nil
         entry.inputSource = nil
         entry.branchPending = false
-        if let t = entry.audioToken { audio?.engine.removeConsumer(t) }
-        entry.audioToken = nil
+        detachAudio(entry.audio)
+        entry.audio = nil
     }
 
     /// 停：主线程摘下，后台线程 stop（等发送线程退出、销毁 NDI 实例），回主线程收尾；还在起的等起完再停（ndiStarted 会再对一次快照）。

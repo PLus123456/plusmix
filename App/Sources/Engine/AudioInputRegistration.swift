@@ -26,6 +26,8 @@ final class AudioInputRegistration {
     private let schedule: Scheduler
     /// 已经注册上的编号。
     private(set) var registered: Set<Int> = []
+    /// 某路注册上了（当场或重试成功之后）：输出运行表让 .input(n) 的消费者跟上这一路的槽位（D06 边角，W5-Q）。
+    var onRegistered: (@MainActor (Int) -> Void)?
     /// 撞 inputAlreadyRegistered 之后排过的重试次数（累计）。
     private(set) var retries = 0
     /// 每路的代次：register / unregister / removeAll 各加一次；排着的重试带着排它时的代次，到点不一样就作废。
@@ -62,6 +64,7 @@ final class AudioInputRegistration {
         do {
             try registerInEngine(number, ring, hints)
             registered.insert(number)
+            onRegistered?(number)
         } catch AudioEngineError.inputAlreadyRegistered(_) where attempt < Self.maxAttempts {
             retries += 1
             schedule(Self.retryDelayMilliseconds) { [weak self] in

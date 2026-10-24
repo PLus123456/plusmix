@@ -202,18 +202,23 @@ struct MediaFileInfo: Equatable, Sendable {
             let length = Self.durationText(duration.seconds)
             if let video = videos.first {
                 let size = try await video.load(.naturalSize)
+                let transform = try await video.load(.preferredTransform)
                 let fps = try await video.load(.nominalFrameRate)
                 let formats = try await video.load(.formatDescriptions)
                 var codec = "?"
                 var alpha = false
+                var coded = (width: Int(size.width.rounded()), height: Int(size.height.rounded()))
                 if let f = formats.first {
+                    let dims = CMVideoFormatDescriptionGetDimensions(f)   // 编码尺寸取格式描述（FileInfo.width / height 同一来源）
+                    if dims.width > 0, dims.height > 0 { coded = (Int(dims.width), Int(dims.height)) }
                     codec = Self.codecName(CMFormatDescriptionGetMediaSubType(f))
                     let ext = CMFormatDescriptionGetExtensions(f) as? [String: Any] ?? [:]
                     if let v = ext[kCMFormatDescriptionExtension_ContainsAlphaChannel as String] as? Bool { alpha = v }
                     else if let n = ext[kCMFormatDescriptionExtension_ContainsAlphaChannel as String] as? NSNumber { alpha = n.boolValue }
                     if !alpha, let depth = ext[kCMFormatDescriptionExtension_Depth as String] as? Int, depth == 32 { alpha = true }
                 }
-                var parts = [codec, "\(Int(size.width.rounded()))×\(Int(size.height.rounded()))", L("addInput.fileInfo.fps", CameraNegotiationSummary.rateText(Double(fps))), length]
+                var parts = [codec, Self.sizeText(codedWidth: coded.width, codedHeight: coded.height, transform: transform),
+                             L("addInput.fileInfo.fps", CameraNegotiationSummary.rateText(Double(fps))), length]
                 if alpha { parts.append(L("addInput.fileInfo.alpha")) }
                 if audios.isEmpty { parts.append(L("addInput.fileInfo.noAudio")) }
                 return MediaFileInfo(summary: parts.joined(separator: " · "), isAudioOnly: false)
@@ -232,6 +237,14 @@ struct MediaFileInfo: Equatable, Sendable {
         } catch {
             return MediaFileInfo(summary: L("addInput.fileInfo.unreadable", "\(error.localizedDescription)"), isAudioOnly: isAudioFile(path))
         }
+    }
+
+    /// 尺寸那一段（W5-Q，117 §3）：先写转正后的尺寸 = FileInput 出帧的尺寸（与 FileInfo.displayWidth / displayHeight 同一套方向归类 FileOrientation），
+    /// 竖拍这类宽高互换的片子编码尺寸放括号里；方向矩阵认不出（任意角度）时 FileInput 按原样出，这里也只写编码尺寸。
+    static func sizeText(codedWidth w: Int, codedHeight h: Int, transform: CGAffineTransform) -> String {
+        let coded = "\(w)×\(h)"
+        guard FileOrientation(transform: transform)?.swapsAxes == true else { return coded }
+        return L("addInput.fileInfo.sizeRotated", "\(h)×\(w)", coded)
     }
 
     /// 读图片（CGImageSource：格式、像素尺寸、有没有透明通道）。

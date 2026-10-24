@@ -5,7 +5,9 @@
 // 范围沿用 EffectEditorRanges（界面 ⊆ 引擎钳位，AudioEffectsTests 钉着），EQ 段数上限 3（一个 AUNBandEQ 格最多 16 段）。
 // 压缩页（W5-O，提案 024 (b)；问题单 W1D3-app-monitor-source-and-input-effects-wiring 第 4 条）：顶上选"压缩器（阈值 + 比例）"= 自写 C 压缩器 compressor
 // 或"苹果动态处理器（阈值 + 压缩量）"= dynamicsProcessor，同一格二选一，新开默认是压缩器。压缩器简单模式给阈值 / 比例 / 补偿，拐点 / 起音 / 释放放"高级"，
-// 范围 = 引擎的 EffectParameterRanges["compressor"]；"延迟自测"一行读引擎冲激法量到的延迟（调音台同一份 50 ms 状态，MixerMeters；按设计 0）。
+// 范围 = 引擎的 EffectParameterRanges["compressor"]；"延迟自测"一行读引擎冲激法量到的延迟（按设计 0）。
+// 效果链延迟（W5-Q，提案 030）：常规页"效果链延迟"与压缩页"延迟自测"都读 Stats 的 audio.effects（1 Hz，PanelCoordinator 每行喂；与 stats.jsonl / API 同一份），
+// 不再读 50 ms 的 AudioEngineStatus（铁律 4）；电平表照旧读 MixerMeters（UI 高刷新率的表允许另读那一份）。
 // 动态处理器照旧"阈值 + 压缩量 + 输出增益"（压缩量就是 AUDynamicsProcessor 的 headroom，不冒充固定比例），起音 / 释放 / 扩展比放"高级"。
 // 限幅页多一个"天花板"（peakLimiter.ceilingDb，−20…0 dBFS：限幅之后同一格内的输出增益，提案 024 顺带 (2)）。
 // 每路的效果格 102 之前还没作用到声音：输入的均衡 / 压缩页照留"效果尚未作用到声音（本版本）"的横幅（AudioEffectsSupport）。
@@ -229,19 +231,45 @@ final class AudioSettingsModel: ObservableObject {
         }
     }
 
-    /// 压缩页"延迟自测"一行（只给自写压缩器：动态处理器是 AU，延迟本来就算在这条的效果延迟里）：引擎装上压缩器后用冲激法量的实际延迟，
-    /// 按设计 0 帧；还没量到（刚装、引擎还没换进去）写"还没量到"。不是压缩器时为 nil（不显示这一行）。
-    func compressorLatencyFrames(_ meters: MixerMeters) -> Int? {
+    // MARK: 效果链延迟（提案 030：读 Stats 的 audio.effects，1 Hz；铁律 4——与 stats.jsonl / API 同一份，W5-Q 起不再读 50 ms 的 AudioEngineStatus）
+
+    /// 这一条在 Stats 里的那一项。
+    struct EffectLatencyReading: Equatable {
+        var latencyMs: Double
+        var measuredLatencyMs: Double?
+    }
+    /// 最近一行 Stats 里这一条的读数：nil = 还没收到 Stats，或 Stats 里不列这一条（没装效果的输入）。
+    @Published private(set) var effectLatency: EffectLatencyReading?
+    @Published private(set) var hasStats = false
+
+    func apply(stats: Stats) {
+        let reading = Self.effectLatency(of: strip, in: stats.audio.effects)
+        if !hasStats { hasStats = true }
+        if reading != effectLatency { effectLatency = reading }
+    }
+
+    /// 总线按 `bus` 名认（列几条看 Stats 本身，不靠 listedBuses）；输入按编号。
+    static func effectLatency(of strip: AudioStrip, in effects: Stats.AudioCounters.EffectsLatency) -> EffectLatencyReading? {
         switch strip {
-        case .bus(let bus): meters.busCompressorLatencyFrames[bus]
-        case .input(let n): meters.inputCompressorLatencyFrames[n]
+        case .bus(let bus): effects.buses.first { $0.bus == bus.name }.map { EffectLatencyReading(latencyMs: $0.latencyMs, measuredLatencyMs: $0.measuredLatencyMs) }
+        case .input(let n): effects.inputs[n].map { EffectLatencyReading(latencyMs: $0.latencyMs, measuredLatencyMs: $0.measuredLatencyMs) }
         }
     }
 
-    func compressorLatencyText(_ meters: MixerMeters) -> String? {
+    /// 常规页"效果链延迟"：这条链已打开的格的处理延迟之和；没收到 Stats 写 —，Stats 不列的输入（没装效果）写"0 ms（没装效果）"。
+    var effectLatencyText: String {
+        guard hasStats else { return "—" }
+        if let r = effectLatency { return String(format: "%.1f ms", r.latencyMs) }
+        if case .input = strip { return L("audioSettings.general.effectLatencyNone") }
+        return "—"
+    }
+
+    /// 压缩页"延迟自测"一行（只给自写压缩器：动态处理器是 AU，延迟本来就算在这条的效果延迟里）：引擎装上压缩器后冲激法量的实际延迟
+    /// （Stats 的 measured_latency_ms），按设计 0 帧；Stats 里还没有（刚装、下一行 Stats 还没到）写"还没量到"。不是压缩器时为 nil（不显示这一行）。
+    var compressorSelfTestText: String? {
         guard editor.dynamicsKind == .compressor else { return nil }
-        guard let frames = compressorLatencyFrames(meters) else { return L("audioSettings.compressor.latencyPending") }
-        return L("audioSettings.compressor.latency", frames, Double(frames) / 48.0)
+        guard let ms = effectLatency?.measuredLatencyMs else { return L("audioSettings.compressor.latencyPending") }
+        return L("audioSettings.compressor.latency", Int((ms * Double(AudioFormat.sampleRate) / 1000).rounded()), ms)
     }
 
     func resetLimiter() {
@@ -354,6 +382,7 @@ struct AudioSettingsView: View {
             LabeledContent(L("audioSettings.general.format"), value: model.formatText)
             LabeledContent(L("audioSettings.general.fader"), value: model.faderText)
             LabeledContent(L("audioSettings.general.mute"), value: model.isMuted ? L("common.on") : L("common.off"))
+            LabeledContent(L("audioSettings.general.effectLatency"), value: model.effectLatencyText)
             Text(L("audioSettings.general.hint")).font(.caption).foregroundStyle(.secondary)
             if case .input(let n) = model.strip {
                 Button(L("audioSettings.general.openInputSettings")) { model.onOpenInputSettings?(n) }
@@ -411,7 +440,7 @@ struct AudioSettingsView: View {
                 }
             }
             .disabled(!model.compressorEnabled)
-            if let latency = model.compressorLatencyText(meters) {
+            if let latency = model.compressorSelfTestText {
                 Text(latency).font(.caption).foregroundStyle(.secondary)
             }
             HStack {

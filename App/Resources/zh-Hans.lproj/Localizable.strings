@@ -261,6 +261,7 @@
 "addInput.fileInfo.missing" = "文件不在了";
 "addInput.fileInfo.noAudio" = "没有声音";
 "addInput.fileInfo.noTracks" = "文件里没有画面也没有声音";
+"addInput.fileInfo.sizeRotated" = "%@（编码 %@）";
 "addInput.fileInfo.unreadable" = "读不出文件信息：%@";
 "addInput.full" = "本节目的输入已满（%d 路）";
 "addInput.group.devices" = "设备";
@@ -383,6 +384,8 @@
 "audioSettings.compressor.ratio" = "比例 %.1f:1";
 "audioSettings.enabled" = "启用";
 "audioSettings.eq.band" = "第 %d 段";
+"audioSettings.general.effectLatency" = "效果链延迟";
+"audioSettings.general.effectLatencyNone" = "0 ms（没装效果）";
 "audioSettings.general.fader" = "推子";
 "audioSettings.general.format" = "格式";
 "audioSettings.general.formatValue" = "48 kHz · 立体声";
@@ -619,6 +622,10 @@
 "error.failed" = "%@失败";
 "error.open" = "打开 %@";
 "error.save" = "保存 %@";
+"error.show.fileRate" = "%@。这一版的播放速率只收 %@–%@ 倍，越界的老节目不打开：用文本编辑器把节目文件里这几路的 \"rate\" 改到范围内再打开。";
+"error.show.fileRate.item" = "输入 %d 的播放速率 %@ 超出 %@–%@";
+"error.show.fileRate.itemNamed" = "输入 %d（%@）的播放速率 %@ 超出 %@–%@";
+"error.show.fileRate.separator" = "；";
 "error.startEngine" = "起引擎";
 "externalMenu.closeAll" = "关闭全部外部显示";
 "externalMenu.display" = "%@（%d×%d %d Hz）";
@@ -920,6 +927,7 @@
 "notice.join" = "；";
 "notice.midiTableUnreadable" = "MIDI 映射表 %@ 读不出来，用空表：%@";
 "notice.isoBranchUnavailable" = "ISO 输入 %d 不存在或分支用完（每路最多 %d 个 ISO / Aux）";
+"notice.isoInputRemoved" = "ISO 录制 %d 停了：输入 %d 删掉了（停在删除那一拍；再加同编号的输入不会接着录，要录再开一次）";
 "notice.midiFailed" = "MIDI 起不来：%@";
 "notice.ndiBranchRestored" = "NDI 发送 %d：输入 %d 空出了分支，已重新接上、开始送画面";
 "notice.ndiBranchUnavailable" = "NDI 发送 %d：输入 %d 的帧槽分支用完了（每路最多 %d 个，与 ISO / Aux 共用），暂时没有画面；那一路空出分支后自动恢复";
@@ -1673,6 +1681,12 @@
 "outputStatus.page.record" = "录制";
 "outputStatus.pagePicker" = "页";
 "outputStatus.waiting" = "等待统计…";
+"outputStatus.effectLatency" = "效果链延迟：%@";
+"outputStatus.effectLatency.input" = "输入 %d %@";
+"outputStatus.effectLatency.inputNoName" = "输入 %d";
+"outputStatus.effectLatency.item" = "%@ %@";
+"outputStatus.effectLatency.itemMeasured" = "%@ %@（压缩器实测 %@）";
+"outputStatus.effectLatency.separator" = " · ";
 "outputStatus.events" = "事件";
 "outputStatus.noEvents" = "还没有事件。";
 "outputStatus.hint" = "数字全读统计（与 API 读的是同一份）；事件由每秒一次的统计里状态的变化推出，一秒内来回的看不到。";

@@ -27,9 +27,6 @@ final class MixerMeters: ObservableObject {
     @Published private(set) var busRmsDb: [Bus: [Double]] = [:]
     @Published private(set) var afvGain: [Int: Float] = [:]
     @Published private(set) var busLoudnessLUFS: [Bus: Double] = [:]
-    /// 装着自写压缩器时引擎冲激法量到的延迟（帧，W1-D3；按设计 0）：音频设置窗压缩页的"延迟自测"一行（W5-O）。没装的不在里面。
-    @Published private(set) var busCompressorLatencyFrames: [Bus: Int] = [:]
-    @Published private(set) var inputCompressorLatencyFrames: [Int: Int] = [:]
 
     func clear() {
         inputPeakDb = [:]
@@ -38,33 +35,25 @@ final class MixerMeters: ObservableObject {
         busRmsDb = [:]
         afvGain = [:]
         busLoudnessLUFS = [:]
-        busCompressorLatencyFrames = [:]
-        inputCompressorLatencyFrames = [:]
     }
 
     func apply(status: AudioEngineStatus) {
         var inputs: [Int: [Double]] = [:]
         var inputRms: [Int: [Double]] = [:]
         var gains: [Int: Float] = [:]
-        var inputLatency: [Int: Int] = [:]
         for i in status.inputs where !i.removing {
             inputs[i.number] = i.peakDb
             inputRms[i.number] = i.rmsDb
             gains[i.number] = i.afvGain
-            if let frames = i.effects.compressorMeasuredLatencyFrames { inputLatency[i.number] = frames }
         }
         var buses: [Bus: [Double]] = [:]
         var busRms: [Bus: [Double]] = [:]
         var lufs: [Bus: Double] = [:]
-        var busLatency: [Bus: Int] = [:]
         for b in status.buses {
             buses[b.bus] = b.peakDb
             busRms[b.bus] = b.rmsDb
             lufs[b.bus] = b.shortTermLUFS
-            if let frames = b.effects.compressorMeasuredLatencyFrames { busLatency[b.bus] = frames }
         }
-        if inputLatency != inputCompressorLatencyFrames { inputCompressorLatencyFrames = inputLatency }
-        if busLatency != busCompressorLatencyFrames { busCompressorLatencyFrames = busLatency }
         if inputs != inputPeakDb { inputPeakDb = inputs }
         if inputRms != inputRmsDb { inputRmsDb = inputRms }
         if gains != afvGain { afvGain = gains }

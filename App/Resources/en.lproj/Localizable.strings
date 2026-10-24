@@ -261,6 +261,7 @@
 "addInput.fileInfo.missing" = "File not found";
 "addInput.fileInfo.noAudio" = "no audio";
 "addInput.fileInfo.noTracks" = "No video or audio in this file";
+"addInput.fileInfo.sizeRotated" = "%@ (encoded %@)";
 "addInput.fileInfo.unreadable" = "Can’t read the file: %@";
 "addInput.full" = "This show already has the maximum of %d inputs";
 "addInput.group.devices" = "Devices";
@@ -383,6 +384,8 @@
 "audioSettings.compressor.ratio" = "Ratio %.1f:1";
 "audioSettings.enabled" = "Enabled";
 "audioSettings.eq.band" = "Band %d";
+"audioSettings.general.effectLatency" = "Effect chain latency";
+"audioSettings.general.effectLatencyNone" = "0 ms (no effects)";
 "audioSettings.general.fader" = "Fader";
 "audioSettings.general.format" = "Format";
 "audioSettings.general.formatValue" = "48 kHz · stereo";
@@ -619,6 +622,10 @@
 "error.failed" = "%@ failed";
 "error.open" = "Open %@";
 "error.save" = "Save %@";
+"error.show.fileRate" = "%@. This version accepts playback rates of %@–%@× only, so the show was not opened: edit \"rate\" of these inputs in the show file with a text editor, then open it again.";
+"error.show.fileRate.item" = "Input %d: playback rate %@ is outside %@–%@";
+"error.show.fileRate.itemNamed" = "Input %d (%@): playback rate %@ is outside %@–%@";
+"error.show.fileRate.separator" = "; ";
 "error.startEngine" = "Start engine";
 "externalMenu.closeAll" = "Turn Off All External Displays";
 "externalMenu.display" = "%@ (%d×%d %d Hz)";
@@ -920,6 +927,7 @@
 "notice.join" = "; ";
 "notice.midiTableUnreadable" = "MIDI mapping table %@ is unreadable; using an empty table: %@";
 "notice.isoBranchUnavailable" = "ISO input %d does not exist or has no free branch (at most %d ISO / Aux per input)";
+"notice.isoInputRemoved" = "ISO recording %d stopped: input %d was removed (stopped at that tick; adding an input with the same number does not resume it — start recording again if needed)";
 "notice.midiFailed" = "MIDI failed to start: %@";
 "notice.ndiBranchRestored" = "NDI output %d: a branch on input %d became free; reconnected and sending";
 "notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now, recovers automatically when one is freed";
@@ -1673,6 +1681,12 @@
 "outputStatus.page.record" = "Recording";
 "outputStatus.pagePicker" = "Page";
 "outputStatus.waiting" = "Waiting for stats…";
+"outputStatus.effectLatency" = "Effect chain latency: %@";
+"outputStatus.effectLatency.input" = "Input %d %@";
+"outputStatus.effectLatency.inputNoName" = "Input %d";
+"outputStatus.effectLatency.item" = "%@ %@";
+"outputStatus.effectLatency.itemMeasured" = "%@ %@ (compressor measured %@)";
+"outputStatus.effectLatency.separator" = " · ";
 "outputStatus.events" = "Events";
 "outputStatus.noEvents" = "No events yet.";
 "outputStatus.hint" = "All numbers come from the stats (the same data the API reads); events are derived from state changes in the once-a-second stats, so changes that come and go within a second are not shown.";

@@ -74,7 +74,17 @@ final class ShowDocuments {
 
     /// 只读文件（做过 prepared），不碰当前文件 / 最近列表。
     func read(from url: URL) throws -> Show {
-        Self.prepared(try store.load(from: url))
+        try Self.load(url, store: store)
+    }
+
+    /// 读一份节目文件并做 prepared。文件来源的播放速率越界（提案 031 之前 App 的速率框不设范围，老节目里会有 10、0.05）契约 validate 拒收，
+    /// 抛的 MixerStateError.fileRate 只带第一路、是枚举原样；这里换成按界面口径列出越界几路的 OutOfRangeFileRates（W5-Q；用户 2026-10-18 裁定 #2 (c)：老节目不钳、照旧不打开）。
+    private static func load(_ url: URL, store: ShowStore) throws -> Show {
+        do {
+            return prepared(try store.load(from: url))
+        } catch MixerStateError.fileRate(let input, let rate) {
+            throw OutOfRangeFileRates(data: try? Data(contentsOf: url), first: (input, rate))
+        }
     }
 
     /// 把 url 当成当前节目的文件（保存写到这里、素材相对路径按它所在目录找），记进最近列表。
@@ -138,7 +148,42 @@ final class ShowDocuments {
     /// 有没有退出时自动存的那份（"打开上次退出时的节目"灰不灰，W5-G）。
     var hasAutosave: Bool { FileManager.default.fileExists(atPath: autosaveURL.path) }
 
-    func loadAutosave() -> Show? {
-        (try? store.load(from: autosaveURL)).map(Self.prepared)
+    /// 读退出时自动存的那份（做过 prepared）；没有这份 / 读不出来抛错（越界速率同 read）。
+    func readAutosave() throws -> Show {
+        try Self.load(autosaveURL, store: store)
     }
+
+    func loadAutosave() -> Show? { try? readAutosave() }
+}
+
+/// 节目文件里越界的文件播放速率（W5-Q）：打开时按界面口径提示"输入 n（名字）的播放速率 x 超出 0.1–8"，越界的几路一起列出来、一次改完。
+struct OutOfRangeFileRates: LocalizedError, Equatable {
+    struct Item: Equatable {
+        var input: Int
+        var name: String
+        var rate: Double
+    }
+    var items: [Item]
+
+    /// 从文件内容里找出全部越界的几路（不校验地解一遍，名字也拿到）；解不出来就只报契约给的那一路。
+    init(data: Data?, first: (input: Int, rate: Double)) {
+        let inputs = data.flatMap { try? Show.fileDecoder.decode(Show.self, from: $0) }?.inputs ?? []
+        let found = inputs.compactMap { i -> Item? in
+            guard case .file(_, _, let rate) = i.source, !FileSource.rateRange.contains(rate) else { return nil }
+            return Item(input: i.number, name: i.name, rate: rate)
+        }
+        items = found.isEmpty ? [Item(input: first.input, name: "", rate: first.rate)] : found
+    }
+
+    var errorDescription: String? {
+        let (low, high) = (Self.number(FileSource.rateRange.lowerBound), Self.number(FileSource.rateRange.upperBound))
+        let list = items.map { i in
+            i.name.isEmpty ? L("error.show.fileRate.item", i.input, Self.number(i.rate), low, high)
+                           : L("error.show.fileRate.itemNamed", i.input, i.name, Self.number(i.rate), low, high)
+        }
+        return L("error.show.fileRate", list.joined(separator: L("error.show.fileRate.separator")), low, high)
+    }
+
+    /// 速率按 %g 写：10、0.05、0.1、8（与 FileInput 钳速率时的提示同一写法）。
+    static func number(_ v: Double) -> String { String(format: "%g", v) }
 }
