@@ -16,6 +16,7 @@ public enum APIDocument {
         默认监听 `127.0.0.1:\(APIServerConfiguration.defaultPort)`（headless：`--api`，`--api-listen 0.0.0.0:\(APIServerConfiguration.defaultPort)` 可改）。
         所有时间戳都是 host time（`mach_absolute_time` 的原始 tick 数，UInt64），换算纳秒用 `hello` / `state` 里的 `timebase`：ns = ticks × numer / denom。
         鉴权默认关；配了 token 后每个请求带 `Authorization: Bearer <token>`（WebSocket 也可用 `?token=<token>`），否则 401。
+        浏览器来源先于 token 查：带 `Origin` 而不在 `allowedOrigins`（默认空；`null` 永远不算），或不带 `Origin`、带 `Sec-Fetch-Site` 而不是 `none` / `same-origin` 的请求一律 `403 {"error": "forbidden-origin"}`，WebSocket 不升级（握手回 400）、不订阅；Stream Deck 插件、Companion、curl、脚本这类不是浏览器的客户端不带这两个头，不受影响。
 
         ## HTTP
 
