@@ -1,7 +1,7 @@
 # W1-D4 音频收口：Cut / Auto 起点统一替换淡变、120 留下的三条、压缩器换掉后清旧实测值 —— 报告（分支 w1-audio-4）
 
 日期 2026-10-24。prompt 125（用户 2026-10-18 裁定 #17；120 §3 第 4–6 条；115 §5 第 3 条）。机器 Apple M5 Max / macOS 27.0.1（26A434）/ Xcode 27.1（27A9275）/ Swift 6.4，
-接电源（AC，电池 95%）。同机并行 123 / 124 / 126 三个会话（负载 2–7；整包测试前 `ps -axo comm` 看过没有别的 xctest / xcodebuild）；没跑 gate4 / perf-baseline / soak。
+接电源（AC，电池 95%）。同机并行 123 / 124 / 126 三个会话（负载 1–7；整包前 `ps -axo comm` 看过：SwitcherCore 那一段同机有另一个会话的 App xcodebuild，SwitcherAudio 那一段没有）；没跑 gate4 / perf-baseline / soak。
 worktree `.claude/worktrees/nostalgic-merkle-3d9175`，harness 分支 `claude/nostalgic-merkle-3d9175`，从 main 2ec2c05 开（= G10 快进的 1f9be64 + 一个只动 reports/ 的 docs 提交，
 `git merge-base --is-ancestor 1f9be64 HEAD` 过）；**`w1-audio-4` 指向同一提交**（每次提交后 `git branch -f w1-audio-4 HEAD`）。不 push、不 merge，交 127 G11。
 
@@ -25,7 +25,7 @@ SwitcherEngine/Audio/（AudioStateBridge、AudioControlEvent）、SwitcherContra
   afv 向转场前的目标回弹（实测 0.019）、第二条起点再跳回（Master 相邻样本跳 0.22）。扫描 14 组（Cut→Cut 隔 1–5 拍、Cut→Auto 1–4、Auto→Cut 1–4，起始拍按 mod 8 挑过）**11 组红**。
   所以"只把 `.cut` / `.transitionStarted` 改成 `replacing: true`"不够（§1.2）。
 - **第 2 条**：Auto 60 拍第 30 拍才开 AFV：第 152 拍起逐块 87 块里 86 块超 ±0.5 dB、最大差 **16.8 dB**；逐样本 AFV 增益与曲线最大差 0.71；旧源 t_e **+5.333 ms** 才到 −∞（走满那一拍补的短淡）。
-- **第 3 条**：状态机排程路报 `[started, cancelled]`、每拍观察者注入的报 `[started, cut(2→1), cancelled]`（多报一次）；命令路本来就对。录音轨里 1 号在第 149.68 拍就回来了（AFV 增益与曲线差 0.98）。
+- **第 3 条**：状态机排程路报 `[started, cancelled]`、每拍观察者注入的报 `[started, cut(2→1), cancelled]`（多报一次）；命令路本来就对。录音轨里走满之前 1 号就回来了（到第 149.68 拍 AFV 增益比曲线高 0.98）。
   同一个根还量出一条：走满那一拍再排一条新 Auto，前后都是"进行中"，**一个事件都不发**（音频既不收口也不起新淡变）。
 - **第 4 条**：每路链换成 dynamicsProcessor / 只剩 EQ / 清空后 `compressorMeasuredLatencyFrames` 还是 0（上一次的实测值）；总线那份本来就是 nil。
 
@@ -36,7 +36,7 @@ SwitcherEngine/Audio/（AudioStateBridge、AudioControlEvent）、SwitcherContra
   - 应用时只撤同槽位上"**还没开始、且起点不早于新的一条**"的淡变（最新的命令说了算）；已经开始的、**和还没开始但起点更早的**都照走到新淡变的起点，在那一块被接管（取当时的 afv 作起点）。
     原来（W1-B5）应用时撤所有还没开始的——两次切换隔不到 ~60 ms 时前一次整个丢。
   - 接管时不碰"还没开始、起点比它晚"的同槽位淡变：那是更新的切换，到它自己的起点再接管这一条（两条可以同时排着）。
-  - 默认语义（`SW_CMD_CROSSFADE`）一个字节没变：应用时撤同槽位所有淡变、起点 afv 在应用时取；引擎里已经没有路径用它（只剩 `AudioMixer.crossfade` 不带参数的老调用）。
+  - 默认语义（`SW_CMD_CROSSFADE`）一个字节没变：应用时撤同槽位所有淡变、起点 afv 在应用时取；引擎里已经没有路径用它（只剩直接调 `AudioMixer.crossfade`、不带 `replacing` / `following` 的老用法：便利写法 `durationBlocks:` 与混音器层用例）。
 - **改了一条既有用例**：`CrossfadeReplaceTests.testD10_pendingReplaceIsCancelledByANewerOne` 钉的正是旧语义（"两条替换都还没开始，前一条应用时被后一条取消"——前一条起点更早），
   与裁定 #17 直接冲突，按新语义改写成 `testW1D4_1_pendingEarlierReplaceRunsAtItsStart_newerTakesOverAtItsOwn`（前一条到自己的起点照走、走满后 from 严格 0）；
   另加 `testW1D4_1_pendingLaterReplaceIsSupersededByANewerOne`（起点更晚的被新命令盖掉，钉"最新的命令说了算"）、`testW1D4_1_reverseReplaceWhileTheFirstIsRunning_noRebound`（反方向接管正在走的，钉现状）。
@@ -76,7 +76,7 @@ SwitcherEngine/Audio/（AudioStateBridge、AudioControlEvent）、SwitcherContra
 ### 1.6 第 5 条：实时模式下 FTB 跟随精度（只量不判）
 
 `IntegrationRealtimeTests.testW1D4_5_nullDevice_ftbRetargetFollowAccuracy_measuredOnly`：D11 的四种改法在**空设备 + 控制线程**上各跑一次，同一份量法（FTBRetargetTests 的口径：Master 逐块 RMS ÷ 不淡时电平 vs reducer 逐拍的画面电平，
-−20 dB 以上的块才比；全黑后看 +1 / +2 拍电平与 +3 拍起非零样本）对离线台也跑一遍并排。三次（14:27–14:29，负载 2.4–2.7）：
+−20 dB 以上的块才比；全黑后看 +1 / +2 拍电平与 +3 拍起非零样本）对离线台也跑一遍并排。三次（14:27–14:29，负载 2.4–2.7；跑在 132b65a 上，之后两个"第 2 条补"的提交不碰 FTB 那条路）：
 
 | 改法 | 实时：逐块最大差（三次） | 实时平均 \|差\| | 离线：逐块最大差 / 平均 | 全黑后（实时 / 离线） |
 |---|---|---|---|---|
