@@ -5,21 +5,21 @@ Stream Deck, Companion and scripts can be mixed freely and always agree on the s
 
 ## Default shortcut table
 
-Active while the main window is in front (not while typing in a text field); also while the Settings, Input Settings, Overlay Settings or Audio Settings windows are in front (while Settings › Shortcuts is recording a key, the key goes into that row and switches nothing).
-Not while the Statistics window, the Stream / Recording Status window or the multiview window is in front: click the main window, then press the key.
+Active while the main window is in front (not while typing in a text field); also while the Settings, Input Settings, Overlay Settings, Audio Settings, Statistics, Stream / Recording Status or multiview windows are in front (while Settings › Shortcuts is recording a key, the key goes into that row and switches nothing).
 
 | Key | Action |
 |---|---|
 | `1` … `9`, `0` | Put input 1–10 on PVW (`0` = input 10) |
-| `⇧1` … `⇧0` | Cut input 1–10 straight to PGM (PVW unchanged). **Known issue: may not fire from a real keyboard** — see below the table |
+| `⇧1` … `⇧0` | Cut input 1–10 straight to PGM (PVW unchanged) |
 | `Space` | Cut |
 | `Return` | Run the current transition slot (the T-bar uses it too; Transition 1 · Fade 0.5 s in a new show) |
 | `F` | FTB on / off |
 | `⌥1` … `⌥4` | Run Transition 1–4 (selects that slot and starts it at once; Return and the T-bar use it afterwards; [Concepts › Transition slots](concepts.md#transition-slots)). A slot that is a Stinger with no input yet doesn't run; the status line says so |
 | `⌃1` … `⌃4` | Overlay 1–4 on / off (a channel without an input uses the input on PVW; if PVW is black too it doesn't turn on and the status line says so — the same as the Overlay buttons in the transition column) |
 
-- **⇧1–⇧0 don't match a real keyboard**: when you press ⇧1 the system hands PlusMix the character Shift produces (`!` on a US keyboard, a full-width `！` with the Pinyin input source), while the table says `shift+1`, so these rows do nothing.
-  Workaround: re-record those rows one by one with "Record" in Settings › Shortcuts (that stores something like `shift+!`, which then works), or use the Cut button on the cells. ⌥1–⌥4 and ⌃1–⌃4 are not affected.
+- **⇧ with a digit / symbol key goes by the key position**: whatever ⇧1 types under your layout or input source (`!`, or a full-width `！` with Pinyin), it counts as `shift+1` (the same for ⇧ with `- = [ ] \ ; ' , . /` and `` ` ``), so these rows work from a US keyboard and with Pinyin alike.
+  Rows you re-recorded earlier with "Record" to make ⇧1–⇧0 work (stored as `shift+!` and the like) are read as `shift+1`, keep working and are written the new way the next time you save; if one collides with the table's own `shift+1` row, your recorded row wins and the other one is disabled (it stays in the table); if two old-style rows land on the same key (e.g. `shift+!` and a hand-written `shift+！`), it doesn't pick for you and treats it as a conflict: the table isn't loaded, the default table is used and the status line says so.
+- **With the Pinyin input source the punctuation keys `, . ; [ ] \` and `` ` `` (without ⇧, also with ⌃ / ⌥ / ⌘) can't be pressed**: the Pinyin layout types them as `， 。 ； 【 】 、 ·`, which don't match the key names in the table. Letters, digits, named keys, `' / - =` and punctuation with ⇧ are fine; the default table has no such keys. To use these keys, switch to a US input source while you press them, or pick another key.
 - **Recording and streaming have no default keys**: stopping them from a hotkey never asks, so one stray key would stop the show. Add them yourself if you want ([Editing the table](#editing-the-table)), e.g. with "All recordings on / off".
 - **The interface lock has no default shortcut**: use the lock at the far right of the bottom bar, or Window › Lock Interface.
 - On a Mac that saved a shortcut table before (`hotkeys.json`), ⌥1–⌥4 are still "Run Current Transition" from the old table (that is how the old default table was saved; it isn't upgraded automatically): click "Reset to Defaults" in Settings › Shortcuts for the new table (re-add your own rows afterwards).
@@ -90,7 +90,7 @@ The table is stored outside the show file in `~/Library/Application Support/Plus
 
 - Combination syntax `ctrl+alt+shift+cmd+<key>` in any order; `⌘⌥⌃⇧` prefixes and the long names `command / option / control` are accepted.
   The key is a single letter / digit / symbol or a named key: `space, return, escape, tab, delete, forwarddelete, up, down, left, right, home, end, pageup, pagedown, f1 … f20`.
-  With ⇧ on a digit or symbol key, `<key>` must be the character Shift produces (it depends on the keyboard layout: ⇧1 is `!` on a US keyboard) — `shift+1` can't be pressed (⇧ with a letter is written with the letter as usual); the easy way is "Record" in Settings › Shortcuts.
+  With ⇧, always write **the key without ⇧**: `shift+1`, `shift+=`, `shift+/` (⇧ with a letter is written with the letter as usual). The old spellings `shift+!`, `shift+?` and full-width `shift+！` are still accepted and read as `shift+1` and so on (for collisions see the [default shortcut table](#default-shortcut-table) above).
 - Actions: `{"command": {<command>}}` (command JSON is the API's, [API reference](../../api.md), Chinese), or the switch / compound actions below. A switch's `mode` is `"on"` / `"off"` / `"toggle"` (missing = toggle);
   an input can be a number or `"preview"` / `"program"` (whatever is on PVW / PGM at the moment of the press).
 - `"enabled": false` is written only on disabled rows; no key = enabled. Old files load unchanged.
@@ -137,6 +137,9 @@ Saving checks that every action fits its trigger (Notes take button actions, CCs
 
 Inside a Note's `"action": {"action": …}` goes an action written exactly as in hotkeys.json above. **The default map is empty** (no factory mappings; restoring defaults empties it); an unreadable midi.json (JSON error, conflict) falls back to the empty map and the status line says "MIDI mapping table … is unreadable; using an empty table: …".
 Devices unplugged and plugged back are picked up again; devices connected while the app runs are discovered too.
+
+- A Note that runs a Stinger slot with no input yet ("Run transition 4", or "Run current transition" while that is the current slot) doesn't run it, just like a shortcut, and the status line says "Transition 4 is a Stinger with no input yet — pick one from ▾ in the transition column"; turning on an overlay channel with no input while PVW is black gets the same notice as ⌃1–⌃4.
+- A CC fader still pushes such a slot: the picture changes once it passes the cut tick and the swap happens at the top — in effect a hard cut. The on-screen T-bar is greyed out in that case ([Concepts › The transition column](concepts.md#the-transition-column)); the MIDI fader doesn't go through it.
 
 ## Stream Deck, Companion, tally, scripts
 

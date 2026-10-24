@@ -45,7 +45,7 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 |---|---|---|
 | 成功 | 200 | `OK <名字>`；命令全被状态机忽略（已是目标状态）时 `OK <名字> (no change)` |
 | 参数缺失 / 越界 / 不认识的函数 | 400 | `BadParameter: …` / `UnknownFunction: …` |
-| 输入 / 输出不存在 | 404 | `InputNotFound: …` / `OutputNotFound: …` |
+| 输入 / 输出不存在（含 `Input=0` / `-1` 落在黑场或已删的输入上，见 §6 表下） | 404 | `InputNotFound: …` / `OutputNotFound: …` |
 | 当前状态做不了（没有录制输出、叠加通道没输入、stinger 没设输入） | 409 | `NotConfigured: …` |
 | 对方有、这里没做 | 501 | `NotImplemented: …` |
 
@@ -100,12 +100,12 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 
 | 函数 | 参数 | 映射 |
 |---|---|---|
-| Cut | Input? | `.cut`；带 Input 先 `.setPreview` 再 `.cut`（旧 PGM 进 PVW，与对方一致）。**转场进行中（T-bar 推到一半也算）带 Input → 409 NotConfigured、一条都不发**（这时 PVW 改不了，`.cut` 会把正在进行的那次做完、落不到点名的那一路）；不带 Input 照旧把当前转场做完 |
-| Fade / Wipe / Zoom | Duration?（ms，默认 500）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition`（改的是当前那组，之后它可能对不上任何转场槽） |
+| Cut | Input? | `.cut`；带 Input 先 `.setPreview` 再 `.cut`（旧 PGM 进 PVW，与对方一致）。**转场进行中（T-bar 推到一半也算）带 Input → 409 NotConfigured、一条都不发**（这时 PVW 改不了，`.cut` 会把正在进行的那次做完、落不到点名的那一路）；不带 Input 照旧把当前转场做完（PVW 是黑场时就把黑场切上去）。`Input=0` 而 PVW 是黑场 → 404 InputNotFound、一条都不发（原来会把黑场切上去） |
+| Fade / Wipe / Zoom | Duration?（ms，默认 500；只收 0–3 600 000，见下）、Input? | `.fade(拍)`；Wipe / Zoom = `.setTransition` + `.autoTransition`（改的是当前那组，之后它可能对不上任何转场槽）。`Input=` 同样要落到一路存在的输入（404 的规矩同 Cut）；但转场进行中带 Input **不回 409**：`.setPreview` 与 `.fade` / `.autoTransition` 都被状态机忽略，回 `OK Fade (no change)` 这样的成功、什么都没变 |
 | Stinger1 | | 执行**第一个选了输入的 Stinger 转场槽**（`.useTransitionSlot(k, start: true)`）；没有这种槽时用当前那组的 stinger 输入（`.setTransition(.stinger)` + `.autoTransition`）；都没有 → NotConfigured |
 | Transition1–4 | | `.useTransitionSlot(n, start: true)`：执行转场 n（一拍内选中并开始，之后 T-bar / 回车也用它）；转场进行中 → `OK TransitionN (no change)`。转场 n 是没选输入的 Stinger 槽 → 409 NotConfigured（"…is a Stinger with no input; pick an input for it first"，与 Stinger1 没配好同口径），一条都不发。Transition5 起 → NotImplemented |
 | SetTransitionEffect1–4 | Value=Cut/Fade/Wipe/Zoom/Stinger（不分大小写） | `.setTransitionSlot(n, 槽 n 只换效果)`：时长、Wipe 方向 / 软边、Stinger 输入 / 换底拍原样带上；只改设置、不执行，转场进行中也收（进行中的那一次照原样走完）。对方的其他效果名 → NotImplemented，谁都没有的名字 → BadParameter |
-| SetTransitionDuration1–4 | Value=ms | `.setTransitionSlot(n, 槽 n 只换时长)`：毫秒按节目帧率换拍（2000 ms @60 = 120 拍）；只改设置、不执行 |
+| SetTransitionDuration1–4 | Value=ms（0–3 600 000） | `.setTransitionSlot(n, 槽 n 只换时长)`：毫秒按节目帧率换拍（2000 ms @60 = 120 拍）；只改设置、不执行 |
 | SetFader | Value=0–255 | `.tbar(v/255)` |
 | PreviewInput / SetPreviewInput | Input | `.setPreview` |
 | ActiveInput / CutDirect | Input | `.setProgram`（直切，PVW 不变；Companion 的 Send Input to Program 发 CutDirect） |
@@ -125,6 +125,12 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 | OverlayInputAllOff | | 关掉开着的通道 |
 
 `Input=` 的四种写法都认：编号、`0` = 当前 PVW、`-1` = 当前 PGM、XML 里的 `key`、整个标题（区分大小写）。
+**永远要落到一路存在的输入上**：编号不存在（含 `-2` 这类别的负数）、key / 标题对不上，或 `0` / `-1` 时 PVW / PGM 是黑场、或指着一路已经删掉的输入，一律 404 `InputNotFound`、一条命令都不发——
+所有带 Input 的函数都这样（Cut / Fade / Wipe / Zoom、PreviewInput、ActiveInput / CutDirect、SetInputName、SetVolume、Audio* / AudioBus*、Solo*、SetBalance、OverlayInput*）。正文说明是哪一种（`input 7 does not exist`、`Input=0 is the current preview, which is empty (black)`）。
+切黑场用不带 Input 的 Cut（PVW 是黑场时）。
+
+**毫秒参数**（Fade / Wipe / Zoom 的 `Duration`、SetTransitionDuration1–4 的 `Value`）只收有限、0–3 600 000（1 小时）之间的数：越界、负数、非数、无穷都回 400 `BadParameter`，正文写可收的范围（`Fade: Duration must be a number of milliseconds within 0…3600000 (got 1e300)`），一条都不发。
+主 API 设下的超大槽时长在 XML 的 `<transition duration>` 里封顶成 Int 的最大值，不会让 XML 轮询出错。
 
 明确不做（返回 NotImplemented + 文案，`FunctionCatalog.knownUnimplemented` 与前缀族）：对方的其他转场效果（Slide / Fly / Merge / CubeZoom…）、
 Transition5 起、Stinger2–8、文件播放（Play / Pause / PlayPause / Restart / SetPosition：PlusMix 有 `setPlayback` / `seekPlayback`，映射还没做）、OverlayInput5–8、OverlayInputNZoom、PreviewOverlayInputN（没有"叠加预览"）、External / MultiCorder / Fullscreen / SRT 输出
