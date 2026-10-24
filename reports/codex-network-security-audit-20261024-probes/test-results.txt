@@ -1,0 +1,5 @@
+2026-10-24 HEAD 1f9be64, relevant existing suites (no source edits):
+SwitcherControl: APIServerTests 8/8 passed; VMixCompat CompatHardeningTests 5/5, HTTPTests 3/3, TCPProtocolTests 6/6 passed. Total 22/22.
+SwitcherOutputs: StreamAuthTests 13/13, ReconnectPolicyTests 2/2 passed. Total 15/15.
+Stream Deck plugin: npm test 11/11 passed.
+These baseline suites do not assert hostile Origin rejection, maximum TCP line length, AMF recursion depth, encoded secret query names, or malformed snapshot handling.

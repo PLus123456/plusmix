@@ -1,0 +1,32 @@
+import Foundation
+import CoreVideo
+import Synchronization
+import SwitcherContracts
+import SwitcherInputs
+
+final class Slot: FrameSlot, @unchecked Sendable {
+ let capacity = 3
+ let value = Mutex<(Frame?, UInt64)>((nil,0))
+ func push(_ frame: Frame) { value.withLock { $0 = (frame, $0.1 + 1) } }
+ func latest(atOrBefore time: HostTime) -> Frame? { value.withLock { $0.0 } }
+ var stats: FrameSlotStats { value.withLock { FrameSlotStats(pushed: $0.1) } }
+}
+@main struct Audit {
+ static func main() throws {
+  let mode=CommandLine.arguments[1]
+  let slot=Slot()
+  let timing=ProgramTiming(format:mode == "poll16_30" ? .hd1080p30 : .hd1080p60,t0:HostClock.now())
+  let file=try FileInput(number:1,name:"audit",path:"/Users/plus/.codex/worktrees/bug-audit-20261022/plusmix/Tests/Fixtures/w1a-sample-20s.mov",endAction:.holdLastFrame,timing:timing,videoSlot:slot)
+  try file.start()
+  defer { file.stop() }
+  let waitStart=Date()
+  while slot.stats.pushed < 90 && Date().timeIntervalSince(waitStart)<5 { Thread.sleep(forTimeInterval:0.005) }
+  if mode == "poll16_phase5" { Thread.sleep(forTimeInterval:0.005) }
+  print("before",file.positionSeconds,"pushed",slot.stats.pushed)
+  file.pause()
+  if mode == "applied" { Thread.sleep(forTimeInterval:0.1) }; if mode.hasPrefix("poll16") { Thread.sleep(forTimeInterval:1.0/60.0) }
+  file.resume()
+  print("immediately",file.positionSeconds,"pushed",slot.stats.pushed)
+  for _ in 0..<5 { Thread.sleep(forTimeInterval:0.1); print("after",file.positionSeconds,"pushed",slot.stats.pushed) }
+ }
+}

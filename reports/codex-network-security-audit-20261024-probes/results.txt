@@ -1,0 +1,16 @@
+Local bounded network probe (2026-10-24, HEAD 1f9be64)
+Environment: macOS arm64; custom CPU-only NetworkProbe instantiated production APIServer and VMixCompatServer on ephemeral 127.0.0.1 ports, with synthetic state and a dummy "scan-canary-only" streamKey. The normal headless engine could not start because no Metal device is available. No external hosts were contacted.
+
+Origin supplied: https://attacker.invalid
+ws_status HTTP/1.1 101 Switching Protocols
+ws_message hello
+ws_message snapshot
+ws_stream_key_visible True
+ws_command_reply receipt True None
+api_preview_after_ws 3
+compat_origin_get 200 OK Cut
+api_program_after_compat 3
+tcp_banner VERSION OK 0.1.0
+tcp_unterminated_bytes 2097152 rss_before 20922368 rss_after 25133056 delta 4210688
+
+Interpretation: the server accepted a foreign Origin WebSocket, sent a full state snapshot containing the dummy stream key and applied setPreview. The optional compatibility GET with foreign Origin applied Cut. Holding a 2 MiB newline-free TCP line raised the process RSS by about 4.2 MiB; this is bounded evidence of uncapped buffering, not an exhaustion test. Browser private-network policies were not exercised.

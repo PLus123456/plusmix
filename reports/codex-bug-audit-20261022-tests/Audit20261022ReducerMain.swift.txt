@@ -1,0 +1,26 @@
+import Foundation
+import SwitcherContracts
+@main struct Audit {
+ static func main() throws {
+  let r=MixerReducer(); var s=MixerState()
+  let mode=CommandLine.arguments[1]
+  switch mode {
+  case "ftbMax":
+   s=r.reduce(s,.ftb(on:true),at:Tick(1))
+   let c=Command.setFTBDuration(ticks:Int.max)
+   print("validator",CommandValidator.reason(rejecting:c,in:s) ?? "accepted")
+   s=r.reduce(s,c,at:Tick(2)); s=r.reduce(s,.ftb(on:false),at:Tick(3)); print(s.ftb)
+  case "overlayDuration":
+   s=r.reduce(s,.setOverlay(channel:1,rect:.full,animation:OverlayAnimation(kind:.fade,durationTicks:60)),at:.zero)
+   s=r.reduce(s,.overlay(channel:1,on:true,input:nil),at:.zero)
+   s=r.advance(s,to:Tick(30)); print("before",s.overlays[0].animProgress)
+   s=r.reduce(s,.setOverlay(channel:1,rect:.full,animation:OverlayAnimation(kind:.fade,durationTicks:120)),at:Tick(30))
+   s=r.advance(s,to:Tick(31)); print("after",s.overlays[0].animProgress)
+  case "loadFormat":
+   let c=Command.loadShow(show:Show(name:"other",state:MixerState(format:.hd1080p30)))
+   print("validator",CommandValidator.reason(rejecting:c,in:s) ?? "accepted")
+   s=r.reduce(s,c,at:Tick(1)); print("newformat",s.format)
+  default: break
+  }
+ }
+}

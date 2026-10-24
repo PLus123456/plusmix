@@ -1,0 +1,20 @@
+[
+  {
+    "inputMB": "200",
+    "returncode": 0,
+    "stdout": "parsed=200 clamped=200\nbytes=209715200\n",
+    "stderr": ""
+  },
+  {
+    "inputMB": "17592186044415",
+    "returncode": 0,
+    "stdout": "parsed=17592186044415 clamped=17592186044415\nbytes=18446744073708503040\n",
+    "stderr": ""
+  },
+  {
+    "inputMB": "17592186044416",
+    "returncode": -5,
+    "stdout": "parsed=17592186044416 clamped=17592186044416\n",
+    "stderr": ""
+  }
+]

@@ -1,0 +1,37 @@
+import Foundation
+import SwitcherContracts
+import SwitcherEngine
+import SwitcherControl
+import VMixCompat
+
+@main struct NetworkProbe {
+ static func main() async throws {
+   var state = MixerState(format: .hd1080p60)
+   state.inputs = (1...4).map { InputConfig(number: $0, name: "Test \($0)", source: .synthetic(settings: SyntheticSourceSettings())) }
+   state.outputs = [OutputState(number: 2, kind: .stream, name: "canary-stream", settings: OutputSettings(stream: StreamSettings(url: "rtmp://example.invalid/live", streamKey: "scan-canary-only")))]
+   state.program = 1
+   state.preview = 2
+   let machine = StateMachine(initialState: state)
+   machine.start()
+   let bus = CommandBus(stateMachine: machine)
+   let clock = TickClockSpec(t0: HostClock.now(), frameRate: .fps60)
+   let feed = StateFeed(stateMachine: machine) { clock }
+   await feed.start()
+   let api = APIServer(bus: bus, feed: feed, configuration: APIServerConfiguration(host: "127.0.0.1", port: 0, token: nil))
+   try await api.start()
+   var config = VMixCompatConfiguration()
+   config.enabled = true
+   config.host = "127.0.0.1"
+   config.httpPort = 0
+   config.tcpPort = 0
+   let compat = VMixCompatServer(bus: bus, feed: feed, configuration: config)
+   try await compat.start()
+   print("API_PORT=\(api.boundPort!) COMPAT_HTTP_PORT=\(compat.boundHTTPPort!) COMPAT_TCP_PORT=\(compat.boundTCPPort!)")
+   fflush(stdout)
+   try await Task.sleep(for: .seconds(180))
+   await compat.stop()
+   await api.stop()
+   await feed.stop()
+   machine.stop()
+ }
+}

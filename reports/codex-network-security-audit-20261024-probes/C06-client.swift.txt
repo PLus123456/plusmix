@@ -1,0 +1,19 @@
+import Foundation
+import SwitcherContracts
+@testable import SwitcherStreaming
+
+@main struct C06Client {
+    static func main() async {
+        let url = CommandLine.arguments[1]
+        let timeout = Double(CommandLine.arguments[2]) ?? 5
+        do {
+            let destination = try StreamDestination(settings: StreamSettings(url: url))
+            guard let credentials = destination.credentials else { fatalError("missing userinfo") }
+            fputs("userinfo accepted; probe start\n", stderr)
+            let target = try await RTMPAdobeAuth.authorize(connectURL: destination.connectURLWithoutCredentials, credentials: credentials, timeoutSeconds: timeout)
+            print("target: \(target)")
+        } catch {
+            fputs("authorize failed: \(error)\n", stderr)
+        }
+    }
+}

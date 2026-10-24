@@ -1,0 +1,7 @@
+import SwitcherInputs
+@main struct Audit {
+ static func main() {
+  let value=CommandLine.arguments[1] == "max" ? Int.max : 999
+  print(InputChannelMap.requiredSourceChannels(map:[value],destinationChannels:2))
+ }
+}

@@ -1,0 +1,119 @@
+// Isolated audit probes. Assertions express required behavior; no production changes.
+import AppKit
+import XCTest
+import SwitcherContracts
+import SwitcherEngine
+import SwitcherISO
+import SwitcherNDISend
+@testable import Switcher
+
+@MainActor
+final class Audit20261022AppTests: XCTestCase {
+    private func startISO() throws -> (SwitcherSession, Int, URL) {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        session.send(.setProgram(input: 1))
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("plusmix-audit22-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let input = try XCTUnwrap(session.state.input(2))
+        var output = ISORoutes.makeISOOutput(for: input, in: session.state, defaultDirectory: base.path)
+        output.settings.record?.directory = base.appendingPathComponent("primary").path
+        output.settings.record?.ownFormat = true
+        session.outputs.minimumFreeBytes = 0
+        session.outputs.fallbackDirectory = base.appendingPathComponent("fallback").path
+        session.send(.addOutput(config: output))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.output(output.number) != nil })
+        session.send(.startRecord(output: output.number))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[output.number] != nil })
+        let tap = try XCTUnwrap(session.outputs.recorders[output.number]?.consumer as? ISOFrameTap)
+        XCTAssertTrue(AppTest.waitUntil(3) { tap.counters.forwarded > 30 })
+        return (session, output.number, base)
+    }
+
+    func testS7_ISOFallbackReleasesBothBranches() throws {
+        let (session, number, base) = try startISO()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let tee = try XCTUnwrap(session.inputs.entries[2]?.tee)
+        XCTAssertEqual(tee.branchCount, 1)
+        // Inject the disk monitor's event into its real, unchanged App callback.
+        session.outputs.diskMonitor.onEvent?(number, .belowMinimum(freeBytes: 0))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[number]?.onFallback == true })
+        AppTest.pump(seconds: 1)
+        session.send(.stopRecord(output: number))
+        XCTAssertTrue(AppTest.waitUntil(10) { session.outputs.recorders[number] == nil })
+        AppTest.pump(seconds: 0.5)
+        print("AUDIT22 fallback ended: activeBranches=\(tee.branchCount), retired=\(tee.retiredCount)")
+        XCTAssertEqual(tee.branchCount, 0, "Fallback must return the old ISO branch as well as the new one")
+    }
+
+    func testS7_ISOFallbackMustNotSubstituteProgramWhenBranchesFull() throws {
+        let (session, number, base) = try startISO()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let extra = try (0..<3).map { _ in try XCTUnwrap(session.inputs.openBranch(input: 2)) }
+        defer { for branch in extra { session.inputs.releaseBranch(branch, input: 2) } }
+        XCTAssertEqual(session.inputs.entries[2]?.tee.branchCount, 4)
+        session.outputs.diskMonitor.onEvent?(number, .belowMinimum(freeBytes: 0))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[number]?.onFallback == true })
+        let replacement = try XCTUnwrap(session.outputs.recorders[number])
+        print("AUDIT22 full branches: requestedSource=\(replacement.output.settings.source), actualConsumer=\(type(of: replacement.consumer)), branchNil=\(replacement.branch == nil)")
+        XCTAssertTrue(replacement.consumer is ISOFrameTap, "Input 2 ISO must never silently become a PGM recorder")
+        XCTAssertNotNil(replacement.branch)
+        AppTest.pump(seconds: 0.7)
+        session.send(.stopRecord(output: number))
+        XCTAssertTrue(AppTest.waitUntil(10) { session.outputs.recorders[number] == nil })
+    }
+
+    func testNDI_SourceReplacementMustRestoreAudioAfterRegistrationRetry() throws {
+        guard NDISender.isAvailable else { throw XCTSkip("NDI SDK unavailable") }
+        let session = try AppTest.freshSession()
+        session.send(.addInput(config: AppTest.syntheticConfig(number: 1, gray: 60, audio: true)))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.audio.registeredInputs.contains(1) && session.inputs.runtimeState(of: 1) == .live })
+        let number = 2
+        session.send(.addOutput(config: OutputState(number: number, kind: .ndi, name: "PlusMix Audit22 \(UUID().uuidString)", enabled: true,
+                                                   settings: OutputSettings(source: .input(number: 1)))))
+        XCTAssertTrue(AppTest.waitUntil(8) { session.outputs.ndiSenders[number]?.audioToken != nil })
+        let beforeRetries = session.audio.registerRetries
+        let old = try XCTUnwrap(session.inputs.entries[1]?.input)
+        session.send(.setInputSource(input: 1, source: AppTest.syntheticConfig(number: 1, gray: 170, audio: true).source))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.entries[1]?.input !== old && session.audio.registeredInputs.contains(1) })
+        AppTest.pump(seconds: 1)
+        let first = session.outputs.ndiSenders[number]?.sender.countersSnapshot.audioBlocksSent ?? 0
+        AppTest.pump(seconds: 1)
+        let second = session.outputs.ndiSenders[number]?.sender.countersSnapshot.audioBlocksSent ?? 0
+        print("AUDIT22 NDI source replacement: registrationRetries=\(session.audio.registerRetries-beforeRetries), inputRegistered=\(session.audio.registeredInputs), audioTokenNil=\(session.outputs.ndiSenders[number]?.audioToken == nil), audioBlocks=\(first)->\(second)")
+        XCTAssertNotNil(session.outputs.ndiSenders[number]?.audioToken, "Successful delayed audio registration must reconnect NDI audio")
+        XCTAssertGreaterThan(second, first, "NDI audio must resume after replacing a source")
+        session.send(.setOutputEnabled(output: number, on: false))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.ndiSenders[number] == nil })
+    }
+
+    func testOverlaySelectingNoneMustClearRoute() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 1)
+        let panels = AppTest.controller.panels
+        defer { panels.closeAll() }
+        let model = panels.showOverlaySettings(channel: 1).model
+        model.setInput(channel: 1, input: 1)
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.overlays[0].input == 1 })
+        AppTest.pump(seconds: 0.2)
+        model.setInput(channel: 1, input: nil)
+        AppTest.pump(seconds: 0.5)
+        print("AUDIT22 overlay none selected: actualInput=\(String(describing: session.state.overlays[0].input))")
+        XCTAssertNil(session.state.overlays[0].input, "Selecting the settings panel's None option must clear its input")
+    }
+
+    func testAPI_LoadShowMustKeepActualAndAdvertisedFormatConsistent() throws {
+        let session = try AppTest.freshSession()
+        var show = session.makeShow()
+        show.mixer.format = ProgramFormat(width: 1280, height: 720, frameRate: .fps30)
+        session.send(.loadShow(show: show))
+        XCTAssertTrue(AppTest.waitUntil(3) { session.state.format == show.mixer.format })
+        AppTest.pump(seconds: 0.5)
+        let readback = AppTest.readback(session)
+        print("AUDIT22 loadShow: advertised=\(session.state.format), session=\(session.format), actualTexture=\(readback?.width ?? -1)x\(readback?.height ?? -1), clockRate=\(String(describing: session.engine.clock?.spec.frameRate))")
+        XCTAssertEqual(session.format, session.state.format, "Accepted loadShow must reconfigure the actual pipeline or reject format changes")
+        XCTAssertEqual(readback?.width, 1280)
+        XCTAssertEqual(readback?.height, 720)
+        XCTAssertEqual(session.engine.clock?.spec.frameRate, .fps30)
+    }
+}

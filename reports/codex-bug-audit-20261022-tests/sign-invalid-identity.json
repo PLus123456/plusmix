@@ -1,0 +1,6 @@
+{
+  "exit": 0,
+  "stdout": "[sign] Audit20261022.app\nAudit20261022 definitely missing identity: no identity found\n[sign]   /Users/plus/.codex/worktrees/bug-audit-20261022/plusmix/.build/bug-audit-20261022/control-tools/Audit20261022.app: valid on disk\n[sign]   /Users/plus/.codex/worktrees/bug-audit-20261022/plusmix/.build/bug-audit-20261022/control-tools/Audit20261022.app: satisfies its Designated Requirement\n[sign] 完成：Signature=adhoc TeamIdentifier=not set \n",
+  "stderr": "",
+  "signature_after": "Executable=/Users/plus/.codex/worktrees/bug-audit-20261022/plusmix/.build/bug-audit-20261022/control-tools/Audit20261022.app/Contents/MacOS/Audit20261022\nIdentifier=invalid.audit20261022.sign\nFormat=app bundle with Mach-O universal (x86_64 arm64e arm64e.x1)\nCodeDirectory v=20400 size=275 flags=0x2(adhoc) hashes=2+3 location=embedded\nSignature=adhoc\nInfo.plist entries=6\nTeamIdentifier=not set\nSealed Resources version=2 rules=13 files=0\nInternal requirements count=0 size=12\nTotal signatures=1\nChosen signature=1\n"
+}

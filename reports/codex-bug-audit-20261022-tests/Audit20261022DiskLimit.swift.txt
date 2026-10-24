@@ -1,0 +1,7 @@
+import Foundation
+struct Settings { var recordMinimumFreeMB: Int }
+let value = try IntegerFormatStyle<Int>.number.grouping(.never).parseStrategy.parse(CommandLine.arguments[1])
+let settings = Settings(recordMinimumFreeMB: max(0, value))
+FileHandle.standardOutput.write(Data("parsed=\(value) clamped=\(settings.recordMinimumFreeMB)\n".utf8))
+let bytes = UInt64(max(0, settings.recordMinimumFreeMB)) * 1024 * 1024
+print("bytes=\(bytes)")

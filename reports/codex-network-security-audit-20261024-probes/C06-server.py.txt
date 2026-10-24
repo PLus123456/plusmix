@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+import socket, struct, sys, time
+from pathlib import Path
+
+def exact(sock, n):
+    data = bytearray()
+    while len(data) < n:
+        part = sock.recv(n - len(data))
+        if not part:
+            raise EOFError(f'closed after {len(data)} of {n} bytes')
+        data.extend(part)
+    return bytes(data)
+
+def chunk_message(payload, chunk_size):
+    head = bytes([3, 0, 0, 0]) + len(payload).to_bytes(3, 'big') + bytes([20, 0, 0, 0, 0])
+    return head + b'\xc3'.join(payload[i:i+chunk_size] for i in range(0, len(payload), chunk_size))
+
+def main():
+    depth = int(sys.argv[1]); output = Path(sys.argv[2])
+    # _result, transaction ID 1, then a third AMF0 value with nested strict arrays.
+    payload = b'\x02\x00\x07_result' + b'\x00' + struct.pack('>d', 1.0) + b'\x0a\x00\x00\x00\x01' * depth + b'\x05'
+    control = bytes([2, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0, 0, 0, 16, 0])
+    wire = control + chunk_message(payload, 4096)
+    output.write_bytes(wire)
+    print(f'depth={depth} payload_bytes={len(payload)} wire_bytes={len(wire)}', flush=True)
+    with socket.socket() as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(('127.0.0.1', 0)); server.listen(1)
+        print(f'port={server.getsockname()[1]}', flush=True)
+        conn, _ = server.accept()
+        with conn:
+            conn.settimeout(10)
+            c0c1 = exact(conn, 1537)
+            if c0c1[0] != 3: raise ValueError('bad RTMP version')
+            conn.sendall(b'\x03' + bytes(1536) + c0c1[1:])
+            exact(conn, 1536)
+            # Read the initial connect chunk; the client has now sent a valid AMF command.
+            first = exact(conn, 12)
+            if first[0] != 3 or first[7] != 20: raise ValueError('not an AMF0 connect')
+            length = int.from_bytes(first[4:7], 'big')
+            remaining = length
+            while remaining:
+                exact(conn, min(128, remaining))
+                remaining -= min(128, remaining)
+                if remaining: exact(conn, 1)
+            start = time.monotonic()
+            try: conn.sendall(wire)
+            except OSError as error: print(f'send_error={error!r}', flush=True)
+            print(f'send_seconds={time.monotonic()-start:.3f}', flush=True)
+            time.sleep(0.2)
+if __name__ == '__main__': main()

@@ -1,0 +1,50 @@
+import Foundation
+import Synchronization
+import XCTest
+import SwitcherContracts
+import SwitcherEngine
+@testable import SwitcherControl
+
+final class Audit20261022ControlTests: XCTestCase {
+    final class EncodeGate: @unchecked Sendable {
+        let blockNext = Atomic<Bool>(true)
+        let entered = Atomic<Bool>(false)
+        let release = DispatchSemaphore(value: 0)
+        func clock() -> TickClockSpec? {
+            if Thread.current.name == "switcher.state-feed", blockNext.exchange(false, ordering: .acquiringAndReleasing) {
+                entered.store(true, ordering: .releasing)
+                _ = release.wait(timeout: .now() + 5)
+            }
+            return nil
+        }
+    }
+    func testAudit20261022_newSubscriberNeverReceivesOlderSnapshotAfterCurrent() async throws {
+        let f = BusFixture()
+        defer { f.stop() }
+        let gate = EncodeGate()
+        let feed = StateFeed(stateMachine: f.stateMachine) { gate.clock() }
+        await feed.start()
+        try await Task.sleep(for: .milliseconds(30))
+        _ = try await f.bus.submit(.setPreview(input: 3), source: .api)
+        for _ in 0..<100 where !gate.entered.load(ordering: .acquiring) { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(gate.entered.load(ordering: .acquiring))
+        _ = try await f.bus.submit(.setPreview(input: 4), source: .api)
+        let subscription = feed.subscribe()
+        gate.release.signal()
+        try await Task.sleep(for: .milliseconds(100))
+        await feed.stop()
+        var sequences: [UInt64] = []
+        for await text in subscription.stream {
+            if let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], object["type"] as? String == "snapshot", let sequence = object["sequence"] as? UInt64 { sequences.append(sequence) }
+        }
+        print("AUDIT StateFeed snapshot sequences = \(sequences)")
+        XCTAssertEqual(sequences, sequences.sorted(), "Subscription must not regress after sending its current snapshot")
+    }
+    func testAudit20261022_primaryAPIDurationBoundaryDecoder() throws {
+        for text in [#"{"fade":{"durationTicks":9223372036854775807}}"#, #"{"setFTBDuration":{"ticks":9223372036854775807}}"#] {
+            let command = try CommandEnvelope.decode(Data(text.utf8))
+            print("AUDIT primary API decoded = \(command), rejection = \(String(describing: CommandValidator.reason(rejecting: command, in: TestStates.base())))")
+            XCTAssertNotNil(CommandValidator.reason(rejecting: command, in: TestStates.base()), "Overflowing transition duration must be rejected at API boundary")
+        }
+    }
+}

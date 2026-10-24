@@ -1,0 +1,13 @@
+import Foundation
+import SwitcherContracts
+// Plain data carriers match the production ProbeFrame / ClickEvent stored properties.
+public struct ProbeFrame: Hashable, Codable, Sendable { var index: Int; var ptsSeconds: Double; var frameNumber: UInt32?; var inputID: Int?; var genTimeMs: UInt32?; var flash: Bool; var gray: Double }
+public struct ClickEvent: Hashable, Codable, Sendable { var sampleIndex: Int64; var timeSeconds: Double; var peak: Float }
+@main struct Audit20261022FrameAnalysis {
+ static func main() throws {
+  let frames = (0...120).map { i in ProbeFrame(index: i, ptsSeconds: Double(i)/60, frameNumber: UInt32(i), inputID: 0, genTimeMs: UInt32(Double(i)*1000/60), flash: i % 60 == 0, gray: 64) }
+  let report = FrameAnalysis.avMulti(files: [("PGM",frames,[]),("ISO",frames,[])])
+  let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+  print(String(decoding:try encoder.encode(report),as:UTF8.self))
+ }
+}

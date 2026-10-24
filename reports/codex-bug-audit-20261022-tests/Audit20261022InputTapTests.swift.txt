@@ -1,0 +1,27 @@
+import XCTest
+import Foundation
+import SwitcherContracts
+import SwitcherAudio
+@testable import SwitcherAudioIntegration
+
+final class Audit20261022InputTapTests: XCTestCase, @unchecked Sendable {
+    func testAuditInputTapMustNotFollowReusedSlot() async throws {
+        let rig = try await EngineRig(state: States.fourInputs(afv: false))
+        try rig.addSource(number: 1, generator: { _, _, n, p in p.update(repeating: 0.125, count: n) })
+        let captured = try rig.capture(.input(number: 1))
+        await rig.run(seconds: 0.2)
+        let firstSlot = rig.engine.slot(forInput: 1)!
+        rig.engine.unregisterInput(number: 1, now: rig.driver.nextBlockHostTime)
+        rig.sources.removeValue(forKey: 1)
+        await rig.run(seconds: 0.1)
+        try rig.addSource(number: 2, sourceT0: rig.driver.nextBlockHostTime,
+                          generator: { _, _, n, p in p.update(repeating: 0.75, count: n) })
+        let secondSlot = rig.engine.slot(forInput: 2)!
+        await rig.run(seconds: 0.3)
+        let tail = Array(captured.left.suffix(2048))
+        let mean = tail.reduce(0.0) { $0 + Double($1) } / Double(max(1, tail.count))
+        print("AUDIT input1Slot=\(firstSlot) input2Slot=\(secondSlot) input1TapTailMean=\(mean)")
+        await rig.shutdown()
+        XCTAssertLessThan(abs(mean), 0.01, "Input 1 ISO must not receive input 2 audio after slot reuse")
+    }
+}

@@ -1,0 +1,32 @@
+import XCTest
+import Foundation
+import SwitcherContracts
+@testable import SwitcherOutputs
+
+final class Audit20261022RecorderTests: XCTestCase {
+    func testAuditLateFirstAudioMustKeepTimestamp() throws {
+        let format = ProgramFormat(width: 320, height: 240, frameRate: .fps60)
+        let url = TestPaths.file("audit20261022-late-first-audio.mov")
+        let rec = Recorder(configuration: .init(url: url, format: format, audio: .init(codec: .pcm), minimumFreeBytes: 0))
+        let clock = TickClockSpec(t0: HostClock.now(), frameRate: .fps60)
+        try rec.start(at: RecordingStart(clock: clock, tick: .zero))
+        let feeder = try PatternFeeder(configuration: .init(format: format))
+        _ = try feeder.feed(consumers: [rec], clock: clock, ticks: Tick.zero..<Tick(60), pacing: .fastest(readyToAccept: { !rec.isQueueFull }))
+        let p = UnsafeMutablePointer<Float>.allocate(capacity: 256)
+        defer { p.deallocate() }
+        for block in 0..<94 {
+            p.update(repeating: block == 0 ? 0.6 : 0, count: 256)
+            let pointers: [UnsafePointer<Float>] = [UnsafePointer(p), UnsafePointer(p)]
+            pointers.withUnsafeBufferPointer { buf in
+                rec.consumeAudio(planes: buf.baseAddress!, channelCount: 2, frameCount: 256,
+                                 hostTime: clock.t0 + HostDuration(seconds: 0.5 + Double(block * 256) / 48000))
+            }
+        }
+        let result = try stopAndWait(rec, atTick: Tick(60))
+        let samples = try FFprobe.decodeAudioMono(result.url)
+        let first = samples.firstIndex { abs($0) > 0.1 }
+        print("AUDIT firstToneSample=\(first ?? -1) expected=24000 audioFrames=\(result.audioFrames) file=\(result.url.path)")
+        XCTAssertNotNil(first)
+        XCTAssertEqual(first ?? -1, 24000, accuracy: 1, "First input audio block has timestamp 0.5 seconds")
+    }
+}

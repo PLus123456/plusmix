@@ -1,0 +1,98 @@
+// AO02 audit probe: the ISO page permits an audio-only input, so stopping it must produce a recording.
+// Hardware-independent source; the session, input registration, ISO tap, audio pump and recorder are real.
+import AppKit
+import XCTest
+import SwitcherContracts
+import SwitcherAudio
+import SwitcherControl
+import SwitcherISO
+import SwitcherInputs
+import SwitcherTestKit
+@testable import Switcher
+
+private struct Audit20261022AudioOnlyFactory: InputFactory {
+    func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput {
+        guard case .audio = config.source else {
+            return try DefaultInputFactory().makeInput(config: config, slot: slot, timing: timing)
+        }
+        let ring = CAudioRing(channelCount: 2)
+        let source = SyntheticAudioInput(number: config.number, name: config.name, frameRate: timing.format.frameRate,
+                                         audioRing: ring, timeline: SyntheticTimeline(t0: timing.clock.t0, frameRate: timing.format.frameRate))
+        // Like AudioDeviceInput, this producer has audio but videoSlot == nil and never pushes into slot.
+        return MadeInput(input: source, audioRing: ring, audioBlockFrames: source.blockFrames)
+    }
+}
+
+@MainActor
+final class Audit20261022AudioISOTests: XCTestCase {
+    func testAudioOnlyISOSelectedInSettingsMustProduceRecording() throws {
+        _ = try AppTest.runningSession() // Avoid racing the host application's initial startup.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("plusmix-audit22-audio-iso-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var show = ShowDocuments.emptyShow(name: "audit22-audio-only-iso", recordDirectory: directory.path)
+        show.mixer.format = ProgramFormat(width: 320, height: 240, frameRate: .fps30)
+        show.inputs = [InputConfig(number: 1, name: "Audit audio only", source: .audio(deviceUID: "audit-synthetic-audio"))]
+        show.outputs = [] // Only the route actually selected through the ISO page will be recorded.
+        show.mixer.program = 1
+        var settings = AppSettings()
+        settings.audioDevice = .null
+        settings.apiEnabled = false
+        settings.compatLayerEnabled = false
+        settings.tallyEnabled = false
+        settings.recordMinimumFreeMB = 0
+        settings.preventSleepWhileRunning = false
+        settings.preventDisplaySleepWhileRunning = false
+        let session = try SwitcherSession(show: show, settings: settings, inputFactory: Audit20261022AudioOnlyFactory(),
+                                          hotkeyTable: .init(bindings: []), midiTable: .init(mappings: []))
+        defer {
+            let stopped = AppTest.expectationBox()
+            Task { await session.stop(); stopped.value = true }
+            let didStop = AppTest.waitUntil(20) { stopped.value }
+            XCTAssertTrue(didStop, "Audit session must stop its source, consumers and engine")
+            if didStop { try? FileManager.default.removeItem(at: directory) }
+        }
+        final class StartOutcome { var done = false; var error: (any Error)? }
+        let started = StartOutcome()
+        Task {
+            do { try await session.start() } catch { started.error = error }
+            started.done = true
+        }
+        XCTAssertTrue(AppTest.waitUntil(20) { started.done }, "Audit session startup must finish")
+        if let error = started.error { throw error }
+        XCTAssertTrue(session.isRunning)
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.runtimeState(of: 1) == .live && session.audio.registeredInputs.contains(1) })
+        let source = try XCTUnwrap(session.inputs.entries[1]?.input as? SyntheticAudioInput)
+        XCTAssertNil(source.videoSlot, "The fixture must be audio-only")
+        XCTAssertTrue(AppTest.waitUntil(5) {
+            source.counters.framesWritten > 48_000 && session.audio.status.inputs.first(where: { $0.number == 1 })?.primed == true
+        }, "The real mixer must receive live audio before recording starts")
+
+        // Exercise the same settings-model path as 'Show all inputs' -> select the audio input's ISO row.
+        let model = OutputSettingsModel(state: session.state, tab: .iso, defaultRecordDirectory: directory.path,
+                                        showName: show.name, queriesSystemExtensions: false)
+        model.send = { [weak session] command in session?.send(command) }
+        XCTAssertFalse(model.isoRows.contains { $0.input == 1 }, "Audio-only inputs are initially collapsed")
+        model.isoShowAllInputs = true
+        let row = try XCTUnwrap(model.isoRows.first { $0.input == 1 })
+        XCTAssertFalse(row.locked)
+        model.setISORow(row.id, on: true)
+        XCTAssertTrue(AppTest.waitUntil(3) { ISORoutes.isoRecord(in: session.state, input: 1) != nil })
+        let iso = try XCTUnwrap(ISORoutes.isoRecord(in: session.state, input: 1))
+        session.send(.startRecord(output: iso.number))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.recorders[iso.number] != nil })
+        let entry = try XCTUnwrap(session.outputs.recorders[iso.number])
+        let tap = try XCTUnwrap(entry.consumer as? ISOFrameTap)
+        XCTAssertNotNil(entry.audioToken, "The ISO route must really be connected to the audio pump")
+        AppTest.pump(seconds: 2)
+        XCTAssertGreaterThan(tap.counters.noFrame + tap.counters.forwarded, 10, "The ISO tap must be receiving real program ticks")
+        print("AUDIT22 audio ISO before stop: sourceFrames=\(source.counters.framesWritten), inputSlotPushed=\(session.inputs.entries[1]?.slot.stats.pushed ?? 0), ISO forwarded=\(tap.counters.forwarded), ISO noFrame=\(tap.counters.noFrame), audioTokenNil=\(entry.audioToken == nil), recorderAudioBlocksDropped=\(entry.recorder.counters.audioBlocksDropped)")
+        session.send(.stopRecord(output: iso.number))
+        XCTAssertTrue(AppTest.waitUntil(15) { session.state.output(iso.number)?.enabled == false && session.outputs.recorders[iso.number] == nil })
+        print("AUDIT22 audio ISO stopped: state=\(entry.recorder.state), error=\(entry.recorder.counters.lastError), fileExists=\(FileManager.default.fileExists(atPath: entry.url.path)), notice=\(session.lastNotice ?? "nil")")
+
+        // Expected behavior, intentionally red on the audited implementation: audio-only ISO must yield a file with audio.
+        let result = try XCTUnwrap(session.outputs.lastResults[iso.number], "Selecting a live audio-only input for ISO must produce a recording when stopped")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.url.path), "The completed ISO recording must exist")
+        XCTAssertGreaterThan(result.audioFrames, 0, "The ISO file must contain the input's audio")
+    }
+}
