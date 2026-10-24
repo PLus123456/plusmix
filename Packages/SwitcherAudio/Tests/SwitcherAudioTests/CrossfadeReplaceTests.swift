@@ -153,6 +153,51 @@ final class CrossfadeReplaceTests: XCTestCase {
         XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
     }
 
+    /// W1-D4 第 2 条（Auto 进行中才开 AFV）的实时侧：跟随淡变 `SW_CMD_CROSSFADE_FOLLOW`（`crossfade(..., following: true)`）。
+    /// 两路门控都开着（AFV 关时的样子：L = R = 1），排一条起点在 47 块之前（约 0.25 s，转场已经走了一半）、时长 24000 帧的跟随淡变：
+    ///   1. 接上那一块第一个样本 = 接上之前的增益（不跳变），之后与曲线的差按 τ 3 ms 衰减，逐样本变化不超过一阶平滑的量级；
+    ///   2. 接上 50 ms 之后逐样本就是 cos / sin 的**绝对值**（不乘起点的增益 1：替换语义的普通淡变会走 1·cos / 1 + 0·sin，PVW 停在 1）；
+    ///   3. 走满那一刻起 from 严格 0、to 严格 1。
+    func testW1D4_2_followCrossfade_lateJoinTracksTheAbsoluteCurve_smoothJoin() {
+        let rig = makeDCPair()
+        rig.mixer.setAFVGain(slot: 1, 1)
+        rig.run(blocks: 50)
+        var l = [Float](), r = [Float]()
+        let collect: (OfflineBlock) -> Void = { b in l.append(contentsOf: b.bus(.master).left); r.append(contentsOf: b.bus(.master).right) }
+        rig.run(blocks: 1, afterEach: collect)                        // 接上之前的最后一块
+        let before = (l.last!, r.last!)
+        l.removeAll(); r.removeAll()
+        let base = rig.driver.blockIndex
+        let start = point(rig, aheadBlocks: -47, sample: 0, base: base)
+        let dur = 24_000
+        rig.mixer.crossfade(from: 0, to: 1, durationFrames: dur, startHostTime: start.time, following: true)
+        rig.run(blocks: 90, afterEach: collect)
+        let k0 = -start.index                                         // 接上那一块第一个样本在曲线上的位置（47 × 256 帧）
+        func ang(_ i: Int) -> Double { Double.pi / 2 * Double(k0 + i) / Double(dur) }
+        // 1. 接上不跳变：第一个样本 = 之前的增益；之后逐样本变化 ≤ 0.003（残差 ≈ 0.3 × 一阶平滑系数 0.0069 + 曲线斜率）
+        XCTAssertEqual(l[0], before.0, accuracy: 1e-6, "接上那一下 from 不跳变")
+        XCTAssertEqual(r[0], before.1, accuracy: 1e-6, "接上那一下 to 不跳变")
+        var maxStep: Float = 0
+        for i in 1..<2400 { maxStep = max(maxStep, abs(l[i] - l[i - 1]), abs(r[i] - r[i - 1])) }
+        XCTAssertLessThan(maxStep, 0.003, "接上之后逐样本变化 \(maxStep)")
+        // 2. 50 ms 之后：绝对的 cos / sin。迟到接上时 C 侧按 tick 差换算已走帧数、截断取整，相位可能差 1 帧（k − 1），两种都算对
+        let end = dur - k0
+        var maxErr = 0.0
+        for i in 2400..<end {
+            let e = min(abs(Double(l[i]) - cos(ang(i))), abs(Double(l[i]) - cos(ang(i - 1))))
+            let f = min(abs(Double(r[i]) - sin(ang(i))), abs(Double(r[i]) - sin(ang(i - 1))))
+            maxErr = max(maxErr, e, f)
+        }
+        XCTAssertLessThan(maxErr, 2e-6, "接上 50 ms 后应在曲线上（最大差 \(maxErr)）")
+        // 3. 走满（同样留 1 帧相位）：from 严格 0、to 满（R 声道稳态本来就是 1 ± 2e-7，同本文件其它用例）
+        let tail = (end + 1)..<l.count
+        XCTAssertGreaterThan(tail.count, 5_000)
+        XCTAssertEqual(tail.filter { l[$0] != 0 }.count, 0, "走满之后 from 严格 0")
+        XCTAssertEqual(tail.filter { abs(Double(r[$0]) - 1) > 2e-7 }.count, 0, "走满之后 to 满")
+        print("W1-D4 跟随淡变（混音器）：接上前 \(before.0) / \(before.1) → 第一个样本 \(l[0]) / \(r[0])，接上后逐样本最大变化 \(maxStep)，50 ms 后与 cos / sin 最大差 \(maxErr)")
+        XCTAssertEqual(rig.mixer.stats.rtViolations, 0)
+    }
+
     /// 第 1 条的另一种相位（连按两下 Cut、第二条命令到时第一条正在走）：反方向的替换淡变不撤正在走的那条，第一条照走到第二条的起点，
     /// 第二条从那一刻的增益接着走回去。默认语义在这里会撤掉第一条、afv 向转场前的目标回弹约 60 ms、起点再跳回（testD10_plainCrossfadeStillCancelsAtApply_contrast）。
     func testW1D4_1_reverseReplaceWhileTheFirstIsRunning_noRebound() {

@@ -129,7 +129,9 @@ typedef struct sw_crossfade {
     uint64_t start_host;        ///< 起点 host time（块首样本 ≥ 它的那一块里按样本定位）
     uint64_t elapsed_frames;    ///< 已走过的帧数
     uint8_t  active, started;
-    uint8_t  replace;           ///< SW_CMD_CROSSFADE_REPLACE：起点那一块才接管同槽位上别的淡变、才取起点 afv（W1-B5，D10）
+    uint8_t  replace;           ///< SW_CMD_CROSSFADE_REPLACE / _FOLLOW：起点那一块才接管同槽位上别的淡变、才取起点 afv（W1-B5，D10）
+    uint8_t  follow;            ///< SW_CMD_CROSSFADE_FOLLOW：曲线是 cos / sin 的绝对值，接上那一刻与 afv 的差按 τ 衰减（W1-D4）
+    float    resid_from, resid_to; ///< 跟随：曲线与实际增益还差多少（接上时 = 当时 afv − 曲线值，每样本乘 1 − gain_smooth_k）
 } sw_crossfade;
 
 /// 消费者队列挂点。

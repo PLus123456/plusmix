@@ -238,9 +238,13 @@ enum sw_cmd_type {
     SW_CMD_MONITOR_SOURCE,    ///< i0=总线号：耳机出口（out 平面 6 / 7）放这条总线（0 Master / 1 A / 2 B）；3 = 耳机总线自己（旧行为，默认）。有独听时总是耳机总线（提案 026）
     SW_CMD_MONITOR_BORROW_MASTER, ///< i0=0/1：开着且有独听时 Master 出口（out 平面 0 / 1）放耳机总线（2 声道设备上听独听，X09）；消费者队列不受影响
     // ---- W1-B5（prompt 120，D10）起 ----
-    SW_CMD_CROSSFADE_REPLACE, ///< 参数同 SW_CMD_CROSSFADE，替换语义（Auto 中途按 Cut 的短淡收口）：同槽位上**已经开始**的淡变照走到新淡变的起点，
-                              ///< 起点那一块里取消它们、从那一刻的 afv 起按 cos / sin 走到 0 / 1（起点之前不回弹到转场前的增益、起点不跳变）；
-                              ///< 同槽位上还没开始的淡变在应用时就取消（同 SW_CMD_CROSSFADE）
+    SW_CMD_CROSSFADE_REPLACE, ///< 参数同 SW_CMD_CROSSFADE，替换语义（Auto 中途按 Cut 的短淡收口；W1-D4 起 Cut / Auto 起点也用）：同槽位上**已经开始**的、
+                              ///< 和**还没开始但起点比新的一条早**的淡变都照走到新淡变的起点，起点那一块里取消它们、从那一刻的 afv 起按 cos / sin
+                              ///< 走到 0 / 1（起点之前不回弹到转场前的增益、起点不跳变，隔不到 ~60 ms 的两次切换前一条也听得到）；
+                              ///< 同槽位上还没开始、起点不早于新的一条的在应用时就取消（最新的命令说了算）
+    // ---- W1-D4（prompt 125）起 ----
+    SW_CMD_CROSSFADE_FOLLOW,  ///< 参数同 SW_CMD_CROSSFADE，替换语义 + 跟随曲线（Auto 进行中才开 AFV）：from 走 cos、to 走 sin 的绝对值（不乘起点 afv；
+                              ///< 起点在过去时从该在的相位接上），接上那一刻与当时 afv 的差按增益平滑的 τ（3 ms）衰减掉——跟剩下的曲线走、不跳变
 };
 
 typedef struct sw_cmd {

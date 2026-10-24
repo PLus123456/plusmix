@@ -408,13 +408,15 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
     case SW_CMD_MONITOR_MODE:  ctx->monitor_mode = (uint32_t)c->i0; break;
     case SW_CMD_MONITOR_POINT: ctx->monitor_point = c->i0 == SW_MONITOR_POST_DELAY ? SW_MONITOR_POST_DELAY : SW_MONITOR_PRE_DELAY; break;
     case SW_CMD_CROSSFADE:
-    case SW_CMD_CROSSFADE_REPLACE: {
-        // 同一槽位只允许一条在进行：旧的取消。替换语义（W1-B5，D10）：已经开始的旧淡变留到新淡变起点那一块再取消（sw_xfade_take_over），
-        // 之前照走——在这里就撤，起点之前那段 afv 会向转场前的目标（旧 PGM 1、旧 PVW 0）平滑回去，起点再跳回来
-        const bool replace = c->type == SW_CMD_CROSSFADE_REPLACE;
+    case SW_CMD_CROSSFADE_REPLACE:
+    case SW_CMD_CROSSFADE_FOLLOW: {
+        // 同一槽位只允许一条在进行：旧的取消。替换语义（W1-B5，D10；W1-D4 起 Cut / Auto 起点、跟随也用）：已经开始的、和还没开始但起点比新的一条
+        // 早的旧淡变都留到新淡变起点那一块再取消（sw_xfade_take_over），之前照走——在这里就撤，正在走的那段 afv 会向转场前的目标（旧 PGM 1、
+        // 旧 PVW 0）平滑回去、起点再跳回来；还没开始的整个没了（隔不到 ~60 ms 的两次切换，前一次切换听不到）。起点不早于新的一条的还没开始的照撤
+        const bool replace = c->type != SW_CMD_CROSSFADE;
         for (int k = 0; k < (int)SW_MIX_MAX_CROSSFADES; k++) {
             sw_crossfade *x = &ctx->xfades[k];
-            if (!x->active || (replace && x->started)) continue;
+            if (!x->active || (replace && (x->started || x->start_host < c->u0))) continue;
             if (c->i0 >= 0 && (x->from == c->i0 || x->to == c->i0)) { if (x->from == c->i0) x->from = -1; else x->to = -1; }
             if (c->i1 >= 0 && (x->from == c->i1 || x->to == c->i1)) { if (x->from == c->i1) x->from = -1; else x->to = -1; }
             if (x->from < 0 && x->to < 0) x->active = 0;
@@ -429,6 +431,9 @@ static void sw_apply_command(struct sw_mix_ctx *ctx, const sw_cmd *c) SW_NONBLOC
             x->elapsed_frames = 0;
             x->started = 0;
             x->replace = replace ? 1u : 0u;
+            x->follow = c->type == SW_CMD_CROSSFADE_FOLLOW ? 1u : 0u;
+            x->resid_from = 0.0f;
+            x->resid_to = 0.0f;
             x->active = (x->from >= 0 || x->to >= 0);
             if (!replace) {   // 替换的起点 afv 在起点那一块取（那时旧淡变已经走到哪是哪）
                 if (x->from >= 0) ctx->inputs[x->from].afv_fade_start = ctx->inputs[x->from].afv;
@@ -902,12 +907,13 @@ static void sw_process_input(struct sw_mix_ctx *ctx, uint32_t slot_index, uint32
 // AFV 交叉淡变：为本块算 from / to 两路的每样本增益（等幅：cos / sin）
 // ---------------------------------------------------------------------------
 
-/// 替换淡变（SW_CMD_CROSSFADE_REPLACE）在起点那一块接管：同槽位上别的淡变去掉这个槽位（两个都去掉了就停），起点 afv = 槽位此刻的 afv
-/// （上一块末尾的值，旧淡变走到哪是哪；本块起点之前那几个样本按它保持，见 sw_xfade_block 的 k = 0）。
+/// 替换淡变（SW_CMD_CROSSFADE_REPLACE / _FOLLOW）在起点那一块接管：同槽位上别的淡变去掉这个槽位（两个都去掉了就停），起点 afv = 槽位此刻的 afv
+/// （上一块末尾的值，旧淡变走到哪是哪；本块起点之前那几个样本按它保持，见 sw_xfade_block 的 k = 0）。起点比它晚、还没开始的不动：
+/// 那是更新的切换，到它自己的起点再接管这一条（W1-D4：应用时不再撤起点更早的旧淡变，两条可以同时排着）。
 static void sw_xfade_take_over(struct sw_mix_ctx *ctx, sw_crossfade *x) SW_NONBLOCKING {
     for (int k = 0; k < (int)SW_MIX_MAX_CROSSFADES; k++) {
         sw_crossfade *o = &ctx->xfades[k];
-        if (o == x || !o->active) continue;
+        if (o == x || !o->active || (!o->started && o->start_host > x->start_host)) continue;
         if (x->from >= 0) { if (o->from == x->from) o->from = -1; if (o->to == x->from) o->to = -1; }
         if (x->to >= 0) { if (o->from == x->to) o->from = -1; if (o->to == x->to) o->to = -1; }
         if (o->from < 0 && o->to < 0) o->active = 0;
@@ -933,17 +939,45 @@ static void sw_xfade_block(struct sw_mix_ctx *ctx, sw_crossfade *x, uint32_t fra
         else x->elapsed_frames = (uint64_t)(-dt / tpf);                  // 迟到：跳到该在的位置，终点仍与视频对齐
         if (s0 >= frames) s0 = frames - 1u;
         if (x->replace) sw_xfade_take_over(ctx, x);
+        if (x->follow) {
+            // 跟随（W1-D4）：曲线是绝对的 cos / sin（起点在过去时 elapsed 已跳到该在的位置），接上那一刻与当时 afv 的差记下来、之后按 τ 衰减
+            const uint64_t k0 = x->elapsed_frames < (uint64_t)x->duration_frames ? x->elapsed_frames : (uint64_t)x->duration_frames;
+            const float ang0 = ((float)k0 / (float)x->duration_frames) * (SW_PI_F * 0.5f);
+            x->resid_from = x->from >= 0 ? ctx->inputs[x->from].afv_fade_start - cosf(ang0) : 0.0f;
+            x->resid_to = x->to >= 0 ? ctx->inputs[x->to].afv_fade_start - sinf(ang0) : 0.0f;
+        }
     }
     const float dur = (float)x->duration_frames;
-    const float a_from = x->from >= 0 ? ctx->inputs[x->from].afv_fade_start : 0.0f;
-    const float a_to = x->to >= 0 ? ctx->inputs[x->to].afv_fade_start : 0.0f;
-    for (uint32_t i = 0; i < frames; i++) {
-        // 起点之前 k = 0（cos 0 = 1、sin 0 = 0 → 起点前的增益）：不单独写常量填充循环，-O2 会把它认成 memset_pattern16（check-rt-symbols 不认）
-        const uint64_t k = i < s0 ? 0u : x->elapsed_frames + (uint64_t)(i - s0);
-        if (k >= (uint64_t)x->duration_frames) { gain_from[i] = 0.0f; gain_to[i] = 1.0f; continue; }   // 走满：精确 0 / 1（cosf(π/2) 不是 0）
-        const float ang = ((float)k / dur) * (SW_PI_F * 0.5f);
-        gain_from[i] = a_from * cosf(ang);
-        gain_to[i] = a_to + (1.0f - a_to) * sinf(ang);
+    if (x->follow) {
+        // 起点之前 k = 0、残差不衰减：曲线 (1, 0) + 残差 = 接上时的 afv（保持）；起点起 = 曲线 + 按 τ 衰减的残差（第一个样本就是当时的 afv，不跳变）
+        const float keep = 1.0f - ctx->gain_smooth_k;
+        float rf = x->resid_from, rt = x->resid_to;
+        for (uint32_t i = 0; i < frames; i++) {
+            const uint64_t k = i < s0 ? 0u : x->elapsed_frames + (uint64_t)(i - s0);
+            float cf = 0.0f, ct = 1.0f;
+            if (k < (uint64_t)x->duration_frames) {
+                const float ang = ((float)k / dur) * (SW_PI_F * 0.5f);
+                cf = cosf(ang);
+                ct = sinf(ang);
+            }
+            gain_from[i] = sw_clampf(cf + rf, 0.0f, 1.0f);
+            gain_to[i] = sw_clampf(ct + rt, 0.0f, 1.0f);
+            if (i >= s0) { rf *= keep; rt *= keep; }
+        }
+        // 衰减到 −120 dB 以下就归零（之后走满那一刻是精确的 0 / 1；也免得一路乘进非规格化数）
+        x->resid_from = fabsf(rf) < 1e-6f ? 0.0f : rf;
+        x->resid_to = fabsf(rt) < 1e-6f ? 0.0f : rt;
+    } else {
+        const float a_from = x->from >= 0 ? ctx->inputs[x->from].afv_fade_start : 0.0f;
+        const float a_to = x->to >= 0 ? ctx->inputs[x->to].afv_fade_start : 0.0f;
+        for (uint32_t i = 0; i < frames; i++) {
+            // 起点之前 k = 0（cos 0 = 1、sin 0 = 0 → 起点前的增益）：不单独写常量填充循环，-O2 会把它认成 memset_pattern16（check-rt-symbols 不认）
+            const uint64_t k = i < s0 ? 0u : x->elapsed_frames + (uint64_t)(i - s0);
+            if (k >= (uint64_t)x->duration_frames) { gain_from[i] = 0.0f; gain_to[i] = 1.0f; continue; }   // 走满：精确 0 / 1（cosf(π/2) 不是 0）
+            const float ang = ((float)k / dur) * (SW_PI_F * 0.5f);
+            gain_from[i] = a_from * cosf(ang);
+            gain_to[i] = a_to + (1.0f - a_to) * sinf(ang);
+        }
     }
     x->elapsed_frames += (uint64_t)(frames - s0);
     *has_from = x->from >= 0;
