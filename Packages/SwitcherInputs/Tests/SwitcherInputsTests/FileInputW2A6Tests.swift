@@ -72,6 +72,7 @@ final class FileInputW2A6Tests: XCTestCase {
             let pending = input.positionSeconds
             XCTAssertFalse(input.pauseIsApplied, "第 \(run) 次：触发条件是暂停还没被推帧线程落实就恢复")
             input.resume()
+            let resumedClock = HostClock.now()
             let resumedAt = input.positionSeconds
             XCTAssertFalse(input.isPaused)
             XCTAssertGreaterThanOrEqual(pending, position, "第 \(run) 次：暂停请求还没落实时位置不退回旧锚点")
@@ -79,11 +80,12 @@ final class FileInputW2A6Tests: XCTestCase {
             XCTAssertGreaterThanOrEqual(resumedAt, position, "第 \(run) 次：恢复后位置不退回旧锚点（Codex 修前 1.5 → 0）")
             sleepMs(500)
             let later = input.positionSeconds
+            let elapsed = (HostClock.now() - resumedClock).milliseconds() / 1000
             let pushedLater = slot.pushed
             let shownLater = slot.newestNumber
-            print("N09 immediate 第 \(run) 次：位置 \(position) → 请求挂着 \(pending) → 恢复 \(resumedAt) → 0.5 s 后 \(later)；"
+            print("N09 immediate 第 \(run) 次：位置 \(position) → 请求挂着 \(pending) → 恢复 \(resumedAt) → \(String(format: "%.3f", elapsed)) s 后 \(later)；"
                   + "pushed \(pushed) → \(pushedLater)；帧号 \(shown.map(String.init) ?? "nil") → \(shownLater.map(String.init) ?? "nil")")
-            XCTAssertEqual(later - resumedAt, 0.5, accuracy: 0.1, "第 \(run) 次：时间线接着走")
+            XCTAssertEqual(later - resumedAt, elapsed, accuracy: 0.03, "第 \(run) 次：时间线接着走（跟墙钟走）")
             XCTAssertGreaterThanOrEqual(pushedLater - pushed, 25, "第 \(run) 次：随后 0.5 s 接着推帧（60 fps 节目 ≈ 30 帧；修前至多 +1）")
             if let shown, let shownLater {
                 XCTAssertGreaterThanOrEqual(shownLater - shown, 25, "第 \(run) 次：画面帧号接着涨（60 fps 文件 0.5 s ≈ 30）")
@@ -114,14 +116,17 @@ final class FileInputW2A6Tests: XCTestCase {
         XCTAssertEqual(input.positionSeconds, frozen, "暂停中位置不走")
         XCTAssertEqual(slot.newestNumber, frozenNumber, "暂停中画面停在同一帧")
         XCTAssertGreaterThanOrEqual(frozen, 1.5 - 1.0 / 60, "冻结在动手时的位置附近")
+        let resumeClock = HostClock.now()
         input.resume()
         XCTAssertNotEqual(input.playbackStartTick, anchor, "落实过的暂停：恢复时照旧重锚到 seekLead 之后的一拍")
         sleepMs(500)
         let later = input.positionSeconds
+        let elapsed = (HostClock.now() - resumeClock).milliseconds() / 1000
         let laterNumber = slot.newestNumber
-        print("N09 对照：冻结 \(frozen)（帧 \(frozenNumber.map(String.init) ?? "nil")）→ 恢复 0.5 s 后 \(later)（帧 \(laterNumber.map(String.init) ?? "nil")）")
-        XCTAssertGreaterThanOrEqual(later - frozen, 0.4, "从停住的位置接着走")
-        XCTAssertLessThanOrEqual(later - frozen, 0.5 + 1.0 / 60, "恢复之前的位置不往前跳")
+        print("N09 对照：冻结 \(frozen)（帧 \(frozenNumber.map(String.init) ?? "nil")）→ 恢复 \(String(format: "%.3f", elapsed)) s 后 \(later)（帧 \(laterNumber.map(String.init) ?? "nil")）")
+        // 恢复锚在 seekLead（30 ms）之后的第一拍：位置比墙钟晚 30–47 ms
+        XCTAssertGreaterThanOrEqual(later - frozen, elapsed - 0.1, "从停住的位置接着走")
+        XCTAssertLessThanOrEqual(later - frozen, elapsed + 1.0 / 60, "恢复之前的位置不往前跳")
         if let frozenNumber, let laterNumber {
             XCTAssertGreaterThanOrEqual(laterNumber - frozenNumber, 24, "画面从停住的帧接着播")
         } else {
@@ -211,15 +216,19 @@ final class FileInputW2A6Tests: XCTestCase {
             }
             input.resume()
             XCTAssertFalse(input.isPaused, "\(variant)")
-            XCTAssertTrue(waitUntil(timeoutMs: 3000) { input.playbackStartTick != nil }, "\(variant)：锚点没定下来")
+            XCTAssertTrue(waitUntil(timeoutMs: 3000, pollMs: 1) { input.playbackStartTick != nil }, "\(variant)：锚点没定下来")
+            let anchoredClock = HostClock.now()
             sleepMs(500)
             let later = input.positionSeconds
+            let elapsed = (HostClock.now() - anchoredClock).milliseconds() / 1000
             let laterNumber = slot.newestNumber
-            print("N09 pause→seek→resume（\(variant)）：0.5 s 后位置 \(later)、帧 \(laterNumber.map(String.init) ?? "nil")")
-            XCTAssertGreaterThanOrEqual(later, 5.4, "\(variant)：从 5 s 接着播")
-            XCTAssertLessThanOrEqual(later, 5.5 + 1.0 / 60, "\(variant)")
+            print("N09 pause→seek→resume（\(variant)）：锚点定下 \(String(format: "%.3f", elapsed)) s 后位置 \(later)、帧 \(laterNumber.map(String.init) ?? "nil")")
+            // 锚点拍在定锚之后 seekLead（30 ms）的第一拍：位置 = 5 + 墙钟 − 30…47 ms
+            XCTAssertGreaterThanOrEqual(later - 5, elapsed - 0.1, "\(variant)：从 5 s 接着播")
+            XCTAssertLessThanOrEqual(later - 5, elapsed + 1.0 / 60, "\(variant)")
             if let laterNumber {
-                XCTAssertTrue((324...331).contains(laterNumber), "\(variant)：画面从第 300 帧接着播：\(laterNumber)")
+                XCTAssertGreaterThanOrEqual(laterNumber, 324, "\(variant)：画面从第 300 帧接着播")
+                XCTAssertEqual(Double(laterNumber), later * 60, accuracy: 2, "\(variant)：画面帧号与位置一致")
             } else {
                 XCTFail("\(variant)：图案帧号解不出")
             }
@@ -240,6 +249,7 @@ final class FileInputW2A6Tests: XCTestCase {
         defer { input.stop() }
         try startAndPlay(input, to: 1.5)
         let shown = slot.newestNumber
+        let clock = HostClock.now()
         let position = input.positionSeconds
         input.pause()
         XCTAssertFalse(input.pauseIsApplied, "触发条件：暂停还没落实")
@@ -251,10 +261,12 @@ final class FileInputW2A6Tests: XCTestCase {
         XCTAssertGreaterThanOrEqual(resumedAt, position - 0.06, "恢复后位置不退回旧锚点")
         sleepMs(500)
         let later = input.positionSeconds
+        let elapsed = (HostClock.now() - clock).milliseconds() / 1000
         let laterNumber = slot.newestNumber
-        print("N09 暂停没落实时改速率：\(position) → 恢复 \(resumedAt) → 0.5 s 后 \(later)；帧 \(shown.map(String.init) ?? "nil") → \(laterNumber.map(String.init) ?? "nil")")
-        XCTAssertGreaterThanOrEqual(later - position, 0.85, "2 倍速 0.5 s 走 ≈ 1 s")
-        XCTAssertLessThanOrEqual(later - position, 1.0 + 1.0 / 60)
+        print("N09 暂停没落实时改速率：\(position) → 恢复 \(resumedAt) → \(String(format: "%.3f", elapsed)) s 后 \(later)；帧 \(shown.map(String.init) ?? "nil") → \(laterNumber.map(String.init) ?? "nil")")
+        // 位置 = 原位置 + 2 × 墙钟 − (新锚点 − 改速率那一刻 ≤ 47 ms)；2 倍速下位置按 2 / 60 s 一格走
+        XCTAssertGreaterThanOrEqual(later - position, 2 * elapsed - 0.1, "2 倍速接着走")
+        XCTAssertLessThanOrEqual(later - position, 2 * elapsed + 2.0 / 60)
         if let shown, let laterNumber {
             XCTAssertGreaterThanOrEqual(laterNumber - shown, 50, "画面按 2 倍速接着播")
         } else {

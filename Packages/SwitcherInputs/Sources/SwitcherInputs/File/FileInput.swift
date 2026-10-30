@@ -115,13 +115,14 @@ public final class FileInput: Input, @unchecked Sendable {
         var generation: UInt64
         /// 解码器（重）开始的位置（文件内秒）。
         var restartMedia: Rational
-        /// 时间线版本：锚点 / 速率 / 暂停任何变化 +1（音频输出块序号从新锚点重数）。
+        /// 时间线版本：锚点 / 速率 / 暂停任何变化 +1（推帧线程据此重读；音频输出块序号只在锚点 / 速率真变了时从新锚点重数，N09）。
         var version: UInt64
         var endAction: FileEndAction
         /// start / seek 之后：锚点拍要等解码线程给出目标位置的第一帧才定（进程里第一个 reader 要 ~85 ms，定位要从关键帧解到目标帧，
         /// 时间不定；等到帧再定锚点，"定位到第 300 帧后首帧就是 300"才不依赖 GOP 长度）。
         var anchorPending: Bool
         /// 暂停已由推帧线程落实（位置冻结在它最近推出的那一帧；推帧线程才知道哪一帧是最后推出的，API 线程读它会差一拍）。
+        /// 没落实之前时间线照走：读位置、改速率都按还在播算，这时恢复 = 取消请求（N09）。
         var pauseApplied: Bool
         /// 本代已经播完（推帧线程按结束动作收了尾：停在末帧 / 黑场）；start / seek 清掉。播完之后再把结束动作改成循环 = 从头来（W5-N）。
         var reachedEnd = false
@@ -244,7 +245,9 @@ public final class FileInput: Input, @unchecked Sendable {
             let timing = self.timing
             playback.withLock { p in
                 let tick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
-                if !p.paused { p.timeline.anchorMedia = p.timeline.position(at: tick) }
+                // 暂停落实了位置才冻结；请求还挂着时时间线照走，按还在播重算锚点位置——原来按"暂停中"留着旧锚点位置，
+                // 随后没落实的恢复（只取消请求）接着这条线播，位置回到旧锚点（N09 同根；App 先改速率再对 pause / resume）
+                if !(p.paused && p.pauseApplied) { p.timeline.anchorMedia = p.timeline.position(at: tick) }
                 p.timeline.anchorTick = tick
                 p.timeline.rate = Rational(approximating: clamped)
                 p.version += 1
@@ -268,7 +271,8 @@ public final class FileInput: Input, @unchecked Sendable {
     public var positionSeconds: Double {
         let tick = timing.tick(at: HostClock.now())
         let (pos, ended, end) = playback.withLock { p in
-            (p.paused ? p.timeline.anchorMedia : p.timeline.position(at: tick), p.reachedEnd, p.endMedia)
+            // 暂停落实之前推帧线程还在按时间线出帧，读到的该是还在播的位置（原来请求挂着的那一下读到旧锚点，N09 同根）
+            (p.paused && p.pauseApplied ? p.timeline.anchorMedia : p.timeline.position(at: tick), p.reachedEnd, p.endMedia)
         }
         guard let d = info?.duration, d.numerator > 0 else { return max(0, pos.doubleValue) }
         if ended || end.map({ pos >= $0 }) == true { return d.doubleValue }
@@ -398,12 +402,17 @@ public final class FileInput: Input, @unchecked Sendable {
         }
     }
 
-    /// 恢复：从停住的帧继续，锚到现在 + seekLead 之后的第一拍。
+    /// 恢复：从停住的帧继续，锚到现在 + seekLead 之后的第一拍。暂停还没落实就恢复 = 取消暂停请求，接着原来的时间线播。
     public func resume() {
         let timing = self.timing
         playback.withLock { p in
             guard p.paused else { return }
-            p.timeline.anchorTick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
+            // 暂停还没被推帧线程落实（时间线从没冻过）：只取消请求、锚点不动——推帧线程落实暂停的那把锁里看见 paused 已清就落不成，
+            // 下一拍照原时间线出帧，什么都不用追。原来照样把锚点拍换成将来的一拍、沿用旧的锚点位置：位置回到旧锚点（1.5 s → 0），
+            // 解码器队首在旧播放点之后，0.5 s 里最多多推 1 帧（Codex N09；App 每 1/60 s 轮询转发 pause / resume，30 fps 节目看相位撞上）
+            if p.pauseApplied {
+                p.timeline.anchorTick = max(timing.nextTick(atOrAfter: HostClock.now() + options.seekLead), .zero)
+            }
             p.paused = false
             p.version += 1
         }
@@ -670,6 +679,7 @@ public final class FileInput: Input, @unchecked Sendable {
         var sequence: UInt64 = 0
         var nextTick: Tick?
         var chunkIndex: Int64 = 0
+        var chunkTimeline: FileTimeline?   // chunkIndex 从哪条时间线的锚点数起
         var trimmedTo = Int64.min
         var audioStalled = false   // 上一轮：当前音频块到点了但样本还没解到（循环点 / 定位后重开），下一轮按块周期轮询
         var black: CVPixelBuffer?
@@ -703,7 +713,12 @@ public final class FileInput: Input, @unchecked Sendable {
                 }
                 if p.version != seenVersion {
                     seenVersion = p.version
-                    chunkIndex = 0
+                    // 音频块序号从锚点数起：锚点 / 速率真变了才从 0 重数。暂停请求、没落实就恢复（只取消请求，N09）动了版本、没动时间线——
+                    // 从 0 重数的话新块从旧锚点那一刻数起，之前的块全成了 .gone（跳过）、最后写过的那块还在 FIFO 里又写一遍
+                    if p.timeline != chunkTimeline {
+                        chunkTimeline = p.timeline
+                        chunkIndex = 0
+                    }
                     nextTick = nil
                     audioStalled = false
                 }
