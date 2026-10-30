@@ -8,6 +8,7 @@ import SwitcherContracts
 @MainActor
 final class ReleaseTests: XCTestCase {
     /// R7：一键导出的诊断包里有日志、stats、去掉密钥的节目、系统信息、崩溃诊断目录；推流密钥和 API token 一个字都不出现。
+    /// NS09（W2-D5）：密钥栏空着、密钥写在 RTMP 地址最后一段（整条粘贴）的也不出现；密钥栏非空时地址路径照旧保留（排障要看往哪推）。
     /// 注意：App 测试不能写成 async——async 测试体在主队列的 dispatch 块里跑，AppTest.pump 的嵌套 run loop 不会排空主队列（CF 的 libdispatchQSafe），
     /// 引擎启动的 main actor 续体永远回不来（W4-B 撞到，reports/w4-release.md §5）。异步的 build 用 Task + 轮询盒子。
     func testR7_diagnosticBundleContainsRequiredFilesWithoutSecrets() throws {
@@ -20,6 +21,12 @@ final class ReleaseTests: XCTestCase {
                                                                              stream: StreamSettings(url: "srt://127.0.0.1:9000?streamid=publish:x:user:\(secretKey)&passphrase=\(secretKey)",
                                                                                                     streamKey: secretKey)))))
         XCTAssertTrue(AppTest.waitUntil(5) { session.state.outputs.contains { $0.number == number } }, "推流输出没加上")
+        let pathKey = "SECRET-PATH-KEY-3b9e"
+        for (offset, stream) in [StreamSettings(url: "rtmp://127.0.0.1:1935/live/\(pathKey)"), StreamSettings(url: "rtmp://127.0.0.1:1935/live/sub", streamKey: secretKey)].enumerated() {
+            session.send(.addOutput(config: OutputState(number: number + 1 + offset, kind: .stream, name: "推流 \(offset + 2)", enabled: false,
+                                                        settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: stream))))
+        }
+        XCTAssertTrue(AppTest.waitUntil(5) { session.state.outputs.contains { $0.number == number + 2 } }, "另两路推流输出没加上")
         var settings = AppTest.controller.settings
         // token 只在这条里用：用完还原内存里的设置（W5-L 查到：不还原的话，排在后面、要连 API 的用例起的引擎都要 token，一律 401）
         let originalSettings = settings
@@ -61,14 +68,21 @@ final class ReleaseTests: XCTestCase {
             guard (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true, let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
             scanned += 1
             XCTAssertFalse(text.contains(secretKey), "\(file.lastPathComponent) 里泄露了推流密钥")
+            XCTAssertFalse(text.contains(pathKey), "\(file.lastPathComponent) 里泄露了写在地址末段的推流密钥")
             XCTAssertFalse(text.contains(secretToken), "\(file.lastPathComponent) 里泄露了 API token")
         }
         XCTAssertGreaterThanOrEqual(scanned, 5, "至少扫了 5 个文本文件")
         // 节目文件仍是合法的 Show，推流输出还在、密钥被换成标记
         let show = try Show.load(from: try Data(contentsOf: root.appendingPathComponent("show.switcher.json")))
-        let stream = try XCTUnwrap(show.outputs.first { $0.kind == .stream })
+        let stream = try XCTUnwrap(show.outputs.first { $0.number == number })
         XCTAssertEqual(stream.settings.stream?.streamKey, ShowRedaction.redactedMarker)
         XCTAssertTrue(stream.settings.stream?.url.contains("127.0.0.1:9000") == true, "主机端口要保留，方便排障：\(stream.settings.stream?.url ?? "")")
+        let pathKeyed = try XCTUnwrap(show.outputs.first { $0.number == number + 1 })
+        XCTAssertEqual(pathKeyed.settings.stream?.url, "rtmp://127.0.0.1:1935/live/\(ShowRedaction.redactedMarker)", "密钥栏空：地址末段（发布名）换成标记，主机端口 app 保留")
+        XCTAssertEqual(pathKeyed.settings.stream?.streamKey, "", "空的密钥栏照旧是空的")
+        let keyed = try XCTUnwrap(show.outputs.first { $0.number == number + 2 })
+        XCTAssertEqual(keyed.settings.stream?.url, "rtmp://127.0.0.1:1935/live/sub", "密钥栏非空：路径照旧保留")
+        XCTAssertEqual(keyed.settings.stream?.streamKey, ShowRedaction.redactedMarker)
         // 系统信息里有版本、机型、系统版本
         let system = try String(contentsOf: root.appendingPathComponent("system.txt"), encoding: .utf8)
         for key in ["app_version", "bundle_id", "macos", "model", "chip_or_cpu", "memory_gb", "gpu"] { XCTAssertTrue(system.contains(key), "system.txt 缺 \(key)") }
@@ -136,6 +150,58 @@ final class ReleaseTests: XCTestCase {
         let back = try Show.load(from: redacted)
         XCTAssertEqual(back.outputs[0].settings.stream?.url, "rtmp://\(m)@ingest.example.com:1936/live")
         XCTAssertEqual(back.outputs[0].settings.stream?.streamKey, m)
+    }
+
+    /// NS09（Codex 10-24 审计 [9]、W5D 问题单）：同层 streamKey 为空（只有空白也算）→ RTMP 地址路径 ≥ 2 段的最后一段（发布名 = 密钥）换成标记；
+    ///     streamKey 非空、只有一段（MediaMTX 的 rtmp://host/path）、不是 RTMP、不是推流设置（没有同层 streamKey）的 url：路径照旧保留。
+    func testNS09_showRedactionHidesPublishNameInPathWhenKeyEmpty() throws {
+        let m = ShowRedaction.redactedMarker
+        func stream(_ n: Int, _ url: String, key: String = "") -> OutputState {
+            OutputState(number: n, kind: .stream, name: "s\(n)", enabled: false,
+                        settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(), stream: StreamSettings(url: url, streamKey: key)))
+        }
+        let show = Show(name: "n", state: MixerState(outputs: [
+            stream(1, "rtmp://a.rtmp.example.com/live2/Path-Key-1a2b"),
+            stream(2, "rtmps://u:p@h:443/app/inner/Path-Key-3c4d?x=1&pa%73s=Pw-5e6f"),
+            stream(3, "rtmp://h/live/Path-Key-7a8b", key: "   "),
+            stream(4, "rtmp://h/live/sub", key: "k4"),
+            stream(5, "rtmp://h/onlyone"),
+            stream(6, "srt://h:9000?streamid=publish:Path-Key-9c0d"),
+        ]))
+        let redacted = try ShowRedaction.redact(showData: try show.save())
+        let text = String(decoding: redacted, as: UTF8.self)
+        for secret in ["Path-Key-1a2b", "Path-Key-3c4d", "Path-Key-7a8b", "Path-Key-9c0d", "Pw-5e6f", "k4"] {
+            XCTAssertFalse(text.contains(secret), "\(secret) 泄露了")
+        }
+        let back = try Show.load(from: redacted)
+        let urls = back.outputs.sorted { $0.number < $1.number }.map { $0.settings.stream?.url ?? "" }
+        XCTAssertEqual(urls, [
+            "rtmp://a.rtmp.example.com/live2/\(m)",
+            "rtmps://\(m)@h:443/app/inner/\(m)?x=1&pa%73s=\(m)",
+            "rtmp://h/live/\(m)",
+            "rtmp://h/live/sub",
+            "rtmp://h/onlyone",
+            "srt://h:9000?streamid=\(m)",
+        ])
+        // 不是推流设置的 url（没有同层 streamKey）：路径保留
+        let other = ShowRedaction.redact(json: ["url": "rtmp://h/live/name", "nested": ["url": "rtmp://h/a/b"]] as [String: Any]) as? [String: Any]
+        XCTAssertEqual(other?["url"] as? String, "rtmp://h/live/name")
+        XCTAssertEqual((other?["nested"] as? [String: Any])?["url"] as? String, "rtmp://h/a/b")
+        XCTAssertEqual(ShowRedaction.redactURL("rtmp://h/live/name"), "rtmp://h/live/name", "默认不动路径")
+    }
+
+    /// NS12（Codex 10-24 审计 [12]）：url 查询参数名先解码再比名单——pa%73s / %70ass / PASS 都打码，参数名照原文。
+    func testNS12_showRedactionHidesEncodedSecretParamNames() throws {
+        let m = ShowRedaction.redactedMarker
+        XCTAssertEqual(ShowRedaction.redactURL("rtmp://h/app?user=alice&pa%73s=demo-secret"), "rtmp://h/app?user=\(m)&pa%73s=\(m)")
+        XCTAssertEqual(ShowRedaction.redactURL("rtmp://h/app?%70ass=a&PASS=b&x=1"), "rtmp://h/app?%70ass=\(m)&PASS=\(m)&x=1")
+        let show = Show(name: "n", state: MixerState(outputs: [
+            OutputState(number: 1, kind: .stream, name: "s", enabled: false,
+                        settings: OutputSettings(source: .program, video: VideoEncodeSettings(), audio: AudioEncodeSettings(),
+                                                 stream: StreamSettings(url: "rtmp://ingest.example.com/live?user=alice&pa%73s=Demo-Secret-2f7c", streamKey: "k"))),
+        ]))
+        let text = String(decoding: try ShowRedaction.redact(showData: try show.save()), as: UTF8.self)
+        XCTAssertFalse(text.contains("Demo-Secret-2f7c"), "编码过参数名的密码泄露了")
     }
 
     /// R9：MetricKit 崩溃诊断落盘：store 按时间命名写 JSON、列表按时间排序、prune 只留最近 N 份；订阅者起得来（测试宿主里 MXMetricManager 也能 add）。
