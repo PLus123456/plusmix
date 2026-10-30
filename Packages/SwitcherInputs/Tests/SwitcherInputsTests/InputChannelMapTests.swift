@@ -38,6 +38,25 @@ final class InputChannelMapTests: XCTestCase {
         XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [3, 4, 15], destinationChannels: 2), 5, "用不上的项不算")
     }
 
+    /// Codex N05（2026-10-22，分项 CI-05）：`requiredSourceChannels` 对原始下标 +1，`[Int.max]` 在这里溢出（SIGTRAP，整个 xctest 进程退出）；
+    /// DeckLink 的 16 路封顶在它之后，来不及。修好：+1 饱和、结果再封顶 `maxSourceChannels`——越界的下标本来就要钳到源的声道范围（契约），
+    /// 这里只决定"源至少开几路"，调用方再按自己的上限钳（DeckLink 16、Core Audio 设备按实际声道数）。
+    func testN05_requiredSourceChannels_hugeIndexSaturatesAndCaps() {
+        let cap = InputChannelMap.maxSourceChannels
+        XCTAssertEqual(cap, 64)
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [Int.max], destinationChannels: 2), cap, "Int.max + 1 不溢出、封顶")
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [Int.max - 1], destinationChannels: 2), cap, "+1 正好到 Int.max，也封顶")
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [0, Int.max], destinationChannels: 2), cap)
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [Int.max, 3], destinationChannels: 1), cap, "环只有一路：只看第一项")
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [999], destinationChannels: 2), cap, "Codex 的对照 [999]：原来 1000，现在封顶")
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [cap - 1], destinationChannels: 2), cap, "封顶边界：要第 64 路正好 64")
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [cap - 2], destinationChannels: 2), cap - 1)
+        XCTAssertEqual(InputChannelMap.requiredSourceChannels(map: [Int.min, -1], destinationChannels: 2), 0, "负下标不要求额外的路（用的时候钳到 0）")
+        // 用的时候照旧钳到源的声道范围
+        XCTAssertEqual(InputChannelMap.sourceChannel(forDestination: 0, map: [Int.max], sourceChannels: 16), 15)
+        XCTAssertEqual(InputChannelMap.sourceChannel(forDestination: 1, map: [Int.min], sourceChannels: 16), 0)
+    }
+
     // MARK: AudioDeviceInput 从 InputSource 取映射
 
     func test014_audioDeviceChannelsComeFromInputSource_explicitOptionsOverride() throws {

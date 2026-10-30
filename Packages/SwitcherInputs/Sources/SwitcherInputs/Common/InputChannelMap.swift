@@ -6,6 +6,10 @@
 /// - 映射比环的声道数短时，缺的复制最后一项（`[4]` = 所有声道都取第 5 路）；多出来的项忽略；
 /// - 越界的下标钳到源的声道范围里。
 public enum InputChannelMap {
+    /// 源最多开几路（`requiredSourceChannels` 的封顶）。映射里的下标是节目文件 / API 给的任意整数，越界的用的时候本来就钳到源的声道范围（契约），
+    /// 这里只是不让"源要开几路"跟着它无限大。调用方再按自己的上限钳：DeckLink 内嵌音频 16 路，Core Audio 设备按实际声道数。
+    public static let maxSourceChannels = 64
+
     /// 不钳范围的"想要源的第几路"。源的声道数还不知道时（建会话之前）先用它算表，用的时候再按实际声道数钳。
     @inline(__always)
     public static func requestedChannel(forDestination destination: Int, map: [Int]) -> Int {
@@ -24,15 +28,17 @@ public enum InputChannelMap {
         min(max(channel, 0), max(sourceChannels - 1, 0))
     }
 
-    /// 要取到映射里用得上的所有下标，源至少得开几路。映射为空返回 0（= 没有额外要求，按各输入自己的默认开）。
+    /// 要取到映射里用得上的所有下标，源至少得开几路（封顶 `maxSourceChannels`）。映射为空返回 0（= 没有额外要求，按各输入自己的默认开）。
     public static func requiredSourceChannels(map: [Int], destinationChannels: Int) -> Int {
         guard !map.isEmpty else { return 0 }
         var needed = 0
         var d = 0
         while d < destinationChannels {
-            needed = max(needed, requestedChannel(forDestination: d, map: map) + 1)
+            // 下标 + 1 饱和：原来直接 + 1，`[Int.max]` 在这里溢出（SIGTRAP）；DeckLink 的 16 路封顶在这之后，来不及（Codex N05）
+            let (count, overflow) = requestedChannel(forDestination: d, map: map).addingReportingOverflow(1)
+            needed = max(needed, overflow ? Int.max : count)
             d += 1
         }
-        return needed
+        return min(needed, maxSourceChannels)
     }
 }
