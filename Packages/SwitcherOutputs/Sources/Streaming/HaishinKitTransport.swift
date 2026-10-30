@@ -135,15 +135,18 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         }
         do {
             let r = try await connection.connect(target)
-            guard r.status?.code == RTMPConnection.Code.connectSuccess.rawValue else {
-                throw StreamTransportError.connectFailed(r.status?.code ?? "connect 无状态")
+            guard let status = r.status, status.code == RTMPConnection.Code.connectSuccess.rawValue else {
+                throw r.status.map { Self.error(code: $0.code, description: $0.description, phase: "") } ?? StreamTransportError.connectFailed("服务器回的 connect 里没有状态")
             }
         } catch let e as StreamTransportError {
             throw e
         } catch {
             let e = Self.transportError(error, phase: "")
             // 地址里写了账号、服务器却还在要 Adobe 鉴权：是我们的前两轮退回了（超时 / 没看懂），不是"没写账号"——照旧当连接失败、退避重试
-            if case .authenticationFailed(.credentialsRequired, let m) = e, destination.credentials != nil { throw StreamTransportError.connectFailed(m) }
+            // （原来照搬了 credentialsRequired 那句"地址里没写"）
+            if case .authenticationFailed(.credentialsRequired, _) = e, destination.credentials != nil, let status = Self.status(of: error) {
+                throw StreamTransportError.connectFailed("服务器还要 Adobe 鉴权（这次前两轮没走完，稍后重试）：" + StreamURLRedaction.redact(text: "\(status.code) \(status.description)"))
+            }
             throw e
         }
         // publish 之前先订阅流的状态：MediaMTX 一类按查询串鉴权的服务器，账号不对时先随机等 0–4 s 才回 NetStream.Publish.Unauthorized（防暴力猜），
@@ -152,8 +155,8 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         let statuses = await s.status
         do {
             let r = try await s.publish(destination.streamName)
-            guard r.status?.code == RTMPStream.Code.publishStart.rawValue else {
-                throw StreamTransportError.connectFailed(r.status?.code ?? "publish 无状态")
+            guard let status = r.status, status.code == RTMPStream.Code.publishStart.rawValue else {
+                throw r.status.map { Self.error(code: $0.code, description: $0.description, phase: "publish") } ?? StreamTransportError.connectFailed("发布：服务器回的 publish 里没有状态")
             }
         } catch let e as StreamTransportError {
             throw e
@@ -162,11 +165,11 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
             for await status in statuses {
                 if status.code == RTMPStream.Code.publishStart.rawValue {
                     // 迟到的成功：HaishinKit 这边的 publish 已经按超时收场（流回到 idle），这条连接用不了，按一般失败重连
-                    throw StreamTransportError.connectFailed("publish: 服务器 \(RTMPConnection.defaultRequestTimeout) ms 之后才回 \(status.code)")
+                    throw StreamTransportError.connectFailed("发布：服务器 \(RTMPConnection.defaultRequestTimeout) ms 之后才回 \(status.code)，这条连接作废、重连")
                 }
                 if status.level != "status" { throw Self.error(code: status.code, description: status.description, phase: "publish") }
             }
-            throw StreamTransportError.connectFailed("publish: requestTimedOut")
+            throw StreamTransportError.connectFailed("发布：服务器没回（请求超时）")
         } catch {
             throw Self.transportError(error, phase: "publish")
         }
@@ -179,7 +182,7 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         guard let stream else { throw StreamTransportError.notConnected }
         let pts = CMSampleBufferGetPresentationTimeStamp(sample.sampleBuffer)
         let dts = CMTimeSubtract(CMTimeAdd(pts, Self.haishinKitCTSOffset.cmTime), dtsOffset.cmTime)
-        guard let sb = retimed(sample.sampleBuffer, dts: dts) else { throw StreamTransportError.sendFailed("retime") }
+        guard let sb = retimed(sample.sampleBuffer, dts: dts) else { throw StreamTransportError.sendFailed("视频样本改时间戳失败") }
         await stream.append(sb)
     }
 
@@ -222,27 +225,31 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
     }
 
     /// 服务器回的状态 → StreamTransportError：拒绝鉴权 → authenticationFailed（"鉴权失败（…）：<状态码> <描述>"，原文照留），
-    /// 其余 → connectFailed（publish 阶段带 "publish: "）。文字里的地址一律打码。
+    /// 其余 → connectFailed："服务器拒绝连接：<状态码> <描述>"，phase 是 "publish" 时"发布被拒：<状态码> <描述>"（W4-C4：原来只有原文、publish 阶段带英文 "publish: "）。
+    /// 文字里的地址一律打码。
     static func error(code: String, description: String, phase: String) -> StreamTransportError {
         let text = StreamURLRedaction.redact(text: "\(code) \(description)")
         if let reason = authFailure(code: code, description: description) {
             return .authenticationFailed(reason, message: "\(reason.summary)：\(text)")
         }
-        return .connectFailed(phase.isEmpty ? text : "\(phase): \(text)")
+        return .connectFailed(phase.isEmpty ? "服务器拒绝连接：\(text)" : "发布被拒：\(text)")
     }
 
     /// HaishinKit 的错误 → StreamTransportError：服务器回了状态（connect 的 _error、publish 的 onStatus）按 `error(code:…)` 认，
-    /// 其余（socket 错误、超时……）原样写进 connectFailed；地址一律打码。
+    /// 其余（socket 错误、超时……）给 TransportErrorText 的中文概括（publish 阶段前面加"发布："），原文记日志。
     static func transportError(_ error: any Error, phase: String) -> StreamTransportError {
-        let status: RTMPStatus?
+        if let status = status(of: error) { return Self.error(code: status.code, description: status.description, phase: phase) }
+        let text = TransportErrorText.summary(of: error, logContext: phase.isEmpty ? "rtmp connect" : "rtmp \(phase)")
+        return .connectFailed(phase.isEmpty ? text : "发布：\(text)")
+    }
+
+    /// HaishinKit 的错误里服务器回的状态（connect 的 _error、publish 的 onStatus）；没有为 nil。
+    static func status(of error: any Error) -> RTMPStatus? {
         switch error {
-        case RTMPConnection.Error.requestFailed(let response): status = response.status
-        case RTMPStream.Error.requestFailed(let response): status = response.status
-        default: status = nil
+        case RTMPConnection.Error.requestFailed(let response): return response.status
+        case RTMPStream.Error.requestFailed(let response): return response.status
+        default: return nil
         }
-        if let status { return Self.error(code: status.code, description: status.description, phase: phase) }
-        let text = StreamURLRedaction.redact(text: "\(error)")
-        return .connectFailed(phase.isEmpty ? text : "\(phase): \(text)")
     }
 }
 
@@ -274,7 +281,7 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
         do {
             try await connection.connect(URL(string: destination.connectURL))
         } catch {
-            throw StreamTransportError.connectFailed(StreamURLRedaction.redact(text: "\(error)"))
+            throw StreamTransportError.connectFailed(TransportErrorText.summary(of: error, logContext: "srt connect"))
         }
         guard await connection.connected else { throw StreamTransportError.connectFailed("SRT 未连接") }
         let s = SRTStream(connection: connection)

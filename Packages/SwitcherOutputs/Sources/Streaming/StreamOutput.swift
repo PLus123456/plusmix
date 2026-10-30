@@ -421,7 +421,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 transport = try transportFactory.makeTransport(for: destination, audioFormat: audioEncoder?.configuration)
             } catch {
                 logger.error("[\(self.consumerName, privacy: .public)] 建传输层失败：\(String(describing: error), privacy: .public)")
-                lastError.withLock { $0 = "建传输层失败：\(error)" }   // 022
+                lastError.withLock { $0 = "建传输层失败：\(TransportErrorText.summary(of: error))" }   // 022；原文在上一行的日志里
                 failures += 1
                 continue
             }
@@ -437,7 +437,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 break
             } catch {
                 logger.warning("[\(self.consumerName, privacy: .public)] 连接失败：\(String(describing: error), privacy: .public)")
-                lastError.withLock { $0 = "连接失败：\(error)" }   // 022
+                lastError.withLock { $0 = "连接失败：\(TransportErrorText.summary(of: error))" }   // 022；底层原文由传输层记日志（W4-C4）
                 await transport.close()
                 failures += 1
                 continue
@@ -628,7 +628,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 }
             } catch {
                 estimateLoss(unsentBytes: inFlight, sizes: s.handedVideoSizes)
-                return .sendFailed("\(error)")
+                return .sendFailed(TransportErrorText.summary(of: error, logContext: "\(consumerName) send"))
             }
         }
     }

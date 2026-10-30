@@ -153,7 +153,7 @@ final class StreamAuthTests: XCTestCase {
     // MARK: 鉴权失败就停（W2-D4）
 
     /// 服务器回的状态 → 类型化的鉴权失败原因：只看状态码，加上 Adobe 那套写在描述里的 reason / authmod 参数；不是鉴权的拒绝返回 nil（照旧退避）。
-    /// 转成的 StreamTransportError：鉴权类 = "鉴权失败（…）：<状态码> <描述>"（原文），其余 = connectFailed（publish 阶段带前缀）。
+    /// 转成的 StreamTransportError：鉴权类 = "鉴权失败（…）：<状态码> <描述>"（原文），其余 = connectFailed（"服务器拒绝连接：" / publish 阶段"发布被拒："，W2-D5）。
     func testE_rtmpStatus_classifiesAuthFailures() {
         let rejected = "NetConnection.Connect.Rejected"
         let authfailed = "[ AccessManager.Reject ] : [ authmod=adobe ] : ?reason=authfailed&opaque=b3BhcXVl"
@@ -169,9 +169,9 @@ final class StreamAuthTests: XCTestCase {
                        .authenticationFailed(.badCredentials, message: "鉴权失败（用户名或密码不对）：\(rejected) \(authfailed)"))
         XCTAssertEqual(RTMPTransport.error(code: "NetStream.Publish.Unauthorized", description: "authentication failed", phase: "publish"),
                        .authenticationFailed(.publishUnauthorized, message: "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized authentication failed"))
-        XCTAssertEqual(RTMPTransport.error(code: "NetStream.Publish.BadName", description: "busy", phase: "publish"), .connectFailed("publish: NetStream.Publish.BadName busy"))
+        XCTAssertEqual(RTMPTransport.error(code: "NetStream.Publish.BadName", description: "busy", phase: "publish"), .connectFailed("发布被拒：NetStream.Publish.BadName busy"))
         XCTAssertEqual(RTMPTransport.error(code: rejected, description: "see rtmp://u:p@h/app", phase: ""),
-                       .connectFailed("\(rejected) see rtmp://\(StreamURLRedaction.marker)@h/app"), "原文里的地址照样打码")
+                       .connectFailed("服务器拒绝连接：\(rejected) see rtmp://\(StreamURLRedaction.marker)@h/app"), "原文里的地址照样打码")
     }
 
     /// W2-D4（Adobe 密码错）：StreamOutput（真编码器 + HaishinKit）第一次就停在 failed——网关正好 3 次连接（我们 2 次 + HaishinKit 1 次），
@@ -250,6 +250,7 @@ final class StreamAuthTests: XCTestCase {
         guard case .connectFailed(let m)? = fellBack as? StreamTransportError else { return XCTFail("应照旧是连接失败：\(String(describing: fellBack))") }
         XCTAssertTrue(m.contains("authmod=adobe"), m)
         XCTAssertFalse(m.contains("secret"), m)
+        XCTAssertFalse(m.contains("地址里没写"), "地址里写了账号：不能照搬 credentialsRequired 那句（W2-D5）：\(m)")
     }
 
     // MARK: 脱敏（日志 / 错误）
