@@ -495,6 +495,13 @@ public final class Recorder: FrameConsumer, AudioBlockConsumer, @unchecked Senda
                 if blockStartNs < originNs {
                     skip = Int(((originNs - blockStartNs) * rate + 500_000_000) / 1_000_000_000)
                     if skip >= n { continue }   // 整块都在起点之前
+                } else if blockStartNs > originNs {
+                    // 首块晚到（来源开录时没就绪 / 入口积压丢了最早的块）：先补起点到它之间的静音（不越过边界，同下面的漂移分支），
+                    // 首样本落在它自己的时间戳上。原来直接写到样本 0、下一块才按漂移补，声音整体提前（N10）
+                    var silence = Int(((blockStartNs - originNs) * rate + 500_000_000) / 1_000_000_000)
+                    if let stopNs { silence = min(silence, max(0, Int((stopNs - originNs) * rate / 1_000_000_000))) }
+                    appendSilence(frames: silence, w: w, ain: ain, format: pcmFormat)
+                    if failure != nil { return }
                 }
                 audioAnchored = true
             } else {
