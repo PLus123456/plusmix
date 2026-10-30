@@ -123,6 +123,10 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
                     throw StreamTransportError.authenticationFailed(reason, message: e.description)
                 case .unsupported:
                     throw StreamTransportError.authenticationFailed(.unsupportedMethod, message: e.description)
+                case .protocolError(let m) where m == RTMPConnectCommand.tooDeepMessage || m == RTMPConnectCommand.tooManyElementsMessage:
+                    // 回复超出 AMF0 上限（NS04：恶意 / 坏掉的服务器）：不退回交给 HaishinKit——它的 AMF0 解析同样递归无上限（2.2.5，W2-D5 探针：
+                    // 它自己 connect 也是 1000 层就 SIGBUS），同一个服务器回同样的东西就把整个进程打崩。当连接失败（退避重试，每次都先过我们的解析）
+                    throw StreamTransportError.connectFailed(e.description)
                 case .rejected, .protocolError, .timedOut:
                     // 服务器不是 Adobe 那套、或者我们的最小客户端没看懂：退回改之前的做法，把不带 userinfo 的地址交给 HaishinKit（账号这时用不上）
                     break

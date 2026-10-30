@@ -258,7 +258,7 @@ final class AdobeAuthGateway: @unchecked Sendable {
         Data((0..<6).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
     }
 
-    private static func loopback(port: Int) -> sockaddr_in {
+    static func loopback(port: Int) -> sockaddr_in {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = in_port_t(port).bigEndian
@@ -266,14 +266,14 @@ final class AdobeAuthGateway: @unchecked Sendable {
         return addr
     }
 
-    private static func configure(_ fd: Int32) {
+    static func configure(_ fd: Int32) {
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         var t = timeval(tv_sec: 5, tv_usec: 0)          // 握手 / connect 阶段：对端 5 s 不说话就放弃
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &t, socklen_t(MemoryLayout<timeval>.size))
     }
 
-    private static func read(_ fd: Int32, _ count: Int) -> [UInt8]? {
+    static func read(_ fd: Int32, _ count: Int) -> [UInt8]? {
         var out = [UInt8](repeating: 0, count: count)
         var got = 0
         while got < count {
@@ -284,7 +284,7 @@ final class AdobeAuthGateway: @unchecked Sendable {
         return out
     }
 
-    private static func write(_ fd: Int32, _ bytes: [UInt8]) -> Bool {
+    static func write(_ fd: Int32, _ bytes: [UInt8]) -> Bool {
         var sent = 0
         while sent < bytes.count {
             let n = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress! + sent, bytes.count - sent) }
@@ -295,7 +295,7 @@ final class AdobeAuthGateway: @unchecked Sendable {
     }
 
     /// 客户端握手之后的第一条消息：块头 fmt 0，块大小还是默认的 128（connect 之前谁都没发 SetChunkSize）。
-    private static func readFirstMessage(_ fd: Int32) -> (type: UInt8, payload: [UInt8], raw: [UInt8])? {
+    static func readFirstMessage(_ fd: Int32) -> (type: UInt8, payload: [UInt8], raw: [UInt8])? {
         guard let b0 = read(fd, 1), b0[0] >> 6 == 0 else { return nil }
         var raw = b0
         let csidByte = b0[0] & 0x3f
