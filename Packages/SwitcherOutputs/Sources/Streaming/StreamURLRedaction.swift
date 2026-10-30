@@ -59,9 +59,13 @@ public enum StreamURLRedaction {
     static func publishNameRange(in s: String) -> Range<String.Index>? {
         guard let sep = s.range(of: "://") else { return nil }
         let scheme = s[..<sep.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard scheme == "rtmp" || scheme == "rtmps",
-              let pathStart = s[sep.upperBound...].firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }), s[pathStart] == "/" else { return nil }
-        let pathEnd = s[pathStart...].firstIndex { $0 == "?" || $0 == "#" } ?? s.endIndex
+        // StreamDestination 先去掉首尾的空白 / 换行再解析："…/KEY/ " 的末段是 KEY，不是那个空白
+        let blank: (Character) -> Bool = { $0.unicodeScalars.allSatisfy(CharacterSet.whitespacesAndNewlines.contains) }
+        guard scheme == "rtmp" || scheme == "rtmps", let last = s.lastIndex(where: { !blank($0) }) else { return nil }
+        let contentEnd = s.index(after: last)
+        guard sep.upperBound < contentEnd,
+              let pathStart = s[sep.upperBound..<contentEnd].firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }), s[pathStart] == "/" else { return nil }
+        let pathEnd = s[pathStart..<contentEnd].firstIndex { $0 == "?" || $0 == "#" } ?? contentEnd
         var segments: [(range: Range<String.Index>, decodedSegments: Int)] = []
         var start = pathStart
         while start < pathEnd {

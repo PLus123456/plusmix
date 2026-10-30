@@ -42,7 +42,11 @@ final class StreamURLRedactionTests: XCTestCase {
         XCTAssertEqual(r("RTMP://h/live/KEY"), "RTMP://h/live/\(m)", "协议名不分大小写（StreamDestination 也是）")
         XCTAssertEqual(r("rtmp://h/live/KEY/"), "rtmp://h/live/\(m)/", "末尾的 / 不算一段")
         XCTAssertEqual(r("rtmp://h//live//KEY"), "rtmp://h//live//\(m)", "空段不算")
-        XCTAssertEqual(r("  rtmp://h/live/KEY  "), "  rtmp://h/live/\(m)", "前后空白（StreamDestination 会去掉）")
+        XCTAssertEqual(r("  rtmp://h/live/KEY  "), "  rtmp://h/live/\(m)  ", "前后空白（StreamDestination 会去掉）")
+        XCTAssertEqual(r("rtmp://h/live/KEY/ "), "rtmp://h/live/\(m)/ ", "末尾 / 加空白：末段是 KEY，不是那个空白")
+        XCTAssertEqual(r("rtmp://h/live/KEY/\n"), "rtmp://h/live/\(m)/\n", "末尾 / 加换行")
+        XCTAssertEqual(r("rtmp://h/live/KEY\t"), "rtmp://h/live/\(m)\t")
+        XCTAssertEqual(r("rtmp://h/live \n"), "rtmp://h/live \n", "去掉空白后只有一段")
         XCTAssertEqual(r("rtmp://u:pa/ss@h/app/KEY"), "rtmp://\(m)@h/app/\(m)", "解析不了的 userinfo：先按最后一个 @ 打码，再拆路径")
         // 只有一段（MediaMTX 的 rtmp://host/path）：那一段是 app、没有发布名，原样
         XCTAssertEqual(r("rtmp://h/live"), "rtmp://h/live")
@@ -59,6 +63,32 @@ final class StreamURLRedactionTests: XCTestCase {
         // 默认（日志、错误文字、地址框）：路径照旧保留
         XCTAssertEqual(StreamURLRedaction.redact(url: "rtmp://h/live/KEY"), "rtmp://h/live/KEY")
         XCTAssertEqual(StreamURLRedaction.redact(text: "连接失败 rtmp://h/live/KEY"), "连接失败 rtmp://h/live/KEY")
+    }
+
+    /// 差分：各种写法（首尾空白 / 换行 / 制表符、末尾 /、空段、%2F 在段首段尾、无效转义、多字节转义、; 参数、..、片段、查询串、userinfo、端口、大写协议）
+    /// 逐条交给 StreamDestination：它认出了发布名（密钥栏空）的，publishNameInPath 的结果里原文、解码后都不剩这个名字；它认不出的（一段 / 解析失败）不管。
+    func testNS09_publishNameRedaction_differentialAgainstStreamDestination() throws {
+        let heads = ["rtmp://h", "RTMPS://u:p@h:443", "rtmp://h:1935", "  rtmp://h", "\trtmp://u@h"]
+        let paths = ["/live/Zq7NAME", "/live/Zq7NAME/", "/live//Zq7NAME", "/a/b/Zq7NAME", "/live/Zq7NA%4DE", "/live/x%2FZq7NAME", "/live/Zq7NAME/%2F",
+                     "/live/Zq7NAME%2F", "/live/%2FZq7NAME", "/live/Zq7NAME;p=1", "/live/../Zq7NAME", "/live/Zq7NAME%20x", "/live/Zq7NAME%FF",
+                     "/live/Zq7%E5%AF%86", "/Zq7a%2FZq7NAME", "/live/Zq7NAME/%2f/", "/live/Zq7NAME%zz"]
+        let tails = ["", "?x=1", "#f", " ", "\n", "/ ", "\t", "/\n", "?pass=1 ", "/\r\n", "\u{3000}"]
+        var checked = 0
+        for h in heads {
+            for p in paths {
+                for t in tails {
+                    let url = h + p + t
+                    guard let d = try? StreamDestination(settings: StreamSettings(url: url)), !d.streamName.isEmpty else { continue }
+                    checked += 1
+                    let out = StreamURLRedaction.redact(url: url, publishNameInPath: true)
+                    XCTAssertFalse(out.contains(d.streamName), "\(url.debugDescription) → \(out.debugDescription)（发布名 \(d.streamName.debugDescription)）")
+                    XCTAssertFalse((out.removingPercentEncoding ?? out).contains(d.streamName), "解码后：\(url.debugDescription) → \(out.debugDescription)")
+                    XCTAssertTrue(out.contains("h"), out)
+                }
+            }
+        }
+        print("NS09 差分：\(heads.count * paths.count * tails.count) 种写法里 StreamDestination 认出发布名的 \(checked) 种全部遮住")
+        XCTAssertGreaterThan(checked, 400)
     }
 
     /// 拆法与 StreamDestination 一致：它认出的发布名（密钥栏空时）在 publishNameInPath 的结果里一个字都不剩，主机和 app 还在。
