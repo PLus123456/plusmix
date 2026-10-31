@@ -247,7 +247,10 @@ struct ISOPage: View {
                                 .accessibilityLabel(row.title)
                                 .disabled(row.locked)
                                 .help(row.locked ? L("outputSettings.iso.lockedHelp") : "")
-                            Text(row.title).lineLimit(1)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.title).lineLimit(1)
+                                if let subtitle = row.subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                            }
                             Text(row.status).lineLimit(1)
                             Text(row.duration).monospacedDigit()
                             Text(row.dropped).monospacedDigit()

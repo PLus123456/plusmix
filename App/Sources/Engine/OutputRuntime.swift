@@ -24,6 +24,8 @@
 //   起 / 停的过程中快照又变了，做完按最新快照再对一次。Stats.encoder 那一项由 sender 的 statsEntry 填（publishing / idle / unavailable / failed，019 起带接收方数）。
 //   源是输入 n、那一路分支用完了（与 ISO / Aux 共用每路 4 个）：sender 照跑、没画面、提示一次、记着在等；InputRuntime 还分支时回调 → 重新要分支、接上、再提示一次（W3-E4）。
 // 起不来的录制 / 推流（W5-B，02 X02 / 01a L13）：原因记在 failed 表（人话，底栏提示与推流页那一段照着写），Stats.encoder 里那一项报 failed（原来报 idle）；
+//   表里只存原因本身（"不认这种地址：foo://…"），状态行的整句（"推流 3 起不来：…"）另拼——原来存整句，推流页 / 悬停 / Stats last_error 再套一层，
+//   页上成了"起不来：推流 3 起不来：…"（W4-C4 问题单第 4 条）；
 //   enabled 仍为真时设置变了（地址 / 目录改对）reconcile 自动重试；底栏主体按钮有起不来的推流路时调 retry 只重试它们，正常的路不动。
 //   推流起的时候提示"连接中"，Stats 第一次报 publishing 才提示"已开始"（X37）。
 //   服务器拒绝鉴权（W2-D4）：StreamOutput 第一次就停在 failed（不退避），Stats 报 failed 时按它的类型化原因提示一次"鉴权失败，已停止"；点底栏主体 = retry。
@@ -67,6 +69,9 @@ final class OutputRuntime {
     enum Event: Equatable {
         case recordingStarted(output: Int, url: URL)
         case recordingStopped(output: Int, url: URL, frames: UInt64, seconds: Double)
+        /// 被迫停下的一路封好口了（ISO 读的那一路被删、磁盘满 / 低于下限又没切到备用目录）：停下的原因与文件一句话提示（W4-C4 第 7 条：
+        /// 原来封口时照常发 recordingStopped，状态行随即换成"录制 n 已停：…"，为什么停的那句一闪就被盖掉）。
+        case recordingStoppedWithReason(output: Int, url: URL, frames: UInt64, seconds: Double, reason: String)
         case recordingFailed(output: Int, message: String)
         /// 磁盘剩余空间跌破警戒线（提示）。
         case recordingDiskLow(output: Int, freeMB: Double)
@@ -122,6 +127,8 @@ final class OutputRuntime {
         var stopping = false
         /// 已经切到备用目录（不再切第二次）。
         var onFallback = false
+        /// 被迫停下的原因（stopForDisk / stopForInputRemoved / 录制器自己出错停下时记）：封口时与文件合成一句提示，不被"录制 n 已停"盖掉。
+        var stopNotice: String?
         init(output: OutputState, recorder: Recorder, consumer: any FrameConsumer, branch: LockFreeFrameSlot?, sourceTee: InputFrameTee?, start: RecordingStart) {
             self.output = output
             self.recorder = recorder
@@ -217,7 +224,8 @@ final class OutputRuntime {
     private var finishedNDI: [Int: NDISender] = [:]
     /// 起不来的 NDI 输出当时的设置：设置变了（改名 / 换源 / 换分组）就再试，没变不反复试。
     private var ndiFailedKeys: [Int: NDIKey] = [:]
-    /// 起不来的输出（enabled 仍为 true）→ 原因（给人看的一句）：不自己反复重试；被关掉、设置改了（reconcile）或底栏点重试（retry）时清。
+    /// 起不来的输出（enabled 仍为 true）→ 原因（给人看的一句，只有原因、不带"推流 n 起不来："——界面 / Stats 的 last_error 各自加前缀）：
+    /// 不自己反复重试；被关掉、设置改了（reconcile）或底栏点重试（retry）时清。
     private(set) var failed: [Int: String] = [:]
     /// 起不来时那一路的设置：enabled 仍为真、设置变了（地址 / 目录改对）就自动重试一次（W5-B，L13）。
     private var failedSettings: [Int: OutputSettings] = [:]
@@ -314,9 +322,9 @@ final class OutputRuntime {
         failedSettings.removeValue(forKey: n)
     }
 
-    /// 记一路起不来：原因 + 当时的设置（设置变了自动重试），提示一次。
-    private func recordFailure(_ output: OutputState, _ message: String) {
-        failed[output.number] = message
+    /// 记一路起不来：原因 + 当时的设置（设置变了自动重试）。
+    private func recordFailure(_ output: OutputState, _ reason: String) {
+        failed[output.number] = reason
         failedSettings[output.number] = output.settings
     }
 
@@ -352,7 +360,7 @@ final class OutputRuntime {
     func routeFailure(output number: Int) -> OutputRouteFailure? {
         if let reason = failed[number] { return OutputRouteFailure(reason: reason) }
         if let e = streams[number], !e.stopping, case .failed(let why) = e.stream.state {
-            return OutputRouteFailure(reason: L("notice.streamGaveUp", number, why), stoppedStream: true)
+            return OutputRouteFailure(reason: why, stoppedStream: true)
         }
         return nil
     }
@@ -370,7 +378,7 @@ final class OutputRuntime {
         for (n, e) in streams where !e.failureAnnounced && !e.stopping && Self.encoderEntry(in: stats, forOutput: n)?.state == "failed" {
             guard case .authentication(let why)? = e.stream.failure else { continue }
             e.failureAnnounced = true
-            onEvent?(.streamFailed(output: n, message: why == .unsupportedMethod ? failureReason(output: n) ?? "" : L("notice.streamAuthFailed", n)))
+            onEvent?(.streamFailed(output: n, message: why == .unsupportedMethod ? L("notice.streamGaveUp", n, failureReason(output: n) ?? "") : L("notice.streamAuthFailed", n)))
         }
     }
 
@@ -436,7 +444,8 @@ final class OutputRuntime {
             if let n = output.settings.source.inputNumber {
                 guard let b = inputs?.openBranch(input: n) else {
                     failedSettings[output.number] = output.settings
-                    fail(output: output.number, L("notice.isoBranchUnavailable", n, InputFrameTee.maxBranches))
+                    let reason = L("notice.isoBranchUnavailable", n, InputFrameTee.maxBranches)
+                    fail(output: output.number, reason: reason, notice: L("notice.recordingFailed", output.number, reason))
                     continue
                 }
                 branch = b
@@ -481,7 +490,7 @@ final class OutputRuntime {
                 if let branch, let n = output.settings.source.inputNumber { inputs?.releaseBranch(branch, input: n) }
                 finishedRecorders[number] = rec
                 failedSettings[number] = output.settings
-                fail(output: number, L("notice.recordingFailed", number, message))
+                fail(output: number, reason: message, notice: L("notice.recordingFailed", number, message))
                 continue
             }
             attach(output: output, recorder: rec, branch: branch, start: start)
@@ -511,10 +520,11 @@ final class OutputRuntime {
         onEvent?(.recordingStarted(output: number, url: rec.configuration.url))
     }
 
-    private func fail(output number: Int, _ message: String) {
-        NSLog("%@", message)
-        failed[number] = message
-        onEvent?(.recordingFailed(output: number, message: message))
+    /// 记一路录制起不来 / 出错：failed 表存原因（reason），状态行与日志用整句（notice）。
+    private func fail(output number: Int, reason: String, notice: String) {
+        NSLog("%@", notice)
+        failed[number] = reason
+        onEvent?(.recordingFailed(output: number, message: notice))
     }
 
     /// 一批录制同一拍停：边界拍 = 生效拍 + lead（主线程来晚了就至少是现在之后第 1 拍），命令生效就 rec.stop(atTick:)。
@@ -545,7 +555,11 @@ final class OutputRuntime {
         switch result {
         case .success(let r):
             lastResults[number] = r
-            onEvent?(.recordingStopped(output: number, url: r.url, frames: r.videoFrames, seconds: r.durationSeconds))
+            if let reason = entry.stopNotice {
+                onEvent?(.recordingStoppedWithReason(output: number, url: r.url, frames: r.videoFrames, seconds: r.durationSeconds, reason: reason))
+            } else {
+                onEvent?(.recordingStopped(output: number, url: r.url, frames: r.videoFrames, seconds: r.durationSeconds))
+            }
         case .failure(let e):
             onEvent?(.recordingFailed(output: number, message: L("notice.recordingFinishFailed", number, "\(e)")))
         }
@@ -575,7 +589,9 @@ final class OutputRuntime {
             }
         case .failed(let cause, let message, _):
             guard cause == .disk else {
-                fail(output: number, L("notice.recordingError", number, message))
+                let notice = L("notice.recordingError", number, message)
+                fail(output: number, reason: message, notice: notice)
+                entry.stopNotice = notice
                 if let clock { entry.stopping = true; entry.recorder.stop(atTick: clock.tick(at: .now())) { [weak self] r in
                     DispatchQueue.main.async { MainActor.assumeIsolated { self?.finishRecording(number, entry: entry, result: r) } } } }
                 return
@@ -598,6 +614,7 @@ final class OutputRuntime {
     private func stopForDisk(_ entry: RecordEntry, reason: String) {
         let number = entry.output.number
         failed[number] = reason
+        entry.stopNotice = reason
         onEvent?(.recordingFailed(output: number, message: reason))
         sendCommand?(.stopRecord(output: number))
         guard let clock else { return }
@@ -613,7 +630,9 @@ final class OutputRuntime {
     private func stopForInputRemoved(_ entry: RecordEntry, input n: Int) {
         let number = entry.output.number
         entry.stopping = true
-        fail(output: number, L("notice.isoInputRemoved", number, n))
+        let notice = L("notice.isoInputRemoved", number, n)
+        entry.stopNotice = notice   // 封口那句带上它（W4-C4 第 7 条）
+        fail(output: number, reason: notice, notice: notice)   // 马上 stopRecord，enabled 回 false 时 failed 就清了，原因不上界面
         sendCommand?(.stopRecord(output: number))
         let tick = commandTicks.takeRemoval(input: n) ?? clock?.tick(at: .now())
         entry.recorder.stop(atTick: tick) { [weak self] r in
@@ -622,9 +641,20 @@ final class OutputRuntime {
     }
 
     /// 切备用目录：停旧录制器（失败的直接封口），下一拍在备用目录起新的，运行表换成新的。
+    /// ISO 路（N06，Codex 2026-10-22）：新录制器要自己的分支（旧的那个录到边界拍才还），先开；这一路 4 个分支都占着就开不到——不切，
+    /// 按 stopForDisk 停这一路并提示，绝不退成 PGM 录制器 + Master 音频（原来 attach 拿到 nil 分支就那么录，配置还写着输入 n）。
+    /// 旧录制器封口时把它的分支还给那一路（同 finishRecording；原来漏了，切一次多占一个，停了以后还剩一个）。
     private func switchToFallback(_ entry: RecordEntry, reason: String, cause: FallbackCause) {
         guard let clock, let dir = fallbackDirectory else { return }
         let number = entry.output.number
+        var branch: LockFreeFrameSlot?
+        if let n = entry.inputNumber {
+            guard let b = inputs?.openBranch(input: n) else {
+                stopForDisk(entry, reason: L("notice.recordingFallbackNoBranch", reason, n, InputFrameTee.maxBranches))
+                return
+            }
+            branch = b
+        }
         entry.stopping = true
         entry.onFallback = true
         let boundary = clock.tick(at: .now()) + 2
@@ -639,10 +669,11 @@ final class OutputRuntime {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try rec.start(at: start)
         } catch {
+            if let branch, let n = entry.inputNumber { inputs?.releaseBranch(branch, input: n) }
             stopForDisk(entry, reason: L("notice.recordingFallbackFailed", reason, "\(error)"))
             return
         }
-        // 旧的停在同一边界；封口回调只做清理（运行表里已经是新的了）
+        // 旧的停在同一边界；封口回调只做清理（运行表里已经是新的了）：摘消费者、摘音频、还分支
         let old = entry
         old.recorder.stop(atTick: boundary) { [weak self] r in
             DispatchQueue.main.async {
@@ -651,12 +682,11 @@ final class OutputRuntime {
                     self.engine.removeConsumer(old.consumer)
                     self.detachAudio(old.audio)
                     old.audio = nil
+                    if let b = old.branch, let n = old.inputNumber { self.inputs?.releaseBranch(b, input: n) }
                     if case .success(let res) = r { self.lastResults[number] = res }
                 }
             }
         }
-        var branch: LockFreeFrameSlot?
-        if let n = entry.inputNumber { branch = inputs?.openBranch(input: n) }
         diskMonitor.remove(key: number)
         attach(output: entry.output, recorder: rec, branch: branch, start: start)
         recorders[number]?.onFallback = true
@@ -715,9 +745,9 @@ final class OutputRuntime {
     private func startStream(_ output: OutputState) {
         let settings = output.settings
         guard let streamSettings = settings.stream, !streamSettings.url.trimmingCharacters(in: .whitespaces).isEmpty else {
-            let message = L("notice.streamNoURL", output.number)
-            recordFailure(output, message)
-            onEvent?(.streamFailed(output: output.number, message: message))
+            let reason = L("stream.error.noURL")
+            recordFailure(output, reason)
+            onEvent?(.streamFailed(output: output.number, message: L("notice.streamFailed", output.number, reason)))
             return
         }
         let video = settings.video ?? VideoEncodeSettings()
@@ -728,9 +758,10 @@ final class OutputRuntime {
             stream = try StreamOutput(configuration: cfg, transportFactory: HaishinKitTransportFactory(format: format, video: video))
             try stream.start()
         } catch {
-            let message = L("notice.streamFailed", output.number, Self.streamErrorText(error))
+            let reason = Self.streamErrorText(error)
+            let message = L("notice.streamFailed", output.number, reason)
             NSLog("%@", message)
-            recordFailure(output, message)
+            recordFailure(output, reason)
             onEvent?(.streamFailed(output: output.number, message: message))
             return
         }
@@ -820,7 +851,7 @@ final class OutputRuntime {
             finishedNDI[n] = entry.sender   // SDK 初始化 / 建实例失败时 sender 自己标 unavailable，Stats 里报它
             let message = L("notice.ndiFailed", n, "\(error)")
             NSLog("%@", message)
-            failed[n] = message
+            failed[n] = "\(error)"
             ndiFailedKeys[n] = entry.key
             onEvent?(.ndiFailed(output: n, message: message))
         case .success:

@@ -736,6 +736,7 @@
 "inputSettings.source.changeHint" = "Changing the source = setInputSource: number, name, settings and PGM / PVW / overlay references are kept; this input is rebuilt from the new source (the picture drops out briefly).";
 "inputSettings.source.channels" = " (%@)";
 "inputSettings.source.current" = "Current";
+"inputSettings.source.note" = "This input reports: %@";
 "inputSettings.source.decklink" = "DeckLink: %@, connection %@";
 "inputSettings.source.file" = "File: %@, at end %@, rate %.2f";
 "inputSettings.source.image" = "Image: %@";
@@ -916,6 +917,7 @@
 "ndi.status.disabled" = "Not sending (off)";
 "ndi.status.dropped" = " (%ld dropped in queue)";
 "ndi.status.failed" = "Failed to start: NDI SDK present, but initialize / send_create failed (see the log)";
+"ndi.status.failedReason" = "Failed: %@";
 "ndi.status.publishing" = "Sending · %ld frames";
 "ndi.status.starting" = "Starting…";
 "ndi.status.unavailable" = "Unavailable: no NDI SDK (install the NDI SDK for Apple and rebuild)";
@@ -943,14 +945,15 @@
 "notice.recordingFallback" = "Recording %d: disk full, switched to the fallback directory: %@";
 "notice.recordingFallbackBelowMinimum" = "Recording %d: %d MB free on disk, below the %d MB minimum; switched to the fallback directory: %@";
 "notice.recordingFallbackFailed" = "%@; the fallback directory failed too: %@";
+"notice.recordingFallbackNoBranch" = "%@; fallback folder: this route's picture branches are all taken (input %d allows at most %d ISO / Aux), so it did not switch and this recording stopped";
 "notice.recordingFinishFailed" = "Recording %d failed to finalize: %@";
 "notice.recordingStarted" = "Recording %d started: %@";
 "notice.recordingStopped" = "Recording %d stopped: %@, %d frames / %.2f s";
+"notice.recordingStoppedBecause" = "%@ — saved: %@, %d frames / %.2f s";
 "notice.streamAuthFailed" = "Stream %d authentication failed (wrong user name or password) and stopped: fix it on the Streaming page, then click “Stream” in the bottom bar to retry";
 "notice.streamConnecting" = "Stream %d connecting…";
 "notice.streamFailed" = "Stream %d failed to start: %@";
 "notice.streamGaveUp" = "Stream %d stopped retrying: %@";
-"notice.streamNoURL" = "Stream %d has no URL";
 "notice.streamStarted" = "Stream %d is live";
 "notice.streamStopped" = "Stream %d stopped";
 "notice.unknownUIAction" = "Unknown interface action in the shortcut / MIDI table: %@";
@@ -1191,7 +1194,7 @@
 "settings.advanced.listenHint" = "127.0.0.1 = this Mac only; 0.0.0.0 = machines on the network too (set a token). The compatibility layer’s HTTP port is fixed at 8088.";
 "settings.advanced.listenInvalid" = "Unrecognized address: %@ (write host:port, port 0–65535)";
 "settings.advanced.minimumFree" = "Free space minimum (MB)";
-"settings.advanced.minimumFreeHint" = "When the recording volume drops below this, that recording stops (or moves to the fallback folder). Applies from the next recording start; running recordings keep their limit. Default 200.";
+"settings.advanced.minimumFreeHint" = "When the recording volume drops below this, that recording stops (or moves to the fallback folder). Applies from the next recording start; running recordings keep their limit. Default 200, at most 16777216 (16 TiB).";
 "settings.advanced.recording" = "Recording";
 "settings.format.custom" = "Custom…";
 "settings.format.customHint" = "Custom sizes are rounded down to even numbers (an encoder requirement), from 320×240 to 7680×4320.";
@@ -1261,6 +1264,7 @@
 "status.render" = "Render";
 "stream.error.invalidURL" = "Malformed address: %@";
 "stream.error.missingHost" = "The address has no server";
+"stream.error.noURL" = "No URL";
 "stream.error.unsupportedScheme" = "Unsupported address: %@:// (only rtmp://, rtmps://, srt://)";
 "streamMenu.addDestination" = "Add Stream Destination…";
 "streamMenu.item" = "%@ · %@";
@@ -1272,6 +1276,7 @@
 "streamMenu.tip.address" = "Address: %@";
 "streamMenu.tip.failed" = "Can't start: %@";
 "streamMenu.tip.retry" = "Click: retry just this one; the others are not affected";
+"streamMenu.tip.stopped" = "Stopped: %@";
 "streamMenu.tip.start" = "Click: start just this one";
 "streamMenu.tip.stop" = "Click: stop just this one (asks first)";
 "strip.add.a11y" = "Add Input";
@@ -1386,6 +1391,7 @@
 "prefs.remote.localOnlyHint" = "Only programs on this Mac can connect; choose “Allow local network” when the control panel runs on another machine.";
 "prefs.remote.noLAN" = "No local network address found (is Ethernet / Wi-Fi connected?)";
 "prefs.remote.noTokenWarning" = "The local network is allowed but no token is set: anyone on the same network can switch the program or stop recordings. Set a token.";
+"prefs.remote.cleartextWarning" = "The token and the whole state travel as plain HTTP / WebSocket (no TLS): only allow the local network on a network you trust.";
 "prefs.remote.compatLANWarning" = "The compatibility layer has no authentication: once the local network is allowed, anyone on the same network can control the switcher. Only enable it on a trusted network.";
 "prefs.tally.title" = "Tally";
 "prefs.tally.enabled" = "Provide the read-only tally stream (tally lights / displays on the local network can connect)";
@@ -1489,6 +1495,7 @@
 "outputSettings.iso.column.directory" = "Folder";
 "outputSettings.iso.column.dropped" = "Dropped";
 "outputSettings.iso.column.name" = "Name";
+"outputSettings.iso.audioOnlyHint" = "Audio only: the picture is black";
 "outputSettings.iso.column.record" = "Rec";
 "outputSettings.iso.column.status" = "Status";
 "outputSettings.iso.formatLine" = "Format %@ · %@ Mb/s · %@ (same as Recording 1)";

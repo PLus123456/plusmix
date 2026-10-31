@@ -736,6 +736,7 @@
 "inputSettings.source.changeHint" = "换来源 = setInputSource：编号 / 名字 / 设置 / PGM / PVW / 叠加引用都保留，这一路按新来源重建（画面会断一下）。";
 "inputSettings.source.channels" = "（%@）";
 "inputSettings.source.current" = "现在";
+"inputSettings.source.note" = "这一路报告：%@";
 "inputSettings.source.decklink" = "DeckLink：%@，接口 %@";
 "inputSettings.source.file" = "文件：%@，播完 %@，速率 %.2f";
 "inputSettings.source.image" = "图片：%@";
@@ -916,6 +917,7 @@
 "ndi.status.disabled" = "没在发（开关关着）";
 "ndi.status.dropped" = "（队列丢 %ld）";
 "ndi.status.failed" = "起不来：有 NDI SDK，但初始化 / 建发送实例失败（看日志）";
+"ndi.status.failedReason" = "失败：%@";
 "ndi.status.publishing" = "发送中 · %ld 帧";
 "ndi.status.starting" = "启动中…";
 "ndi.status.unavailable" = "不可用：没有 NDI SDK（装 NDI SDK for Apple 后重新编译）";
@@ -943,14 +945,15 @@
 "notice.recordingFallback" = "录制 %d：磁盘满，已切到备用目录：%@";
 "notice.recordingFallbackBelowMinimum" = "录制 %d：磁盘剩余 %d MB，低于下限 %d MB，已切到备用目录：%@";
 "notice.recordingFallbackFailed" = "%@；备用目录也起不来：%@";
+"notice.recordingFallbackNoBranch" = "%@；备用目录：这一路的画面分支满了（输入 %d 每路最多 %d 个 ISO / Aux），没有切，已停这一路";
 "notice.recordingFinishFailed" = "录制 %d 封口失败：%@";
 "notice.recordingStarted" = "录制 %d 开始：%@";
 "notice.recordingStopped" = "录制 %d 已停：%@，%d 帧 / %.2f s";
+"notice.recordingStoppedBecause" = "%@——已封口：%@，%d 帧 / %.2f s";
 "notice.streamAuthFailed" = "推流 %d 鉴权失败（用户名或密码不对），已停止：在推流页改对后点底栏「推流」重试";
 "notice.streamConnecting" = "推流 %d 连接中…";
 "notice.streamFailed" = "推流 %d 起不来：%@";
 "notice.streamGaveUp" = "推流 %d 不再重连：%@";
-"notice.streamNoURL" = "推流 %d 没有地址";
 "notice.streamStarted" = "推流 %d 已开始";
 "notice.streamStopped" = "推流 %d 已停";
 "notice.unknownUIAction" = "快捷键 / MIDI 表里有认不出的界面动作：%@";
@@ -1191,7 +1194,7 @@
 "settings.advanced.listenHint" = "127.0.0.1 = 只有本机能连；0.0.0.0 = 局域网里的机器也能连（记得设访问令牌）。兼容层的 HTTP 端口固定 8088。";
 "settings.advanced.listenInvalid" = "认不出的地址：%@（写成 host:port，端口 0–65535）";
 "settings.advanced.minimumFree" = "磁盘下限（MB）";
-"settings.advanced.minimumFreeHint" = "录制目录剩余空间低于这个数就停那一路（设了备用目录就切过去接着录）。从下一次开录起生效，在录的路照旧。默认 200。";
+"settings.advanced.minimumFreeHint" = "录制目录剩余空间低于这个数就停那一路（设了备用目录就切过去接着录）。从下一次开录起生效，在录的路照旧。默认 200，最大 16777216（16 TiB）。";
 "settings.advanced.recording" = "录制";
 "settings.format.custom" = "自定义…";
 "settings.format.customHint" = "自定义的宽、高按偶数取（编码器要求），范围 320×240 … 7680×4320。";
@@ -1261,6 +1264,7 @@
 "status.render" = "渲染";
 "stream.error.invalidURL" = "地址格式不对：%@";
 "stream.error.missingHost" = "地址里没有服务器";
+"stream.error.noURL" = "没有地址";
 "stream.error.unsupportedScheme" = "不认这种地址：%@://（只支持 rtmp:// rtmps:// srt://）";
 "streamMenu.addDestination" = "添加推流目的地…";
 "streamMenu.item" = "%@ · %@";
@@ -1272,6 +1276,7 @@
 "streamMenu.tip.address" = "地址：%@";
 "streamMenu.tip.failed" = "起不来：%@";
 "streamMenu.tip.retry" = "点一下：只重试这一路，别的路不受影响";
+"streamMenu.tip.stopped" = "已停：%@";
 "streamMenu.tip.start" = "点一下：只开这一路";
 "streamMenu.tip.stop" = "点一下：只停这一路（先确认）";
 "strip.add.a11y" = "添加输入";
@@ -1386,6 +1391,7 @@
 "prefs.remote.localOnlyHint" = "只有这台 Mac 上的程序连得上；控制面板装在别的机器上时选“允许局域网”。";
 "prefs.remote.noLAN" = "没找到局域网地址（网线 / Wi-Fi 没连上？）";
 "prefs.remote.noTokenWarning" = "允许了局域网但没设 token：同一网络里谁都能切画面、停录制。建议设一个 token。";
+"prefs.remote.cleartextWarning" = "令牌和全部状态走明文 HTTP / WebSocket（没有 TLS），只在可信局域网里开。";
 "prefs.remote.compatLANWarning" = "兼容层没有鉴权：允许局域网后，同一网络里谁都能控制。只在可信的网络里打开。";
 "prefs.tally.title" = "Tally";
 "prefs.tally.enabled" = "提供只读 tally 流（局域网上的 tally 灯 / 提词屏可以连）";
@@ -1489,6 +1495,7 @@
 "outputSettings.iso.column.directory" = "目录";
 "outputSettings.iso.column.dropped" = "丢帧";
 "outputSettings.iso.column.name" = "名称";
+"outputSettings.iso.audioOnlyHint" = "纯音频：画面为黑";
 "outputSettings.iso.column.record" = "录";
 "outputSettings.iso.column.status" = "状态";
 "outputSettings.iso.formatLine" = "格式 %@ · %@ Mb/s · %@（同录制 1）";
@@ -1607,7 +1614,7 @@
 "slot.menu.factory" = "恢复出厂";
 "slot.duration.seconds" = "%@ 秒";
 "slot.duration.customTitle" = "转场 %d 的时长";
-"slot.stingerMenu.header" = "转场 %d · Stinger：先选一路输入（选了才执行）";
+"slot.stingerMenu.header" = "转场 %d · Stinger：先选一路输入，选好后再点一次才执行";
 "slot.stingerMenu.noInputs" = "还没有输入";
 "slot.tbarRow" = "%@ ▾";
 "slot.tbarRowSlot" = "转场 %d · %@ ▾";

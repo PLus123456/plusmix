@@ -20,17 +20,17 @@ final class W5PCopyTests: XCTestCase {
     /// 底栏：推流对象停在 failed（服务器拒绝鉴权）的写"失败"（与状态窗、Stats 同一个字；用户 2026-10-17 定），仍是深红、点主体仍重试它；
     /// 运行表起不来的照旧写"起不来"。▴ 菜单那一项同样写"失败"、点 = 单路重试。
     func testW5P111_authStoppedStreamSaysFailedInBottomBar() {
-        let stopped = OutputRouteFailure(reason: "推流 2 不再重连：鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized", stoppedStream: true)
+        let stopped = OutputRouteFailure(reason: "鉴权失败（用户名或密码不对）：NetStream.Publish.Unauthorized", stoppedStream: true)
         let route = streamRoute(2, state: "failed", failure: stopped)
         let state = OutputButtonSummary.routeState(route, kind: .stream)
         XCTAssertEqual(state.text, "失败")
         XCTAssertEqual(state.severity, .error)
         let summary = OutputButtonSummary.stream([route])
         XCTAssertEqual(summary.title, "推流 · 失败", "原来写「推流 · 起不来」，状态窗写「失败」，两处不一致")
-        XCTAssertTrue(summary.toolTip?.contains("推流 2：失败 — 推流 2 不再重连：鉴权失败") == true, summary.toolTip ?? "")
+        XCTAssertTrue(summary.toolTip?.contains("推流 2：失败 — 鉴权失败（用户名或密码不对）") == true, summary.toolTip ?? "")
         XCTAssertTrue(summary.toolTip?.contains("点一下：重试起不来 / 失败的路") == true, "点主体 = 重试它：\(summary.toolTip ?? "")")
         // 运行表起不来（字符串字面量 = 这一种）：照旧"起不来"、提示照旧
-        let startFailed = OutputButtonSummary.stream([streamRoute(3, state: "failed", failure: "推流 3 没有地址")])
+        let startFailed = OutputButtonSummary.stream([streamRoute(3, state: "failed", failure: "没有地址")])
         XCTAssertEqual(startFailed.title, "推流 · 起不来")
         XCTAssertTrue(startFailed.toolTip?.contains("点一下：重试起不来的路") == true, startFailed.toolTip ?? "")
         // ▴ 菜单：同字、点 = 单路重试
@@ -51,15 +51,15 @@ final class W5PCopyTests: XCTestCase {
         let model = OutputSettingsModel(state: state, tab: .stream, defaultRecordDirectory: "/tmp", showName: "t", queriesSystemExtensions: false)
         model.routeFailure = { n in
             switch n {
-            case 2: OutputRouteFailure(reason: "推流 2 不再重连：鉴权失败（用户名或密码不对）", stoppedStream: true)
-            case 3: "推流 3 没有地址"
-            case 4: "推流 4 没有地址"
+            case 2: OutputRouteFailure(reason: "鉴权失败（用户名或密码不对）", stoppedStream: true)
+            case 3: "没有地址"
+            case 4: "没有地址"
             default: nil
             }
         }
         model.refreshRouteDetails()
-        XCTAssertEqual(model.streamStatus(output: 2), "失败：推流 2 不再重连：鉴权失败（用户名或密码不对）")
-        XCTAssertEqual(model.streamStatus(output: 3), "起不来：推流 3 没有地址")
+        XCTAssertEqual(model.streamStatus(output: 2), "失败：鉴权失败（用户名或密码不对）")
+        XCTAssertEqual(model.streamStatus(output: 3), "起不来：没有地址")
         XCTAssertEqual(model.streamFailureHint(2), "这一路已停止、不再自己重连（服务器拒绝了鉴权）：改对地址 / 账号后点「重试」，光改设置不会自己重试；也可以先停用这一路。")
         XCTAssertEqual(model.streamFailureHint(3), "改好地址 / 密钥（回车或离开输入框）会自动重试；也可以先停用这一路。")
         XCTAssertNil(model.streamFailureHint(4), "关着的路不写红字")
@@ -105,7 +105,7 @@ final class W5PCopyTests: XCTestCase {
         let since = lastSequence(session)
         _ = AppTest.measurePoppedMenu(open: { cell.transitionButton.performClick(nil) }, menu: { self.panel.activeMenu })
         let menu = try XCTUnwrap(panel.activeMenu, "应弹出槽 4 的输入选择")
-        XCTAssertEqual(menu.items.first?.title, "转场 4 · Stinger：先选一路输入（选了才执行）", "\(menu.items.map(\.title))")
+        XCTAssertEqual(menu.items.first?.title, "转场 4 · Stinger：先选一路输入，选好后再点一次才执行", "\(menu.items.map(\.title))")
         AppTest.pump(seconds: 0.3)
         XCTAssertEqual(uiCommands(session, since: since), [], "整条不发：既不换 PVW，也不发 autoTransition")
         XCTAssertEqual(session.state.preview, 2, "PVW 不换")

@@ -299,10 +299,17 @@ final class InputSettingsModel: ObservableObject {
     /// 运行状态不在快照里：快照来的时候与每秒一行 Stats 来的时候（PanelCoordinator）各取一次。
     @Published private(set) var playbackEnded = false
 
+    /// 这一路自己报的那句（PanelCoordinator 接：出画面时 = session.inputs.liveNote（文件输入的方向矩阵 / 转正失败 / 速率钳 / 定位越界），
+    /// 无信号时 = 它的 lastError）；"来源"一节写出来（W4-C4 第 1 条：原来设置窗里哪里都看不到）。
+    var runtimeNote: (() -> String?)?
+    @Published private(set) var sourceNote: String?
+
     func refreshRuntime() {
         let ended: Bool
         if case .file(_, let endAction, _) = config.source, endAction != .loop { ended = runtimeState?() == .noSignal } else { ended = false }
         if ended != playbackEnded { playbackEnded = ended }
+        let note = runtimeNote?().flatMap { $0.isEmpty ? nil : $0 }
+        if note != sourceNote { sourceNote = note }
     }
 
     /// "播放"一节那颗按钮画 ▶ 吗：暂停中 / 播完 = ▶ 播放，播着 = ⏸ 暂停（同格子）。
@@ -591,6 +598,9 @@ struct InputSettingsView: View {
         let form = model.sourceFormModel()
         Section(L("inputSettings.source.title")) {
             LabeledContent(L("inputSettings.source.current"), value: model.sourceSummary)
+            if let note = model.sourceNote {
+                Text(L("inputSettings.source.note", note)).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
             Picker(L("inputSettings.source.kind"), selection: Binding(get: { form.model.kind }, set: { form.model.kind = $0 })) {
                 ForEach(AddInputModel.Kind.displayOrder) { Text($0.title).tag($0) }
             }

@@ -168,6 +168,8 @@ extension OutputSettingsModel {
         let duration: String
         let dropped: String
         let directory: String
+        /// 名字下面那一小行：纯音频输入写"纯音频：画面为黑"（N07：录出来是黑画面 + 本路声音）；其余 nil。
+        let subtitle: String?
     }
 
     /// 纯音频 / 图片输入：表里默认收起（勾"显示全部输入"才列；已经有 ISO 路的照列）。
@@ -182,7 +184,7 @@ extension OutputSettingsModel {
         if let m = OutputLinkage.recordMaster(in: state) {
             rows.append(ISORow(id: "pgm", output: m.number, input: nil, title: L("outputSettings.iso.pgmRow", m.name), checked: OutputLinkage.isArmed(m),
                                locked: m.enabled, status: recordStatus(output: m.number), duration: durationText(m.number), dropped: droppedText(m.number),
-                               directory: m.settings.record?.directory ?? ""))
+                               directory: m.settings.record?.directory ?? "", subtitle: nil))
         }
         for input in state.inputs {
             let iso = ISORoutes.isoRecord(in: state, input: input.number)
@@ -190,7 +192,8 @@ extension OutputSettingsModel {
             rows.append(ISORow(id: "input-\(input.number)", output: iso?.number, input: input.number, title: L("outputSettings.iso.input", input.number, input.name),
                                checked: iso != nil, locked: iso?.enabled ?? false, status: iso.map { recordStatus(output: $0.number) } ?? "—",
                                duration: iso.map { durationText($0.number) } ?? "—", dropped: iso.map { droppedText($0.number) } ?? "—",
-                               directory: iso?.settings.record?.directory ?? ""))
+                               directory: iso?.settings.record?.directory ?? "",
+                               subtitle: input.source.kind == .audio ? L("outputSettings.iso.audioOnlyHint") : nil))
         }
         return rows
     }

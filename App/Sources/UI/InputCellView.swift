@@ -40,6 +40,9 @@ final class InputCellView: NSView {
     private let statusLabel = Theme.label("", size: 10, color: .white)
     /// 无信号时的第二行：这一路输入自己报的原因（lastError：设备不在 / 驱动没装 / NDI 源找不到……），一行放不下截尾、全文在悬停提示（W5-O）。
     private let statusDetailLabel = Theme.label("", size: 9, color: NSColor(white: 0.9, alpha: 1))
+    /// 出画面时这一路自己报的提示（文件输入的方向矩阵 / 转正失败 / 速率钳 / 定位越界，InputRuntime.liveNote）：缩略图底边一行小字，不压画面中间；
+    /// 放不下截尾、全文在悬停提示（W4-C4 第 1 条：原来只在无信号时显示 lastError，播放中这几句哪里都看不到）。
+    private let noteLabel = Theme.label("", size: 9, color: NSColor(white: 0.9, alpha: 1))
     // 第一行
     let removeButton: NSButton
     let transitionButton: NSButton
@@ -119,6 +122,11 @@ final class InputCellView: NSView {
         statusDetailLabel.drawsBackground = true
         statusDetailLabel.lineBreakMode = .byTruncatingTail
         statusDetailLabel.isHidden = true
+        noteLabel.alignment = .center
+        noteLabel.backgroundColor = NSColor(white: 0, alpha: 0.6)
+        noteLabel.drawsBackground = true
+        noteLabel.lineBreakMode = .byTruncatingTail
+        noteLabel.isHidden = true
         removeButton.action = #selector(removePressed)
         removeButton.setAccessibilityLabel(L("cell.remove.a11y", number))
         removeButton.toolTip = L("cell.remove.tip")
@@ -168,6 +176,7 @@ final class InputCellView: NSView {
         addSubview(audioPlaceholder)
         addSubview(statusLabel)
         addSubview(statusDetailLabel)
+        addSubview(noteLabel)
         addSubview(firstRow)
         addSubview(secondRow)
         widthConstraint = widthAnchor.constraint(equalToConstant: Theme.thumbnailWidth)
@@ -199,6 +208,9 @@ final class InputCellView: NSView {
             statusDetailLabel.centerXAnchor.constraint(equalTo: display.centerXAnchor),
             statusDetailLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 1),
             statusDetailLabel.widthAnchor.constraint(lessThanOrEqualTo: display.widthAnchor, constant: -8),
+            noteLabel.centerXAnchor.constraint(equalTo: display.centerXAnchor),
+            noteLabel.bottomAnchor.constraint(equalTo: display.bottomAnchor, constant: -2),
+            noteLabel.widthAnchor.constraint(lessThanOrEqualTo: display.widthAnchor, constant: -8),
             firstRow.topAnchor.constraint(equalTo: display.bottomAnchor, constant: Self.rowInset),
             firstRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             firstRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
@@ -270,8 +282,9 @@ final class InputCellView: NSView {
     }
 
     /// 快照里这一路的部分 + 运行状态。配置没变时只动 tally / 叠加 / 运行状态（快照 ≤ 60 Hz，别每次重设字和提示：92 的坑）。
-    /// detail = 无信号时这一路输入自己报的原因（lastError，W5-O），格子写在"无信号"下面一行。
-    func apply(config: InputConfig, tally: Tally, overlays: [OverlayState], runtime: InputState?, detail: String? = nil) {
+    /// detail = 无信号时这一路输入自己报的原因（lastError，W5-O），格子写在"无信号"下面一行；note = 出画面时这一路自己报的提示
+    /// （InputRuntime.liveNote，W4-C4 第 1 条），写在缩略图底边。
+    func apply(config: InputConfig, tally: Tally, overlays: [OverlayState], runtime: InputState?, detail: String? = nil, note: String? = nil) {
         let configChanged = config != self.config || nameLabel.stringValue.isEmpty
         self.config = config
         if tally != self.tally || configChanged {
@@ -297,9 +310,10 @@ final class InputCellView: NSView {
             restartButton.toolTip = isFile ? L("cell.restart.tip") : L("cell.playback.onlyFile")
         }
         Theme.setHighlighted(loopButton, isLooping)
-        if runtime != self.runtime || detail != runtimeDetail || configChanged {
+        if runtime != self.runtime || detail != runtimeDetail || note != liveNote || configChanged {
             self.runtime = runtime
             runtimeDetail = detail
+            liveNote = note
             updateStatus()
         }
         updatePlayButton()
@@ -418,6 +432,8 @@ final class InputCellView: NSView {
     private var runtime: InputState?
     /// 无信号的原因（lastError；没有 / 不是无信号为 nil）。
     private var runtimeDetail: String?
+    /// 出画面时的提示（liveNote；没有 / 不在出画面为 nil）。
+    private var liveNote: String?
 
     /// 纯音频输入（没有画面）：格子画占位，不画多画面格子。视频文件输入选的是 mp3 / wav / m4a / aac 也算（W5-K，04 Q57）。
     var isAudioOnly: Bool {
@@ -454,6 +470,10 @@ final class InputCellView: NSView {
         statusDetailLabel.stringValue = detail ?? ""
         statusDetailLabel.toolTip = detail
         statusDetailLabel.isHidden = detail == nil
+        let note = runtime == .live ? liveNote.flatMap { $0.isEmpty ? nil : $0 } : nil
+        noteLabel.stringValue = note ?? ""
+        noteLabel.toolTip = note
+        noteLabel.isHidden = note == nil
     }
 
     /// 格子上现在显示的状态文字（没有为空串；有原因时第二行用换行接上；测试看）。
@@ -463,6 +483,9 @@ final class InputCellView: NSView {
     }
     /// 状态那几个字的悬停提示（无信号的原因全文；测试看）。
     var statusToolTip: String? { statusLabel.toolTip }
+    /// 缩略图底边那行提示（出画面时这一路自己报的；没有为空串；测试看）与它的悬停提示。
+    var displayedNote: String { noteLabel.isHidden ? "" : noteLabel.stringValue }
+    var noteToolTip: String? { noteLabel.toolTip }
 
     /// 搜索匹配：编号或名字包含关键字。
     func matches(search: String) -> Bool {

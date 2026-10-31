@@ -68,6 +68,9 @@ final class OutputStatusModel: ObservableObject {
     static var showLogsTitle: String { L("outputStatus.showLogs") }
     /// 事件最多留多少条（老的丢掉）。
     static let maxEvents = 500
+    /// 一路起不来 / 停住的原因（OutputRuntime.routeFailure，PanelCoordinator 接）：状态那一列与底栏 / 推流页同一套字——起不来的写"起不来"、
+    /// 推流对象自己停住的写"失败"（W4-C4 第 5 条：原来只看 Stats，起不来的路 Stats 报 failed，这里写"失败"，三处不一）。
+    var routeFailure: ((Int) -> OutputRouteFailure?)?
 
     /// 每一路上一次看到的样子（推事件用）。
     private struct Seen {
@@ -104,7 +107,7 @@ final class OutputStatusModel: ObservableObject {
         for o in state.outputs where o.kind == .stream || o.kind == .record {
             let page: Page = o.kind == .stream ? .stream : .record
             let entry = OutputRuntime.encoderEntry(stats.encoder, forOutput: o.number)
-            let route = OutputRouteStatus(output: o, entry: entry)
+            let route = OutputRouteStatus(output: o, entry: entry, failure: routeFailure?(o.number))
             let s = OutputButtonSummary.routeState(route, kind: page == .stream ? .stream : .record)
             let row = Self.row(o, entry: entry, stateText: s.text, severity: s.severity)
             if page == .stream { stream.append(row) } else { record.append(row) }

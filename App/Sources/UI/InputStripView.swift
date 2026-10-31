@@ -57,6 +57,8 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     var runtimeState: ((Int) -> InputState?)?
     /// 无信号的原因来源（session.inputs.lastError：各输入自己报的那一句，W5-O）；只在无信号时读。
     var runtimeDetail: ((Int) -> String?)?
+    /// 出画面时这一路自己报的提示来源（session.inputs.liveNote：文件输入的方向矩阵 / 转正失败 / 速率钳 / 定位越界；W4-C4 第 1 条）。
+    var liveNote: ((Int) -> String?)?
 
     /// 分类（颜色 = 快照里各路的 InputConfig.color，每个快照都对一遍；名字 = Show.layout，主窗口换 session / 改名时设）。
     var categories = InputCategories() {
@@ -217,9 +219,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         let unsetStinger = !state.transition.isActive && state.transition.currentGroup.isStingerWithoutInput   // 提案 029 的判定（校验器拒 autoTransition 的同一条）
         for config in state.inputs {
             guard let cell = cells[config.number] else { continue }
-            let runtime = runtimeState?(config.number)
-            cell.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays, runtime: runtime,
-                       detail: runtime == .noSignal ? runtimeDetail?(config.number) : nil)
+            applyRuntime(cell, config: config, state: state)
             cell.applySwitching(program: state.program, transitionActive: state.transition.isActive, transitionLabel: label,
                                 unsetStinger: unsetStinger, currentSlot: state.transition.currentSlot)
             cell.removalImpacts = InputRemovalImpact.impacts(of: config.number, in: state)   // 删之前要不要问（W5-B）
@@ -241,6 +241,23 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         }
         relayoutThumbnails()
         applyFilter()
+    }
+
+    /// 一个格子的配置 + 运行状态（无信号的原因 / 出画面时的提示）。
+    private func applyRuntime(_ cell: InputCellView, config: InputConfig, state: MixerState) {
+        let runtime = runtimeState?(config.number)
+        cell.apply(config: config, tally: state.tally(ofInput: config.number), overlays: state.overlays, runtime: runtime,
+                   detail: runtime == .noSignal ? runtimeDetail?(config.number) : nil,
+                   note: runtime == .live ? liveNote?(config.number) : nil)
+    }
+
+    /// 运行状态、无信号的原因、出画面时的提示都是输入对象自己的，不在快照里：空闲时快照不变，格子就停在上一个快照那一刻
+    /// （新加的文件输入出了画面还写着"无信号"、出画面后才报的提示看不到）。每行 Stats（1 Hz，MainWindowController）再对一遍（W4-C4 第 1 条）；
+    /// 格子自己只在变了时才重设文字。
+    func refreshRuntime() {
+        for config in lastState.inputs {
+            if let cell = cells[config.number] { applyRuntime(cell, config: config, state: lastState) }
+        }
     }
 
     private func makeCell(_ config: InputConfig) -> InputCellView {

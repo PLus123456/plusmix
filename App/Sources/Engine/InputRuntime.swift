@@ -83,6 +83,14 @@ final class InputRuntime {
     /// 某路输入自己报的最近一句原因（lastError；这一类不报 / 没有为 nil）。
     func lastError(of number: Int) -> String? { (entries[number]?.input as? InputLastErrorReporting)?.lastError }
 
+    /// 出画面时这一路自己报的提示（W4-C4 第 1 条）：只有文件输入的 lastError 在播放中也有意义——方向矩阵不是 90° 的整数倍按原样出、转正失败、
+    /// 速率被钳、定位越界，FileInput 把这几句放进 lastError、不改 state；别的输入的 lastError 讲的是无信号的原因，出画面了不该再挂着（有的类不清）。
+    /// 不是文件输入、不在出画面、没有提示为 nil。
+    func liveNote(of number: Int) -> String? {
+        guard let file = entries[number]?.input as? FileInput, file.state == .live, let note = file.lastError, !note.isEmpty else { return nil }
+        return note
+    }
+
     /// 让运行表跟上快照：新编号建 + 注册（+ start），消失的编号 stop + 注销，来源变了的换输入对象（`replaceSource`：帧出口不换）。名字 / 设置变化不重建；
     /// 文件输入只有结束动作 / 速率变了（路径没变）也不重建：改在跑着的 FileInput 上（两样都运行中可改），播放位置接着走（W5-H 的循环、W5-N 的速率）。
     /// 播放目标（暂停 / 定位）随后由 `applyPlayback` 对上去。
@@ -208,8 +216,9 @@ final class InputRuntime {
         }
     }
 
-    /// 往一路的 tee 里推一帧黑（节目尺寸、BGRA、IOSurface 背后；主线程，只在换源换到不出画面的来源时用一次）。旧输入已经停了、新输入不推，
-    /// 这一刻主线程是这个 tee 唯一的生产者。pts = 现在：下一拍起引擎与各分支都挑到它。
+    /// 往一路的 tee（或一个分支）里推一帧黑（节目尺寸、BGRA、IOSurface 背后；主线程）。两处用：换源换到不出画面的来源时推进 tee 一次
+    /// （旧输入已经停了、新输入不推，这一刻主线程是这个 tee 唯一的生产者）；给不出画面的一路开分支时推进新分支一次（openBranch，N07：
+    /// 没人往这个 tee 推帧）。pts = 现在：下一拍起引擎 / 分支上的 tap 都挑到它，之后每拍重复它。
     static func pushBlackFrame(into slot: any FrameSlot, input number: Int, format: ProgramFormat) {
         let attrs: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary, kCVPixelBufferMetalCompatibilityKey: true]
         var buffer: CVPixelBuffer?
@@ -258,8 +267,15 @@ final class InputRuntime {
         return resolved
     }
 
-    /// 给某路开一个分支槽（ISO 录制 / Aux）；没有这路或分支用完为 nil。用完 `releaseBranch`。
-    func openBranch(input number: Int) -> LockFreeFrameSlot? { entries[number]?.tee.addBranch() }
+    /// 给某路开一个分支槽（ISO 录制 / Aux / 源是这一路的 NDI）；没有这路或分支用完为 nil。用完 `releaseBranch`。
+    /// 这一路不出画面（纯音频设备、建不出来的占位：videoSlot 为 nil）：新分支里先推一帧黑（N07，Codex 2026-10-22）——原来空分支上 ISO 的 tap
+    /// 每拍 noFrame、录制器从不建 writer，停的时候"没有写入任何视频帧"、没有文件；现在 tap 每拍重复这一帧（repeated 记账），录出来是黑画面 +
+    /// 本路声音。只推进新分支、不推主槽：PGM / 多画面上空槽本来就画黑，主槽推了反倒每拍记一次 dup（per_input）。
+    func openBranch(input number: Int) -> LockFreeFrameSlot? {
+        guard let entry = entries[number], let branch = entry.tee.addBranch() else { return nil }
+        if entry.input.videoSlot == nil { Self.pushBlackFrame(into: branch, input: number, format: engine.format) }
+        return branch
+    }
 
     /// 某路还回来一个分支时回调（参数 = 输入编号），在还分支的调用栈上同步调。W3-E4：源是输入 n 的 NDI 发送在分支用完时靠它重新要分支（OutputRuntime）。
     var onBranchReleased: ((Int) -> Void)?

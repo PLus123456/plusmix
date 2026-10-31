@@ -392,11 +392,11 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertTrue(s.toolTip?.contains("推流 3：重连中（第 2 次）") == true, s.toolTip ?? "")
         XCTAssertTrue(s.toolTip?.contains("推流 1：推流中") == true, s.toolTip ?? "")
         // 一路起不来 → 红，提示写原因
-        s = .stream([pub1, pub2, route(3, true, "failed", failure: "推流 3 没有地址")])
+        s = .stream([pub1, pub2, route(3, true, "failed", failure: "没有地址")])
         XCTAssertEqual(s.title, "推流 · 1 路异常")
         XCTAssertEqual(s.severity, .error)
         XCTAssertEqual(s.color, Theme.outputError)
-        XCTAssertTrue(s.toolTip?.contains("推流 3：起不来 — 推流 3 没有地址") == true, s.toolTip ?? "")
+        XCTAssertTrue(s.toolTip?.contains("推流 3：起不来 — 没有地址") == true, s.toolTip ?? "")
         XCTAssertTrue(s.toolTip?.contains("点一下：重试起不来的路") == true, "提示点主体的作用：\(s.toolTip ?? "")")
         // 最差的那一路定颜色，异常路数按路数算
         s = .stream([pub1, route(2, true, "backoff", frames: 10, attempt: 2), route(3, true, "idle", failure: "x")])
@@ -409,8 +409,8 @@ final class LiveSafetyTests: XCTestCase {
         XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "backoff", attempt: 3)]).severity, .warning)
         XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "connecting", frames: 5, attempt: 2)]).title, "推流 · 重连中（第 1 次）")
         XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "connecting", frames: 5, attempt: 4)]).title, "推流 · 重连中（第 3 次）")
-        XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "idle", failure: "推流 1 没有地址")]).title, "推流 · 起不来", "原来显示“推流 · idle”")
-        XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "idle", failure: "推流 1 没有地址")]).severity, .error)
+        XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "idle", failure: "没有地址")]).title, "推流 · 起不来", "原来显示“推流 · idle”")
+        XCTAssertEqual(OutputButtonSummary.stream([route(1, true, "idle", failure: "没有地址")]).severity, .error)
         // 录制同一套：PGM + 两路 ISO 都在录 →"● 录制 00:00:03（3 路）"（时长取最长那一路）；一路起不来 → 红
         let rec = { (n: Int) in OutputRouteStatus(number: n, name: "录制 \(n)", enabled: true, state: "recording", uptime: Double(n)) }
         XCTAssertEqual(OutputButtonSummary.record([rec(1)]).title, "● 录制 00:00:01")

@@ -347,6 +347,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         bottomBar.send = send
         inputStrip.runtimeState = session.map { s in { [weak s] n in s?.inputs.runtimeState(of: n) } }
         inputStrip.runtimeDetail = session.map { s in { [weak s] n in s?.inputs.lastError(of: n) } }   // 无信号格子的第二行（W5-O）
+        inputStrip.liveNote = session.map { s in { [weak s] n in s?.inputs.liveNote(of: n) } }   // 出画面的格子底下一行（W4-C4 第 1 条）
         let source = session?.displaySource
         previewMonitor.display.source = source
         bindProgramLedger(to: source)
@@ -432,6 +433,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
 
     private func apply(stats: Stats) {
         bottomBar.apply(stats: stats)
+        inputStrip.refreshRuntime()   // 输入的运行状态 / 原因 / 提示不在快照里：空闲时每秒对一遍（W4-C4 第 1 条）
         refreshToolbarStatus()
         mixerPanel.apply(stats: stats)
         reminderTracker.update(stats: stats, now: Self.now)
