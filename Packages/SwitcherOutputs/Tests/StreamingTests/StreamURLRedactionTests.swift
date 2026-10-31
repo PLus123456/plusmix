@@ -6,6 +6,7 @@ import SwitcherContracts
 /// 推流地址脱敏（StreamURLRedaction，日志 / 错误文字 / 诊断包 / 地址框共用）的两个口子：
 /// - NS12（Codex 10-24 审计 [12]）：查询参数名按原文比名单，`pa%73s=` 这种编码写法不打码——Foundation / 服务器解出来就是 pass；
 /// - NS09（审计 [9]，W5D 问题单）：密钥栏空着、发布名（密钥）写在 RTMP 地址最后一段时，路径原样保留。诊断包传 `publishNameInPath: true`。
+/// 提案 035 第 ① 步（P5-8）之后类型本身在 SwitcherContracts，这里经 `public typealias` 调到同一份代码；`test035_` 用搬迁前的金样证明逐字相同。
 final class StreamURLRedactionTests: XCTestCase {
     private let m = StreamURLRedaction.marker
 
@@ -112,5 +113,36 @@ final class StreamURLRedactionTests: XCTestCase {
         // 只有一段：StreamDestination 的发布名是空的，脱敏也不动路径
         XCTAssertEqual(try StreamDestination(settings: StreamSettings(url: "rtmp://h/live")).streamName, "")
         XCTAssertEqual(StreamURLRedaction.redact(url: "rtmp://h/live", publishNameInPath: true), "rtmp://h/live")
+    }
+
+    // MARK: 035 第 ① 步：类型搬进了 SwitcherContracts
+
+    /// 提案 035 第 ① 步（P5-8 / prompt 136）：`StreamURLRedaction` 搬进 SwitcherContracts，这个包里只剩 `public typealias`——同一个类型、同一份代码，推流日志 / App 的调用点一行不改。
+    /// 搬迁前（main c7d441a 的 SwitcherStreaming 版本）跑出的金样（Contracts 测试目录 Fixtures/redaction-035/，1041 个地址 + 10 段文字，含上面差分表全部 935 种）
+    /// 经这个包的名字再跑一遍，逐字相同。
+    func test035_movedToContracts_sameTypeAndPremoveOutputsIdentical() throws {
+        XCTAssertTrue(SwitcherStreaming.StreamURLRedaction.self == SwitcherContracts.StreamURLRedaction.self, "typealias 指向契约里的那个类型")
+        let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: packageDir.appendingPathComponent("Sources/Streaming/StreamURLRedaction.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("public typealias StreamURLRedaction = SwitcherContracts.StreamURLRedaction"), source)
+        XCTAssertFalse(source.contains("enum StreamURLRedaction"), "实现只在 SwitcherContracts 一份")
+        struct URLCase: Decodable { let group: String; let url: String; let publishNameInPath: Bool; let marker: String; let expected: String }
+        struct TextCase: Decodable { let group: String; let text: String; let marker: String; let expected: String }
+        struct Golden: Decodable { let urlCases: [URLCase]; let textCases: [TextCase] }
+        let goldenURL = packageDir.deletingLastPathComponent().appendingPathComponent("SwitcherCore/Tests/SwitcherContractsTests/Fixtures/redaction-035/StreamURLRedaction-premove.json")
+        let golden = try JSONDecoder().decode(Golden.self, from: Data(contentsOf: goldenURL))
+        XCTAssertEqual(golden.urlCases.count, 1041)
+        XCTAssertEqual(golden.textCases.count, 10)
+        XCTAssertEqual(golden.urlCases.filter { $0.group == "differential" }.count, 935)
+        var mismatches: [String] = []
+        for c in golden.urlCases {
+            let got = SwitcherStreaming.StreamURLRedaction.redact(url: c.url, marker: c.marker, publishNameInPath: c.publishNameInPath)
+            if got != c.expected { mismatches.append("[\(c.group)] \(c.url.debugDescription) → \(got.debugDescription)，金样 \(c.expected.debugDescription)") }
+        }
+        for c in golden.textCases {
+            let got = SwitcherStreaming.StreamURLRedaction.redact(text: c.text, marker: c.marker)
+            if got != c.expected { mismatches.append("[\(c.group) text] \(c.text.debugDescription) → \(got.debugDescription)，金样 \(c.expected.debugDescription)") }
+        }
+        XCTAssertTrue(mismatches.isEmpty, "与搬迁前的输出不同 \(mismatches.count) 条：\n" + mismatches.prefix(20).joined(separator: "\n"))
     }
 }
