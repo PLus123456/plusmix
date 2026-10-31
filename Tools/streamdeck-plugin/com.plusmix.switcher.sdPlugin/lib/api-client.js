@@ -2,8 +2,23 @@
 // 断线每 2 s 重连；快照缓存在 .snapshot，时钟在 .clock（hello 里带）。
 // WebSocket 构造函数与计时器由调用方给（bin/plugin.js 给 ws 包的 WebSocket）：这个文件不 import ws，test/cases.js 在 node 与 JXA 里
 // 都能拿假 socket / 假计时器排事件顺序（W2-C4 / D17）。JXA 没有 node:events，scripts/run-jxa.sh 垫一个只有 on / emit 的。
+// Codex 10-24 审计（W2-C5）：NS10——快照里 state.inputs / outputs 不是对象数组的丢掉（tally.js 对它们 find / filter，畸形的抛 TypeError、
+// 带走整个插件进程），监听回调抛的异常也接住只记一行；NS11——日志里不出现 token（连接地址带 ?token=，记日志用 endpoint / redactToken）。
 import { EventEmitter } from "node:events";
 import { classifyMessage } from "./tally.js";
+
+/** 文字里的 token= 查询项整项去掉（日志用，NS11）："…/events?token=abc&x=1" → "…/events?x=1"，"…/events?token=abc" → "…/events"。 */
+export function redactToken(text) {
+  return String(text).replace(/(^|[?&\s])token=[^&#\s]*(&?)/gi, (match, sep, amp) => (sep === "?" || sep === "&" ? (amp ? sep : "") : sep));
+}
+
+/** 按钮会遍历的两张表（state.inputs / outputs）：有就得是对象数组；没有这两个键的照收（tally.js 按空表算）。 */
+function snapshotTablesOK(message) {
+  const state = message && message.state;
+  if (state === null || typeof state !== "object") return true;
+  const ok = (table) => table == null || (Array.isArray(table) && table.every((e) => e !== null && typeof e === "object"));
+  return ok(state.inputs) && ok(state.outputs);
+}
 
 export class SwitcherClient extends EventEmitter {
   constructor({ host = "127.0.0.1", port = 8765, token = "", WebSocket = null,
@@ -28,6 +43,23 @@ export class SwitcherClient extends EventEmitter {
   get url() {
     const q = this.token ? `?token=${encodeURIComponent(this.token)}` : "";
     return `ws://${this.host}:${this.port}/api/v1/events${q}`;
+  }
+
+  /** 日志里写的连接目标：只有 host:port（url 带 ?token=，NS11）。 */
+  get endpoint() {
+    return `${this.host}:${this.port}`;
+  }
+
+  /** 监听回调抛的异常不往外冒（NS10）：原来重画一抛就顺着 ws 的事件处理冒上去、带走插件进程（断开时还会漏掉重连）。记一行 log，事件照常往下走。 */
+  emit(event, ...args) {
+    try {
+      return super.emit(event, ...args);
+    } catch (e) {
+      if (event !== "log") {
+        try { super.emit("log", `${event} 的回调出错：${redactToken(e && e.message)}`); } catch (e2) { /* 记日志的回调也出错：不管 */ }
+      }
+      return true;
+    }
   }
 
   connect() {
@@ -62,7 +94,7 @@ export class SwitcherClient extends EventEmitter {
     const current = () => this.ws === ws;
     ws.on("open", () => { if (!current()) return; this.connected = true; this.emit("connected"); });
     ws.on("message", (data) => { if (current()) this.handle(String(data)); });
-    ws.on("error", (err) => { if (current()) this.emit("log", `连接出错：${err.message}`); });
+    ws.on("error", (err) => { if (current()) this.emit("log", `连接出错：${redactToken(err && err.message)}`); });
     ws.on("close", () => {
       if (!current()) return;
       this.ws = null;
@@ -100,6 +132,10 @@ export class SwitcherClient extends EventEmitter {
         this.clock = message.clock || null;
         break;
       case "snapshot":
+        if (!snapshotTablesOK(message)) {
+          this.emit("log", "快照格式不对（state.inputs / state.outputs 不是对象数组），丢掉这条");
+          break;
+        }
         this.snapshot = message;
         this.emit("snapshot", message);
         break;

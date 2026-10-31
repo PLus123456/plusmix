@@ -100,6 +100,8 @@ final class LineClient: @unchecked Sendable {
         }
         var one: Int32 = 1
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
+        // 服务端可能在用例还在发的时候断开（NS07 的超长行）：发失败抛错，别让 SIGPIPE 带走整个 xctest
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
     }
 
     deinit { if fd >= 0 { close(fd) } }

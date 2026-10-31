@@ -69,7 +69,7 @@ function applyGlobal(settings) {
 }
 
 client.on("snapshot", paintAll);
-client.on("connected", () => { streamDeck.logger.info(`已连上 ${client.url}`); paintAll(); });
+client.on("connected", () => { streamDeck.logger.info(`已连上 ${client.endpoint}`); paintAll(); });   // 不写 url：它带 ?token=（NS11）
 client.on("disconnected", () => { streamDeck.logger.info("PlusMix 断开，2 s 后重连"); paintAll(); });
 client.on("log", (line) => streamDeck.logger.debug(line));
 streamDeck.settings.onDidReceiveGlobalSettings((ev) => applyGlobal(ev.settings));
