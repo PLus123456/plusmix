@@ -3,7 +3,7 @@ import SwitcherContracts
 
 // 状态机的纯函数部分（CONTRACTS.md §2.6 MixerReducing；设计方案 §5 转场、§9.1）。
 //
-// reduce：一条命令 → 新状态。纯函数、不看时钟；非法命令（不存在的输入 / 输出、通道越界、kind 不符、负时长）原样返回。
+// reduce：一条命令 → 新状态。纯函数、不看时钟；非法命令（不存在的输入 / 输出、通道越界、kind 不符、负时长或超上限的时长）原样返回。
 // advance：把状态推进到某一拍。所有随时间变化的量（转场 progress、FTB level、叠加 animProgress）都由
 // (startTick, durationTicks, 目标) 与 tick 直接算出，不依赖"上一拍"，所以对同一个 (state, tick) 永远得到同一结果，
 // 逐拍推进与一步到位等价。中途反转目标（FTB / 叠加开关）时，reduce 把 startTick 回拨到"当前电平对应的起点"，
@@ -28,6 +28,10 @@ import SwitcherContracts
 //（与 CommandValidator 同判；越界的值在 FileInput 里崩进程，底层钳位归 117）。
 // 输入编号的上限（提案 032，P5-5）：addInput 的编号不在 `InputConfig.numberRange`（1…16）原样返回（与 CommandValidator 同判；编号极大的输入让兼容层按编号分配的 TALLY / XML 崩或卡）；
 // 别的命令按编号取输入，越界的编号进不了状态，自然"不存在"。
+// 数值入口加固（提案 034，P5-7；Codex 10-22 N02 / N03 / N08 / N11）：五条带时长的命令超过 `DurationLimits.maxTicks` 原样返回（拒，不钳；setTransitionSlot / setOverlay 的负数照旧钳 0）；
+// addInput / setInputSource 的来源数值越界（`InputSource.rangeError`：文件速率、屏幕 / 合成源帧率、合成源宽高）原样返回；loadShow 先 `makeValidatedState()`（结构检查在 makeState 之前）、
+// 格式与当前不同原样返回（引擎时钟 / 渲染器 / App 的 session 在构造时定死，运行中换格式只会让状态说谎）；`overlay(input: 0)` 清空这一路的输入（nil 仍是不换）；
+// 叠加进 / 出动画中改时长按当前进度重锚（与 setFTBDuration 同一做法）。`equivalentStart` / `ramp` 自己也不溢出（第二道：状态里就算有超上限的时长也不崩）。
 
 /// `MixerReducing` 的实现。
 public struct MixerReducer: MixerReducing {
@@ -64,21 +68,25 @@ public struct MixerReducer: MixerReducing {
         return s
     }
 
-    /// 从 start 起用 duration 拍从 0 走到 1（rising）或从 1 走到 0；返回 (当前值, 是否到位)。
+    /// 从 start 起用 duration 拍从 0 走到 1（rising）或从 1 走到 0；返回 (当前值, 是否到位)。拍差溢出 Int64（只在起点离得极远时）按"早已到位 / 还没开始"算（034 第二道）。
     private static func ramp(from start: Tick, duration: Int, at tick: Tick, rising: Bool) -> (Double, Bool) {
         if duration <= 0 { return (rising ? 1 : 0, true) }
-        let k = tick - start
+        let (k, overflow) = tick.rawValue.subtractingReportingOverflow(start.rawValue)
+        if overflow { return tick > start ? (rising ? 1 : 0, true) : (rising ? 0 : 1, false) }
         if k <= 0 { return (rising ? 0 : 1, false) }
         if k >= Int64(duration) { return (rising ? 1 : 0, true) }
         let x = Double(k) / Double(duration)
         return (rising ? x : 1 - x, false)
     }
 
-    /// 反转目标时算等效起点：让 advance 在 tick 得到 currentLevel（按拍取整）。
+    /// 反转目标 / 改时长时算等效起点：让 advance 在 tick 得到 currentLevel（按拍取整）。拍数先钳到 0…duration 再转 Int（034 第二道：原来 progressed = 1、duration = Int.max 时
+    /// `Double(Int.max)` 舍入成 2^63，转回 Int 溢出崩——Codex N03）；起点溢出 Int64 时钳到 Int64.min（ramp 会按"早已到位"算）。
     private static func equivalentStart(currentLevel: Double, duration: Int, at tick: Tick, rising: Bool) -> Tick {
         let progressed = rising ? currentLevel : 1 - currentLevel
-        let k = Int((progressed * Double(duration)).rounded())
-        return tick - k
+        let x = (progressed * Double(duration)).rounded()
+        let k = x >= Double(duration) ? duration : (x > 0 ? Int(x) : 0)
+        let (start, overflow) = tick.rawValue.subtractingReportingOverflow(Int64(k))
+        return Tick(overflow ? .min : start)
     }
 
     static func completeTransition(_ s: inout MixerState, at tick: Tick) {
@@ -114,13 +122,13 @@ public struct MixerReducer: MixerReducing {
         case .cut:
             Self.completeTransition(&s, at: tick)
         case .fade(let d):
-            guard !s.transition.isActive, d >= 0 else { return state }
+            guard !s.transition.isActive, DurationLimits.tickRange.contains(d) else { return state }   // 034：超上限与负数一样拒
             s.transition.type = .fade
             s.transition.durationTicks = d
             Self.refreshCurrentSlot(&s)
             Self.startAuto(&s, at: tick)
         case .setTransition(let type, let d):
-            guard !s.transition.isActive, d >= 0 else { return state }
+            guard !s.transition.isActive, DurationLimits.tickRange.contains(d) else { return state }
             s.transition.type = type
             s.transition.durationTicks = d
             Self.refreshCurrentSlot(&s)
@@ -134,7 +142,8 @@ public struct MixerReducer: MixerReducing {
             Self.refreshCurrentSlot(&s)
         case .setTransitionSlot(let slot, var config):
             // 020：只改槽，转场进行中也收；钳位与 016 同口径；改的是当前槽且空闲 → 当前那组同时重拷（进行中的在完成或取消那一拍重拷）
-            guard TransitionSlot.indexRange.contains(slot), slot - 1 < s.transition.slots.count else { return state }
+            guard TransitionSlot.indexRange.contains(slot), slot - 1 < s.transition.slots.count,
+                  config.durationTicks <= DurationLimits.maxTicks else { return state }   // 034：超上限拒（负数照旧钳 0）
             if let input = config.stinger.input, !Self.inputExists(input, in: s) { return state }
             config.durationTicks = max(config.durationTicks, 0)
             config.wipe.softness = min(max(config.wipe.softness, 0), 1)
@@ -151,8 +160,8 @@ public struct MixerReducer: MixerReducing {
             s.transition.select(slot: slot)
             if start { Self.startAuto(&s, at: tick) }
         case .setFTBDuration(let ticks):
-            // 020：渐变进行中按当前电平对应的起点回拨，电平从当前值按新时长继续走；0 = 立即到位
-            guard ticks >= 0, ticks != s.ftb.durationTicks else { return state }
+            // 020：渐变进行中按当前电平对应的起点回拨，电平从当前值按新时长继续走；0 = 立即到位；034：超上限与负数一样拒
+            guard DurationLimits.tickRange.contains(ticks), ticks != s.ftb.durationTicks else { return state }
             s.ftb.durationTicks = ticks
             if s.ftb.startTick != nil {
                 if ticks <= 0 {
@@ -201,8 +210,9 @@ public struct MixerReducer: MixerReducing {
         case .overlay(let channel, let on, let input):
             guard let i = Self.overlayIndex(channel) else { return state }
             if let input {
-                guard Self.inputExists(input, in: s) else { return state }
-                s.overlays[i].input = input
+                // 034 ⑤：0 = 清空这一路的输入（与 setPreview(0) 的"0 = 无"一致）；nil 仍是不换
+                guard input == MixerState.noInput || Self.inputExists(input, in: s) else { return state }
+                s.overlays[i].input = input == MixerState.noInput ? nil : input
             }
             if on != s.overlays[i].on {
                 s.overlays[i].on = on
@@ -216,11 +226,22 @@ public struct MixerReducer: MixerReducing {
                 }
             }
         case .setOverlay(let channel, let rect, let animation):
-            guard let i = Self.overlayIndex(channel) else { return state }
+            guard let i = Self.overlayIndex(channel), animation.durationTicks <= DurationLimits.maxTicks else { return state }   // 034：超上限拒（负数照旧钳 0）
             s.overlays[i].rect = rect
             var a = animation
             a.durationTicks = max(a.durationTicks, 0)
+            let changed = a.durationTicks != s.overlays[i].animation.durationTicks
             s.overlays[i].animation = a
+            // 034 ⑦：进 / 出动画进行中改了时长 → 按当前进度重锚（与 setFTBDuration 同一做法），进度不倒退；0 = 立即到位；只改位置 / 方式起点不动
+            if changed, s.overlays[i].startTick != nil {
+                if a.durationTicks <= 0 {
+                    s.overlays[i].animProgress = s.overlays[i].on ? 1 : 0
+                    s.overlays[i].startTick = nil
+                } else {
+                    s.overlays[i].startTick = Self.equivalentStart(currentLevel: s.overlays[i].animProgress, duration: a.durationTicks, at: tick, rising: s.overlays[i].on)
+                    s = advance(s, to: tick)
+                }
+            }
         case .setOverlayDecoration(let channel, let border, let anchor, let previewOn):
             guard let i = Self.overlayIndex(channel) else { return state }
             s.overlays[i].border = border
@@ -288,7 +309,8 @@ public struct MixerReducer: MixerReducing {
             guard let i = Self.inputIndex(input, in: s) else { return state }
             s.inputs[i].name = name
         case .addInput(let config):
-            guard InputConfig.numberRange.contains(config.number), !Self.inputExists(config.number, in: s), Self.isValidFileRate(config.source) else { return state }
+            guard InputConfig.numberRange.contains(config.number), !Self.inputExists(config.number, in: s),
+                  config.source.rangeError(input: config.number) == nil else { return state }
             var c = config
             c.settings = Self.strippingLegacyBorder(c.settings.clamped())
             let at = s.inputs.firstIndex { $0.number > c.number } ?? s.inputs.count
@@ -304,8 +326,8 @@ public struct MixerReducer: MixerReducing {
             // 020：四个槽里的 Stinger 引用同样清
             for k in s.transition.slots.indices where s.transition.slots[k].stinger.input == input { s.transition.slots[k].stinger.input = nil }
         case .setInputSource(let input, let source):
-            // 编号 / 名字 / 设置 / PGM / PVW / 叠加引用全部保留；kind 由 source 推出，不另存；文件来源的速率越界与校验器同判、原样返回（031）
-            guard let i = Self.inputIndex(input, in: s), Self.isValidFileRate(source) else { return state }
+            // 编号 / 名字 / 设置 / PGM / PVW / 叠加引用全部保留；kind 由 source 推出，不另存；来源数值越界（文件速率 031、屏幕 / 合成源帧率与合成源宽高 034）与校验器同判、原样返回
+            guard let i = Self.inputIndex(input, in: s), source.rangeError(input: input) == nil else { return state }
             s.inputs[i].source = source
         case .setPlayback(let input, let paused):
             // 021：只对文件输入；相同值状态不变
@@ -336,10 +358,10 @@ public struct MixerReducer: MixerReducing {
             guard let i = s.outputs.firstIndex(where: { $0.number == output }) else { return state }
             s.outputs[i].settings = settings.migratingLegacyKeys()
 
-        // 节目（整份先搬迁，与 Show.load 读文件同一结果；搬迁不碰 validate 查的结构，所以与命令校验器的判定一致）
+        // 节目（整份先搬迁，与 Show.load 读文件同一结果；搬迁不碰 validate 查的结构，所以与命令校验器的判定一致）。
+        // 034 ③：结构检查在 makeState 之前（叠加不是 4 个原来在 MixerState.init 的 precondition 上崩）；⑥：格式与当前不同原样返回
         case .loadShow(let show):
-            let loaded = show.migratingLegacyKeys().makeState()
-            guard (try? loaded.validate()) != nil else { return state }
+            guard let loaded = try? show.migratingLegacyKeys().makeValidatedState(), loaded.format == s.format else { return state }
             s = loaded
         }
         return s
@@ -364,11 +386,6 @@ public struct MixerReducer: MixerReducing {
         (1...MixerState.overlayCount).contains(channel) ? channel - 1 : nil
     }
     private static func inputExists(_ number: Int, in s: MixerState) -> Bool { s.input(number) != nil }
-    /// 031：文件来源的播放速率在 `FileSource.rateRange` 里（别的 kind 恒 true）；与 `MixerState.validate()` / CommandValidator 同一条边界。
-    private static func isValidFileRate(_ source: InputSource) -> Bool {
-        if case .file(_, _, let rate) = source { return FileSource.rateRange.contains(rate) }
-        return true
-    }
     private static func isValidReference(_ number: Int, in s: MixerState) -> Bool { number == MixerState.noInput || inputExists(number, in: s) }
     private static func inputIndex(_ number: Int, in s: MixerState) -> Int? { s.inputs.firstIndex { $0.number == number } }
     private static func busIndex(_ bus: Bus, in s: MixerState) -> Int? { s.audio.buses.firstIndex { $0.bus == bus } }

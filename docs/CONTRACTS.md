@@ -1,4 +1,4 @@
-# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017 / 019，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则；P5 落地 023 一 / 024 / 025 / 026 / 027；P5-2 落地 020 / 021 / 022 / 023 二–五与 028 的口径文字；P5-3 落地 026 允许 headphones 与 029；P5-4 落地 030 / 031 与 020 的 T-bar 取消重拷；P5-5 落地 032 与 030 列耳机总线）
+# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017 / 019，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则；P5 落地 023 一 / 024 / 025 / 026 / 027；P5-2 落地 020 / 021 / 022 / 023 二–五与 028 的口径文字；P5-3 落地 026 允许 headphones 与 029；P5-4 落地 030 / 031 与 020 的 T-bar 取消重拷；P5-5 落地 032 与 030 列耳机总线；P5-7 落地 034）
 
 代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
@@ -38,6 +38,7 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 → **P5-5（2026-10-24，分支 p5-contracts-5，prompt 123；用户 2026-10-18 定"22 条都按建议"）：032（`InputConfig.numberRange` = 1…16、`MixerStateError.inputNumber`；`validate()` / 校验器的 addInput / reducer 同一条边界——0.1.1 唯一的 S1）、
 030 列耳机总线（`EffectsLatency.listedBuses` = `Bus.allCases`，填数 G10 胶水已改）、NDI 的 failed 也指"在跑但连续 10 帧送不出"与推流 last_error 的新写法（118 / G10 胶水的行为，只改文字）。
 不加字段、不加命令（仍 42 个 case），JSON 形态不变**
+→ **P5-7（2026-10-25，分支 p5-contracts-7，prompt 129；Codex 10-22 审查 N01 / N02 / N03 / N08 / N11 + 10-24 审计 NS01；用户 2026-10-25 批 034 "按建议"、⑤ 选 `input: 0`、⑥ 选拒收、附带三条都并进）：034 数值入口加固——`Rational` / `FrameRate` 解码拒分母 0 / `Int64.min` / 帧率 ≤ 0（抛 `DecodingError`，不再 SIGTRAP）；`ProgramFormat.sizeRange` = 16…8192、`FrameRate.programRange` = 1…240 fps 管节目格式、屏幕输入与合成源；`DurationLimits.maxTicks` = 864 000 拍管转场 / 槽 / FTB / 叠加动画四处时长（命令拒、不钳）；`AudioState.alignmentRange` = 0…24 000；`MixerStateError` 加 format / inputFrameRate / inputSize / durationTicks / alignmentFrames；`InputSource.rangeError(input:)`；`Show.validateStructure()` / `makeValidatedState()`（结构检查跑在 makeState 之前）；`overlay(input: 0)` = 清空；运行中 loadShow 换格式拒收；叠加动画进行中改时长按当前进度重锚。不加字段、不加命令（仍 42 个 case），JSON 形态不变**
 
 ---
 
@@ -71,8 +72,8 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 | `MachTimebase` | mach 时基 numer/denom；`HostClock.timebase` 进程内读一次 | HostClock | 所有换算 | 任意 |
 | `HostTime` | mach_absolute_time 的 tick 数，唯一的时间戳类型（铁律 5） | 入口打戳的人 | 所有人 | 任意，值类型 |
 | `HostDuration` | 有符号的 tick 差；`HostTime - HostTime` | 同上 | 同上 | 任意 |
-| `Rational` | 整数分子分母，永远约分、分母为正 | — | 时钟、帧率 | 任意 |
-| `FrameRate` | 每秒帧数的 Rational；预设 24/25/29.97/30/50/59.94/60；`nominalFramesPerSecond` 四舍五入（59.94 → 60） | 配置 | 时钟、合成源、闪光节奏 | 任意 |
+| `Rational` | 整数分子分母，永远约分、分母为正；**解码**拒分母 0 与分子 / 分母 = `Int64.min`（变号 / 取倒数会溢出——这就是约分 / 变号后超出 Int64 的全部情形），抛 `DecodingError`，不走带 precondition 的 init（提案 034 ①，Codex N01） | — | 时钟、帧率 | 任意 |
+| `FrameRate` | 每秒帧数的 Rational；预设 24/25/29.97/30/50/59.94/60；`nominalFramesPerSecond` 四舍五入（59.94 → 60）；**解码**分子 ≤ 0 抛"帧率必须为正"（约分后分母恒正，−60/−1 = 60 照收；034 ①）；合法范围 `programRange` = 1…240 fps（按有理数比，59.94 在里面、1/2 不在；034 ②），节目格式、屏幕输入、合成源共用 | 配置 | 时钟、合成源、闪光节奏 | 任意 |
 | `Tick` | 拍序号 Int64，第 0 拍在 t0，可为负 | 时钟（W1-B） | 状态机、脚本、Stats | 任意 |
 | `TickClockSpec` | {t0, frameDuration}；`time(of:)`、`tick(at:)`、`duration(ofTicks:)` 全是 128 位整数运算 | 引擎启动时 | 时钟、编码 PTS、合成源 | 任意 |
 
@@ -86,7 +87,7 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 | `ColorInfo` | {primaries, transfer, matrix, range}；默认 `.bt709Limited`（引擎输出永远是它，V9） | 输入 | 渲染、编码 | 任意 |
 | `RGB8` / `YCbCr` | 8-bit RGB / BT.709 limited YCbCr 实数；调色板、抠像键色 | 配置、图案 | 图案解码 | 任意 |
 | `Frame` | {pixelBuffer, pts, duration, color, inputNumber, sequence, ingressTime}；`@unchecked Sendable`：push 之后像素只读，池回收靠引用计数 | 输入线程 | 渲染（挑帧）、编码（PGM 帧 inputNumber = 0） | 输入 → 渲染 → 消费者 |
-| `ProgramFormat` | {width, height, frameRate}；预设 1080p60 / 1080p59.94 / 1080p30 / 720p60 / 2160p30 | Show / 命令 | 引擎、渲染、编码 | 任意 |
+| `ProgramFormat` | {width, height, frameRate}；预设 1080p60 / 1080p59.94 / 1080p30 / 720p60 / 2160p30；宽高各自的合法范围 `sizeRange` = 16…8192、帧率 `FrameRate.programRange` = 1…240 fps（提案 034 ②：`validate()` 抛 `MixerStateError.format`，Show.load / loadShow 读到不打开；App 自己的格式选项都在里面）；**运行中不许换**：loadShow 的格式与当前不同被拒（034 ⑥，见 §2.6） | Show / 命令 | 引擎、渲染、编码 | 任意 |
 
 `Frame.pts` = 采集时刻换算成 host time（挑帧比它）；`ingressTime` = 进帧槽那一刻（L1 = 编码器入口 − ingressTime）。
 
@@ -110,9 +111,9 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 |---|---|---|---|---|
 | `InputKind` | {camera, decklink, screen, file, image, ndi, audio, synthetic} | 由 `InputSource` 推出 | UI、引擎 | — |
 | `InputState` | {live, noSignal, error(message:)}；未 start / 已 stop = noSignal | 输入线程 | UI、引擎 | 实现保证原子 |
-| `InputSource` | 每种 kind 的来源参数（设备 ID、路径、屏幕目标、NDI 源名 / 带宽 / 抖动缓冲、DeckLink 设备 ID / 接口 / 声道映射、纯音频设备 UID / 声道映射、合成源设置）；file 的 `rate` 合法范围 `FileSource.rateRange` = 0.1…8、缺键 = 1（提案 031，见下"文件输入的播放控制"） | Show / addInput / setInputSource | 输入实现 | 普通 |
+| `InputSource` | 每种 kind 的来源参数（设备 ID、路径、屏幕目标、NDI 源名 / 带宽 / 抖动缓冲、DeckLink 设备 ID / 接口 / 声道映射、纯音频设备 UID / 声道映射、合成源设置）；file 的 `rate` 合法范围 `FileSource.rateRange` = 0.1…8、缺键 = 1（提案 031，见下"文件输入的播放控制"）；屏幕输入给的帧率（nil = 跟节目，不查）、合成源的帧率 / 宽高合法范围同节目格式（`FrameRate.programRange` / `ProgramFormat.sizeRange`，提案 034 ② / ②b）；来源里的数值越界由 `rangeError(input:)` 给出对应的 `MixerStateError`（fileRate / inputFrameRate / inputSize），`validate()`、reducer 的 addInput / setInputSource、校验器共用这一个判定 | Show / addInput / setInputSource | 输入实现 | 普通 |
 | `DeckLinkConnection` / `NDIBandwidth` | {sdi, hdmi, opticalSDI, component, composite, sVideo} / {highest, lowest, audioOnly}（提案 008） | 同上 | DeckLinkInput / NDIInput 填 `Options` | — |
-| `SyntheticSourceSettings` | 合成源：帧率、尺寸、底色、patternID、抖动、丢帧、时钟漂移、音频及其漂移 | Show / 脚本 | TestKit（W1-A） | 普通 |
+| `SyntheticSourceSettings` | 合成源：帧率、尺寸（帧率 / 宽高合法范围同节目格式，提案 034 ②b）、底色、patternID、抖动、丢帧、时钟漂移、音频及其漂移 | Show / 脚本 | TestKit（W1-A） | 普通 |
 | `InputSettings` | {crop, transform, audio: `InputAudioSettings`, effects: [`EffectSlot`]（键表见下，**只放音频效果**——023 三；每路的接线归 W1-D3）, keyer: `KeyerSettings`（提案 009）, playback: `PlaybackSettings`（提案 021，缺键默认）}；`clamped()` 钳范围（含 seekSeconds 0…一周：021 钳 ≥ 0，031 加上限） | 状态机（setInputSettings / setInputAudio / setPlayback / seekPlayback） | 渲染（crop/transform/keyer）、混音（audio / effects）、组装方（playback → FileInput） | 从快照读 |
 | `InputAudioSettings` | {routing: `BusRouting`, gainDb, muted, solo, pan, delayMs 0–500, afv}（提案 012 顺带项，用户 2026-09-22 批）；solo / afv / routing 单独改走 `setInputAudio`（023 五） | 同上 | 混音（W2-E 转成 C 参数） | 从快照读 |
 | `PlaybackSettings` | {paused, restartOnProgram, seekSeconds?, seekTick?}（提案 021）：前两个是目标随文件存，后两个是一次定位请求的瞬态（`resetTransientState` 清、nil 不写键）；只对 `InputSource.file` 有意义 | 状态机（setPlayback / seekPlayback / 换 PGM 时的 restartOnProgram） | 组装方（App InputRuntime / headless 看到 (seekTick, seekSeconds) 变了就 seek 一次，paused 变了就 pause / resume，不重建） | 从快照读 |
@@ -206,7 +207,7 @@ AUNBandEQ 的带宽参数就是这个定义（设计方案 §7 原来对的 AUPa
 | `OverlayState` | {input?, on 目标, rect, animProgress 0–1, animation, startTick, border?, anchor, previewOn}（提案 010）；`isVisible` | 状态机 | 渲染 | — |
 | `OverlayAnimation` | {kind, durationTicks, slideFrom?}（提案 010：slideFrom nil = 离 rect 最近的边）；`OverlayAnimation()` = cut 0 拍不变；**新节目**四路叠加默认 = `OverlayAnimation.defaultFade(for: format)` = fade、round(0.5 s × 帧率) 拍（提案 027，用户 2026-10-10 批）：`MixerState.newShow(format:outputs:)` 建出来就是它，App 的 emptyShow 也调它；老文件的 animation 照读 | 状态机 | 渲染 | — |
 | `OverlayBorder` / `OverlayAnchor` / `OverlayEdge` | {width 占节目高的比例（渲染器钳 0–0.1，界面只给到 0.05，更宽的只能从 API / 节目文件给）, color} / 九宫格锚点 / {left, right, top, bottom}（提案 010） | 同上 | 渲染 | — |
-| `AudioState` | {buses[4] 顺序 = Bus.allCases, afv 总开关, monitorMode, alignmentFrames = 2048, monitorPoint（提案 007）, monitorSource（提案 026：耳机 / 监听总线上听哪条总线，master 默认 / busA / busB / headphones；headphones = 听耳机总线自己，只听每路 routing.headphones 送出的那些（用户 2026-10-12 允许，P5-3；P5 时判无效、命令被拒、文件里读成 master）；缺键 master，四个值按字面读写；独听仍优先，四个值同一口径；混音器按它选耳机出口，W1-D3 `SW_CMD_MONITOR_SOURCE`）} | 状态机 | 混音、UI | — |
+| `AudioState` | {buses[4] 顺序 = Bus.allCases, afv 总开关, monitorMode, alignmentFrames = 2048（合法范围 `alignmentRange` = 0…24 000，提案 034 ⑧）, monitorPoint（提案 007）, monitorSource（提案 026：耳机 / 监听总线上听哪条总线，master 默认 / busA / busB / headphones；headphones = 听耳机总线自己，只听每路 routing.headphones 送出的那些（用户 2026-10-12 允许，P5-3；P5 时判无效、命令被拒、文件里读成 master）；缺键 master，四个值按字面读写；独听仍优先，四个值同一口径；混音器按它选耳机出口，W1-D3 `SW_CMD_MONITOR_SOURCE`）} | 状态机 | 混音、UI | — |
 | `MonitorPoint` | {preDelayLine（默认）, postDelayLine}：耳机 / 监听总线取对齐延迟线之前还是之后（提案 007） | Show / 设置面板 | 集成层填 `AudioEngineConfiguration` | — |
 | `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`}；kind = multiview 的 enabled = 要不要把多画面 NV12 送给下游，布局与它无关（见下） | 状态机 | 输出实现、UI | — |
 | `OutputSettings` | {source, video?, audio?, record?, stream?, multiview?（010）, display?（013）, extra（各输出会话的附加项，NDI 的 ndi.groups / ndi.conversion 在用）}；录制输出的 source 只认 program / input(n)，写进来的 preview / multiview **照录 PGM**、校验器不拒（023 二 (a)） | Show / 命令 | 编码、录制、推流、多画面、外部显示 | — |
@@ -221,7 +222,7 @@ progress 的意义：新画面（= preview 输入）盖在旧画面上的比例�
 `StingerParams.cutAtTick`（W3-B 口径，用户 2026-09-22 定）：第 s 拍应用命令时 progress = 0（渲染器什么都不叠），第 s + 1 拍才是 stinger 第一帧，所以 **cutAtTick 0 与 1 等价**；cutAtTick ≥ durationTicks 等于"完成时换"。`TransitionRenderer.stingerShowsNewUnder` 是定义。
 
 **输入引用的口径（P4，用户 2026-09-27 定）**：状态里四处引用输入编号——`program`、`preview`、`overlays[k].input`、`transition.stinger.input`。removeInput 把前两个置 0（黑场）、后两个置 nil；
-`validate()` 只查结构不变量（叠加恰好 4 个、总线顺序、输入编号在 1…16（032）且不重复、输出编号不重复、转场槽 4 个，外加 031 的一条取值：file 来源的速率在 `FileSource.rateRange` 里），**不查引用**，渲染器对不存在的输入按"没有这路"画（跳过）。
+`validate()` 只查结构不变量（叠加恰好 4 个、总线顺序、输入编号在 1…16（032）且不重复、输出编号不重复、转场槽 4 个），外加几条取值：file 来源的速率在 `FileSource.rateRange` 里（031）；节目格式的宽高 / 帧率、屏幕输入与合成源的帧率 / 宽高、四处时长、音频对齐帧数在 034 的范围里（见下"数值入口"）；**不查引用**，渲染器对不存在的输入按"没有这路"画（跳过）。
 P4 之前 removeInput 不清 Stinger 引用，那时存下的节目文件里的悬空编号由搬迁清掉（§2.8）；引用存在与否在命令入口由 `CommandValidator` 查（setTransitionParams / overlay / setPreview……）。
 
 **转场槽（提案 020，用户 2026-10-11 批，P5-2 落地；"请用户定的点"按提案默认）**：`TransitionState.slots` 恰好 4 个（`validate()` 查，`MixerStateError.transitionSlotCount`）、`currentSlot` nil 或 1…4（`transitionSlotIndex`）；
@@ -235,10 +236,17 @@ currentSlot = 当前那组（type / durationTicks / wipe / stinger）对应哪�
   不受影响：`useTransitionSlot(start: false)`（只选中，之后 T-bar 用）、`cut`（原子对调，不看类型）、`fade`（总是 Fade）、`tbar`。**T-bar 推这样的当前那组（P5-3 核对）**：reducer 照收（progress = 推杆位置、source = tbar，到 1 提交、拉回 0 取消，与别的类型同一条路）；
   渲染器（`TransitionRenderer.stingerShowsNewUnder`）在 round(progress × durationTicks) ≥ max(cutAtTick, 1) 时把底换成 PVW、不叠任何东西——即推过换底拍对应的那一格画面就整个换成新画面，拉回去又换回旧的；cutAtTick ≥ durationTicks 时推的过程中不换、到 1 提交才换；durationTicks = 0 时一推就换。
   控制层 / 兼容层 / Stream Deck 的提示（feedback、Transition n → 409、showAlert）归 W5-O（prompt 112）；App 界面三处本来就先弹输入选择（X18），不变。
-- `setFTBDuration(ticks:)`：`ftb.durationTicks = ticks`（存拍，界面按秒填）；FTB 渐变**进行中**按"当前电平对应的起点"回拨 startTick（`equivalentStart`），电平从当前值按新时长继续走、不跳变，0 = 立即到位；相同值 applied = false；ticks < 0 校验器拒；不并进 `ftb(on:)`（W2-C 客户端在用它的 JSON 形态）。
+- `setFTBDuration(ticks:)`：`ftb.durationTicks = ticks`（存拍，界面按秒填）；FTB 渐变**进行中**按"当前电平对应的起点"回拨 startTick（`equivalentStart`），电平从当前值按新时长继续走、不跳变，0 = 立即到位；相同值 applied = false；ticks 不在 0…864 000 校验器拒（034 之前只拒负数）；不并进 `ftb(on:)`（W2-C 客户端在用它的 JSON 形态）。
 - 原有 fade / setTransition / setTransitionParams 语义不变，执行后 currentSlot = 当前那组仍对得上的槽（优先原来那个），对不上任何槽 → nil（R3a C 附 3 的"不再对应任何槽"）；`removeInput` 清引用的规则扩到四个槽。
 - 默认与搬迁：`TransitionState()` 不知道帧率，slots = 60 fps 的出厂四槽、currentSlot 自动对号（fade 30 = 槽 1；`TransitionState(type: .cut, durationTicks: 0)` 这种裸状态 = nil）；`MixerState.newShow(format:)` 按节目帧率重算四槽、当前那组 = 槽 1（Fade 0.5 s）；`MixerState()` / `MixerState(format:)` 仍是 60 fps 出厂槽。020 之前的文件 / API 节目缺 slots → 裸解码 `[]`、`Show.migratingLegacyKeys()` 补齐（§2.8），`validate()` 要求恰好 4 个所以没经搬迁的进不了状态机；**loadShow 的校验器改成先搬迁再 validate**（否则老节目会被 400 拒，P4 报告 §5 第 3 条预告过）。
 - 界面（转场列、"切换"菜单、T-bar 行、格子"转场"按钮、FTB 右键）、Hotkeys / MIDI 的 `ControlAction`（执行 / 选中转场 n，默认表 ⌥1–⌥4）、VMixCompat 的 Transition1–4 / SetTransitionEffect1–4 / SetTransitionDuration1–4、Stream Deck 转场按钮归 100；SwitcherRender 不改。
+
+**数值入口（提案 034，用户 2026-10-25 批，P5-7 落地；Codex 10-22 审查 N01 / N02 / N03 / N08 / N11 + 10-24 审计 NS01）**：节目文件 / API 进来的一个数不许让承载引擎的进程 SIGTRAP——不可信数据在进带 precondition 的构造 / 会溢出的换算之前就被拒，API（`CommandValidator`）、节目文件（`Show.load` / `validate()`）、状态机（reducer）三处判同一件事。
+- **时长上限** `DurationLimits.maxTicks` = 864 000 拍（= 1 小时 @ 240 fps，按拍不按秒；兼容层毫秒参数的 1 小时上限在 240 fps 下换出来正好是它）：fade / setTransition / setTransitionSlot / setFTBDuration / setOverlay 超上限校验器 400"时长必须在 0–864000 拍之间：<n>"、reducer 原样返回（**拒，不钳**）；fade / setTransition / setFTBDuration 的负数照旧拒（文案并进同一句），setTransitionSlot / setOverlay 的负数照旧钳 0。`validate()` 查 `transition.durationTicks` / `slots[].durationTicks` / `ftb.durationTicks` / `overlays[].animation.durationTicks` 在 0…上限（`MixerStateError.durationTicks`）。第二道：reducer 的 `equivalentStart` 先把拍数钳到 0…duration 再转 Int、`ramp` 的拍差用不溢出的减法——状态里就算有 Int.max 时长（代码直接造的）也不崩。
+- **尺寸 / 帧率**：节目格式宽高 `ProgramFormat.sizeRange` = 16…8192、帧率 `FrameRate.programRange` = 1…240 fps（`MixerStateError.format`）；屏幕输入给的帧率、合成源的帧率 / 宽高同一组（`inputFrameRate(input:)` / `inputSize(input:)`），addInput / setInputSource 校验器 400"帧率必须在 1–240 之间：<帧率>" / "画面尺寸必须在 16–8192 之间：<宽>×<高>"、reducer 原样返回。帧率 ≤ 0 / `Int64.min` 在解码时就抛（§2.1）。出厂转场槽、新节目默认淡入的"秒 → 拍"换算钳进 0…上限（搬迁在 validate 之前跑，越界帧率原来在这里溢出；合法帧率下结果逐拍不变）。
+- **音频对齐帧数** `AudioState.alignmentRange` = 0…24 000（= App 设置面板的范围；`MixerStateError.alignmentFrames`）：极大值原来让 AudioEngine 把帧数换成 host time 的 Int64 换算溢出、起 session 就崩。没有命令改它，只在 `validate()` 查。
+- **叠加"清空"**：`overlay(channel:on:input: 0)` = 清掉这一路的输入（`MixerState.noInput`，与 setPreview(0) 的"0 = 无"一致），`input: nil` 仍是"不换"；负数 / 不存在照旧拒。开关照 `on` 走、与清空互不影响——开着的通道清空，画面立刻没有（`isVisible` 要有输入，没有退出动画）。App 叠加设置的"（无）"发 0。
+- **叠加动画进行中改时长**：setOverlay 改了时长且通道正在进 / 出（startTick 非 nil）→ 按当前进度用 `equivalentStart` 重锚（与 setFTBDuration 同一做法）：改的那一拍进度不变、之后按新时长继续；新时长 0 = 立即到位；时长没变（只改位置 / 方式）起点不动。原来沿用旧起点，60 → 120 拍时进度从 0.5 掉到 0.258。
 
 **`RecordSettings.container` 与录制来源（提案 023 二，用户 2026-10-11 批，P5-2 落地）**：`container`（mov / mp4）**废弃**——运行时从不读它、文件一律写 .mov，要 .mp4 用 `remuxToMP4`（停止后转封装，失败保留 .mov），两者表达同一件事；字段与枚举留着（删了是破坏性 wire 变更），缺键 = mov、写出仍写、不加 `@available`（App 的 OutputSettingsPanel 还读它给"写着 .mp4 又没开转封装"的提示）。录制输出的 `source` 只认 program / input(n)：从 API / 节目文件写进来的 preview / multiview 按 program 录（录制器的来源选择只认这两种），校验器不拒（(a)）；界面上录制来源只给 PGM / 某路输入。
 
@@ -259,10 +267,12 @@ currentSlot = 当前那组（type / durationTicks / wipe / stinger）对应哪�
 
 | 类型 | 是什么 | 谁写 | 谁读 | 线程 |
 |---|---|---|---|---|
-| `Command` | 枚举，42 个 case（对照见 §8；P3 按提案 010 / 012 从 27 加到 33，W3-E2 按提案 016 加 setTransitionParams，P5 按提案 026 加 setMonitorSource，P5-2 按提案 020 加 setTransitionSlot / useTransitionSlot / setFTBDuration、021 加 setPlayback / seekPlayback、023 四 / 五加 setInputColor / setInputAudio；P5-3 不加 case：026 的 setMonitorSource 起 headphones 合法、029 的 useTransitionSlot(start: true) / autoTransition 对没选输入的 Stinger 拒收；P5-4 不加 case：031 的文件速率 / 定位上限入口拒、020 的 T-bar 取消重拷）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}`；可选参数 nil 不写键（`setInputAudio` / `setInputColor`） | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
+| `Command` | 枚举，42 个 case（对照见 §8；P3 按提案 010 / 012 从 27 加到 33，W3-E2 按提案 016 加 setTransitionParams，P5 按提案 026 加 setMonitorSource，P5-2 按提案 020 加 setTransitionSlot / useTransitionSlot / setFTBDuration、021 加 setPlayback / seekPlayback、023 四 / 五加 setInputColor / setInputAudio；P5-3 不加 case：026 的 setMonitorSource 起 headphones 合法、029 的 useTransitionSlot(start: true) / autoTransition 对没选输入的 Stinger 拒收；P5-4 不加 case：031 的文件速率 / 定位上限入口拒、020 的 T-bar 取消重拷；P5-7 不加 case：034 的时长上限 / 来源帧率尺寸入口拒、`overlay(input: 0)` = 清空、运行中 loadShow 换格式拒）；JSON 形态 `{"fade":{"durationTicks":30}}`、`{"cut":{}}`；可选参数 nil 不写键（`setInputAudio` / `setInputColor`） | UI、快捷键、MIDI、API、脚本 | 状态机 | 普通 |
 | `IssuedCommand` | {sequence, issuedAt, command}：命令总线（W2-C）加信封；`issuedAt` = 命令进总线的时刻（服务端 host time，不是客户端发出时刻；提案 003 §C） | 命令总线 | 状态机（按 sequence 严格顺序） | 普通 |
 | `CommandReceipt` | {sequence, appliedTick, applied}；`applied` = 状态真的变了（false = reducer 按规则忽略了它，提案 003 §A；结构性非法的在总线入口就被拒，到不了回执） | 状态机 | 总线、API | 普通 |
 | `MixerReducing` 协议 | `reduce(state, command, at tick)`、`advance(state, to tick)`，纯函数，实现在 W1-B | W1-B | 状态机、Control 的测试 | 纯函数 |
+
+**loadShow 的两条规则（提案 034 ③ / ⑥）**：① 结构检查在构造状态之前——`show.migratingLegacyKeys().makeValidatedState()`（`validateStructure()` → `makeState()` → `validate()`），叠加不是 4 个的节目原来在 `MixerState.init` 的 precondition 上把进程弄崩，现在校验器 400"节目文件不合法：overlayCount(n)"、reducer 原样返回；034 新加的取值错误给人话（"节目文件不合法：帧率必须在 1–240 之间：…"之类）。② **运行中不能换格式**：节目的 `mixer.format`（宽高 / 帧率）与当前不同 → 校验器 400"节目格式不同（1920×1080@60 → 1280×720@30）：运行中不能换格式，用打开节目 / 重启 headless"、reducer 原样返回；同格式照载。引擎时钟、渲染器、App 的 `session.format` 都在构造时定死，loadShow 只会换掉状态（Codex N08：状态 720p30、纹理 1920×1080、时钟 60 fps）；App 的"打开节目"走 `performReplace` 重建 session、不经 loadShow，headless 从文件起。
 
 ### 2.7 统计（Stats.swift）
 
@@ -327,13 +337,14 @@ P5-4 加的字段（提案 030，用户 2026-10-17 批，字段定稿）：
 
 | 类型 | 是什么 | 谁写 | 谁读 |
 |---|---|---|---|
-| `Show` | {schemaVersion = 1, name, inputs, mixer: `MixerSettings`, audio, outputs, layout: `ShowLayout`}；`save()` / `load(from:)` / `migrate(from:schemaVersion:)` 占位 | App、命令 loadShow | 引擎启动、App |
+| `Show` | {schemaVersion = 1, name, inputs, mixer: `MixerSettings`, audio, outputs, layout: `ShowLayout`}；`save()` / `load(from:)` / `migrate(from:schemaVersion:)` 占位；`validateStructure()` / `makeValidatedState()`（提案 034 ③，见下） | App、命令 loadShow | 引擎启动、App |
 | `MixerSettings` | Show 里的切换部分 = MixerState 去掉 inputs/audio/outputs | `Show(name:state:)` | `makeState()` |
 | `ShowLayout` | 界面布局，`[String: JSONValue]` 原样存取，契约不解释 | App（W2-B / W3-E） | App |
 | `Scenario` | {durationTicks, events: [{tick, command}]}；`sortedEvents` | 测试脚本 | ScenarioRunner（W1-A） |
 | `JSONValue` | 占位字段用的通用 JSON | — | — |
 
 `Show ↔ MixerState`：`Show(name:state:layout:)` 和 `show.makeState()`；makeState 清瞬态（进度、startTick），目标值直接到位。
+**结构检查在 makeState 之前（提案 034 ③）**：`makeState()` 里 `MixerState.init` 对叠加个数是 precondition（写错代码），不可信的节目（文件、API 的 loadShow）走 `makeValidatedState()` = `validateStructure()`（叠加恰好 4 个 → 否则 `overlayCount`；转场槽 4 个或空，空的由搬迁补 → 否则 `transitionSlotCount`）+ `makeState()` + `validate()`，哪一步不过就抛、进程在。`Show.load` / `migrate`、校验器与 reducer 的 loadShow 四处都是先 `migratingLegacyKeys()` 再它（原来 `"overlays": []` 的文件让 Show.load SIGTRAP，Codex N02）。解码阶段的帧率规则见 §2.1。
 
 过渡键的一次性搬迁（提案 010 / 013，P3 落地，P4 收口）：`Show.load(from:)` 解完就调 `migratingLegacyKeys()`，把 `OutputSettings.extra["layout"]` 搬进 `.multiview`、
 `extra["displayID"]` / `["fallbackToMain"]` 搬进 `.display`、某路输入效果链里第一个启用的 `EffectSlot(id: "border")` 搬进用到这路输入、还没有边框的叠加通道的 `OverlayState.border`，
@@ -364,8 +375,8 @@ P5-2 起 `migratingLegacyKeys()` 多一条（提案 020）：文件没有 `trans
 - **切换**：`reduce` 只在拍点边界应用；Cut 原子换号。每拍先 `advance` 再 `reduce` 该拍命令，命令按 sequence 严格顺序。
 - **C1 的两种口径**：`生效拍点时刻 − IssuedCommand.issuedAt` 是"服务端收到 → 生效"；客户端口径（客户端发出 → 画面生效）由客户端自己记发送时刻（scripts/apitest），多一个单程网络延迟。
 - **音频块**：`AudioRing.write` 的 hostTime 是块首帧时刻；混音输出块的首样本 host time 作音频 PTS，与视频同一时基。
-- **编号**：输入 / 输出编号从 1 起，0 = 无；输入编号最大 16（`InputConfig.numberRange`，提案 032）；overlay channel 1–4；`Bus.rawValue` = `AudioState.buses` 下标。
-- **范围**：tbar/progress 0–1；pan −1…1；gainDb −96…+24；delayMs 0–500；crop 各边 0–1 且对边之和 ≤ 1（`InputSettings.clamped()`）。
+- **编号**：输入 / 输出编号从 1 起，0 = 无（`overlay` 命令里 input 0 = 清空这一路，nil = 不换；提案 034）；输入编号最大 16（`InputConfig.numberRange`，提案 032）；overlay channel 1–4；`Bus.rawValue` = `AudioState.buses` 下标。
+- **范围**：tbar/progress 0–1；pan −1…1；gainDb −96…+24；delayMs 0–500；crop 各边 0–1 且对边之和 ≤ 1（`InputSettings.clamped()`）；转场 / 槽 / FTB / 叠加动画时长 0…864 000 拍、节目与合成源宽高 16…8192、帧率 1…240 fps、音频对齐帧数 0…24 000（提案 034，越界的命令 400、节目文件不打开）。
 - **无信号**：`InputState.noSignal`，帧槽保留最后一帧；渲染不阻塞。noSignal 与 error 的分界见 §2.4（会不会自己好）。
 - **纯音频输入**：没有帧槽，能切进 Program（画黑、音频按 AFV 走），多画面画占位格 + 电平表（§2.4，用户 2026-09-23 定）；声道映射口径见 §2.4 提案 014。
 - **PVW / 多画面出不出 NV12**（用户 2026-09-22 定）：状态里有 enabled 的输出、其 `settings.source` 是 `.preview` / `.multiview` 时 `RenderedFrame.preview` / `.multiview` 自动填；
@@ -468,7 +479,7 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 | — | `.setTransitionSlot(slot:config:)` | 加的（提案 020，P5-2）：改转场槽 1–4 之一（`TransitionSlot` 整体替换），进行中也收；改当前槽：空闲时当前那组同时重拷、进行中的完成或取消（T-bar 拉回 0）那一拍重拷；钳位同 016；槽号 / Stinger 引用由校验器拒；相同配置 applied = false |
 | — | `.useTransitionSlot(slot:start:)` | 加的（提案 020）：把槽拷进当前那组、currentSlot = slot；start = true 同时开始 auto 转场（一拍内原子完成，cut / 时长 0 = 立即对调）；start = true 而槽是没选输入的 Stinger 被拒（提案 029，P5-3：校验器 400、reducer 原样返回）；start = false 只选中；转场进行中被拒；已是当前槽且相同 applied = false |
 | — | `.setFTBDuration(ticks:)` | 加的（提案 020）：`ftb.durationTicks`；渐变进行中回拨起点不跳变、0 立即到位；相同值 applied = false；负数校验器拒；不并进 ftb |
-| overlay(n, on, input) | `.overlay(channel:on:input:)` | input nil = 不换输入 |
+| overlay(n, on, input) | `.overlay(channel:on:input:)` | input nil = 不换输入，0 = 清空这一路（提案 034） |
 | — | `.setOverlay(channel:rect:animation:)` | 加的：W3-B 位置 / 动画 |
 | — | `.setOverlayDecoration(channel:border:anchor:previewOn:)` | 加的（提案 010 A4，P3 定）：边框 / 锚点 / PVW 预览；与 setOverlay 分开是为了不改它的 JSON 形态 |
 | audioGain(input, dB) | `.audioGain(input:dB:)` | |
@@ -488,7 +499,7 @@ CRC-4：多项式 x⁴+x+1，初值 0xF，MSB 先，无反射无 xorout（`crc4`
 | — | `.seekPlayback(input:seconds:)` | 加的（提案 021）：文件输入定位（0 = 从头播），记一次定位请求 (seekTick = 这一拍, seekSeconds)，组装方交给 FileInput；kind != file / 秒数负、非有限或超过一周（604 800，提案 031）校验器拒（reducer 同判）；同一拍同一位置再发 applied = false。"切上 PGM 时从头播"是每路 `playback.restartOnProgram`，reducer 在换人那一拍写同一种定位 |
 | — | `.setInputColor(input:color:)` | 加的（提案 023 四，P5-2）：改一路的分类颜色（`InputColor`），nil = 清掉；输入不存在拒；相同值 applied = false；分类名字留在 Show.layout |
 | — | `.addOutput(config:)` / `.removeOutput(output:)` / `.setOutputSettings(output:settings:)` | 加的：输出表要能改；addOutput / setOutputSettings 进来的设置先搬过渡键（P4，同 Show.load） |
-| loadShow | `.loadShow(show:)` | 整体替换状态；先按 Show.load 同一套规则搬迁（P4），`validate()` 不过的被拒 |
+| loadShow | `.loadShow(show:)` | 整体替换状态；先按 Show.load 同一套规则搬迁（P4），结构检查（034 ③）/ `validate()` 不过的被拒；格式与当前不同被拒（034 ⑥） |
 
 每条命令在总线上加信封 `IssuedCommand{sequence, issuedAt}`（prompt 的"每条命令带 sequence 和 issuedAt"）；`Scenario` 和 HTTP API 只有 `Command`。
 

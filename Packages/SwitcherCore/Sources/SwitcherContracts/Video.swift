@@ -158,7 +158,7 @@ public struct Frame: @unchecked Sendable {
 
 // MARK: - 节目格式
 
-/// 节目（PGM）的分辨率与帧率。引擎、渲染器、编码器、合成源都按它配置；改它等于重启管线。
+/// 节目（PGM）的分辨率与帧率。引擎、渲染器、编码器、合成源都按它配置；改它等于重启管线——所以运行中的 loadShow 不许换它（提案 034 ⑥），换格式走 App 的打开节目 / 重启 headless。
 public struct ProgramFormat: Hashable, Codable, Sendable {
     /// 节目宽（像素）。
     public var width: Int
@@ -183,6 +183,11 @@ public struct ProgramFormat: Hashable, Codable, Sendable {
     public static let hd720p60 = ProgramFormat(width: 1280, height: 720, frameRate: .fps60)
     /// 3840×2160 @ 30。
     public static let uhd2160p30 = ProgramFormat(width: 3840, height: 2160, frameRate: .fps30)
+
+    /// 宽、高各自的合法范围（像素；提案 034 ②，用户 2026-10-25 批）：16…8192——盖住 DCI 8K（8192×4320）与竖屏，Metal 纹理上限 16384 之内；
+    /// 下限只挡掉 0 / 负数 / 几个像素这种算不出东西的值。帧率的范围是 `FrameRate.programRange`。合成源（`SyntheticSourceSettings`）的宽高用同一组。
+    /// 节目格式越界：`MixerState.validate()` 抛 `MixerStateError.format`，校验器 loadShow 400；App 自己的格式选项（自定义 320–7680 × 240–4320）都在里面。
+    public static let sizeRange: ClosedRange<Int> = 16...8192
 
     /// 一拍的时长（秒）。
     public var frameDuration: Rational { frameRate.frameDuration }

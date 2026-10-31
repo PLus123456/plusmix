@@ -85,8 +85,9 @@ final class OverlaySettingsModel: ObservableObject {
 
     // MARK: 输入 / 开关
 
+    /// input nil = 选了"（无）"：发 `input: 0` 清空这一路（提案 034 ⑤；命令里的 nil 是"不换输入"，原来发 nil 清不掉——Codex N11）。
     func setInput(channel: Int, input: Int?) {
-        send?(.overlay(channel: channel, on: overlay(channel).on, input: input))
+        send?(.overlay(channel: channel, on: overlay(channel).on, input: input ?? MixerState.noInput))
     }
 
     func setOn(channel: Int, on: Bool) {
@@ -120,8 +121,12 @@ final class OverlaySettingsModel: ObservableObject {
     /// 节目帧率（拍 / 秒）。
     var framesPerSecond: Double { max(1, state.format.frameRate.approximateFramesPerSecond) }
 
-    /// 秒 → 拍（按节目帧率四舍五入）。
-    func ticks(seconds: Double) -> Int { max(0, Int((seconds * framesPerSecond).rounded())) }
+    /// 秒 → 拍（按节目帧率四舍五入），钳进 0…`DurationLimits.maxTicks`（提案 034：原来填一个 20 位数就在 Int 换算上溢出、App 崩；超上限的命令总线也会拒）。
+    func ticks(seconds: Double) -> Int {
+        let t = (seconds * framesPerSecond).rounded()
+        guard t > 0 else { return 0 }
+        return t >= Double(DurationLimits.maxTicks) ? DurationLimits.maxTicks : Int(t)
+    }
 
     func durationSeconds(channel: Int) -> Double { Double(overlay(channel).animation.durationTicks) / framesPerSecond }
 
