@@ -107,4 +107,88 @@ final class DeckLinkChannelMapTests: XCTestCase {
         XCTAssertEqual(left[frames - 1], 6.0 / 128)
         XCTAssertEqual(right[frames - 1], 3.0 / 128)
     }
+
+    // MARK: N05（Codex 2026-10-22）：`channels: [Int.max]` 在算内嵌音频路数时溢出
+
+    /// Codex N05：`embeddedAudioChannels` 先调 `InputChannelMap.requiredSourceChannels`（对原始下标 +1）再封顶 16，`[Int.max]` 在 +1 那里
+    /// 溢出、进程 SIGTRAP（`[999]` 对照正常）。纯计算，不要 SDK。
+    func testN05_embeddedAudioChannels_intMaxMapSaturatesTo16() {
+        XCTAssertEqual(DeckLinkInput.embeddedAudioChannels(requested: 2, map: [Int.max], ringChannels: 2), 16)
+        XCTAssertEqual(DeckLinkInput.embeddedAudioChannels(requested: 2, map: [Int.max - 1], ringChannels: 2), 16)
+        XCTAssertEqual(DeckLinkInput.embeddedAudioChannels(requested: 2, map: [0, Int.max], ringChannels: 2), 16)
+        XCTAssertEqual(DeckLinkInput.embeddedAudioChannels(requested: 2, map: [999], ringChannels: 2), 16, "Codex 的对照")
+        XCTAssertEqual(DeckLinkInput.embeddedAudioChannels(requested: 0, map: [Int.max], ringChannels: 2), 0, "Options 显式关了音频照旧不开")
+    }
+
+    /// Codex N05 的启动链：SDK 编进来时 `attempt` 在查驱动 / 枚举设备之前就算 `cfg.audio_channels`（App 默认给 audioRing），
+    /// 所以不插卡也崩。从 InputSource（`channels: [Int.max]`）取映射、对着 Fake IDeckLinkInput start：会话建得起来、内嵌音频开 16 路，
+    /// 越界的下标按契约钳到源的范围——环的两路都取内嵌音频的最后一路（第 16 路）。
+    func testN05_deckLinkFake_intMaxChannelMap_startOpens16ChannelsAndClampsToLast() throws {
+        let config = InputConfig(number: 4, name: "SDI 越界映射", source: .decklink(deviceID: "fake", connection: .sdi, channels: [Int.max]))
+        let fromSource = try DeckLinkInput(config: config, timing: timing(), videoSlot: LockFreeFrameSlot(capacity: 3))
+        XCTAssertEqual(fromSource.options.channelMap, [Int.max], "映射从 case 取，原样留着（用的时候再钳）")
+        guard SwitcherDeckLinkInfo.isSDKAvailable else {
+            throw XCTSkip("BLOCKED-SDK：没有 DeckLink SDK 头，Fake IDeckLinkInput 编不出来")
+        }
+        let fake = try XCTUnwrap(sw_decklink_fake_create())
+        defer { sw_decklink_fake_destroy(fake) }
+        let ring = HarnessAudioRing(channelCount: 2, capacityFrames: 1 << 15)
+        let input = DeckLinkInput(number: 4, name: "SDI 越界映射", deviceID: "fake", timing: timing(),
+                                  videoSlot: LockFreeFrameSlot(capacity: 3), audioRing: ring, options: fromSource.options, fake: fake)
+        try input.start()
+        defer { input.stop() }
+        XCTAssertTrue(waitUntil(timeoutMs: 2000) { input.deckLinkCounters.rebuilds == 1 }, "会话应建起来")
+        var log = sw_decklink_fake_log()
+        sw_decklink_fake_get_log(fake, &log)
+        XCTAssertEqual(log.last_audio_channels, 16, "越界映射：内嵌音频开到 SDK 的上限 16 路")
+
+        // 16 路交错 int32：第 k 路恒为 (k + 1) << 24 = (k + 1) / 128 满幅
+        let frames = 800
+        let channels = 16
+        var audio = [Int32](repeating: 0, count: frames * channels)
+        for i in 0..<frames { for k in 0..<channels { audio[i * channels + k] = Int32(k + 1) << 24 } }
+        let width = 1920, height = 1080
+        let bytes = [UInt8](repeating: 0x80, count: width * height * 2)
+        let frameDuration: Int64 = 16_683_350
+        let hardwareOffset: Int64 = 500_000_000
+        for n in 0..<2 {
+            var f = sw_decklink_fake_frame()
+            f.width = Int32(width)
+            f.height = Int32(height)
+            f.row_bytes = Int32(width * 2)
+            f.pixel_format = 0x32767579   // '2vuy'
+            f.hw_duration_ns = frameDuration
+            f.stream_time_ns = Int64(n) * frameDuration
+            f.hw_timestamp_supported = 1
+            f.audio_frames = Int32(frames)
+            f.audio_channels = Int32(channels)
+            f.audio_sample_type = 32
+            f.audio_packet_time_ns = Int64(n) * frameDuration
+            let hwNow = Int64(HostClock.now().nanoseconds) - hardwareOffset
+            f.hw_time_ns = hwNow - frameDuration
+            sw_decklink_fake_set_hardware_clock(fake, hwNow)
+            audio.withUnsafeBufferPointer { a in
+                bytes.withUnsafeBufferPointer { b in
+                    f.bytes = UnsafeRawPointer(b.baseAddress)
+                    f.audio_bytes = UnsafeRawPointer(a.baseAddress)
+                    sw_decklink_fake_emit_frame(fake, &f)
+                }
+            }
+            usleep(UInt32(frameDuration / 1000))
+        }
+        XCTAssertTrue(waitUntil(timeoutMs: 2000) { ring.availableFrames >= frames * 2 }, "两包音频都该进环：\(ring.availableFrames)")
+        let left = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+        let right = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+        left.initialize(repeating: 0, count: frames)
+        right.initialize(repeating: 0, count: frames)
+        defer { left.deallocate(); right.deallocate() }
+        let table = UnsafeMutablePointer<UnsafeMutablePointer<Float>>.allocate(capacity: 2)
+        defer { table.deallocate() }
+        table[0] = left
+        table[1] = right
+        XCTAssertEqual(ring.read(into: UnsafePointer(table), frameCount: frames).framesRead, frames)
+        XCTAssertEqual(left[0], 16.0 / 128, "环的第 0 路 = 内嵌音频最后一路（下标 Int.max 钳到 15）")
+        XCTAssertEqual(right[0], 16.0 / 128, "映射比环短：第 1 路复制最后一项，同样钳到 15")
+        XCTAssertEqual(left[frames - 1], 16.0 / 128)
+    }
 }
