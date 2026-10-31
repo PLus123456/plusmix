@@ -62,12 +62,12 @@ App 地址框的还原（`StreamAddress.unmaskedQuery`）按原文参数名配�
 **文字表和要文档会话（W4-C5）跟的几处**写在 `reports/issues/W4C4-w2-stream-last-error-raw-texts.md` 末尾（docs/api/README.md §6、docs/user/输出.md、docs/user/en/outputs.md 的"最后错误"那条
 现在还写着"开始推的阶段前面带 `publish: `""例如 `连接失败：publish: requestTimedOut`"）。CONTRACTS.md 的口径（"连接失败：<原因>……或传输层回的那一句"）不用改。
 
-### 1.6 新发现（没修，等用户定）：对端接受 TCP 但不说话时，推流一直卡在"连接中"、停不掉
+### 1.6 新发现（没修；用户 2026-10-31 定：交 G12）：对端接受 TCP 但不说话时，推流一直卡在"连接中"、停不掉
 
 给第 5 条做探针时撞到：本机只 listen 不回话的端口，`rtmp://` 连上之后 **StreamOutput 一直 `connecting(1)`（3 s 连接超时不起作用）、`stop()` 20 s 不返回**；
 传输层单测 `withTimeout(4) { connect() }` 25 s 不返回，rtmps 拖到 15 s。原因：HaishinKit 的 connect 把续体存起来等服务器回握手，握手没有超时、也不理外层取消
 （它的 `close()` 才会结束那个续体）；我们的 `withTimeout` 用任务组，超时之后要等 body 子任务结束；stop 等发送 Task。App 里这一路停不掉也起不来、换节目 / 退出白等 10 s 兜底并泄漏。
-不在 prompt 132 的范围，写了 `reports/issues/W2D5-w2-stream-connect-hangs-on-silent-server.md`（建议 S1，附原因、改法、探针）；改法都在 Streaming/ 里，要不要在本分支顺手修等用户定。
+不在 prompt 132 的范围，写了 `reports/issues/W2D5-w2-stream-connect-hangs-on-silent-server.md`（建议 S1，附原因、改法、探针）；改法都在 Streaming/ 里。用户 2026-10-31 定：本分支不修，交 G12（134）定级、排给下一个推流续做会话。
 
 ## 2. 每个测试 ID：数值 / 阈值 / 通过否
 
@@ -109,7 +109,7 @@ App 地址框的还原（`StreamAddress.unmaskedQuery`）按原文参数名配�
 ## 3. 没做的和原因
 
 1. **HaishinKit 自己的 AMF0 解析**（不带账号的 RTMP、鉴权之后的连接）：要改 HaishinKit，prompt 写明"HaishinKit 升级（W4-B）"不做；问题单 W2D5-w4-release-haishinkit-amf0-unbounded-recursion + BLOCKED-SDK 用例。
-2. **对端不说话时推流卡死**（§1.6）：新发现，不在范围；问题单 W2D5-w2-stream-connect-hangs-on-silent-server，等用户定修不修、谁修。
+2. **对端不说话时推流卡死**（§1.6）：新发现，不在范围；问题单 W2D5-w2-stream-connect-hangs-on-silent-server。用户 2026-10-31 定：本分支不修，交 G12（134）定级、排续做。
 3. RTMPS 没另搭 TLS 服务器做端到端（prompt 说靠单元测试）。
 4. 别处显示推流地址的口径没动（不是我的文件 / 不在 prompt 里）：底栏推流按钮的悬停提示（`App/Sources/UI/BottomBarView.swift:493`）用默认的 `redact(url:)`，
    **密钥栏空、密钥写在地址末段时悬停会显示密钥**（屏幕共享时可见）；API 状态的 url 打码是 131 W2-C5（提案 035）的事——两处要遮发布名都可以看同层 streamKey 传 `publishNameInPath: true`。
@@ -138,4 +138,4 @@ CONTRACTS.md 对它的口径"连接失败：<原因>（如"连接超时""没连�
 - 新 worktree 跑 App 用例前先 `make gen`；`xcodebuild … build-for-testing` 首次几分钟，之后增量编 + `test-without-building -only-testing:SwitcherTests/ReleaseTests` 都很快（R7 本身 2–3 s）。
 - 提交信息里有中文引号，走 `git commit -F -`（heredoc），别用 -m（G11 的坑）。
 - G12 销号：KNOWN_ISSUES 的 S2（NS04）——我们的解析器那半边销，HaishinKit 那半边换成新问题单；S3（NS12）销；S2"推流凭据外泄两处"的 ③（NS09）销（② 看 131）；
-  S1（N10）销；S3"推流 last_error 仍有底层库的原样文字"销（文档跟 W4-C5）；新增两行（§1.6 卡死、HaishinKit AMF0）等用户定级。
+  S1（N10）销；S3"推流 last_error 仍有底层库的原样文字"销（文档跟 W4-C5）；新增两行（§1.6 卡死，用户已定交 G12；HaishinKit AMF0，归 W4-B），级别由 G12 报用户定（我的建议 S1 / S2）。

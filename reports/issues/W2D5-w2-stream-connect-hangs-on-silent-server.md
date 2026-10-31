@@ -1,6 +1,6 @@
 # 推流：对端接受 TCP 但不说话时，StreamOutput 一直停在"连接中"，连接超时不起作用、stop 永远回不来
 
-归属会话 / 分支：W2-D 推流（`Packages/SwitcherOutputs/Sources/Streaming/`，下一个推流续做会话；W2-D5 发现，没修——不在 prompt 132 的范围，等用户定）
+归属会话 / 分支：W2-D 推流（`Packages/SwitcherOutputs/Sources/Streaming/`，下一个推流续做会话；W2-D5 发现，没修——不在 prompt 132 的范围；用户 2026-10-31 定：W2-D5 不修，交 G12（134）定级、排续做会话）
 发现于：W2-D5（prompt 132，分支 `w2-stream-5`）给 last_error 做探针时，main bf149e2 / g11 树
 严重级：建议 S1（功能错，节目能继续；用户可改口）——不是整个 App 卡死（App 用 stopAsync，主线程不堵），但这一路推流卡住、停不掉也起不来
 
