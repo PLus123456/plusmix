@@ -18,3 +18,5 @@
 
 不做：N08（129 在校验器拒；App 端到端用例 G12 翻）、N11 的接线（129）；统计窗列效果链延迟（等用户定）；ShowDocuments 的 catch（128）；任何阈值。
 报告 reports/w5-app-closeout-2.md 五段；不 push、不 merge，交 G12（134）。
+
+**G12 追加（2026-10-31）**：已合入 g12（6b3d03f → 合并提交 490dd06，最后一路、0 冲突；130 没碰 OverlaySettingsPanel / ControlRuntime，与 129 / 131 不用手接）；合入后 `make gen` + App 16 类 128 用例 0 红 0 跳（W5RCloseout 15 / 15）；全量两遍见 reports/G12.md §5。§3 第 1 条（纯音频 ISO 录纯音频文件）/ 第 2 条（NDI 翻 failed 时状态行提示）与 §4 统计窗效果链延迟三条"等用户定"记在 reports/G12.md §7.1，定了归 139 W5-S；§5 的手册句子归 135 W4-C5；KNOWN_ISSUES 的 N04 / N06 / N07 / NS08（提醒文字）/ W4-C4 八条销号进"G12 合入已修"表。
