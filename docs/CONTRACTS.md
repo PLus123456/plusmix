@@ -1,4 +1,4 @@
-# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017 / 019，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则；P5 落地 023 一 / 024 / 025 / 026 / 027；P5-2 落地 020 / 021 / 022 / 023 二–五与 028 的口径文字；P5-3 落地 026 允许 headphones 与 029；P5-4 落地 030 / 031 与 020 的 T-bar 取消重拷；P5-5 落地 032 与 030 列耳机总线；P5-7 落地 034）
+# SwitcherContracts 契约（P1 冻结；P2 落地提案 001–006，P3 落地提案 007–013，W2-A2 落地提案 014，G4 续做落地 015 / 017 / 019，W3-E2 落地 016，W3-C2 落地 018；P4 收口注释与两条 reducer 规则；P5 落地 023 一 / 024 / 025 / 026 / 027；P5-2 落地 020 / 021 / 022 / 023 二–五与 028 的口径文字；P5-3 落地 026 允许 headphones 与 029；P5-4 落地 030 / 031 与 020 的 T-bar 取消重拷；P5-5 落地 032 与 030 列耳机总线；P5-7 落地 034；P5-8 落地 035 第 ① 步（`StreamURLRedaction` 搬入））
 
 代码：`Packages/SwitcherCore/Sources/SwitcherContracts/`（Swift）+ `Sources/SwitcherContracts/C/include/sw_audio_ring.h`（C 布局，target CSwitcherContracts）。
 测试：`Packages/SwitcherCore/Tests/SwitcherContractsTests/`。所有包只依赖这里的类型互相见面（依赖方向见 CLAUDE.md）。
@@ -39,6 +39,7 @@ Command 35 → 42；028 的口径文字（`tickTime` / `hostTime` = 节目输出
 030 列耳机总线（`EffectsLatency.listedBuses` = `Bus.allCases`，填数 G10 胶水已改）、NDI 的 failed 也指"在跑但连续 10 帧送不出"与推流 last_error 的新写法（118 / G10 胶水的行为，只改文字）。
 不加字段、不加命令（仍 42 个 case），JSON 形态不变**
 → **P5-7（2026-10-25，分支 p5-contracts-7，prompt 129；Codex 10-22 审查 N01 / N02 / N03 / N08 / N11 + 10-24 审计 NS01；用户 2026-10-25 批 034 "按建议"、⑤ 选 `input: 0`、⑥ 选拒收、附带三条都并进）：034 数值入口加固——`Rational` / `FrameRate` 解码拒分母 0 / `Int64.min` / 帧率 ≤ 0（抛 `DecodingError`，不再 SIGTRAP）；`ProgramFormat.sizeRange` = 16…8192、`FrameRate.programRange` = 1…240 fps 管节目格式、屏幕输入与合成源；`DurationLimits.maxTicks` = 864 000 拍管转场 / 槽 / FTB / 叠加动画四处时长（命令拒、不钳）；`AudioState.alignmentRange` = 0…24 000；`MixerStateError` 加 format / inputFrameRate / inputSize / durationTicks / alignmentFrames；`InputSource.rangeError(input:)`；`Show.validateStructure()` / `makeValidatedState()`（结构检查跑在 makeState 之前）；`overlay(input: 0)` = 清空；运行中 loadShow 换格式拒收；叠加动画进行中改时长按当前进度重锚。不加字段、不加命令（仍 42 个 case），JSON 形态不变**
+→ **P5-8（2026-10-31，分支 p5-contracts-8，prompt 136；用户 2026-10-25 批 035 方案 A1 的第 ① 步）：`StreamURLRedaction`（推流地址打码：userinfo / 密钥类查询参数 / 密钥栏空时的 RTMP 路径末段换标记）从 SwitcherStreaming **原样**搬进契约（只用 Foundation；`marker` / `secretQueryParams` / `redact(url:marker:publishNameInPath:)` / `redact(text:marker:)` 的名字、签名、默认值不变），SwitcherStreaming 留 `public typealias`，推流日志 / App 的调用点一行不改；金样（搬迁前跑出的 1041 个地址 + 10 段文字）证明打码结果逐字相同（§2.11）。API 对外状态 / WS 快照 / 命令日志的打码与 `?secrets=1`（第 ② 步）归 137 W2-C6，**本步 API 还是原文**。不加字段、不加命令（仍 42 个 case），JSON 形态不变**
 
 ---
 
@@ -212,7 +213,7 @@ AUNBandEQ 的带宽参数就是这个定义（设计方案 §7 原来对的 AUPa
 | `OutputState` | {number, kind, name, enabled 目标, settings: `OutputSettings`}；kind = multiview 的 enabled = 要不要把多画面 NV12 送给下游，布局与它无关（见下） | 状态机 | 输出实现、UI | — |
 | `OutputSettings` | {source, video?, audio?, record?, stream?, multiview?（010）, display?（013）, extra（各输出会话的附加项，NDI 的 ndi.groups / ndi.conversion 在用）}；录制输出的 source 只认 program / input(n)，写进来的 preview / multiview **照录 PGM**、校验器不拒（023 二 (a)） | Show / 命令 | 编码、录制、推流、多画面、外部显示 | — |
 | `RecordSettings` | {directory, fileNamePattern, container（**废弃**，023 二：运行时从不读、文件一律 .mov，缺键 = mov、写出仍写、不加 @available；要 .mp4 用 remuxToMP4）, fragmentIntervalSeconds, remuxToMP4, armed（025，缺键 true）, ownFormat（025，缺键 false）}；armed = 参与"全部录制"，ownFormat = ISO 路用自己的编码参数而不跟主录制 | Show / setOutputSettings | 录制器、App 底栏 / 录制页（OutputLinkage） | — |
-| `StreamSettings` | {url, streamKey, reconnectMaxSeconds, followFirst（025，缺键 false）}；followFirst = 编码参数跟编号最小的 stream 输出（地址 / 密钥 / 重连上限不跟） | Show / setOutputSettings | 推流、App 推流页（OutputLinkage） | — |
+| `StreamSettings` | {url, streamKey, reconnectMaxSeconds, followFirst（025，缺键 false）}；followFirst = 编码参数跟编号最小的 stream 输出（地址 / 密钥 / 重连上限不跟）；对外（API 状态 / 命令日志）怎么打码与往返见 §2.11（提案 035，137 落地后生效） | Show / setOutputSettings | 推流、App 推流页（OutputLinkage） | — |
 | `MultiviewLayoutSettings` / `MultiviewCell` | {preset, custom[], safeArea, meters} / {source, rect}（提案 010；`OutputSource.multiview` 作格子源无效，渲染器忽略）；meters = 画真实电平（`Stats.audio.meters` 经 `setMeters` 喂进渲染器：输入格画该路、PGM 格 = Master、PVW 格 = 当前 PVW 那路），纯音频输入格总是画、不看它 | Show / setOutputSettings | 渲染（多画面） | 解析只在快照 sequence 变化时做 |
 | `DisplayOutputSettings` | {displayID?（CGDirectDisplayID；nil = 主显示器）, fallbackToMain（默认 false = 显示器不在时黑着等、不动主屏；提案 013 定 true，015 改 false 与运行时一致）} | Show / setOutputSettings | 外部显示运行表 | — |
 | `Tally` | {program, preview}，由快照推导 | 契约代码 | UI、API、多画面、外部 tally | — |
@@ -364,6 +365,19 @@ P5-2 起 `migratingLegacyKeys()` 多一条（提案 020）：文件没有 `trans
 
 ### 2.10 测试工装（TestPattern.swift、TestSignal.swift）见 §4、§5。
 
+### 2.11 推流地址打码（StreamURLRedaction.swift）
+
+| 类型 | 是什么 | 谁写 | 谁读 | 线程 |
+|---|---|---|---|---|
+| `StreamURLRedaction` | 无 case 的枚举（命名空间），只用 Foundation、不经 URLComponents：`marker` = `"<redacted>"`；`secretQueryParams` = {passphrase, key, token, password, secret, streamid, auth, user, pass, pwd, response}（不分大小写，参数名先百分号解码再比——`pa%73s` 也算 pass，NS12）；`redact(url:marker:publishNameInPath:)`——userinfo（`user:pass@`，没转义的 @ 按最后一个分、解析不了的地址保守地从 `://` 到最后一个 @）整段换标记、名单里的查询参数**值**换标记（参数名与不打码的项照原文留）、`publishNameInPath`（默认 false）为 true 时 RTMP / RTMPS 地址路径 ≥ 2 段的最后一段（密钥栏空时的发布名 = 密钥，NS09）换标记；scheme / 主机 / 端口 / 其余路径 / 片段保留，不是 `scheme://…` 的原样返回。路径的拆法与 `StreamDestination` 一致：先去首尾空白、按解码后的路径以 / 拆、空段不算、`%2F` 也是分隔，换掉含最后一个解码段的整个原文段（只多盖、不漏）。`redact(text:marker:)`：一段文字里每个 `scheme://` 地址（到空白或引号 / 尖括号 / 反斜杠 / 脱字符 / 反引号 / 花括号 / 竖线为止——URL 里不会原样出现的字符）都按 `redact(url:)` 处理，日志 / 错误文字用。提案 035 第 ① 步（P5-8）从 SwitcherStreaming **原样**搬来（搬迁前后 1041 个地址 + 10 段文字的打码结果逐字相同，`Contracts035Tests` 的金样），那边留 `public typealias` | 契约代码 | 推流日志 / 错误文字（SwitcherStreaming）、App 的 ShowRedaction（诊断包，密钥栏空时传 `publishNameInPath: true`）/ 地址框（标记换成 •••）/ 底栏提示、API 对外状态（137 起） | 普通；纯函数、无状态 |
+
+**API 对外的推流凭据打码与往返规则（提案 035 正文第 1–4 条，用户 2026-10-25 批方案 A1）——137 W2-C6 落地后生效，现在 API 给的还是原文**：
+对外状态（`GET /api/v1/state`、WS `snapshot`）与命令日志（`GET /api/v1/log` 里的 `setOutputSettings` / `addOutput` / `loadShow`）里的推流凭据打码——`streamKey` 非空 → `<redacted>`（空串照旧空串，客户端靠它知道"没填密钥"），
+`url` 按 `StreamURLRedaction.redact(url:publishNameInPath: streamKey.isEmpty)`（userinfo / 密钥类查询参数 / 密钥栏空时的路径末段换标记）；JSON 键名、类型、层级与 `MixerState` 一致，节目文件 / 界面 / 状态机里的值不变（只改 API 写出去的样子）。
+**往返**：`setOutputSettings` 收到打码值 = 保留原值（`stream.streamKey == "<redacted>"` 保留这一路现在的密钥；`stream.url` 等于"现在的 url 打码之后的样子"保留现在的 url），API 层换回原值再进总线，总线日志 / reducer / 界面永远看不到标记；
+`addOutput` / `loadShow` 带标记（没有"现在的值"可保留）→ 400 "推流设置里有打码标记：原文用 ?secrets=1 读"；要原文 `GET /api/v1/state?secrets=1` / `WS /api/v1/events?secrets=1` / `GET /api/v1/log?secrets=1` + 配了 token（没配 token → 403 `secrets-require-token`，WS 不升级）。
+打码函数只有契约里这一份：日志、诊断包、地址框、API 同一份名单、同一份代码。reducer 不改；tally / 回执 / hello / stats / 兼容层 XML / Tally 服务 / Stream Deck 没有推流设置，不涉及。
+
 ---
 
 ## 3. 关键口径速查
@@ -383,6 +397,7 @@ P5-2 起 `migratingLegacyKeys()` 多一条（提案 020）：文件没有 `trans
   `MetalRendererOptions.previewOutput` / `multiviewOutput` 保留为强制开的覆盖（取或）。kind = multiview 的输出的 enabled 就是这个意思（要不要把多画面 NV12 送给下游），
   多画面布局取第一个 kind = multiview 的输出、与 enabled 无关（§2.5）。
 - **PVW 画不画叠加**：每通道的 `OverlayState.previewOn`，与渲染器的"全部预览"总开关 `MetalRendererOptions.overlaysInPreview` 取或。
+- **推流凭据对外打码（提案 035；137 落地后生效，现在 API 还是原文）**：API 状态 / WS 快照 / 命令日志里 `streamKey` → `<redacted>`、`url` 的 userinfo / 密钥类查询参数 / 密钥栏空时的路径末段换标记；`setOutputSettings` 收到打码值 = 保留原值；`addOutput` / `loadShow` 带标记 → 400；原文要 `?secrets=1` + token。打码只有契约里 `StreamURLRedaction` 一份（§2.11），日志 / 诊断包 / 地址框 / API 同一份名单。
 
 ---
 
