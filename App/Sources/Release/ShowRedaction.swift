@@ -1,6 +1,7 @@
 // 节目文件去密钥（W4-B，后续方案 §8.1 诊断包：去掉密钥的节目文件）。在 JSON 层做，不依赖 Show 的具体字段：
 // 名字在 secretKeys 里的字符串值（streamKey …）换成标记；名字是 url 的字符串值按推流包的 StreamURLRedaction 打码：userinfo（user:pass@）整段换成标记
-// （W5-D：地址里的账号密码与密钥同样处理），查询参数里名字像密钥的（passphrase / key / token / streamid …）值换成标记，主机、端口、路径保留（排障要看往哪推）。
+// （W5-D：地址里的账号密码与密钥同样处理），查询参数里名字像密钥的（passphrase / key / token / streamid …，名字解码后比）值换成标记，主机、端口、路径保留（排障要看往哪推）；
+// 同一层的 streamKey 是空的（推流设置里密钥栏空着），RTMP 地址最后一段就是发布名（密钥，StreamDestination 的拆法），也换成标记（NS09，W5D 问题单）。
 // 名单与推流包写日志时的脱敏是同一份。空字符串不动（"没设"不能变成"有值"）。
 import Foundation
 import SwitcherStreaming
@@ -21,13 +22,16 @@ enum ShowRedaction {
     static func redact(json: Any) -> Any {
         switch json {
         case let dict as [String: Any]:
+            // 推流设置（url 与 streamKey 同层）：密钥栏空着（只有空白也算，StreamDestination 先去空白）→ 地址路径的最后一段是密钥
+            let publishNameInPath = dict.first { $0.key.lowercased() == "streamkey" }
+                .map { (($0.value as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
             var out: [String: Any] = [:]
             for (key, value) in dict {
                 if let s = value as? String {
                     if secretKeys.contains(key.lowercased()) {
                         out[key] = s.isEmpty ? s : redactedMarker
                     } else if key.lowercased() == "url" {
-                        out[key] = redactURL(s)
+                        out[key] = redactURL(s, publishNameInPath: publishNameInPath)
                     } else {
                         out[key] = s
                     }
@@ -44,7 +48,8 @@ enum ShowRedaction {
     }
 
     /// `scheme://user:pass@host:port/path?a=1&passphrase=x#frag` → userinfo 与 passphrase 的值换成标记。不是 `scheme://` 地址的原样返回。
-    static func redactURL(_ s: String) -> String {
-        StreamURLRedaction.redact(url: s, marker: redactedMarker)
+    /// publishNameInPath：RTMP 路径 ≥ 2 段时最后一段（发布名）也换成标记（同层 streamKey 为空时）。
+    static func redactURL(_ s: String, publishNameInPath: Bool = false) -> String {
+        StreamURLRedaction.redact(url: s, marker: redactedMarker, publishNameInPath: publishNameInPath)
     }
 }

@@ -324,6 +324,15 @@ final class RTMPConnectProbe: @unchecked Sendable {
 
 /// connect 命令（AMF0）与回复的编解码，只做这两样。
 enum RTMPConnectCommand {
+    /// 回复里容器（对象 / ECMA 数组 / 严格数组 / 类型对象）套容器最多几层。真实的 `_result` / `_error` 不超过 4 层（状态对象里的 data 是 ECMA 数组）；
+    /// 原来递归无上限，恶意服务器回 10 万层单元素严格数组（约 500 KB）就把栈打穿（NS04，debug 构建 1000 层就 SIGBUS）。
+    static let maxNestingDepth = 32
+    /// 一条回复最多解析几个值：防一个百万元素的数组在连接超时之前同步空转（解析不看超时）。
+    static let maxElements = 10_000
+    /// 超上限时 `Failure.protocolError` 带的文字（RTMPTransport 认它们：这种回复不退回交给 HaishinKit）。
+    static let tooDeepMessage = "AMF0 嵌套过深"
+    static let tooManyElementsMessage = "AMF0 元素过多"
+
     /// connect(1, {app, type: nonprivate, flashVer, tcUrl})：发布端（FMLE / ffmpeg）发的就是这几个字段。
     /// 块流 3、消息类型 20、消息流 0、时间戳 0，按默认块大小 128 分块（connect 之前谁都没发 Set Chunk Size）。
     static func chunks(app: String, tcUrl: String, flashVer: String) -> Data {
@@ -385,6 +394,12 @@ enum RTMPConnectCommand {
     struct Reader {
         let bytes: [UInt8]
         var i = 0
+        /// 已经读了几个值（一条回复一个 Reader，对 `maxElements`）。
+        private var elements = 0
+
+        init(bytes: [UInt8]) {
+            self.bytes = bytes
+        }
 
         var atEnd: Bool { i >= bytes.count }
 
@@ -398,19 +413,26 @@ enum RTMPConnectCommand {
         private mutating func u32() throws -> Int { try take(4).reduce(0) { $0 << 8 | Int($1) } }
         private mutating func utf8(_ n: Int) throws -> String { String(decoding: try take(n), as: UTF8.self) }
 
-        mutating func value() throws -> Value {
+        /// 下一个（顶层的）值。reply() 只从这里进。
+        mutating func value() throws -> Value { try value(depth: 0) }
+
+        /// depth = 外面套了几层容器。
+        private mutating func value(depth: Int) throws -> Value {
+            elements += 1
+            guard elements <= RTMPConnectCommand.maxElements else { throw RTMPAdobeAuth.Failure.protocolError(RTMPConnectCommand.tooManyElementsMessage) }
             switch try take(1).first! {
             case 0x00: return .number(Double(bitPattern: try take(8).reduce(UInt64(0)) { $0 << 8 | UInt64($1) }))
             case 0x01: return .bool(try take(1).first! != 0)
             case 0x02: return .string(try utf8(try u16()))
-            case 0x03: return .object(try properties())
+            case 0x03: return .object(try properties(depth: try inside(depth)))
             case 0x05, 0x06: return .null
             case 0x08:
                 _ = try take(4)
-                return .object(try properties())
+                return .object(try properties(depth: try inside(depth)))
             case 0x0A:
+                let childDepth = try inside(depth)
                 var items: [Value] = []
-                for _ in 0..<(try u32()) { items.append(try value()) }
+                for _ in 0..<(try u32()) { items.append(try value(depth: childDepth)) }
                 return .array(items)
             case 0x0B:
                 _ = try take(10)
@@ -418,13 +440,19 @@ enum RTMPConnectCommand {
             case 0x0C: return .string(try utf8(try u32()))
             case 0x10:
                 _ = try take(try u16())
-                return .object(try properties())
+                return .object(try properties(depth: try inside(depth)))
             case let marker: throw RTMPAdobeAuth.Failure.protocolError("AMF0 类型 \(marker) 不认")
             }
         }
 
-        /// 对象体：(键, 值)… 直到空键 + 0x09。
-        private mutating func properties() throws -> [String: Value] {
+        /// 进一层容器：它的值在 depth + 1；这一层已经是第 maxNestingDepth + 1 层就拒。
+        private func inside(_ depth: Int) throws -> Int {
+            guard depth < RTMPConnectCommand.maxNestingDepth else { throw RTMPAdobeAuth.Failure.protocolError(RTMPConnectCommand.tooDeepMessage) }
+            return depth + 1
+        }
+
+        /// 对象体：(键, 值)… 直到空键 + 0x09。值在 depth 层。
+        private mutating func properties(depth: Int) throws -> [String: Value] {
             var out: [String: Value] = [:]
             while true {
                 let key = try utf8(try u16())
@@ -432,7 +460,7 @@ enum RTMPConnectCommand {
                     i += 1
                     return out
                 }
-                out[key] = try value()
+                out[key] = try value(depth: depth)
             }
         }
     }
