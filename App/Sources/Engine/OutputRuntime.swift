@@ -242,6 +242,10 @@ final class OutputRuntime {
     /// tap 就还挂在旧槽位上、录到别人。任何一路注册上来都对一遍（followInputAudioSlots）。D06 边角（119 §3，W5-Q）。
     private var inputAudio: [AudioAttachment] = []
     private var inputAudioSlots: [Int: Int] = [:]
+    /// NDI 发送在跑中翻 failed 的状态行提示（每路 60 s 一次，G12 §7.1 第 6 条）。
+    private var ndiFailingNotices = NDIFailingNotices()
+    /// 提示节流用的钟（单调秒；用例换成替身）。
+    var noticeUptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
     init(engine: Engine, audio: AudioRuntime?, inputs: InputRuntime?, format: ProgramFormat, showName: String) {
         self.engine = engine
@@ -383,6 +387,15 @@ final class OutputRuntime {
             guard case .authentication(let why)? = e.stream.failure else { continue }
             e.failureAnnounced = true
             onEvent?(.streamFailed(output: n, message: why == .unsupportedMethod ? L("notice.streamGaveUp", n, failureReason(output: n) ?? "") : L("notice.streamAuthFailed", n)))
+        }
+        // NDI 发送在跑中翻 failed（D08：连续送不出去）→ 状态行一句，原因 = 这一行的 last_error（发送页显示的同一句）；同一路 60 s 内只提示一次
+        //（G12 §7.1 第 6 条，用户 2026-11-07 定：sender 在 failed / publishing 之间来回翻时不刷屏）
+        let now = noticeUptime()
+        for (n, e) in ndiSenders.sorted(by: { $0.key < $1.key }) where e.phase == .running {
+            let entry = Self.encoderEntry(in: stats, forOutput: n)
+            guard ndiFailingNotices.note(output: n, state: entry?.state, now: now) else { continue }
+            let why = entry?.lastError ?? ""
+            onEvent?(.ndiFailed(output: n, message: why.isEmpty ? L("notice.ndiSendFailingNoReason", n) : L("notice.ndiSendFailing", n, why)))
         }
     }
 
@@ -957,6 +970,7 @@ final class OutputRuntime {
     private func ndiStopped(_ entry: NDIEntry) {
         let n = entry.number
         if ndiSenders[n] === entry { ndiSenders.removeValue(forKey: n) }
+        ndiFailingNotices.forget(output: n)   // 再起是新的一次：翻 failed 照样提示
         finishedNDI[n] = entry.sender
         onEvent?(.ndiStopped(output: n))
         // 停的过程中又被打开 / 改了设置：按最新快照再起
@@ -1116,5 +1130,29 @@ final class NDIInputFeed: FrameConsumer, @unchecked Sendable {
 
     func consume(_ frame: RenderedFrame) {
         sender.send(frame: frame.program, tickTime: frame.tickTime)
+    }
+}
+
+/// NDI 发送在跑中翻 failed 时要不要在状态行提示（G12 §7.1 第 6 条，用户 2026-11-07 定）：上一行不是 failed、这一行是 failed 才算"翻"
+///（第一行就是 failed 也算）；同一路离上次提示不到 60 s 不再提示——sender 在 failed / publishing 之间来回翻（D08 送一帧成功就回 publishing）时不刷屏。
+/// 只看 Stats.encoder 里这一路的 state（铁律 4：发送页、API、状态行读同一行）；各路分开算；这一路停了就忘掉（再起是新的一次）。
+struct NDIFailingNotices {
+    static let interval: TimeInterval = 60
+    private var lastState: [Int: String] = [:]
+    private var lastNotice: [Int: TimeInterval] = [:]
+
+    /// 记下这一路这一行的 state（nil = 这一行没有它）；返回这一行该不该提示。
+    mutating func note(output n: Int, state: String?, now: TimeInterval) -> Bool {
+        let previous = lastState[n]
+        lastState[n] = state
+        guard state == "failed", previous != "failed" else { return false }
+        if let last = lastNotice[n], now - last < Self.interval { return false }
+        lastNotice[n] = now
+        return true
+    }
+
+    mutating func forget(output n: Int) {
+        lastState.removeValue(forKey: n)
+        lastNotice.removeValue(forKey: n)
     }
 }

@@ -936,6 +936,8 @@
 "notice.ndiBranchRestored" = "NDI output %d: a branch on input %d became free; reconnected and sending";
 "notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now, recovers automatically when one is freed";
 "notice.ndiFailed" = "NDI output %d failed to start: %@";
+"notice.ndiSendFailing" = "NDI output %d error: %@";
+"notice.ndiSendFailingNoReason" = "NDI output %d error (see the NDI page in Output settings)";
 "notice.ndiStarted" = "NDI output %d started: %@";
 "notice.ndiStopped" = "NDI output %d stopped";
 "notice.ndiUnavailable" = "NDI output %d: no NDI SDK (not found at build time), nothing is actually sent";
