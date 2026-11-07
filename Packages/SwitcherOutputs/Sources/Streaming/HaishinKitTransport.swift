@@ -4,6 +4,7 @@ import Foundation
 import HaishinKit
 import RTMPHaishinKit
 import SRTHaishinKit
+import Synchronization
 import SwitcherContracts
 import SwitcherOutputs
 
@@ -85,6 +86,7 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
     /// 我们要的 CTS = 拍点时刻 − 音频原点，所以 DTS = PTS − 期望 CTS + 这个常量。E2E 测试（A/V 对齐）会盯住它。
     static let haishinKitCTSOffset = HostDuration(milliseconds: 66)
 
+    static let pendingHaishinKitConnects = Atomic<Int>(0)   // 红用例桩
     let protocolName: String
     let startAlignment: StartAlignment = .dtsOffset
     private let destination: StreamDestination

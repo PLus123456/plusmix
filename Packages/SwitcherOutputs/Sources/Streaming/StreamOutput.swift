@@ -659,7 +659,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
 }
 
 /// 带超时的 await。
-func withTimeout<T: Sendable>(seconds: Double, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+func withTimeout<T: Sendable>(seconds: Double, onTimeout: (@Sendable () async -> Void)? = nil, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await body() }
         group.addTask {
