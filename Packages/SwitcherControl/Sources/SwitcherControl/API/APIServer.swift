@@ -16,6 +16,8 @@ import SwitcherEngine
 //   GET  /api/v1/tally     PGM / PVW / 每路 tally 的小应答（外部 tally 轮询用）
 //   WS   /api/v1/events    hello → 快照（整快照 + 版本号）/ tally / 每秒 Stats；连接上也能发命令（单条或批量）
 // 默认只监听 127.0.0.1:8765；token 鉴权默认关；浏览器来源（Origin / Sec-Fetch-Site）不在白名单的一律 403（BrowserRequestGuard，NS02）。
+// 推流凭据（提案 035，NS03）：state / WS 快照 / log 里打码（APIStreamCredentials）；`?secrets=1` 给原文，只在配了 token 时——
+// 没配 token 的服务器上带 `?secrets=1` 的请求一律 403 secrets-require-token（WS 不升级）。从 API 写进来的打码标记在这里换回原值再进总线。
 // 所有应答都是手工编码的 JSON（APIJSON：键排序、不转义斜杠），
 // 不用 Hummingbird 的默认编码器，保证和 stats.jsonl / 节目文件同一种写法。
 
@@ -57,6 +59,10 @@ public final class APIServer: Sendable {
         if let token = configuration.token {
             router.add(middleware: TokenAuthMiddleware(token: token))
             wsRouter.add(middleware: TokenAuthMiddleware(token: token))
+        } else {
+            // 要原文得先有 token（提案 035）：没配 token 时 ?secrets=1 一律 403，WS 升级被拒（hummingbird-websocket 回 400）、不订阅
+            router.add(middleware: SecretsRequireTokenMiddleware())
+            wsRouter.add(middleware: SecretsRequireTokenMiddleware())
         }
         addRoutes(router)
         addWebSocket(wsRouter)
@@ -102,15 +108,16 @@ public final class APIServer: Sendable {
     // MARK: 路由
 
     private func addRoutes(_ router: Router<BasicRequestContext>) {
-        router.get("/api/v1/state") { [feed] _, _ in
-            Self.json(feed.stateResponse())
+        router.get("/api/v1/state") { [self] request, _ in
+            Self.json(feed.stateResponse(secrets: grantsSecrets(request)))
         }
         router.get("/api/v1/commands") { _, _ in
             Self.json(CommandCatalogResponse())
         }
-        router.get("/api/v1/log") { [bus] request, _ in
+        router.get("/api/v1/log") { [self] request, _ in
             let limit = request.uri.queryParameters["limit"].flatMap { Int($0) } ?? 256
-            return Self.json(CommandLogResponse(entries: bus.recentEntries(limit: max(0, limit))))
+            let entries = bus.recentEntries(limit: max(0, limit))
+            return Self.json(CommandLogResponse(entries: grantsSecrets(request) ? entries : entries.map(APIStreamCredentials.redacted)))
         }
         router.get("/api/v1/tally") { [feed] _, _ in
             let snap = feed.stateMachine.publisher.latest
@@ -138,11 +145,28 @@ public final class APIServer: Sendable {
         }
     }
 
+    /// 这个请求拿不拿推流凭据原文：带 `?secrets=1` 且配了 token（token 中间件已经放行）。没配 token 的早被 `SecretsRequireTokenMiddleware` 挡了，这里再判一次兜底。
+    func grantsSecrets(_ request: Request) -> Bool {
+        configuration.token != nil && Self.wantsSecrets(request)
+    }
+
+    /// 请求要不要原文：只认 `secrets=1`（别的值照旧打码）。中间件和路由用同一个判断。
+    static func wantsSecrets(_ request: Request) -> Bool {
+        request.uri.queryParameters["secrets"] == "1"
+    }
+
+    /// 从 API 进来的命令：先把打码标记换回原值（提案 035 往返；换不回去的抛 CommandRejection → 400），再走总线。
+    /// "原值"取执行到这一条时最新的快照（与总线的校验器同一份；批量里前一条已生效的也算）。
+    func submitFromAPI(_ command: Command, source: CommandSource) async throws -> CommandReceipt {
+        let restored = try APIStreamCredentials.restoringMarkers(in: command, current: feed.stateMachine.publisher.latest?.state)
+        return try await bus.submit(restored, source: source)
+    }
+
     /// 走总线，把结果编成 HTTP 应答。
     private func execute(_ command: Command, source: CommandSource) async -> Response {
         let issuedAt = HostClock.now()
         do {
-            let receipt = try await bus.submit(command, source: source)
+            let receipt = try await submitFromAPI(command, source: source)
             return Self.json(CommandResponse(receipt: receipt, issuedAt: issuedAt, clock: feed.clock))
         } catch let e as CommandRejection {
             return Self.json(ErrorResponse(e.reason), status: .badRequest)
@@ -157,7 +181,7 @@ public final class APIServer: Sendable {
         for (i, command) in commands.enumerated() {
             let issuedAt = HostClock.now()
             do {
-                let receipt = try await bus.submit(command, source: source)
+                let receipt = try await submitFromAPI(command, source: source)
                 receipts.append(CommandResponse(receipt: receipt, issuedAt: issuedAt, clock: feed.clock))
             } catch {
                 let reason = (error as? CommandRejection)?.reason ?? "\(error)"
@@ -168,8 +192,8 @@ public final class APIServer: Sendable {
     }
 
     private func addWebSocket(_ router: Router<BasicWebSocketRequestContext>) {
-        router.ws("/api/v1/events") { [self] inbound, outbound, _ in
-            let subscription = feed.subscribe()
+        router.ws("/api/v1/events") { [self] inbound, outbound, context in
+            let subscription = feed.subscribe(secrets: grantsSecrets(context.request))
             defer { feed.unsubscribe(subscription.id) }
             try await withThrowingTaskGroup(of: Void.self) { group in
                 // 唯一的写方：订阅流（快照 / stats / 回执都经它）
@@ -222,7 +246,7 @@ public final class APIServer: Sendable {
         }
         let issuedAt = HostClock.now()
         do {
-            let receipt = try await bus.submit(command, source: .api)
+            let receipt = try await submitFromAPI(command, source: .api)
             let m = ReceiptMessage(id: request.id, sequence: receipt.sequence, appliedTick: receipt.appliedTick, applied: receipt.applied,
                                    issuedAt: issuedAt, appliedTickTime: feed.clock?.time(of: receipt.appliedTick))
             return (try? APIJSON.string(m)) ?? fallback
@@ -263,6 +287,15 @@ struct TokenAuthMiddleware<Context: RequestContext>: RouterMiddleware {
         if let auth = request.headers[.authorization], auth == "Bearer \(token)" { return try await next(request, context) }
         if let q = request.uri.queryParameters["token"], String(q) == token { return try await next(request, context) }
         return APIServer.json(ErrorResponse("unauthorized"), status: .unauthorized)
+    }
+}
+
+/// 没配 token 的服务器：带 `?secrets=1`（要推流凭据原文）的请求一律 `403 {"error":"secrets-require-token"}`（提案 035）。
+/// 配了 token 的不装它：原文的门槛就是 token 中间件。装在来源检查之后，WS 握手被拒时 hummingbird-websocket 回 400、不升级。
+struct SecretsRequireTokenMiddleware<Context: RequestContext>: RouterMiddleware {
+    func handle(_ request: Request, context: Context, next: (Request, Context) async throws -> Response) async throws -> Response {
+        guard APIServer.wantsSecrets(request) else { return try await next(request, context) }
+        return APIServer.json(ErrorResponse("secrets-require-token"), status: .forbidden)
     }
 }
 
