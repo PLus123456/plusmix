@@ -7,10 +7,11 @@
 #      (a) ad-hoc 与 (c) Developer ID 和 W4-B3 之前一字不差，(b) 开发签名 = Manual + Apple Development + 开发表 + 不要描述文件；
 #      生成的 TargetAttributes 仍是 ProvisioningStyle = Automatic（(c) 本机测不了，生成物不许变）。
 #   4. XcodeGen 把两个输入写进工程（临时目录生成，不动工作区的 Switcher.xcodeproj）；make gen 把自动识别的结果交给 XcodeGen（假 xcodegen 记环境）；
+#      project.yml 变了 build-app 自动重新生成时沿用工程里原来的签名设置（假工程）；
 #      make archive 那条钉 SWITCHER_DEV_SIGN=0（Developer ID 永远不会被自动识别成开发签名）；DEV_SIGN_TEAM 别名只在 xcodebuild 命令行盖两个输入；make help 有一句。
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 sm=scripts/dev-signing/sign-mode.sh
 T=ABCDE12345     # 假 Team ID（只用来算设置，不签名）
 U=ZYXWV98765     # 另一个假 Team
@@ -56,8 +57,8 @@ assert_false "--dev-team 没有 Apple Development 身份时退出非 0" env -i P
 
 # ---- 3. 工程按模式选设置 ----
 if [ ! -f Switcher.xcodeproj/project.pbxproj ] || [ project.yml -nt Switcher.xcodeproj/project.pbxproj ]; then
-  note "工作区的 Switcher.xcodeproj 没有或比 project.yml 旧：按 ad-hoc 重新生成（之后要开发签名再 make gen 一次）"
-  DEVELOPMENT_TEAM= SWITCHER_DEV_SIGN=0 make --no-print-directory gen >"$scratch/gen.log" 2>&1 || { fail "make gen 失败（$scratch/gen.log）"; finish; }
+  note "工作区的 Switcher.xcodeproj 没有或比 project.yml 旧：按 Makefile 的规则重新生成（沿用工程里原来的签名模式；下面的命令行覆盖与它无关）"
+  make --no-print-directory Switcher.xcodeproj/project.pbxproj >"$scratch/gen.log" 2>&1 || { fail "重新生成工程失败（$scratch/gen.log）"; finish; }
 fi
 # settings <标签> <覆盖...> → $scratch/<标签>.json（test 动作：三个 target 都在）
 settings() {
@@ -142,6 +143,19 @@ assert_eq "$(cat "$scratch/fake.env" 2>/dev/null)" "TEAM=[] DEV=[]" "make gen：
 assert_contains "$(cat "$scratch/mkgen.log")" "$T" "make gen 的 ad-hoc 提示里带上钥匙串里能用的 Team"
 if mkgen DEVELOPMENT_TEAM= SWITCHER_DEV_SIGN=1 SWITCHER_SIGN_IDENTITIES=""; then fail "make gen：SWITCHER_DEV_SIGN=1 却没给 Team 应失败"; else ok "make gen：SWITCHER_DEV_SIGN=1 却没给 Team → 失败"; fi
 assert_no_file "$scratch/fake.env" "配置不对时不调 XcodeGen"
+# 4b'. project.yml 比工程新时 build-app / test-app 自动重新生成：环境里两个签名变量都没给就沿用工程里原来写的（拉一次 bump 版本号不该悄悄退回 ad-hoc）
+fp="$scratch/fake.xcodeproj"; mkdir -p "$fp"
+printf '\t\t\t\tDEVELOPMENT_TEAM = %s;\n\t\t\t\tSWITCHER_DEV_SIGN = 1;\n' $T > "$fp/project.pbxproj"
+regen() { rm -f "$scratch/fake.env"; touch -t 200001010000 "$fp/project.pbxproj"
+  env SWITCHER_KEEP_RESOLVED=1 "$@" make --no-print-directory "$fp/project.pbxproj" XCODEPROJ="$fp" XCODEGEN="$fake" >"$scratch/regen.log" 2>&1; }
+regen DEVELOPMENT_TEAM= SWITCHER_DEV_SIGN= SWITCHER_SIGN_IDENTITIES="dev $T"
+assert_eq "$(cat "$scratch/fake.env" 2>/dev/null)" "TEAM=[$T] DEV=[1]" "project.yml 变了自动重新生成：沿用工程里原来的 Team 与开发签名开关"
+assert_contains "$(cat "$scratch/regen.log")" "沿用工程里原来的" "自动重新生成时说一声沿用了什么"
+regen DEVELOPMENT_TEAM=$U SWITCHER_DEV_SIGN=0 SWITCHER_SIGN_IDENTITIES=""
+assert_eq "$(cat "$scratch/fake.env" 2>/dev/null)" "TEAM=[$U] DEV=[0]" "自动重新生成时环境里给了就听环境的"
+printf '\t\t\t\tDEVELOPMENT_TEAM = "";\n\t\t\t\tSWITCHER_DEV_SIGN = "";\n' > "$fp/project.pbxproj"
+regen DEVELOPMENT_TEAM= SWITCHER_DEV_SIGN= SWITCHER_SIGN_IDENTITIES="dev $T"
+assert_eq "$(cat "$scratch/fake.env" 2>/dev/null)" "TEAM=[] DEV=[]" "原来是 ad-hoc 的工程自动重新生成后仍是 ad-hoc"
 # 4c. make archive（Developer ID）钉 SWITCHER_DEV_SIGN=0
 assert_contains "$(grep -n 'run_logged gen' scripts/release/archive.sh)" "SWITCHER_DEV_SIGN=0" "archive.sh 生成工程时钉 SWITCHER_DEV_SIGN=0"
 assert_contains "$(grep -n 'xcb=(xcodebuild archive' -A3 scripts/release/archive.sh)" "SWITCHER_DEV_SIGN=0" "archive.sh 的 xcodebuild archive 命令行也钉 SWITCHER_DEV_SIGN=0"

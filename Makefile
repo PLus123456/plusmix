@@ -62,8 +62,16 @@ gen:
 	  mkdir -p $(XCODEPROJ)/project.xcworkspace/xcshareddata/swiftpm && \
 	  cp scripts/xcode-workspace-Package.resolved $(XCODEPROJ)/project.xcworkspace/xcshareddata/swiftpm/Package.resolved; fi
 
+# project.yml 变了（比如 bump 版本号）build-app / test-app 自动重新生成时：环境里两个签名变量都没给，就沿用工程里原来写的 Team 与开发签名开关
+# （W4-B3：不然拉一次 project.yml 的改动就悄悄退回 ad-hoc、TCC 又重问一遍）。显式 make gen 照旧只看环境变量。
 $(XCODEPROJ)/project.pbxproj: project.yml
-	$(MAKE) gen
+	@team="$$DEVELOPMENT_TEAM"; dev="$$SWITCHER_DEV_SIGN"; \
+	  if [ -z "$$team$$dev" ] && [ -f "$@" ]; then \
+	    team=$$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM = \([A-Z0-9]\{10\}\);$$/\1/p' "$@" | head -1); \
+	    dev=$$(sed -n 's/^[[:space:]]*SWITCHER_DEV_SIGN = \([01]\);$$/\1/p' "$@" | head -1); \
+	    [ -z "$$team" ] || echo "project.yml 比工程新，重新生成：沿用工程里原来的 DEVELOPMENT_TEAM=$$team SWITCHER_DEV_SIGN=$${dev:-<空>}"; \
+	  fi; \
+	  DEVELOPMENT_TEAM="$$team" SWITCHER_DEV_SIGN="$$dev" $(MAKE) --no-print-directory gen
 
 # ---------- build ----------
 build: build-packages build-tools build-app

@@ -33,7 +33,7 @@ settings:
     SWITCHER_SIGN_MODE_FOR_DEV_1: dev
     SWITCHER_SIGN_MODE: "$(SWITCHER_SIGN_MODE_FOR_TEAM_$(SWITCHER_TEAM_KIND):default=$(SWITCHER_SIGN_MODE_FOR_DEV_$(SWITCHER_DEV_SIGN_KIND):default=devid))"
     # 签名方式分两行：无条件那行是 W4-B3 之前的值，XcodeGen 拿它写 TargetAttributes 的 ProvisioningStyle（它不认宏，写成宏就把宏原样抄进去）；
-    # [sdk=macosx*] 那行按模式查表——同一层里带条件的变体优先，本工程只有 macOS，所以构建时总是它生效。(a) / (c) 生成的工程因此与之前逐字一样（(c) 本机测不了）。
+    # [sdk=macosx*] 那行按模式查表——同一层里带条件的变体优先，本工程只有 macOS，所以构建时总是它生效。这样 (a) / (c) 的 TargetAttributes 与之前一样、构建时取到的值也一样（(c) 本机测不了，R16 逐项比）。
     SWITCHER_CODE_SIGN_STYLE_dev: Manual
     CODE_SIGN_STYLE: Automatic
     "CODE_SIGN_STYLE[sdk=macosx*]": "$(SWITCHER_CODE_SIGN_STYLE_$(SWITCHER_SIGN_MODE):default=Automatic)"
