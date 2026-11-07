@@ -388,16 +388,16 @@ final class NS03StreamCredentialTests: XCTestCase {
         let machine = await s.fixture.stateMachine.state
         XCTAssertFalse(String(describing: machine.outputs).contains(Self.marker), "状态机永远看不到标记")
 
-        // 新地址 + 标记密钥：地址换、密钥留
+        // 密钥换了、地址还是打码的样子：地址换回原值（同一个目的地），密钥用新的
         var two = try redactedSettings(2)
         var stream2 = try XCTUnwrap(two["stream"] as? [String: Any])
-        stream2["url"] = "rtmp://new.example.com/app2"
+        stream2["streamKey"] = "new-key-2"
         two["stream"] = stream2
         let (st2, r2) = try await post(s, try body(2, two))
         XCTAssertEqual(st2, 200, r2)
         let now2 = await output(s, 2)?.settings.stream
-        XCTAssertEqual(now2?.url, "rtmp://new.example.com/app2")
-        XCTAssertEqual(now2?.streamKey, Self.key2)
+        XCTAssertEqual(now2?.url, Self.url2)
+        XCTAssertEqual(now2?.streamKey, "new-key-2")
 
         // WS 上同样换回原值
         let ws = WSClient(url: s.wsURL)
@@ -426,6 +426,40 @@ final class NS03StreamCredentialTests: XCTestCase {
         let now5 = await output(s, 5)?.settings.stream
         XCTAssertEqual(now5?.url, Self.url5, "批量：密钥栏空时打码的发布名换回原值")
         XCTAssertEqual(now5?.reconnectMaxSeconds, 5)
+    }
+
+    /// 标记密钥只跟着原来的目的地走（安全复查，W2-C6）：地址换成别的（哪怕是干净的新地址）同时密钥给标记 → 400、状态不变——
+    /// 否则不配 token、读不到原文的客户端发一条 `{url: 自己的服务器, streamKey: "<redacted>"}`，下次开推原密钥就推到了它那里，等于绕过 `?secrets=1`。
+    /// 换地址就得连密钥原文一起给；地址不变（原样或打码的样子）照旧保留。
+    func testNS03_markerKeyWithChangedURL_400_keyNeverFollowsToNewDestination() async throws {
+        let s = try await APIServerTests.Server.start(state: Self.state())
+        defer { Task { await s.stop() } }
+        let before = await s.fixture.stateMachine.state
+        let sequence = s.fixture.bus.lastSequence
+        let cases: [(Int, String)] = [
+            (2, "rtmp://attacker.invalid/app"),                       // 干净的新地址
+            (3, "rtmp://attacker.invalid/live/app"),                  // userinfo 也没了
+            (5, "rtmp://attacker.invalid/live2/x"),                    // 密钥栏空的那一路（原密钥是空串，也不许）
+            (6, "srt://attacker.invalid:9000?latency=200"),            // SRT
+            (2, "rtmp://live.example.com/app/"),                       // 只差一个斜杠也算换了
+        ]
+        for (n, url) in cases {
+            let settings = OutputSettings(stream: StreamSettings(url: url, streamKey: Self.marker))
+            let body = String(decoding: try APIJSON.encoder.encode(["command": Command.setOutputSettings(output: n, settings: settings)]), as: UTF8.self)
+            let (status, text) = try await post(s, body)
+            XCTAssertEqual(status, 400, "输出 \(n) → \(url)：\(text)")
+            XCTAssertEqual(try object(text)["error"] as? String, Self.markerRejection)
+        }
+        let after = await s.fixture.stateMachine.state
+        XCTAssertEqual(after, before, "状态不变：密钥没跟着去新地址")
+        XCTAssertEqual(s.fixture.bus.lastSequence, sequence, "没进总线")
+        // 地址原文 + 标记密钥（客户端自己知道地址、只是没有密钥）：同一个目的地，照旧保留
+        let same = OutputSettings(stream: StreamSettings(url: Self.url3, streamKey: Self.marker, reconnectMaxSeconds: 8))
+        let (st, text) = try await post(s, String(decoding: try APIJSON.encoder.encode(["command": Command.setOutputSettings(output: 3, settings: same)]), as: UTF8.self))
+        XCTAssertEqual(st, 200, text)
+        let three = await output(s, 3)?.settings.stream
+        XCTAssertEqual(three?.streamKey, Self.key3)
+        XCTAssertEqual(three?.reconnectMaxSeconds, 8)
     }
 
     /// 换不回去的标记一律 400、状态不变：地址带标记但不是"现在的地址打码后的样子"（主机改了 / 过期的快照）、没有推流设置的输出收到标记密钥。
