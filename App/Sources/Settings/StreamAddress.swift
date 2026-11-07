@@ -6,7 +6,7 @@
 // - 地址框里 user:pass@ 打码显示（`masked`），编辑时打码段原样留着就换回原来的 userinfo（`unmasked`）。
 // - W5-N（2026-10-10 裁定 ①）：鉴权表加"写法"二选一——Adobe（user:pass@，上面那种）/ 查询串（?user=&pass=，参数名可改、默认 MediaMTX 的 user / pass）。
 //   查询串写进地址的 query、不碰 userinfo；两种写法互斥（写一种时把另一种的账号去掉，免得两头都带）。地址框打码同时盖住 query 里名单内参数的值
-//   （名单 = 推流包 StreamURLRedaction.secretQueryParams，日志 / 诊断包同一份），编辑时打码的值原样留着就换回原值。节目只存整条地址，不加字段。
+//   （名单 = 契约 SwitcherContracts 的 StreamURLRedaction.secretQueryParams，日志 / 诊断包同一份），编辑时打码的值原样留着就换回原值。节目只存整条地址，不加字段。
 import Foundation
 import SwitcherContracts
 import SwitcherStreaming
