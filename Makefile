@@ -18,6 +18,13 @@ DERIVED     := .build/DerivedData
 DESTINATION := platform=macOS,arch=arm64
 XCB         := xcodebuild -project $(XCODEPROJ) -scheme $(SCHEME) -destination '$(DESTINATION)' -derivedDataPath $(DERIVED)
 XCB_FLAGS   ?= -quiet
+# G13（2026-11-07）：本机开发签名——钥匙串里有 Apple Development 身份时 `make build-app DEV_SIGN_TEAM=<Team ID>`（test-app 同），
+# scripts/dev-signing/dev-signing.xcconfig 以 -xcconfig 盖过工程的 ad-hoc 设置：稳定的 Team ID + bundle id，TCC 授权跨重编译不重问。
+# 不设就是原来的 ad-hoc（每次编译 CDHash 变、系统当新 App 重问权限）。Personal Team 也能签；只管本机跑，发布仍走 make archive（W4-B）。
+DEV_SIGN_TEAM ?=
+ifneq ($(DEV_SIGN_TEAM),)
+XCB += -xcconfig scripts/dev-signing/dev-signing.xcconfig DEV_SIGN_TEAM=$(DEV_SIGN_TEAM)
+endif
 
 # make lint 检查的分支：默认当前分支；检查别的分支用 make lint BRANCH=w1-core
 BRANCH ?= $(shell git symbolic-ref --short -q HEAD 2>/dev/null || echo main)
@@ -37,6 +44,7 @@ help:
 	@echo "make clean  删掉所有 .build 和生成的工程"
 	@echo "make manual 随包 HTML 手册：docs/user（中英）→ App/Resources/Help/（docs/tools/build-help.py；改了 docs/user 要重跑，make lint 的 scripts/check-help.sh 会查）"
 	@echo "make archive  发布归档：签名 → 校验 → DMG → 公证（W4-B，scripts/release/release.mk；archive-adhoc / release-test / appcast / pin-check 也在那里）"
+	@echo "make build-app DEV_SIGN_TEAM=<Team ID>  本机开发签名（钥匙串里的 Apple Development 身份；TCC 授权跨重编译不重问）；test-app 同"
 
 # ---------- gen ----------
 gen:

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- G13（2026-11-07）：本机开发签名用的权限表——钥匙串里的 Apple Development 身份（Personal Team 也行）+ 硬化运行时下摄像头 / 麦克风要这两条；
+	     不带 system-extension.install（受限权限要描述文件，Personal Team 拿不到），所以虚拟摄像头扩展仍装不上（BLOCKED-账号）。
+	     正式发布的权限表仍是 App/Switcher-signed.entitlements（W4-B，make archive 走它）。 -->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- 硬化运行时默认开库校验：主二进制链接的 libndi.dylib 在 /Library/NDI SDK for Apple/ 里、是 NDI 那边签的，开发构建不随包重签（那是 make archive 的 sign.sh 做的），
+	     不关库校验 App 一起就 dyld 报 Library not loaded: @rpath/libndi.dylib（G13 探针实测）。只给开发签名用。 -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
