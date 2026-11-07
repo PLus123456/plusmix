@@ -11,3 +11,5 @@
 
 不做：ShowDocuments 的 catch（128）；OverlaySettingsPanel 之外的契约 / 命令目录；Recorder；阈值。
 报告 reports/w5-app-closeout-3.md 五段；不 push、不 merge，交 G13（140）。
+
+**G13 追加（2026-11-07）**：已合入 g13（2f78897 → 合并提交 d5c3c9b，第四路、0 冲突）；合入后 App 16 个相关类 91 条 = 90 过 + 1 跳（键盘导航 BLOCKED-系统设置）+ 0 红——`BottomBarSplitTests` 两条第一遍红是同机正在跑包里的 `MediaMTXTests`（两边都用 apiPort 29997，G12 记过的坑），机器安静后单独复跑 6 过 + 1 跳；`W5SCloseoutTests` 8 / 8。KNOWN_ISSUES：S1 NDI 漏挂音频、S2 底栏悬停销号；§3 第 4 条推流设置页地址框仍露路径末段 G13 定 S2 新进缺陷表（归下一个 App 收口会话）；§1 第 7 条 `AppTest.run` 的工装修法记进"G13 合入已修"表。

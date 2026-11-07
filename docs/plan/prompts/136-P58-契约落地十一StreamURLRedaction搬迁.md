@@ -11,3 +11,5 @@
 
 不做：API 打码本身（137）；别的契约；命令数不变 42；阈值。
 报告 reports/p5-contracts-8.md 五段；不 push、不 merge，交 G13（140）。
+
+**G13 追加（2026-11-07）**：已合入 g13（903c0ea → 合并提交 2ffe471，第一路、0 冲突）；合入后 Core 378（Render 101 / Engine 140 / Contracts 137，1 跳原有；Render 的 `DisplayDecouplingTests.testDisplay_maxFrameRateCapsThumbnailBlits` 整包红一次、单独复跑绿——名单内的显示类环境红）、StreamingTests 的 `StreamURLRedactionTests` 5 / 5；137 叠在它上面一起进了。§3 第 2 条 App 三处注释 G13 按胶水额度改成"契约的"（9049649）；§4 第 2 条 CONTRACTS.md 五处"137 落地后生效"不在 G13 目录，写成问题单 reports/issues/G13-p5-contracts-6-contracts-md-035-present-tense.md 交下一个契约会话（128）；§3 第 4 条 Package.swift 的 `exclude: ["Fixtures"]` 也在那张单子里。
