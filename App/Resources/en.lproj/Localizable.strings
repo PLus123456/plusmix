@@ -1439,6 +1439,7 @@
 "statsWindow.col.skipped" = "Encoder skips";
 "statsWindow.col.dropped" = "Dropped";
 "statsWindow.col.bitrate" = "Bitrate";
+"statsWindow.col.compressorMeasured" = "Compressor measured";
 "statsWindow.col.reconnects" = "Reconnects";
 "statsWindow.col.undelivered" = "Undelivered";
 "statsWindow.col.dropouts" = "Dropouts";
@@ -1455,6 +1456,8 @@
 "statsWindow.display.multiviewWindow" = "Multiview window";
 "statsWindow.display.externalDisplay" = "External display";
 "statsWindow.display.virtualCamera" = "Virtual camera";
+"statsWindow.effects.input" = "Input %d · %@";
+"statsWindow.effects.title" = "Effect chain latency";
 "statsWindow.kind.record" = "Recording";
 "statsWindow.kind.stream" = "Streaming";
 "statsWindow.kind.ndi" = "NDI® output";

@@ -1439,6 +1439,7 @@
 "statsWindow.col.skipped" = "编码跳帧";
 "statsWindow.col.dropped" = "丢帧";
 "statsWindow.col.bitrate" = "码率";
+"statsWindow.col.compressorMeasured" = "压缩器实测";
 "statsWindow.col.reconnects" = "重连";
 "statsWindow.col.undelivered" = "没送出";
 "statsWindow.col.dropouts" = "回调超时";
@@ -1455,6 +1456,8 @@
 "statsWindow.display.multiviewWindow" = "多画面窗口";
 "statsWindow.display.externalDisplay" = "外部显示";
 "statsWindow.display.virtualCamera" = "虚拟摄像头";
+"statsWindow.effects.input" = "输入 %d · %@";
+"statsWindow.effects.title" = "效果链延迟";
 "statsWindow.kind.record" = "录制";
 "statsWindow.kind.stream" = "推流";
 "statsWindow.kind.ndi" = "NDI® 发送";

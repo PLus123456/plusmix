@@ -214,6 +214,39 @@ final class W5SCloseoutTests: XCTestCase {
         ActionPickerModel(context: .hotkey, current: current, state: state, defaults: AppTest.controller.defaults)
     }
 
+    /// P57（reports/p5-contracts-7.md §3 第 2 条，G12 §7.1 第 11 条）：叠加命令（overlay）的输入在命令目录里是 input(allowsBlack: false)、可选——
+    /// 面板原来只有"不换输入"和各路输入，选不到 0（034 ⑤：input 0 = 清空这个通道的输入）。面板自己加"（清空）"= 0，目录不动；
+    /// 一句话摘要写"清空"、不写"黑场"；别的 allowsBlack: false 的输入下拉（setInputAudio）不加，setPreview 照旧是"黑场"。
+    func testP57_overlayCommandPickerOffersClearOption() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 2)
+        let p = picker { session.state }
+        p.select("command.overlay")
+        let field = try XCTUnwrap(p.selected?.fields.first { $0.name == "input" })
+        XCTAssertEqual(field.type, .input(allowsBlack: false), "命令目录不动")
+        let choices = p.inputChoices(for: field)
+        XCTAssertEqual(Array(choices.prefix(2)).map(\.title), ["不换输入", "（清空）"])
+        XCTAssertEqual(Array(choices.prefix(2)).map(\.value), [nil, .number(0)])
+        XCTAssertEqual(choices.dropFirst(2).map(\.value), session.state.inputs.map { .number($0.number) })
+        p.set("input", .input(.number(0)))
+        XCTAssertEqual(p.builtAction, .command(.overlay(channel: 1, on: true, input: 0)), "（清空）= input 0")
+        let built = try XCTUnwrap(p.builtAction)
+        let summary = ActionText.summary(built, state: session.state)
+        XCTAssertTrue(summary.contains("清空") && !summary.contains("黑场"), summary)
+        // 存下的动作打开时定位回"（清空）"，原样拼回
+        let located = picker(current: .command(.overlay(channel: 2, on: false, input: 0))) { session.state }
+        XCTAssertEqual(located.values["input"], .input(.number(0)))
+        XCTAssertEqual(located.builtAction, .command(.overlay(channel: 2, on: false, input: 0)))
+        // 别的输入下拉不受影响
+        p.select("command.setInputAudio")
+        let audioField = try XCTUnwrap(p.selected?.fields.first { $0.name == "input" })
+        XCTAssertFalse(p.inputChoices(for: audioField).contains { $0.value == .number(0) }, "setInputAudio 没有 0")
+        p.select("command.setPreview")
+        let previewField = try XCTUnwrap(p.selected?.fields.first { $0.name == "input" })
+        XCTAssertEqual(p.inputChoices(for: previewField).first?.title, "黑场")
+        XCTAssertFalse(p.inputChoices(for: previewField).contains { $0.title == "（清空）" })
+    }
+
     /// P57（reports/p5-contracts-7.md §3 第 3 条）：秒数显示 `String(Int(rounded))` 与拼动作时的 `Int((秒 × 帧率).rounded())` 对 1e30 秒会 Double → Int 溢出 trap。
     /// 显示：任何 Double 都不 trap（Int 装不下的按 %g 写）；拼动作：时长格钳到 DurationLimits.maxTicks 对应的秒数（同 OverlaySettingsModel.ticks(seconds:)）。
     func testP57_actionTextSecondsAndBuildDoNotTrapOnHugeSeconds() throws {
@@ -238,9 +271,128 @@ final class W5SCloseoutTests: XCTestCase {
                        "毫秒格钳到 1 小时（maxTicks @ 240 fps，任何合法帧率下换出来都 ≤ maxTicks）")
     }
 
+    /// P57：表单里的秒数框（DurationField 的绑定走 setSeconds）填 1e30——按格的类型钳：按拍的到 maxTicks ÷ 帧率、毫秒的到 1 小时、定位秒数到 PlaybackLimits.maxSeekSeconds；
+    /// 负数 / NaN → 0。框里随即显示钳后的值，摘要与预览都不 trap。
+    func testP57_actionPickerSecondsFieldClampsHugeValue() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 1)
+        let rate = session.state.format.frameRate.framesPerSecond.doubleValue
+        let p = picker { session.state }
+        let entries = ActionCatalog.entries(for: .hotkey)
+        let ticksEntry = try XCTUnwrap(entries.first { e in !e.advanced && !e.legacy && e.fields.contains { $0.type == .durationTicks } })
+        let ticksField = try XCTUnwrap(ticksEntry.fields.first { $0.type == .durationTicks })
+        p.select(ticksEntry.id)
+        p.setSeconds(ticksField.name, 1e30)
+        XCTAssertEqual(p.values[ticksField.name], .seconds(Double(DurationLimits.maxTicks) / rate), "按拍的格钳到 maxTicks ÷ 帧率")
+        XCTAssertNotNil(p.builtAction)
+        XCTAssertFalse(p.preview.isEmpty)
+        p.setSeconds(ticksField.name, -3)
+        XCTAssertEqual(p.values[ticksField.name], .seconds(0))
+        p.setSeconds(ticksField.name, .nan)
+        XCTAssertEqual(p.values[ticksField.name], .seconds(0))
+        p.setSeconds(ticksField.name, 2.5)
+        XCTAssertEqual(p.values[ticksField.name], .seconds(2.5), "范围里的照常")
+
+        p.select("action.fadeMs")
+        p.setSeconds("durationMs", 1e30)
+        XCTAssertEqual(p.values["durationMs"], .seconds(3_600))
+        XCTAssertEqual(p.builtAction, .fadeMs(durationMs: 3_600_000))
+
+        p.select("command.seekPlayback")
+        p.setSeconds("seconds", 1e30)
+        XCTAssertEqual(p.values["seconds"], .seconds(PlaybackLimits.maxSeekSeconds))
+        XCTAssertNotNil(p.builtAction)
+    }
+
     private static func command(_ action: ControlAction) -> Command? {
         if case .command(let c) = action { return c }
         return nil
     }
 
+    // MARK: G12 §7.1 第 6 条：NDI 在跑中翻 failed 时状态行提示
+
+    /// 纯逻辑：上一行不是 failed、这一行是 failed 才算"翻"；同一路 60 s 内只提示一次；各路分开；停了再起是新的一次。
+    func testG12_6_ndiFailingNoticeOncePer60Seconds() {
+        var n = NDIFailingNotices()
+        XCTAssertFalse(n.note(output: 2, state: "publishing", now: 0))
+        XCTAssertTrue(n.note(output: 2, state: "failed", now: 1), "publishing → failed：提示")
+        XCTAssertFalse(n.note(output: 2, state: "failed", now: 2), "还是 failed：不再提示")
+        XCTAssertFalse(n.note(output: 2, state: "publishing", now: 3))
+        XCTAssertFalse(n.note(output: 2, state: "failed", now: 30), "60 s 内又翻：不提示")
+        XCTAssertFalse(n.note(output: 2, state: "publishing", now: 40))
+        XCTAssertTrue(n.note(output: 3, state: "failed", now: 41), "别的路各算各的（第一行就是 failed 也算翻）")
+        XCTAssertTrue(n.note(output: 2, state: "failed", now: 61.5), "离上次提示 ≥ 60 s：再提示")
+        n.forget(output: 3)
+        XCTAssertTrue(n.note(output: 3, state: "failed", now: 50), "停了再起：新的一次")
+        XCTAssertFalse(n.note(output: 4, state: "idle", now: 0))
+        XCTAssertFalse(n.note(output: 4, state: nil, now: 1))
+    }
+
+    /// 接线：在跑的 NDI 发送，Stats.encoder 里它那一项翻成 failed（D08：连续送不出去）→ 状态行"NDI 发送 n 出错：<last_error>"一次；
+    /// 来回翻不刷屏；过了 60 s 再翻再提示。Stats 行是喂进 noteStats 的（真 sender 不会自己翻），时钟用替身。
+    func testG12_6_ndiFailingWhileRunningShowsStatusNoticeThrottled() throws {
+        let session = try AppTest.freshSession()
+        try AppTest.addSynthetics(session, count: 1)
+        let page = AppTest.controller.panels.showOutputSettings(tab: .ndi).model
+        defer { AppTest.controller.panels.closeAll() }
+        let number = page.addNDI(name: "PlusMix W5S 翻 failed \(UUID().uuidString.prefix(6))", groups: "", conversion: "auto", source: .program)
+        defer {
+            page.removeOutput(number)
+            _ = AppTest.waitUntil(5) { session.outputs.ndiSenders[number] == nil }
+        }
+        XCTAssertTrue(AppTest.waitUntil(8) { session.outputs.ndiSenders[number]?.phase == .running }, "\(String(describing: session.outputs.failed[number]))")
+        final class Clock { var now: TimeInterval = 1000 }
+        let clock = Clock()
+        session.outputs.noticeUptime = { clock.now }
+        defer { session.outputs.noticeUptime = { ProcessInfo.processInfo.systemUptime } }
+        var notices: [String] = []
+        let token = session.observeNotices { notices.append($0) }
+        defer { token.invalidate() }
+        func row(_ state: String, _ error: String = "") -> Stats {
+            Stats(ts: 1, tick: Tick(60), renderMs: 1, missedRender: 0, jitterMs: 0, perInput: [:],
+                  encoder: [Stats.EncoderEntry(output: number, skipped: 0, bitrate: 0, state: state, lastError: error)],
+                  audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 1, cpuPct: 1, gpuPct: 1)
+        }
+        func failing() -> [String] { notices.filter { $0.contains("NDI 发送 \(number) 出错") } }
+        session.outputs.noteStats(row("publishing"))
+        session.outputs.noteStats(row("failed", "连续 30 帧没送出：像素格式 w5s"))
+        XCTAssertEqual(failing(), ["NDI 发送 \(number) 出错：连续 30 帧没送出：像素格式 w5s"])
+        clock.now += 10
+        session.outputs.noteStats(row("publishing"))
+        session.outputs.noteStats(row("failed", "连续 30 帧没送出：像素格式 w5s"))
+        XCTAssertEqual(failing().count, 1, "60 s 内来回翻不刷屏：\(notices)")
+        clock.now += 51
+        session.outputs.noteStats(row("publishing"))
+        session.outputs.noteStats(row("failed"))
+        XCTAssertEqual(failing().count, 2, "过了 60 s 再翻再提示：\(notices)")
+        XCTAssertEqual(failing().last, "NDI 发送 \(number) 出错（原因见输出设置的 NDI 页）", "没有 last_error 时的那一句")
+        XCTAssertEqual(L10n.string("notice.ndiSendFailing", language: "en"), "NDI output %d error: %@")
+    }
+
+    // MARK: G12 §7.1 第 5 条：统计窗列效果链延迟
+
+    /// 统计窗"音频"一节多一张效果链延迟表：总线按 Stats 列的顺序、输入按编号（名字从快照对号，删了的写"已删"），延迟一位小数、压缩器实测两位；
+    /// 数原样来自 Stats.audio.effects（铁律 4），瞬时值、不受"重置"影响。
+    func testG12_5_statsWindowListsEffectChainLatency() {
+        var state = MixerState()
+        state.inputs = [InputConfig(number: 2, name: "机位", source: .synthetic(settings: SyntheticSourceSettings()))]
+        let effects = Stats.AudioCounters.EffectsLatency(
+            buses: [.init(bus: "master", latencyMs: 0), .init(bus: "busA", latencyMs: 5.333, measuredLatencyMs: 5.3125),
+                    .init(bus: "busB", latencyMs: 0), .init(bus: "headphones", latencyMs: 1.5)],
+            inputs: [7: .init(latencyMs: 2.04), 2: .init(latencyMs: 1.33, measuredLatencyMs: 0)])
+        let stats = Stats(ts: 1, tick: Tick(60), renderMs: 1, missedRender: 0, jitterMs: 0, perInput: [:], encoder: [],
+                          audio: Stats.AudioCounters(dropouts: 0, underruns: 0, effects: effects), rssMb: 1, cpuPct: 1, gpuPct: 1)
+        let model = StatsWindowModel()
+        model.apply(stats: stats, state: state)
+        XCTAssertEqual(model.effectRows.map(\.name), ["Master", "Bus A", "Bus B", "耳机", "输入 2 · 机位", "输入 7（已删）"])
+        XCTAssertEqual(model.effectRows.map(\.latencyText), ["0.0 ms", "5.3 ms", "0.0 ms", "1.5 ms", "1.3 ms", "2.0 ms"])
+        XCTAssertEqual(model.effectRows.map(\.measuredText), ["—", "5.31 ms", "—", "—", "0.00 ms", "—"])
+        model.reset()
+        XCTAssertEqual(model.effectRows.count, 6, "瞬时值：重置不动它")
+        // 没有效果链数据（老 Stats / 引擎没起）：空表
+        model.apply(stats: Stats(ts: 2, tick: Tick(120), renderMs: 1, missedRender: 0, jitterMs: 0, perInput: [:], encoder: [],
+                                 audio: Stats.AudioCounters(dropouts: 0, underruns: 0), rssMb: 1, cpuPct: 1, gpuPct: 1), state: state)
+        XCTAssertTrue(model.effectRows.isEmpty)
+        XCTAssertEqual(L10n.string("statsWindow.effects.title", language: "en"), "Effect chain latency")
+    }
 }
