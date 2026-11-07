@@ -18,7 +18,7 @@ The interface is described as it looks after the 0.1.x redesign (toolbar, three-
 | [Outputs](outputs.md) | Overview, recording (ISO, disk protection), streaming (service presets, quality, authentication), NDI® output, external display, virtual camera, multiview |
 | [Shortcuts](shortcuts.md) | Default keyboard table, editing it and the action picker, hotkeys.json, MIDI mapping, Stream Deck / Companion / tally |
 | [Settings](settings.md) | The single Settings window: This Show / This Mac pages, when changes apply, export / import / restore defaults, remote control, tally, performance & power, advanced; launch arguments |
-| [Troubleshooting](troubleshooting.md) | Permissions, no signal, disk, streaming (connecting / reconnecting / couldn't start / authentication), NDI® / DeckLink / virtual camera, picture and sound, interface, API, logs and diagnostics |
+| [Troubleshooting](troubleshooting.md) | Permissions, no signal, disk, streaming (connecting / reconnecting / couldn't start / authentication), NDI® / DeckLink / virtual camera, picture and sound, interface, API, logs and diagnostics, known issues |
 
 See also: [sample shows](../../../Samples/README.md) (church / classroom / event, run out of the box; Chinese),
 [local API](../../api/README.md) (scripting, control panels), [control panels and tally](../../integrations/README.md).
