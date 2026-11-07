@@ -131,6 +131,7 @@ C 系列测试用的完整客户端（记录快照、按计划发命令、算 C1
 | 选 + 切一次完成 | `{"commands": [{"setPreview": {"input": 3}}, {"cut": {}}]}`（转场进行中 `setPreview` 被拒、`cut` 只把正在进行的那次做完，看回执） |
 | 执行转场 1–4 | `{"command": {"useTransitionSlot": {"slot": 2, "start": true}}}` |
 | 叠加 1 开 / 关 | `{"command": {"overlay": {"channel": 1, "on": true, "input": null}}}` / `"on": false` |
+| 叠加 1 关掉并清空输入 | `{"command": {"overlay": {"channel": 1, "on": false, "input": 0}}}`（`input: 0` = 清空、`null` = 不换；清空的那一拍画面就没有、不走退出动画——要淡出就先单发 `"on": false`，等动画走完再清） |
 | FTB | `{"command": {"ftb": {"on": true}}}` |
 | 录制 / 推流 | `{"command": {"startRecord": {"output": 1}}}` … |
 
