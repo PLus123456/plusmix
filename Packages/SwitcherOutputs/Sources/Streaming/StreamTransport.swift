@@ -67,7 +67,7 @@ extension StreamTransportError: CustomStringConvertible {
     public var description: String {
         switch self {
         case .connectFailed(let m), .sendFailed(let m), .authenticationFailed(_, let m): return m
-        case .connectTimedOut: return "连接超时"
+        case .connectTimedOut: return "连接超时（服务器没回）"   // W2-D6：对端接了 TCP 不说话 / 根本没回握手，都是这一句
         case .notConnected: return "没连上"
         }
     }
@@ -90,7 +90,8 @@ public protocol StreamTransport: AnyObject, Sendable {
     func isConnected() async -> Bool
     /// 最近一次上报。
     func report() async -> TransportReport
-    /// 关闭；之后对象不再使用。
+    /// 关闭；之后对象不再使用。可以在 `connect()` 进行中从别的 Task 调（StreamOutput 的连接超时、stop()，W2-D6）：
+    /// 要让挂着的 connect 尽快抛错返回、自己也尽快返回；重复调用无害。
     func close() async
 }
 

@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import HaishinKit
+import os
 import RTMPHaishinKit
 import SRTHaishinKit
 import Synchronization
@@ -23,6 +24,10 @@ import SwitcherOutputs
 //   5. 服务器拒绝鉴权（W2-D4）报类型化的 StreamTransportError.authenticationFailed（StreamOutput 第一次就停、不退避）：Adobe 的 authfailed /
 //      nosuchuser / llnw、publish 的 NetStream.Publish.Unauthorized。publish 的回复可能晚于 HaishinKit 3 s 的请求超时（MediaMTX 随机等 0–4 s），
 //      超时之后从流的状态流里接着等（RTMPTransport.connect）。
+//   6. 它的 connect 握手 / connect 命令没有超时、不理取消；socket 还没起来（TCP / TLS 握手中）时它的 close() 直接抛 invalidState、什么都不做，
+//      RTMPS 对端不回 TLS 要等它写死的 15 s socket 超时（RTMPConnection(timeout:) 没有传给 socket）——对端接了 TCP 不说话就一直挂着（W2-D6）。
+//      RTMPTransport.connect 把整个连接过程放进自己的子 Task，调用方的取消和别的 Task 调的 close() 都转成取消它；
+//      HaishinKit 那一次 connect 再放进一个能"放手"的 Task（haishinKitConnect），放手之后后台关到它返回为止。
 // 错误文字进日志 / 状态之前都过 StreamURLRedaction（HaishinKit 的错误里可能带整个地址：unsupportedCommand、SRT 的 unsupportedUri）。
 
 /// 存 HaishinKit 每秒一次的网络上报（NetworkMonitorEvent），供 StreamOutput 读。不调 setVideoSettings（我们不让它改码率）。
@@ -86,16 +91,28 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
     /// 我们要的 CTS = 拍点时刻 − 音频原点，所以 DTS = PTS − 期望 CTS + 这个常量。E2E 测试（A/V 对齐）会盯住它。
     static let haishinKitCTSOffset = HostDuration(milliseconds: 66)
 
-    static let pendingHaishinKitConnects = Atomic<Int>(0)   // 红用例桩
+    /// 被放手、还在等 HaishinKit 自己返回的 connect 调用个数（W2-D6，见 haishinKitConnect）：明文 RTMP 关一次就回，
+    /// RTMPS 在 TLS 阶段最多等它 15 s 的 socket 超时。测试看它回到 0 = 没有残留的 Task / 连接。
+    static let pendingHaishinKitConnects = Atomic<Int>(0)
+    private static let logger = Logger(subsystem: "switcher.streaming", category: "Transport")
+
     let protocolName: String
     let startAlignment: StartAlignment = .dtsOffset
     private let destination: StreamDestination
     private let connection: RTMPConnection
     private let reporter = QueueReporter()
-    private var stream: RTMPStream?
     private let audioFormat: AVAudioFormat?
     private let metadata: AMFObject
     private let connectTimeout: Int
+    /// close() 可能在 connect() 进行中从别的 Task 来（StreamOutput 的连接超时、stop()，W2-D6），这几样都在锁里。
+    private struct Lifecycle {
+        var closed = false
+        /// connect() 正在跑的连接过程（close() 取消它、等它收尾）。
+        var connecting: Task<Void, any Error>?
+        /// 发布成功的流（connect 成功之后才有）。
+        var stream: RTMPStream?
+    }
+    private let lifecycle = Mutex(Lifecycle())
 
     init(destination: StreamDestination, audioFormat: AVAudioFormat?, metadata: AMFObject, connectTimeout: Int) {
         self.destination = destination
@@ -106,7 +123,31 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         connection = RTMPConnection(timeout: connectTimeout)
     }
 
+    /// 连接并开始发布。整个过程在一个子 Task（connectSteps）里跑：调用方的取消、别的 Task 调的 close() 都取消它（W2-D6）；
+    /// 每一步都理取消——Adobe 鉴权、等 publish 的迟到回复本来就理，HaishinKit 的 connect 由 haishinKitConnect 放手——所以总能及时返回。
+    /// connect 进行中被 close() → 抛 connectFailed("传输层已关闭")。
     func connect() async throws {
+        let steps: Task<Void, any Error>? = lifecycle.withLock { l in
+            guard !l.closed, l.connecting == nil else { return nil }
+            let t = Task { try await self.connectSteps() }
+            l.connecting = t
+            return t
+        }
+        guard let steps else { throw StreamTransportError.connectFailed("传输层已关闭") }
+        defer { lifecycle.withLock { $0.connecting = nil } }
+        do {
+            try await withTaskCancellationHandler {
+                try await steps.value
+            } onCancel: {
+                steps.cancel()
+            }
+        } catch {
+            if lifecycle.withLock({ $0.closed }) { throw StreamTransportError.connectFailed("传输层已关闭") }
+            throw error
+        }
+    }
+
+    private func connectSteps() async throws {
         // 先建流再 connect：RTMPConnection.connect 成功后会同步给每个已注册的流做 createStream；
         // 反过来（connect 之后再建流）createStream 在流的 init Task 里异步跑，publish 可能抢在它前面用 streamId 0 发出去而超时（E7 实测）。
         // fcPublishName：FMLE 序列（releaseStream / FCPublish / FCUnpublish），关流时不用等服务器回 Unpublish.Success（有的服务器不回，会等满 requestTimeout）
@@ -136,7 +177,7 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
             }
         }
         do {
-            let r = try await connection.connect(target)
+            let r = try await haishinKitConnect(target)
             guard let status = r.status, status.code == RTMPConnection.Code.connectSuccess.rawValue else {
                 throw r.status.map { Self.error(code: $0.code, description: $0.description, phase: "") } ?? StreamTransportError.connectFailed("服务器回的 connect 里没有状态")
             }
@@ -177,11 +218,62 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
         }
         // 它自己发的 onMetaData 对压缩输入只有 duration；补一份带尺寸 / 码率 / 编码的
         try? await s.send("@setDataFrame", arguments: "onMetaData", metadata)
-        stream = s
+        // close() 刚好抢在这之前来过：这条流不留（close 已经在关连接），按被关处理
+        let kept = lifecycle.withLock { l -> Bool in
+            guard !l.closed else { return false }
+            l.stream = s
+            return true
+        }
+        if !kept {
+            _ = try? await s.close()
+            throw CancellationError()
+        }
+    }
+
+    /// HaishinKit 的那一次 `RTMPConnection.connect`（W2-D6，探针结论见 reports/w2-stream-6.md）：
+    /// - 握手 / connect 命令没有超时、不理取消：对端接了 TCP 不说话就一直挂着；
+    /// - 它的 close() 能结束握手阶段的挂起（明文 RTMP 1 s 时关 → 立刻以 Connect.Failed 返回），但 socket 还没起来时（TCP / TLS 握手中，
+    ///   readyState 还是 uninitialized）直接抛 invalidState、什么都不做：RTMPS 对端不回 TLS 要等它写死的 15 s socket 超时，
+    ///   close 落在 TCP 连上之前也一样（明文 RTMP 0 s 时关 → 永远挂）。
+    /// 所以这次调用放进自己的 Task，结果经 HaishinKitConnectCall 交回来；本 Task 被取消就立刻放手（抛 CancellationError、不等它），
+    /// 那个 Task 交给收尾（closeUntilReturned）：每 0.2 s 关一次连接，直到 HaishinKit 的 connect 自己返回（明文 RTMP 第一次关就回；
+    /// RTMPS 的 TLS 阶段最多它 15 s 的超时），晚到的成功也关掉作废。`pendingHaishinKitConnects` 记着还没返回的个数。
+    private func haishinKitConnect(_ target: String) async throws -> RTMPResponse {
+        try Task.checkCancellation()
+        let connection = self.connection
+        let call = HaishinKitConnectCall()
+        Self.pendingHaishinKitConnects.add(1, ordering: .relaxed)
+        Task {
+            let result: Result<RTMPResponse, any Error>
+            do { result = .success(try await connection.connect(target)) } catch { result = .failure(error) }
+            if !call.deliver(result), case .success = result {
+                try? await connection.close()   // 已经放手：晚到的成功作废
+            }
+            call.markReturned()
+            Self.pendingHaishinKitConnects.subtract(1, ordering: .relaxed)
+        }
+        return try await withTaskCancellationHandler {
+            try await call.value()
+        } onCancel: {
+            guard call.abandon() else { return }
+            Task { await Self.closeUntilReturned(connection, call) }
+        }
+    }
+
+    /// 放手之后的收尾：关到 HaishinKit 的 connect 返回为止（至少关一次——放手时它可能刚成功、结果没人取）。30 s 还没返回就不再管
+    /// （它自己的 socket 超时是 15 s；只剩 HaishinKit 的一处竞态会这样：close 正好落在它发 C0C1 与登记续体之间，续体再没人收）。
+    private static func closeUntilReturned(_ connection: RTMPConnection, _ call: HaishinKitConnectCall) async {
+        let deadline = HostClock.now() + HostDuration(seconds: 30)
+        repeat {
+            try? await connection.close()
+            if call.hasReturned { return }
+            try? await Task.sleep(for: .milliseconds(200))
+        } while !call.hasReturned && HostClock.now() < deadline
+        if !call.hasReturned { logger.error("HaishinKit 的 connect 放手 30 s 后还没返回，不再关它") }
     }
 
     func send(video sample: EncodedVideoSample, dtsOffset: HostDuration) async throws {
-        guard let stream else { throw StreamTransportError.notConnected }
+        guard let stream = lifecycle.withLock({ $0.stream }) else { throw StreamTransportError.notConnected }
         let pts = CMSampleBufferGetPresentationTimeStamp(sample.sampleBuffer)
         let dts = CMTimeSubtract(CMTimeAdd(pts, Self.haishinKitCTSOffset.cmTime), dtsOffset.cmTime)
         guard let sb = retimed(sample.sampleBuffer, dts: dts) else { throw StreamTransportError.sendFailed("视频样本改时间戳失败") }
@@ -189,7 +281,7 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
     }
 
     func send(audio packet: EncodedAudioPacket) async throws {
-        guard let stream else { throw StreamTransportError.notConnected }
+        guard let stream = lifecycle.withLock({ $0.stream }) else { throw StreamTransportError.notConnected }
         guard let audioFormat, let buffer = HKAudioBridge.makeBuffer(packet, format: audioFormat) else { return }
         await stream.append(buffer, when: AVAudioTime(hostTime: packet.hostTime.ticks))
     }
@@ -198,9 +290,20 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
 
     func report() async -> TransportReport { await reporter.report }
 
+    /// 关闭。可以在 connect() 进行中从别的 Task 调（W2-D6）：先取消连接过程、等它收尾（HaishinKit 那一次 connect 已放手，很快），
+    /// 再关流和连接；connect() 随之抛 connectFailed("传输层已关闭")。重复调用无害。
     func close() async {
+        let steps = lifecycle.withLock { l -> Task<Void, any Error>? in
+            l.closed = true
+            return l.connecting
+        }
+        steps?.cancel()
+        _ = await steps?.result
+        let stream = lifecycle.withLock { l -> RTMPStream? in
+            defer { l.stream = nil }
+            return l.stream
+        }
         if let stream { _ = try? await stream.close() }
-        stream = nil
         try? await connection.close()
     }
 
@@ -255,6 +358,64 @@ final class RTMPTransport: StreamTransport, @unchecked Sendable {
     }
 }
 
+/// HaishinKit 的一次 connect 调用的结果交接（W2-D6，见 RTMPTransport.haishinKitConnect）：调用跑在自己的 Task 里，等的人可以先走（放手）。只用一次。
+final class HaishinKitConnectCall: Sendable {
+    private enum State {
+        case running
+        case waiting(CheckedContinuation<RTMPResponse, any Error>)
+        case delivered(Result<RTMPResponse, any Error>)
+        /// 结果交出去了，或已放手。
+        case done
+    }
+    private let state = Mutex<State>(.running)
+    private let returned = Atomic<Bool>(false)
+
+    /// 等结果；已经放手（或等着时被放手）抛 CancellationError。
+    func value() async throws -> RTMPResponse {
+        try await withCheckedThrowingContinuation { c in
+            let ready: Result<RTMPResponse, any Error>? = state.withLock { s in
+                switch s {
+                case .running: s = .waiting(c); return nil
+                case .delivered(let r): s = .done; return r
+                case .waiting, .done: return .failure(CancellationError())
+                }
+            }
+            if let ready { c.resume(with: ready) }
+        }
+    }
+
+    /// HaishinKit 返回了。false = 已经放手、没人要这个结果（成功的话调用方去关连接）。
+    func deliver(_ result: Result<RTMPResponse, any Error>) -> Bool {
+        let (accepted, waiter) = state.withLock { s -> (Bool, CheckedContinuation<RTMPResponse, any Error>?) in
+            switch s {
+            case .running: s = .delivered(result); return (true, nil)
+            case .waiting(let c): s = .done; return (true, c)
+            case .delivered, .done: return (false, nil)
+            }
+        }
+        waiter?.resume(with: result)
+        return accepted
+    }
+
+    /// 放手：等的人立刻以 CancellationError 返回。true = 这次放手生效（结果还没交给等的人），调用方负责收尾去关连接。
+    func abandon() -> Bool {
+        let (abandoned, waiter) = state.withLock { s -> (Bool, CheckedContinuation<RTMPResponse, any Error>?) in
+            switch s {
+            case .running: s = .done; return (true, nil)
+            case .waiting(let c): s = .done; return (true, c)
+            case .delivered: s = .done; return (true, nil)   // HaishinKit 已经返回、还没人取：作废（成功的连接由收尾关）
+            case .done: return (false, nil)
+            }
+        }
+        waiter?.resume(throwing: CancellationError())
+        return abandoned
+    }
+
+    /// HaishinKit 的 connect 已经返回（不管有没有人要结果）。
+    func markReturned() { returned.store(true, ordering: .releasing) }
+    var hasReturned: Bool { returned.load(ordering: .acquiring) }
+}
+
 /// SRT（libsrt，HaishinKit 自带的二进制）。
 ///
 /// TSWriter 的规矩：expectedMedias 里的格式都齐了才写；先到的那个样本被当格式热身丢掉。所以：
@@ -267,7 +428,13 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
     private let destination: StreamDestination
     private let connection = SRTConnection()
     private let reporter = QueueReporter()
-    private var stream: SRTStream?
+    /// close() 可能在 connect() 进行中从别的 Task 来（StreamOutput 的连接超时、stop()，W2-D6）：流和"已关"在锁里。
+    /// SRT 的 connect 本身由 libsrt 自己的超时兜住（没人听 3 s 报错），这里不另做放手。
+    private struct Lifecycle {
+        var closed = false
+        var stream: SRTStream?
+    }
+    private let lifecycle = Mutex(Lifecycle())
     private let audioFormat: AVAudioFormat?
     private var audioPrimed = false            // TSWriter 已记下音频格式
     private var videoStarted = false           // 第一帧视频已 append
@@ -280,6 +447,7 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
     }
 
     func connect() async throws {
+        guard !lifecycle.withLock({ $0.closed }) else { throw StreamTransportError.connectFailed("传输层已关闭") }
         do {
             try await connection.connect(URL(string: destination.connectURL))
         } catch {
@@ -290,11 +458,19 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
         await s.setBitRateStrategy(reporter)
         await s.setExpectedMedias(audioFormat == nil ? [.video] : [.video, .audio])
         await s.publish()
-        stream = s
+        let kept = lifecycle.withLock { l -> Bool in
+            guard !l.closed else { return false }
+            l.stream = s
+            return true
+        }
+        if !kept {
+            await s.close()
+            throw StreamTransportError.connectFailed("传输层已关闭")
+        }
     }
 
     func send(video sample: EncodedVideoSample, dtsOffset: HostDuration) async throws {
-        guard let stream else { throw StreamTransportError.notConnected }
+        guard let stream = lifecycle.withLock({ $0.stream }) else { throw StreamTransportError.notConnected }
         if audioFormat != nil && !audioPrimed {
             heldVideo.append((sample, dtsOffset))
             if heldVideo.count > 64 { heldVideo.removeFirst() }
@@ -309,7 +485,7 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
     }
 
     func send(audio packet: EncodedAudioPacket) async throws {
-        guard let stream else { throw StreamTransportError.notConnected }
+        guard let stream = lifecycle.withLock({ $0.stream }) else { throw StreamTransportError.notConnected }
         if !audioPrimed {
             // 热身：让 TSWriter 记下音频格式（这份会被它丢掉），真正的那份扣到第一帧视频之后
             await appendAudio(packet, to: stream)
@@ -341,8 +517,12 @@ final class SRTTransport: StreamTransport, @unchecked Sendable {
     func report() async -> TransportReport { await reporter.report }
 
     func close() async {
+        let stream = lifecycle.withLock { l -> SRTStream? in
+            l.closed = true
+            defer { l.stream = nil }
+            return l.stream
+        }
         if let stream { await stream.close() }
-        stream = nil
         await connection.close()
     }
 }

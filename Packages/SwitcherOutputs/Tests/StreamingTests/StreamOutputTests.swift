@@ -86,7 +86,7 @@ final class StreamOutputTests: XCTestCase {
         _ = try feed(outputs: [o], seconds: 1)
         XCTAssertTrue(waitUntil(timeout: 2) { o.statsEntry(previous: nil, windowSeconds: 1).lastError == "断线：连接断开" }, o.statsEntry(previous: nil, windowSeconds: 1).lastError)
         o.stop()
-        XCTAssertEqual(["\(StreamTransportError.sendFailed("retime"))", "\(StreamTransportError.connectTimedOut)"], ["retime", "连接超时"])
+        XCTAssertEqual(["\(StreamTransportError.sendFailed("retime"))", "\(StreamTransportError.connectTimedOut)"], ["retime", "连接超时（服务器没回）"])   // W2-D6 改了这一句
     }
 
     /// E8（逻辑版）：发 60 帧后传输层断开 → 退避 0.1 s 重连失败 → 退避 0.2 s 重连成功；重连后第一帧是关键帧、重连计数 1、断线期间的帧记为网络丢帧。
