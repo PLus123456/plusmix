@@ -24,6 +24,7 @@
 | `streamOutput` | nil | StartStreaming 没带 `Value` 时用哪个推流输出；nil = 编号最小的；`Value=k` 选第 k 路（0 起） |
 | `reportedVersion` | `SwitcherVersion.current` | XML `<version>` 与 TCP 问候里报的版本——报本产品的版本，不冒充对方 |
 | `edition` | Switcher | XML `<edition>`（包内默认值是代码名；产品名 PlusMix 的改名没动包，见 reports/w4-rename.md §3） |
+| `allowedOrigins` | `[]` | HTTP 入口放行的浏览器来源（同主 API 的白名单规则，见 [docs/api/README.md §1](../api/README.md)）；空 = 不放任何网页。App 和 headless 这一版都没有入口填它 |
 
 接线（App 与 headless 都一样，都在检查点 / W3-E 做）：
 
@@ -48,8 +49,10 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 | 输入 / 输出不存在（含 `Input=0` / `-1` 落在黑场或已删的输入上，见 §6 表下） | 404 | `InputNotFound: …` / `OutputNotFound: …` |
 | 当前状态做不了（没有录制输出、叠加通道没输入、stinger 没设输入） | 409 | `NotConfigured: …` |
 | 对方有、这里没做 | 501 | `NotImplemented: …` |
+| 浏览器发来的（带 `Origin` 而不在 `allowedOrigins`；或不带 `Origin`、`Sec-Fetch-Site` 不是 `none`——`same-origin` 只在 Host 是 IP / localhost 时放） | 403 | `Forbidden`，什么都不执行 |
 
-`GET /api`（不带 `Function`）→ `text/xml` 的状态文档（§4）。
+`GET /api`（不带 `Function`）→ `text/xml` 的状态文档（§4）；浏览器来源同样 403。
+来源检查防的是"网页让浏览器替它发请求"（`<img src="http://127.0.0.1:8088/api?Function=Cut">` 这类）：Companion、curl、脚本不带这两个头，不受影响；在浏览器地址栏里直接打开 `http://127.0.0.1:8088/api` 照旧能看 XML。
 
 ## 3. TCP 入口（默认 8099）
 
@@ -70,6 +73,8 @@ await compat.stop()           // 关连接、释放端口；顺序：兼容层 �
 | 其他 | `<命令> ER UnknownCommand: <命令>` |
 
 一个包里多条命令（粘包）按行拆开逐条应答；三条以上并发连接互不干扰（Companion 开三条：命令、激活器订阅、每 250 ms 轮询 XML）。
+
+上限：一行最长 64 KiB（不含结尾的 `\r\n`；还没等到换行的半行同样算），超了这条连接被断开、日志记一行 warning；同时最多 64 条连接，满了之后新连接连上就被关掉（没有 `VERSION OK` 问候、日志记一行）；没有空闲超时——只订阅 TALLY / ACTS、不发命令的客户端一直挂着没问题。
 
 ## 4. XML 状态文档
 
@@ -152,5 +157,6 @@ SetGain（内部只有一个增益）、SetVolumeFade、声道混音器、音频
 
 - XML 里没有"转场进行中"，Companion 的 PGM 反馈在转场那几十帧只亮旧 PGM（TALLY 订阅和外部 tally 流没这个问题）。
 - 输入的 `state` 恒 Running（编号空洞处补的 Blank 占位写 Paused）、`position` / `duration` 恒 0、`loop` 恒 False：兼容层没映射文件播放（PlusMix 自己有暂停 / 回到开头 / 循环，见[用户手册 · 输入](../user/输入.md#播放)；对方的 Play / Pause / Restart / SetPosition 回 NotImplemented）。
-- 没有鉴权（对方的 TCP 协议也没有）；默认只听 127.0.0.1，开到局域网前想清楚。
+- 没有鉴权（对方的 TCP 协议也没有）；默认只听 127.0.0.1，开到局域网前想清楚。HTTP 入口挡浏览器来源（§2），TCP 入口不查来源（它不是 HTTP，没有这两个头可查）。
+- 白名单 `allowedOrigins` 这一版没有设置入口：自己写的网页面板连不上 HTTP 入口（走 TCP 或主 API 的非浏览器客户端不受影响）。
 - 每条 TCP 连接的推送缓冲 64 条快照，慢客户端丢旧的；ACTS 事件按"上次看到的状态 → 这次"算差，中间被合并的来回不会都发（收敛到最终状态）。

@@ -35,7 +35,9 @@ npx streamdeck pack com.plusmix.switcher.sdPlugin    # 发布：出 com.plusmix.
 
 ## 排错
 
-- 按钮灰色写"未连接"：API 没开、地址端口不对、token 不对。插件日志在 Stream Deck 的插件日志目录（macOS：`~/Library/Logs/ElgatoStreamDeck/com.plusmix.switcher.*.log`）。
+- 按钮灰色写"未连接"：API 没开、地址端口不对、token 不对。插件日志在 Stream Deck 的插件日志目录（macOS：`~/Library/Logs/ElgatoStreamDeck/com.plusmix.switcher.*.log`）；连上那一行只写 host:port（不写带 `?token=` 的整条地址）。
+  插件不是浏览器、不带 `Origin`，API 的浏览器来源拦截不挡它（[docs/api/README.md §1](../api/README.md)）。
+- 收到格式不对的快照（`state.inputs` / `state.outputs` 不是对象数组）：丢掉那一条、插件日志记一行（debug 级）"快照格式不对…"，按钮保持上一份快照的样子，下一条正常的快照来了就重画。
 - 按下闪警告：命令被拒（输入不存在、没有录制输出、执行的是没选输入的 Stinger 槽）或回执超时；原因在日志。
 - 改了代码：`npx streamdeck restart com.plusmix.switcher`。
 - 没有 Node 的机器上验证纯逻辑：`scripts/run-jxa.sh`（macOS 自带 JavaScriptCore）。

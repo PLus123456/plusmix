@@ -15,6 +15,7 @@ await tally.stop(); await publisher.stop()
 ```
 
 默认 0.0.0.0:8766（API 端口 + 1）：tally 设备通常在局域网另一台机器上，流是只读的、不收命令，所以不像 API 那样默认只听本机。
+它也没有主 API 那道浏览器来源拦截（[docs/api/README.md §1](../api/README.md)）：同网段的设备、本机的网页都读得到 PGM / PVW 是哪几路（只读，切不了画面）。
 
 谁起它：
 
