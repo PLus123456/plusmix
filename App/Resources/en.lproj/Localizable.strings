@@ -145,6 +145,8 @@
 "actionPicker.ui.toggleMultiviewWindow.summary" = "Opens or closes the multiview window (this Mac’s app only)";
 "actionPicker.value.black" = "Black";
 "actionPicker.value.channel" = "Channel %d";
+"actionPicker.value.clearOverlay" = "(Clear)";
+"actionPicker.value.clearOverlayShort" = "Clear";
 "actionPicker.value.currentPreview" = "Current PVW";
 "actionPicker.value.currentProgram" = "Current PGM";
 "actionPicker.value.input" = "Input %d";

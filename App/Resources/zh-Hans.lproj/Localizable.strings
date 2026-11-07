@@ -145,6 +145,8 @@
 "actionPicker.ui.toggleMultiviewWindow.summary" = "打开或关掉多画面窗口（只在本机的 App 里）";
 "actionPicker.value.black" = "黑场";
 "actionPicker.value.channel" = "通道 %d";
+"actionPicker.value.clearOverlay" = "（清空）";
+"actionPicker.value.clearOverlayShort" = "清空";
 "actionPicker.value.currentPreview" = "当前 PVW";
 "actionPicker.value.currentProgram" = "当前 PGM";
 "actionPicker.value.input" = "输入 %d";
