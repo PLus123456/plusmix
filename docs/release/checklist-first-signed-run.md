@@ -13,8 +13,8 @@ make release-test                               # R17 真签一次（Team / runt
 ```
 
 - [ ] `make gen` 那行是 `[sign-mode] 开发签名…`；`codesign -dvv .build/DerivedData/Build/Products/Debug/PlusMix.app` 有 `TeamIdentifier=<Team ID>`、`flags=0x10000(runtime)`、`Authority=Apple Development: …`；`codesign -d -r- <同一个 App>` 的指定要求里没有 `cdhash`。
-- [ ] **授一次权**：从 Terminal.app 起这个 PlusMix.app（Claude 的 Bash 起的进程拿不到 TCC）：添加内置摄像头输入 → 允许、出画面；添加纯音频设备输入 → 允许、有电平；添加屏幕采集 → 系统设置里允许屏幕录制、按提示重开 App。
-- [ ] **重编译不重问**：改一行 App 代码（或 `touch App/Sources/AppDelegate.swift`）→ `make build-app` → 再从 Terminal.app 起：三项都不再问、直接出画面 / 电平。对照：ad-hoc 构建同样操作会重问（指定要求是 cdhash）。
+- [ ] **授一次权**：在 Terminal.app 里 `open .build/DerivedData/Build/Products/Debug/PlusMix.app`（经 LaunchServices 起，TCC 记在 PlusMix 名下；直接跑 `Contents/MacOS/PlusMix` 时记在 Terminal 名下，测不出签名的作用；Claude 的 Bash 起的进程拿不到 TCC）：添加内置摄像头输入 → 允许、出画面；添加纯音频设备输入 → 允许、有电平；添加屏幕采集 → 系统设置里允许屏幕录制、按提示重开 App。
+- [ ] **重编译不重问**：改一行 App 代码（或 `touch App/Sources/AppDelegate.swift`）→ `make build-app` → 再 `open` 起：三项都不再问、直接出画面 / 电平。对照：ad-hoc 构建同样操作会重问（指定要求是 cdhash）。另一个 worktree 用同一 Team 编出来的也应不重问（TCC 按 bundle id + 指定要求记、不看路径）——顺手验一次。
 - [ ] **`make test-app` 的宿主也不重问**：从 Terminal.app `make test-app XCB_FLAGS=`——`InputWiringTests.testInputs_builtInCameraLiveWithin5sAndPictureShows` 不再因"BLOCKED-权限"跳过、不再弹授权框；用例数看日志末尾 `Executed N tests`。
 - [ ] **libndi 在硬化运行时下能加载**：App 起来、添加 NDI 输入 / 开 NDI 输出不崩（开发表的 `cs.disable-library-validation`；没有它 dyld 当场拒，signing.md 上表）。
 - [ ] **虚拟摄像头扩展装不上是预期**：输出 → 虚拟摄像头 → 安装 / 激活扩展 → 失败或要批准都记下来（Personal Team 没有 `system-extension.install`，BLOCKED-账号），别当新问题。
