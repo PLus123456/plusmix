@@ -1,0 +1,246 @@
+// W5-S（prompt 139）App 收口三：133 / 132 / 129 攒下、G12 定级分派的几条 + G12 §7.1 用户 2026-11-07 定的两条。
+// W2A6 NDI 发送（源 = 输入 n）：那一路换来源时新来源的音频注册撞上旧槽淡出、走了 30 ms 延后重试，重试成功之后这路 NDI 再没挂上音频
+//      （问题单 W2A6-app-ndi-send-input-audio-lost-after-register-retry；Codex testNDI_SourceReplacementMustRestoreAudioAfterRegistrationRetry 搬来改名，
+//      被换的输入改成 stop() 快的纯音频合成源——两路都是合成 PCM，旧的 stop() 比淡出快，才进得了重试窗口）；
+// W2D5 底栏推流 ▴ 菜单项的悬停提示：密钥栏空着、密钥写在地址末段时也要遮（看同层 streamKey 传 publishNameInPath，与 ShowRedaction 同口径）；
+// P57 选动作面板：叠加命令的输入下拉加"（清空）"= 0（命令目录不动）；秒数框填 1e30 不在 Double → Int 上 trap，钳到 DurationLimits.maxTicks 对应的秒数；
+// G12 §7.1 第 6 条：NDI 发送在跑中翻 failed 时状态行提示一句，同一路 60 s 内只提示一次；第 5 条：统计窗"音频"一节列效果链延迟（只读 Stats audio.effects）。
+import AppKit
+import XCTest
+import SwitcherContracts
+import SwitcherAudio
+import SwitcherControl
+import SwitcherEngine
+import SwitcherInputs
+import SwitcherNDISend
+import SwitcherTestKit
+@testable import Switcher
+
+/// 纯音频输入的替身：合成 PCM 写进 CAudioRing，没有画面（同 AudioDeviceInput），不要麦克风权限。
+/// 不用 TestKit 的 SyntheticAudioInput：它的 stop() 要等实时线程睡到下一块的到点时刻，本会话实测 140 ms，比混音器摘除淡出
+/// （removalFadeBlocks × 256 帧 ≈ 16 ms）慢得多，旧槽早摘掉了、新来源当场注册上，进不了问题单那个重试窗口（Codex 探针 registerRetries = 0 也是这个原因）。
+/// 这个替身 stop() 只 cancel 定时器、立即返回（像设备 / 文件输入那样快），换源时新来源的注册必撞 inputAlreadyRegistered、走延后重试。
+private struct W5SAudioOnlyFactory: InputFactory {
+    func makeInput(config: InputConfig, slot: any FrameSlot, timing: ProgramTiming) throws -> MadeInput {
+        guard case .audio = config.source else {
+            return try DefaultInputFactory().makeInput(config: config, slot: slot, timing: timing)
+        }
+        let source = W5SFastStopAudioInput(number: config.number, name: config.name)
+        return MadeInput(input: source, audioRing: source.ring, audioBlockFrames: W5SFastStopAudioInput.blockFrames)
+    }
+}
+
+/// stop() 立即返回的纯音频合成源：DispatchSourceTimer 每块（256 帧 ≈ 5.3 ms）醒一次，按 start 那一刻起的样本数把落后的块补写进环，
+/// host time = 起点 + 样本数 / 48 kHz（入口打戳，铁律 5）。stop() 只 cancel 定时器、不等在途的那一次回调——它写的是旧环（换源后混音器不再读），无害。
+private final class W5SFastStopAudioInput: Input, @unchecked Sendable {
+    static let blockFrames = 256
+    let number: Int
+    let name: String
+    let kind: InputKind = .audio
+    let ring = CAudioRing(channelCount: 2)
+    private let queue = DispatchQueue(label: "w5s-fast-stop-audio", qos: .userInteractive)
+    private let lock = NSLock()
+    private var timer: DispatchSourceTimer?
+    /// 已写的样本数（只在 queue 上动）。
+    private var written: Int64 = 0
+
+    init(number: Int, name: String) {
+        self.number = number
+        self.name = name
+    }
+
+    var state: InputState { lock.withLock { timer == nil ? .noSignal : .live } }
+    var videoSlot: (any FrameSlot)? { nil }
+    var audioRing: (any AudioRing)? { ring }
+
+    func start() throws {
+        lock.lock(); defer { lock.unlock() }
+        guard timer == nil else { return }
+        let frames = Self.blockFrames
+        let start = HostClock.now()
+        queue.sync { written = 0 }
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now(), repeating: .nanoseconds(Int(Double(frames) * 1e9 / Double(AudioFormat.sampleRate))), leeway: .microseconds(500))
+        t.setEventHandler { [self] in
+            let buffer = UnsafeMutablePointer<Float>.allocate(capacity: frames)
+            buffer.initialize(repeating: 0.25, count: frames)
+            let planes = UnsafeMutablePointer<UnsafePointer<Float>>.allocate(capacity: 2)
+            planes[0] = UnsafePointer(buffer)
+            planes[1] = UnsafePointer(buffer)
+            defer { planes.deallocate(); buffer.deallocate() }
+            let now = HostClock.now()
+            while start + HostDuration(seconds: Double(written + Int64(frames)) / Double(AudioFormat.sampleRate)) <= now {
+                let stamp = start + HostDuration(seconds: Double(written) / Double(AudioFormat.sampleRate))
+                _ = ring.write(planes: UnsafePointer(planes), frameCount: frames, hostTime: stamp)
+                written += Int64(frames)
+            }
+        }
+        timer = t
+        t.resume()
+    }
+
+    func stop() {
+        lock.lock(); defer { lock.unlock() }
+        timer?.cancel()
+        timer = nil
+    }
+}
+
+@MainActor
+final class W5SCloseoutTests: XCTestCase {
+    /// 自己起的 session 用的设置：不出声、不起 API / 兼容层 / tally、不防睡眠（不碰宿主那一个）。
+    private static func isolatedSettings() -> AppSettings {
+        var s = AppSettings()
+        s.audioDevice = .null
+        s.apiEnabled = false
+        s.compatLayerEnabled = false
+        s.tallyEnabled = false
+        s.preventSleepWhileRunning = false
+        s.preventDisplaySleepWhileRunning = false
+        return s
+    }
+
+    private func startSession(_ show: Show, factory: any InputFactory) throws -> SwitcherSession {
+        let session = try SwitcherSession(show: show, settings: Self.isolatedSettings(), inputFactory: factory,
+                                          hotkeyTable: .init(bindings: []), midiTable: .init(mappings: []))
+        final class StartOutcome { var done = false; var error: (any Error)? }
+        let started = StartOutcome()
+        Task {
+            do { try await session.start() } catch { started.error = error }
+            started.done = true
+        }
+        XCTAssertTrue(AppTest.waitUntil(20) { started.done }, "session 起得来")
+        if let error = started.error { throw error }
+        return session
+    }
+
+    private func stopSession(_ session: SwitcherSession) {
+        let stopped = AppTest.expectationBox()
+        Task { await session.stop(); stopped.value = true }
+        XCTAssertTrue(AppTest.waitUntil(20) { stopped.value }, "session 收得掉")
+    }
+
+    // MARK: W2A6 NDI 发送换源撞注册重试
+
+    /// W2A6（S1，问题单代码链 1–4）：源是输入 1 的 NDI 发送在跑、带着输入 1 的音频；输入 1 换来源（纯音频合成源 → 另一个纯音频合成源）——
+    /// 新来源的注册撞上旧槽还在淡出、30 ms 后重试；运行表这时已经摘下重挂了这路 NDI（registeredInputs 里没有 1 → 没建音频挂件）。
+    /// 修前：重试成功后 followInputAudioSlots 只遍历已有挂件，这路 NDI 的 audio 一直是 nil、音频块不再涨（要关开这路输出才回来）。
+    func testW2A6_ndiSendRestoresAudioAfterSourceReplacementHitsRegisterRetry() throws {
+        _ = try AppTest.runningSession()   // 别跟宿主起它自己那个 session 抢
+        var show = ShowDocuments.emptyShow(name: "w5s-ndi-audio-retry")
+        show.mixer.format = ProgramFormat(width: 320, height: 240, frameRate: .fps30)
+        show.inputs = [InputConfig(number: 1, name: "话筒 A", source: .audio(deviceUID: "w5s-synthetic-a"))]
+        show.outputs = []
+        let session = try startSession(show, factory: W5SAudioOnlyFactory())
+        defer { stopSession(session) }
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.runtimeState(of: 1) == .live && session.audio.registeredInputs.contains(1) })
+
+        let number = 2
+        session.send(.addOutput(config: OutputState(number: number, kind: .ndi, name: "PlusMix W5S \(UUID().uuidString.prefix(8))", enabled: true,
+                                                   settings: OutputSettings(source: .input(number: 1)))))
+        XCTAssertTrue(AppTest.waitUntil(8) { session.outputs.ndiSenders[number]?.phase == .running && session.outputs.ndiSenders[number]?.audio?.token != nil },
+                      "NDI 发送起来、挂着输入 1 的音频：\(String(describing: session.outputs.failed[number]))")
+        let entry = try XCTUnwrap(session.outputs.ndiSenders[number])
+        // 没有 SDK 时 sender 是空实现（不发、不计音频块）：挂件这半照测，音频块那半只在真发的时候测
+        let sends = !entry.sender.countersSnapshot.unavailable
+        if sends {
+            XCTAssertTrue(AppTest.waitUntil(3) { entry.sender.countersSnapshot.audioBlocksSent > 20 }, "换源前在发音频块")
+        }
+
+        let retriesBefore = session.audio.registerRetries
+        let old = try XCTUnwrap(session.inputs.entries[1]?.input)
+        session.send(.setInputSource(input: 1, source: .audio(deviceUID: "w5s-synthetic-b")))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.inputs.entries[1]?.input !== old && session.audio.registeredInputs.contains(1) }, "新来源注册上")
+        XCTAssertGreaterThan(session.audio.registerRetries, retriesBefore, "真进了注册重试窗口（旧来源 stop() 比淡出快）——没进的话这条测不到问题单那条链")
+        XCTAssertTrue(session.outputs.ndiSenders[number] === entry, "换源不重建 sender")
+        XCTAssertTrue(AppTest.waitUntil(2) { entry.audio?.token != nil },
+                      "重试成功后这路 NDI 要重新挂上输入 1 的音频：audio=\(String(describing: entry.audio)) token=\(String(describing: entry.audio?.token))")
+        if case .input(let n)? = entry.audio?.source { XCTAssertEqual(n, 1) } else { XCTFail("挂的是输入 1：\(String(describing: entry.audio?.source))") }
+        if sends {
+            AppTest.pump(seconds: 0.3)
+            let first = entry.sender.countersSnapshot.audioBlocksSent
+            AppTest.pump(seconds: 1)
+            let second = entry.sender.countersSnapshot.audioBlocksSent
+            print("W5S W2A6：registerRetries +\(session.audio.registerRetries - retriesBefore)，音频块 \(first) → \(second)")
+            XCTAssertGreaterThan(second, first + 20, "换源后音频块接着涨")
+        }
+
+        session.send(.setOutputEnabled(output: number, on: false))
+        XCTAssertTrue(AppTest.waitUntil(5) { session.outputs.ndiSenders[number] == nil })
+    }
+
+    // MARK: W2D5 底栏推流 ▴ 菜单 / 悬停的路径密钥
+
+    private static func streamOutput(_ number: Int, _ name: String, url: String, key: String) -> OutputState {
+        OutputState(number: number, kind: .stream, name: name, enabled: false,
+                    settings: OutputSettings(stream: StreamSettings(url: url, streamKey: key)))
+    }
+
+    /// W2D5（S2，reports/w2-stream-5.md §3 第 4 条）：推流 ▴ 菜单每一项的悬停提示写着地址——密钥栏空（只有空白也算）、密钥写在 RTMP 地址末段时
+    /// 末段换成标记（ShowRedaction 同口径：看同层 streamKey）；密钥栏非空的那一路地址末段是应用名 / 子路径，照原样。
+    func testW2D5_streamMenuTooltipHidesPathKeyWhenKeyFieldEmpty() throws {
+        let state = MixerState(outputs: [
+            Self.streamOutput(2, "整条地址", url: "rtmp://h/live/KEYW5S2", key: ""),
+            Self.streamOutput(3, "空白密钥栏", url: "rtmps://h:443/app/KEYW5S3", key: "  "),
+            Self.streamOutput(4, "分开填", url: "rtmp://h/live/sub", key: "SECRETW5S4"),
+            Self.streamOutput(5, "带账号", url: "rtmp://u:PASSW5S5@h/live/KEYW5S5", key: ""),
+        ])
+        let rows = StreamMenuRow.rows(state: state, encoder: [], failure: { _ in nil })
+        let tips = rows.map { $0.toolTip ?? "" }
+        print("W5S W2D5 提示：\(tips)")
+        for secret in ["KEYW5S2", "KEYW5S3", "SECRETW5S4", "PASSW5S5", "KEYW5S5"] {
+            XCTAssertFalse(tips.joined(separator: "\n").contains(secret), "悬停提示里不该有 \(secret)")
+        }
+        XCTAssertTrue(tips[0].contains("rtmp://h/live/<redacted>"), tips[0])
+        XCTAssertTrue(tips[1].contains("rtmps://h:443/app/<redacted>"), tips[1])
+        XCTAssertTrue(tips[2].contains("rtmp://h/live/sub"), "密钥栏非空：末段是子路径，照原样：\(tips[2])")
+        XCTAssertTrue(tips[3].contains("/live/<redacted>"), tips[3])
+
+        // 真的 ▴ 菜单（菜单栏"输出 › 推流 ▸"也是它）：项的 toolTip 就是上面那几行
+        let session = try AppTest.freshSession()
+        for o in state.outputs { session.send(.addOutput(config: o)) }
+        let bar = AppTest.controller.windowController.bottomBar
+        XCTAssertTrue(AppTest.waitUntil(3) { bar.streamMenu().items.compactMap(\.toolTip).count >= 4 }, "四个目的地都在菜单里")
+        let menuTips = bar.streamMenu().items.compactMap(\.toolTip).joined(separator: "\n")
+        for secret in ["KEYW5S2", "KEYW5S3", "SECRETW5S4", "PASSW5S5", "KEYW5S5"] {
+            XCTAssertFalse(menuTips.contains(secret), "▴ 菜单项悬停不该有 \(secret)")
+        }
+        XCTAssertTrue(menuTips.contains("rtmp://h/live/sub"))
+    }
+
+    // MARK: P57 选动作面板
+
+    private func picker(current: ControlAction? = nil, state: @escaping () -> MixerState?) -> ActionPickerModel {
+        ActionPickerModel(context: .hotkey, current: current, state: state, defaults: AppTest.controller.defaults)
+    }
+
+    /// P57（reports/p5-contracts-7.md §3 第 3 条）：秒数显示 `String(Int(rounded))` 与拼动作时的 `Int((秒 × 帧率).rounded())` 对 1e30 秒会 Double → Int 溢出 trap。
+    /// 显示：任何 Double 都不 trap（Int 装不下的按 %g 写）；拼动作：时长格钳到 DurationLimits.maxTicks 对应的秒数（同 OverlaySettingsModel.ticks(seconds:)）。
+    func testP57_actionTextSecondsAndBuildDoNotTrapOnHugeSeconds() throws {
+        XCTAssertEqual(ActionText.seconds(0.5), "0.5 秒")
+        XCTAssertEqual(ActionText.seconds(14_400), "14400 秒")
+        XCTAssertEqual(ActionText.seconds(1e30), "1e+30 秒", "显示不 trap")
+        XCTAssertEqual(ActionText.seconds(.infinity), "inf 秒")
+        // 存下来的定位动作（热键表 JSON 里手写的 1e30）：摘要不 trap
+        XCTAssertTrue(ActionText.summary(.command(.seekPlayback(input: 1, seconds: 1e30))).contains("1e+30"))
+
+        // 拼动作：durationTicks / durationMs 格里塞着 1e30（表单之外进来的值）照样不 trap，钳到上限
+        let rate = FrameRate.fps60
+        let entries = ActionCatalog.entries(for: .hotkey)
+        let ticksEntry = try XCTUnwrap(entries.first { e in !e.advanced && !e.legacy && e.fields.contains { $0.type == .durationTicks } }, "有按拍的时长格")
+        var values = ActionCatalog.defaults(for: ticksEntry, state: nil)
+        let ticksField = try XCTUnwrap(ticksEntry.fields.first { $0.type == .durationTicks })
+        values[ticksField.name] = .seconds(1e30)
+        let builtTicks = try XCTUnwrap(ActionCatalog.build(ticksEntry, values: values, frameRate: rate), ticksEntry.id)
+        XCTAssertTrue(CommandText.summary(try XCTUnwrap(Self.command(builtTicks))).contains("\(DurationLimits.maxTicks)"), "\(builtTicks)")
+        let msEntry = try XCTUnwrap(entries.first { $0.id == "action.fadeMs" })
+        XCTAssertEqual(ActionCatalog.build(msEntry, values: ["durationMs": .seconds(1e30)], frameRate: rate), .fadeMs(durationMs: 3_600_000),
+                       "毫秒格钳到 1 小时（maxTicks @ 240 fps，任何合法帧率下换出来都 ≤ maxTicks）")
+    }
+
+    private static func command(_ action: ControlAction) -> Command? {
+        if case .command(let c) = action { return c }
+        return nil
+    }
+
+}
