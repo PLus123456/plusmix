@@ -57,3 +57,16 @@ let done = DispatchSemaphore(value: 0)
 DispatchQueue.global().async { o.stop(); done.signal() }
 XCTAssertEqual(done.wait(timeout: .now() + 20), .success)   // 现在是 .timedOut
 ```
+
+## 处理结果（W2-D6，prompt 138，分支 `w2-stream-6`，2026-11-07）
+
+修了，全在 `Streaming/` 里（HaishinKit 没动）。详见 reports/w2-stream-6.md。
+
+- 探针补了一条问题单没写到的：**socket 还没起来时（TCP / TLS 握手中）HaishinKit 的 `close()` 直接抛 invalidState、什么都不做**——
+  RTMPS 对端不回 TLS 时要等它写死的 15 s socket 超时（`RTMPConnection(timeout:)` 没传给 socket），close 落在 TCP 连上之前则永远挂。
+  所以建议 1"超时时 close"对明文 RTMP 够、对 RTMPS 不够：`RTMPTransport` 把 HaishinKit 那一次 connect 放进能"放手"的 Task，
+  取消 / close 就立刻返回，后台每 0.2 s 关一次直到它自己返回（明文第一次就回、RTMPS 最多 15 s），`pendingHaishinKitConnects` 记数。
+- 建议 1：`withTimeout(seconds:onTimeout:)`，到点先取消、再 `await transport.close()`、抛"连接超时（服务器没回）"。
+- 建议 2：连接期间传输层放进 StreamOutput 的 `connecting` 格子，`beginStop()` 拿走它去 close；发布中的 stop 不碰（没有 cancel 发送 Task）。
+- 建议 3：`StreamingTests/SilentServerTests` 6 条（端口 19501–19506）。
+- 实测：3 s 连接超时 3.04–3.18 s 报错进退避；connecting 期间 stop() / stopAsync() 1–2 ms 返回；对端那条 TCP 连接都关了。

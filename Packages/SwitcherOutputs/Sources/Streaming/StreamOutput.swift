@@ -23,6 +23,10 @@ import SwitcherOutputs
 /// 停在 failed 之后关掉收帧 / 收音频块的门（计数定住），编码器会话等 stop() 收。改对之后重新 start（App：点底栏「推流」= 新对象）。
 /// 别的错误（连不上 / 断线 / 停滞）照旧退避重连。
 ///
+/// 连接超时与 stop（W2-D6）：连接这一步套 `withTimeout`，到点先取消 connect、再 close 传输层、报"连接超时（服务器没回）"进退避——
+/// 对端接了 TCP 不说话时 HaishinKit 的 connect 自己永远不回，原来这一路一直"连接中"、stop 也回不来。连接期间传输层放在 `connecting` 格子里，
+/// stop() 拿走它去 close，发送 Task 回来看见格子空了就按停收尾（不发布、last_error 不写）；发布中的 stop 照旧排空 + linger，不受影响。
+///
 /// 多目的地互不影响：每个实例自己的编码器、队列、Task、连接对象；没有任何共享锁或共享队列（E7）。
 public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked Sendable {
     /// 队列与门的参数（"每路队列深度与延迟的取舍"见报告）。
@@ -154,6 +158,8 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     private let lastError = Mutex<String>("")
     // W2-D4：停在 failed 的类型化原因（下一次 start 清）
     private let failureReason = Mutex<StreamFailure?>(nil)
+    // W2-D6：发送 Task 正在连接的传输层（连接这一步之外为 nil）。stop() 和发送 Task 谁先从这里拿走谁说了算：stop 拿走 = 去 close 它、发送 Task 按停收尾
+    private let connecting = Mutex<(any StreamTransport)?>(nil)
 
     /// 用 VideoToolbox 编码器。
     public convenience init(configuration: Configuration, transportFactory: any StreamTransportFactory) throws {
@@ -291,7 +297,7 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
         }
     }
 
-    /// 停：停编码器（把尾巴编完）、排空队列、关连接。阻塞到发送 Task 退出（最多 drain + linger + 连接超时）。
+    /// 停：停编码器（把尾巴编完）、排空队列、关连接。阻塞到发送 Task 退出（发布中最多 drain + linger；连接中 / 退避中立刻收，W2-D6）。
     /// 不要在 Swift 并发的协作线程上调它（会阻塞协作线程）；那边用 `stopAsync()`。
     public func stop() {
         guard beginStop() else { return }
@@ -326,6 +332,14 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
         audioThreadGroup.wait()
         stopRequested.store(true, ordering: .releasing)
         wakeContinuation.yield()
+        // W2-D6：发送 Task 还在连接（握手 / 等服务器回话）：关掉这个传输层，挂着的 connect 立刻返回——不然 stop 要陪它等
+        // （对端接了 TCP 不说话时 HaishinKit 永远不回）。格子在 stopRequested 之后拿：发送 Task 放进格子前在同一把锁里看过 stopRequested，两边总有一边看见对方
+        if let transport = connecting.withLock({ slot -> (any StreamTransport)? in
+            defer { slot = nil }
+            return slot
+        }) {
+            Task { await transport.close() }
+        }
         return true
     }
 
@@ -425,19 +439,46 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
                 failures += 1
                 continue
             }
-            do {
-                try await withTimeout(seconds: configuration.connectTimeoutSeconds) { try await transport.connect() }
-            } catch StreamTransportError.authenticationFailed(let reason, let message) {
-                // W2-D4：服务器拒绝鉴权，第一次就停在 failed（见类型说明）；last_error 原样用传输层那一句
-                logger.error("[\(self.consumerName, privacy: .public)] \(message, privacy: .public)，不再重试")
-                lastError.withLock { $0 = message }
-                failureReason.withLock { $0 = .authentication(reason) }
-                finalState = .failed(message)
+            // W2-D6：连接期间把传输层放进 stop() 看得见的格子（见 beginStop）；stop 抢在这之前就不连了
+            let armed = connecting.withLock { slot -> Bool in
+                guard !stopRequested.load(ordering: .acquiring) else { return false }
+                slot = transport
+                return true
+            }
+            guard armed else {
                 await transport.close()
                 break
+            }
+            var connectError: (any Swift.Error)?
+            do {
+                // 到点：先取消 connect、再 close 传输层（理取消的、只理 close 的都就此返回），然后报"连接超时（服务器没回）"
+                try await withTimeout(seconds: configuration.connectTimeoutSeconds, onTimeout: { await transport.close() }) {
+                    try await transport.connect()
+                }
             } catch {
-                logger.warning("[\(self.consumerName, privacy: .public)] 连接失败：\(String(describing: error), privacy: .public)")
-                lastError.withLock { $0 = "连接失败：\(TransportErrorText.summary(of: error))" }   // 022；底层原文由传输层记日志（W4-C4）
+                connectError = error
+            }
+            // 连接这一步结束：从格子里拿回传输层；已经被 stop() 拿走 = 它正在关：不管连没连上都按停收尾（停不是错误，last_error 不写）
+            let stillOurs = connecting.withLock { slot -> Bool in
+                defer { slot = nil }
+                return slot != nil
+            }
+            guard stillOurs else {
+                await transport.close()
+                break
+            }
+            if let connectError {
+                if let e = connectError as? StreamTransportError, case .authenticationFailed(let reason, let message) = e {
+                    // W2-D4：服务器拒绝鉴权，第一次就停在 failed（见类型说明）；last_error 原样用传输层那一句
+                    logger.error("[\(self.consumerName, privacy: .public)] \(message, privacy: .public)，不再重试")
+                    lastError.withLock { $0 = message }
+                    failureReason.withLock { $0 = .authentication(reason) }
+                    finalState = .failed(message)
+                    await transport.close()
+                    break
+                }
+                logger.warning("[\(self.consumerName, privacy: .public)] 连接失败：\(String(describing: connectError), privacy: .public)")
+                lastError.withLock { $0 = "连接失败：\(TransportErrorText.summary(of: connectError))" }   // 022；底层原文由传输层记日志（W4-C4）
                 await transport.close()
                 failures += 1
                 continue
@@ -658,16 +699,29 @@ public final class StreamOutput: FrameConsumer, AudioBlockConsumer, @unchecked S
     }
 }
 
-/// 带超时的 await。
-func withTimeout<T: Sendable>(seconds: Double, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+/// 带超时的 await（W2-D6 改）。到点：先取消 body（理取消的——Task.sleep、AsyncStream、我们的 Adobe 鉴权、RTMPTransport.connect——就此返回），
+/// 再 await `onTimeout`（StreamOutput 传 `transport.close()`：只理 close 的也结束），然后抛 `StreamTransportError.connectTimedOut`。
+/// 任务组照旧等 body 子任务结束才返回（结构化，不漏 Task），所以 body 必须理取消或理 onTimeout 二者之一——
+/// 原来计时子任务一抛错，组就去等不理取消的 body（HaishinKit 的 connect），整个 withTimeout 陪着挂。
+func withTimeout<T: Sendable>(seconds: Double, onTimeout: (@Sendable () async -> Void)? = nil,
+                              _ body: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await body() }
         group.addTask {
             try await Task.sleep(for: .milliseconds(max(1, Int(seconds * 1000))))
+            throw TimeoutElapsed()
+        }
+        do {
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        } catch is TimeoutElapsed {
+            group.cancelAll()
+            await onTimeout?()
             throw StreamTransportError.connectTimedOut
         }
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
     }
 }
+
+/// withTimeout 的计时子任务到点（和 body 自己抛的 connectTimedOut 分开）。
+private struct TimeoutElapsed: Error {}
