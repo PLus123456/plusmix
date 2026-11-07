@@ -24,6 +24,7 @@ final class W2C6StreamCredentialAppTests: XCTestCase {
         // 测试宿主的设置可能被别的用例写过 token（W5-L 的坑）：有就带上，`?secrets=1` 的期望跟着变
         let token = server.configuration.token
         let auth = token.map { ["Authorization": "Bearer \($0)"] } ?? [:]
+        print("W2C6 App API：\(token == nil ? "没配 token（?secrets=1 应 403）" : "配了 token（?secrets=1 应给原文）")")
         let base = "http://127.0.0.1:\(port)"
         let n1 = (session.state.outputs.map(\.number).max() ?? 0) + 1
         let n2 = n1 + 1
