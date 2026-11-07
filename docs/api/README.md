@@ -15,7 +15,13 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 - App：设置 › 远程控制 › 本地 API（默认开，`127.0.0.1:8765`）："谁能连"选仅本机 / 允许局域网（= `0.0.0.0`），端口、Token，页上显示别的机器该连的地址；要具体地址在 设置 › 高级 填 host:port；改了点窗口底部"应用并重起引擎"。启动参数 `--api-listen host:port`、`--api-token <token>`、`--no-api`（只管这一次运行）。
 - 无界面引擎：`switcher-headless run … --api [--api-listen 0.0.0.0:8765] [--api-token <token>]`。
 - 鉴权默认关。设了 token 之后每个请求带 `Authorization: Bearer <token>`，WebSocket 也可以用 `?token=<token>`，否则 401。
-- 只在需要时监听 `0.0.0.0`：API 能改任何状态，没有 token 就等于局域网里谁都能切你的节目。
+- **浏览器来源先于 token 查**（App 与无界面引擎一样）：请求带 `Origin` 而不在白名单 `allowedOrigins` 里（默认空；`null` 永远不算）→ `403 {"error": "forbidden-origin"}`；不带 `Origin` 时看 `Sec-Fetch-Site`：只放 `none`（地址栏直接打开），`same-origin` 只在 Host 是 IP 或 localhost 时放（防 DNS 重绑定），`same-site` / `cross-site` 一律拦。浏览器发起的 WebSocket 握手被拦时回 400、不升级、不订阅。
+  两个头都不带的客户端——Stream Deck 插件、Companion、curl、Python / Node 脚本、URLSession——不受影响，token 照旧另查。结果：在浏览器地址栏里直接打开 `http://127.0.0.1:8765/api/v1/state` 照旧能看；网页（包括自己写的网页面板）不在白名单里就连不上，而白名单这一版**没有设置入口**（App 设置页、无界面引擎的命令行都传不进去）。
+  兼容层的 HTTP 入口用同一套规则（拦下回 `403 text/plain "Forbidden"`，见[兼容层](vmix-compat.md)），它的 TCP 入口和只读 tally 流不查来源。
+- **推流凭据打码**：`GET /api/v1/state` 的 `state`、WebSocket 的 `snapshot`、`GET /api/v1/log` 里的 `setOutputSettings` / `addOutput` / `loadShow`——每个推流设置的 `streamKey` 非空时写成 `"<redacted>"`（空串照旧空串，客户端靠它知道"没填密钥"）；`url` 里的 `user:pass@`、密钥类查询参数（passphrase / key / token / password / secret / streamid / auth / user / pass / pwd / response，参数名不分大小写，`pa%73s` 这种百分号写法也算）的值、密钥栏空（只有空白也算）时 RTMP / RTMPS 地址路径末段的发布名（路径至少两段时）都换成 `<redacted>`。键名、类型、层级不变；节目文件、App 界面和状态机里仍是原文，只改 API 写出去的样子。
+  要原文在请求上加 `?secrets=1`（只认 `1`），**只在配了 token 时给**；没配 token 时带 `?secrets=1` 的任何请求一律 `403 {"error": "secrets-require-token"}`（WebSocket 握手回 400、不升级）。
+  写回：把读到的打码设置原样 `setOutputSettings` 回去 = 保留这一路现在的密钥和地址（"读 → 改别的字段 → 整个写回"不会把标记存进去；只换密钥、地址照旧打码写回也行）。**换地址时密钥要给原文**：密钥给标记而地址变了回 400"推流设置里有打码标记：原文用 ?secrets=1 读"（不然读不到原文的客户端能把原密钥"推"到别的服务器上）；地址里带标记却对不上现在的地址、`addOutput` / `loadShow` 里出现标记，都是同一句 400。
+- 只在需要时监听 `0.0.0.0`：API 能改任何状态，没有 token 就等于局域网里谁都能切你的节目。允许局域网时令牌和全部状态走明文 HTTP / WebSocket（没有 TLS），只在可信局域网里开。
 
 ## 2. 时间戳
 
@@ -26,10 +32,10 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 
 | 方法 路径 | 用途 | 应答 |
 |---|---|---|
-| `GET /api/v1/state` | 全量状态 + 派生的 tally + 最近一行统计 | `{version, now, timebase, clock, sequence, tick, tickTime, publishedAt, state, tally, stats}` |
+| `GET /api/v1/state` | 全量状态 + 派生的 tally + 最近一行统计（推流凭据打码，`?secrets=1` 要 token，见 §1） | `{version, now, timebase, clock, sequence, tick, tickTime, publishedAt, state, tally, stats}` |
 | `POST /api/v1/command` | 发一条命令 `{"command": <Command>}`（也接受直接放 `<Command>`），或一批 `{"commands": [<Command>, …]}` | 回执 `{sequence, appliedTick, applied, issuedAt, appliedTickTime}`；批量 `{"receipts": [...]}` |
 | `GET /api/v1/commands` | 命令目录（[命令参考](../api.md)的机器可读版） | `{"commands": [{kind, group, summary, parameters, example}, …]}` |
-| `GET /api/v1/log?limit=256` | 最近走过总线的命令（诊断） | `{"entries": [{sequence, issuedAt, source, command, appliedTick, applied, appliedAt}, …]}` |
+| `GET /api/v1/log?limit=256` | 最近走过总线的命令（诊断；命令里的推流凭据打码，同 §1） | `{"entries": [{sequence, issuedAt, source, command, appliedTick, applied, appliedAt}, …]}` |
 | `GET /api/v1/tally` | 给面板轮询的小应答 | `{sequence, tick, program, preview, tally: {"1": {program, preview}, …}}` |
 
 - `state` 的键名与节目文件一致（`MixerState` 原样）：`format / inputs / program / preview / transition / ftb / overlays / audio / outputs`。
@@ -51,14 +57,15 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 
 | 状态码 | 什么时候 |
 |---|---|
-| 400 | JSON 解析失败、命令结构错、引用不存在的输入 / 输出、通道越界、负时长；正文 `{"error": "<理由>"}` |
+| 400 | JSON 解析失败（帧率写 0 / 负数也在这里："命令 JSON 无法解析：帧率必须为正"）、命令结构错、引用不存在的输入 / 输出、通道越界、负时长或超上限的时长、别的数值越界（见 §6）、运行中 `loadShow` 换格式、推流设置里的打码标记换不回原值（§1）；正文 `{"error": "<理由>"}` |
 | 401 | 设了 token 而请求没带或带错 |
+| 403 | `{"error": "forbidden-origin"}`：浏览器来源不在白名单（§1，先于 token 查）；`{"error": "secrets-require-token"}`：没配 token 而请求带了 `?secrets=1`。WebSocket 握手遇到这两种都回 400、不升级 |
 | 404 | 路径不存在 |
 
 ## 4. WebSocket `/api/v1/events`
 
 连接后依次收到 `hello`、当前 `snapshot`、最近一行 `stats`（如有）；之后每次状态变化推一条 `snapshot`（每拍最多一条，同一拍内多条命令只发最终状态），每秒一条 `stats`。
-推的是**整快照 + 版本号**，不是增量：丢一条也能自愈，客户端只要保存最近一条。
+推的是**整快照 + 版本号**，不是增量：丢一条也能自愈，客户端只要保存最近一条。握手同样先过 §1 的浏览器来源检查和 token；`snapshot` 里的推流凭据打码，连接时带 `?secrets=1`（要 token）才推原文。
 
 ```json
 {"type": "hello", "version": "0.1.0", "now": 123456789, "timebase": {"numer": 125, "denom": 3}, "clock": {"t0": 123000000, "frameDuration": {"numerator": 1, "denominator": 60}}}
@@ -102,13 +109,20 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
 [命令参考](../api.md) 由代码生成，只写命令的形态；下面几条是实现上的口径，写代码时会碰到：
 
 - **输入编号 1–16**（`InputConfig.numberRange`，提案 032）：`addInput` 的编号不在 1–16（含 0 与负数）回 400"输入编号必须在 1–16 之间：<n>"；节目文件里有越界编号的整份不打开（`loadShow` 同样拒）。按编号取输入的命令遇到大于 16 的编号照旧回"输入 n 不存在"（越界的编号进不了状态；`setPreview` / `setProgram` 的 0 仍是黑场，负数回"输入编号不能为负：n"）。
+- **数值边界**（提案 034；上限是拒、不是钳）：
+  - 时长：`fade` / `setTransition` / `setTransitionSlot` / `setFTBDuration` / `setOverlay` 最多 864 000 拍（240 fps 下 1 小时、60 fps 下 4 小时），超了回 400"时长必须在 0–864000 拍之间：<n>"；`fade` / `setTransition` / `setFTBDuration` 的负数也是这一句（`setTransitionSlot` / `setOverlay` 的负数照旧钳成 0）。
+  - 来源：`addInput` / `setInputSource` 的屏幕输入帧率、合成源帧率要在 1–240 fps（"帧率必须在 1–240 之间：<帧率>"），合成源宽高 16–8192（"画面尺寸必须在 16–8192 之间：<宽>×<高>"）；帧率写 0 或负数在解 JSON 时就回 400"命令 JSON 无法解析：帧率必须为正"。
+  - 节目文件（打开、`loadShow`）：格式宽高 16–8192、帧率 1–240 fps，转场 / 转场槽 / FTB / 叠加动画四处时长 0–864 000 拍，音频对齐帧数 0–24 000，叠加恰好 4 个；越界的整份不打开，`loadShow` 回 400"节目文件不合法：<原因>"。
+- **运行中 `loadShow` 不能换格式**：节目的宽高 / 帧率和当前不同 → 400"节目格式不同（1920×1080@60 → 1280×720@30）：运行中不能换格式，用打开节目 / 重启 headless"，状态不变；同格式照载。要换格式用 App 的"打开节目"，或用新节目重启无界面引擎。
+- **叠加清空**：`overlay {channel, on, input: 0}` = 清掉这个通道的输入（与 `setPreview` / `setProgram` 的 0 一样表示"无"）；`input` 省略或 `null` = 不换，开关照 `on` 走。开着的通道清空时画面立刻没有（没有退出动画），要淡出先 `on: false` 再清。
+  叠加正在进 / 出（淡入、滑入、缩放）时用 `setOverlay` 改时长：改的那一拍进度不变，之后按新时长接着走（不往回跳）；新时长 0 = 立即到位。
 - **转场进行中**（`transition.isActive`，T-bar 推到一半也算）`setPreview` / `setProgram` 被忽略（`applied = false`，PVW / PGM 不变）；`cut` 立即完成正在进行的转场。
 - **转场槽**：`useTransitionSlot {slot, start}` 选中槽 n（`start: true` 同一拍开始 auto 转场 = 界面上点"转场 n"、⌥n；`false` = 只给 T-bar / 回车用），转场进行中被忽略；
   `setTransitionSlot` 改槽的整份配置，**转场进行中也收**（进行中的那一次按开始时的参数走完；改的是当前槽时，做完那一拍、或 `tbar` 拉回 0 取消的那一拍起按新配置）；`autoTransition` / T-bar 用的是当前那组 = 当前槽（`transition.currentSlot`；对不上任何槽时快照里没有这个键）。
   老命令 `fade` / `setTransition` / `setTransitionParams` 改的是当前那组，之后 `currentSlot` = 仍对得上的槽，对不上就没有这个键。**没选输入的 Stinger**（提案 029）不执行：`useTransitionSlot(start: true)` 对这种槽、`autoTransition` 在要执行的当前那组是这种时都回 400（"转场 n 是 Stinger、还没选输入"，当前那组不对应槽时"当前转场是…"）——不然画面在换底拍那一拍（出厂 0 = 第 1 拍）就硬切、状态机却要等满时长才对调；`start: false`、`tbar`、`cut`、`fade` 照常（App 的 T-bar 这时灰着不发 `tbar`；API / MIDI 推这种槽，推过换底拍对应的位置——出厂 0 = 一推动——画面就整幅硬切成 PVW，推到 1 PGM / PVW 才对调）。
 - **AFV 的声音**：`cut` 打断进行中的 auto 转场或 T-bar 转场、`tbar` 推到 1 提交时，跟随视频的声音在画面对调的那一拍（拍点 + 对齐延迟）用一条约 5 ms 的短淡收口，不再接着走原来的长淡变。
 - **FTB 的声音**（Master 跟着淡，与 AFV 开不开无关）：FTB 进行中改时长（`setFTBDuration`），声音从改的那一拍起跟着画面的新斜坡走。
-- **文件播放**：`setPlayback {input, paused}` 暂停 / 继续（画面停在那一帧，仍每拍出帧）；`seekPlayback {input, seconds}` 定位（暂停中定位就停在那一帧）；
+- **文件播放**：`setPlayback {input, paused}` 暂停 / 继续（画面停在那一帧，仍每拍出帧；暂停由这一路的推帧线程在一拍左右里落实，落实之前又来了 `paused: false` = 取消这次暂停，照原来的进度接着播，不跳回开头、声音不断）；`seekPlayback {input, seconds}` 定位（暂停中定位就停在那一帧）；
   `settings.playback.restartOnProgram` 开着的文件输入在被切上 PGM 的那一拍从头播（首帧晚约 3 拍）。只对文件输入有意义。
   - **定位秒数**收 0–604 800（一周，`PlaybackLimits.maxSeekSeconds`），非有限 / 负数 / 超上限回 400"定位秒数必须在 0–604800 之间（一周）：<值>"；在范围里但到了片长或更后面 = 从头播。`setInputSettings` 整体带进来的 `playback.seekSeconds` 不拒、钳进 [0, 一周]。
   - **播放速率**（`InputSource.file` 的 `rate`）收 0.1–8（`FileSource.rateRange`）：`addInput` / `setInputSource` 越界（含非有限）回 400"播放速率必须在 0.1–8 之间：<值>"；节目文件里有越界速率的整份不打开（`loadShow` 同样拒），老文件缺 `rate` 键按 1 读。（提案 031）
@@ -124,11 +138,12 @@ PlusMix 的官方控制接口：HTTP + WebSocket，JSON。Stream Deck 插件、M
   不用前瞻、按设计 0 延迟（装格 / 改参数时实测，量到的进对齐）；起音 / 释放是线性域峰值包络的一阶时间常数（不是 dB 域增益走到 63% 的时间；两者差多少看信号超过阈值多少，超 20 dB 时后者约为前者的一半）。App 的压缩页两种都能选（新开默认 `compressor`）。
 - **监听同步**：见上面总线那一条；录制文件从这条延后的输出时间线的 0 起（开头没有黑帧）。
 - **`setMonitorSource {bus}`**：耳机出口放哪条总线——`0` Master（默认）/ `1` Bus A / `2` Bus B / `3` 耳机总线自己（提案 026 追加、P5-3 起允许，只听各路"送耳机"的那些；之前的版本回 400）；调音台里有独听时耳机出口总是放独听的路。快照里是 `audio.monitorSource`。
-- **起不来的录制 / 推流路**：`stats.encoder[]` 里那一项报 `failed`（不是 `idle`），原因在那一项的 `last_error`（App 的界面提示与日志里也有）。
+- **起不来的录制 / 推流路**：`stats.encoder[]` 里那一项报 `failed`（不是 `idle`），原因在那一项的 `last_error`——只写原因本身，例如推流 `没有地址`、`不认这种地址：foo://（只支持 rtmp:// rtmps:// srt://）`（App 状态行那句另带"推流 n 起不来："前缀；界面提示与日志里也有）。
 - **推流被服务器拒绝鉴权**：被拒的那一次就停在 `failed`（`attempt` 0），不按退避重试；`last_error` 以 `鉴权失败（用户名或密码不对）`、`鉴权失败（服务器要用户名和密码，地址里没写）` 或 `鉴权失败（服务器要的鉴权方式不支持）` 开头，冒号后面是服务器回的原文（不带密码；地址里写了 Adobe 账号而服务器要 Limelight 时是一句"服务器要 Limelight（authmod=llnw）"）。
   改对之后要重新开始这一路：App 里先 `stopStream`，等 `stats.encoder[]` 里这一路不再是 `failed` 再 `startStream`（两条紧挨着发，App 按 60 Hz 看快照、可能看不到中间那一下，就什么也不做），或点底栏推流主体；改设置本身不会让它重试。其余连不上 / 断线照旧在 `connecting` / `backoff` 之间一直重试。
-- **推流 `last_error` 的另外几种**：连不上 `连接失败：<原因>`（如 `连接失败：连接超时`；服务器回了状态时是它的状态码（多数还带描述，开始推的阶段多数前面带 `publish: `）），推上过又断了 `断线：连接断开` / `断线：发送停滞` / `断线：发送失败：<原因>`。
-  外层不再带程序内部的枚举写法；`<原因>` 是底层库或服务器的原话，个别是英文标识（如 `连接失败：publish: requestTimedOut`），按原文显示即可、别拿它做字符串匹配。
+- **推流 `last_error` 的另外几种**：连不上 `连接失败：<原因>`，原因是一句中文概括，例如 `连接失败：连接超时（服务器没回）`（对端接了连接却一直不回话，到连接超时——App 默认 5 s——还没握上手；到点就关掉这次连接、按退避重试）、`连接失败：连接被拒（这个地址和端口上没有服务器在听）`、`连接失败：找不到主机（域名解析失败）`、`连接失败：SRT 连接超时（服务器没回）`；
+  服务器回了状态时是 `连接失败：服务器拒绝连接：<状态码> <描述>`、`连接失败：发布被拒：<状态码> <描述>`，开始推的阶段服务器不回是 `连接失败：发布：服务器没回（请求超时）`；Adobe 鉴权的回复嵌套超过 32 层或超过 1 万个值是 `连接失败：RTMP 协议错误：AMF0 嵌套过深` / `…AMF0 元素过多`（照常退避重试，不再改走另一条连接路）。推上过又断了 `断线：连接断开` / `断线：发送停滞` / `断线：发送失败：<原因>`。
+  底层库的原文（地址打过码）只进系统日志（subsystem `switcher.streaming`、category `Transport`），认不出的错误写"未知错误"；这些是给人看的句子，按原文显示即可、别拿它做字符串匹配。
 - **NDI 发送**：来源是 NV12 的画面（PGM / PVW / 多画面、摄像头 / 文件这类输入）转 UYVY 送，按帧尺寸、不超过节目尺寸（比节目大的 NV12 输入只送左上一块，已知问题）；UYVY / BGRA 的输入（图片、屏幕、NDI / DeckLink 接收）不转、按输入自己的尺寸直送，其中 BGRA 按 **BGRX**（不透明，下游没有 alpha）。`bitrate` 一律按节目尺寸的 UYVY 估。
 
 ## 7. 版本
