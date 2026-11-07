@@ -13,6 +13,8 @@ import SwitcherEngine
 // 顺序（Codex 10-22 审查 N12）：推送线程在订阅表锁外编码，编码旧快照的空当里新订阅会先补发到更新的那条；所以每个订阅者记着
 // 最后发给它的快照键 (sequence, tick)，扇出时比它旧的不发——同 sequence 的新拍（转场 / 动画每拍一条、不带新命令）照发，键相同的也照发
 // （不经总线的 apply / 每拍注入可以在同一拍、同一 sequence 再发布一次不同的状态）。
+// 推流凭据（提案 035 第 ② 步，NS03）：快照里的 state 默认打码（`APIStreamCredentials`）；`?secrets=1` 的订阅者（APIServer 只在配了 token 时这么订）
+// 另拿一份原文——推送线程先看订阅表里有没有这样的订阅者，有才多编一次（状态里没有推流设置时两份一样，也不多编）。
 
 /// 状态推送源。
 public final class StateFeed: @unchecked Sendable, SnapshotObserver {
@@ -44,10 +46,11 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
         static func < (a: Self, b: Self) -> Bool { (a.sequence, a.tick) < (b.sequence, b.tick) }
     }
 
-    /// 一个订阅者：它的流 + 最后发给它的快照键（还没发过快照为 nil）。
+    /// 一个订阅者：它的流 + 最后发给它的快照键（还没发过快照为 nil）+ 要不要推流凭据原文（`?secrets=1`）。
     private struct Subscriber: Sendable {
         let continuation: AsyncStream<String>.Continuation
         var lastSnapshot: SnapshotKey?
+        let secrets: Bool
     }
 
     public let stateMachine: StateMachine
@@ -57,6 +60,7 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
     private let wakeups = Atomic<UInt64>(0)
     private let snapshotsSent = Atomic<UInt64>(0)
     private let statsSent = Atomic<UInt64>(0)
+    private let secretSnapshotsSent = Atomic<UInt64>(0)
     private let nextSubscriberID = Atomic<UInt64>(0)
     private let subscribers = Mutex<[UInt64: Subscriber]>([:])
     private let latestStatsBox = Mutex<Stats?>(nil)
@@ -74,7 +78,8 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
 
     public var counters: Counters {
         Counters(snapshots: snapshotsSent.load(ordering: .relaxed), stats: statsSent.load(ordering: .relaxed),
-                 wakeups: wakeups.load(ordering: .relaxed), subscribers: subscribers.withLock { $0.count })
+                 wakeups: wakeups.load(ordering: .relaxed), subscribers: subscribers.withLock { $0.count },
+                 secretSnapshots: secretSnapshotsSent.load(ordering: .relaxed))
     }
 
     /// 最近一行 Stats。
@@ -135,7 +140,8 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
     // MARK: 订阅
 
     /// 订阅事件流。流的开头是 hello、当前快照、最近一行 Stats（如有）。
-    public func subscribe() -> Subscription {
+    /// - Parameter secrets: 快照里的推流凭据给原文（API 的 `?secrets=1`，只在配了 token 时）；默认 false = 打码（提案 035）。
+    public func subscribe(secrets: Bool = false) -> Subscription {
         let id = nextSubscriberID.add(1, ordering: .relaxed).newValue
         let (stream, continuation) = AsyncStream<String>.makeStream(bufferingPolicy: .bufferingNewest(bufferDepth))
         // 在订阅表的锁内补发当前状态并登记：扇出也在同一把锁内，所以"补发的快照"和"之后的推送"之间不会漏一条；
@@ -144,12 +150,12 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
             let now = HostClock.now()
             var sent: SnapshotKey? = nil
             if let hello = try? APIJSON.string(HelloMessage(now: now, clock: clockProvider())) { continuation.yield(hello) }
-            if let snap = stateMachine.publisher.latest, let text = try? encode(snap, sentAt: now) {
+            if let snap = stateMachine.publisher.latest, let text = try? encode(snap, sentAt: now, secrets: secrets) {
                 continuation.yield(text)
                 sent = SnapshotKey(snap)
             }
             if let stats = latestStatsBox.withLock({ $0 }), let text = try? APIJSON.string(StatsMessage(stats: stats)) { continuation.yield(text) }
-            subs[id] = Subscriber(continuation: continuation, lastSnapshot: sent)
+            subs[id] = Subscriber(continuation: continuation, lastSnapshot: sent, secrets: secrets)
         }
         continuation.onTermination = { [weak self] _ in self?.unsubscribe(id) }
         return Subscription(id: id, stream: stream)
@@ -168,13 +174,15 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
     // MARK: GET /state 用
 
     /// 当前状态的完整应答（GET /api/v1/state）。
+    /// - Parameter secrets: state 里的推流凭据给原文（`?secrets=1` + token，APIServer 判）；默认 false = 打码（提案 035）。
     public func stateResponse(now: HostTime = .now(), secrets: Bool = false) -> StateResponse {
         let snap = stateMachine.publisher.latest
         let state = snap?.state ?? MixerState()
         let clock = clockProvider()
         return StateResponse(now: now, clock: clock, sequence: snap?.sequence ?? 0, tick: snap?.tick ?? .zero,
                              tickTime: snap.flatMap { s in clock?.time(of: s.tick) }, publishedAt: snap?.publishedAt ?? now,
-                             state: state, tally: state.tallies, stats: latestStatsBox.withLock { $0 })
+                             state: secrets ? state : APIStreamCredentials.redacted(state), tally: state.tallies,
+                             stats: latestStatsBox.withLock { $0 })
     }
 
     // MARK: 推送线程
@@ -189,30 +197,50 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
             guard let snap = stateMachine.publisher.latest, snap !== lastSeen else { continue }
             lastSeen = snap
             lastSent.withLock { $0 = snap }
-            if let text = try? encode(snap, sentAt: HostClock.now()) {
+            let now = HostClock.now()
+            if let text = try? encode(snap, sentAt: now, secrets: false) {
                 snapshotsSent.add(1, ordering: .relaxed)
-                fanOut(text, snapshot: SnapshotKey(snap))
+                // 原文只编给要的：订阅表里没有 ?secrets=1 的就不编；状态里没有推流设置时两份一样，直接用打码那份
+                var raw: String? = nil
+                if subscribers.withLock({ $0.values.contains { $0.secrets } }) {
+                    if APIStreamCredentials.hasStreamSettings(snap.state.outputs) {
+                        raw = try? encode(snap, sentAt: now, secrets: true)
+                        if raw != nil { secretSnapshotsSent.add(1, ordering: .relaxed) }
+                    } else {
+                        raw = text
+                    }
+                }
+                fanOut(text, raw: raw, snapshot: SnapshotKey(snap))
             }
         }
         stopped.signal()
     }
 
-    private func encode(_ snap: MixerSnapshot, sentAt: HostTime) throws -> String {
+    /// 一条快照消息；secrets = false 时 state 里的推流凭据打码。
+    private func encode(_ snap: MixerSnapshot, sentAt: HostTime, secrets: Bool) throws -> String {
         let clock = clockProvider()
         let message = SnapshotMessage(sequence: snap.sequence, tick: snap.tick, tickTime: clock?.time(of: snap.tick), publishedAt: snap.publishedAt,
-                                      sentAt: sentAt, state: snap.state, tally: snap.state.tallies)
+                                      sentAt: sentAt, state: secrets ? snap.state : APIStreamCredentials.redacted(snap.state),
+                                      tally: snap.state.tallies)
         return try APIJSON.string(message)
     }
 
     /// 扇出给所有订阅者。快照带上它的键：比某个订阅者已收到的旧就跳过它（N12），发了就记下。Stats 不带键，照发。
-    private func fanOut(_ text: String, snapshot key: SnapshotKey? = nil) {
+    /// 快照的 `raw` = 推流凭据原文那一份，只发给 `?secrets=1` 的订阅者；它为 nil 而有这样的订阅者 = 编码前看订阅表时它还没来，
+    /// 它订阅时补发的快照不比这条旧（publisher.latest 只会往前走），跳过它不漏东西——打码的那份永远不发给要原文的、原文永远不发给不要的。
+    private func fanOut(_ text: String, raw: String? = nil, snapshot key: SnapshotKey? = nil) {
         subscribers.withLock { subs in
             for (id, sub) in subs {
+                var payload = text
                 if let key {
+                    if sub.secrets {
+                        guard let raw else { continue }
+                        payload = raw
+                    }
                     if let last = sub.lastSnapshot, key < last { continue }
                     subs[id]?.lastSnapshot = key
                 }
-                _ = sub.continuation.yield(text)
+                _ = sub.continuation.yield(payload)
             }
         }
     }
