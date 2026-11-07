@@ -1,4 +1,4 @@
-// SwitcherContracts —— 所有包共用的类型：时间、帧、音频块、输入、状态、命令、统计、节目文件、场景、测试图案。
+// SwitcherContracts —— 所有包共用的类型：时间、帧、音频块、输入、状态、命令、统计、节目文件、场景、测试图案、推流地址打码。
 //
 // P1（分支 p1-contracts）在这里冻结契约。之后任何公开类型、JSON 字段名、测试图案布局的改动
 // 都必须先在 docs/contract-changes/ 写提案（通用前言铁律 1）。每个类型"是什么、谁写、谁读、线程归属"
@@ -18,6 +18,7 @@
 //   TestPattern.swift 合成视频图案（CPU 参考实现）
 //   TestSignal.swift  合成音频信号（CPU 参考实现）
 //   JSONValue.swift   占位字段用的通用 JSON 值
+//   StreamURLRedaction.swift 推流地址打码（日志 / 错误文字 / 诊断包 / 地址框 / API 对外状态共用的口径；提案 035 第 ① 步从 SwitcherStreaming 原样搬来，那边留 typealias）
 //   Version.swift     产品版本号（G5 改）
 //   C/                CSwitcherContracts target：sw_audio_ring.h（音频环布局）+ layout.c（布局断言）
 

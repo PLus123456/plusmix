@@ -79,3 +79,22 @@ docs/KNOWN_ISSUES.md"推流凭据外泄两处"一行的 ②（③ 诊断包那�
 
 正文里没单独问到的细节（没配 token 时 `?secrets=1` 回 `403 secrets-require-token`、WS 不升级；`addOutput` / `loadShow` 带标记回 400；打码只改 API 写出去的样子、节目文件与界面不变）按正文的建议做。
 131（`w2-control-5`）只记下这次裁定，不落代码；三步的 prompt 由 G12（134）或之后的排期会话写。
+
+## 落地记录（第 ① 步：P5-8 / prompt 136，2026-10-31）
+
+分支 `p5-contracts-8`（从 main c7d441a = g12 开）：红用例 + 金样 914c502 → 搬迁 2ff784f → 文字（本提交）。不 push、不 merge，交 G13（140）。报告 reports/p5-contracts-8.md。
+
+- **搬了什么**：`Packages/SwitcherOutputs/Sources/Streaming/StreamURLRedaction.swift` 整个文件**逐字节不变**地到了 `Packages/SwitcherCore/Sources/SwitcherContracts/StreamURLRedaction.swift`
+  （git blob 9960823…，`git diff -C` 认 copy 100%）：只 import Foundation；公开接口 `marker`、`secretQueryParams`、`redact(url:marker:publishNameInPath:)`（marker 默认 = marker、publishNameInPath 默认 false）、
+  `redact(text:marker:)` 的名字、签名、默认值一个不改；内部的 `userinfoRange` / `publishNameRange` / `redactQuery` 跟着搬（仓库里没有别处用它们；App 的 `StreamAddress.userinfoRange` 是它自己的）。
+  SwitcherStreaming 原文件只剩 `public typealias StreamURLRedaction = SwitcherContracts.StreamURLRedaction`（外加两行注释）。umbrella `SwitcherContracts.swift` 的文件一览加一行。
+- **哪些调用点没动**（经 typealias 编得过）：SwitcherStreaming 的 StreamDestination.swift:51、RTMPAdobeAuth.swift:69 / 110、HaishinKitTransport.swift:148 / 231、TransportErrorText.swift:19；
+  App 的 Release/ShowRedaction.swift:10 / 53（诊断包）、Settings/StreamAddress.swift:101 / 116（地址框的名单与 •••）、UI/BottomBarView.swift:494（底栏提示）、Engine/OutputRuntime.swift:390（invalidURL 文案）；
+  用例 StreamAuthTests.testE、TransportErrorTextTests.testW4C4、App PlaybackStatusTests:459。两个模块都 import 时裸写 `StreamURLRedaction` 不歧义（Swift 对指向同一类型的 typealias 不报 ambiguous，先用三个模块的 20 行探针验过）。
+- **用例**：`Contracts035Tests` 7 条——`test035_publicSurfaceUnchanged`（名字 / 签名 / 默认值 / 名单 / 文件只 import Foundation）、`test035_NS12_encodedSecretParamNamesAreRedacted`、`test035_NS09_publishNameInPathRedacted`、
+  `test035_NS09_differentialRepresentatives`、`test035_userinfoSRTAndNonURL`、`test035_textRedaction_everyAddressInText`、`test035_goldenPremove_everyInputRedactsIdentically`；
+  金样 `Tests/SwitcherContractsTests/Fixtures/redaction-035/StreamURLRedaction-premove.json` 由**搬迁前**的文件直接编译跑出（1041 个地址 + 10 段文字，含 NS09 差分表 5 × 17 × 11 = 935 种全部），搬后逐字相同；
+  StreamingTests 加 `StreamURLRedactionTests.test035_movedToContracts_sameTypeAndPremoveOutputsIdentical`（typealias 指向契约类型、这个包里只剩别名、同一份金样经推流包的名字再跑一遍），原四条（含对 `StreamDestination` 的 935 种差分）照旧绿。
+  口径以后变了：`SW_REDACTION_GOLDEN_WRITE=1` 跑那条金样用例会按当前实现重写期望（输入不动），看 diff 再提交。
+- **CONTRACTS.md**：标题 / 变更记录加 P5-8；新 §2.11（`StreamURLRedaction` 的类型行 + 正文第 1–4 条的 API 打码与往返规则，**写明 137 落地后生效、现在 API 还是原文**）；§2.5 `StreamSettings` 行与 §3 各加一句指过去。
+- **没做 / 交出去**：API 打码本身（第 ② 步，137 W2-C6：APIModels / StateFeed / APIServer + docs/api.md 重生成）；KNOWN_ISSUES "推流凭据外泄两处" 的 ② 到 137 再销号；命令仍 42 个，JSON 形态不变。
