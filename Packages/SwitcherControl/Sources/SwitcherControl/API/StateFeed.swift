@@ -29,6 +29,8 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
         public var stats: UInt64 = 0
         public var wakeups: UInt64 = 0
         public var subscribers: Int = 0
+        /// 给 `?secrets=1` 的订阅者另编的原文快照条数（提案 035：没人要就不编）。
+        public var secretSnapshots: UInt64 = 0
     }
 
     /// 快照的先后（N12）：先比 sequence、再比 tick。
@@ -166,7 +168,7 @@ public final class StateFeed: @unchecked Sendable, SnapshotObserver {
     // MARK: GET /state 用
 
     /// 当前状态的完整应答（GET /api/v1/state）。
-    public func stateResponse(now: HostTime = .now()) -> StateResponse {
+    public func stateResponse(now: HostTime = .now(), secrets: Bool = false) -> StateResponse {
         let snap = stateMachine.publisher.latest
         let state = snap?.state ?? MixerState()
         let clock = clockProvider()
