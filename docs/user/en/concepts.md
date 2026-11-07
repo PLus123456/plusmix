@@ -68,7 +68,7 @@ Hotkeys, MIDI and the API never ask. Settings › General › Confirmations turn
 - **Reminders**: an amber bar at the right of the status line, several joined with "·": the engine has run n minutes with neither recording nor streaming (off by default, n = 5), FTB has been on for 10 seconds (the PGM title bar blinks too),
   the Master level has stayed below −50 dBFS for 30 seconds (only judged when some input with sound feeds the Master unmuted). Settings › General › Reminders turns each off separately; changes apply immediately.
 - **Statistics window**: the Statistics button in the bottom bar or Window › Statistics, read-only. Five sections: Inputs (fps / repeated / dropped / latency), Rendering (render time / missed / jitter / GPU / CPU / memory),
-  Outputs (each output matched by number to its name, type, source, state, frames, encoder skips, dropped, bitrate, reconnects), Displays (monitor, multiview window, external displays, virtual camera) and Audio (dropouts / underruns / discontinuities, Master peak, short-term loudness).
+  Outputs (each output matched by number to its name, type, source, state, frames, encoder skips, dropped, bitrate, reconnects), Displays (monitor, multiview window, external displays, virtual camera) and Audio (dropouts / underruns / discontinuities, Master peak, short-term loudness; below it an "Effect chain latency" table: the four buses (0.0 ms without effects) and every input with an EQ / compressor, each with its processing latency (one decimal) and the compressor's measured value (two decimals, "—" without the self-written compressor) — momentary values that "Reset" doesn't touch).
   It reads the same statistics line as the status line and the API. "Reset" only restarts the counts inside this window; `stats.jsonl`, the API and the status line keep counting.
 - **Interface lock**: the lock at the far right of the bottom bar, or Window › Lock Interface (ticked while locked). While locked, mouse clicks in the main window (toolbar, cells, T-bar, mixer, bottom bar) do nothing and the status line says
   "Interface locked: click the lock at the right end of the bottom bar to unlock; shortcuts still work"; **hotkeys, MIDI, the API and the menu bar keep working**, and separate windows such as Settings and Statistics are not locked. The button reads "Locked" while locked.
@@ -172,9 +172,9 @@ The **Overlay Settings window** is a normal window (it doesn't block the main wi
 | Section | Contents |
 |---|---|
 | Top | Overlay 1–4 segments; only the current channel is shown; every change applies immediately |
-| Source | Input, On (switch), Preview in PVW |
+| Source | Input ("(none)" = clear the channel's input: a channel that is on disappears at once, with no out animation — to fade it out, turn "On" off first, then clear it), On (switch), Preview in PVW |
 | Full screen / picture in picture | One or the other. Full screen covers the picture (position, anchor and border are hidden, their settings kept); picture in picture = position preset (lower third, bottom right quarter, bottom left, top left, top right, custom) + X / Y / W / H, border (colour, width), anchor. Switching from full screen starts at the bottom right quarter |
-| In / out animation | Cut / Fade / Slide (from which edge) / Zoom; duration in seconds (0.5 / 1 / 2 s shortcuts; the tooltip says "= n frames") |
+| In / out animation | Cut / Fade / Slide (from which edge) / Zoom; duration in seconds (0.5 / 1 / 2 s shortcuts; the tooltip says "= n frames"; a huge number is taken as the limit of 864 000 frames, 14 400 s at 60 fps). Changing the duration while it is coming in / going out carries on from the current progress at the new duration (no jump back) |
 
 - In a show created in the app all four channels fade in over 0.5 s by default (that is only the app's default for new shows; shows built through the API or the headless engine default to cut).
 - Transparent parts of an image / video show PGM through. A full 1920×1080 PNG with alpha plus "Full screen" is the simplest way to do titles (the [sample shows](../../../Samples/README.md) do exactly that).
