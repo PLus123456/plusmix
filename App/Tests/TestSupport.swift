@@ -146,18 +146,28 @@ enum AppTest {
     }
 
     /// 外部进程（ffprobe / frameprobe）。
+    /// stderr 写进临时文件、不用管道（W5-S）：原来两根管道先读 stdout 到 EOF 再读 stderr，子进程往 stderr 写满管道缓冲（64 KB）就卡在 write 上、
+    /// 我们卡在等 stdout 的 EOF 上——互等。xctest 给宿主设了 OS_ACTIVITY_DT_MODE（os_log 镜像到 stderr），子进程继承；macOS 27 上 frameprobe 读音轨时
+    /// AudioAnalytics 刷 720 行"[carc] … rate-limit"（≈ 127 KB），ISOAppTests 的 A4 就这样挂了 30 分钟（实测）。文件不会写满，stdout 照旧用管道。
     struct ProcessOutput { let stdout: Data; let stderr: String; let code: Int32 }
     static func run(_ path: String, _ args: [String]) throws -> ProcessOutput {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = args
-        let out = Pipe(), err = Pipe()
+        let out = Pipe()
+        let errURL = FileManager.default.temporaryDirectory.appendingPathComponent("apptest-stderr-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        let errHandle = try FileHandle(forWritingTo: errURL)
+        defer {
+            try? errHandle.close()
+            try? FileManager.default.removeItem(at: errURL)
+        }
         p.standardOutput = out
-        p.standardError = err
+        p.standardError = errHandle
         try p.run()
         let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
+        let errData = (try? Data(contentsOf: errURL)) ?? Data()
         return ProcessOutput(stdout: outData, stderr: String(decoding: errData, as: UTF8.self), code: p.terminationStatus)
     }
 
