@@ -172,7 +172,7 @@ The **Overlay Settings window** is a normal window (it doesn't block the main wi
 | Section | Contents |
 |---|---|
 | Top | Overlay 1–4 segments; only the current channel is shown; every change applies immediately |
-| Source | Input ("(none)" = clear the channel's input: a channel that is on disappears at once, with no out animation — to fade it out, turn "On" off first, then clear it), On (switch), Preview in PVW |
+| Source | Input ("(none)" = clear the channel's input: a channel that is on disappears at once, with no out animation — to fade it out, turn "On" off first and clear it once the out animation has finished; "(none)" leaves "On" as it is, so after clearing it is still on and picking an input again shows it at once, without the in animation), On (switch), Preview in PVW |
 | Full screen / picture in picture | One or the other. Full screen covers the picture (position, anchor and border are hidden, their settings kept); picture in picture = position preset (lower third, bottom right quarter, bottom left, top left, top right, custom) + X / Y / W / H, border (colour, width), anchor. Switching from full screen starts at the bottom right quarter |
 | In / out animation | Cut / Fade / Slide (from which edge) / Zoom; duration in seconds (0.5 / 1 / 2 s shortcuts; the tooltip says "= n frames"; a huge number is taken as the limit of 864 000 frames, 14 400 s at 60 fps). Changing the duration while it is coming in / going out carries on from the current progress at the new duration (no jump back) |
 

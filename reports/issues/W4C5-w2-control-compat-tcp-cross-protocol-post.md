@@ -15,6 +15,7 @@
 
 浏览器能发出这种正文：`<form method="POST" action="http://127.0.0.1:8099/" enctype="text/plain">` 里放 `<input name="FUNCTION Cut&#13;&#10;x" value="">`，
 text/plain 编码的正文就是 `FUNCTION Cut\r\nx=\r\n`（"名字=值\r\n"，名字里的换行原样保留）——第一行就是一条完整的兼容层命令。不需要读应答，副作用在服务端已经发生。
+更省事的是脚本：`fetch("http://127.0.0.1:8099/", {method: "POST", mode: "no-cors", body: "FUNCTION Cut\r\n"})`（no-cors 下 text/plain 正文是"简单请求"，不预检；W4-C5 的核对 agent 独立读代码时也指出了这条）。
 
 ## 没验证的部分
 

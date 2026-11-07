@@ -48,7 +48,7 @@ Connections 加 "vMix" 类型的连接，Target host = PlusMix 所在机器，TC
 
 ## 协议范围
 
-- HTTP：`GET /api/?Function=<名字>&Input=<n>&Duration=<ms>&Value=<v>`；`GET /api` 返回 XML 状态文档。浏览器替网页发来的请求（带 `Origin`，或 `Sec-Fetch-Site` 不是 `none`）一律 `403 Forbidden`、什么都不执行（规则同[本地 API §1](README.md#1-地址与鉴权)，白名单这一版没有设置入口）；Companion、curl、脚本不受影响，地址栏里直接打开 `/api` 照旧能看。
+- HTTP：`GET /api/?Function=<名字>&Input=<n>&Duration=<ms>&Value=<v>`；`GET /api` 返回 XML 状态文档。浏览器替网页发来的请求（带 `Origin` 而不在白名单；或不带 `Origin`、`Sec-Fetch-Site` 不是 `none`——`same-origin` 只在 Host 是 IP / localhost 时放）一律 `403 Forbidden`、什么都不执行（规则同[本地 API §1](README.md#1-地址与鉴权)，白名单这一版没有设置入口）；Companion、curl、脚本不受影响，地址栏里直接打开 `/api` 照旧能看。
 - TCP（8099）：`FUNCTION` / `TALLY` / `XML` / `ACTS` / `SUBSCRIBE TALLY` / `SUBSCRIBE ACTS` / `PING` / `VERSION` / `QUIT`；`XMLTEXT` 未实现。一行最长 64 KiB（超了断开这条连接）、同时最多 64 条连接（满了新连接连上就被关、没有问候），没有空闲超时。
 - XML `<version>` 报的是 PlusMix 自己的版本，`<edition>` 是 "Switcher"（代码名，包内默认值），不冒充对方。
 
