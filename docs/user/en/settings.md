@@ -75,9 +75,11 @@ Two sections: the **local API** (HTTP / WebSocket, [docs/api](../../api/README.m
 | Authentication | Token (empty = no auth) | None (the protocol has none) |
 | Connect to | Read-only address for other machines (`http://<this Mac's LAN IP>:8765`) with "Copy"; with several network interfaces the others are listed too; if no LAN address is found it says so | HTTP address (`…/api`) and TCP address, with "Copy" |
 
-When the local network is allowed without a token, or the compatibility layer allows the local network, a yellow warning says anyone on the same network can switch the program or stop recordings. Changes need "Apply and Restart Engine".
-"Change Listen Addresses… (Advanced)" at the bottom jumps to the [Advanced](#advanced) page, where a specific host:port can be typed.
-**The first time PlusMix listens on the local network** (Allow local network, or the tally stream), macOS asks "Allow incoming connections" if the firewall is on; click Allow.
+- The yellow warnings on the page: when the local API allows the local network without a token, "anyone on the same network can switch the program or stop recordings — set a token"; whenever the local API allows the local network (token or not) one more line, "The token and the whole state travel as plain HTTP / WebSocket (no TLS): only allow the local network on a network you trust."; and when the compatibility layer allows the local network, that it has no authentication and anyone on the network can control it. Changes need "Apply and Restart Engine".
+- In the state the API hands out, stream keys and passwords in stream URLs are **masked** (`<redacted>`); the originals need a token and `?secrets=1` on the request. Web pages (browsers) are refused by the local API and by the compatibility layer's HTTP entry (there is no setting for an allow-list in this version); Stream Deck, Companion, curl and scripts are not affected. Details in [local API §1](../../api/README.md#1-地址与鉴权) (Chinese).
+- "This Mac only, and a token if you open it to the network" is still the advice: the API can change anything (switch the program, stop recordings, change a stream URL).
+- "Change Listen Addresses… (Advanced)" at the bottom jumps to the [Advanced](#advanced) page, where a specific host:port can be typed.
+- **The first time PlusMix listens on the local network** (Allow local network, or the tally stream), macOS asks "Allow incoming connections" if the firewall is on; click Allow.
 
 ### Tally
 
@@ -106,7 +108,7 @@ See [Shortcuts](shortcuts.md).
 
 | Section | Contents |
 |---|---|
-| Recording | **Free space minimum (MB)**: when the recording volume drops below this, that recording stops (default 200); applies from the next recording start. **Fallback folder**: when the target disk is full or below the minimum, recording continues in this folder from the next tick (best on another disk); "Choose… / Clear", applies immediately |
+| Recording | **Free space minimum (MB)**: when the recording volume drops below this, that recording stops (default 200, at most 16777216 = 16 TiB; a larger number is stored as the maximum and a negative one as 0, and the field shows what was stored); applies from the next recording start. **Fallback folder**: when the target disk is full or below the minimum, recording continues in this folder from the next tick (best on another disk); "Choose… / Clear", applies immediately |
 | Listen addresses | Local API (host:port), compatibility layer (host:TCP port): type a specific address here if you need one. Invalid entries are not saved and are explained in red. Restarts engine |
 
 ## Launch arguments
@@ -121,5 +123,5 @@ if that change opens the API to the network (turning the API on, or a non-local 
 | `--stats <file>` | Write one statistics line per second to this file (stats.jsonl) |
 | `--audio-device <name / default / null>` | Audio output device; `null` = the null device |
 | `--api-listen <host:port>`, `--api-token <token>`, `--no-api` | Local API address, token, or turn it off |
-| `--record-min-free-mb <MB>`, `--record-fallback <folder>` | Recording free-space minimum, fallback folder |
+| `--record-min-free-mb <MB>`, `--record-fallback <folder>` | Recording free-space minimum (as on the settings page, clamped to 0–16777216), fallback folder |
 | `--tally-port <port>` | Turn on the read-only tally stream on this port (same name as in the headless engine) |
