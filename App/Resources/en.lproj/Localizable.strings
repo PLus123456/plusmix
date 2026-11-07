@@ -145,6 +145,8 @@
 "actionPicker.ui.toggleMultiviewWindow.summary" = "Opens or closes the multiview window (this Mac’s app only)";
 "actionPicker.value.black" = "Black";
 "actionPicker.value.channel" = "Channel %d";
+"actionPicker.value.clearOverlay" = "(Clear)";
+"actionPicker.value.clearOverlayShort" = "Clear";
 "actionPicker.value.currentPreview" = "Current PVW";
 "actionPicker.value.currentProgram" = "Current PGM";
 "actionPicker.value.input" = "Input %d";
@@ -934,6 +936,8 @@
 "notice.ndiBranchRestored" = "NDI output %d: a branch on input %d became free; reconnected and sending";
 "notice.ndiBranchUnavailable" = "NDI output %d: no frame-slot branch left on input %d (at most %d per input, shared with ISO / Aux); no picture for now, recovers automatically when one is freed";
 "notice.ndiFailed" = "NDI output %d failed to start: %@";
+"notice.ndiSendFailing" = "NDI output %d error: %@";
+"notice.ndiSendFailingNoReason" = "NDI output %d error (see the NDI page in Output settings)";
 "notice.ndiStarted" = "NDI output %d started: %@";
 "notice.ndiStopped" = "NDI output %d stopped";
 "notice.ndiUnavailable" = "NDI output %d: no NDI SDK (not found at build time), nothing is actually sent";
@@ -1435,6 +1439,7 @@
 "statsWindow.col.skipped" = "Encoder skips";
 "statsWindow.col.dropped" = "Dropped";
 "statsWindow.col.bitrate" = "Bitrate";
+"statsWindow.col.compressorMeasured" = "Compressor measured";
 "statsWindow.col.reconnects" = "Reconnects";
 "statsWindow.col.undelivered" = "Undelivered";
 "statsWindow.col.dropouts" = "Dropouts";
@@ -1451,6 +1456,8 @@
 "statsWindow.display.multiviewWindow" = "Multiview window";
 "statsWindow.display.externalDisplay" = "External display";
 "statsWindow.display.virtualCamera" = "Virtual camera";
+"statsWindow.effects.input" = "Input %d · %@";
+"statsWindow.effects.title" = "Effect chain latency";
 "statsWindow.kind.record" = "Recording";
 "statsWindow.kind.stream" = "Streaming";
 "statsWindow.kind.ndi" = "NDI® output";

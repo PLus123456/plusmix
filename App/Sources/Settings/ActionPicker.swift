@@ -83,6 +83,35 @@ final class ActionPickerModel: ObservableObject {
 
     func set(_ name: String, _ value: FieldValue) { values[name] = value }
 
+    /// 输入下拉的一项（视图照它出，用例直接读）。
+    struct InputChoice: Hashable {
+        let title: String
+        /// nil = "不换输入"（可选的格不填）。
+        let value: InputRef?
+    }
+
+    /// 输入下拉的选项：可选的格先列"不换输入"；能黑场的（allowsBlack）列"黑场"（0）；叠加命令的输入列"（清空）"（0 = 清空这个通道的输入，提案 034 ⑤）——
+    /// 命令目录把它标成 allowsBlack: false（0 不是黑场），面板自己加这一项、目录不动（W5-S，129 §3 第 2 条）；然后是各路输入。
+    func inputChoices(for field: CommandField) -> [InputChoice] {
+        guard case .input(let allowsBlack) = field.type else { return [] }
+        var out: [InputChoice] = []
+        if field.optional { out.append(InputChoice(title: L("actionPicker.value.keepInput"), value: nil)) }
+        if allowsBlack {
+            out.append(InputChoice(title: L("actionPicker.value.black"), value: .number(MixerState.noInput)))
+        } else if let e = selected, ActionCatalog.zeroClearsInput(e, field) {
+            out.append(InputChoice(title: L("actionPicker.value.clearOverlay"), value: .number(MixerState.noInput)))
+        }
+        for i in state()?.inputs ?? [] { out.append(InputChoice(title: L("actionPicker.value.inputNamed", i.number, i.name), value: .number(i.number))) }
+        return out
+    }
+
+    /// 时长 / 秒数框（DurationField）写回：按这一格的类型钳（ActionCatalog.clampedSeconds：按拍的到 maxTicks ÷ 节目帧率、毫秒的到 1 小时、定位秒数到
+    /// PlaybackLimits.maxSeekSeconds；负数 / NaN → 0）。原来只钳了负数，填 1e30 秒在摘要 / 拼动作的 Double → Int 上 trap（W5-S，129 §3 第 3 条）。
+    func setSeconds(_ name: String, _ seconds: Double) {
+        let type = selected?.fields.first { $0.name == name }?.type ?? .durationTicks
+        values[name] = .seconds(ActionCatalog.clampedSeconds(seconds, type: type, frameRate: frameRate))
+    }
+
     /// 打开时定位到当前动作。
     private func load(_ action: MIDIAction) {
         let located = ActionCatalog.locate(action, frameRate: frameRate)
@@ -176,7 +205,11 @@ enum ActionText {
         }
         // 按拍存的旧 Fade：照拍数写（时长跟着节目帧率走）
         if case .command(.fade(let ticks)) = action { return L("actionPicker.summary.legacyFade", ticks) }
-        let parts = entry.fields.compactMap { f in located.values[f.name].map { value(f, $0, state: state) } }
+        let parts = entry.fields.compactMap { f in
+            located.values[f.name].map { v in
+                v == .input(.number(MixerState.noInput)) && ActionCatalog.zeroClearsInput(entry, f) ? L("actionPicker.value.clearOverlayShort") : value(f, v, state: state)
+            }
+        }
         return ([entry.title] + parts).joined(separator: " · ")
     }
 
@@ -237,10 +270,11 @@ enum ActionText {
         return L("actionPicker.value.output", n)
     }
 
-    /// "0.5 秒""1 秒""1.25 秒"（不加千分位、不写多余的 0）。
+    /// "0.5 秒""1 秒""1.25 秒"（不加千分位、不写多余的 0）。整数秒写成整数；Int 装不下的（热键表 JSON 里手写的定位 1e30 秒、inf 这类——
+    /// 表单里填的先由 setSeconds 钳过）按 %g 写，不在 Int(…) 上 trap（W5-S，129 §3 第 3 条）。
     static func seconds(_ s: Double) -> String {
         let rounded = (s * 1000).rounded() / 1000
-        let text = rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%g", rounded)
+        let text = rounded == rounded.rounded() && abs(rounded) < 1e15 ? String(Int(rounded)) : String(format: "%g", rounded)
         return L("actionPicker.value.seconds", text)
     }
 }
@@ -358,11 +392,9 @@ struct ActionFieldsForm: View {
     private func fieldControl(_ f: CommandField) -> some View {
         let label = L("actionPicker.field.\(f.name)")
         switch f.type {
-        case .input(let allowsBlack):
+        case .input:
             Picker(label, selection: inputBinding(f)) {
-                if f.optional { Text(L("actionPicker.value.keepInput")).tag(Optional<InputRef>.none) }
-                if allowsBlack { Text(L("actionPicker.value.black")).tag(Optional(InputRef.number(MixerState.noInput))) }
-                ForEach(inputs, id: \.number) { i in Text(L("actionPicker.value.inputNamed", i.number, i.name)).tag(Optional(InputRef.number(i.number))) }
+                ForEach(model.inputChoices(for: f), id: \.self) { c in Text(c.title).tag(c.value) }
             }
         case .inputRef:
             Picker(label, selection: inputBinding(f)) {
@@ -478,7 +510,7 @@ struct ActionFieldsForm: View {
         Binding(get: { if case .double(let v)? = model.values[f.name] { return v }; return d }, set: { model.set(f.name, .double($0)) })
     }
     private func secondsBinding(_ f: CommandField) -> Binding<Double> {
-        Binding(get: { if case .seconds(let v)? = model.values[f.name] { return v }; return 0.5 }, set: { model.set(f.name, .seconds(max(0, $0))) })
+        Binding(get: { if case .seconds(let v)? = model.values[f.name] { return v }; return 0.5 }, set: { model.setSeconds(f.name, $0) })
     }
 }
 

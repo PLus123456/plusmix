@@ -307,8 +307,8 @@ enum ActionCatalog {
 
     private static func jsonValue(_ value: FieldValue, type: CommandFieldType, frameRate: FrameRate) -> Any? {
         switch (value, type) {
-        case (.seconds(let s), .durationTicks): return Int((max(0, s) * frameRate.framesPerSecond.doubleValue).rounded())
-        case (.seconds(let s), .durationMs): return Int((max(0, s) * 1000).rounded())
+        case (.seconds(let s), .durationTicks): return ticks(seconds: clampedSeconds(s, type: .durationTicks, frameRate: frameRate), frameRate: frameRate)
+        case (.seconds(let s), .durationMs): return Int((clampedSeconds(s, type: .durationMs, frameRate: frameRate) * 1000).rounded())
         case (.input(.number(let n)), _): return n
         case (.input(.preview), .inputRef): return "preview"
         case (.input(.program), .inputRef): return "program"
@@ -320,6 +320,41 @@ enum ActionCatalog {
         case (.string(let s), _): return s
         case (.seconds(let s), _): return s
         }
+    }
+
+    // MARK: 时长钳位（W5-S，129 §3 第 3 条）
+
+    /// 毫秒格（fadeMs）的上限：1 小时 = DurationLimits.maxTicks @ 240 fps（FrameRate.programRange 的上限）——按毫秒存的动作不跟帧率走，
+    /// 钳到这里在任何合法帧率下换出来的拍数都 ≤ maxTicks（兼容层的毫秒参数上限 D03 也是 1 小时）。
+    static let maxDurationMilliseconds = 3_600_000
+
+    /// 秒数格能填的上限：按拍的（durationTicks）= maxTicks ÷ 节目帧率；毫秒的 = 1 小时；定位秒数（.seconds，021）= PlaybackLimits.maxSeekSeconds。
+    static func maxSeconds(for type: CommandFieldType, frameRate: FrameRate) -> Double {
+        switch type {
+        case .durationMs: return Double(maxDurationMilliseconds) / 1000
+        case .seconds: return PlaybackLimits.maxSeekSeconds
+        default: return Double(DurationLimits.maxTicks) / frameRate.framesPerSecond.doubleValue
+        }
+    }
+
+    /// 钳进 0…上限（NaN / 负数 → 0，+inf → 上限）。
+    static func clampedSeconds(_ s: Double, type: CommandFieldType, frameRate: FrameRate) -> Double {
+        guard s > 0 else { return 0 }   // NaN 也走这里
+        return min(s, maxSeconds(for: type, frameRate: frameRate))
+    }
+
+    /// 秒 → 拍（按帧率四舍五入）再钳进 0…DurationLimits.maxTicks：与 OverlaySettingsModel.ticks(seconds:)、契约里出厂转场槽换拍同一个法子
+    /// （先在 Double 上比上限再转 Int，不在 Int(…) 上 trap）。
+    static func ticks(seconds: Double, frameRate: FrameRate) -> Int {
+        let t = (seconds * frameRate.framesPerSecond.doubleValue).rounded()
+        guard t > 0 else { return 0 }
+        return t >= Double(DurationLimits.maxTicks) ? DurationLimits.maxTicks : Int(t)
+    }
+
+    /// 这一格填 0 是"清空"（不是黑场）：叠加命令（overlay）的 input——命令目录里是 input(allowsBlack: false)、可选，034 ⑤ 定了 input 0 = 清空这个通道的输入。
+    /// 面板自己认这一处（加"（清空）"选项、摘要写"清空"），不改命令目录的类型化字段（W5-S，129 §3 第 2 条 / G12 §7.1 第 11 条）。
+    static func zeroClearsInput(_ entry: ActionEntry, _ field: CommandField) -> Bool {
+        entry.commandKind == .overlay && field.name == "input"
     }
 
     private static func fieldValue(_ raw: Any, type: CommandFieldType, frameRate: FrameRate) -> FieldValue? {

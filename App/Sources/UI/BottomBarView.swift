@@ -490,8 +490,12 @@ struct StreamMenuRow: Equatable {
             var tip: [String] = []
             // 起不来的写"起不来：原因"；推流对象自己停住的（服务器拒绝鉴权）写"已停：鉴权失败（…）"（W4-C4 第 3 条：原来两种都写"起不来"）
             if o.enabled, let failure = route.failure { tip.append(L(route.failureStopped ? "streamMenu.tip.stopped" : "streamMenu.tip.failed", failure)) }
-            // 地址只给打过码的（user:pass@ / passphrase / streamid / key 等换成 <redacted>，G6 追加 ①）
-            if let url = o.settings.stream?.url, !url.isEmpty { tip.append(L("streamMenu.tip.address", StreamURLRedaction.redact(url: url))) }
+            // 地址只给打过码的（user:pass@ / passphrase / streamid / key 等换成 <redacted>，G6 追加 ①）；密钥栏空着时 RTMP 路径末段就是密钥，
+            // 连它一起遮（W5-S，132 §3 第 4 条：屏幕共享时悬停会露出来；与诊断包 ShowRedaction 同一个判法）
+            if let s = o.settings.stream, !s.url.isEmpty {
+                let address = StreamURLRedaction.redact(url: s.url, publishNameInPath: ShowRedaction.keyIsInPath(streamKey: s.streamKey))
+                tip.append(L("streamMenu.tip.address", address))
+            }
             switch click {
             case .start: tip.append(L("streamMenu.tip.start"))
             case .stop: tip.append(L("streamMenu.tip.stop"))
