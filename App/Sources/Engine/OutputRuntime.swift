@@ -258,8 +258,12 @@ final class OutputRuntime {
         inputs?.onBranchReleased = { [weak self] m in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.retryPendingNDIBranches(input: m) } }
         }
-        // 某路音频注册上来（新加 / 换源重注册 / 重试成功）：.input(n) 的消费者跟上这一路现在的槽位（D06 边角）
-        audio?.registration.onRegistered = { [weak self] _ in self?.followInputAudioSlots() }
+        // 某路音频注册上来（新加 / 换源重注册 / 重试成功）：.input(n) 的消费者跟上这一路现在的槽位（D06 边角）；
+        // 源是这一路、还没挂上音频的 NDI 发送补挂（W2A6：换源撞注册重试时 attachNDI 那一刻这一路没注册、没建挂件）
+        audio?.registration.onRegistered = { [weak self] n in
+            self?.followInputAudioSlots()
+            self?.attachMissingNDIAudio(input: n)
+        }
     }
 
     /// Stats.encoder（采样线程上调）。
@@ -737,6 +741,20 @@ final class OutputRuntime {
                 do { a.token = try audio.engine.addConsumer(a.consumer, source: a.source) } catch { NSLog("输入 \(n) 的音频消费者重挂不上：\(error)") }
             }
             NSLog("输入 \(n) 的音频换了混音器槽位：\(group.count) 个消费者（ISO / NDI）跟到槽位 \(slot)")
+        }
+    }
+
+    /// 源是输入 n、在跑、还没有音频挂件的 NDI 发送补挂这一路的音频（这一路刚注册上来时调，排在 followInputAudioSlots 之后）。
+    /// W2A6（133 静态确认、139 复现）：换源时 InputRuntime 先摘旧环（旧槽淡出 ≈ 16 ms 才摘掉）再注册新环，旧来源 stop() 比淡出快就撞 inputAlreadyRegistered、
+    /// 30 ms 后重试；同一轮 reconcile 里 reconcileNDI 摘下重挂这路 NDI，attachNDI 那一刻 registeredInputs 里没有 n、不建挂件，重试成功后
+    /// followInputAudioSlots 只跟已有的挂件——这路 NDI 原来就再没声音，要关开这路输出才回来。这时新来源已经注册上，槽位是新的，挂不到还在淡出的旧槽上（D06 边角的口径）。
+    /// 纯视频来源（图片等，没有环、永远不注册）走不到这里，与原来一样不发音频块。起 / 停进行中的不动：起完 attachNDI 按那时的注册表挂，停的不要了。
+    private func attachMissingNDIAudio(input n: Int) {
+        guard audio?.registeredInputs.contains(n) == true else { return }
+        for e in ndiSenders.values.sorted(by: { $0.number < $1.number }) where e.phase == .running && e.audio == nil {
+            guard case .input(let m) = e.key.source, m == n else { continue }
+            e.audio = attachAudio(e.sender, source: .input(number: n))
+            NSLog("NDI 发送 \(e.number)：输入 \(n) 的音频注册上来了，补挂音频")
         }
     }
 
