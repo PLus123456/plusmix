@@ -16,7 +16,7 @@
 
 ```bash
 make archive-adhoc            # 没有账号：全流程走一遍（公证 BLOCKED-账号），产物 .build/release/<版本>/
-make release-test             # scripts/release/tests/：R1–R6、R11–R14
+make release-test             # scripts/release/tests/：R1–R6、R11–R15
 DEVELOPMENT_TEAM=XXXXXXXXXX SPARKLE_FEED_URL=https://… SPARKLE_PUBLIC_ED_KEY=… make archive     # 正式
 make release-verify TARGET=.build/release/0.1.0/PlusMix-0.1.0.dmg VERIFY_FLAGS=--expect-notarized
 ```
