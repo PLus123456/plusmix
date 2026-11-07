@@ -23,8 +23,7 @@ enum ShowRedaction {
         switch json {
         case let dict as [String: Any]:
             // 推流设置（url 与 streamKey 同层）：密钥栏空着（只有空白也算，StreamDestination 先去空白）→ 地址路径的最后一段是密钥
-            let publishNameInPath = dict.first { $0.key.lowercased() == "streamkey" }
-                .map { (($0.value as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
+            let publishNameInPath = dict.first { $0.key.lowercased() == "streamkey" }.map { keyIsInPath(streamKey: ($0.value as? String) ?? "") } ?? false
             var out: [String: Any] = [:]
             for (key, value) in dict {
                 if let s = value as? String {
@@ -45,6 +44,12 @@ enum ShowRedaction {
         default:
             return json
         }
+    }
+
+    /// 推流设置的密钥栏空着（只有空白也算，StreamDestination 先去空白）→ 密钥写在地址路径的最后一段，打码时要连发布名一起遮。
+    /// 诊断包（上面的 redact(json:)）与底栏推流 ▴ 菜单的悬停提示（StreamMenuRow，W5-S）同一个判法。
+    static func keyIsInPath(streamKey: String) -> Bool {
+        streamKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// `scheme://user:pass@host:port/path?a=1&passphrase=x#frag` → userinfo 与 passphrase 的值换成标记。不是 `scheme://` 地址的原样返回。
