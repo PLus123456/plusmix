@@ -17,12 +17,13 @@ public enum APIDocument {
         所有时间戳都是 host time（`mach_absolute_time` 的原始 tick 数，UInt64），换算纳秒用 `hello` / `state` 里的 `timebase`：ns = ticks × numer / denom。
         鉴权默认关；配了 token 后每个请求带 `Authorization: Bearer <token>`（WebSocket 也可用 `?token=<token>`），否则 401。
         浏览器来源先于 token 查：带 `Origin` 而不在 `allowedOrigins`（默认空；`null` 永远不算），或不带 `Origin`、带 `Sec-Fetch-Site` 而不是 `none`（`same-origin` 只在 Host 是 IP 或 localhost 时算，防 DNS 重绑定）的请求一律 `403 {"error": "forbidden-origin"}`，WebSocket 不升级（握手回 400）、不订阅；Stream Deck 插件、Companion、curl、脚本这类不是浏览器的客户端不带这两个头，不受影响。
+        推流凭据打码（提案 035）：`state`、WebSocket 的 `snapshot`、`log` 里每个推流设置的 `streamKey` 非空时写成 `"<redacted>"`（空串照旧空串），`url` 里的 `user:pass@`、密钥类查询参数（\(StreamURLRedaction.secretQueryParams.sorted().joined(separator: " / "))，不分大小写）的值、密钥栏空时 RTMP 路径末段的发布名换成 `<redacted>`；键名与形状不变。要原文带 `?secrets=1`（只认 1），**只在配了 token 时给**；没配 token 时带 `?secrets=1` 的请求一律 `403 {"error": "secrets-require-token"}`，WebSocket 不升级。
 
         ## HTTP
 
         ### GET /api/v1/state
 
-        全量状态。键名与 Swift `Codable` 一致（`MixerState` 的字段原样）。
+        全量状态。键名与 Swift `Codable` 一致（`MixerState` 的字段原样）。推流凭据打码，`?secrets=1` 要 token（见开头）。
 
         ```json
         {
@@ -43,6 +44,7 @@ public enum APIDocument {
         - `clock` 在引擎没起时钟时为 `null`；`stats` 在还没采到第一行时为 `null`；`publishedAt` 是状态机发布这个快照的时刻。
         - `tally`：每路已配置输入的 `{program, preview}`，由快照推导（`MixerState.tally(ofInput:)`），全系统只算这一处。
         - `stats` 就是 stats.jsonl 的最近一行（测试标准 §7 的字段），UI / API / 测试三方同一份（铁律 4）。
+        - `state.outputs[].settings.stream`：`streamKey` 非空 → `"<redacted>"`，`url` 例如 `rtmp://<redacted>@ingest.example.com/live/app`、`rtmp://a.rtmp.youtube.com/live2/<redacted>`（密钥栏空时）、`srt://h:9000?streamid=<redacted>&passphrase=<redacted>&latency=200`。
 
         ### POST /api/v1/command
 
@@ -57,6 +59,7 @@ public enum APIDocument {
         - `applied`：状态是否真的变了。`false` = 状态机按规则忽略了它（转场进行中再发 fade、FTB 目标已相同、mute 已是该值……），状态原样，仍是 200。
         - `issuedAt`：命令进总线的时刻（服务端 host time）。
         - 结构性非法（引用不存在的输入 / 输出、通道越界、负时长、JSON 解析失败）→ `400 {"error": "<理由>"}`。
+        - 打码的推流设置可以原样写回：`setOutputSettings` 里 `streamKey` 是 `"<redacted>"` = 保留这一路现在的密钥，`url` 与 `state` 里给的打码地址相同 = 保留现在的地址，别的字段照改（"读 → 改别的 → 整个写回"不会把标记存进去）。密钥只跟着原来的地址走：`url` 换成别的地址时 `streamKey` 要给原文（给 `"<redacted>"` → 400，免得原密钥被推到新地址）。换不回去的标记（这一路没有推流设置、地址改了别的部分却还带标记）以及 `addOutput` / `loadShow` 里的标记 → `400 {"error": "推流设置里有打码标记：原文用 ?secrets=1 读"}`，状态不变。
 
         批量：请求体 `{"commands": [<Command>, …]}`，按顺序执行、sequence 连续（例如 `setPreview` + `cut` 一次发）。应答 `200 {"receipts": [...]}`；
         第 `index` 条被拒时 `400 {"error": "<理由>", "index": 1, "receipts": [前面已生效的回执]}`。空数组 400。
@@ -69,6 +72,7 @@ public enum APIDocument {
 
         最近走过总线的命令（诊断用）：`{"entries": [{"sequence", "issuedAt", "source": "ui|hotkey|midi|api|script", "command", "appliedTick", "applied", "appliedAt"}, ...]}`，
         按 sequence 升序，最多 256 条；`appliedAt − issuedAt` 是总线 + 状态机的处理耗时。
+        `setOutputSettings` / `addOutput` / `loadShow` 里的推流凭据打码，`?secrets=1` 要 token（见开头）。
 
         ### GET /api/v1/tally
 
@@ -78,6 +82,7 @@ public enum APIDocument {
         ## WebSocket /api/v1/events
 
         连接后依次收到 `hello`、当前 `snapshot`、最近一行 `stats`（如有）；之后每次状态变化推一条 `snapshot`（每拍最多一条，同一拍内多条命令只发最终状态），每秒一条 `stats`。
+        `snapshot` 的 `state` 里推流凭据打码；`/api/v1/events?secrets=1`（配了 token 才行）的连接收原文快照，没配 token 时这样的握手不升级。
         推送形态选的是 **整快照 + 版本号**（`sequence` / `tick`），不是 JSON Patch：快照几 KB、本机回环带宽不是问题，而整快照幂等、丢一条也能自愈，客户端不用维护补丁状态机；tally 和 PGM / PVW 只关心最新值。
 
         ```json
