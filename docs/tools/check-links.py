@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""文档链接检查（W4-C）：docs/、Samples/、README.md 里的 Markdown 相对链接都要指向存在的文件；带锚点的还要能在目标文件里找到那个标题。
+"""文档链接检查（W4-C）：docs/、Samples/、README.md、README.zh-CN.md 里的 Markdown 相对链接都要指向存在的文件；带锚点的还要能在目标文件里找到那个标题。
 
     python3 docs/tools/check-links.py            # 全部；有坏链接退出 1
     python3 docs/tools/check-links.py docs/user  # 只查某个目录
@@ -15,7 +15,7 @@ import sys
 import unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_SCOPES = ["docs", "Samples", "README.md"]
+DEFAULT_SCOPES = ["docs", "Samples", "README.md", "README.zh-CN.md"]
 
 LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")

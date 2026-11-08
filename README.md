@@ -1,108 +1,225 @@
 <p align="center">
-  <img src="docs/media/plusmix-icon.png" width="112" height="112" alt="PlusMix 图标：统一深色描边的预览绿与播出红双画面，加号位于红色画面右下角">
+  <img src="docs/media/plusmix-icon.png" width="128" height="128" alt="PlusMix icon: a green preview screen and a red program screen with a plus sign">
 </p>
 
-# PlusMix
+<h1 align="center">PlusMix</h1>
 
-Apple Silicon 原生的多机位导播台：编号输入（摄像头 / 采集卡、DeckLink、屏幕、文件、图片、NDI、纯音频）、PGM / PVW 范式、Cut / Fade / Wipe / Zoom / Stinger 转场、
-T-bar、FTB、四个叠加通道、四条音频总线，输出到录制（含 ISO 分路）、推流（RTMP / RTMPS / SRT）、NDI、第二块显示器、虚拟摄像头和多画面。
-Swift 6（严格并发）+ Metal，macOS 15+，Apache-2.0。
-代码名 Switcher：模块（`Switcher*`）、命令行工具（`switcher-headless` / `frameprobe`）、scheme、bundle id（`com.plusmix.switcher`）仍叫这个名字；界面、`PlusMix.app` 与发布产物用产品名 PlusMix。
+<p align="center">
+  <strong>A native multi-camera live production switcher for Apple Silicon Macs.</strong><br>
+  Cameras, capture cards, screens, files and NDI® in. Recording, streaming, NDI®, displays and a virtual camera out.
+</p>
 
-**状态**：0.1.0 第一版功能已全部合入，之后又做了一轮界面改版（工具条、三段式底栏、一个设置窗、转场槽、播放控制与推流 / 录制状态窗……，0.1.x）和几轮按外部审查修的稳定性与安全问题。检查点 G2–G10、G12、G13 的自动化门槛通过（G11 的 gate4 没拿到干净的一次；[测试报告索引](docs/testing/README.md)），
-但还没有发布版：G13（2026-11-07）判 0.1.1 还不发——人工检查清单还没人跑过，8 小时长稳要在最新的代码上再跑一遍，还有一条崩溃类缺陷（输出编号没有上限）等定修法，签名公证等账号（见 [已知问题](docs/KNOWN_ISSUES.md)）。
-现在能用来干活，但请先在自己的设备上按 [测试标准](docs/testing/测试标准.md) 验一遍。
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2563eb" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B-111827?logo=apple&logoColor=white" alt="macOS 15 or later">
+  <img src="https://img.shields.io/badge/Apple%20Silicon-native-111827" alt="Native on Apple Silicon">
+  <img src="https://img.shields.io/badge/Swift%206-strict%20concurrency-F05138?logo=swift&logoColor=white" alt="Swift 6 with strict concurrency">
+  <img src="https://img.shields.io/badge/GPU-Metal-6b7280" alt="Rendering with Metal">
+  <img src="https://img.shields.io/badge/status-pre--release-d97706" alt="Status: pre-release">
+</p>
 
-## 看看它怎么工作
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-下面是当前 App 的**真实窗口录制**，使用原创演示素材，无需摄像头或网络。操作由本地 API 驱动，与界面按钮共用同一套命令；GIF 无音频。
+<p align="center">
+  <img src="docs/media/demo-switching.gif" width="820" alt="PlusMix demo: pick input 2 on the green Preview monitor, then take it to the red Program monitor with Cut, Fade and Wipe">
+</p>
 
-**先预览，再播出。** 左侧绿色 PVW 选好下一路，右侧红色 PGM 保持当前节目；随后用 Cut 硬切、Fade 淡变或 Wipe 擦除切上播出。
+<p align="center">
+  <a href="#see-it-in-action">Demo</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#project-status">Status</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#contributing">Contributing</a>
+</p>
 
-![PlusMix 实机演示：选择 PVW，依次执行 Cut、Fade 和 Wipe，观察 PGM 画面变化](docs/media/demo-switching.gif)
+PlusMix is a production switcher in the Program / Preview tradition, written from scratch for macOS. It has numbered inputs, a transition column with a T-bar, four overlay channels, a four-bus audio mixer, and the outputs a small live show needs. Pictures are composited on the GPU with Metal, and sound runs through a real-time mixing engine written in C. The app is called PlusMix; inside the code it keeps its code name, **Switcher**.
 
-**叠加分别控制。** 字幕从下方滑入，再加入画中画；两个通道可以独立收起，回到干净的节目画面。
+## See it in action
 
-![PlusMix 实机演示：字幕滑入，画中画淡入，再分别收起两个叠加通道](docs/media/demo-overlays.gif)
+**Preview first, then take it to air** (the clip above). Pick the next shot on the green Preview monitor while the red Program monitor stays on air, then take it with a Cut, a Fade or a Wipe.
 
-[查看静态界面](docs/media/demo-poster.png) · [图标源文件、素材说明与重新生成](docs/media/README.md)
+**Overlays on their own channels.** A lower third slides in, a picture-in-picture fades in, and each channel leaves on its own, back to a clean program.
 
-## 一分钟上手
+![PlusMix demo: a lower third slides in, a picture-in-picture fades in, then each overlay channel is taken off separately](docs/media/demo-overlays.gif)
 
-要求：Apple Silicon Mac、macOS 15 以上、Xcode 26.x 或 27.x、Homebrew（`brew install xcodegen jq ffmpeg mediamtx`）。
+Both clips are real window recordings of the current build, made with original demo material. They are driven through the local API, which sends the same commands as the buttons; no camera or network is involved, and the GIFs have no sound. See also the [still screenshot](docs/media/demo-poster.png) and [how the icon and demos are made](docs/media/README.md) (Chinese).
 
-克隆本仓库后在仓库根目录：
+## Features
+
+### Inputs
+
+- Up to 16 numbered inputs: cameras and capture devices (USB, HDMI or SDI to USB, Continuity Camera), Blackmagic DeckLink cards, screens, windows and apps, video files, still images, NDI® sources, audio-only devices and synthetic test patterns.
+- Video files loop, pause, restart and play at 0.1–8× speed, and can restart by themselves when taken to Program.
+- Per-input crop and position, a chroma keyer with an eyedropper on the live picture, audio delay compensation, and channel mapping for multichannel devices.
+
+### Switching and transitions
+
+- Program / Preview with Cut and four transition slots. Each slot holds a Fade, a Wipe (five directions), a Zoom or a Stinger with its own duration; ⌥1–⌥4 run a slot and Return runs the current one.
+- A horizontal T-bar for manual transitions, and fade to black with an adjustable duration.
+- Frame-accurate timing: a cut lands on the exact program tick, and the test harness checks transition curves frame by frame.
+
+### Overlays and multiview
+
+- Four overlay channels, full frame or picture-in-picture, with fade or slide-in animations, borders, nine anchor positions and an optional preview on PVW.
+- A multiview with name labels and live audio meters, in its own window or on any display.
+
+### Audio
+
+- Faders, mute, pan, solo (PFL / AFL) and audio-follow-video on every input, and four buses: Master, Bus A, Bus B and a headphone bus.
+- EQ, compressor and limiter on every bus; EQ and a dynamics stage on every input. The effect chain's latency is matched by delaying the picture the same amount, so recordings, streams and what you monitor all stay in sync.
+- Loudness readouts (momentary, short-term, integrated, LRA and true peak), on top of a real-time audio path written in C: no locks, allocations, logging or system calls in the audio callback.
+
+### Outputs
+
+- Recording to H.264, HEVC or ProRes in crash-safe fragmented .mov files, with an optional MP4 remux after stopping, plus synchronized ISO recording of individual inputs.
+- Streaming to several destinations at once over RTMP, RTMPS or SRT, with service presets (YouTube, Twitch, Facebook, Bilibili, Douyin, Kuaishou, WeChat Channels or custom), per-destination quality, automatic reconnect and stream authentication.
+- NDI® output, full-screen external displays, and a virtual camera for video-call apps (the virtual camera needs a Developer ID–signed build).
+- Disk protection with a minimum free space and a fallback folder.
+
+### Control
+
+- Editable keyboard shortcuts with an action picker, MIDI mapping, a Stream Deck plugin, and a local HTTP + WebSocket API with 42 commands.
+- A read-only tally stream for tally lights, an optional compatibility layer for existing control panels such as Companion (off by default), and an interface lock.
+
+### Built to be measured
+
+- Every frame and audio block is stamped with host time on arrival, and encoder timestamps come from the program clock.
+- One statistics structure feeds the UI, the API and the tests, and can be written to `stats.jsonl` once a second.
+- Synthetic sources carry frame numbers, flashes and clicks. `frameprobe` reads them back out of recordings to measure drops, A/V sync and transition timing. A 10-minute integration run gates every checkpoint, and an 8-hour soak is part of the release gate.
+
+## Quick start
+
+You need an Apple Silicon Mac with macOS 15 or later, Xcode 26 or 27, and [Homebrew](https://brew.sh).
 
 ```bash
+brew install xcodegen jq ffmpeg mediamtx
+git clone https://github.com/PLus123456/plusmix.git
+cd plusmix
 make gen build-app && open .build/DerivedData/Build/Products/Debug/PlusMix.app
 ```
 
-1. 节目 › 打开… 选 `Samples/event/event.switcher.json`（四路合成源 + 多画面 + 四路 ISO，不需要任何设备；[示例说明](Samples/README.md)）。
-2. 键盘 `2` 选 2 号到 PVW，`空格` Cut，`回车` Fade，`F` 渐黑；底栏"录制"录到 `~/Movies/PlusMix/`。
-3. 输入 › 添加输入…（⌘I）接自己的摄像头。屏幕录制权限要在 系统设置 › 隐私与安全性 里手动给（[故障排查](docs/user/故障排查.md#1-权限)）。
+1. **Show › Open…** and pick `Samples/event/event.switcher.json`: four synthetic cameras, a multiview and four ISO recordings, no hardware needed ([sample shows](Samples/README.md), Chinese).
+2. Press `2` to put input 2 on Preview, `Space` to cut, `Return` to run the current transition and `F` to fade to black.
+3. Click **Record** in the bottom bar. Files go to `~/Movies/PlusMix/`.
+4. **Input › Add Input…** (⌘I) connects your own camera. Screen recording permission has to be granted by hand in System Settings ([Troubleshooting › Permissions](docs/user/en/troubleshooting.md#1-permissions)).
 
-不开界面、纯命令行跑同一个节目 30 秒并写每秒统计：
+To run the same show for 30 seconds without the interface and write per-second statistics:
 
 ```bash
-swift build -c release --package-path Tools/switcher-headless && Tools/switcher-headless/.build/release/switcher-headless run --show Samples/event/event.switcher.json --duration 30 --audio-device null --stats /tmp/stats.jsonl
+swift build -c release --package-path Tools/switcher-headless
+Tools/switcher-headless/.build/release/switcher-headless run --show Samples/event/event.switcher.json \
+  --duration 30 --audio-device null --stats /tmp/stats.jsonl
 ```
 
-## 文档
+The interface comes in English and Simplified Chinese and follows the system language.
 
-| 看什么 | 在哪 |
+## Project status
+
+> [!NOTE]
+> **Pre-release.** All 0.1.0 features are in, along with the 0.1.x interface redesign (toolbar, three-part bottom bar, a single Settings window, transition slots, playback controls, stream and recording status windows). 0.1.1 has not shipped yet: one high-severity defect is still open, the manual checklist and an 8-hour soak on the current code are pending, and there are no signed or notarized builds, so for now you build from source. Details are in the [known issues](docs/KNOWN_ISSUES.md) (Chinese).
+
+| Latest checkpoint: G14, 2026-11-08 | Result |
 |---|---|
-| 用户手册：概念、每种输入的接法、输出、快捷键、故障排查（中 / 英） | [docs/user/](docs/user/README.md) · [English](docs/user/en/README.md) |
-| 示例节目：教会 / 教室 / 活动 | [Samples/](Samples/README.md) |
-| 本地 API（HTTP + WebSocket）、示例、第三方面板兼容层 | [docs/api/](docs/api/README.md)、[命令参考](docs/api.md) |
-| Stream Deck、Companion、外部 tally | [docs/integrations/](docs/integrations/README.md) |
-| 测试标准（公开）、检查点报告索引、设备兼容性表 | [docs/testing/](docs/testing/README.md) |
-| 设计方案、后续方案、内部测试标准 | [docs/spec/](docs/spec/) |
-| 契约（所有包共用的类型与 JSON 字段） | [docs/CONTRACTS.md](docs/CONTRACTS.md) |
+| Package tests (`swift test`, six packages) | 1,097 cases: 1,070 pass, 25 skipped (hardware, SDK or signing), 2 environment-dependent |
+| App tests (`xcodebuild test`, two runs) | 336 cases per run: 330 pass, 4 skipped, 2 display-dependent |
+| 10-minute integration run | all automatic video, audio, encoder and control checks pass |
+| Performance baseline | no regression against the previous checkpoint |
 
-## 构建与测试
+Full report: [reports/G14.md](reports/G14.md) (Chinese). How things are measured: [testing summary](docs/testing/en/README.md).
 
-| 目标 | 做什么 |
+## Documentation
+
+| Topic | Where |
 |---|---|
-| `make gen` | XcodeGen 由 `project.yml` 生成 `Switcher.xcodeproj`（不入库）。真实签名：`DEVELOPMENT_TEAM=你的TeamID make gen`（虚拟摄像头的系统扩展必须这样签） |
-| `make build` | 六个包、两个命令行工具、App 全部编译 |
-| `make test` | 包的 `swift test`（G8 时 861 个用例）、工具冒烟、App 的 `xcodebuild test`（244 个） |
-| `make lint` | 禁词 / 版本号 / 包约束、依赖方向、目录归属、文档链接、随包手册与 `docs/user/` 一致 |
-| `make manual` | 由 `docs/user/` 重生成随 App 打包的 HTML 手册（`App/Resources/Help/`） |
-| `make gate4` | 10 分钟集成场景（V1–V7、A1–A4、E1–E3、E5、C1–C4）并出报告 |
+| User manual: concepts, inputs, outputs, shortcuts, settings, troubleshooting | [English](docs/user/en/README.md) · [中文](docs/user/README.md) |
+| Local API (HTTP + WebSocket) with examples | [docs/api/](docs/api/README.md) · [command reference](docs/api.md) (Chinese) |
+| Stream Deck, Companion and tally | [docs/integrations/](docs/integrations/README.md) (Chinese) |
+| Sample shows: church, classroom, event | [Samples/](Samples/README.md) (Chinese) |
+| Testing: metrics, tools and checkpoint reports | [English summary](docs/testing/en/README.md) · [中文](docs/testing/README.md) |
+| Design spec, follow-up plan and internal test standard | [docs/spec/](docs/spec/) (Chinese) |
+| Contracts: the types and JSON fields shared by all packages | [docs/CONTRACTS.md](docs/CONTRACTS.md) (Chinese) |
+| Release engineering: signing, notarization, updates | [docs/release/](docs/release/README.md) (Chinese) |
 
-改了 `docs/user/` 之后跑 `make manual`（= `python3 docs/tools/build-help.py`），重生成随 App 打包的 HTML 手册（`App/Resources/Help/`，帮助 › PlusMix 使用手册 打开的就是它）；忘了跑 `make lint` 会红。
-单独跑一个包：`swift test --package-path Packages/SwitcherCore`。可选的第三方 SDK：NDI SDK for Apple（默认 `/Library/NDI SDK for Apple`，环境变量 `NDI_SDK_DIR`）、
-DeckLink SDK（`DECKLINK_SDK_DIR` 或 `~/SDKs/DeckLink`）；没有时对应输入 / 输出编成空实现，其他功能不受影响。
+## Build and test
 
-权限：摄像头、麦克风首次访问弹窗；屏幕录制没有弹窗，要在 系统设置 › 隐私与安全性 › 屏幕与系统音频录制 里手动加；没设 Team ID 的 ad-hoc 签名每次重编都会重新问。
-虚拟摄像头（系统扩展）和公证需要付费开发者账号。
+| Command | What it does |
+|---|---|
+| `make gen` | Generates `Switcher.xcodeproj` from `project.yml` with XcodeGen (the project file is not checked in). |
+| `make build` | Builds the six packages, both command-line tools and the app. |
+| `make test` | Runs `swift test` for every package, a smoke run of both tools, and the app's `xcodebuild test`. |
+| `make lint` | Checks forbidden words, version numbers, package rules, dependency direction, directory ownership, doc links and the bundled manual. |
+| `make manual` | Rebuilds the HTML manual bundled with the app from `docs/user/`. |
+| `make gate4` | Runs the 10-minute integration scenario and writes a report. |
 
-## 目录
+To test a single package: `swift test --package-path Packages/SwitcherCore`.
 
+**Optional SDKs.** The NDI® SDK for Apple (`/Library/NDI SDK for Apple`, or set `NDI_SDK_DIR`) and the Blackmagic DeckLink SDK (`DECKLINK_SDK_DIR`, or `~/SDKs/DeckLink`). Without them, those inputs and outputs build as empty stubs and everything else works.
+
+**Signing.** Builds are ad-hoc signed by default. With an Apple Development identity in your keychain, `DEVELOPMENT_TEAM=<Team ID> make gen build-app` signs for local development, and macOS then remembers camera, microphone and screen-recording permissions across rebuilds. Developer ID signing, notarization and the virtual camera's system extension need a paid Apple Developer account ([signing](docs/release/signing.md), Chinese).
+
+**Permissions.** macOS asks for camera and microphone access on first use. Screen recording has no prompt: add the app under System Settings › Privacy & Security › Screen & System Audio Recording.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    contracts["SwitcherContracts<br/>shared types and JSON"]
+    core["SwitcherCore<br/>engine and Metal renderer"]
+    inputs["SwitcherInputs"]
+    audio["SwitcherAudio<br/>real-time C mixer"]
+    outputs["SwitcherOutputs"]
+    control["SwitcherControl"]
+    testkit["SwitcherTestKit"]
+    app["PlusMix.app"]
+    tools["switcher-headless<br/>frameprobe"]
+    contracts --> core
+    core --> inputs & audio & outputs & control
+    inputs & audio & outputs & control --> testkit
+    testkit --> app & tools
 ```
-Packages/SwitcherCore      引擎：SwitcherContracts（契约）/ SwitcherEngine（时钟、帧槽、状态机）/ SwitcherRender（Metal）
-Packages/SwitcherInputs    各输入；DeckLink、NDI 是可选 target      Packages/SwitcherAudio     混音（C 热路径）、重采样、效果、表
-Packages/SwitcherOutputs   编码、录制、推流、NDI 发送、外部显示、虚拟摄像头桥、ISO
-Packages/SwitcherControl   命令总线、HTTP / WS API、快捷键、MIDI、tally；VMixCompat 独立 target 默认关
-Packages/SwitcherTestKit   合成源、帧号解码、Stats 采集、场景执行器
-App/                       AppKit 主程序             CameraExtension/           CMIO 系统扩展（虚拟摄像头）
-Tools/switcher-headless    无界面跑引擎              Tools/frameprobe           分析输出文件里的帧号 / 闪光 / click
-Tools/streamdeck-plugin    Stream Deck 插件          Samples/                   示例节目与素材
-Tests/Fixtures  Tests/References  scenarios/  baselines/  reports/   测试素材、参考图、场景、基线、报告
-docs/user  docs/api  docs/testing  docs/integrations  docs/spec  docs/CONTRACTS.md  docs/OWNERSHIP.md  docs/contract-changes/
-scripts/                   lint、依赖方向、目录归属检查，gate 脚本，网络损伤，MediaMTX 配置
-```
 
-依赖方向只允许 `SwitcherContracts ← SwitcherCore ← {Inputs, Audio, Outputs, Control} ← TestKit ← Tools / App`，`make lint` 会拦反向依赖。
-热路径规则：渲染线程每帧零分配；音频回调内无锁、无分配、无日志、无系统调用，热路径用 C（[设计方案 §3](docs/spec/导播台设计方案.md)）。
+Arrows point from a module to the modules built on top of it, and `make lint` rejects any dependency in the other direction. Inside SwitcherCore, the engine and the renderer only see the contracts, never each other.
 
-## 贡献
+The real-time rules from the [design spec](docs/spec/导播台设计方案.md) (Chinese) are enforced in review and by tests: the render thread allocates nothing per frame; the audio callback takes no locks, allocates nothing, logs nothing and makes no system calls, and its hot path is written in C. Every frame and audio block is stamped with host time (`mach_absolute_time`) where it enters.
 
-- 许可证 **Apache-2.0**（[LICENSE](LICENSE)）；内嵌的第三方源码及其许可证在 [THIRD_PARTY/](THIRD_PARTY/)。不接受 GPL 代码。
-- 贡献用 **DCO** 签字，不用 CLA：每个提交加 `Signed-off-by: 你的名字 <邮箱>`（`git commit -s`），表示你有权按 Apache-2.0 提交这段代码。
-- 提交前 `make lint` 和相关包的 `swift test` 要绿；改公共契约（`SwitcherContracts` 的公开类型、JSON 字段名）先在 [docs/contract-changes/](docs/contract-changes/README.md) 写提案。
-- 产品文案、代码、界面里不出现竞品的名字、图标、文案和默认快捷键表（`make lint` 会扫）；唯一例外是第三方 API 兼容层的模块名，它的法律说明见 [docs/api/vmix-compat.md](docs/api/vmix-compat.md)。
-- 设备实测结果比代码更缺人手：按 [设备兼容性表](docs/testing/设备兼容性.md) 的模板提交。
-- 报 bug 附上 `stats.jsonl` 和能复现的节目文件（[故障排查 §9](docs/user/故障排查.md#9-日志与诊断)）。
+| Path | What lives there |
+|---|---|
+| `Packages/SwitcherCore` | The contracts, the engine (clock, frame slots, state machine) and the Metal renderer |
+| `Packages/SwitcherInputs` | Every input kind; DeckLink and NDI® are optional targets |
+| `Packages/SwitcherAudio` | The mixer (C hot path), resampling, effects and meters |
+| `Packages/SwitcherOutputs` | Encoding, recording, ISO, streaming, NDI® output, external displays and the virtual camera bridge |
+| `Packages/SwitcherControl` | Command bus, HTTP / WebSocket API, hotkeys, MIDI, tally and the compatibility layer |
+| `Packages/SwitcherTestKit` | Synthetic sources, frame-number decoding, statistics and the scenario runner |
+| `App/` · `CameraExtension/` | The AppKit app, and the CMIO system extension behind the virtual camera |
+| `Tools/` | `switcher-headless`, `frameprobe` and the Stream Deck plugin |
+| `Samples/` · `scenarios/` · `baselines/` · `reports/` | Sample shows, test scenarios, performance baselines and checkpoint reports |
+| `docs/` | Manual, API, integrations, testing, spec, contracts and the development plan |
 
-这个仓库由多个 AI 辅助会话按 [docs/plan/](docs/plan/导播台落地方案.md) 的分工推进，每个会话只动 [docs/OWNERSHIP.md](docs/OWNERSHIP.md) 里划给它的目录；仓库约定在 [CLAUDE.md](CLAUDE.md)。
+The code name **Switcher** stays on the modules (`Switcher*`), the command-line tools, the Xcode scheme and the bundle id (`com.plusmix.switcher`). The app, its windows and the release files are called PlusMix.
+
+## How this project is built
+
+PlusMix is developed by AI-assisted coding sessions working in parallel git worktrees. Each session follows one prompt in [docs/plan/prompts/](docs/plan/prompts/) and may only touch the directories assigned to it in [docs/OWNERSHIP.md](docs/OWNERSHIP.md). Checkpoint sessions (G2 to G14 so far) merge the finished branches, run the full test suite and write a report in [reports/](reports/). The plan, every prompt and every report live in this repository; the conventions are in [CLAUDE.md](CLAUDE.md) (Chinese).
+
+## Contributing
+
+- PlusMix is licensed under **Apache-2.0** ([LICENSE](LICENSE)). Bundled third-party code and its licenses are in [THIRD_PARTY/](THIRD_PARTY/); GPL code is not accepted.
+- Sign off your commits under the **DCO** (`git commit -s`); there is no CLA.
+- Before sending a change, `make lint` and `swift test` for the packages you touched should pass. Changes to the public contracts (public types in `SwitcherContracts`, JSON field names) start as a proposal in [docs/contract-changes/](docs/contract-changes/README.md).
+- Product text, code and UI never use a competitor's name, icons, copy or default shortcut table, and `make lint` checks this. The only exception is the module name of the third-party API compatibility layer, explained in its [legal note](docs/api/vmix-compat.md).
+- Results from real devices are the most wanted contribution: fill in the [device compatibility template](docs/testing/设备兼容性.md) (Chinese).
+- For bug reports, attach `stats.jsonl` and a show file that reproduces the problem ([Troubleshooting › Logs and diagnostics](docs/user/en/troubleshooting.md#9-logs-and-diagnostics)).
+
+## Acknowledgements
+
+PlusMix builds on [HaishinKit](https://github.com/HaishinKit/HaishinKit.swift) (RTMP), [SwiftNIO](https://github.com/apple/swift-nio) and [Hummingbird](https://github.com/hummingbird-project/hummingbird) (the local API), [Sparkle](https://sparkle-project.org) (updates), [libsamplerate](https://github.com/libsndfile/libsamplerate) and [libebur128](https://github.com/jiixyj/libebur128) (audio), and the NDI® SDK.
+
+## License
+
+PlusMix is released under the [Apache License 2.0](LICENSE).
+
+NDI® is a registered trademark of Vizrt NDI AB. The optional compatibility layer imitates a third-party control protocol only so that existing control panels keep working; protocol and product names belong to their owners, and PlusMix is not affiliated with them.
