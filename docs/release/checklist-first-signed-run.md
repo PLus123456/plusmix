@@ -1,10 +1,33 @@
-# 第一次带 Team ID 签名跑通时的验证清单（prompt 71 第 10 条；都 BLOCKED-签名 / 账号到这里）
+# 第一次带 Team ID 签名跑通时的验证清单（prompt 71 第 10 条；W4-B3 分成两段）
+
+两种"第一次"：**开发签名**（钥匙串里有 Apple Development 身份就能做，Personal Team / 免费 Apple ID 也行——本机 2026-11-03 起就有）和 **Developer ID**（要 Apple Developer Program，仍 BLOCKED-账号）。
+两者的区别（能做 / 不能做、TCC 为什么稳定、libndi 为什么要关库校验）见 signing.md"三种签名模式"与"权限表与硬化运行时"。
+
+## 开发签名第一次（W4-B3）
+
+前提：钥匙串里有 "Apple Development: …" 身份（`security find-identity -v -p codesigning`）；Team ID 用 `scripts/dev-signing/sign-mode.sh --dev-team` 读（证书名括号里那串不是）。
+
+```bash
+DEVELOPMENT_TEAM=<Team ID> make gen build-app   # 没有 Developer ID 身份时 make gen 自动选开发签名（打一行 "[sign-mode] 开发签名…"）；写明 SWITCHER_DEV_SIGN=1 也一样
+make release-test                               # R17 真签一次（Team / runtime / 权限表 / 指定要求 / 起来 4 秒）；跑完工程回到 ad-hoc（R1），见最后一条
+```
+
+- [ ] `make gen` 那行是 `[sign-mode] 开发签名…`；`codesign -dvv .build/DerivedData/Build/Products/Debug/PlusMix.app` 有 `TeamIdentifier=<Team ID>`、`flags=0x10000(runtime)`、`Authority=Apple Development: …`；`codesign -d -r- <同一个 App>` 的指定要求里没有 `cdhash`。
+- [ ] **授一次权**：在 Terminal.app 里 `open .build/DerivedData/Build/Products/Debug/PlusMix.app`（经 LaunchServices 起，TCC 记在 PlusMix 名下；直接跑 `Contents/MacOS/PlusMix` 时记在 Terminal 名下，测不出签名的作用；Claude 的 Bash 起的进程拿不到 TCC）：添加内置摄像头输入 → 允许、出画面；添加纯音频设备输入 → 允许、有电平；添加屏幕采集 → 系统设置里允许屏幕录制、按提示重开 App。
+- [ ] **重编译不重问**：改一行 App 代码（或 `touch App/Sources/AppDelegate.swift`）→ `make build-app` → 再 `open` 起：三项都不再问、直接出画面 / 电平。对照：ad-hoc 构建同样操作会重问（指定要求是 cdhash）。另一个 worktree 用同一 Team 编出来的也应不重问（TCC 按 bundle id + 指定要求记、不看路径）——顺手验一次。
+- [ ] **`make test-app` 的宿主也不重问**：从 Terminal.app `make test-app XCB_FLAGS=`——`InputWiringTests.testInputs_builtInCameraLiveWithin5sAndPictureShows` 不再因"BLOCKED-权限"跳过、不再弹授权框；用例数看日志末尾 `Executed N tests`。
+- [ ] **libndi 在硬化运行时下能加载**：App 起来、添加 NDI 输入 / 开 NDI 输出不崩（开发表的 `cs.disable-library-validation`；没有它 dyld 当场拒，signing.md 上表）。
+- [ ] **虚拟摄像头扩展装不上是预期**：输出 → 虚拟摄像头 → 安装 / 激活扩展 → 失败或要批准都记下来（Personal Team 没有 `system-extension.install`，BLOCKED-账号），别当新问题。
+- [ ] `make release-test` / `make archive-adhoc` 之后工程是 ad-hoc 的：回来开发再 `DEVELOPMENT_TEAM=<Team ID> make gen`；只想临时编一次用别名 `make build-app DEV_SIGN_TEAM=<Team ID>`（不改工程里写的模式）。
+
+## Developer ID 第一次（BLOCKED-账号；都 BLOCKED-签名 / 账号到这里）
 
 前提：Apple Developer Program 账号；Team ID；钥匙串里有 "Developer ID Application" 证书；App 放到 /Applications 再起。
 
 ```bash
-DEVELOPMENT_TEAM=<TeamID> make gen build-app         # 权限表自动换成 App/Switcher-signed.entitlements（含 system-extension.install、camera、audio-input）
-# 或直接 DEVELOPMENT_TEAM=<TeamID> make archive 拿签好的 .build/release/<版本>/PlusMix.app
+DEVELOPMENT_TEAM=<TeamID> make archive               # 拿签好的 .build/release/<版本>/PlusMix.app（archive.sh 钉 SWITCHER_DEV_SIGN=0 → App/Switcher-signed.entitlements，含 system-extension.install、camera、audio-input）
+# 本机直接编：DEVELOPMENT_TEAM=<TeamID> make gen build-app（钥匙串里有该 Team 的 Developer ID 身份时 make gen 自动选 Developer ID 的设置）——
+# 这条在 Personal Team 上停在 GatherProvisioningInputs（G13 §4.4）；付费账号第一次在这里验证，不行就加 -allowProvisioningUpdates，或本机清单改用上一段的开发签名
 ```
 
 - [ ] **硬化运行时下摄像头 / 麦克风能用**：添加内置摄像头输入 → 出画面；纯音频设备输入 → 有电平。不行 = App/Switcher-signed.entitlements 少了 device.camera / device.audio-input（W4-B 加的两条）。

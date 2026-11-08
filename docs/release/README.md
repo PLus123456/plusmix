@@ -2,7 +2,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| signing.md | `make archive`：签名、公证、DMG、校验、干净机器验证、常见错误 |
+| signing.md | 三种签名模式（ad-hoc / 开发签名 / Developer ID，W4-B3）；`make archive`：签名、公证、DMG、校验、干净机器验证、常见错误 |
 | sparkle.md | 自动更新：集成、EdDSA 密钥（私钥不进仓库）、appcast、本地验证一次 |
 | diagnostics.md | MetricKit 崩溃诊断落盘、诊断包一键导出（内容、去掉了什么） |
 | ci.md | GitHub Actions self-hosted runner：三个工作流、装 runner、secrets |
@@ -10,13 +10,14 @@
 | dependencies.md | 依赖钉版本（swift-collections 1.6.0）与升级流程 |
 | bundle-id.md | 正式 bundle id 已定 `com.plusmix.switcher`（用户 2026-09-28 定前缀 com.plusmix，G5 用 `set-bundle-id.sh` 切）；脚本一键切换（含 Stream Deck 插件 UUID） |
 | third-party.md | 随包分发的 NDI 运行库、Sparkle 等的许可证与商标声明 |
-| checklist-first-signed-run.md | 第一次带 Team ID 跑通时要验的清单（虚拟摄像头四步、扩展 CPU、L1、警告） |
+| checklist-first-signed-run.md | 第一次带 Team ID 跑通时要验的清单：开发签名第一次（授一次权、重编译 / `make test-app` 不重问）；Developer ID 第一次（虚拟摄像头四步、扩展 CPU、L1、警告） |
 
 ## 快速上手
 
 ```bash
 make archive-adhoc            # 没有账号：全流程走一遍（公证 BLOCKED-账号），产物 .build/release/<版本>/
-make release-test             # scripts/release/tests/：R1–R6、R11–R14
+make release-test             # scripts/release/tests/：R1–R6、R11–R17（R15 G12 加，R16 / R17 W4-B3 加；R17 没有 Apple Development 身份时跳过）
+DEVELOPMENT_TEAM=XXXXXXXXXX make gen build-app   # 本机开发签名（钥匙串里有 Apple Development 身份、没有 Developer ID 时自动选；signing.md"三种签名模式"）
 DEVELOPMENT_TEAM=XXXXXXXXXX SPARKLE_FEED_URL=https://… SPARKLE_PUBLIC_ED_KEY=… make archive     # 正式
 make release-verify TARGET=.build/release/0.1.0/PlusMix-0.1.0.dmg VERIFY_FLAGS=--expect-notarized
 ```
@@ -30,6 +31,7 @@ make release-verify TARGET=.build/release/0.1.0/PlusMix-0.1.0.dmg VERIFY_FLAGS=-
 |---|---|---|
 | Xcode 26+、xcodegen | 归档 | 不能构建 |
 | Apple Developer Program（Team ID + "Developer ID Application" 证书） | 签名、公证、虚拟摄像头扩展、Sparkle 的代码签名一致性 | 退成 ad-hoc：Gatekeeper 拦、扩展装不上、Sparkle 不能装更新 |
+| Apple Development 身份（Xcode › Settings › Accounts 登 Apple ID，免费的也行） | 本机开发签名：TCC 授权跨重编译不重问（W4-B3） | ad-hoc：每次重编译都重授权摄像头 / 麦克风 / 屏幕录制；不影响发布 |
 | notarytool 凭据（钥匙串 profile 或 App Store Connect API 密钥） | 公证 | 报告标 BLOCKED-账号 |
 | NDI SDK（/Library/NDI SDK for Apple） | 链接 NDI、随包 libndi.dylib | 包不含 NDI，Stats 标 unavailable |
 | Sparkle 密钥（钥匙串） | appcast 签名 | 不能出 appcast；App 里更新"未配置" |
@@ -42,3 +44,4 @@ W4-B 还动了：根 Makefile 两行 include、App/Info.plist 两个 Sparkle 键
 App/Tests/ReleaseTests.swift、CameraExtension/Resources/ 两个 InfoPlist.strings、THIRD_PARTY/NDI 与 Sparkle、scripts/xcode-workspace-Package.resolved 的 sparkle 一项——
 都是 prompt 71 点名的交付，逐条列在 reports/w4-release.md §4 请求归属行补记。
 W4-B2（prompt 83，分支 w4-release-2）收尾：R11 改读当前前缀、`scripts/check-links.sh` 把文档链接检查挂进 make lint、release.yml 产物名跟 PRODUCT_NAME、本目录跟 bundle id 裁定与改名。
+W4-B3（prompt 141，分支 w4-release-3）：开发签名接进 project.yml（三种签名模式、`App/Switcher-dev.entitlements`、`scripts/dev-signing/sign-mode.sh` 自动识别、Makefile 的 `DEV_SIGN_TEAM` 改成别名）、R16 / R17、本目录两篇的开发签名段。

@@ -17,10 +17,28 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"           # 必须与 Packages/SwitcherCore/Sources/SwitcherContracts/Version.swift 一致（lint 校验）
     CURRENT_PROJECT_VERSION: "1"
-    # Team ID 走环境变量：`DEVELOPMENT_TEAM=XXXXXXXXXX make gen`。不设则为空，走 ad-hoc 签名（"Sign to Run Locally"）。
+    # 签名三种模式（W4-B3 / prompt 141；docs/release/signing.md"三种签名模式"）。两个输入由 `make gen` 从环境变量写进工程（XcodeGen 的 ${…}）：
+    #   DEVELOPMENT_TEAM   不设 → (a) ad-hoc（"Sign to Run Locally"，现状）
+    #   SWITCHER_DEV_SIGN  有 Team 时：1 → (b) 开发签名（钥匙串里的 Apple Development 身份，Personal Team 也行：Manual、不要描述文件、App 用开发表）；
+    #                      0 → (c) Developer ID（make archive 那条，W4-B，archive.sh 钉 0）；不设 → make gen 看钥匙串自动定
+    #                      （scripts/dev-signing/sign-mode.sh：没有该 Team 的 Developer ID 身份、有它的 Apple Development 身份 → 1，否则 0）
+    # 派生的 SWITCHER_SIGN_MODE（adhoc / dev / devid）选签名方式、身份和 App 的权限表。写法同 W3-C 的 $(DEVELOPMENT_TEAM:default=adhoc)：
+    # 查表只定义 adhoc / dev 两项，其他（devid，任何 Team ID）落到 default，即 W4-B3 之前的 Automatic + "-" + 签名表。
+    # 两个输入也能在 xcodebuild 命令行上盖（命令行优先级最高，派生跟着变）：`make build-app DEV_SIGN_TEAM=<Team ID>` 就是不重新生成工程、命令行盖这两个。
     DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+    SWITCHER_DEV_SIGN: ${SWITCHER_DEV_SIGN}
+    SWITCHER_TEAM_KIND: "$(DEVELOPMENT_TEAM:default=adhoc)"
+    SWITCHER_DEV_SIGN_KIND: "$(SWITCHER_DEV_SIGN:default=0)"
+    SWITCHER_SIGN_MODE_FOR_TEAM_adhoc: adhoc
+    SWITCHER_SIGN_MODE_FOR_DEV_1: dev
+    SWITCHER_SIGN_MODE: "$(SWITCHER_SIGN_MODE_FOR_TEAM_$(SWITCHER_TEAM_KIND):default=$(SWITCHER_SIGN_MODE_FOR_DEV_$(SWITCHER_DEV_SIGN_KIND):default=devid))"
+    # 签名方式分两行：无条件那行是 W4-B3 之前的值，XcodeGen 拿它写 TargetAttributes 的 ProvisioningStyle（它不认宏，写成宏就把宏原样抄进去）；
+    # [sdk=macosx*] 那行按模式查表——同一层里带条件的变体优先，本工程只有 macOS，所以构建时总是它生效。这样 (a) / (c) 的 TargetAttributes 与之前一样、构建时取到的值也一样（(c) 本机测不了，R16 逐项比）。
+    SWITCHER_CODE_SIGN_STYLE_dev: Manual
     CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "-"
+    "CODE_SIGN_STYLE[sdk=macosx*]": "$(SWITCHER_CODE_SIGN_STYLE_$(SWITCHER_SIGN_MODE):default=Automatic)"
+    SWITCHER_CODE_SIGN_IDENTITY_dev: Apple Development
+    CODE_SIGN_IDENTITY: "$(SWITCHER_CODE_SIGN_IDENTITY_$(SWITCHER_SIGN_MODE):default=-)"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     DEAD_CODE_STRIPPING: YES
   configs:
@@ -74,15 +92,16 @@ targets:
         SPARKLE_FEED_URL: ""
         SPARKLE_PUBLIC_ED_KEY: ""
         # W4-B：公证要求硬化运行时。ad-hoc 签名时 Xcode 自己会关掉它（构建日志 note: Disabling hardened runtime with ad-hoc codesigning），
-        # 有 Team ID 时生效：摄像头 / 麦克风要 App/Switcher-signed.entitlements 里的 device.camera / device.audio-input 两条，
-        # 包内的 libndi.dylib / Sparkle.framework 要用同一 Team ID 重签（库校验），scripts/release/sign.sh 做。
+        # 有 Team ID 时（开发签名与 Developer ID）生效：摄像头 / 麦克风要权限表里的 device.camera / device.audio-input 两条；库校验开着——
+        # Developer ID 由 scripts/release/sign.sh 用同一 Team 重签包内的 libndi.dylib / Sparkle.framework，开发签名不重签、靠开发表关库校验。
         ENABLE_HARDENED_RUNTIME: YES
-        # W3-C：权限表按 DEVELOPMENT_TEAM 选——空（ad-hoc）用空表 App/Switcher.entitlements，有 Team ID 用 App/Switcher-signed.entitlements
-        # （system-extension.install 是受限权限，ad-hoc 带着它 Xcode 拒绝构建）。写法：$(DEVELOPMENT_TEAM:default=adhoc) → "adhoc" 或 Team ID，
-        # 再查 SWITCHER_ENTITLEMENTS_<它>，只定义了 adhoc 那个，其他（任何 Team ID）落到 default 的签名表。
-        SWITCHER_TEAM_KIND: "$(DEVELOPMENT_TEAM:default=adhoc)"
+        # W3-C 起权限表查表选（W4-B3 加开发签名那张，按上面派生的 SWITCHER_SIGN_MODE）：
+        #   adhoc → App/Switcher.entitlements（空：system-extension.install 是受限权限，ad-hoc 带着它 Xcode 拒绝构建）
+        #   dev   → App/Switcher-dev.entitlements（camera + audio-input + cs.disable-library-validation；不带 system-extension.install，Personal Team 拿不到）
+        #   devid → default 的 App/Switcher-signed.entitlements（system-extension.install + camera + audio-input；make archive / sign.sh 走它）
         SWITCHER_ENTITLEMENTS_adhoc: App/Switcher.entitlements
-        CODE_SIGN_ENTITLEMENTS: "$(SWITCHER_ENTITLEMENTS_$(SWITCHER_TEAM_KIND):default=App/Switcher-signed.entitlements)"
+        SWITCHER_ENTITLEMENTS_dev: App/Switcher-dev.entitlements
+        CODE_SIGN_ENTITLEMENTS: "$(SWITCHER_ENTITLEMENTS_$(SWITCHER_SIGN_MODE):default=App/Switcher-signed.entitlements)"
     dependencies:
       - package: SwitcherCore
         product: SwitcherContracts

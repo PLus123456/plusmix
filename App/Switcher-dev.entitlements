@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 开发签名（project.yml 的 SWITCHER_SIGN_MODE = dev：Team ID + SWITCHER_DEV_SIGN=1，或 make gen 自动识别出"只有 Apple Development 身份"）用的权限表。
+	     W4-B3（prompt 141）从 G13 的旁路 scripts/dev-signing/PlusMix-dev.entitlements 收进来，只此一份。钥匙串里的 Apple Development 身份
+	     （Personal Team 也行）+ 硬化运行时：摄像头 / 麦克风要下面两条，否则系统直接拒绝访问。
+	     不带 com.apple.developer.system-extension.install：受限权限要描述文件，Personal Team 拿不到——虚拟摄像头扩展照旧编得出、装不上（BLOCKED-账号）。
+	     正式发布的权限表仍是 App/Switcher-signed.entitlements（make archive / sign.sh 走它）。docs/release/signing.md"权限表与硬化运行时"。 -->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- 硬化运行时默认开库校验：主二进制链接的 libndi.dylib 在 /Library/NDI SDK for Apple/ 里、是 NDI 那边的 Team 签的，开发构建不随包重签
+	     （那是 make archive 的 sign.sh 做的），不关库校验 App 一起就被 dyld 拒：Library not loaded: @rpath/libndi.dylib … different Team IDs（G13 §4.4 实测）。
+	     只给开发签名用；发布表不关（sign.sh 用同一 Team 重签 libndi / Sparkle）。 -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

@@ -21,7 +21,7 @@ make runner-install RUNNER_FLAGS="--url https://github.com/<owner>/<repo> --toke
 App 的 xcodebuild test、显示类用例、虚拟摄像头都要窗口服务器，LaunchDaemon 不行。装完的人工项（脚本末尾也打印）：
 
 1. 自动登录本用户；节能里禁止自动睡眠；屏幕保护 / 锁屏关掉（锁屏会挡住 TCC 弹窗、显示类用例被盖住就红——G4 的经验）。
-2. 第一次跑给 runner 进程摄像头 / 麦克风 / 屏幕录制授权；ad-hoc 构建每次签名都变，授权会反复问——CI 机器最好设 `DEVELOPMENT_TEAM`（README 的说明）。
+2. 第一次跑给 runner 进程摄像头 / 麦克风 / 屏幕录制授权；ad-hoc 构建每次签名都变，授权会反复问——CI 机器最好在 runner 环境里设 `DEVELOPMENT_TEAM`：钥匙串里只有 Apple Development 身份时 `make gen` 自动选开发签名（W4-B3，signing.md"三种签名模式"），授一次权之后重编译不再问；有 Developer ID 身份时是 Developer ID 的设置，本地 `make test` 可能停在签名（signing.md"常见错误"），这时显式 `SWITCHER_DEV_SIGN=1`。`make release-test` 的 R17（开发签名真签）在 CI 上默认跳过（`RELEASE_TEST_DEV_SIGN=1` 强制）。
 3. `perf-baseline` 的 powermetrics 要免密码 sudo：`/etc/sudoers.d/switcher-ci` 写 `<用户> ALL=(root) NOPASSWD: /usr/bin/powermetrics`。
 4. 装 Xcode（接受许可）、`brew install xcodegen ffmpeg mediamtx actionlint`、NDI SDK（没有 SDK 的机器 NDI 编成空实现，NDI 回环 L1 测不到）。
 5. 机器要能访问 GitHub（第一次解析 Sparkle / HaishinKit 等包）。

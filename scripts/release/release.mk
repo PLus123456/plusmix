@@ -5,7 +5,7 @@
 #   make archive-adhoc               强制 ad-hoc、跳过公证（本机验证脚本 / CI 每次提交用）
 #   make release-verify TARGET=x     校验一个 .app 或 .dmg（签名、spctl、staple、扩展、libndi、Sparkle）；VERIFY_FLAGS=--expect-notarized 要求已公证
 #   make appcast DIR=dir APPCAST_FLAGS="--download-url-prefix https://…/"   用 Sparkle 的 generate_appcast 给目录里的 DMG 出 appcast.xml
-#   make release-test                scripts/release/tests/（R1–R6、R11–R14）
+#   make release-test                scripts/release/tests/（R1–R6、R11–R17；R17 = 开发签名真签，没有 Apple Development 身份时跳过）
 #   make pin-check / pin-sync        依赖钉版本一致性检查 / 把模板拷进工作区（同 make gen 那一步）
 #   make runner-install RUNNER_FLAGS="--url https://github.com/<owner>/<repo> --token <token>"   装 GitHub Actions self-hosted runner
 # 产物：$(RELEASE_OUT)/<版本>/{PlusMix.xcarchive,PlusMix.app,PlusMix-<版本>.dmg,release-report.md,verify.json}（产物名 = project.yml 的 PRODUCT_NAME，W4-D）

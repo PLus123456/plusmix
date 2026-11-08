@@ -10,12 +10,29 @@ make release-verify TARGET=.build/release/0.1.0/PlusMix-0.1.0.dmg VERIFY_FLAGS=-
 
 产物在 `.build/release/<版本>/`：`PlusMix.xcarchive`（含 dSYM，留着符号化崩溃）、`PlusMix.app`、`PlusMix-<版本>.dmg` + `.sha256`（产物名 = project.yml 的 `PRODUCT_NAME`，W4-D）、`verify.json`、`release-report.md`、`logs/`。
 
+## 三种签名模式（W4-B3，prompt 141）
+
+`make gen` 时由两个环境变量定、写进工程（project.yml 设置段开头的注释；派生的构建设置 `SWITCHER_SIGN_MODE` = `adhoc` / `dev` / `devid`）：
+
+| 模式 | 怎么选 | 签名方式 / 身份 | App 权限表 | 干什么用 |
+|---|---|---|---|---|
+| (a) ad-hoc | 不给 `DEVELOPMENT_TEAM`（默认） | Automatic / `-`（"Sign to Run Locally"） | `App/Switcher.entitlements`（空） | 没有 Apple 身份的机器；`make archive-adhoc` |
+| (b) 开发签名 | `DEVELOPMENT_TEAM=<Team ID> SWITCHER_DEV_SIGN=1 make gen build-app`；Team 给了、`SWITCHER_DEV_SIGN` 没给时自动识别（下面） | Manual / `Apple Development`，不要描述文件 | `App/Switcher-dev.entitlements` | 本机编、跑、测：TCC 授权跨重编译不重问 |
+| (c) Developer ID | `DEVELOPMENT_TEAM=<Team ID> make archive`（archive.sh 生成工程与 archive 都钉 `SWITCHER_DEV_SIGN=0`） | Automatic / `-`，archive 带 `-allowProvisioningUpdates`、导出 developer-id、sign.sh 用 Developer ID 重签 | `App/Switcher-signed.entitlements` | 发布（公证仍 BLOCKED-账号） |
+
+- **自动识别**（`scripts/dev-signing/sign-mode.sh`，只读钥匙串、不碰私钥、不联网）：钥匙串里有该 Team 的 "Developer ID Application" 身份 → (c) 的设置（W4-B 原样）；没有、但有它的 "Apple Development" 身份 → (b)——Personal Team（免费 Apple ID）就是这样，(c) 那套设置在这种机器上根本签不出来（G13 §4.4：停在 GatherProvisioningInputs）；都没有 → (c) 的设置（原样，构建多半停在签名）。`make gen` 打一行 `[sign-mode] …` 说选了哪种、为什么；`SWITCHER_DEV_SIGN=1` 却没给 Team、或值不是 1 / 0 / 空，在这里就停。
+- **Team ID** 是证书主题的 OU：`scripts/dev-signing/sign-mode.sh --dev-team`、或签过的东西 `codesign -dvv` 的 `TeamIdentifier`。**不是** "Apple Development: 邮箱 (XXXXXXXXXX)" 括号里那串（那是个人证书的编号）；给错了 `make gen` 会提示钥匙串里实际的 Team。
+- **别名**：`make build-app DEV_SIGN_TEAM=<Team ID>`（`test-app` 同）不重新生成工程，在 xcodebuild 命令行上盖 `DEVELOPMENT_TEAM` + `SWITCHER_DEV_SIGN=1`——命令行优先级最高，工程里派生的签名方式 / 身份 / 权限表跟着变；下一次不给别名就回到工程里写的模式。G13 的 `-xcconfig` 旁路已删，权限表只有 App/ 下这三份。
+- 写进工程的模式一直有效到下一次显式 `make gen`：project.yml 变了（比如 bump 版本号）`make build-app` / `test-app` 自动重新生成时，环境里两个签名变量都没给就沿用工程里原来写的 Team 与开关（打一行"沿用工程里原来的 …"），不会悄悄退回 ad-hoc。`make release-test`（R1 跑 `archive.sh --adhoc`）、`make archive-adhoc` 是显式生成 ad-hoc，之后回来开发再 `DEVELOPMENT_TEAM=<Team ID> make gen` 一次。
+- **自检**：`make release-test` 的 R16（不要身份、CI 也跑：决策表、三种模式下三个 target 的设置、(a) / (c) 与 W4-B3 之前一致、生成的 TargetAttributes 不变）与 R17（真签一次：TeamIdentifier / runtime / 权限表 / 指定要求不含 cdhash / `codesign --verify --deep --strict` / 扩展与测试包同一 Team / 起来 4 秒；钥匙串里没有 Apple Development 身份、在 CI 上、钥匙串锁着都跳过并写明 BLOCKED-签名）。
+- 实现上的一个坑：XcodeGen 把 `CODE_SIGN_STYLE` 原样抄进 TargetAttributes 的 `ProvisioningStyle`（宏也照抄），target 的 `attributes:` 盖不住（XcodeGen 2.46 后写的覆盖先写的）。所以 project.yml 写成无条件 `CODE_SIGN_STYLE: Automatic`（给 XcodeGen 抄）+ `CODE_SIGN_STYLE[sdk=macosx*]` 宏（同一层带条件的变体优先，构建时生效）。
+
 ## 步骤与脚本（scripts/release/）
 
 | 步 | 脚本 | 要点 |
 |---|---|---|
 | 钉版本 | `pin-deps.sh check` | 不一致直接停：发布构建必须用钉住的解析结果（docs/release/dependencies.md） |
-| 生成工程 | `make gen`（DEVELOPMENT_TEAM 决定权限表：空 → App/Switcher.entitlements；Team ID → App/Switcher-signed.entitlements） | 会重写 Switcher.xcodeproj（生成物） |
+| 生成工程 | `DEVELOPMENT_TEAM=<Team 或空> SWITCHER_DEV_SIGN=0 make gen`（钉 0：发布归档永远不会被自动识别成开发签名；空 → ad-hoc 空表，Team ID → App/Switcher-signed.entitlements） | 会重写 Switcher.xcodeproj（生成物）：之后工程是 ad-hoc / Developer ID 的设置 |
 | 归档 | `xcodebuild archive -configuration Release -destination generic/platform=macOS ARCHS=arm64 -onlyUsePackageVersionsFromResolvedFile SPARKLE_FEED_URL=… SPARKLE_PUBLIC_ED_KEY=…`，有 Team 加 `-allowProvisioningUpdates` | 只出 Apple Silicon；Sparkle 两个键从这里进 Info.plist |
 | 导出 | Team：`-exportArchive` method `developer-id`（自动签名，嵌描述文件——`system-extension.install` 是受限权限，要它）；ad-hoc：直接拷 xcarchive 里的 App | |
 | 随包 | `archive.sh`：`libndi.dylib` → `Contents/Frameworks/`，`libndi_licenses.txt` + NOTICE → `Contents/Resources/Licenses/NDI/`，`install_name_tool -delete_rpath` 删掉主二进制指向 SDK 目录的 LC_RPATH；所有 SwiftPM 依赖与 THIRD_PARTY 的许可证 → `Licenses/<名>/` | 主二进制链接的是 `@rpath/libndi.dylib`，`@executable_path/../Frameworks` 在 rpath 表最前 |
@@ -34,11 +51,16 @@ SUFeedURL / SUPublicEDKey（都非空才 sparkle_configured）、架构、最低
 
 ## 权限表与硬化运行时
 
-| | ad-hoc（无 Team ID） | Developer ID |
-|---|---|---|
-| App 权限表 | `App/Switcher.entitlements`（空） | `App/Switcher-signed.entitlements`：`system-extension.install`（受限，靠描述文件）、`device.camera`、`device.audio-input`（硬化运行时下访问摄像头 / 麦克风必须） |
-| 硬化运行时 | project.yml 开着，Xcode 对 ad-hoc 自动关（构建日志 note） | 开（公证要求）；库校验要求包内 dylib / 框架同一 Team 签名 → sign.sh 重签 libndi 与 Sparkle |
-| 扩展 | 编得出、签 ad-hoc，装不上（BLOCKED-签名） | `CameraExtension/CameraExtension.entitlements`（沙盒 + app group `$(TeamIdentifierPrefix)<bundle id>.camera`） |
+| | ad-hoc（无 Team ID） | 开发签名（Apple Development；Personal Team 也行） | Developer ID |
+|---|---|---|---|
+| App 权限表 | `App/Switcher.entitlements`（空） | `App/Switcher-dev.entitlements`：`device.camera`、`device.audio-input`、`cs.disable-library-validation`；**不带** `system-extension.install` | `App/Switcher-signed.entitlements`：`system-extension.install`（受限，靠描述文件）、`device.camera`、`device.audio-input`（硬化运行时下访问摄像头 / 麦克风必须） |
+| 签名身份 | `-` | 钥匙串里的 "Apple Development: …"（Manual、不要描述文件；扩展、测试包同一身份） | "Developer ID Application: …"（sign.sh 由内向外重签、带时间戳） |
+| 硬化运行时 | project.yml 开着，Xcode 对 ad-hoc 自动关（构建日志 note） | 开（`codesign -dvv` 的 flags 含 runtime），库校验也跟着开——所以要下面"libndi"那一行 | 开（公证要求）；库校验要求包内 dylib / 框架同一 Team 签名 → sign.sh 重签 libndi 与 Sparkle |
+| TCC（摄像头 / 麦克风 / 屏幕录制） | **每次重编译都重问**：ad-hoc 的指定要求（designated requirement）就是 `cdhash H"…"`，CDHash 一变系统当新 App | **授一次、重编译不重问**：TCC 按指定要求记授权，开发签名的是 `identifier "com.plusmix.switcher" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: …" and certificate 1[…] /* exists */`——只看 bundle id + 证书、不含 CDHash；`make test-app` 的测试宿主就是同一个 PlusMix.app、同一身份，也不重问 | 同开发签名（按 Developer ID 证书记）；从 /Applications 起 |
+| libndi | 硬化运行时关着，库校验不查，直接从 SDK 目录加载 | 开发构建不随包重签：主程序从 `/Library/NDI SDK for Apple/lib/macOS/` 直接加载 NDI 自己 Team 签的 libndi，库校验开着时 dyld 当场拒（`mapping process and mapped file (non-platform) have different Team IDs`，G13 §4.4；W4-B3 去掉这条权限重签一份的反证：退出 134）→ 开发表关库校验 | 随包进 Contents/Frameworks、sign.sh 用同一 Team 重签，发布表**不**关库校验 |
+| 扩展 | 编得出、签 ad-hoc，装不上（BLOCKED-签名） | 编得出、签成同一 Team（app group `<Team>.<bundle id>.camera`），**装不上**：App 没有 `system-extension.install`（受限权限要带 System Extension 能力的描述文件，Personal Team 拿不到，BLOCKED-账号） | `CameraExtension/CameraExtension.entitlements`（沙盒 + app group `$(TeamIdentifierPrefix)<bundle id>.camera`） |
+| 能做 | 本机编、跑、测（每次重编译重授权） | 本机编、跑、测、跑 L3 清单：TCC 稳定、`make test-app` 宿主不重问；钥匙串里有身份就行，免费 Apple ID 也有 | 分发：公证、Gatekeeper 放行、Sparkle 正式更新、虚拟摄像头扩展 |
+| 不能做 | 分发；虚拟摄像头扩展 | **分发**——不是 Developer ID：不能公证、`spctl --assess` rejected、别的机器上 Gatekeeper 拦、Sparkle 不能装更新；虚拟摄像头扩展；Personal Team 只能签不带受限权限的东西，证书一年一换（本机这张 2026-11-03 签发、2027-11-03 到期，到期在 Xcode › Settings › Accounts 重建，Team ID 不变、授权照旧） | — |
 
 ## Gatekeeper 与干净机器验证（人工）
 
@@ -60,3 +82,6 @@ SUFeedURL / SUPublicEDKey（都非空才 sparkle_configured）、架构、最低
 - "The executable does not have the hardened runtime enabled"：archive 没带 Release 配置或 project.yml 的 ENABLE_HARDENED_RUNTIME 被覆盖。
 - 起来就崩 `Library not loaded: @rpath/libndi.dylib`：随包那步没跑（打包机没装 SDK 却链接了它——不可能，Package.swift 探测的是同一台机器）。
 - 摄像头黑屏、`TCC` 拒绝：硬化运行时下少了 `device.camera` 权限（本文上表）。
+- `"Switcher" has entitlements that require signing with a development certificate`（GatherProvisioningInputs）：工程按 (c) Developer ID 的设置生成（`CODE_SIGN_IDENTITY "-"` + 带受限权限的签名表）却在本机 `make build-app`——本机开发用开发签名：`DEVELOPMENT_TEAM=<Team ID> SWITCHER_DEV_SIGN=1 make gen`（G13 §4.4 撞到的就是这个）。
+- 开发签名找不到身份：`No signing certificate "Mac Development" found: No "Mac Development" signing certificate matching team ID "…" with a private key was found`——Team ID 给错（多半拿了证书名括号里那串；W4-B3 用 `DEV_SIGN_TEAM=34XFY3Q25G` 试出的就是这条）或钥匙串里没有这个 Team 的 Apple Development 身份：`scripts/dev-signing/sign-mode.sh --list` 列出钥匙串里能用的。
+- 开发签名的 App / 测试宿主一起来就 abort，`Library not loaded: @rpath/libndi.dylib … different Team IDs`：权限表少了 `cs.disable-library-validation`（不是 `App/Switcher-dev.entitlements`，或被人删了那条）。

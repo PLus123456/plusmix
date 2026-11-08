@@ -89,7 +89,8 @@ row "依赖钉版本" "通过" "pin-deps.sh check"
 
 # ---- 2. 生成工程 ----
 step "make gen（DEVELOPMENT_TEAM=${team:-<空，ad-hoc>}）"
-DEVELOPMENT_TEAM="$team" run_logged gen make gen || die "make gen 失败（$dir/logs/gen.log）"
+# W4-B3：SWITCHER_DEV_SIGN=0 钉死——make gen 在 Team 给了、SWITCHER_DEV_SIGN 没给时会看钥匙串自动选开发签名，发布归档永远不能走那条（开发签名的包不能分发）
+DEVELOPMENT_TEAM="$team" SWITCHER_DEV_SIGN=0 run_logged gen make gen || die "make gen 失败（$dir/logs/gen.log）"
 $S/pin-deps.sh check >/dev/null || die "make gen 之后工作区 Package.resolved 与模板不一致"
 
 # ---- 3. archive ----
@@ -97,7 +98,7 @@ step "xcodebuild archive（Release, arm64）"
 archive="$dir/$product.xcarchive"
 xcb=(xcodebuild archive -project Switcher.xcodeproj -scheme Switcher -configuration Release -destination "generic/platform=macOS"
      -archivePath "$archive" -derivedDataPath .build/DerivedData -onlyUsePackageVersionsFromResolvedFile
-     ARCHS=arm64 ONLY_ACTIVE_ARCH=NO SPARKLE_FEED_URL="$feed" SPARKLE_PUBLIC_ED_KEY="$pubkey")
+     ARCHS=arm64 ONLY_ACTIVE_ARCH=NO SWITCHER_DEV_SIGN=0 SPARKLE_FEED_URL="$feed" SPARKLE_PUBLIC_ED_KEY="$pubkey")
 [ "$mode" = team ] && xcb+=(-allowProvisioningUpdates DEVELOPMENT_TEAM="$team")
 run_logged archive "${xcb[@]}" || { tail -40 "$dir/logs/archive.log"; die "xcodebuild archive 失败（$dir/logs/archive.log）"; }
 [ -d "$archive/Products/Applications/$product.app" ] || die "归档里没有 $product.app（project.yml 的 PRODUCT_NAME 与归档产物对不上：$(ls "$archive/Products/Applications" 2>/dev/null | tr '\n' ' ')）"

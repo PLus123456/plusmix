@@ -7,6 +7,9 @@ export PATH := $(BREW_PREFIX)/bin:$(PATH)
 XCODEGEN ?= $(BREW_PREFIX)/bin/xcodegen
 # XcodeGen 会把 ${DEVELOPMENT_TEAM} 原样写进工程（未设置时不会替换成空），所以保证它至少是空串。
 export DEVELOPMENT_TEAM ?=
+# W4-B3（prompt 141）：签名三种模式由这两个变量在 make gen 时定、写进工程（project.yml 文件头的注释、docs/release/signing.md）——
+# 不给 Team = ad-hoc；Team + SWITCHER_DEV_SIGN=1 = 开发签名；Team + 0 = Developer ID；Team 给了、它没给 = scripts/dev-signing/sign-mode.sh 看钥匙串自动定。
+export SWITCHER_DEV_SIGN ?=
 
 PACKAGES := Packages/SwitcherCore Packages/SwitcherInputs Packages/SwitcherAudio \
             Packages/SwitcherOutputs Packages/SwitcherControl Packages/SwitcherTestKit
@@ -18,12 +21,12 @@ DERIVED     := .build/DerivedData
 DESTINATION := platform=macOS,arch=arm64
 XCB         := xcodebuild -project $(XCODEPROJ) -scheme $(SCHEME) -destination '$(DESTINATION)' -derivedDataPath $(DERIVED)
 XCB_FLAGS   ?= -quiet
-# G13（2026-11-07）：本机开发签名——钥匙串里有 Apple Development 身份时 `make build-app DEV_SIGN_TEAM=<Team ID>`（test-app 同），
-# scripts/dev-signing/dev-signing.xcconfig 以 -xcconfig 盖过工程的 ad-hoc 设置：稳定的 Team ID + bundle id，TCC 授权跨重编译不重问。
-# 不设就是原来的 ad-hoc（每次编译 CDHash 变、系统当新 App 重问权限）。Personal Team 也能签；只管本机跑，发布仍走 make archive（W4-B）。
+# 开发签名的别名（G13 的旁路，W4-B3 改成走 project.yml）：`make build-app DEV_SIGN_TEAM=<Team ID>`（test-app 同）不重新生成工程，
+# 在 xcodebuild 命令行上盖 DEVELOPMENT_TEAM + SWITCHER_DEV_SIGN=1（优先级最高，工程里派生的签名方式 / 身份 / 权限表跟着变）。
+# 等价于 DEVELOPMENT_TEAM=<Team ID> SWITCHER_DEV_SIGN=1 make gen build-app，区别只是不改写进工程的模式（之后不给别名就回到工程里的模式）。
 DEV_SIGN_TEAM ?=
 ifneq ($(DEV_SIGN_TEAM),)
-XCB += -xcconfig scripts/dev-signing/dev-signing.xcconfig DEV_SIGN_TEAM=$(DEV_SIGN_TEAM)
+XCB += DEVELOPMENT_TEAM=$(DEV_SIGN_TEAM) SWITCHER_DEV_SIGN=1
 endif
 
 # make lint 检查的分支：默认当前分支；检查别的分支用 make lint BRANCH=w1-core
@@ -44,11 +47,14 @@ help:
 	@echo "make clean  删掉所有 .build 和生成的工程"
 	@echo "make manual 随包 HTML 手册：docs/user（中英）→ App/Resources/Help/（docs/tools/build-help.py；改了 docs/user 要重跑，make lint 的 scripts/check-help.sh 会查）"
 	@echo "make archive  发布归档：签名 → 校验 → DMG → 公证（W4-B，scripts/release/release.mk；archive-adhoc / release-test / appcast / pin-check 也在那里）"
-	@echo "make build-app DEV_SIGN_TEAM=<Team ID>  本机开发签名（钥匙串里的 Apple Development 身份；TCC 授权跨重编译不重问）；test-app 同"
+	@echo "签名：不给 DEVELOPMENT_TEAM 是 ad-hoc；DEVELOPMENT_TEAM=<Team ID> SWITCHER_DEV_SIGN=1 make gen build-app 是本机开发签名（钥匙串里的 Apple Development 身份、Personal Team 也行，TCC 授权跨重编译不重问；没有 Developer ID 身份时 make gen 自动选它），make build-app DEV_SIGN_TEAM=<Team ID> 是不重新生成工程的别名（test-app 同；docs/release/signing.md）"
 
 # ---------- gen ----------
 gen:
-	$(XCODEGEN) generate --quiet
+	@# W4-B3：SWITCHER_DEV_SIGN 没给时 sign-mode.sh 看钥匙串定（stderr 一行说明选了哪种、为什么）；配置不对（SWITCHER_DEV_SIGN=1 没给 Team 等）在这里就停
+	@dev=$$(scripts/dev-signing/sign-mode.sh) || exit $$?; \
+	  echo "$(XCODEGEN) generate --quiet（DEVELOPMENT_TEAM=$${DEVELOPMENT_TEAM:-<空>} SWITCHER_DEV_SIGN=$${dev:-<空>}）"; \
+	  SWITCHER_DEV_SIGN="$$dev" $(XCODEGEN) generate --quiet
 	@# 新 worktree 第一次解析会把 swift-collections 解到 1.7.0（要 Swift 6.4 运行时，macOS 26.6.2 的 libswiftCore 没有 _swift_initBorrow，App 一起就崩，
 	@# reports/issues/W3C2-g5-swift-collections-1.7-dyld-crash.md）。工作区的 Package.resolved 是生成物，这里从入库的模板拷一份钉住（与各包入库的 Package.resolved 同一套版本）；
 	@# 升依赖是 W4-B 的事：改模板 + 各包的 Package.resolved 一起改，并在 macOS 15 / 26 各起一次 App 与 frameprobe。SWITCHER_KEEP_RESOLVED=1 跳过拷贝。
@@ -56,8 +62,16 @@ gen:
 	  mkdir -p $(XCODEPROJ)/project.xcworkspace/xcshareddata/swiftpm && \
 	  cp scripts/xcode-workspace-Package.resolved $(XCODEPROJ)/project.xcworkspace/xcshareddata/swiftpm/Package.resolved; fi
 
+# project.yml 变了（比如 bump 版本号）build-app / test-app 自动重新生成时：环境里两个签名变量都没给，就沿用工程里原来写的 Team 与开发签名开关
+# （W4-B3：不然拉一次 project.yml 的改动就悄悄退回 ad-hoc、TCC 又重问一遍）。显式 make gen 照旧只看环境变量。
 $(XCODEPROJ)/project.pbxproj: project.yml
-	$(MAKE) gen
+	@team="$$DEVELOPMENT_TEAM"; dev="$$SWITCHER_DEV_SIGN"; \
+	  if [ -z "$$team$$dev" ] && [ -f "$@" ]; then \
+	    team=$$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM = \([A-Z0-9]\{10\}\);$$/\1/p' "$@" | head -1); \
+	    dev=$$(sed -n 's/^[[:space:]]*SWITCHER_DEV_SIGN = \([01]\);$$/\1/p' "$@" | head -1); \
+	    [ -z "$$team" ] || echo "project.yml 比工程新，重新生成：沿用工程里原来的 DEVELOPMENT_TEAM=$$team SWITCHER_DEV_SIGN=$${dev:-<空>}"; \
+	  fi; \
+	  DEVELOPMENT_TEAM="$$team" SWITCHER_DEV_SIGN="$$dev" $(MAKE) --no-print-directory gen
 
 # ---------- build ----------
 build: build-packages build-tools build-app
