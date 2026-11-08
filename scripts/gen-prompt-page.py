@@ -46,7 +46,9 @@ def status(p, gates):
         return ("已在 main", "done")
     if not branch_exists(b):
         return ("未开始", "")
-    if is_ancestor(b, "main"):
+    # OSS-1 2026-11-08 开源前重写了 main 的历史（去掉 docs/spec/ui-mock），之前合入的分支都不再是新 main 的祖先；
+    # 本地留着重写前的 main 当备份分支 main-pre-oss，合入判定两边都认（docs/history/README.md）。
+    if is_ancestor(b, "main") or (branch_exists("main-pre-oss") and is_ancestor(b, "main-pre-oss")):
         return ("已合入 main", "done")
     for g in gates:
         if g != b and branch_exists(g) and is_ancestor(b, g):

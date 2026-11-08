@@ -166,7 +166,7 @@ To test a single package: `swift test --package-path Packages/SwitcherCore`.
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     contracts["SwitcherContracts<br/>shared types and JSON"]
     core["SwitcherCore<br/>engine and Metal renderer"]
     inputs["SwitcherInputs"]

@@ -166,7 +166,7 @@ Tools/switcher-headless/.build/release/switcher-headless run --show Samples/even
 ## 架构
 
 ```mermaid
-flowchart LR
+flowchart TB
     contracts["SwitcherContracts<br/>共用类型与 JSON"]
     core["SwitcherCore<br/>引擎与 Metal 渲染"]
     inputs["SwitcherInputs"]
