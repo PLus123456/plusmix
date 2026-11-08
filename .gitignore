@@ -39,6 +39,10 @@ reports/**/*.jsonl
 # ---- 调研资料 ----
 # 竞品截图是作品（设计方案 §0），只留在本机；文档里按图号引用（docs/ui-study/README.md）
 vmix-28-guide/
+vmix-28-guide.zip
+# 早期界面稿（docs/spec/ui-mock/ 与同内容的 zip）里是竞品截图，截图里还有个人文件路径：OSS-1 2026-11-08 开源前移出库，只留在本机
+docs/spec/ui-mock/
+docs/spec/*.zip
 
 # Python 字节码（scripts/ 下的报告 / 判定脚本跑一次就生成；G9 2026-10-18 误提交过一次）
 __pycache__/
