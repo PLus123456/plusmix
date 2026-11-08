@@ -22,7 +22,7 @@ team=${RELEASE_TEST_DEV_TEAM:-}
 if [ -z "$team" ] && [ -n "${DEVELOPMENT_TEAM:-}" ] && "$sm" --list 2>/dev/null | grep -qx "dev $DEVELOPMENT_TEAM"; then team=$DEVELOPMENT_TEAM; fi
 [ -n "$team" ] || team=$("$sm" --dev-team 2>/dev/null)
 [ -n "$team" ] || skip "BLOCKED-签名：钥匙串里没有 Apple Development 身份（security find-identity -v -p codesigning；CI / 没登 Apple ID 的机器）。解锁 = Xcode › Settings › Accounts 登 Apple ID（免费的也行）→ Manage Certificates → + Apple Development"
-note "Team $team（$("$sm" --list 2>/dev/null | tr '\n' ' ')）"
+note "Team ${team}（$("$sm" --list 2>/dev/null | tr '\n' ' ')）"
 
 if [ ! -f Switcher.xcodeproj/project.pbxproj ] || [ project.yml -nt Switcher.xcodeproj/project.pbxproj ]; then
   note "工作区的 Switcher.xcodeproj 没有或比 project.yml 旧：按 Makefile 的规则重新生成（沿用工程里原来的签名模式；下面的命令行覆盖照样出开发签名）"
@@ -33,7 +33,7 @@ note "xcodebuild build-for-testing DEVELOPMENT_TEAM=$team SWITCHER_DEV_SIGN=1（
 if ! xcodebuild -project Switcher.xcodeproj -scheme Switcher -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/DerivedData \
      DEVELOPMENT_TEAM="$team" SWITCHER_DEV_SIGN=1 build-for-testing >"$log" 2>&1; then
   if grep -q 'errSecInternalComponent' "$log"; then skip "BLOCKED-签名：签名时钥匙串锁着（errSecInternalComponent；屏幕锁着 / SSH 会话）——解锁登录钥匙串再跑"; fi
-  fail "开发签名构建失败（$log）"; grep -E 'error:|requires a development|No signing certificate|provisioning' "$log" | head -8; finish
+  fail "开发签名构建失败（${log}）"; grep -E 'error:|requires a development|No signing certificate|provisioning' "$log" | head -8; finish
 fi
 ok "开发签名的 build-for-testing 退出 0"
 
@@ -52,7 +52,7 @@ done
 assert_not_contains "$ents" "system-extension.install" "App 权限表没有 system-extension.install（受限权限，Personal Team 拿不到）"
 req=$(codesign -d -r- "$app" 2>&1)
 assert_contains "$req" "anchor apple generic" "指定要求按 Apple 证书链写（TCC 按它记授权）"
-assert_contains "$req" "identifier \"$bid\"" "指定要求含 bundle id（$bid）"
+assert_contains "$req" "identifier \"$bid\"" "指定要求含 bundle id（${bid}）"
 assert_not_contains "$req" "cdhash" "指定要求不含 cdhash（重编译后不变 → TCC 不重问）"
 assert_true "codesign --verify --deep --strict 通过" codesign --verify --deep --strict --verbose=2 "$app"
 

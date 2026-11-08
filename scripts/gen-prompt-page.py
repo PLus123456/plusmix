@@ -85,7 +85,7 @@ def main():
             groups[cls].append(f"{num} {p['title'].split('（')[0].split(' ')[0]}")
         title = html.escape(p["title"])
         # 卡片名：去掉开头的 "P1 " / "W1-A " 之类的编号，标签里另放
-        code = re.match(r"^([A-Z]\d(?:-[A-Z]\d?)?|G\d|P\d[H]?|P0-H|UIA)\s*", p["title"])
+        code = re.match(r"^([A-Z]\d+(?:-[A-Z]?\d*)?|UIA)\s*", p["title"])  # G14 修：两位数的 G1x / P5-2 以前被截成 G1 / P5
         short = "通用前言" if p["number"] == 0 else (code.group(1).replace("-", "") if code else "—")
         name = html.escape(p["title"][code.end():] if code else p["title"])
         branch = html.escape(p["branch"] or "—")

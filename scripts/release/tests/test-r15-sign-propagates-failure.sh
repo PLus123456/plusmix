@@ -24,18 +24,18 @@ PLIST
 /usr/bin/codesign --force --sign - "$app" 2>/dev/null || { fail "造不出 ad-hoc 签名的最小 App"; finish; }
 cdhash() { /usr/bin/codesign -dvvv "$1" 2>&1 | sed -n 's/^CDHash=//p'; }
 before=$(cdhash "$app")
-if [ -n "$before" ]; then ok "最小 App 先有 ad-hoc 签名（CDHash $before）"; else fail "读不到最小 App 的 CDHash"; fi
+if [ -n "$before" ]; then ok "最小 App 先有 ad-hoc 签名（CDHash ${before}）"; else fail "读不到最小 App 的 CDHash"; fi
 
 # 1. 不存在的身份：codesign 报 no identity found → 脚本退出非 0、不报"完成"、原签名不动（修前：退出 0 + "完成：Signature=adhoc"）
 out=$("$sign" "$app" --identity "G12 definitely missing identity" 2>&1); code=$?
-if [ "$code" != 0 ]; then ok "不存在的身份：退出码 $code（非 0）"; else fail "不存在的身份：退出 0（N13 的现象）"; fi
+if [ "$code" != 0 ]; then ok "不存在的身份：退出码 ${code}（非 0）"; else fail "不存在的身份：退出 0（N13 的现象）"; fi
 assert_contains "$out" "codesign 失败" "错误原因写明是 codesign 失败"
 assert_not_contains "$out" "完成：" "没有报完成"
 assert_eq "$(cdhash "$app")" "$before" "原 ad-hoc 签名不动（CDHash）"
 
 # 2. --verbose 分支同样不吞退出码
 out=$("$sign" "$app" --identity "G12 definitely missing identity" --verbose 2>&1); code=$?
-if [ "$code" != 0 ]; then ok "--verbose 分支：退出码 $code（非 0）"; else fail "--verbose 分支：退出 0"; fi
+if [ "$code" != 0 ]; then ok "--verbose 分支：退出码 ${code}（非 0）"; else fail "--verbose 分支：退出 0"; fi
 assert_eq "$(cdhash "$app")" "$before" "--verbose 分支：原签名不动（CDHash）"
 
 # 3. codesign 退出 0 但没签上请求的身份：PATH 里放一个假 codesign（遇 --sign 直接退 0 不签，其他转给真的），脚本要靠 codesign -dvv 的核对抓出来
@@ -47,7 +47,7 @@ exec /usr/bin/codesign "$@"
 FAKE
 chmod +x "$work/bin/codesign"
 out=$(PATH="$work/bin:$PATH" "$sign" "$app" --identity "Developer ID Application: Nobody (G12G12G12G)" 2>&1); code=$?
-if [ "$code" != 0 ]; then ok "codesign 退出 0 但签名仍是 ad-hoc：退出码 $code（非 0）"; else fail "签上去的不是请求的身份仍报成功"; fi
+if [ "$code" != 0 ]; then ok "codesign 退出 0 但签名仍是 ad-hoc：退出码 ${code}（非 0）"; else fail "签上去的不是请求的身份仍报成功"; fi
 assert_contains "$out" "仍是 ad-hoc" "错误原因写明签完仍是 ad-hoc"
 assert_not_contains "$out" "完成：" "身份不符时没有报完成"
 

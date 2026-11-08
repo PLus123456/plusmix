@@ -45,7 +45,7 @@ sign_one() { # $1 = path, 其余 = 附加参数（--entitlements F）
     codesign --force --sign "$sign_id" ${opts[@]+"${opts[@]}"} "$@" "$p" > "$out" 2>&1; rc=$?
     grep -v "replacing existing signature" "$out" || true
   fi
-  [ "$rc" = 0 ] || { echo "[sign] codesign 失败（退出码 $rc）：$p" >&2; exit 1; }
+  [ "$rc" = 0 ] || { echo "[sign] codesign 失败（退出码 ${rc}）：$p" >&2; exit 1; }
   codesign --verify --strict "$p" >/dev/null 2>&1 || { echo "[sign] 签完验不过：$p" >&2; exit 1; }
   check_signed_as_requested "$p"
 }
@@ -58,7 +58,7 @@ check_signed_as_requested() { # $1 = path
     echo "[sign] 要 ad-hoc，签完却不是：$1" >&2
   else
     if printf '%s\n' "$info" | grep -q '^Signature=adhoc$'; then
-      echo "[sign] 签完仍是 ad-hoc、不是请求的身份（$identity）：$1" >&2
+      echo "[sign] 签完仍是 ad-hoc、不是请求的身份（${identity}）：$1" >&2
     else
       want=$identity
       # 身份给的是 SHA-1 指纹（40 位十六进制）时，换成钥匙串里它的名字再比

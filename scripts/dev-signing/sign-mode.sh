@@ -63,7 +63,7 @@ if [ -z "$team" ]; then
     exit 2
   fi
   if [ -n "$first_dev_team" ]; then
-    say "ad-hoc（没给 DEVELOPMENT_TEAM）。钥匙串里有 Apple Development（Team $first_dev_team）：要本机开发签名（TCC 授权跨重编译不重问）用 DEVELOPMENT_TEAM=$first_dev_team make gen"
+    say "ad-hoc（没给 DEVELOPMENT_TEAM）。钥匙串里有 Apple Development（Team ${first_dev_team}）：要本机开发签名（TCC 授权跨重编译不重问）用 DEVELOPMENT_TEAM=$first_dev_team make gen"
   else
     say "ad-hoc（没给 DEVELOPMENT_TEAM）"
   fi
@@ -73,13 +73,13 @@ fi
 hint_teams() { [ -n "$dev_teams" ] && echo "；钥匙串里的 Apple Development 身份是 Team $(printf '%s' "$dev_teams" | tr '\n' ' ' | sed 's/ *$//')（证书名括号里那串不是 Team ID，Team 看证书的 OU）"; }
 case "$dev" in
   1)
-    if has "dev $team"; then say "开发签名（DEVELOPMENT_TEAM=$team，SWITCHER_DEV_SIGN=1）"
+    if has "dev $team"; then say "开发签名（DEVELOPMENT_TEAM=${team}，SWITCHER_DEV_SIGN=1）"
     else say "开发签名（SWITCHER_DEV_SIGN=1），但钥匙串里没有 Team $team 的 Apple Development 身份：构建会停在签名那步$(hint_teams)"; fi ;;
   0)
-    say "Developer ID 设置（DEVELOPMENT_TEAM=$team，SWITCHER_DEV_SIGN=0；make archive 那条）" ;;
+    say "Developer ID 设置（DEVELOPMENT_TEAM=${team}，SWITCHER_DEV_SIGN=0；make archive 那条）" ;;
   "")
-    if has "devid $team"; then dev=0; say "Developer ID 设置（DEVELOPMENT_TEAM=$team：钥匙串里有该 Team 的 Developer ID 身份；本机开发签名要显式 SWITCHER_DEV_SIGN=1）"
-    elif has "dev $team"; then dev=1; say "开发签名（DEVELOPMENT_TEAM=$team：钥匙串里只有该 Team 的 Apple Development 身份、没有 Developer ID——Personal Team 也是这样；SWITCHER_DEV_SIGN=0 强制 Developer ID 设置）"
-    else dev=0; say "Developer ID 设置（DEVELOPMENT_TEAM=$team，钥匙串里没有该 Team 的签名身份：构建多半停在签名那步$(hint_teams)）"; fi ;;
+    if has "devid $team"; then dev=0; say "Developer ID 设置（DEVELOPMENT_TEAM=${team}：钥匙串里有该 Team 的 Developer ID 身份；本机开发签名要显式 SWITCHER_DEV_SIGN=1）"
+    elif has "dev $team"; then dev=1; say "开发签名（DEVELOPMENT_TEAM=${team}：钥匙串里只有该 Team 的 Apple Development 身份、没有 Developer ID——Personal Team 也是这样；SWITCHER_DEV_SIGN=0 强制 Developer ID 设置）"
+    else dev=0; say "Developer ID 设置（DEVELOPMENT_TEAM=${team}，钥匙串里没有该 Team 的签名身份：构建多半停在签名那步$(hint_teams)）"; fi ;;
 esac
 printf '%s\n' "$dev"

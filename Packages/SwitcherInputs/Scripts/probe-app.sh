@@ -22,7 +22,7 @@ APP="$APP_DIR/SwitcherInputProbe.app"
 LOG=${PROBE_LOG:-$APP_DIR/last.log}
 mkdir -p "$APP_DIR"
 
-echo "== swift build -c $CONFIG（switcher-input-probe）" >&2
+echo "== swift build -c ${CONFIG}（switcher-input-probe）" >&2
 swift build -c "$CONFIG" --product switcher-input-probe >&2
 PROBE="$(swift build -c "$CONFIG" --show-bin-path)/switcher-input-probe"
 
@@ -79,7 +79,7 @@ SWIFT
 fi
 
 : > "$LOG"
-echo "== open $APP（日志 $LOG）" >&2
+echo "== open ${APP}（日志 ${LOG}）" >&2
 echo "   若系统弹出摄像头 / 麦克风授权提示，请点允许；屏幕录制要在 系统设置 › 隐私与安全性 › 屏幕录制与系统录音 里打开 SwitcherInputProbe。" >&2
 open -W -n -a "$APP" --args --probe "$PROBE" --log "$LOG" -- "$@" &
 OPEN_PID=$!

@@ -35,8 +35,8 @@ run_sm() {
   local want=$1 wantcode=$2 msg=$3; shift 3
   local out code
   out=$(env -i PATH="$PATH" HOME="$HOME" "$@" "$sm" 2>"$scratch/sm.err"); code=$?
-  if [ "$code" = "$wantcode" ] && { [ "$wantcode" != 0 ] || [ "$out" = "$want" ]; }; then ok "$msg（输出 [$out]，退出 $code）"
-  else fail "${msg}：期望输出 [$want] 退出 $wantcode，实际 [$out] 退出 ${code}；stderr：$(tr '\n' ' ' < "$scratch/sm.err")"; fi
+  if [ "$code" = "$wantcode" ] && { [ "$wantcode" != 0 ] || [ "$out" = "$want" ]; }; then ok "${msg}（输出 [$out]，退出 ${code}）"
+  else fail "${msg}：期望输出 [$want] 退出 ${wantcode}，实际 [$out] 退出 ${code}；stderr：$(tr '\n' ' ' < "$scratch/sm.err")"; fi
 }
 run_sm ""  0 "没给 Team → ad-hoc（SWITCHER_DEV_SIGN 留空）"                       DEVELOPMENT_TEAM= SWITCHER_DEV_SIGN= SWITCHER_SIGN_IDENTITIES="dev $T"
 run_sm "0" 0 "没给 Team、显式 0（archive.sh --adhoc 这么调）→ 照写 0，仍是 ad-hoc"  DEVELOPMENT_TEAM= SWITCHER_DEV_SIGN=0 SWITCHER_SIGN_IDENTITIES=""
@@ -162,7 +162,7 @@ assert_contains "$(grep -n 'xcb=(xcodebuild archive' -A3 scripts/release/archive
 # 4d. DEV_SIGN_TEAM 别名：只在 xcodebuild 命令行盖两个输入，不再带 -xcconfig
 for t in build-app test-app; do
   n=$(make -n --no-print-directory "$t" DEV_SIGN_TEAM=$T 2>/dev/null | grep xcodebuild | tail -1)
-  assert_contains "$n" "DEVELOPMENT_TEAM=$T SWITCHER_DEV_SIGN=1" "make $t DEV_SIGN_TEAM=$T：xcodebuild 命令行盖 DEVELOPMENT_TEAM + SWITCHER_DEV_SIGN=1"
+  assert_contains "$n" "DEVELOPMENT_TEAM=$T SWITCHER_DEV_SIGN=1" "make $t DEV_SIGN_TEAM=${T}：xcodebuild 命令行盖 DEVELOPMENT_TEAM + SWITCHER_DEV_SIGN=1"
   assert_not_contains "$n" "-xcconfig" "make $t DEV_SIGN_TEAM：不再走 G13 的 -xcconfig 旁路"
   n=$(make -n --no-print-directory "$t" 2>/dev/null | grep xcodebuild | tail -1)
   assert_not_contains "$n" "SWITCHER_DEV_SIGN" "make $t 不给别名：命令行不盖签名设置（用工程里写好的）"
