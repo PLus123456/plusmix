@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">PlusMix</title>
+  <desc id="desc">预览绿与播出红的双画面使用一致的深色描边，加号融入红色画面的右下角。</desc>
+  <defs>
+    <linearGradient id="shell" x1="64" y1="24" x2="448" y2="488" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#263341"/>
+      <stop offset="1" stop-color="#101820"/>
+    </linearGradient>
+    <linearGradient id="preview" x1="80" y1="108" x2="336" y2="284" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#76F4C0"/>
+      <stop offset="1" stop-color="#29C99A"/>
+    </linearGradient>
+    <linearGradient id="program" x1="168" y1="216" x2="424" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF8A7A"/>
+      <stop offset="1" stop-color="#F05060"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="110" fill="url(#shell)"/>
+  <rect x="17" y="17" width="478" height="478" rx="109" fill="none" stroke="#FFFFFF" stroke-opacity=".10" stroke-width="2"/>
+  <!-- Both panels share exactly the same outline and corner geometry. -->
+  <g stroke="#101820" stroke-width="10" stroke-linejoin="round">
+    <rect x="80" y="108" width="256" height="176" rx="34" fill="url(#preview)"/>
+    <rect x="168" y="216" width="256" height="176" rx="34" fill="url(#program)"/>
+  </g>
+  <!-- Integrated corner mark; equal 14-unit right/bottom insets before the outline. -->
+  <path d="M368 308v56m-28-28h56" fill="none" stroke="#F8FCFA" stroke-width="28" stroke-linecap="round"/>
+</svg>
