@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/media/plusmix-icon.png" width="112" height="112" alt="PlusMix 图标：统一深色描边的预览绿与播出红双画面，加号位于红色画面右下角">
+</p>
+
 # PlusMix
 
 Apple Silicon 原生的多机位导播台：编号输入（摄像头 / 采集卡、DeckLink、屏幕、文件、图片、NDI、纯音频）、PGM / PVW 范式、Cut / Fade / Wipe / Zoom / Stinger 转场、
@@ -8,6 +12,20 @@ Swift 6（严格并发）+ Metal，macOS 15+，Apache-2.0。
 **状态**：0.1.0 第一版功能已全部合入，之后又做了一轮界面改版（工具条、三段式底栏、一个设置窗、转场槽、播放控制与推流 / 录制状态窗……，0.1.x）。检查点 G2–G8 的自动化门槛通过（[测试报告索引](docs/testing/README.md)），
 但还没有发布版：G8 判 0.1.1 还不发，只差人工检查清单与签名公证（8 小时长稳已复验通过、已知崩溃已修，见 [已知问题](docs/KNOWN_ISSUES.md)）。
 现在能用来干活，但请先在自己的设备上按 [测试标准](docs/testing/测试标准.md) 验一遍。
+
+## 看看它怎么工作
+
+下面是当前 App 的**真实窗口录制**，使用原创演示素材，无需摄像头或网络。操作由本地 API 驱动，与界面按钮共用同一套命令；GIF 无音频。
+
+**先预览，再播出。** 左侧绿色 PVW 选好下一路，右侧红色 PGM 保持当前节目；随后用 Cut 硬切、Fade 淡变或 Wipe 擦除切上播出。
+
+![PlusMix 实机演示：选择 PVW，依次执行 Cut、Fade 和 Wipe，观察 PGM 画面变化](docs/media/demo-switching.gif)
+
+**叠加分别控制。** 字幕从下方滑入，再加入画中画；两个通道可以独立收起，回到干净的节目画面。
+
+![PlusMix 实机演示：字幕滑入，画中画淡入，再分别收起两个叠加通道](docs/media/demo-overlays.gif)
+
+[查看静态界面](docs/media/demo-poster.png) · [图标源文件、素材说明与重新生成](docs/media/README.md)
 
 ## 一分钟上手
 

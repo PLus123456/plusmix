@@ -1,0 +1,11 @@
+2026-11-08 · 内置 image_gen 编辑（用户指定 image2）
+输入：上一版 docs/media/plusmix-icon.png。
+输出：plusmix-icon-image2.png。保留生成原图；正式 SVG 按此方向整理成可编辑几何，并兼顾小尺寸。
+
+Use case: precise-object-edit; logo-brand.
+Asset type: PlusMix macOS application icon, a simple vector-friendly production logo.
+Input image: the supplied PNG is the edit target, the current PlusMix icon. Preserve its recognizable composition: dark navy rounded-square tile, one mint-green rounded video panel behind at upper-left, one coral-red rounded video panel in front at lower-right, slight restrained gradients, transparent area outside the tile.
+Make exactly these design corrections:
+1. BOTH the mint-green rear panel AND the coral-red front panel must have the SAME complete dark navy outline treatment: equal stroke weight, consistent corner rounding, consistent edge spacing. The green panel must visibly have a border just as the red one does. No uneven one-sided halo or extra contour only on the red panel.
+2. Remove the large central white plus. Keep the overlap of the two panels clean and unobstructed. Place a smaller ivory-white plus near the LOWER-RIGHT interior corner of the coral-red foreground panel. It should feel embedded into the panel, using the same softly rounded geometry, with comfortable equal inset from the right and bottom panel edges. It must remain entirely inside the red panel, not a floating badge, not a medical cross in the middle. The plus should be clear at small app-icon sizes.
+Refine visual balance and spacing while staying close to the original palette and the two-panel silhouette. Flat clean orthographic 2D icon, precise geometric edges, polished subtle gradients, no perspective, no extrusion, no gloss, no broad drop shadows. One icon only, centered on a 1:1 canvas. No text, no labels, no mockup sheet, no watermark. Outside the rounded-square tile is truly transparent.
