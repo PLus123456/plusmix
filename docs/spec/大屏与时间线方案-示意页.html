@@ -264,7 +264,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
           <div class="pagewrap" data-page="stage" hidden>
             <div class="mons">
               <div class="mon pvw"><div class="t"><span>预设 2 · 主屏 PPT</span><span>舞台 PVW</span></div><div class="v stage" id="appStagePvw"></div></div>
-              <div class="col"><div class="btn">Cut</div><div class="btn hot">Auto 0.5s</div><div class="btn">黑场</div><div class="btn">对位图</div><div class="lab">方式</div><div class="btn">预监后 TAKE</div><div class="btn">联动导播</div><div class="lab">编排</div><div class="btn">屏幕编排…</div><div class="btn">分区矩阵</div></div>
+              <div class="col"><div class="btn">Cut</div><div class="btn hot">Auto 0.5s</div><div class="btn">黑场</div><div class="btn">对位图</div><div class="lab">方式</div><div class="btn">预监后 TAKE</div><div class="btn">联动导播</div><div class="lab">编排</div><div class="btn">屏幕编排…</div><div class="btn">预设表</div></div>
               <div class="mon pgm"><div class="t"><span>预设 3 · 主屏直播</span><span>舞台 PGM</span></div><div class="v stage" id="appStagePgm"></div></div>
             </div>
             <div class="strip"><div class="h">画面预设 <span class="lab">⌃1…⌃0</span></div><div class="cells" id="appLooks"></div></div>
@@ -324,8 +324,35 @@ code { font-family: var(--mono); font-size: 0.92em; }
       <div class="tlmon pgm"><div class="t"><span id="pgmName"></span><span>舞台 PGM · 现在屏上</span></div><div class="v" id="tlPgm"></div></div>
     </div>
     <div class="tablewrap"><table class="cuetable" id="cueTable"></table></div>
-    <p class="note">触发有三种：手动（等 GO）、跟随（上一条走完或片子放完自动走）、定时。"录制操作"可以把排练时手动走的一遍直接记成提示点。走带放在状态机里按拍执行，所以时刻逐拍确定，不靠界面线程。</p>
+    <p class="note">触发有三种：手动（等 GO）、跟随（上一条走完或片子放完自动走）、定时。"录制操作"可以把排练时手动走的一遍直接记成提示点。走带放在状态机里按拍执行，所以时刻逐拍确定，不靠界面线程。GO 默认也认 PgDn 和方向键，翻页笔能用。上面这张表和 HiRender 的节目管理是同一种东西：行是每块屏，列是演出的一个时刻，只是每列多了触发方式。</p>
   </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">对照</div>
+    <h2>和 HiRender S3、屏幕管理类切换台对一遍</h2>
+    <p>读了 HiRender S3 的三份官方手册和几款同类软件的官方文档。模型对得上，差别主要在一处：它点节目就上屏，我们默认先进预监。</p>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>本方案</th><th>HiRender S3</th><th>屏幕管理类切换台</th></tr></thead>
+      <tbody>
+        <tr><td class="k">舞台</td><td>舞台</td><td>一块 Screen 的像素画布</td></tr>
+        <tr><td class="k">屏幕</td><td>5.x 的"表面"；4.x 是切片里"取哪块"那一半</td><td>Screen 里一个输出口占的区域</td></tr>
+        <tr><td class="k">输出口</td><td>5.x 的"屏幕"（真实输出口），显示管理窗口右边的输出区域</td><td>Output</td></tr>
+        <tr><td class="k">分区</td><td>窗口（舞台坐标里的位置和大小）</td><td>Layer（属于某一块屏）</td></tr>
+        <tr><td class="k">画面预设</td><td>节目（节目管理表的一列）</td><td>Preset、Master Memory</td></tr>
+        <tr><td class="k">时间线、提示点</td><td>节目的先后顺序，加时间线上的控制命令</td><td>Cue 序列</td></tr>
+        <tr><td class="k">预监后 TAKE</td><td>"预监"只在软件里看，没有 TAKE；连线后所见即所出</td><td>每块屏一对 Program / Preview，一次 Take 一起换</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="plain">
+    <li><b>照做的：</b>舞台和输出口分开摆（它 5.x 的显示管理就是左边舞台、右边输出）；素材放进窗口，不直接绑输出口；一列节目等于一整组屏一起换；实时信号不跟着走带暂停；翻页笔走带。</li>
+    <li><b>不一样的：</b>我们默认预监后 TAKE，这是切换台的做法；用惯所见即所出的人可以开"直出"。时间线先做"节目表加每列的触发方式"这一半，轨道上摆素材块、打关键帧的那一半以后作为片段嵌进提示点。</li>
+    <li><b>以后再借的：</b>给中控的 TCP / UDP 文本指令、LTC / MTC 时间码、临时盖上去的插播层。</li>
+  </ul>
 </section>
 
 <section>
@@ -359,14 +386,14 @@ code { font-family: var(--mono); font-size: 0.92em; }
       <tbody>
         <tr><td class="q">Q1</td><td>监看省出来的高度给谁</td><td>给输入条变多行；留"自由高度"开关</td></tr>
         <tr><td class="q">Q2</td><td>竖屏画布时输入区放哪</td><td>自动挪到监看右侧，调音台默认收起</td></tr>
-        <tr><td class="q">Q3</td><td>大屏的操作范式</td><td>预监后 TAKE（和导播一致），另给"直出"开关</td></tr>
-        <tr><td class="q">Q4</td><td>时间线形态</td><td>提示点序列画在时间轴上；任意摆素材的自由时间线以后按需要加</td></tr>
+        <tr><td class="q">Q3</td><td>大屏的操作范式</td><td>预监后 TAKE（和导播一致），另给显眼的"直出"开关。HiRender 是点节目就上屏；你和那位老师都更习惯那样的话，可以把"直出"设成默认</td></tr>
+        <tr><td class="q">Q4</td><td>时间线形态</td><td>先做提示点序列（等于 HiRender 的节目表加每列的触发方式）；素材块加关键帧的自由时间线以后作为片段嵌进来。如果老师说的"时间线"就是轨道上摆素材块那种，这条要反过来排</td></tr>
         <tr><td class="q">Q5</td><td>规模上限与性能阈值</td><td>屏幕 16、分区 24、输出口 4、舞台每边 8192；大档阈值量完再定</td></tr>
         <tr><td class="q">Q6</td><td>你现场用什么把信号送进 LED 处理器</td><td>按 HDMI / DP 外接口 + NDI 做；常用 SDI 的话把输出卡提前</td></tr>
         <tr><td class="q">Q7</td><td>片子多不多</td><td>超过十来段就把播放器输入排到时间线前面</td></tr>
         <tr><td class="q">Q8</td><td>快捷键随不随面板变</td><td>默认不变（⌃1…⌃0 调预设、⌃空格 TAKE、→ GO），给开关</td></tr>
         <tr><td class="q">Q9</td><td>输入上了大屏算不算"在播"（红灯）</td><td>不算，另加"屏"徽标</td></tr>
-        <tr><td class="q">Q10</td><td>叫什么</td><td>面板"导播 / 大屏"；舞台、屏幕、输出口、分区、画面预设、时间线、提示点</td></tr>
+        <tr><td class="q">Q10</td><td>叫什么</td><td>面板"导播 / 大屏"；舞台、屏幕、输出口、分区、画面预设、时间线、提示点。分区要不要跟 HiRender 叫"窗口"可以考虑；"节目"在本软件里已经指节目文件和 PGM，不建议照搬</td></tr>
         <tr><td class="q">Q11</td><td>什么时候做</td><td>第 1 步现在就可以开；第 2 步以后等 0.1.1 的几条 S1 收完</td></tr>
       </tbody>
     </table>
