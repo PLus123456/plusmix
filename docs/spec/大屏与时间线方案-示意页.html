@@ -154,21 +154,43 @@ td.q { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
 .flow { font-family: var(--mono); font-size: 12.5px; line-height: 1.6; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; overflow-x: auto; white-space: pre; margin: 0; }
 footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 18px; }
 code { font-family: var(--mono); font-size: 0.92em; }
+a { color: var(--accent); }
+.app { display: flex; flex-direction: column; }
+.app .lower { display: flex; gap: 2px; align-items: stretch; }
+.app .lower .strip { flex: 1; min-width: 0; }
+.app .mix { width: 170px; border-left: 0; }
+.app .faders i { min-height: 56px; }
+.cuetable th.sec { font-size: 12px; color: var(--muted); border-left: 1px solid var(--line); }
+.ans { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; margin-right: 4px; }
+.ans.ok { background: var(--accent-soft); color: var(--accent); }
+.ans.wait { background: var(--warn-soft); color: var(--warn); }
+.twocol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+.opt { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.opt.rec { border-color: var(--accent); }
+.opt h3 small { font-weight: 600; font-size: 12px; color: var(--accent); margin-left: 8px; }
+ol.gates { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; counter-reset: gate; }
+ol.gates > li { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; }
+ol.gates > li::before { counter-increment: gate; content: counter(gate); grid-row: 1 / span 3; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #ffffff; font-weight: 700; display: flex; align-items: center; justify-content: center; font-family: var(--mono); }
+ol.gates h3, ol.gates p { grid-column: 2; }
+ol.gates p { font-size: 13.5px; }
+ol.gates .see { color: var(--muted); }
+pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; overflow-x: auto; margin: 0; font-family: var(--mono); font-size: 12px; }
 </style>
 
 <div class="wrap">
 
 <header>
-  <div class="eyebrow">PLUSMIX · 设计稿 · 2026-11-13</div>
+  <div class="eyebrow">PLUSMIX · 设计稿第二版 · 2026-11-14</div>
   <h1>大屏与时间线方案</h1>
   <p class="lede">监看框贴合画面、横竖屏排布、按屏放内容的"舞台"、一键多屏的画面预设和时间线，再加"导播 ｜ 大屏"两套工作面板。能做，而且是在现有引擎上加一层，不用推倒重来。</p>
-  <div class="status"><span class="chip">等你拍板</span><span class="muted">没有改任何代码。完整文字在 <code>docs/spec/大屏与时间线方案.md</code>，代码基线 main <code>949d956</code>。</span></div>
+  <div class="status"><span class="chip">还有两条等你答复</span><span class="muted">第二版：九条已定，调音台挪到了下边，补了整体架构和五个检查点。<a href="#answers">看那两条问题</a>。没有改任何代码，完整文字在 <code>docs/spec/大屏与时间线方案.md</code>。</span></div>
 </header>
 
 <section>
   <div class="sec-head"><h2>三件事，三层</h2><p class="muted">每一层可以单独交付。节目里没配大屏时，一切和现在逐字节相同。</p></div>
   <div class="layers">
-    <div class="layer"><span class="tag">第一层 · 只动界面</span><h3>监看框贴合画面，横竖屏</h3><p>监看框的形状跟画布走，不再上下一大片黑。省出来的高度给输入条变多行。竖屏时输入区挪到监看右侧。</p><span class="cost">约 1 个会话，不碰契约，现在就能开</span></div>
+    <div class="layer"><span class="tag">第一层 · 只动界面</span><h3>监看框贴合画面，横竖屏</h3><p>监看框的形状跟画布走。横屏时上边整幅给监看，调音台挪到下边、和输入同高。竖屏时监看占满左边，输入和调音台叠在右边。</p><span class="cost">约 1 个会话，不碰契约，现在就能开</span></div>
     <div class="layer"><span class="tag">第二层 · 舞台</span><h3>画出屏幕，按屏放内容</h3><p>舞台、屏幕、输出口三样分开。监看看的是现场的样子，不是挤进一路 1080p 之后的样子。也是预监后 TAKE，多块屏同一拍换。</p><span class="cost">约 5 个会话 + 1 个检查点</span></div>
     <div class="layer"><span class="tag">第三层 · 预设与时间线</span><h3>编好，现场只管往下走</h3><p>一组屏各放什么存成画面预设。时间线把预设排成提示点，替你把下一步装进预监，GO 就是 TAKE。</p><span class="cost">约 4 个会话 + 1 个检查点</span></div>
   </div>
@@ -177,8 +199,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <section>
   <div class="sec-head">
     <div class="eyebrow">第一层</div>
-    <h2>监看框：现在和改后</h2>
-    <p>现在监看区的高度是"窗口剩多少给多少"，画面等比缩进去，四周清成黑；输入条固定一行。下面两张图按界面里真实的尺寸常数画，换窗口大小和画布看差别。</p>
+    <h2>主窗口排布：现在和改后</h2>
+    <p>现在调音台在右边占一整列，监看区的高度是"窗口剩多少给多少"，画面等比缩进去，四周清成黑；输入条固定一行。改后监看占满一条边，调音台和输入共享另一条边。下面两张图按界面里真实的尺寸常数画，换窗口大小和画布看差别。</p>
   </div>
   <div class="demo">
     <div class="controls">
@@ -187,7 +209,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
       <div class="ctl">画布<div class="seg" id="segCanvas"></div></div>
     </div>
     <div class="pair">
-      <div class="fig"><div class="fig-title">现在 <small>监看区铺满，画面留黑边</small></div><div id="winNow"></div><div class="stats" id="statNow"></div></div>
+      <div class="fig"><div class="fig-title">现在 <small>调音台在右边通高，监看区留黑边</small></div><div id="winNow"></div><div class="stats" id="statNow"></div></div>
       <div class="fig"><div class="fig-title">改后 <small id="afterSub"></small></div><div id="winAfter"></div><div class="stats" id="statAfter"></div></div>
     </div>
     <div class="legend">
@@ -199,9 +221,11 @@ code { font-family: var(--mono); font-size: 0.92em; }
     <p class="note" id="layoutNote"></p>
   </div>
   <ul class="plain">
-    <li>规则只有两条：监看框 = 画面（按画布宽高比），上半区的高度由画面算出来；省下的高度给输入条，输入条会折行。</li>
+    <li><b>横屏：</b>上边整幅给监看，下边一行是"输入 ｜ 调音台"，两者同高。监看框 = 画面，上半区的高度由画面算出来，其余给下边一行，输入会折行。</li>
+    <li><b>竖屏：</b>把横屏的排法转 90°。监看占满左边，右边一栏上面是输入、下面是调音台。输入格子换成竖的小格（标题条加 9:16 缩略图），挨得近、露得多，和监看是同一个形状。</li>
+    <li><b>调音台的高度跟着位置走：</b>够高就和现在一样，不够就缩短推子，再不够把声像和总线送出收进齿轮。留一个"旧排布"开关给习惯现在样子的人。</li>
     <li>节目格式页加竖屏预设和"横 ⇄ 竖"按钮。1366×762 这类非标尺寸今天就能在"自定义"里填，改后监看框也贴合它。</li>
-    <li>窗口窄时转场列比画面高，监看下面会空出一截底色。想让画面更大只有收起调音台或拉宽窗口。</li>
+    <li>这些是按尺寸算出来的排法。真机上的样子在检查点 1 拿给你看了再调。</li>
   </ul>
 </section>
 
@@ -264,29 +288,31 @@ code { font-family: var(--mono); font-size: 0.92em; }
           <div class="pagewrap" data-page="stage" hidden>
             <div class="mons">
               <div class="mon pvw"><div class="t"><span>预设 2 · 主屏 PPT</span><span>舞台 PVW</span></div><div class="v stage" id="appStagePvw"></div></div>
-              <div class="col"><div class="btn">Cut</div><div class="btn hot">Auto 0.5s</div><div class="btn">黑场</div><div class="btn">对位图</div><div class="lab">方式</div><div class="btn">预监后 TAKE</div><div class="btn">联动导播</div><div class="lab">编排</div><div class="btn">屏幕编排…</div><div class="btn">预设表</div></div>
+              <div class="col"><div class="btn">Cut</div><div class="btn hot">Auto 0.5s</div><div class="lab">方式</div><div class="btn">直出：关</div><div class="btn">联动导播</div><div class="lab">全场</div><div class="btn">黑场</div><div class="btn">对位图</div><div class="lab">编排</div><div class="btn">屏幕编排…</div><div class="btn">预设表</div></div>
               <div class="mon pgm"><div class="t"><span>预设 3 · 主屏直播</span><span>舞台 PGM</span></div><div class="v stage" id="appStagePgm"></div></div>
             </div>
             <div class="strip"><div class="h">画面预设 <span class="lab">⌃1…⌃0</span></div><div class="cells" id="appLooks"></div></div>
           </div>
-          <div class="strip shared">
-            <div class="h">输入 <span class="sharedtag">共用</span></div>
-            <div class="cells">
-              <div class="cell" data-page="stage" hidden><div class="ct" style="background:var(--m-pgm)">PGM 节目画面</div><div class="cv"></div></div>
-              <div class="cell onpgm"><div class="ct">1 机位 1</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 主屏</span></div>
-              <div class="cell onpvw"><div class="ct">2 机位 2</div><div class="cv"></div></div>
-              <div class="cell"><div class="ct">3 PPT</div><div class="cv"></div></div>
-              <div class="cell"><div class="ct">4 背景视频</div><div class="cv"></div></div>
-              <div class="cell"><div class="ct">5 台标</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 两耳</span></div>
-              <div class="cell"><div class="ct">6 片头</div><div class="cv"></div></div>
+          <div class="lower">
+            <div class="strip shared">
+              <div class="h">输入 <span class="sharedtag">共用</span></div>
+              <div class="cells">
+                <div class="cell" data-page="stage" hidden><div class="ct" style="background:var(--m-pgm)">PGM 节目画面</div><div class="cv"></div></div>
+                <div class="cell onpgm"><div class="ct">1 机位 1</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 主屏</span></div>
+                <div class="cell onpvw"><div class="ct">2 机位 2</div><div class="cv"></div></div>
+                <div class="cell"><div class="ct">3 PPT 7 / 24</div><div class="cv"></div></div>
+                <div class="cell"><div class="ct">4 背景视频</div><div class="cv"></div></div>
+                <div class="cell"><div class="ct">5 台标</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 两耳</span></div>
+                <div class="cell"><div class="ct">6 片头</div><div class="cv"></div></div>
+              </div>
             </div>
+            <div class="mix shared"><div><b>调音台</b> <span class="sharedtag">共用</span></div><div class="faders"><i></i><i></i><i></i><i></i></div><div class="lab">Master −18 LUFS</div></div>
           </div>
           <div class="tl" data-page="stage" hidden>
-            <span class="go">GO →</span><span>时间线 · 年会流程</span>
+            <span class="go">GO →</span><span>时间线 · 年会流程 · 第 2 段 正会</span>
             <span class="cue">1 开场片</span><span class="cue on">2 主持人上场</span><span class="cue nx">3 讲 PPT</span><span class="cue">4 全场互动</span><span class="cue">5 结束片</span>
           </div>
         </div>
-        <div class="mix shared"><div><b>调音台</b> <span class="sharedtag">共用</span></div><div class="faders"><i></i><i></i><i></i></div><div class="lab">Master −18 LUFS</div></div>
         <div class="bbar shared"><span class="btn">添加输入…</span><span class="btn">录制</span><span class="btn">外部显示</span><span class="btn">推流</span><span class="btn">多画面</span><span class="sharedtag">共用</span><span class="lab" id="appHint" style="margin-left:auto"></span></div>
       </div>
     </div>
@@ -324,7 +350,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
       <div class="tlmon pgm"><div class="t"><span id="pgmName"></span><span>舞台 PGM · 现在屏上</span></div><div class="v" id="tlPgm"></div></div>
     </div>
     <div class="tablewrap"><table class="cuetable" id="cueTable"></table></div>
-    <p class="note">触发有三种：手动（等 GO）、跟随（上一条走完或片子放完自动走）、定时。"录制操作"可以把排练时手动走的一遍直接记成提示点。走带放在状态机里按拍执行，所以时刻逐拍确定，不靠界面线程。GO 默认也认 PgDn 和方向键，翻页笔能用。上面这张表和 HiRender 的节目管理是同一种东西：行是每块屏，列是演出的一个时刻，只是每列多了触发方式。</p>
+    <p class="note">触发有三种：手动（等 GO）、跟随（上一条走完或片子放完自动走）、定时。"录制操作"可以把排练时手动走的一遍直接记成提示点。走带放在状态机里按拍执行，所以时刻逐拍确定，不靠界面线程。GO 默认也认 PgDn 和方向键，翻页笔能用。上面这张表和 HiRender 的节目管理是同一种东西：行是每块屏，列是演出的一个时刻，只是每列多了触发方式。提示点可以分段，一段一段跳；20–30 张 PPT 做成一路幻灯片列表之后，可以按它一键生成提示点。</p>
   </div>
 </section>
 
@@ -356,51 +382,133 @@ code { font-family: var(--mono); font-size: 0.92em; }
 </section>
 
 <section>
-  <div class="sec-head"><h2>落地顺序</h2><p class="muted">和第五波界面改版一个量级：十来个会话、两个检查点。第 1 步不依赖任何决定。</p></div>
+  <div class="sec-head">
+    <div class="eyebrow">整体架构</div>
+    <h2>一个节目，两路合成，同一拍</h2>
+    <p>输入、状态机、调音台只有一套。画面分两路合成：直播那一路和现在完全一样，舞台那一路是新加的。两路由同一个状态机在同一拍上驱动，所以一次 TAKE 两边同时换，直播 PGM 上大屏不多一帧延迟。</p>
+  </div>
+  <pre class="mermaid">
+flowchart LR
+  subgraph IN["输入（两个面板共用）"]
+    I1["摄像头 · 采集卡 · NDI · 屏幕"]
+    I2["视频文件 · 图片"]
+    I3["幻灯片列表（新）"]
+  end
+  subgraph CT["控制"]
+    U["界面：导播 ｜ 大屏"]
+    KB["快捷键 · MIDI · 翻页笔 · API"]
+    S["状态机（按拍走）"]
+  end
+  subgraph MX["合成"]
+    P["直播合成：PGM / PVW、转场、叠加"]
+    G["舞台合成：分区 → 舞台画面（新）"]
+    R["输出口打包（新）"]
+  end
+  subgraph OUT["输出"]
+    O1["录制 · 推流 · 虚拟摄像头"]
+    O2["外部显示 HDMI / DP"]
+    O3["NDI"]
+  end
+  A["调音台（共用）"]
+  U --> S
+  KB --> S
+  S -- "快照" --> P
+  S -- "快照" --> G
+  IN --> P
+  IN --> G
+  IN --> A
+  P -- "直播 PGM 可作来源" --> G
+  G --> R
+  P --> O1
+  P --> O2
+  P --> O3
+  R --> O2
+  R --> O3
+  A --> O1
+  </pre>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>步</th><th>会话</th><th>交付</th><th>依赖</th></tr></thead>
+      <thead><tr><th>每一拍的顺序</th><th>做什么</th></tr></thead>
       <tbody>
-        <tr><td class="q">1</td><td class="k">监看贴合与竖屏排布</td><td>第一层全部（只动 App）</td><td>无</td></tr>
-        <tr><td class="q">2</td><td class="k">契约提案：舞台、预设</td><td>提案写完停下来问你，批了再落类型</td><td>你定下面的问题</td></tr>
-        <tr><td class="q">3</td><td class="k">舞台合成 ‖ 舞台状态与命令</td><td>渲染两遍 + 输出口打包；TAKE、同拍</td><td>2</td></tr>
-        <tr><td class="q">4</td><td class="k">输出口出画 ‖ 大屏面板</td><td>外部显示 / NDI 点对点；面板切换、舞台监看、屏幕编排、预设条</td><td>3</td></tr>
-        <tr><td class="q">5</td><td class="k">检查点</td><td>合入、全量、接真屏或回采的人工清单</td><td>4</td></tr>
-        <tr><td class="q">6–7</td><td class="k">契约提案：时间线 → 走带 ‖ 时间线面板</td><td>提示点、GO、录制操作</td><td>5</td></tr>
-        <tr><td class="q">8</td><td class="k">播放器输入</td><td>一路输入装一串片子，接缝不黑</td><td>可与 7 并行</td></tr>
-        <tr><td class="q">9–10</td><td class="k">手册 → 检查点</td><td>合入、放行</td><td>7–8</td></tr>
+        <tr><td class="k">1 状态机</td><td>先走时间线（到点的提示点当命令应用），再推进转场，再应用这一拍收到的命令，发布快照</td></tr>
+        <tr><td class="k">2 挑帧</td><td>每路输入取不晚于这一拍的最新一帧</td></tr>
+        <tr><td class="k">3 渲染</td><td>直播 PGM → 直播 PVW → 多画面 → 舞台 PGM → 舞台 PVW → 各输出口</td></tr>
+        <tr><td class="k">4 派发</td><td>PGM 给录制、推流、NDI、虚拟摄像头；输出口画面给外部显示和 NDI。谁慢谁自己丢帧</td></tr>
       </tbody>
     </table>
   </div>
   <ul class="plain">
-    <li><b>要先写探针验证的三处：</b>外接显示口能不能逐像素送出（缩放、色彩管理）；多个输出口之间差不差帧；大舞台（8192 宽 + 两路 4K）在入门机型上的渲染耗时。前两条需要采集卡或 LED 处理器回采。</li>
-    <li><b>明确先不做：</b>SDI 输出卡与逐帧锁定、多机联动、边缘融合和几何校正、LED 逐点校色、自由时间线上的关键帧、DMX / Art-Net。定位是"一台 Mac 同时管直播和几块屏"。</li>
+    <li><b>不变的：</b>节目里没配大屏，一切和现在逐字节相同。录制、推流仍然只认直播 PGM。渲染线程零分配、统计只有一份、切换只在拍点生效，这几条铁律同样管新部分。</li>
+    <li><b>新加的：</b>舞台合成与输出口打包（渲染）；舞台命令和时间线走带（状态机）；幻灯片列表输入；大屏面板、屏幕编排窗、时间线面板（界面）。</li>
+    <li><b>幻灯片列表：</b>一路输入里装一串页，来源是一组图片或一份 PDF（PPT 导出），可以分段，能上一张、下一张、跳到第几张。只占一个输入编号，20–30 张 PPT 不再挤占 16 路输入。可以按它一键生成时间线的提示点。</li>
+    <li><b>节目文件：</b>多两节，舞台（屏幕、输出口、分区、画面预设）和时间线（分段、提示点）。老文件照常打开。</li>
   </ul>
 </section>
 
 <section>
-  <div class="sec-head"><h2>要你定的 11 件事</h2><p class="muted">每条都有建议值。不改就按建议值写进各会话的任务单。</p></div>
+  <div class="sec-head">
+    <div class="eyebrow">怎么推进</div>
+    <h2>五个检查点，每个都把外观拿给你看</h2>
+    <p>界面类的工作都拆成两步：先把真界面用假数据搭出来给你看，你说可以了再接上引擎。外观早看早改，改起来也不牵动底下的东西。</p>
+  </div>
+  <ol class="gates">
+    <li><h3>主窗口新排布</h3><p>监看贴合、调音台挪到下边、竖屏排法、节目格式页的横竖预设。只动界面，现在就能开。</p><p class="see">你会看到：真机截图，横屏 4 种窗口 × 调音台开和收，竖屏 3 种窗口，1366×762 一组；加一个能直接运行的版本。</p></li>
+    <li><h3>大屏面板的样子</h3><p>面板切换、舞台监看、屏幕编排窗、预设条和预设表，用假数据撑起来，还不接引擎。底下的契约、渲染、状态机同时并行做。</p><p class="see">你会看到：大屏面板和屏幕编排窗的截图，加一个能点的骨架。只定外观，不合入。</p></li>
+    <li><h3>大屏能出画</h3><p>外观定稿后接上引擎和输出口。合入、跑全量。</p><p class="see">你会看到：接一块真屏或 NDI 回看，实际操作一遍三联屏：选分区、调预设、TAKE、直出、黑场、对位图。</p></li>
+    <li><h3>时间线面板的样子</h3><p>时间线面板（时间轴、列表、分段）和幻灯片列表的格子与设置页，用假数据。走带和幻灯片输入同时并行做。</p><p class="see">你会看到：时间线面板与幻灯片列表的截图，加骨架。</p></li>
+    <li><h3>整场走一遍</h3><p>时间线接线、录下操作、按幻灯片生成提示点、手册。合入、全量、放行。</p><p class="see">你会看到：用一份 20–30 页分好段的 PPT 加三联屏，从开场走到结束。</p></li>
+  </ol>
+  <ul class="plain">
+    <li>截图都是把软件真跑起来拍的，不拿示意图代替。每张图下面写清这是什么、对应方案哪一条、哪里还没做。</li>
+    <li>你的意见逐条记下来。小的当场改完重拍，大的另开一个会话改。你说可以之后才合入，依赖这块外观的下一步才开。</li>
+    <li>要先写探针验证的三处不变：外接口能不能逐像素送出、多个输出口之间差不差帧、大舞台在入门机型上的耗时。前两处要采集卡或 LED 处理器回采，放在检查点 3 之前。</li>
+    <li>没有哪一块是引擎做不到的。量和上次界面改版差不多，十四五个会话。先不做的：SDI 输出卡、多机联动、融合与几何校正、逐点校色、自由时间线上的关键帧、时间码、DMX。</li>
+  </ul>
+</section>
+
+<section id="answers">
+  <div class="sec-head">
+    <div class="eyebrow">你的答复</div>
+    <h2>九条已定，两条换个说法再问一遍</h2>
+  </div>
+  <div class="demo">
+    <h3>Q3 在大屏面板点了一个画面预设，现场的屏是立刻变，还是先看一眼再变？</h3>
+    <div class="twocol">
+      <div class="opt"><h3>立刻变</h3><p>就是你说的"所见即所得"，HiRender 是这样。点预设 2，三块屏马上换。</p><p class="muted">少按一下。点错了观众也马上看到。</p></div>
+      <div class="opt rec"><h3>先看一眼再变<small>建议</small></h3><p>点预设 2，只有软件里左边的"舞台预监"变，现场的屏不动。看着没错，按一下空格，三块屏同时换。</p><p class="muted">多按一下。点错了有机会改。导播面板现在就是这样。</p></div>
+    </div>
+    <p class="note">两种都会做，转场列里有个"直出"开关随时切。要你定的只是默认开哪一种。走时间线时没有区别：预监里本来就是下一步，按 GO 就上屏。</p>
+  </div>
+  <div class="demo">
+    <h3>Q9 一路输入只上了大屏、没上直播，它的格子要不要亮红灯？</h3>
+    <p>现在哪一路正在直播 PGM 上，它的格子标题条是红的，意思是"这一路观众正在看，别动它"。加了大屏以后会有新情况：比如 PPT 只放在主屏上，直播里播的是机位。这时 PPT 那一格怎么标？</p>
+    <div class="twocol">
+      <div class="opt"><h3>也亮红</h3><p>简单。</p><p class="muted">红灯分不出是"在直播里"还是"在大屏上"。</p></div>
+      <div class="opt rec"><h3>不亮红，加一个"屏 · 主屏"小标签<small>建议</small></h3><p>红灯仍然只表示在直播里，标签写明它正在哪块屏上。</p><p class="muted">上面"两个面板"的示意里，切到大屏就能看到这个标签。</p></div>
+    </div>
+    <p class="note">一场活动只做大屏、不做直播的话，两种差别不大。</p>
+  </div>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>#</th><th>问题</th><th>建议</th></tr></thead>
+      <thead><tr><th>#</th><th>问题</th><th>结果</th></tr></thead>
       <tbody>
-        <tr><td class="q">Q1</td><td>监看省出来的高度给谁</td><td>给输入条变多行；留"自由高度"开关</td></tr>
-        <tr><td class="q">Q2</td><td>竖屏画布时输入区放哪</td><td>自动挪到监看右侧，调音台默认收起</td></tr>
-        <tr><td class="q">Q3</td><td>大屏的操作范式</td><td>预监后 TAKE（和导播一致），另给显眼的"直出"开关。HiRender 是点节目就上屏；你和那位老师都更习惯那样的话，可以把"直出"设成默认</td></tr>
-        <tr><td class="q">Q4</td><td>时间线形态</td><td>先做提示点序列（等于 HiRender 的节目表加每列的触发方式）；素材块加关键帧的自由时间线以后作为片段嵌进来。如果老师说的"时间线"就是轨道上摆素材块那种，这条要反过来排</td></tr>
-        <tr><td class="q">Q5</td><td>规模上限与性能阈值</td><td>屏幕 16、分区 24、输出口 4、舞台每边 8192；大档阈值量完再定</td></tr>
-        <tr><td class="q">Q6</td><td>你现场用什么把信号送进 LED 处理器</td><td>按 HDMI / DP 外接口 + NDI 做；常用 SDI 的话把输出卡提前</td></tr>
-        <tr><td class="q">Q7</td><td>片子多不多</td><td>超过十来段就把播放器输入排到时间线前面</td></tr>
-        <tr><td class="q">Q8</td><td>快捷键随不随面板变</td><td>默认不变（⌃1…⌃0 调预设、⌃空格 TAKE、→ GO），给开关</td></tr>
-        <tr><td class="q">Q9</td><td>输入上了大屏算不算"在播"（红灯）</td><td>不算，另加"屏"徽标</td></tr>
-        <tr><td class="q">Q10</td><td>叫什么</td><td>面板"导播 / 大屏"；舞台、屏幕、输出口、分区、画面预设、时间线、提示点。分区要不要跟 HiRender 叫"窗口"可以考虑；"节目"在本软件里已经指节目文件和 PGM，不建议照搬</td></tr>
-        <tr><td class="q">Q11</td><td>什么时候做</td><td>第 1 步现在就可以开；第 2 步以后等 0.1.1 的几条 S1 收完</td></tr>
+        <tr><td class="q">Q1</td><td>监看省出来的高度给谁</td><td><span class="ans ok">已定</span> 给输入折行。你追加的：调音台挪到下边、和输入同高，上边整幅给监看</td></tr>
+        <tr><td class="q">Q2</td><td>竖屏怎么排</td><td><span class="ans ok">已定</span> 监看占满左边，输入和调音台叠在右边。真机的样子在检查点 1 给你看了再调</td></tr>
+        <tr><td class="q">Q3</td><td>立刻变还是先看一眼</td><td><span class="ans wait">等你答复</span> 暂按建议：默认先看一眼再变</td></tr>
+        <tr><td class="q">Q4</td><td>时间线形态</td><td><span class="ans ok">已定</span> 先做提示点序列</td></tr>
+        <tr><td class="q">Q5</td><td>规模上限</td><td><span class="ans ok">已定</span> 屏幕 16、分区 24、输出口 4、舞台每边 8192</td></tr>
+        <tr><td class="q">Q6</td><td>信号怎么送出去</td><td><span class="ans ok">已定</span> HDMI / DP 外接口加 NDI</td></tr>
+        <tr><td class="q">Q7</td><td>素材</td><td><span class="ans ok">已定</span> 主要是 PPT，一场 20–30 张、分几段。加一路能装一串页的"幻灯片列表"输入，时间线加分段</td></tr>
+        <tr><td class="q">Q8</td><td>快捷键随不随面板变</td><td><span class="ans ok">已定</span> 不变，给开关</td></tr>
+        <tr><td class="q">Q9</td><td>上了大屏亮不亮红灯</td><td><span class="ans wait">等你答复</span> 暂按建议：不亮红，加标签</td></tr>
+        <tr><td class="q">Q10</td><td>叫法</td><td><span class="ans ok">已定</span> 导播 / 大屏；舞台、屏幕、输出口、分区、画面预设、时间线、提示点</td></tr>
+        <tr><td class="q">Q11</td><td>怎么推进</td><td><span class="ans ok">已定</span> 先出整体架构，再按检查点做，每个检查点把外观拿给你看</td></tr>
       </tbody>
     </table>
   </div>
 </section>
 
-<footer>示意里的窗口尺寸取自 <code>App/Sources/UI/Theme.swift</code> 与 <code>MainWindowController.swift</code>：工具条一行 52、底栏 58、输入条 197、转场列 150、调音台 340、监看标题条 26、转场列最小高按 409、输入格"中"档 200×153。舞台、时间线两节是设计示意，不是现有功能。</footer>
+<footer>示意里的窗口尺寸取自 <code>App/Sources/UI/Theme.swift</code> 与 <code>MainWindowController.swift</code>：工具条一行 52、底栏 58、输入条 197、转场列 150、调音台 340、监看标题条 26、转场列最小高按 409、输入格"中"档 200×153；改后调音台在下边时宽 340，竖屏的小格 72×146。舞台、时间线两节是设计示意，不是现有功能。</footer>
 
 </div>
 
@@ -427,100 +535,112 @@ code { font-family: var(--mono); font-size: 0.92em; }
   }
 
   /* ---------- 第一层：按真实常数算排布 ---------- */
-  var K = { TB: 52, BB: 58, STRIP: 197, STRIPMIN: 195, TCOL: 150, GAP: 2, MIX: 340, TITLE: 26, TMIN: 409, CW: 200, CG: 6, CH: 153, HDR: 30, TOTAL: 16 };
+  var K = { TB: 52, BB: 58, STRIP: 197, STRIPMIN: 195, TCOL: 150, GAP: 2, MIX: 340, TITLE: 26, TMIN: 409, CW: 200, CG: 6, CH: 153, HDR: 30, TOTAL: 16, RMIN: 346, PW: 72, PHT: 146 };
   var WINS = [{ label: '1100×720', w: 1100, h: 720 }, { label: '1440×900', w: 1440, h: 900 }, { label: '1728×1117', w: 1728, h: 1117 }, { label: '2560×1440', w: 2560, h: 1440 }];
   var CANVASES = [{ label: '横屏 1920×1080', w: 1920, h: 1080 }, { label: '竖屏 1080×1920', w: 1080, h: 1920 }, { label: '非标 1366×762', w: 1366, h: 762 }];
   var st = { win: 1, mixer: true, canvas: 0 };
 
+  /* now = 今天的排法；land = 横屏新排法（监看占满上边，下边 = 输入 ｜ 调音台）；port = 竖屏新排法（监看占满左边，右边 = 输入 / 调音台） */
   function layout(W, H, mixer, cw, ch, after) {
-    var a = cw / ch, contentH = H - K.TB, centerW = mixer ? W - K.MIX - 1 : W, availH = contentH - K.BB;
-    var L = { W: W, H: H, centerW: centerW, availH: availH, mixer: mixer, after: after, side: false };
-    if (after && a < 1) {
-      var ih = availH - K.TITLE, iw = ih * a;
-      var maxIw = (centerW - 418 - 1 - K.TCOL - 2 * K.GAP) / 2;
-      if (iw > maxIw) { iw = Math.max(120, maxIw); ih = iw / a; }
-      var block = 2 * iw + K.TCOL + 2 * K.GAP;
-      L.side = true; L.iw = iw; L.ih = ih; L.monW = iw; L.topH = availH; L.sideX = block + 1; L.sideW = Math.max(0, centerW - block - 1);
-      L.cols = Math.max(1, Math.floor((L.sideW - 6) / 206)); L.rows = Math.max(1, Math.floor((availH - K.HDR - 6) / 118));
-      L.visible = Math.min(K.TOTAL, L.cols * L.rows); L.paneW = iw; L.paneH = ih;
+    var a = cw / ch, availH = H - K.TB - K.BB;
+    var L = { W: W, H: H, availH: availH, mixer: mixer, mode: 'now' };
+    if (!after) {
+      var centerW = mixer ? W - K.MIX - 1 : W;
+      L.inW = centerW; L.monW = (centerW - K.TCOL - 2 * K.GAP) / 2; L.topH = availH - K.STRIP - 1;
+      L.paneW = L.monW; L.paneH = L.topH - K.TITLE;
+      L.iw = Math.min(L.monW, L.paneH * a); L.ih = L.iw / a;
+      L.rowH = K.STRIP; L.rows = 1; L.perRow = Math.max(1, Math.floor((centerW - 6) / (K.CW + K.CG)));
+      L.visible = Math.min(K.TOTAL, L.perRow);
       return L;
     }
-    var monW = (centerW - K.TCOL - 2 * K.GAP) / 2, topH, iw2, ih2, stripH;
-    if (!after) {
-      stripH = K.STRIP; topH = availH - stripH - 1;
-      var dispH = topH - K.TITLE;
-      iw2 = Math.min(monW, dispH * a); ih2 = iw2 / a;
-      L.paneW = monW; L.paneH = dispH;
-    } else {
-      iw2 = monW; ih2 = monW / a;
+    if (a >= 1) {
+      L.mode = 'land';
+      L.monW = (W - K.TCOL - 2 * K.GAP) / 2; L.iw = L.monW; L.ih = L.monW / a;
       var maxTop = availH - K.STRIPMIN - 1;
-      topH = Math.max(ih2 + K.TITLE, K.TMIN);
-      if (topH > maxTop) { topH = maxTop; if (ih2 > topH - K.TITLE) { ih2 = topH - K.TITLE; iw2 = ih2 * a; } }
-      stripH = availH - topH - 1;
-      L.paneW = iw2; L.paneH = ih2;
+      L.topH = Math.max(L.ih + K.TITLE, K.TMIN);
+      if (L.topH > maxTop) { L.topH = maxTop; if (L.ih > L.topH - K.TITLE) { L.ih = L.topH - K.TITLE; L.iw = L.ih * a; } }
+      L.rowH = availH - L.topH - 1; L.inW = mixer ? W - K.MIX - 1 : W;
+      L.rows = Math.max(1, Math.floor((L.rowH - 36) / (K.CH + K.CG)));
+      L.perRow = Math.max(1, Math.floor((L.inW - 6) / (K.CW + K.CG)));
+      L.visible = Math.min(K.TOTAL, L.rows * L.perRow);
+      return L;
     }
-    L.monW = monW; L.topH = topH; L.iw = iw2; L.ih = ih2; L.stripH = stripH;
-    L.rows = after ? Math.max(1, Math.floor((stripH - 36) / (K.CH + K.CG))) : 1;
-    L.perRow = Math.max(1, Math.floor((centerW - 6) / (K.CW + K.CG)));
-    L.visible = Math.min(K.TOTAL, L.rows * L.perRow);
+    L.mode = 'port';
+    L.ih = availH - K.TITLE; L.iw = L.ih * a;
+    var maxIw = (W - K.RMIN - 1 - K.TCOL - 2 * K.GAP) / 2;
+    if (L.iw > maxIw) { L.iw = Math.max(120, maxIw); L.ih = L.iw / a; }
+    L.monW = L.iw; L.sideX = 2 * L.iw + K.TCOL + 2 * K.GAP + 1; L.sideW = Math.max(0, W - L.sideX);
+    L.mixH = mixer ? Math.max(240, Math.min(380, availH - 1 - (36 + 2 * (K.PHT + K.CG)))) : 0;
+    L.inH = availH - (mixer ? L.mixH + 1 : 0);
+    L.cols = Math.max(1, Math.floor((L.sideW - 6) / (K.PW + K.CG)));
+    L.rows = Math.max(1, Math.floor((L.inH - 36) / (K.PHT + K.CG)));
+    L.visible = Math.min(K.TOTAL, L.cols * L.rows);
     return L;
   }
 
   function cellColor(i) { return i === 0 ? 'var(--m-pgm)' : (i === 1 ? 'var(--m-pvw)' : 'var(--m-off)'); }
 
-  function drawWindow(L, uid) {
-    var W = L.W, H = L.H, s = '', y0 = K.TB, fs = Math.round(W / 62);
-    s += '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="主窗口排布示意">';
-    s += '<defs><clipPath id="win' + uid + '"><rect width="' + W + '" height="' + H + '" rx="' + (W / 90).toFixed(1) + '"/></clipPath><clipPath id="strip' + uid + '"><rect x="0" y="' + (y0 + (L.side ? 0 : L.topH + 1)) + '" width="' + L.centerW + '" height="' + (L.side ? L.availH : L.stripH) + '"/></clipPath></defs>';
-    s += '<g clip-path="url(#win' + uid + ')">';
-    s += r(0, 0, W, H, 'var(--m-win)') + r(0, 0, W, K.TB, 'var(--m-bar)');
-    for (var d = 0; d < 3; d++) s += '<circle cx="' + (22 + d * 20) + '" cy="' + (K.TB / 2) + '" r="6" fill="var(--m-off)"/>';
-    var xs = [0, L.monW + K.GAP + K.TCOL + K.GAP], cols = ['var(--m-pvw)', 'var(--m-pgm)'], names = ['PVW', 'PGM'];
-    for (var m = 0; m < 2; m++) {
-      var x = xs[m];
-      if (!L.after) {
-        s += r(x, y0, L.monW, K.TITLE, cols[m]);
-        s += r(x, y0 + K.TITLE, L.monW, L.paneH, 'var(--m-black)');
-        s += r(x + (L.monW - L.iw) / 2, y0 + K.TITLE + (L.paneH - L.ih) / 2, L.iw, L.ih, 'var(--m-img)');
-        s += '<text x="' + (x + 10) + '" y="' + (y0 + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + names[m] + '</text>';
-      } else {
-        var fx = x + (L.monW - L.iw) / 2;
-        s += r(fx, y0, L.iw, K.TITLE, cols[m]) + r(fx, y0 + K.TITLE, L.iw, L.ih, 'var(--m-img)');
-        s += '<text x="' + (fx + 10) + '" y="' + (y0 + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + names[m] + '</text>';
-      }
+  function mixerPanel(x, y, w, h, cap) {
+    var s = r(x, y, w, h, 'var(--m-panel)'), n = Math.max(1, Math.floor((w - 16) / 46)), sh = Math.max(20, Math.min(cap || 9999, h - 44));
+    s += r(x + 10, y + 10, Math.min(120, w - 20), 12, 'var(--m-cell)', ' rx="4"');
+    for (var i = 0; i < n; i++) {
+      var sx = x + 10 + i * 46;
+      s += r(sx, y + 30, 36, sh, 'var(--m-cell)', ' rx="5"') + r(sx + 16, y + 38, 4, Math.max(6, sh - 16), 'var(--m-win)') + r(sx + 9, y + 30 + sh * 0.35, 18, 8, 'var(--m-dim)', ' rx="2"');
     }
-    var tx = L.monW + K.GAP;
-    s += r(tx, y0, K.TCOL, L.side ? Math.min(L.availH, Math.max(K.TMIN, L.ih + K.TITLE)) : L.topH, 'var(--m-panel)');
-    for (var b = 0; b < 7; b++) s += r(tx + 10, y0 + 10 + b * 34, K.TCOL - 20, 24, 'var(--m-cell)', ' rx="5"');
+    return s;
+  }
+
+  function monitor(x, y, w, ih, color, name, fs) {
+    return r(x, y, w, K.TITLE, color) + r(x, y + K.TITLE, w, ih, 'var(--m-img)') +
+      '<text x="' + (x + 10).toFixed(1) + '" y="' + (y + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + name + '</text>';
+  }
+
+  function drawWindow(L, uid) {
+    var W = L.W, H = L.H, y0 = K.TB, fs = Math.round(W / 62), s = '', i;
+    var clip = L.mode === 'port' ? [L.sideX, y0, L.sideW, L.inH] : [0, y0 + L.topH + 1, L.inW, L.rowH];
+    s += '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="主窗口排布示意">';
+    s += '<defs><clipPath id="win' + uid + '"><rect width="' + W + '" height="' + H + '" rx="' + (W / 90).toFixed(1) + '"/></clipPath>';
+    s += '<clipPath id="strip' + uid + '"><rect x="' + clip[0].toFixed(1) + '" y="' + clip[1].toFixed(1) + '" width="' + Math.max(0, clip[2]).toFixed(1) + '" height="' + Math.max(0, clip[3]).toFixed(1) + '"/></clipPath></defs>';
+    s += '<g clip-path="url(#win' + uid + ')">' + r(0, 0, W, H, 'var(--m-win)') + r(0, 0, W, K.TB, 'var(--m-bar)');
+    for (i = 0; i < 3; i++) s += '<circle cx="' + (22 + i * 20) + '" cy="' + (K.TB / 2) + '" r="6" fill="var(--m-off)"/>';
+    var x2 = L.monW + K.GAP + K.TCOL + K.GAP, tx = L.monW + K.GAP;
+    if (L.mode === 'now') {
+      [[0, 'var(--m-pvw)', 'PVW'], [x2, 'var(--m-pgm)', 'PGM']].forEach(function (m) {
+        s += r(m[0], y0, L.monW, K.TITLE, m[1]) + r(m[0], y0 + K.TITLE, L.monW, L.paneH, 'var(--m-black)');
+        s += r(m[0] + (L.monW - L.iw) / 2, y0 + K.TITLE + (L.paneH - L.ih) / 2, L.iw, L.ih, 'var(--m-img)');
+        s += '<text x="' + (m[0] + 10).toFixed(1) + '" y="' + (y0 + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + m[2] + '</text>';
+      });
+    } else {
+      var off = (L.monW - L.iw) / 2;
+      s += monitor(off, y0, L.iw, L.ih, 'var(--m-pvw)', 'PVW', fs) + monitor(x2 + off, y0, L.iw, L.ih, 'var(--m-pgm)', 'PGM', fs);
+    }
+    s += r(tx, y0, K.TCOL, L.mode === 'port' ? L.availH : L.topH, 'var(--m-panel)');
+    for (i = 0; i < 7; i++) s += r(tx + 10, y0 + 10 + i * 34, K.TCOL - 20, 24, 'var(--m-cell)', ' rx="5"');
     s += '<g clip-path="url(#strip' + uid + ')">';
-    if (!L.side) {
-      var sy = y0 + L.topH + 1;
-      s += r(8, sy + 8, 240, 14, 'var(--m-cell)', ' rx="4"');
-      var count = L.after ? L.visible : Math.min(K.TOTAL, L.perRow + 1);
-      for (var i = 0; i < count; i++) {
-        var row = Math.floor(i / L.perRow), col = i % L.perRow;
-        if (!L.after) { row = 0; col = i; }
-        var cx = 6 + col * (K.CW + K.CG), cy = sy + K.HDR + 6 + row * (K.CH + K.CG);
-        s += r(cx, cy, K.CW, K.CH, 'var(--m-cell)') + r(cx, cy, K.CW, 20, cellColor(i)) + r(cx + 4, cy + 24, K.CW - 8, 78, 'var(--m-img)');
+    if (L.mode === 'port') {
+      s += r(L.sideX + 8, y0 + 8, 150, 14, 'var(--m-cell)', ' rx="4"');
+      for (i = 0; i < L.visible; i++) {
+        var px0 = L.sideX + 6 + (i % L.cols) * (K.PW + K.CG), py0 = y0 + K.HDR + 6 + Math.floor(i / L.cols) * (K.PHT + K.CG);
+        s += r(px0, py0, K.PW, K.PHT, 'var(--m-img)') + r(px0, py0, K.PW, 18, cellColor(i));
       }
     } else {
-      s += r(L.sideX + 8, y0 + 8, 180, 14, 'var(--m-cell)', ' rx="4"');
-      for (var j = 0; j < L.visible; j++) {
-        var rr = j % L.rows, cc = Math.floor(j / L.rows);
-        var kx = L.sideX + 6 + cc * 206, ky = y0 + K.HDR + 6 + rr * 118;
-        s += r(kx, ky, 200, 112, 'var(--m-cell)') + r(kx, ky, 200, 20, cellColor(j)) + r(kx + 4, ky + 24, 47, 84, 'var(--m-img)');
-        s += r(kx + 60, ky + 30, 130, 16, 'var(--m-win)', ' rx="3"') + r(kx + 60, ky + 54, 130, 16, 'var(--m-win)', ' rx="3"');
+      var sy = y0 + L.topH + 1, count = L.mode === 'now' ? Math.min(K.TOTAL, L.perRow + 1) : L.visible;
+      s += r(8, sy + 8, 240, 14, 'var(--m-cell)', ' rx="4"');
+      for (i = 0; i < count; i++) {
+        var row = L.mode === 'now' ? 0 : Math.floor(i / L.perRow), col = L.mode === 'now' ? i : i % L.perRow;
+        var cx = 6 + col * (K.CW + K.CG), cy = sy + K.HDR + 6 + row * (K.CH + K.CG);
+        s += r(cx, cy, K.CW, K.CH, 'var(--m-cell)') + r(cx, cy, K.CW, 20, cellColor(i)) + r(cx + 4, cy + 24, K.CW - 8, 78, 'var(--m-img)');
       }
     }
     s += '</g>';
     if (L.mixer) {
-      s += r(L.centerW + 1, y0, K.MIX, L.availH, 'var(--m-panel)');
-      for (var f = 0; f < 3; f++) s += r(L.centerW + 24 + f * 104, y0 + 60, 84, Math.min(280, L.availH - 120), 'var(--m-cell)', ' rx="6"');
+      if (L.mode === 'now') s += mixerPanel(L.inW + 1, y0, K.MIX, L.availH, 330);
+      else if (L.mode === 'land') s += mixerPanel(L.inW + 1, y0 + L.topH + 1, K.MIX, L.rowH);
+      else s += mixerPanel(L.sideX, y0 + L.inH + 1, L.sideW, L.mixH);
     }
     s += r(0, H - K.BB, W, K.BB, 'var(--m-panel)');
-    for (var q = 0; q < 5; q++) s += r(12 + q * 118, H - K.BB + 10, 104, 22, 'var(--m-cell)', ' rx="5"');
-    s += '</g></svg>';
-    return s;
+    for (i = 0; i < 5; i++) s += r(12 + i * 118, H - K.BB + 10, 104, 22, 'var(--m-cell)', ' rx="5"');
+    return s + '</g></svg>';
   }
 
   function stat(label, value, cls) { return '<div class="' + (cls || '') + '">' + label + '<b>' + value + '</b></div>'; }
@@ -535,14 +655,17 @@ code { font-family: var(--mono); font-size: 0.92em; }
     $('statNow').innerHTML = stat('画面', px(now.iw, now.ih)) + stat('画面占监看区', share + '%', share < 70 ? 'worse' : '') + stat('输入露出', now.visible + ' / ' + K.TOTAL + ' 路', '');
     var gain = Math.round(100 * ((aft.iw * aft.ih) / (now.iw * now.ih) - 1));
     $('statAfter').innerHTML = stat('画面', px(aft.iw, aft.ih) + (gain >= 5 ? '（+' + gain + '%）' : ''), gain >= 5 ? 'better' : '') + stat('画面占监看框', '100%', 'better') + stat('输入露出', aft.visible + ' / ' + K.TOTAL + ' 路', aft.visible > now.visible ? 'better' : '');
-    $('afterSub').textContent = aft.side ? '竖屏：输入区挪到监看右侧' : '监看框贴合画面，输入条折行';
     var note;
-    if (aft.side) {
-      note = '竖屏画布：监看占满整个高度，输入改成横排卡片排在右侧（' + aft.cols + ' 列 × ' + aft.rows + ' 行）。' + (st.mixer ? '调音台开着时右侧不够宽，监看被挤小了；竖屏排布默认把调音台收起，点上面的"收起"看效果。' : '');
-    } else if (aft.topH > aft.ih + K.TITLE + 1) {
-      note = '这个宽度下画面只有 ' + Math.round(aft.ih) + ' 高，转场列要约 409，所以监看下面空出 ' + Math.round(aft.topH - aft.ih - K.TITLE) + ' 的底色。输入条从 1 行变成 ' + aft.rows + ' 行。';
+    if (aft.mode === 'port') {
+      $('afterSub').textContent = '竖屏：监看占满左边，输入和调音台叠在右边';
+      note = '右边一栏宽 ' + Math.round(aft.sideW) + '。上面是输入，竖的小格 ' + aft.cols + ' 列 × ' + aft.rows + ' 行' +
+        (st.mixer ? '；下面是调音台，高 ' + Math.round(aft.mixH) + (aft.mixH < 380 ? '（用紧凑条子）' : '') + '。' : '。调音台收起后输入占满整栏。');
     } else {
-      note = '上半区正好等于画面高度。输入条从 1 行变成 ' + aft.rows + ' 行，' + (aft.visible >= K.TOTAL ? '16 路输入全部看得到。' : '露出 ' + aft.visible + ' 路。');
+      $('afterSub').textContent = '横屏：监看占满上边，调音台在下边、和输入同高';
+      var slack = Math.round(aft.topH - aft.ih - K.TITLE);
+      note = '下边一行高 ' + Math.round(aft.rowH) + '。输入折成 ' + aft.rows + ' 行' +
+        (st.mixer ? '，调音台 340 宽、和它同高' + (aft.rowH < 380 ? '（这个高度用紧凑条子）' : '') : '，调音台收起后输入占满整行') + '。' +
+        (slack > 1 ? '转场列要约 409 高，所以监看下面空出 ' + slack + ' 的底色。' : '');
     }
     $('layoutNote').textContent = note;
   }
@@ -661,7 +784,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
   var CUES = [
     { name: '开场片', trig: '手动', c: { all: 'intro' }, act: '6 号输入从头播' },
     { name: '主持人上场', trig: '片头放完自动走', c: { all: 'bg', main: 'pgm', ears: 'logo' }, act: '导播切机位 1' },
-    { name: '讲 PPT', trig: '手动', c: { all: 'bg', main: 'ppt', ears: 'cam1' }, act: '导播切机位 2' },
+    { name: '讲 PPT', trig: '手动', c: { all: 'bg', main: 'ppt', ears: 'cam1' }, act: '幻灯片翻到第 1 张，导播切机位 2' },
     { name: '全场互动', trig: '手动', c: { all: 'cam1' }, act: '' },
     { name: '结束片', trig: '手动', c: { all: 'outro' }, act: '片尾从头播，放完黑场' }
   ];
@@ -677,7 +800,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
     $('btnGo').disabled = nxIdx < 0;
     $('btnBack').disabled = pos === 0;
     function cls(i) { return i === onIdx ? ' class="on"' : (i === nxIdx ? ' class="nx"' : ''); }
-    var h = '<thead><tr><th class="rowh">提示点</th>' + CUES.map(function (c, i) { return '<th' + cls(i) + '><span class="cname">' + (i + 1) + ' ' + c.name + '</span><span class="ctrig">' + c.trig + '</span></th>'; }).join('') + '</tr></thead><tbody>';
+    var h = '<thead><tr><th class="rowh">段</th><th class="sec">开场</th><th class="sec" colspan="3">正会</th><th class="sec">结束</th></tr><tr><th class="rowh">提示点</th>' + CUES.map(function (c, i) { return '<th' + cls(i) + '><span class="cname">' + (i + 1) + ' ' + c.name + '</span><span class="ctrig">' + c.trig + '</span></th>'; }).join('') + '</tr></thead><tbody>';
     ZONES.forEach(function (z) {
       h += '<tr><td class="rowh">' + z.name + '</td>' + CUES.map(function (c, i) { return '<td' + cls(i) + '>' + chip(c.c[z.id]) + '</td>'; }).join('') + '</tr>';
     });
