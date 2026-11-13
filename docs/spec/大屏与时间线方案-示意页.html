@@ -1,0 +1,665 @@
+<title>大屏与时间线方案</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 版面：单栏阅读（最宽 1060），每节一个可点的示意；示意里的软件界面固定用 PlusMix 自己的深色，页面本身跟随浅 / 深主题 */
+:root {
+  --bg: #f4f5f8; --surface: #ffffff; --fg: #161a21; --muted: #586172; --line: #dde2ea;
+  --accent: #2b68d8; --accent-soft: #e6eefc; --pgm: #c5261f; --pvw: #1c8736; --warn: #a15c00; --warn-soft: #fdf1dc;
+  --m-win: #1c1c1c; --m-bar: #2b2b2b; --m-panel: #262626; --m-cell: #333333; --m-off: #474747; --m-div: #5a5f6a;
+  --m-text: #e8e8e8; --m-dim: #a2a2a2; --m-black: #000000; --m-img: #757575; --m-pgm: #d92420; --m-pvw: #1a852e; --m-accent: #3d85f2;
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101216; --surface: #191c22; --fg: #e9ebef; --muted: #9aa3b3; --line: #2b303b;
+    --accent: #6a9df7; --accent-soft: #1b2a47; --pgm: #ea5048; --pvw: #3cba5c; --warn: #e0a548; --warn-soft: #33270f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101216; --surface: #191c22; --fg: #e9ebef; --muted: #9aa3b3; --line: #2b303b;
+  --accent: #6a9df7; --accent-soft: #1b2a47; --pgm: #ea5048; --pvw: #3cba5c; --warn: #e0a548; --warn-soft: #33270f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 15px; line-height: 1.7; }
+.wrap { max-width: 1060px; margin: 0 auto; padding-block: 36px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 56px; }
+h1 { font-size: clamp(26px, 4.4vw, 38px); line-height: 1.2; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 22px; line-height: 1.3; margin: 0; text-wrap: balance; }
+h3 { font-size: 15px; margin: 0; }
+p { margin: 0; max-width: 46em; }
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.lede { font-size: 17px; color: var(--fg); }
+.muted { color: var(--muted); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+header { display: flex; flex-direction: column; gap: 14px; }
+.status { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+.chip { display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+section { display: flex; flex-direction: column; gap: 18px; }
+.sec-head { display: flex; flex-direction: column; gap: 6px; }
+
+/* 三层一览 */
+.layers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.layer { padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; border-left: 1px solid var(--line); }
+.layer:first-child { border-left: 0; }
+.layer .tag { font-size: 12px; font-weight: 700; color: var(--accent); }
+.layer .cost { font-size: 13px; color: var(--muted); margin-top: auto; padding-top: 6px; }
+@media (max-width: 760px) { .layers { grid-template-columns: 1fr; } .layer { border-left: 0; border-top: 1px solid var(--line); } .layer:first-child { border-top: 0; } }
+
+/* 示意面板 */
+.demo { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { font: inherit; font-size: 13px; padding: 5px 11px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #ffffff; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 860px) { .pair { grid-template-columns: 1fr; } }
+.fig { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fig-title { display: flex; align-items: baseline; gap: 8px; font-weight: 700; font-size: 14px; }
+.fig-title small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.fig svg { width: 100%; height: auto; display: block; border-radius: 8px; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; font-size: 12px; color: var(--muted); }
+.stats b { display: block; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 16px; color: var(--fg); font-weight: 600; }
+.stats .better b { color: var(--pvw); }
+.stats .worse b { color: var(--pgm); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; border: 1px solid var(--line); }
+.note { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 12px; }
+.stagebox { background: var(--m-win); border-radius: 8px; padding: 10px; }
+.stagebox svg { border-radius: 0; }
+
+/* 列表与表格 */
+ul.plain { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; max-width: 48em; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+td.k { white-space: nowrap; font-weight: 600; }
+td.q { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+
+/* 两个面板的软件界面示意（固定深色） */
+.appscroll { overflow-x: auto; border-radius: 10px; }
+.app { min-width: 760px; background: var(--m-win); color: var(--m-text); border-radius: 10px; font-size: 11px; line-height: 1.3; display: grid; grid-template-columns: minmax(0, 1fr) 150px; grid-template-rows: auto 1fr auto; overflow: hidden; }
+.app .tbar { grid-column: 1 / -1; background: var(--m-bar); display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+.app .lights { display: flex; gap: 5px; }
+.app .lights i { width: 9px; height: 9px; border-radius: 50%; background: var(--m-off); display: block; }
+.app .name { color: var(--m-dim); }
+.app .pages { margin: 0 auto; display: inline-flex; border-radius: 7px; overflow: hidden; border: 1px solid var(--m-div); }
+.app .pages button { font: inherit; font-size: 12px; font-weight: 600; padding: 4px 16px; border: 0; background: transparent; color: var(--m-text); cursor: pointer; }
+.app .pages button[aria-pressed="true"] { background: var(--m-accent); color: #ffffff; }
+.app .main { padding: 2px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.app .mons { display: grid; grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr); gap: 2px; }
+.app .mon { display: flex; flex-direction: column; min-width: 0; }
+.app .mon .t { padding: 3px 8px; font-weight: 700; color: #ffffff; display: flex; justify-content: space-between; }
+.app .mon.pvw .t { background: var(--m-pvw); }
+.app .mon.pgm .t { background: var(--m-pgm); }
+.app .mon .v { background: var(--m-img); aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; color: #ffffff; font-size: 13px; font-weight: 600; }
+.app .mon .v.stage { background: var(--m-win); aspect-ratio: auto; padding: 8px 6px; }
+.app .mon .v.stage svg { width: 100%; height: auto; display: block; }
+.app .col { background: var(--m-panel); padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.app .btn { background: var(--m-cell); border-radius: 4px; padding: 3px 4px; text-align: center; color: var(--m-text); }
+.app .btn.hot { background: var(--m-accent); color: #ffffff; }
+.app .lab { color: var(--m-dim); font-size: 10px; margin-top: 2px; }
+.app .strip { background: var(--m-win); padding: 4px 6px 6px; display: flex; flex-direction: column; gap: 4px; }
+.app .strip .h { color: var(--m-dim); font-weight: 700; display: flex; gap: 8px; align-items: center; }
+.app .cells { display: flex; gap: 5px; flex-wrap: wrap; }
+.app .cell { width: 86px; background: var(--m-cell); border-radius: 3px; overflow: hidden; }
+.app .cell .ct { padding: 2px 5px; background: var(--m-off); color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app .cell.onpgm .ct { background: var(--m-pgm); }
+.app .cell.onpvw .ct { background: var(--m-pvw); }
+.app .cell .cv { height: 40px; background: var(--m-img); }
+.app .cell.look .cv { background: var(--m-win); padding: 4px 3px; height: auto; }
+.app .cell.look .cv svg { width: 100%; height: auto; display: block; }
+.app .cell .badge { display: inline-block; margin: 3px 4px; padding: 0 4px; border-radius: 3px; background: var(--m-accent); color: #ffffff; font-size: 9px; }
+.app .tl { background: var(--m-panel); padding: 5px 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.app .tl .go { background: var(--m-pvw); color: #ffffff; font-weight: 700; padding: 3px 12px; border-radius: 4px; }
+.app .tl .cue { background: var(--m-cell); border-radius: 3px; padding: 2px 8px; }
+.app .tl .cue.on { outline: 2px solid var(--m-pgm); }
+.app .tl .cue.nx { outline: 2px solid var(--m-pvw); }
+.app .mix { background: var(--m-panel); border-left: 1px solid var(--m-win); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.app .faders { display: flex; gap: 8px; flex: 1; }
+.app .faders i { flex: 1; background: var(--m-cell); border-radius: 3px; min-height: 90px; display: block; }
+.app .bbar { grid-column: 1 / -1; background: var(--m-panel); border-top: 1px solid var(--m-win); padding: 6px 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.app .shared { outline: 1px dashed var(--m-accent); outline-offset: -3px; }
+.app .sharedtag { color: var(--m-accent); font-weight: 700; }
+.pagewrap { display: contents; }
+[hidden] { display: none !important; }
+
+/* 时间线示意 */
+.tlgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .tlgrid { grid-template-columns: 1fr; } }
+.tlmon { background: var(--m-win); border-radius: 8px; overflow: hidden; }
+.tlmon .t { padding: 4px 10px; color: #ffffff; font-weight: 700; font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
+.tlmon.pvw .t { background: var(--m-pvw); }
+.tlmon.pgm .t { background: var(--m-pgm); }
+.tlmon .v { padding: 12px 10px; }
+.tlmon .v svg { width: 100%; height: auto; display: block; }
+.transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.transport button { font: inherit; font-size: 14px; padding: 7px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+.transport button.go { background: var(--pvw); border-color: var(--pvw); color: #ffffff; font-weight: 700; padding-inline: 26px; }
+.transport button:disabled { opacity: 0.45; cursor: default; }
+.transport .where { font-size: 13px; color: var(--muted); }
+.cuetable th, .cuetable td { text-align: center; padding: 7px 8px; }
+.cuetable th.rowh, .cuetable td.rowh { text-align: left; white-space: nowrap; color: var(--muted); font-weight: 600; }
+.cuetable .cname { display: block; font-weight: 700; color: var(--fg); font-size: 13px; white-space: nowrap; }
+.cuetable .ctrig { display: block; font-size: 11px; color: var(--muted); font-weight: 400; white-space: nowrap; }
+.cuetable col.on, .cuetable .on { background: color-mix(in srgb, var(--pgm) 13%, transparent); }
+.cuetable .nx { background: color-mix(in srgb, var(--pvw) 14%, transparent); }
+.srcchip { display: inline-block; padding: 1px 8px; border-radius: 4px; color: #ffffff; font-size: 12px; white-space: nowrap; }
+.empty { color: var(--muted); }
+.flow { font-family: var(--mono); font-size: 12.5px; line-height: 1.6; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; overflow-x: auto; white-space: pre; margin: 0; }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 18px; }
+code { font-family: var(--mono); font-size: 0.92em; }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">PLUSMIX · 设计稿 · 2026-11-13</div>
+  <h1>大屏与时间线方案</h1>
+  <p class="lede">监看框贴合画面、横竖屏排布、按屏放内容的"舞台"、一键多屏的画面预设和时间线，再加"导播 ｜ 大屏"两套工作面板。能做，而且是在现有引擎上加一层，不用推倒重来。</p>
+  <div class="status"><span class="chip">等你拍板</span><span class="muted">没有改任何代码。完整文字在 <code>docs/spec/大屏与时间线方案.md</code>，代码基线 main <code>949d956</code>。</span></div>
+</header>
+
+<section>
+  <div class="sec-head"><h2>三件事，三层</h2><p class="muted">每一层可以单独交付。节目里没配大屏时，一切和现在逐字节相同。</p></div>
+  <div class="layers">
+    <div class="layer"><span class="tag">第一层 · 只动界面</span><h3>监看框贴合画面，横竖屏</h3><p>监看框的形状跟画布走，不再上下一大片黑。省出来的高度给输入条变多行。竖屏时输入区挪到监看右侧。</p><span class="cost">约 1 个会话，不碰契约，现在就能开</span></div>
+    <div class="layer"><span class="tag">第二层 · 舞台</span><h3>画出屏幕，按屏放内容</h3><p>舞台、屏幕、输出口三样分开。监看看的是现场的样子，不是挤进一路 1080p 之后的样子。也是预监后 TAKE，多块屏同一拍换。</p><span class="cost">约 5 个会话 + 1 个检查点</span></div>
+    <div class="layer"><span class="tag">第三层 · 预设与时间线</span><h3>编好，现场只管往下走</h3><p>一组屏各放什么存成画面预设。时间线把预设排成提示点，替你把下一步装进预监，GO 就是 TAKE。</p><span class="cost">约 4 个会话 + 1 个检查点</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">第一层</div>
+    <h2>监看框：现在和改后</h2>
+    <p>现在监看区的高度是"窗口剩多少给多少"，画面等比缩进去，四周清成黑；输入条固定一行。下面两张图按界面里真实的尺寸常数画，换窗口大小和画布看差别。</p>
+  </div>
+  <div class="demo">
+    <div class="controls">
+      <div class="ctl">窗口<div class="seg" id="segWin"></div></div>
+      <div class="ctl">调音台<div class="seg" id="segMix"></div></div>
+      <div class="ctl">画布<div class="seg" id="segCanvas"></div></div>
+    </div>
+    <div class="pair">
+      <div class="fig"><div class="fig-title">现在 <small>监看区铺满，画面留黑边</small></div><div id="winNow"></div><div class="stats" id="statNow"></div></div>
+      <div class="fig"><div class="fig-title">改后 <small id="afterSub"></small></div><div id="winAfter"></div><div class="stats" id="statAfter"></div></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--m-img)"></i>画面</span>
+      <span><i style="background:var(--m-black)"></i>黑边</span>
+      <span><i style="background:var(--m-cell)"></i>输入格子（共 16 路）</span>
+      <span><i style="background:var(--m-panel)"></i>转场列 / 调音台 / 底栏</span>
+    </div>
+    <p class="note" id="layoutNote"></p>
+  </div>
+  <ul class="plain">
+    <li>规则只有两条：监看框 = 画面（按画布宽高比），上半区的高度由画面算出来；省下的高度给输入条，输入条会折行。</li>
+    <li>节目格式页加竖屏预设和"横 ⇄ 竖"按钮。1366×762 这类非标尺寸今天就能在"自定义"里填，改后监看框也贴合它。</li>
+    <li>窗口窄时转场列比画面高，监看下面会空出一截底色。想让画面更大只有收起调音台或拉宽窗口。</li>
+  </ul>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">第二层</div>
+    <h2>舞台：现场的摆法和信号里的摆法分开</h2>
+    <p>例子：主屏 1366×762，两侧各一块 512×288 的耳屏，LED 处理器吃一路 1920×1080。左边是舞台，屏幕按现场位置摆，监看和编排都看它。右边是同一时刻送出去的那路信号，屏幕按接线挤着放。现在的监看只能看到右边那种。</p>
+  </div>
+  <div class="demo">
+    <div class="controls">
+      <div class="ctl">画面预设<div class="seg" id="segLook"></div></div>
+    </div>
+    <div class="pair">
+      <div class="fig"><div class="fig-title">舞台 <small>监看看这个</small></div><div class="stagebox" id="stageView"></div></div>
+      <div class="fig"><div class="fig-title">输出口 1 <small>送给 LED 处理器的 1920×1080</small></div><div class="stagebox" id="rasterView"></div></div>
+    </div>
+    <p class="note" id="lookNote"></p>
+  </div>
+  <pre class="flow">来源（编号输入 / 直播 PGM）
+   │ 放到分区：适应 / 填满 / 拉伸 / 点对点
+   ▼
+舞台画面      屏幕按现场位置摆。分区 = 放内容的目标：每块屏一个，另有"整幅""两耳"这类自建的
+   │ 每块屏幕取舞台上自己那一块
+   ▼
+输出口画面    一路 1080p / 4K 信号，屏幕按接线位置摆
+   │
+   ▼
+外部显示 / NDI（已有的输出）</pre>
+  <ul class="plain">
+    <li>一路输入铺满整幅大屏 = 放到"整幅"分区（跨屏）。只上两边小屏 = 放到"两耳"分区（各放一份）。分区有上下顺序，空着的透出下面的。</li>
+    <li>每个分区有自己的 PGM 和 PVW。选分区点输入，或调一个预设，内容先进预监；TAKE 时所有变了的分区在同一拍换。另给"直出"开关。</li>
+    <li>来源可以是"直播 PGM"：导播面板切机位，主屏跟着换，同一拍，不多延迟。</li>
+    <li>屏幕编排窗有两个页签：舞台（拖到现场位置）和输出口（拖到信号里的位置，可一键自动排布）。带对位图：每块屏显示自己的名字、尺寸和边框。</li>
+  </ul>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">两套工作面板</div>
+    <h2>一个节目，"导播 ｜ 大屏"两个面板</h2>
+    <p>点示意里工具条正中的开关。切面板只换中上部分；虚线框住的输入、调音台、底栏是两边共用的同一份。</p>
+  </div>
+  <div class="demo">
+    <div class="appscroll">
+      <div class="app" id="app">
+        <div class="tbar">
+          <div class="lights"><i></i><i></i><i></i></div><span class="name">PlusMix — 年会</span>
+          <div class="pages"><button type="button" id="pgSwitch" aria-pressed="true">导播</button><button type="button" id="pgStage" aria-pressed="false">大屏</button></div>
+          <span class="name">未录制 · 未推流</span>
+        </div>
+        <div class="main">
+          <div class="pagewrap" data-page="switch">
+            <div class="mons">
+              <div class="mon pvw"><div class="t"><span>2 机位 2</span><span>PVW</span></div><div class="v">机位 2</div></div>
+              <div class="col"><div class="btn">Cut</div><div class="btn hot">Fade 0.5s</div><div class="btn">Wipe 1s</div><div class="btn">Zoom 1s</div><div class="btn">Stinger</div><div class="btn">FTB</div><div class="lab">Overlay</div><div class="btn">1 · 2 · 3 · 4</div><div class="lab">T-bar</div><div class="btn">━━━━</div></div>
+              <div class="mon pgm"><div class="t"><span>1 机位 1</span><span>PGM</span></div><div class="v">机位 1</div></div>
+            </div>
+          </div>
+          <div class="pagewrap" data-page="stage" hidden>
+            <div class="mons">
+              <div class="mon pvw"><div class="t"><span>预设 2 · 主屏 PPT</span><span>舞台 PVW</span></div><div class="v stage" id="appStagePvw"></div></div>
+              <div class="col"><div class="btn">Cut</div><div class="btn hot">Auto 0.5s</div><div class="btn">黑场</div><div class="btn">对位图</div><div class="lab">方式</div><div class="btn">预监后 TAKE</div><div class="btn">联动导播</div><div class="lab">编排</div><div class="btn">屏幕编排…</div><div class="btn">分区矩阵</div></div>
+              <div class="mon pgm"><div class="t"><span>预设 3 · 主屏直播</span><span>舞台 PGM</span></div><div class="v stage" id="appStagePgm"></div></div>
+            </div>
+            <div class="strip"><div class="h">画面预设 <span class="lab">⌃1…⌃0</span></div><div class="cells" id="appLooks"></div></div>
+          </div>
+          <div class="strip shared">
+            <div class="h">输入 <span class="sharedtag">共用</span></div>
+            <div class="cells">
+              <div class="cell" data-page="stage" hidden><div class="ct" style="background:var(--m-pgm)">PGM 节目画面</div><div class="cv"></div></div>
+              <div class="cell onpgm"><div class="ct">1 机位 1</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 主屏</span></div>
+              <div class="cell onpvw"><div class="ct">2 机位 2</div><div class="cv"></div></div>
+              <div class="cell"><div class="ct">3 PPT</div><div class="cv"></div></div>
+              <div class="cell"><div class="ct">4 背景视频</div><div class="cv"></div></div>
+              <div class="cell"><div class="ct">5 台标</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 两耳</span></div>
+              <div class="cell"><div class="ct">6 片头</div><div class="cv"></div></div>
+            </div>
+          </div>
+          <div class="tl" data-page="stage" hidden>
+            <span class="go">GO →</span><span>时间线 · 年会流程</span>
+            <span class="cue">1 开场片</span><span class="cue on">2 主持人上场</span><span class="cue nx">3 讲 PPT</span><span class="cue">4 全场互动</span><span class="cue">5 结束片</span>
+          </div>
+        </div>
+        <div class="mix shared"><div><b>调音台</b> <span class="sharedtag">共用</span></div><div class="faders"><i></i><i></i><i></i></div><div class="lab">Master −18 LUFS</div></div>
+        <div class="bbar shared"><span class="btn">添加输入…</span><span class="btn">录制</span><span class="btn">外部显示</span><span class="btn">推流</span><span class="btn">多画面</span><span class="sharedtag">共用</span><span class="lab" id="appHint" style="margin-left:auto"></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>两个面板怎么耦合</th><th>具体是什么</th></tr></thead>
+      <tbody>
+        <tr><td class="k">输入只有一份</td><td>在哪个面板加、改名、调设置，另一个同时生效。</td></tr>
+        <tr><td class="k">直播 PGM 是大屏的来源</td><td>主屏放"节目画面"，导播切什么它就是什么。</td></tr>
+        <tr><td class="k">同一个时钟</td><td>两边的切换都落在拍点上。打开"联动"后一次空格两边同一拍换。</td></tr>
+        <tr><td class="k">一条时间线指挥两边</td><td>提示点里既能换舞台画面，也能发任何导播命令（切机位、上字幕、放片、开始录制）。</td></tr>
+        <tr><td class="k">互相看得见</td><td>大屏面板输入条第一格是直播 PGM；导播面板有舞台小窗；多画面可放"舞台 PGM"。</td></tr>
+        <tr><td class="k">Tally</td><td>上直播 PGM 是红灯，含义不变。上了大屏的输入多一个"屏"徽标，写明在哪个分区。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">第三层</div>
+    <h2>时间线：GO 一下走一步</h2>
+    <p>时间线是一串提示点。它不另起一套出画机制，只做两件事：把下一个提示点的画面装进舞台预监，到点替你按 TAKE。所以预监里永远是"下一步"，手动随时能插进来改。按 GO 试试。</p>
+  </div>
+  <div class="demo">
+    <div class="transport">
+      <button type="button" class="go" id="btnGo">GO →</button>
+      <button type="button" id="btnBack">上一条</button>
+      <button type="button" id="btnReset">回到开演前</button>
+      <span class="where" id="tlWhere"></span>
+    </div>
+    <div class="tlgrid">
+      <div class="tlmon pvw"><div class="t"><span id="pvwName"></span><span>舞台 PVW · 下一步</span></div><div class="v" id="tlPvw"></div></div>
+      <div class="tlmon pgm"><div class="t"><span id="pgmName"></span><span>舞台 PGM · 现在屏上</span></div><div class="v" id="tlPgm"></div></div>
+    </div>
+    <div class="tablewrap"><table class="cuetable" id="cueTable"></table></div>
+    <p class="note">触发有三种：手动（等 GO）、跟随（上一条走完或片子放完自动走）、定时。"录制操作"可以把排练时手动走的一遍直接记成提示点。走带放在状态机里按拍执行，所以时刻逐拍确定，不靠界面线程。</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><h2>落地顺序</h2><p class="muted">和第五波界面改版一个量级：十来个会话、两个检查点。第 1 步不依赖任何决定。</p></div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>步</th><th>会话</th><th>交付</th><th>依赖</th></tr></thead>
+      <tbody>
+        <tr><td class="q">1</td><td class="k">监看贴合与竖屏排布</td><td>第一层全部（只动 App）</td><td>无</td></tr>
+        <tr><td class="q">2</td><td class="k">契约提案：舞台、预设</td><td>提案写完停下来问你，批了再落类型</td><td>你定下面的问题</td></tr>
+        <tr><td class="q">3</td><td class="k">舞台合成 ‖ 舞台状态与命令</td><td>渲染两遍 + 输出口打包；TAKE、同拍</td><td>2</td></tr>
+        <tr><td class="q">4</td><td class="k">输出口出画 ‖ 大屏面板</td><td>外部显示 / NDI 点对点；面板切换、舞台监看、屏幕编排、预设条</td><td>3</td></tr>
+        <tr><td class="q">5</td><td class="k">检查点</td><td>合入、全量、接真屏或回采的人工清单</td><td>4</td></tr>
+        <tr><td class="q">6–7</td><td class="k">契约提案：时间线 → 走带 ‖ 时间线面板</td><td>提示点、GO、录制操作</td><td>5</td></tr>
+        <tr><td class="q">8</td><td class="k">播放器输入</td><td>一路输入装一串片子，接缝不黑</td><td>可与 7 并行</td></tr>
+        <tr><td class="q">9–10</td><td class="k">手册 → 检查点</td><td>合入、放行</td><td>7–8</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="plain">
+    <li><b>要先写探针验证的三处：</b>外接显示口能不能逐像素送出（缩放、色彩管理）；多个输出口之间差不差帧；大舞台（8192 宽 + 两路 4K）在入门机型上的渲染耗时。前两条需要采集卡或 LED 处理器回采。</li>
+    <li><b>明确先不做：</b>SDI 输出卡与逐帧锁定、多机联动、边缘融合和几何校正、LED 逐点校色、自由时间线上的关键帧、DMX / Art-Net。定位是"一台 Mac 同时管直播和几块屏"。</li>
+  </ul>
+</section>
+
+<section>
+  <div class="sec-head"><h2>要你定的 11 件事</h2><p class="muted">每条都有建议值。不改就按建议值写进各会话的任务单。</p></div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>#</th><th>问题</th><th>建议</th></tr></thead>
+      <tbody>
+        <tr><td class="q">Q1</td><td>监看省出来的高度给谁</td><td>给输入条变多行；留"自由高度"开关</td></tr>
+        <tr><td class="q">Q2</td><td>竖屏画布时输入区放哪</td><td>自动挪到监看右侧，调音台默认收起</td></tr>
+        <tr><td class="q">Q3</td><td>大屏的操作范式</td><td>预监后 TAKE（和导播一致），另给"直出"开关</td></tr>
+        <tr><td class="q">Q4</td><td>时间线形态</td><td>提示点序列画在时间轴上；任意摆素材的自由时间线以后按需要加</td></tr>
+        <tr><td class="q">Q5</td><td>规模上限与性能阈值</td><td>屏幕 16、分区 24、输出口 4、舞台每边 8192；大档阈值量完再定</td></tr>
+        <tr><td class="q">Q6</td><td>你现场用什么把信号送进 LED 处理器</td><td>按 HDMI / DP 外接口 + NDI 做；常用 SDI 的话把输出卡提前</td></tr>
+        <tr><td class="q">Q7</td><td>片子多不多</td><td>超过十来段就把播放器输入排到时间线前面</td></tr>
+        <tr><td class="q">Q8</td><td>快捷键随不随面板变</td><td>默认不变（⌃1…⌃0 调预设、⌃空格 TAKE、→ GO），给开关</td></tr>
+        <tr><td class="q">Q9</td><td>输入上了大屏算不算"在播"（红灯）</td><td>不算，另加"屏"徽标</td></tr>
+        <tr><td class="q">Q10</td><td>叫什么</td><td>面板"导播 / 大屏"；舞台、屏幕、输出口、分区、画面预设、时间线、提示点</td></tr>
+        <tr><td class="q">Q11</td><td>什么时候做</td><td>第 1 步现在就可以开；第 2 步以后等 0.1.1 的几条 S1 收完</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>示意里的窗口尺寸取自 <code>App/Sources/UI/Theme.swift</code> 与 <code>MainWindowController.swift</code>：工具条一行 52、底栏 58、输入条 197、转场列 150、调音台 340、监看标题条 26、转场列最小高按 409、输入格"中"档 200×153。舞台、时间线两节是设计示意，不是现有功能。</footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function seg(el, items, current, onPick) {
+    el.innerHTML = '';
+    items.forEach(function (it, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = it.label;
+      b.setAttribute('aria-pressed', i === current ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        Array.prototype.forEach.call(el.children, function (c, j) { c.setAttribute('aria-pressed', j === i ? 'true' : 'false'); });
+        onPick(i);
+      });
+      el.appendChild(b);
+    });
+  }
+  function r(x, y, w, h, fill, extra) {
+    return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(0, w).toFixed(1) + '" height="' + Math.max(0, h).toFixed(1) + '" fill="' + fill + '"' + (extra || '') + '/>';
+  }
+
+  /* ---------- 第一层：按真实常数算排布 ---------- */
+  var K = { TB: 52, BB: 58, STRIP: 197, STRIPMIN: 195, TCOL: 150, GAP: 2, MIX: 340, TITLE: 26, TMIN: 409, CW: 200, CG: 6, CH: 153, HDR: 30, TOTAL: 16 };
+  var WINS = [{ label: '1100×720', w: 1100, h: 720 }, { label: '1440×900', w: 1440, h: 900 }, { label: '1728×1117', w: 1728, h: 1117 }, { label: '2560×1440', w: 2560, h: 1440 }];
+  var CANVASES = [{ label: '横屏 1920×1080', w: 1920, h: 1080 }, { label: '竖屏 1080×1920', w: 1080, h: 1920 }, { label: '非标 1366×762', w: 1366, h: 762 }];
+  var st = { win: 1, mixer: true, canvas: 0 };
+
+  function layout(W, H, mixer, cw, ch, after) {
+    var a = cw / ch, contentH = H - K.TB, centerW = mixer ? W - K.MIX - 1 : W, availH = contentH - K.BB;
+    var L = { W: W, H: H, centerW: centerW, availH: availH, mixer: mixer, after: after, side: false };
+    if (after && a < 1) {
+      var ih = availH - K.TITLE, iw = ih * a;
+      var maxIw = (centerW - 418 - 1 - K.TCOL - 2 * K.GAP) / 2;
+      if (iw > maxIw) { iw = Math.max(120, maxIw); ih = iw / a; }
+      var block = 2 * iw + K.TCOL + 2 * K.GAP;
+      L.side = true; L.iw = iw; L.ih = ih; L.monW = iw; L.topH = availH; L.sideX = block + 1; L.sideW = Math.max(0, centerW - block - 1);
+      L.cols = Math.max(1, Math.floor((L.sideW - 6) / 206)); L.rows = Math.max(1, Math.floor((availH - K.HDR - 6) / 118));
+      L.visible = Math.min(K.TOTAL, L.cols * L.rows); L.paneW = iw; L.paneH = ih;
+      return L;
+    }
+    var monW = (centerW - K.TCOL - 2 * K.GAP) / 2, topH, iw2, ih2, stripH;
+    if (!after) {
+      stripH = K.STRIP; topH = availH - stripH - 1;
+      var dispH = topH - K.TITLE;
+      iw2 = Math.min(monW, dispH * a); ih2 = iw2 / a;
+      L.paneW = monW; L.paneH = dispH;
+    } else {
+      iw2 = monW; ih2 = monW / a;
+      var maxTop = availH - K.STRIPMIN - 1;
+      topH = Math.max(ih2 + K.TITLE, K.TMIN);
+      if (topH > maxTop) { topH = maxTop; if (ih2 > topH - K.TITLE) { ih2 = topH - K.TITLE; iw2 = ih2 * a; } }
+      stripH = availH - topH - 1;
+      L.paneW = iw2; L.paneH = ih2;
+    }
+    L.monW = monW; L.topH = topH; L.iw = iw2; L.ih = ih2; L.stripH = stripH;
+    L.rows = after ? Math.max(1, Math.floor((stripH - 36) / (K.CH + K.CG))) : 1;
+    L.perRow = Math.max(1, Math.floor((centerW - 6) / (K.CW + K.CG)));
+    L.visible = Math.min(K.TOTAL, L.rows * L.perRow);
+    return L;
+  }
+
+  function cellColor(i) { return i === 0 ? 'var(--m-pgm)' : (i === 1 ? 'var(--m-pvw)' : 'var(--m-off)'); }
+
+  function drawWindow(L, uid) {
+    var W = L.W, H = L.H, s = '', y0 = K.TB, fs = Math.round(W / 62);
+    s += '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="主窗口排布示意">';
+    s += '<defs><clipPath id="win' + uid + '"><rect width="' + W + '" height="' + H + '" rx="' + (W / 90).toFixed(1) + '"/></clipPath><clipPath id="strip' + uid + '"><rect x="0" y="' + (y0 + (L.side ? 0 : L.topH + 1)) + '" width="' + L.centerW + '" height="' + (L.side ? L.availH : L.stripH) + '"/></clipPath></defs>';
+    s += '<g clip-path="url(#win' + uid + ')">';
+    s += r(0, 0, W, H, 'var(--m-win)') + r(0, 0, W, K.TB, 'var(--m-bar)');
+    for (var d = 0; d < 3; d++) s += '<circle cx="' + (22 + d * 20) + '" cy="' + (K.TB / 2) + '" r="6" fill="var(--m-off)"/>';
+    var xs = [0, L.monW + K.GAP + K.TCOL + K.GAP], cols = ['var(--m-pvw)', 'var(--m-pgm)'], names = ['PVW', 'PGM'];
+    for (var m = 0; m < 2; m++) {
+      var x = xs[m];
+      if (!L.after) {
+        s += r(x, y0, L.monW, K.TITLE, cols[m]);
+        s += r(x, y0 + K.TITLE, L.monW, L.paneH, 'var(--m-black)');
+        s += r(x + (L.monW - L.iw) / 2, y0 + K.TITLE + (L.paneH - L.ih) / 2, L.iw, L.ih, 'var(--m-img)');
+        s += '<text x="' + (x + 10) + '" y="' + (y0 + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + names[m] + '</text>';
+      } else {
+        var fx = x + (L.monW - L.iw) / 2;
+        s += r(fx, y0, L.iw, K.TITLE, cols[m]) + r(fx, y0 + K.TITLE, L.iw, L.ih, 'var(--m-img)');
+        s += '<text x="' + (fx + 10) + '" y="' + (y0 + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + names[m] + '</text>';
+      }
+    }
+    var tx = L.monW + K.GAP;
+    s += r(tx, y0, K.TCOL, L.side ? Math.min(L.availH, Math.max(K.TMIN, L.ih + K.TITLE)) : L.topH, 'var(--m-panel)');
+    for (var b = 0; b < 7; b++) s += r(tx + 10, y0 + 10 + b * 34, K.TCOL - 20, 24, 'var(--m-cell)', ' rx="5"');
+    s += '<g clip-path="url(#strip' + uid + ')">';
+    if (!L.side) {
+      var sy = y0 + L.topH + 1;
+      s += r(8, sy + 8, 240, 14, 'var(--m-cell)', ' rx="4"');
+      var count = L.after ? L.visible : Math.min(K.TOTAL, L.perRow + 1);
+      for (var i = 0; i < count; i++) {
+        var row = Math.floor(i / L.perRow), col = i % L.perRow;
+        if (!L.after) { row = 0; col = i; }
+        var cx = 6 + col * (K.CW + K.CG), cy = sy + K.HDR + 6 + row * (K.CH + K.CG);
+        s += r(cx, cy, K.CW, K.CH, 'var(--m-cell)') + r(cx, cy, K.CW, 20, cellColor(i)) + r(cx + 4, cy + 24, K.CW - 8, 78, 'var(--m-img)');
+      }
+    } else {
+      s += r(L.sideX + 8, y0 + 8, 180, 14, 'var(--m-cell)', ' rx="4"');
+      for (var j = 0; j < L.visible; j++) {
+        var rr = j % L.rows, cc = Math.floor(j / L.rows);
+        var kx = L.sideX + 6 + cc * 206, ky = y0 + K.HDR + 6 + rr * 118;
+        s += r(kx, ky, 200, 112, 'var(--m-cell)') + r(kx, ky, 200, 20, cellColor(j)) + r(kx + 4, ky + 24, 47, 84, 'var(--m-img)');
+        s += r(kx + 60, ky + 30, 130, 16, 'var(--m-win)', ' rx="3"') + r(kx + 60, ky + 54, 130, 16, 'var(--m-win)', ' rx="3"');
+      }
+    }
+    s += '</g>';
+    if (L.mixer) {
+      s += r(L.centerW + 1, y0, K.MIX, L.availH, 'var(--m-panel)');
+      for (var f = 0; f < 3; f++) s += r(L.centerW + 24 + f * 104, y0 + 60, 84, Math.min(280, L.availH - 120), 'var(--m-cell)', ' rx="6"');
+    }
+    s += r(0, H - K.BB, W, K.BB, 'var(--m-panel)');
+    for (var q = 0; q < 5; q++) s += r(12 + q * 118, H - K.BB + 10, 104, 22, 'var(--m-cell)', ' rx="5"');
+    s += '</g></svg>';
+    return s;
+  }
+
+  function stat(label, value, cls) { return '<div class="' + (cls || '') + '">' + label + '<b>' + value + '</b></div>'; }
+  function px(w, h) { return Math.round(w) + '×' + Math.round(h); }
+
+  function renderLayout() {
+    var w = WINS[st.win], c = CANVASES[st.canvas];
+    var now = layout(w.w, w.h, st.mixer, c.w, c.h, false), aft = layout(w.w, w.h, st.mixer, c.w, c.h, true);
+    $('winNow').innerHTML = drawWindow(now, 'a');
+    $('winAfter').innerHTML = drawWindow(aft, 'b');
+    var share = Math.round(100 * (now.iw * now.ih) / (now.paneW * now.paneH));
+    $('statNow').innerHTML = stat('画面', px(now.iw, now.ih)) + stat('画面占监看区', share + '%', share < 70 ? 'worse' : '') + stat('输入露出', now.visible + ' / ' + K.TOTAL + ' 路', '');
+    var gain = Math.round(100 * ((aft.iw * aft.ih) / (now.iw * now.ih) - 1));
+    $('statAfter').innerHTML = stat('画面', px(aft.iw, aft.ih) + (gain >= 5 ? '（+' + gain + '%）' : ''), gain >= 5 ? 'better' : '') + stat('画面占监看框', '100%', 'better') + stat('输入露出', aft.visible + ' / ' + K.TOTAL + ' 路', aft.visible > now.visible ? 'better' : '');
+    $('afterSub').textContent = aft.side ? '竖屏：输入区挪到监看右侧' : '监看框贴合画面，输入条折行';
+    var note;
+    if (aft.side) {
+      note = '竖屏画布：监看占满整个高度，输入改成横排卡片排在右侧（' + aft.cols + ' 列 × ' + aft.rows + ' 行）。' + (st.mixer ? '调音台开着时右侧不够宽，监看被挤小了；竖屏排布默认把调音台收起，点上面的"收起"看效果。' : '');
+    } else if (aft.topH > aft.ih + K.TITLE + 1) {
+      note = '这个宽度下画面只有 ' + Math.round(aft.ih) + ' 高，转场列要约 409，所以监看下面空出 ' + Math.round(aft.topH - aft.ih - K.TITLE) + ' 的底色。输入条从 1 行变成 ' + aft.rows + ' 行。';
+    } else {
+      note = '上半区正好等于画面高度。输入条从 1 行变成 ' + aft.rows + ' 行，' + (aft.visible >= K.TOTAL ? '16 路输入全部看得到。' : '露出 ' + aft.visible + ' 路。');
+    }
+    $('layoutNote').textContent = note;
+  }
+  seg($('segWin'), WINS, st.win, function (i) { st.win = i; renderLayout(); });
+  seg($('segMix'), [{ label: '开' }, { label: '收起' }], 0, function (i) { st.mixer = i === 0; renderLayout(); });
+  seg($('segCanvas'), CANVASES, st.canvas, function (i) { st.canvas = i; renderLayout(); });
+  renderLayout();
+
+  /* ---------- 第二层：舞台与输出口 ---------- */
+  var SCR = [
+    { id: 'L', name: '左耳', x: 0, y: 237, w: 512, h: 288, rx: 1408, ry: 0 },
+    { id: 'C', name: '主屏', x: 552, y: 0, w: 1366, h: 762, rx: 0, ry: 0 },
+    { id: 'R', name: '右耳', x: 1958, y: 237, w: 512, h: 288, rx: 1408, ry: 288 }
+  ];
+  var STAGE = { w: 2470, h: 762 }, RAS = { w: 1920, h: 1080 };
+  var ZONES = [
+    { id: 'all', name: '整幅', rects: [{ x: 0, y: 0, w: 2470, h: 762 }] },
+    { id: 'main', name: '主屏', rects: [SCR[1]] },
+    { id: 'ears', name: '两耳', rects: [SCR[0], SCR[2]] }
+  ];
+  var SRC = {
+    bg: { name: '背景视频', color: '#1d6a93', kind: 'video' },
+    intro: { name: '片头', color: '#6240a0', kind: 'video' },
+    outro: { name: '片尾', color: '#a2531f', kind: 'video' },
+    ppt: { name: 'PPT', color: '#3f6f52', kind: 'slides' },
+    cam1: { name: '机位 1', color: '#74603f', kind: 'camera' },
+    pgm: { name: '直播 PGM', color: '#4d5568', kind: 'program' },
+    logo: { name: '台标', color: '#2a303b', kind: 'logo' }
+  };
+  var uidN = 0;
+  function label(cx, cy, fs, text, fill) {
+    return '<text x="' + cx.toFixed(1) + '" y="' + cy.toFixed(1) + '" font-size="' + fs.toFixed(1) + '" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="' + (fill || '#ffffff') + '" stroke="rgba(0,0,0,0.45)" stroke-width="' + (fs * 0.12).toFixed(1) + '" paint-order="stroke">' + text + '</text>';
+  }
+  function drawSource(key, q) {
+    var src = SRC[key], id = 'z' + (uidN++), s = '', cx = q.x + q.w / 2, cy = q.y + q.h / 2, fs = Math.min(q.h * 0.2, q.w * 0.11);
+    s += '<clipPath id="' + id + '"><rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '"/></clipPath><g clip-path="url(#' + id + ')">';
+    if (src.kind === 'slides') {
+      var sw = Math.min(q.w, q.h * 16 / 9), sh = sw * 9 / 16, sx = cx - sw / 2, sy = cy - sh / 2;
+      s += r(q.x, q.y, q.w, q.h, '#111317') + r(sx, sy, sw, sh, '#f3f1ea');
+      s += r(sx + sw * 0.08, sy + sh * 0.14, sw * 0.5, sh * 0.08, '#2c3038') + r(sx + sw * 0.08, sy + sh * 0.34, sw * 0.7, sh * 0.04, '#8d9199') + r(sx + sw * 0.08, sy + sh * 0.44, sw * 0.6, sh * 0.04, '#8d9199') + r(sx + sw * 0.08, sy + sh * 0.54, sw * 0.66, sh * 0.04, '#8d9199');
+      s += label(sx + sw * 0.82, sy + sh * 0.8, fs * 0.8, src.name, '#2c3038').replace('stroke="rgba(0,0,0,0.45)"', 'stroke="none"');
+    } else if (src.kind === 'logo') {
+      s += r(q.x, q.y, q.w, q.h, src.color) + '<circle cx="' + cx + '" cy="' + cy + '" r="' + (q.h * 0.3).toFixed(1) + '" fill="#e9b949"/>';
+      s += label(cx, cy, q.h * 0.16, src.name, '#2a303b').replace('stroke="rgba(0,0,0,0.45)"', 'stroke="none"');
+    } else if (src.kind === 'camera' || src.kind === 'program') {
+      s += r(q.x, q.y, q.w, q.h, src.color);
+      s += '<circle cx="' + cx + '" cy="' + (q.y + q.h * 0.42).toFixed(1) + '" r="' + (q.h * 0.14).toFixed(1) + '" fill="rgba(255,255,255,0.24)"/><ellipse cx="' + cx + '" cy="' + (q.y + q.h * 1.0).toFixed(1) + '" rx="' + (q.h * 0.34).toFixed(1) + '" ry="' + (q.h * 0.36).toFixed(1) + '" fill="rgba(255,255,255,0.24)"/>';
+      if (src.kind === 'program') s += r(q.x + q.w - q.h * 0.3, q.y + q.h * 0.06, q.h * 0.24, q.h * 0.12, '#d92420', ' rx="' + (q.h * 0.02).toFixed(1) + '"') + label(q.x + q.w - q.h * 0.18, q.y + q.h * 0.12, q.h * 0.075, 'PGM').replace('stroke="rgba(0,0,0,0.45)"', 'stroke="none"');
+      s += label(cx, q.y + q.h * 0.17, fs * 0.8, src.name);
+    } else {
+      s += r(q.x, q.y, q.w, q.h, src.color);
+      for (var i = -q.h; i < q.w; i += 150) s += '<line x1="' + (q.x + i) + '" y1="' + (q.y + q.h) + '" x2="' + (q.x + i + q.h) + '" y2="' + q.y + '" stroke="rgba(255,255,255,0.13)" stroke-width="52"/>';
+      s += '<circle cx="' + (q.x + q.w * 0.18).toFixed(1) + '" cy="' + (q.y + q.h * 0.3).toFixed(1) + '" r="' + (q.h * 0.34).toFixed(1) + '" fill="rgba(255,255,255,0.12)"/><circle cx="' + (q.x + q.w * 0.86).toFixed(1) + '" cy="' + (q.y + q.h * 0.72).toFixed(1) + '" r="' + (q.h * 0.42).toFixed(1) + '" fill="rgba(0,0,0,0.16)"/>';
+      s += label(cx, cy, fs, src.name);
+    }
+    return s + '</g>';
+  }
+  function composite(contents) {
+    var s = r(0, 0, STAGE.w, STAGE.h, '#000000');
+    ZONES.forEach(function (z) { var key = contents[z.id]; if (key) z.rects.forEach(function (q) { s += drawSource(key, q); }); });
+    return s;
+  }
+  function stageSVG(contents, labels) {
+    var id = 'sc' + (uidN++), top = labels ? 78 : 0, s = '<svg viewBox="0 ' + (-top) + ' ' + STAGE.w + ' ' + (STAGE.h + top + (labels ? 10 : 0)) + '" role="img" aria-label="舞台示意">';
+    s += '<clipPath id="' + id + '">'; SCR.forEach(function (q) { s += '<rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '"/>'; }); s += '</clipPath>';
+    s += '<g clip-path="url(#' + id + ')">' + composite(contents) + '</g>';
+    SCR.forEach(function (q) {
+      s += '<rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '" fill="none" stroke="var(--m-div)" stroke-width="5"/>';
+      if (labels) s += '<text x="' + q.x + '" y="' + (q.y - 18) + '" font-size="40" fill="var(--m-dim)">' + q.name + ' ' + q.w + '×' + q.h + '</text>';
+    });
+    return s + '</svg>';
+  }
+  function rasterSVG(contents) {
+    var s = '<svg viewBox="0 -78 ' + RAS.w + ' ' + (RAS.h + 88) + '" role="img" aria-label="输出口示意">';
+    s += r(0, 0, RAS.w, RAS.h, '#0a0a0b', ' stroke="var(--m-div)" stroke-width="5" stroke-dasharray="18 12"');
+    s += '<text x="0" y="-18" font-size="40" fill="var(--m-dim)">整幅 1920×1080，没画屏幕的地方送黑</text>';
+    SCR.forEach(function (q) {
+      var id = 'rs' + (uidN++);
+      s += '<clipPath id="' + id + '"><rect x="' + q.rx + '" y="' + q.ry + '" width="' + q.w + '" height="' + q.h + '"/></clipPath>';
+      s += '<g clip-path="url(#' + id + ')"><g transform="translate(' + (q.rx - q.x) + ',' + (q.ry - q.y) + ')">' + composite(contents) + '</g></g>';
+      s += '<rect x="' + q.rx + '" y="' + q.ry + '" width="' + q.w + '" height="' + q.h + '" fill="none" stroke="var(--m-div)" stroke-width="5"/>';
+      s += '<text x="' + (q.rx + 16) + '" y="' + (q.ry + q.h - 18) + '" font-size="34" fill="#ffffff" stroke="rgba(0,0,0,0.6)" stroke-width="6" paint-order="stroke">' + q.name + '</text>';
+    });
+    return s + '</svg>';
+  }
+  var LOOKS = [
+    { label: '1 整幅背景', c: { all: 'bg' }, note: '一路"背景视频"放到"整幅"分区，跨三块屏铺一幅。舞台上是连着的一张图；输出口里它被切成三块挤在一起，字和图都是断的，这就是现在监看里"看不清中间是什么"的原因。' },
+    { label: '2 主屏 PPT + 两耳机位', c: { all: 'bg', main: 'ppt', ears: 'cam1' }, note: '"主屏"分区放 PPT（适应留边），"两耳"分区放机位 1（各放一份、填满）。底下的"整幅"仍是背景视频，被上面的分区盖住。调这个预设，三块屏同一拍换。' },
+    { label: '3 主屏直播画面 + 两耳台标', c: { all: 'bg', main: 'pgm', ears: 'logo' }, note: '"主屏"的来源是直播 PGM：导播面板切到哪路，主屏就是哪路，同一拍。两耳放台标图片。' }
+  ];
+  function renderLook(i) {
+    $('stageView').innerHTML = stageSVG(LOOKS[i].c, true);
+    $('rasterView').innerHTML = rasterSVG(LOOKS[i].c);
+    $('lookNote').textContent = LOOKS[i].note;
+  }
+  seg($('segLook'), LOOKS, 1, renderLook);
+  renderLook(1);
+
+  /* ---------- 两个面板 ---------- */
+  $('appStagePvw').innerHTML = stageSVG(LOOKS[1].c, false);
+  $('appStagePgm').innerHTML = stageSVG(LOOKS[2].c, false);
+  $('appLooks').innerHTML = LOOKS.map(function (l, i) {
+    return '<div class="cell look' + (i === 2 ? ' onpgm' : (i === 1 ? ' onpvw' : '')) + '"><div class="ct">' + l.label + '</div><div class="cv">' + stageSVG(l.c, false) + '</div></div>';
+  }).join('') + '<div class="cell look"><div class="ct">＋ 存当前预监</div><div class="cv" style="height:28px"></div></div>';
+  function showPage(name) {
+    Array.prototype.forEach.call(document.querySelectorAll('#app [data-page]'), function (el) { el.hidden = el.getAttribute('data-page') !== name; });
+    $('pgSwitch').setAttribute('aria-pressed', name === 'switch' ? 'true' : 'false');
+    $('pgStage').setAttribute('aria-pressed', name === 'stage' ? 'true' : 'false');
+    $('appHint').textContent = name === 'switch' ? '数字键选输入 · 空格 Cut · 回车转场' : '⌃数字调预设 · ⌃空格 TAKE · → GO';
+  }
+  $('pgSwitch').addEventListener('click', function () { showPage('switch'); });
+  $('pgStage').addEventListener('click', function () { showPage('stage'); });
+  showPage('switch');
+
+  /* ---------- 第三层：时间线 ---------- */
+  var CUES = [
+    { name: '开场片', trig: '手动', c: { all: 'intro' }, act: '6 号输入从头播' },
+    { name: '主持人上场', trig: '片头放完自动走', c: { all: 'bg', main: 'pgm', ears: 'logo' }, act: '导播切机位 1' },
+    { name: '讲 PPT', trig: '手动', c: { all: 'bg', main: 'ppt', ears: 'cam1' }, act: '导播切机位 2' },
+    { name: '全场互动', trig: '手动', c: { all: 'cam1' }, act: '' },
+    { name: '结束片', trig: '手动', c: { all: 'outro' }, act: '片尾从头播，放完黑场' }
+  ];
+  var pos = 0;
+  function chip(key) { return key ? '<span class="srcchip" style="background:' + SRC[key].color + '">' + SRC[key].name + '</span>' : '<span class="empty">空</span>'; }
+  function renderTimeline() {
+    var onIdx = pos - 1, nxIdx = pos < CUES.length ? pos : -1;
+    $('tlPgm').innerHTML = stageSVG(onIdx >= 0 ? CUES[onIdx].c : {}, false);
+    $('tlPvw').innerHTML = stageSVG(nxIdx >= 0 ? CUES[nxIdx].c : {}, false);
+    $('pgmName').textContent = onIdx >= 0 ? '提示点 ' + (onIdx + 1) + ' · ' + CUES[onIdx].name : '开演前 · 黑场';
+    $('pvwName').textContent = nxIdx >= 0 ? '提示点 ' + (nxIdx + 1) + ' · ' + CUES[nxIdx].name : '没有下一条了';
+    $('tlWhere').textContent = nxIdx >= 0 ? '按 GO：预监里的画面上屏，再装入下一条。' : '时间线走完了。';
+    $('btnGo').disabled = nxIdx < 0;
+    $('btnBack').disabled = pos === 0;
+    function cls(i) { return i === onIdx ? ' class="on"' : (i === nxIdx ? ' class="nx"' : ''); }
+    var h = '<thead><tr><th class="rowh">提示点</th>' + CUES.map(function (c, i) { return '<th' + cls(i) + '><span class="cname">' + (i + 1) + ' ' + c.name + '</span><span class="ctrig">' + c.trig + '</span></th>'; }).join('') + '</tr></thead><tbody>';
+    ZONES.forEach(function (z) {
+      h += '<tr><td class="rowh">' + z.name + '</td>' + CUES.map(function (c, i) { return '<td' + cls(i) + '>' + chip(c.c[z.id]) + '</td>'; }).join('') + '</tr>';
+    });
+    h += '<tr><td class="rowh">顺带的命令</td>' + CUES.map(function (c, i) { return '<td' + cls(i) + '>' + (c.act || '<span class="empty">无</span>') + '</td>'; }).join('') + '</tr></tbody>';
+    $('cueTable').innerHTML = h;
+  }
+  $('btnGo').addEventListener('click', function () { if (pos < CUES.length) { pos++; renderTimeline(); } });
+  $('btnBack').addEventListener('click', function () { if (pos > 0) { pos--; renderTimeline(); } });
+  $('btnReset').addEventListener('click', function () { pos = 0; renderTimeline(); });
+  renderTimeline();
+})();
+</script>
