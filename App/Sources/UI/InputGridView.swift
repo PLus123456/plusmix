@@ -4,6 +4,8 @@
 // 藏起来的格子（搜索 / 分类筛掉的）不占位（同 NSStackView 的 detachesHiddenViews）。格子自己有宽高约束（InputCellView / AddInputPlaceholderView），
 // 这里只用 leading / top 两条约束定位、改常数，不和格子自己的约束打架；自己的宽高按排法设（滚动视图的文档视图）。
 // 一行几格、露出几行的口径和方案示意页的 perRow / rowsFor 一样：每格算上它右边 / 下边的一个间距（最后一格算上外留白）。
+// 用户 2026-11-14 裁定（W6-A 报告 §4 第 15 条）：折行时一行几格照上面算，放完之后多出来的宽度平均分到"两头留白 + 格子之间"（space-evenly），
+// 各行同一组列位置，最后一行不满时靠左对到这些列上；一行排（旧排布）不动。
 import AppKit
 
 @MainActor
@@ -25,6 +27,8 @@ final class InputGridView: NSView {
     private var positions: [ObjectIdentifier: (x: NSLayoutConstraint, y: NSLayoutConstraint)] = [:]
     /// 一行几格（.row 时 = 可见格数）。
     private(set) var columns = 1
+    /// 折行时格子之间（和两头）的空隙（space-evenly；一行排时 = spacing）。
+    private(set) var columnGap: CGFloat = 6
     private weak var clip: NSClipView?
     /// 可见区的宽（输入条在自己的 layout 里先给；没给就读滚动视图的可见区）。
     var viewportWidth: CGFloat?
@@ -92,14 +96,20 @@ final class InputGridView: NSView {
         switch flow {
         case .row:
             columns = max(1, visible.count)
+            columnGap = spacing
         case .wrap:
             columns = max(1, Int(((viewportWidth - inset) / (w + spacing)).rounded(.down)))
+            // 多出来的宽度均分到 columns + 1 个空隙里（两头 + 格子之间）；一格都放不下时照原来贴左
+            let n = CGFloat(columns)
+            columnGap = max(inset, (viewportWidth - n * w) / (n + 1))
         }
+        let leading = flow == .row ? inset : columnGap
+        let step = w + (flow == .row ? spacing : columnGap)
         for (i, v) in visible.enumerated() {
             guard let p = positions[ObjectIdentifier(v)] else { continue }
             let col = flow == .row ? i : i % columns
             let row = flow == .row ? 0 : i / columns
-            let x = inset + CGFloat(col) * (w + spacing), y = inset + CGFloat(row) * (h + spacing)
+            let x = leading + CGFloat(col) * step, y = inset + CGFloat(row) * (h + spacing)
             if p.x.constant != x { p.x.constant = x }
             if p.y.constant != y { p.y.constant = y }
         }

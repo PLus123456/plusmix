@@ -385,6 +385,30 @@ final class MainWindowArrangementTests: XCTestCase {
             }
             XCTAssertEqual(forward, backward.reversed(), "[\(canvas.0)×\(canvas.1)] 拉大再缩回：同一尺寸结果相同")
         }
+        // 会叠放的画布（用户 2026-11-14 裁定加了粘性，报告 §4 第 3 条）：只在粘性区间（面积比 1.15–1.30、第二句不成立）之外断言同一尺寸结果相同
+        for (canvas, path) in [((3840, 1080), "对角"), ((5760, 1080), "只拉宽"), ((3840, 1080), "只拉宽")] {
+            try AppTest.setCanvas(width: canvas.0, height: canvas.1)
+            let k = AppTest.measuredK()
+            let steps: [NSSize] = path == "对角"
+                ? (0...24).map { i in let f = CGFloat(i) / 24; return NSSize(width: (1100 + f * 1460).rounded(), height: (720 + f * 720).rounded()) }
+                : stride(from: CGFloat(1100), through: 2560, by: 40).map { NSSize(width: $0, height: 900) }
+            var forward: [String: String] = [:], inBand = 0, compared = 0
+            for s in steps {
+                AppTest.resizeMainWindowQuickly(s)
+                let m = AppTest.measureArrangement()
+                forward[size(s)] = "\(m.tier.title) \(m.mode.rawValue) \(Int(m.top.rounded()))"
+            }
+            for s in steps.reversed() {
+                AppTest.resizeMainWindowQuickly(s)
+                let m = AppTest.measureArrangement()
+                let L = RefLayout.layout(s.width, s.height, mixer: true, CGFloat(canvas.0), CGFloat(canvas.1), k)
+                if L.ratio >= RefLayout.stackKeep, L.ratio < 1.3, !L.slackClause { inBand += 1; continue }
+                compared += 1
+                XCTAssertEqual("\(m.tier.title) \(m.mode.rawValue) \(Int(m.top.rounded()))", forward[size(s)],
+                               "[\(canvas.0)×\(canvas.1) \(path) \(size(s))] 粘性区间之外：拉大缩回同一尺寸结果相同")
+            }
+            print("W6表 M6 粘性 \(canvas.0)×\(canvas.1) \(path)：比较 \(compared) 个尺寸，粘性区间里 \(inBand) 个不比")
+        }
     }
 
     /// 时钟"自动"（默认）：放不下时收起，时间改在状态行右端用小字显示；放得下时回来，状态行的时间收起。
@@ -501,7 +525,8 @@ final class MainWindowArrangementTests: XCTestCase {
             return NSSize(width: (1100 + f * 1460).rounded(), height: (720 + f * 720).rounded())
         }
         let wide = stride(from: CGFloat(1100), through: 2560, by: 20).map { NSSize(width: $0, height: 900) }
-        for canvas in [(5760, 1080), (2460, 1080)] {
+        // 3840×1080 原来只记数（方案的门槛压线时会来回跳）；用户 2026-11-14 裁定加粘性之后一并断言（报告 §4 第 3 条）
+        for canvas in [(5760, 1080), (2460, 1080), (3840, 1080)] {
             try AppTest.setCanvas(width: canvas.0, height: canvas.1)
             for (name, path) in [("对角", diagonal), ("只拉宽", wide)] {
                 let up = switches(along: path), down = switches(along: path.reversed())
@@ -510,10 +535,65 @@ final class MainWindowArrangementTests: XCTestCase {
                 XCTAssertLessThanOrEqual(down.count, 1, "[\(canvas.0)×\(canvas.1) \(name)] 缩小时不来回跳：\(down.at)")
             }
         }
-        // 32:9 只记数（方案的门槛在这一种画布上会在两处边界来回跳，报告 §4）
-        try AppTest.setCanvas(width: 3840, height: 1080)
-        let up32 = switches(along: diagonal)
-        print("W6表 M7 连续缩放 3840×1080 对角（只记数）：换 \(up32.count) 次 \(up32.at)")
+    }
+
+    /// 用户 2026-11-14 裁定（报告 §4 第 3 条）：并排 / 叠放加粘性。并排着时叠放的画面 ≥ 并排的 1.30 倍（或并排空得超过 24 而叠放更大）才换叠放；
+    /// 叠放着时面积比 < 1.15、且第二句也不成立才换回并排；换画布、切新 / 旧排布、从存档恢复窗口位置时按无状态的规则重新定。中间那一列选档仍是无状态的。
+    func testM7_stackingStaysStickyInsideTheBand() throws {
+        try AppTest.addLightInputs(try AppTest.freshSession(), count: 16)
+        // 用抄本（喂量出来的常数）找一个粘性区间里的窗口尺寸 band，同一高度上左边一个无状态就叠放的 stacked、右边一个无状态就并排的 side
+        var found: (canvas: (Int, Int), band: NSSize, stacked: NSSize, side: NSSize)?
+        search: for canvas in [(3840, 1080), (3200, 1080), (2880, 1080), (4800, 1080), (5760, 1080)] {
+            try AppTest.setCanvas(width: canvas.0, height: canvas.1)
+            let k = AppTest.measuredK()
+            func ref(_ w: CGFloat, _ h: CGFloat, _ prev: Bool? = nil) -> RefLayout.L {
+                RefLayout.layout(w, h, mixer: true, CGFloat(canvas.0), CGFloat(canvas.1), k, previouslyStacked: prev)
+            }
+            for h in [CGFloat(900), 1000, 1117] {
+                let widths = stride(from: CGFloat(1100), through: 2560, by: 10).map { $0 }
+                guard let b = widths.first(where: { let L = ref($0, h); return L.ratio >= RefLayout.stackKeep && L.ratio < 1.3 && !L.slackClause }),
+                      let a = widths.last(where: { $0 < b && ref($0, h).mode == .stacked && ref($0, h).ratio >= 1.3 }),
+                      let c = widths.first(where: { $0 > b && ref($0, h).mode == .sideBySide && ref($0, h).ratio < RefLayout.stackKeep }) else { continue }
+                found = (canvas, NSSize(width: b, height: h), NSSize(width: a, height: h), NSSize(width: c, height: h))
+                break search
+            }
+        }
+        let f = try XCTUnwrap(found, "找不到粘性区间里的窗口尺寸")
+        print("W6表 M7 粘性：\(f.canvas.0)×\(f.canvas.1) 区间里 \(size(f.band))，叠放那边 \(size(f.stacked))，并排那边 \(size(f.side))")
+        let k = AppTest.measuredK()
+        func mode(at s: NSSize) -> ArrangementMeasure { AppTest.setExactWindowSize(s); return AppTest.measureArrangement() }
+        // 从叠放那边过来：留在叠放；中间那一列的档 = 叠放时无状态选的那一档
+        XCTAssertEqual(mode(at: f.stacked).mode, .stacked)
+        var m = mode(at: f.band)
+        XCTAssertEqual(m.mode, .stacked, "叠放着进到区间里：面积比还 ≥ 1.15，留在叠放")
+        let stickyRef = RefLayout.layout(f.band.width, f.band.height, mixer: true, CGFloat(f.canvas.0), CGFloat(f.canvas.1), k, previouslyStacked: true)
+        XCTAssertEqual(stickyRef.mode, .stacked)
+        XCTAssertEqual(m.tier.rawValue, stickyRef.tier, "叠放时中间那一列照样按无状态选档")
+        XCTAssertEqual(m.picture.width, stickyRef.iw, accuracy: 1)
+        // 从并排那边过来：留在并排
+        XCTAssertEqual(mode(at: f.side).mode, .sideBySide)
+        m = mode(at: f.band)
+        XCTAssertEqual(m.mode, .sideBySide, "并排着进到区间里：面积比 < 1.30，留在并排")
+        let statelessRef = RefLayout.layout(f.band.width, f.band.height, mixer: true, CGFloat(f.canvas.0), CGFloat(f.canvas.1), k)
+        XCTAssertEqual(statelessRef.mode, .sideBySide)
+        XCTAssertEqual(m.tier.rawValue, statelessRef.tier, "并排时中间那一列照样按无状态选档")
+        // 区间里叠放着时：切旧排布再切回 / 换画布再换回 / 从存档恢复窗口位置 → 按无状态的规则重新定（并排）
+        _ = mode(at: f.stacked)
+        XCTAssertEqual(mode(at: f.band).mode, .stacked)
+        wc.setArrangement(.legacy)
+        wc.setArrangement(.adaptive)
+        XCTAssertEqual(AppTest.measureArrangement().mode, .sideBySide, "切新 / 旧排布：按无状态重新定")
+        _ = mode(at: f.stacked)
+        XCTAssertEqual(mode(at: f.band).mode, .stacked)
+        try AppTest.setCanvas(width: 1920, height: 1080)
+        try AppTest.setCanvas(width: f.canvas.0, height: f.canvas.1)
+        XCTAssertEqual(AppTest.measureArrangement().mode, .sideBySide, "换节目格式：按无状态重新定")
+        _ = mode(at: f.stacked)
+        XCTAssertEqual(mode(at: f.band).mode, .stacked)
+        let frame = try XCTUnwrap(wc.window?.frame)
+        wc.applyLayout(ShowLayout(values: ["mainWindowFrame": .string(NSStringFromRect(frame))]))
+        wc.window?.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertEqual(AppTest.measureArrangement().mode, .sideBySide, "从存档恢复窗口位置：按无状态重新定")
     }
 
     // MARK: 旧排布开关（规则 8）
@@ -570,6 +650,57 @@ final class MainWindowArrangementTests: XCTestCase {
         let m = AppTest.measureArrangement()
         XCTAssertEqual(m.mode, .sideBySide)
         XCTAssertEqual(m.mixerHeight, m.bottom, accuracy: 0.5, "新排布：调音台在下边一行")
+    }
+
+    // MARK: 输入格子的空隙均分（用户 2026-11-14 裁定，报告 §4 第 15 条）
+
+    /// 新排布里一行放完格子之后多出来的宽度平均分到"两头留白 + 格子之间"（space-evenly）：同一行相邻格子的间距相等、左右留白相等（= 间距）；
+    /// 各行用同一组列位置，最后一行不满时靠左对到这些列上；"＋ 添加输入"占一格。横屏的格子和竖屏的竖小格都这样；每行格数、露出路数和原来一样。
+    func testW6A_inputGridSpacesCellsEvenly() throws {
+        try AppTest.addLightInputs(try AppTest.freshSession(), count: 10)   // 10 路 + 占位格 = 11 格：有满行，最后一行不满
+        for (canvas, windows) in [((1920, 1080), [SpecTables.windows[0], SpecTables.windows[1], SpecTables.windows[2]]),
+                                  ((1080, 1920), [SpecTables.windows[0], SpecTables.windows[1]])] {
+            try AppTest.setCanvas(width: canvas.0, height: canvas.1)
+            for window in windows {
+                AppTest.setExactWindowSize(window)
+                for mixer in [true, false] {
+                    setMixer(mixer)
+                    let label = "[\(size(window)) \(canvas.0)×\(canvas.1) 调音台\(mixer ? "开" : "收")]"
+                    let g = AppTest.measureGridRows()
+                    XCTAssertEqual(g.rows.reduce(0) { $0 + $1.count }, 11, "\(label) 10 路 + 占位格")
+                    var k = AppTest.measuredK()
+                    k.TOTAL = 10
+                    let L = RefLayout.layout(window.width, window.height, mixer: mixer, CGFloat(canvas.0), CGFloat(canvas.1), k)
+                    XCTAssertEqual(g.columns, canvas.0 >= canvas.1 ? L.perRow : L.cols, "\(label) 每行格数和原来一样")
+                    XCTAssertEqual(AppTest.measureArrangement().visible, L.visible, "\(label) 露出路数和原来一样")
+                    let first = try XCTUnwrap(g.rows.first)
+                    XCTAssertEqual(first.count, g.columns, "\(label) 第一行是满的")
+                    let gaps = zip(first, first.dropFirst()).map { $1.minX - $0.maxX }
+                    let gap = gaps.first ?? (g.viewportWidth - (first[0].maxX - first[0].minX)) / 2
+                    for x in gaps { XCTAssertEqual(x, gap, accuracy: 0.5, "\(label) 同一行相邻格子的间距相等：\(gaps)") }
+                    let left = first[0].minX, right = g.viewportWidth - first[first.count - 1].maxX
+                    XCTAssertEqual(left, right, accuracy: 1, "\(label) 左右留白相等：\(left) / \(right)")
+                    XCTAssertEqual(left, gap, accuracy: 1, "\(label) 两头留白和格子之间一样大（space-evenly）")
+                    XCTAssertGreaterThanOrEqual(gap, InputStripView.itemSpacing - 0.5, "\(label) 空隙不小于原来的 6")
+                    for row in g.rows.dropFirst() {
+                        for (i, cell) in row.enumerated() {
+                            XCTAssertEqual(cell.minX, first[i].minX, accuracy: 0.5, "\(label) 各行同一组列位置、最后一行靠左对到列上")
+                        }
+                    }
+                    print("W6表 均分 \(label)：\(g.columns) 列，空隙 \(String(format: "%.1f", gap))，左 \(String(format: "%.1f", left)) 右 \(String(format: "%.1f", right))")
+                }
+            }
+        }
+        // 旧排布的一行横滚不动：格子之间还是 6、左边 6
+        wc.setArrangement(.legacy)
+        defer { wc.setArrangement(.adaptive) }
+        try AppTest.setCanvas(width: 1920, height: 1080)
+        AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
+        let legacy = AppTest.measureGridRows()
+        XCTAssertEqual(legacy.rows.count, 1, "旧排布一行")
+        let row = try XCTUnwrap(legacy.rows.first)
+        XCTAssertEqual(row[0].minX, InputStripView.stackInset, accuracy: 0.5)
+        for (a, b) in zip(row, row.dropFirst()) { XCTAssertEqual(b.minX - a.maxX, InputStripView.itemSpacing, accuracy: 0.5, "旧排布格子之间还是 6") }
     }
 
     // MARK: 节目格式页（§2.4）

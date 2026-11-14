@@ -177,6 +177,31 @@ extension AppTest {
     }
 }
 
+// MARK: 输入格子的横向排法（空隙均分的用例量）
+
+/// 输入区（新排布折行时）一行行格子的横坐标：每行 = [(minX, maxX)]，按格子在可见区里的位置；再给出可见区宽。
+struct GridRowsMeasure {
+    var rows: [[(minX: CGFloat, maxX: CGFloat)]]
+    var viewportWidth: CGFloat
+    var columns: Int
+}
+
+@MainActor
+extension AppTest {
+    static func measureGridRows() -> GridRowsMeasure {
+        let strip = controller.windowController.inputStrip
+        let items = strip.arrangedItems.filter { !$0.isHidden }
+        let grid = items.first?.superview
+        var byRow: [Int: [(CGFloat, CGFloat)]] = [:]
+        for v in items {
+            let f = v.frame
+            byRow[Int(f.minY.rounded()), default: []].append((f.minX, f.maxX))
+        }
+        let rows = byRow.keys.sorted().map { y in byRow[y]!.sorted { $0.0 < $1.0 }.map { (minX: $0.0, maxX: $0.1) } }
+        return GridRowsMeasure(rows: rows, viewportWidth: grid?.bounds.width ?? 0, columns: strip.gridColumns)
+    }
+}
+
 // MARK: 方案示意页 layout() 的抄本
 
 /// docs/spec/大屏与时间线方案-示意页.html 脚本"第一层"一段（layout / pickTier / rowsFor）逐行抄成 Swift。字面量 36 = 头一行 30 + 上留白 6，195 = 36 + 格子 153 + 6，
@@ -198,6 +223,9 @@ enum RefLayout {
 
     struct L {
         var mode: ArrangementMeasure.Mode
+        /// 叠放比并排大多少（面积比），与"并排时监看下面空得超过 TOL 而叠放更大"成不成立（粘性用例找区间用）。
+        var ratio: CGFloat = 0
+        var slackClause = false
         var iw: CGFloat = 0, ih: CGFloat = 0
         var sideIw: CGFloat = 0, sideIh: CGFloat = 0
         var topH: CGFloat = 0
@@ -228,7 +256,11 @@ enum RefLayout {
         return k.ALLOWED.last ?? 3
     }
 
-    static func layout(_ W: CGFloat, _ H: CGFloat, mixer: Bool, _ cw: CGFloat, _ ch: CGFloat, _ k: K) -> L {
+    /// 叠放粘性（用户 2026-11-14 裁定，报告 §4 第 3 条）：叠放着的时候面积比要掉到 1.15 以下（且第二句不成立）才换回并排。
+    static let stackKeep: CGFloat = 1.15
+
+    /// previouslyStacked：上一次是不是叠放（nil / false = 按无状态的规则算，方案的表就是这样算的）。
+    static func layout(_ W: CGFloat, _ H: CGFloat, mixer: Bool, _ cw: CGFloat, _ ch: CGFloat, _ k: K, previouslyStacked: Bool? = nil) -> L {
         let a = cw / ch, availH = H - k.TB - k.BB
         if a >= 1 {
             var L = L(mode: .sideBySide)
@@ -240,13 +272,17 @@ enum RefLayout {
             let keep = min(2, rowsFor(availH - topH - k.DIV, k))
             let topMax2 = availH - max(k.STRIPMIN, k.HDR + k.INSET + CGFloat(keep) * (k.CH + k.CG)) - k.DIV, stackW = W - k.TCOL - 2 * k.GAP
             let h2 = min(stackW / a, (topMax2 - k.GAP) / 2 - k.TITLE), w2 = h2 * a
-            if h2 > 0 && (w2 * h2 >= 1.3 * iw * ih || (topH - hug > k.TOL && w2 * h2 > iw * ih)) {
+            L.ratio = (w2 * h2) / max(iw * ih, 1)
+            L.slackClause = topH - hug > k.TOL && w2 * h2 > iw * ih
+            let gain: CGFloat = previouslyStacked == true ? stackKeep : 1.3
+            if h2 > 0 && (w2 * h2 >= gain * iw * ih || L.slackClause) {
                 let stackH = 2 * (k.TITLE + h2) + k.GAP
                 L.mode = .stacked
                 L.iw = w2; L.ih = h2; L.sideIw = iw; L.sideIh = ih
                 L.tier = pickTier(stackH, topMax2, availH, k); L.contentH = stackH
                 L.topH = min(topMax2, max(stackH, k.TIERS[L.tier]))
             } else {
+                L.mode = .sideBySide
                 L.iw = iw; L.ih = ih; L.sideIw = iw; L.sideIh = ih; L.tier = ti; L.contentH = hug; L.topH = topH
             }
             L.slack = max(0, L.topH - L.contentH)

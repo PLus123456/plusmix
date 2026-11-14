@@ -78,6 +78,7 @@ extension MainWindowController {
         }
         installedArrangement = target
         arrangement = target
+        lastStackedDecision = nil   // 切新 / 旧排布：并排 / 叠放按无状态的规则重新定
         switch target {
         case .legacy: installLegacy(content: content, mixerVisible: mixerVisible)
         case .adaptive: installAdaptive(content: content, mixerVisible: mixerVisible)
@@ -178,6 +179,7 @@ extension MainWindowController {
     /// 换节目画布（换 session）：监看的画面区比例、竖屏的紧凑小格、重排。
     func applyCanvas(_ size: CGSize) {
         canvasSize = size
+        lastStackedDecision = nil   // 换节目格式：并排 / 叠放按无状态的规则重新定
         let adaptive = installedArrangement == .adaptive
         let aspect: CGFloat? = adaptive && size.height > 0 ? size.width / size.height : nil
         previewMonitor.canvasAspect = aspect
@@ -207,8 +209,15 @@ extension MainWindowController {
         guard installedArrangement == .adaptive, size.width > 0, size.height > 0, !applyingAdaptiveLayout else { return }
         applyingAdaptiveLayout = true
         defer { applyingAdaptiveLayout = false }
-        let result = MainLayoutModel.compute(adaptiveMetrics(size: size))
+        var metrics = adaptiveMetrics(size: size)
+        metrics.previouslyStacked = lastStackedDecision
+        let result = MainLayoutModel.compute(metrics)
         arrangementResult = result
+        switch result.mode {
+        case .stacked: lastStackedDecision = true
+        case .sideBySide: lastStackedDecision = false
+        case .portrait: lastStackedDecision = nil
+        }
         if let tier = TransitionPanelView.ColumnTier(rawValue: result.tier) { transitionPanel.setTier(tier) }
         setFrame(previewMonitor, result.preview)
         setFrame(programMonitor, result.program)

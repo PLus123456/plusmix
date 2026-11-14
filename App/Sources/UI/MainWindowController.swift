@@ -110,6 +110,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     }
     /// 新排布最近一次算出来的样子（用例 / 截图脚本看）。
     var arrangementResult: MainLayoutResult?
+    /// 上一次是并排还是叠放（叠放的粘性，MainLayoutRules.stackKeep）；nil = 下一次按无状态的规则定
+    /// （换节目格式 applyCanvas、切新 / 旧排布 install、从存档恢复窗口位置 applyLayout 时清掉；窗口刚打开时本来就是 nil）。
+    var lastStackedDecision: Bool?
     /// 新排布里调音台开着没有（旧排布看 outerSplit 收没收起）。
     var adaptiveMixerVisible = true
     /// 节目画布（节目格式）的宽 × 高：排布按它的比例算。
@@ -800,6 +803,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         if case .bool(let visible)? = layout.values["mixerPanelVisible"], visible != isMixerPanelVisible { toggleMixerPanel() }
         if case .bool(let visible)? = layout.values["multiviewWindowVisible"], visible != isMultiviewWindowVisible { toggleMultiviewWindow() }
         if case .string(let text)? = layout.values["mainWindowFrame"], let window {
+            // 从存档恢复窗口位置：并排 / 叠放按无状态的规则重新定（W6-A 叠放粘性）
+            lastStackedDecision = nil
+            layoutView.needsLayout = true
             var frame = NSRectFromString(text)
             frame.size.width = max(frame.width, window.minSize.width)
             frame.size.height = max(frame.height, window.minSize.height)

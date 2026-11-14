@@ -10,6 +10,9 @@ enum MainLayoutRules {
     static let tolerance: CGFloat = 24
     /// 规则 10：叠放的画面比并排大三成以上才换（不让窗口拉一拉就来回跳）。
     static let stackGain: CGFloat = 1.3
+    /// 用户 2026-11-14 裁定（W6-A 报告 §4 第 3 条）：叠放着的时候，面积比掉到 1.15 以下（且"并排空得超过 24 而叠放更大"也不成立）才换回并排。
+    /// 只管"并排还是叠放"这一个选择；中间那一列选哪一档仍是无状态的。换节目格式、切新 / 旧排布、窗口刚打开或从存档恢复时按无状态的规则（1.3）重新定。
+    static let stackKeep: CGFloat = 1.15
     /// 规则 10：叠放时下边一行至少留两行输入（并排时本来只有一行的留一行）。
     static let stackedKeepRows = 2
     /// §2.3：竖屏右边一栏宽不够 346 时监看让一点。
@@ -49,6 +52,8 @@ struct MainLayoutMetrics: Equatable {
     var compactCell: CGSize
     /// 用户拖过上下之间的分隔条：横屏下边一行想要的高（nil = 按规则）。
     var preferredBottomHeight: CGFloat?
+    /// 上一次是不是叠放（粘性，MainLayoutRules.stackKeep）；nil = 按无状态的规则定。
+    var previouslyStacked: Bool? = nil
 }
 
 /// 算出来的排布：各块在排布区里的位置（翻转坐标：原点在左上，y 朝下），和用例 / 报告要看的几项。
@@ -136,7 +141,9 @@ enum MainLayoutModel {
         let topMax2 = availH - max(stripMin, m.stripHeader + m.stripInset + CGFloat(keep) * (m.cell.height + m.cellSpacing)) - m.divider
         let stackW = W - m.columnWidth - 2 * m.gap
         let h2 = min(stackW / a, (topMax2 - m.gap) / 2 - m.monitorTitleHeight), w2 = h2 * a
-        let stacked = h2 > 0 && (w2 * h2 >= MainLayoutRules.stackGain * iw * ih
+        // 并排着（或刚重新定）要 ≥ 1.3 才换叠放；叠放着的话要掉到 1.15 以下才换回并排（粘性）；第二句两边一样
+        let gain = m.previouslyStacked == true ? MainLayoutRules.stackKeep : MainLayoutRules.stackGain
+        let stacked = h2 > 0 && (w2 * h2 >= gain * iw * ih
                                  || (sideTop - hug > MainLayoutRules.tolerance && w2 * h2 > iw * ih))
         var mode: MainLayoutResult.Mode = .sideBySide
         var picture = CGSize(width: iw, height: ih)
