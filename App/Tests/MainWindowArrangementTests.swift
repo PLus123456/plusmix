@@ -16,6 +16,7 @@ final class MainWindowArrangementTests: XCTestCase {
         MainActor.assumeIsolated {
             let wc = AppTest.controller.windowController
             if !wc.isMixerPanelVisible { wc.toggleMixerPanel() }
+            AppTest.restoreWindowSizeLimit()
             AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
         }
         super.tearDown()
@@ -50,7 +51,9 @@ final class MainWindowArrangementTests: XCTestCase {
     private func checkApp(_ m: ArrangementMeasure, window: NSSize, canvas: (w: Int, h: Int), mixer: Bool, spec: SpecLandscapeRow?,
                           test: String, file: StaticString = #filePath, line: UInt = #line) -> RefLayout.L {
         let k = AppTest.measuredK()
-        let L = RefLayout.layout(window.width, window.height, mixer: mixer, CGFloat(canvas.w), CGFloat(canvas.h), k)
+        let actual = wc.window?.frame.size ?? window   // 规则按真实的窗口尺寸算（屏幕放不下时会比要的小）
+        XCTAssertEqual(actual, window, "窗口摆成了要的尺寸", file: file, line: line)
+        let L = RefLayout.layout(actual.width, actual.height, mixer: mixer, CGFloat(canvas.w), CGFloat(canvas.h), k)
         let label = "[\(size(window)) \(canvas.w)×\(canvas.h) 调音台\(mixer ? "开" : "收")]"
         XCTAssertEqual(m.mode, L.mode, "\(label) 摆法", file: file, line: line)
         XCTAssertEqual(m.picture.width, L.iw, accuracy: 1, "\(label) 画面宽：App \(m.picture.width) / 规则 \(L.iw)", file: file, line: line)
@@ -79,7 +82,7 @@ final class MainWindowArrangementTests: XCTestCase {
             XCTAssertEqual(wc.previewMonitor.canvasAspect ?? 0, aspect, accuracy: 0.0001, "换格式时画面区的比例跟着换")
             XCTAssertEqual(wc.programMonitor.canvasAspect ?? 0, aspect, accuracy: 0.0001)
             for window in SpecTables.windows {
-                AppTest.setMainWindowSize(window)
+                AppTest.setExactWindowSize(window)
                 for mixer in [true, false] {
                     setMixer(mixer)
                     let label = "[\(size(window)) \(canvas.0)×\(canvas.1) 调音台\(mixer ? "开" : "收")]"
@@ -105,7 +108,7 @@ final class MainWindowArrangementTests: XCTestCase {
         for table in [SpecTables.hd, SpecTables.wall] {
             try AppTest.setCanvas(width: table[0].canvas.w, height: table[0].canvas.h)
             for row in table {
-                AppTest.setMainWindowSize(row.window)
+                AppTest.setExactWindowSize(row.window)
                 for mixer in [true, false] {
                     setMixer(mixer)
                     let m = AppTest.measureArrangement()
@@ -138,7 +141,7 @@ final class MainWindowArrangementTests: XCTestCase {
         }
         // 16 路全部滚得到（最小窗口、调音台开：只露 3 路）
         try AppTest.setCanvas(width: 1920, height: 1080)
-        AppTest.setMainWindowSize(SpecTables.windows[0])
+        AppTest.setExactWindowSize(SpecTables.windows[0])
         setMixer(true)
         let strip = wc.inputStrip
         XCTAssertLessThan(strip.fullyVisibleNumbers().count, 16)
@@ -167,9 +170,8 @@ final class MainWindowArrangementTests: XCTestCase {
                 XCTAssertEqual(L.visible, visible, label)
             }
         }
-        let session = try AppTest.freshSession()
-        try AppTest.addLightInputs(session, count: 16)
-        try AppTest.setCanvas(width: 1080, height: 1920)
+        try AppTest.addLightInputs(try AppTest.freshSession(), count: 16)
+        let session = try AppTest.setCanvas(width: 1080, height: 1920)   // 换画布 = 换 session，之后看新的
         XCTAssertEqual(wc.inputStrip.effectiveThumbnailSize, .compact, "竖屏：输入格子换成竖的小格")
         let cell = try XCTUnwrap(wc.inputStrip.cells[1])
         XCTAssertTrue(cell.isCompact)
@@ -177,7 +179,7 @@ final class MainWindowArrangementTests: XCTestCase {
         XCTAssertEqual(cell.display.frame.width, ThumbnailSize.compact.width, accuracy: 0.5, "宽 72")
         XCTAssertEqual(cell.display.frame.height, cell.display.frame.width * 1920 / 1080, accuracy: 1, "9:16 的缩略图（不再钳在 16:9 的框里）")
         for row in SpecTables.portrait {
-            AppTest.setMainWindowSize(row.window)
+            AppTest.setExactWindowSize(row.window)
             for mixer in [true, false] {
                 setMixer(mixer)
                 let m = AppTest.measureArrangement()
@@ -212,7 +214,7 @@ final class MainWindowArrangementTests: XCTestCase {
             }
         }
         // 16 路全部滚得到
-        AppTest.setMainWindowSize(SpecTables.windows[0])
+        AppTest.setExactWindowSize(SpecTables.windows[0])
         setMixer(true)
         for n in [9, 16] {
             wc.inputStrip.scrollToCell(n)
@@ -271,10 +273,13 @@ final class MainWindowArrangementTests: XCTestCase {
             XCTAssertEqual(m.picture.width, fit.picture.width, accuracy: 0.5)
             assertNoLetterbox("往下拖到底")
             XCTAssertNil(prefs.bottomRowHeight, "\(label) 拖到底 = 按规则排，不存位置")
-            // 往上拖 120：下边一行高 120，监看等比变小、居中
+            // 往上拖 120：下边一行高 120（上半区不小于最矮那一档：20.5:9 时贴合高 328，最多拖到 228），监看等比变小、居中
             AppTest.drag(wc.layoutView.topDivider, by: NSPoint(x: 0, y: 120))
             m = AppTest.measureArrangement()
-            XCTAssertEqual(m.bottom, fit.bottom + 120, accuracy: 1, "\(label) 往上拖：下边一行更高")
+            let lowest = wc.transitionPanel.fittingHeight(of: .minimal)
+            let expectedTop = max(lowest, fit.top - 120)
+            XCTAssertEqual(m.top, expectedTop, accuracy: 1, "\(label) 往上拖：上半区 = max(最小档 \(lowest), 贴合高 − 120)")
+            XCTAssertEqual(m.bottom, fit.bottom + (fit.top - expectedTop), accuracy: 1, "\(label) 往上拖：下边一行更高")
             XCTAssertLessThan(m.picture.width, fit.picture.width - 10, "\(label) 监看等比变小")
             assertNoLetterbox("往上拖")
             let root = wc.layoutView
@@ -284,7 +289,7 @@ final class MainWindowArrangementTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingHeight(of: wc.transitionPanel.tier) - 0.5, "\(label) 中间那一列放得下（\(wc.transitionPanel.tier.title)）")
             XCTAssertEqual(prefs.bottomRowHeight ?? 0, m.bottom, accuracy: 1, "\(label) 分隔条位置存本机")
             // 窗口放大：下边一行保持、上半区不超过贴合高，画面不出黑边
-            AppTest.setMainWindowSize(NSSize(width: 1728, height: 1117))
+            AppTest.setExactWindowSize(NSSize(width: 1728, height: 1117))
             let big = AppTest.measureArrangement()
             let ref = RefLayout.layout(1728, 1117, mixer: true, CGFloat(canvas.0), CGFloat(canvas.1), AppTest.measuredK())
             XCTAssertLessThanOrEqual(big.top, ref.topH + 0.5, "\(label) 放大后上半区不超过贴合高")
@@ -337,7 +342,7 @@ final class MainWindowArrangementTests: XCTestCase {
         for (canvas, rows) in [((1920, 1080), SpecTables.hd), ((2460, 1080), SpecTables.wall), ((5760, 1080), SpecTables.triple)] {
             try AppTest.setCanvas(width: canvas.0, height: canvas.1)
             for row in rows {
-                AppTest.setMainWindowSize(row.window)
+                AppTest.setExactWindowSize(row.window)
                 let m = AppTest.measureArrangement()
                 let L = checkApp(m, window: row.window, canvas: canvas, mixer: true, spec: row, test: "M6")
                 XCTAssertLessThanOrEqual(m.slack, 24, "[\(size(row.window)) \(canvas.0)×\(canvas.1)] 监看下面最多空 24：\(m.slack)")
@@ -348,7 +353,7 @@ final class MainWindowArrangementTests: XCTestCase {
         }
         // 32:9 配最小窗口：方案写明的例外（空 69）；App 按量出来的常数照规则排，和抄本一致
         try AppTest.setCanvas(width: 3840, height: 1080)
-        AppTest.setMainWindowSize(SpecTables.windows[0])
+        AppTest.setExactWindowSize(SpecTables.windows[0])
         let m32 = AppTest.measureArrangement()
         let L32 = checkApp(m32, window: SpecTables.windows[0], canvas: (3840, 1080), mixer: true, spec: nil, test: "M6-32:9")
         XCTAssertEqual(m32.slack, L32.slack, accuracy: 1, "32:9 配最小窗口：空白与规则一致（方案 69，实测 \(m32.slack)）")
@@ -388,7 +393,7 @@ final class MainWindowArrangementTests: XCTestCase {
         XCTAssertFalse(wc.transitionPanel.isClockShown)
         XCTAssertTrue(AppTest.waitUntil(2) { !status.displayedClock.isEmpty }, "时钟收起时状态行右端有时间")
         XCTAssertNotNil(status.displayedClock.range(of: #"^\d{2}:\d{2}:\d{2}$"#, options: .regularExpression), "小字时间 HH:mm:ss：\(status.displayedClock)")
-        let right = status.convert(status.clockLabel.bounds, from: status.clockLabel)
+        let right = AppTest.alignmentFrame(status.clockLabel, in: status)
         XCTAssertEqual(right.maxX, status.bounds.maxX - StatusBarView.padding, accuracy: 1, "在状态行最右端")
         XCTAssertLessThan(status.clockLabel.font?.pointSize ?? 99, 12, "小字")
         try AppTest.setCanvas(width: 1920, height: 1080)
@@ -413,7 +418,7 @@ final class MainWindowArrangementTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(m.top, wc.transitionPanel.fittingHeight(of: .full) - 0.5, "宁可空着也留时钟")
         XCTAssertGreaterThan(m.slack, 24, "这一档比监看高出 24 以上也不收")
         XCTAssertEqual(wc.bottomBar.statusBar.displayedClock, "", "状态行不显示时间")
-        AppTest.setMainWindowSize(SpecTables.windows[0])
+        AppTest.setExactWindowSize(SpecTables.windows[0])
         XCTAssertEqual(wc.transitionPanel.tier, .full, "最小窗口也一直显示")
     }
 
@@ -421,7 +426,7 @@ final class MainWindowArrangementTests: XCTestCase {
     func testM6_clockNeverHidesClock() throws {
         let session = try AppTest.freshSession()
         try AppTest.addLightInputs(session, count: 4)
-        AppTest.setMainWindowSize(NSSize(width: 2560, height: 1440))
+        AppTest.setExactWindowSize(NSSize(width: 2560, height: 1440))
         XCTAssertEqual(wc.transitionPanel.tier, .full)
         wc.setClockDisplay(.never)
         wc.window?.contentView?.layoutSubtreeIfNeeded()
@@ -446,7 +451,7 @@ final class MainWindowArrangementTests: XCTestCase {
         try AppTest.addLightInputs(session, count: 16)
         try AppTest.setCanvas(width: 5760, height: 1080)
         for row in SpecTables.triple {
-            AppTest.setMainWindowSize(row.window)
+            AppTest.setExactWindowSize(row.window)
             for mixer in [true, false] {
                 setMixer(mixer)
                 let m = AppTest.measureArrangement()
@@ -471,7 +476,7 @@ final class MainWindowArrangementTests: XCTestCase {
         setMixer(true)
         try AppTest.setCanvas(width: 2460, height: 1080)
         for window in SpecTables.windows {
-            AppTest.setMainWindowSize(window)
+            AppTest.setExactWindowSize(window)
             XCTAssertEqual(AppTest.measureArrangement().mode, .sideBySide, "[\(size(window))] 2460×1080 不叠放")
         }
         // 连续缩放：对角拉大、只拉宽（高 900）两条路上，摆法最多换一次，不来回跳

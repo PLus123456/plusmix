@@ -10,6 +10,7 @@ import SwitcherContracts
 @MainActor
 final class MixerAdaptiveHeightTests: XCTestCase {
     /// 把一块调音台单独摆进一个窗口，量它在给定高度下的样子。
+    @MainActor
     private final class Bench {
         let panel: MixerPanelView
         let window: NSWindow
@@ -60,7 +61,7 @@ final class MixerAdaptiveHeightTests: XCTestCase {
 
         let bench = Bench(adaptive: true, state: session.state)
         defer { bench.close() }
-        var faderHeights: [CGFloat] = []
+        var faderHeights: [(full: Bool, height: CGFloat)] = []
         for h in [200, 269, 317, 380, 537].map(CGFloat.init) {
             bench.resize(height: h)
             let f = bench.frames
@@ -104,10 +105,12 @@ final class MixerAdaptiveHeightTests: XCTestCase {
                 XCTAssertLessThanOrEqual(r.maxY, h + 0.5, "\(label) 推子底下被裁")
                 XCTAssertGreaterThanOrEqual(r.height, 60 - 0.5, "\(label) 推子最短 60：\(r.height)")
                 let center = bench.panel.superview!.convert(NSPoint(x: r.midX, y: r.midY), from: bench.panel)
-                XCTAssertTrue(bench.panel.superview?.hitTest(center) === s, "\(label) 推子点得到")
+                // 点到推子本身或它里面的视图（macOS 27 的 NSSlider 里面还有一层 _NSCoreHostingView 画滑块）
+                let hit = bench.panel.superview?.hitTest(center)
+                XCTAssertTrue(hit === s || hit?.isDescendant(of: s) == true, "\(label) 推子点得到：命中 \(String(describing: hit.map { type(of: $0) }))")
                 shortest = min(shortest, r.height)
             }
-            faderHeights.append(shortest)
+            faderHeights.append((full, shortest))
             // 放得下整条（推子 60）时一定是整条；高度 ≥ 今天的自然高时推子 = 170 + 多出来的高
             let fullFits = h >= natural - legacyFader + 60
             XCTAssertEqual(full, fullFits, "\(label) 放得下整条（需要 \(natural - legacyFader + 60)）就整条，放不下才收进齿轮")
@@ -116,7 +119,12 @@ final class MixerAdaptiveHeightTests: XCTestCase {
             }
             print("W6表 M5 调音台高 \(Int(h))：\(full ? "整条" : "紧凑（三行收进齿轮）")，推子 \(f["in\(inputs[0]).fader"]?.height ?? -1)，Master 推子 \(f["bus.master.fader"]?.height ?? -1)")
         }
-        XCTAssertEqual(faderHeights, faderHeights.sorted(), "推子随高度变长：\(faderHeights)")
+        // 推子随高度变长（同一种摆法里）。整条 → 紧凑那一下推子反而变长：规则是先缩推子（最短 60），再不够才把三行收进齿轮，收起来的高给推子
+        for mode in [true, false] {
+            let heights = faderHeights.filter { $0.full == mode }.map(\.height)
+            XCTAssertEqual(heights, heights.sorted(), "\(mode ? "整条" : "紧凑")：推子随高度变长 \(heights)")
+        }
+        XCTAssertEqual(faderHeights.map(\.full), faderHeights.map(\.full).sorted { !$0 && $1 }, "矮的用紧凑、高的用整条，中间只换一次")
     }
 
     /// 收进齿轮的三行在菜单里还能改：跟随视频、总线送出（发 setInputSettings），声像打开输入设置。

@@ -11,6 +11,8 @@
 // W5-L（98）：远程控制页 = RemoteControlSection（API / 兼容层"仅本机 / 允许局域网" + 可访问地址）、Tally / 性能与电源 / 提醒三节各自即时生效、只写自己的键（AppController.updateSettings(_:saving:)），G7 合并时挂进 96 的对应页。
 // W5-O（112）：常规 / 音频设备 / 远程控制 / 高级 页的提交也只写这次真变了的键（AppController.commitSettings → AppSettings.save(to:changedFrom:)）——
 // 原来整份写回，带 --no-api 之类启动参数起、改一项设置，就把启动参数存成了本机设置（问题单 W4C2-w5-app-settings-gaps 第 2 条）。
+// W6-A（docs/spec/大屏与时间线方案.md §2.4、§2.1 规则 9）：节目格式页的分辨率预设加竖屏 1080×1920 / 720×1280 / 2160×3840 与"横 ⇄ 竖"（宽高互换，
+// 换完超出自定义范围的不让换）；常规页加"显示 › 时钟：自动 / 一直显示 / 不显示"（存本机，即时生效，MainLayoutPreferences）。
 import AppKit
 import Combine   // bindAudioOutput：订阅 W5-K 音频设备模型的改动（G7 合并时加）
 import SwiftUI
@@ -36,8 +38,8 @@ final class PreferencesModel: ObservableObject {
     static let systemLanguage = "system"
     static let formatPresets: [ProgramFormat] = [.hd1080p60, .hd1080p5994, .hd1080p30, .hd720p60, .uhd2160p30]
     static let frameRates: [FrameRate] = [.fps24, .fps25, .fps2997, .fps30, .fps50, .fps5994, .fps60]
-    /// 分辨率预设（W5-J 加 2560×1440；不在这里的是"自定义"，F5）。
-    static let resolutions: [(Int, Int)] = [(1920, 1080), (1280, 720), (2560, 1440), (3840, 2160)]
+    /// 分辨率预设（W5-J 加 2560×1440；W6-A 加竖屏三个；不在这里的是"自定义"，F5）。
+    static let resolutions: [(Int, Int)] = [(1920, 1080), (1280, 720), (2560, 1440), (3840, 2160), (1080, 1920), (720, 1280), (2160, 3840)]
     /// 自定义分辨率的范围（偶数，编码器要求）。
     static let customWidthRange = 320...7680
     static let customHeightRange = 240...4320
@@ -78,6 +80,10 @@ final class PreferencesModel: ObservableObject {
     /// 外部输出在主屏上不盖住主界面（ExternalDisplayManager.mainScreenLayering，即时生效）。
     @Published var externalBehindInterface: Bool { didSet { commit() } }
     @Published var language: String { didSet { commitLanguage() } }
+    /// 时钟：自动 / 一直显示 / 不显示（W6-A，本机偏好、即时生效；不经这里的 commit）。
+    @Published var clockDisplay: ClockDisplay {
+        didSet { if !loading, clockDisplay != oldValue { controller.windowController.setClockDisplay(clockDisplay) } }
+    }
     /// 底栏停录制 / 停推流前先确认（W5-B，默认开）。
     @Published var confirmBeforeStop: Bool { didSet { commit() } }
     /// 录制目录剩余空间下限（MB）：低于就停那一路（或切到备用目录）。即时生效，跑着的引擎从下一次开录起用（在录的路照旧）。
@@ -150,6 +156,7 @@ final class PreferencesModel: ObservableObject {
         let languages = controller.defaults.stringArray(forKey: "AppleLanguages")
         language = languages?.first.flatMap { code in L10n.supportedLanguages.contains(code) ? code : nil } ?? Self.systemLanguage
         languageChoices = [LanguageChoice(id: Self.systemLanguage, title: L("prefs.language.system"))] + L10n.supportedLanguages.map { LanguageChoice(id: $0, title: L("prefs.language.\($0)")) }
+        clockDisplay = controller.layoutPreferences.clockDisplay
         loading = false
         bindAudioOutput()
         refreshPending()
@@ -217,6 +224,20 @@ final class PreferencesModel: ObservableObject {
         formatWidth = f.width
         formatHeight = f.height
         frameRate = f.frameRate
+    }
+
+    /// "横 ⇄ 竖"：宽高互换（W6-A）。换完是预设、或还在自定义范围里才让换（7680×4320 换成 4320×7680 高超出 240–4320，不让换）。
+    var canSwapOrientation: Bool {
+        let (w, h) = (formatHeight, formatWidth)
+        if Self.resolutions.contains(where: { $0 == (w, h) }) { return true }
+        return Self.customWidthRange.contains(w) && Self.customHeightRange.contains(h)
+    }
+
+    func swapOrientation() {
+        guard canSwapOrientation, formatWidth != formatHeight else { return }
+        let (w, h) = (formatHeight, formatWidth)
+        formatWidth = w
+        formatHeight = h
     }
 
     /// 自定义宽 × 高（钳到范围、取偶数）。
@@ -515,9 +536,15 @@ struct ShowFormatPage: View {
                         let parts = v.split(separator: "x").compactMap { Int($0) }
                         if parts.count == 2 { model.formatWidth = parts[0]; model.formatHeight = parts[1] }
                     })) {
-                        ForEach(PreferencesModel.resolutions, id: \.0) { r in Text(verbatim: PreferencesModel.resolutionTitle(width: r.0, height: r.1)).tag("\(r.0)x\(r.1)") }
+                        ForEach(PreferencesModel.resolutions.map { "\($0.0)x\($0.1)" }, id: \.self) { tag in
+                            let parts = tag.split(separator: "x").compactMap { Int($0) }
+                            Text(verbatim: PreferencesModel.resolutionTitle(width: parts[0], height: parts[1])).tag(tag)
+                        }
                         Text(L("settings.format.custom")).tag("custom")
                     }
+                    Button(L("settings.format.swap")) { model.swapOrientation() }
+                        .disabled(!model.canSwapOrientation)
+                        .help(L("settings.format.swapTip"))
                     RestartTag()
                 }
                 if model.isCustomResolution {
@@ -590,6 +617,12 @@ struct GeneralPage: View {
             Section(L("prefs.external.title")) {
                 Toggle(L("prefs.external.behindInterface"), isOn: $model.externalBehindInterface)
                 Text(L("prefs.external.hint")).font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L("prefs.display.title")) {
+                Picker(L("prefs.display.clock"), selection: $model.clockDisplay) {
+                    ForEach(ClockDisplay.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Text(L("prefs.display.clockHint")).font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

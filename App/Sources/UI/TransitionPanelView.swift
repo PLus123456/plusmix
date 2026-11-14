@@ -13,6 +13,9 @@
 // 排版沿用 W5-A（prompt 86，03-目视检查.md §1.3）：每行宽 = 列宽 − 16、左对齐，所有可见边落在 8…列宽 − 8；两档控件（主操作 regular 24 pt / 13 pt 字，
 // 次要控件 small 20 pt / 11 pt 字）；组内 4、组间 8、组标题到控件 2。T-bar 横放后不再吃剩下的高度：多出来的高度给 T-bar 与时钟之间的空白。
 // Overlay 开关的口径（OverlayToggle）与按钮提示的反查口径（HotkeyMatch）和菜单栏"切换"共用。所有动作只发 Command，显示只读快照。
+// W6-A（docs/spec/大屏与时间线方案.md §2.1 规则 9）：这一列按高度分四档自动收放——全 → 不带时钟 → 紧凑（再收"当前槽"和"时长"两行，每个槽的 ▾ 里都有）
+// → 最小（再收 T-bar，只留 Cut、转场 1–4、FTB、叠加）。哪一档由主窗口按排布算（MainLayoutModel），各档的高用 fittingSize 量（fittingHeight(of:)，
+// 先量好存着：T-bar 下面那行提示出没时重量、告诉主窗口重排），不写死。收起时钟时时间改在状态行右端（StatusBarView.setClockShown）。
 import AppKit
 import SwiftUI
 import SwitcherContracts
@@ -58,6 +61,27 @@ final class TransitionPanelView: NSView {
     let clock = ClockView(frame: .zero)
     /// T-bar 与时钟之间的空白（列里多出来的高度都给它）。
     private let spacer = NSView()
+    /// 整列的竖排（换档时改"叠加那一行之后"的组间距）与叠加那一行。
+    private var stack: NSStackView!
+    private var overlayRow: NSStackView!
+
+    /// 中间那一列的四档（规则 9）：全 → 不带时钟 → 紧凑 → 最小。
+    enum ColumnTier: Int, CaseIterable, Comparable {
+        case full, noClock, compact, minimal
+        static func < (a: ColumnTier, b: ColumnTier) -> Bool { a.rawValue < b.rawValue }
+    }
+    /// 现在这一档。
+    private(set) var tier: ColumnTier = .full
+    /// 时钟在列里（全档）。
+    var isClockShown: Bool { tier == .full }
+    /// 各档的高（fittingSize 量的，下标 = 档）：T-bar 下面那行提示出没 / 换字时重量。
+    private var tierHeights: [CGFloat] = []
+    /// 各档的高变了（提示出没）：主窗口重排。
+    var onTierHeightsChange: (() -> Void)?
+    /// 现在这一档变了（时钟出没）：主窗口把时间挪到状态行 / 挪回来。
+    var onTierChange: ((ColumnTier) -> Void)?
+    /// T-bar 下面那行提示该不该出来（当前槽是没选输入的 Stinger；最小档没有 T-bar，提示也不出）。
+    private var hintWanted = false
 
     /// 预设时长（秒）：转场槽、时长分段、FTB 共用。
     static let durationPresets: [Double] = [0.5, 1, 2]
@@ -133,6 +157,7 @@ final class TransitionPanelView: NSView {
         spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .vertical)
 
         let overlayRow = NSStackView(views: overlayButtons)
+        self.overlayRow = overlayRow
         overlayRow.orientation = .horizontal
         overlayRow.spacing = 4
         overlayRow.distribution = .fillEqually
@@ -143,6 +168,7 @@ final class TransitionPanelView: NSView {
         tbarHint.maximumNumberOfLines = 2
         tbarHint.cell?.wraps = true
         let stack = NSStackView(views: [cutButton] + slotButtons + [ftbSplit, overlayHeader, overlayRow, tbarHeader, tbarSlotButton, durationControl, tbar, tbarHint, spacer, clock])
+        self.stack = stack
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.distribution = .fill
@@ -175,6 +201,7 @@ final class TransitionPanelView: NSView {
         ])
         apply(state: state)
         shownCurrent = nil   // 第一份真快照不算"换了当前槽"
+        tierHeights = measureTierHeights()
     }
 
     @available(*, unavailable)
@@ -205,6 +232,50 @@ final class TransitionPanelView: NSView {
         params.apply(state: state)
     }
 
+    // MARK: 四档（W6-A，规则 9）
+
+    /// 换到这一档（主窗口按排布算好的）：收起 / 放回时钟、"当前槽"和"时长"两行、T-bar 组。
+    func setTier(_ newTier: ColumnTier) {
+        guard newTier != tier else { return }
+        tier = newTier
+        applyTierFlags(newTier)
+        onTierChange?(newTier)
+    }
+
+    /// 这一档摆出来多高（fittingSize 量的）。
+    func fittingHeight(of t: ColumnTier) -> CGFloat {
+        if tierHeights.isEmpty { tierHeights = measureTierHeights() }
+        return tierHeights[t.rawValue]
+    }
+
+    /// 按档藏 / 放各行。组间距跟着：最小档没有 T-bar 组，叠加那一行后面不再留组间的 8。
+    private func applyTierFlags(_ t: ColumnTier) {
+        let clockHidden = t != .full
+        if clock.isHidden != clockHidden { clock.isHidden = clockHidden }
+        let rowsHidden = t >= .compact
+        if tbarSlotButton.isHidden != rowsHidden { tbarSlotButton.isHidden = rowsHidden }
+        if durationControl.isHidden != rowsHidden { durationControl.isHidden = rowsHidden }
+        let tbarHidden = t == .minimal
+        if tbarHeader.isHidden != tbarHidden { tbarHeader.isHidden = tbarHidden }
+        if tbar.isHidden != tbarHidden { tbar.isHidden = tbarHidden }
+        let hintShown = hintWanted && !tbarHidden
+        if tbarHint.isHidden == hintShown { tbarHint.isHidden = !hintShown }
+        stack.setCustomSpacing(tbarHidden ? 0 : 8, after: overlayRow)
+    }
+
+    /// 四档各摆一次量 fittingSize，再摆回现在这一档（只在初始化和提示出没时量，不在主窗口排布的那一趟里量）。
+    private func measureTierHeights() -> [CGFloat] {
+        let current = tier
+        var out: [CGFloat] = []
+        for t in ColumnTier.allCases {
+            applyTierFlags(t)
+            updateConstraintsForSubtreeIfNeeded()
+            out.append(fittingSize.height)
+        }
+        applyTierFlags(current)
+        return out
+    }
+
     // MARK: 转场 1–4
 
     /// 槽 n 现在的配置（槽号不对为 nil）。
@@ -221,8 +292,17 @@ final class TransitionPanelView: NSView {
         let unset = !t.isActive && t.currentGroup.isStingerWithoutInput
         if tbar.isEnabled == unset { tbar.isEnabled = !unset }
         let hint = unset ? (t.currentSlot.map { L("tbar.stingerUnsetHint", $0) } ?? L("tbar.stingerUnsetHintNoSlot")) : ""
-        if tbarHint.stringValue != hint { tbarHint.stringValue = hint }
-        if tbarHint.isHidden == unset { tbarHint.isHidden = !unset }
+        let textChanged = tbarHint.stringValue != hint
+        if textChanged { tbarHint.stringValue = hint }
+        let wantedChanged = hintWanted != unset
+        hintWanted = unset
+        let shown = unset && tier != .minimal
+        if tbarHint.isHidden == shown { tbarHint.isHidden = !shown }
+        // 提示占高度：出没（或出着时换了字）各档的高都变了，重量、让主窗口重排（W6-A）
+        if !tierHeights.isEmpty, wantedChanged || (unset && textChanged) {
+            tierHeights = measureTierHeights()
+            onTierHeightsChange?()
+        }
         let tip: String? = unset ? (t.currentSlot.map { L("tbar.stingerUnsetTip", $0) } ?? L("tbar.stingerUnsetTipNoSlot")) : nil
         if tbar.toolTip != tip { tbar.toolTip = tip }
     }

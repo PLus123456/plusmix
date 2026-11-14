@@ -40,9 +40,32 @@ extension AppTest {
         controller.windowController.window?.contentView?.layoutSubtreeIfNeeded()
     }
 
+    /// 主窗口改成正好这么大（W6-A：方案表里有 2560×1440，比这台机器屏幕的可见区高，放开 constrainFrameRect 的限制）；
+    /// 屏幕放得下就摆在可见区正中，放不下就从屏幕左上角摆。用完 restoreWindowSizeLimit()。
+    @discardableResult
+    static func setExactWindowSize(_ size: NSSize) -> NSRect {
+        guard let window = controller.windowController.window as? MainWindow else { return .zero }
+        window.allowsFrameBeyondVisibleArea = true
+        let screen = window.screen ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 2560, height: 1440)
+        let full = screen?.frame ?? visible
+        var origin = NSPoint(x: (visible.midX - size.width / 2).rounded(), y: (visible.midY - size.height / 2).rounded())
+        if size.height > visible.height || size.width > visible.width { origin = NSPoint(x: full.minX, y: full.maxY - size.height) }
+        window.setFrame(NSRect(origin: origin, size: size), display: true)
+        window.contentView?.layoutSubtreeIfNeeded()
+        pump(seconds: 0.2)
+        window.contentView?.layoutSubtreeIfNeeded()
+        return window.frame
+    }
+
+    static func restoreWindowSizeLimit() {
+        (controller.windowController.window as? MainWindow)?.allowsFrameBeyondVisibleArea = false
+    }
+
     /// 快速改主窗口大小（连续缩放的扫描用：不泵 0.2 s，只让布局跟上）。
     static func resizeMainWindowQuickly(_ size: NSSize) {
         guard let window = controller.windowController.window else { return }
+        (window as? MainWindow)?.allowsFrameBeyondVisibleArea = true
         var frame = window.frame
         frame.origin.y += frame.height - size.height
         frame.size = size
