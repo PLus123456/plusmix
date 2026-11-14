@@ -78,16 +78,14 @@ enum LayoutShotTour {
             session.send(.addInput(config: InputConfig(number: i + 1, name: name, source: .image(path: url.path))))
         }
         for _ in 0..<100 where session.state.inputs.count < names.count { await sleep(0.05) }
-        session.send(.setProgram(input: 1))
-        session.send(.setPreview(input: 2))
-        var rows = ["文件\t窗口\t画布\t调音台\t排布\t摆法\t中间那一列\t画面\t上半区\t下边一行\t监看下面空\t说明"]   // l10n-exempt：清单表头
+        setTally(session)
+        var rows = ["文件\t窗口\t画布\t调音台\t排布\t摆法\t中间那一列\t画面\t上半区\t下边一行\t监看下面空"]   // l10n-exempt：清单表头
         for shot in plan {
             let format = ProgramFormat(width: shot.canvas.w, height: shot.canvas.h, frameRate: .fps30)
             if controller.session?.format != format {
                 await controller.changeProgramFormat(format)
                 for _ in 0..<200 where controller.session?.isRunning != true { await sleep(0.05) }
-                controller.session?.send(.setProgram(input: 1))
-                controller.session?.send(.setPreview(input: 2))
+                if let s = controller.session { setTally(s) }
                 await sleep(1.0)
             }
             wc.setArrangement(shot.arrangement)
@@ -103,6 +101,12 @@ enum LayoutShotTour {
         wc.setArrangement(.adaptive)
         try? (rows.joined(separator: "\n") + "\n").write(to: output.appendingPathComponent("shots.tsv"), atomically: true, encoding: .utf8)
         try? FileManager.default.removeItem(at: images)
+    }
+
+    /// PGM 1、PVW 2（已经是了就不发：重复的命令状态行会提示"命令被忽略"，截进图里）。
+    private static func setTally(_ session: SwitcherSession) {
+        if session.state.program != 1 { session.send(.setProgram(input: 1)) }
+        if session.state.preview != 2 { session.send(.setPreview(input: 2)) }
     }
 
     /// 窗口摆成正好这么大：屏幕放得下就靠可见区左上，放不下（2560×1440 的窗口在 2560×1440 的屏上）就从屏幕左上角摆。
@@ -137,11 +141,11 @@ enum LayoutShotTour {
         let picture = wc.previewMonitor.display.frame.size
         let pictureText = "\(Int(picture.width))×\(Int(picture.height.rounded()))"
         guard shot.arrangement == .adaptive, let r = wc.arrangementResult else {
-            return [shot.fileName, window, canvas, mixer, "旧排布", "调音台在右侧通高", tier, pictureText, "—", "—", "—", ""].joined(separator: "\t")   // l10n-exempt：清单
+            return [shot.fileName, window, canvas, mixer, "旧排布", "调音台在右侧通高", tier, pictureText, "—", "—", "—"].joined(separator: "\t")   // l10n-exempt：清单
         }
         let mode = r.mode == .stacked ? "叠放" : (r.mode == .portrait ? "竖屏" : "并排")   // l10n-exempt：清单
         let fmt = { (v: CGFloat) in String(Int(v.rounded())) }
-        return [shot.fileName, window, canvas, mixer, "新排布", mode, tier, pictureText, fmt(r.topHeight), fmt(r.bottomHeight), fmt(r.slack), shot.note].joined(separator: "\t")   // l10n-exempt：清单
+        return [shot.fileName, window, canvas, mixer, "新排布", mode, tier, pictureText, fmt(r.topHeight), fmt(r.bottomHeight), fmt(r.slack)].joined(separator: "\t")   // l10n-exempt：清单
     }
 
     /// 一张 1280×720 的图：彩色底、正中写名字（截图里看得出哪一路在哪）。

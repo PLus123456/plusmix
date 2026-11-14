@@ -51,6 +51,17 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     let mixerToggle: NSButton
     let addPlaceholder = AddInputPlaceholderView()
     private let scrollView = NSScrollView()
+    /// 头一行的"输入"二字（窄的时候收起，W6-A）。
+    private let titleLabel = Theme.label(L("strip.title"), size: 12, weight: .semibold, color: Theme.dimText)
+    /// 头一行的三种排法（W6-A：竖屏右边一栏最窄 346，"输入 + 分类标签 + 搜索框 + 调音台开关"放不下）：
+    /// 全 = 都在、搜索框最窄 120；紧 = 收起"输入"二字、搜索框最窄 90；最紧 = 再收起分类标签（有筛选时不收，免得筛着看不见）。
+    enum HeaderMode { case full, tight, tightest }
+    private(set) var headerMode: HeaderMode = .full
+    private var categoryAfterTitle: NSLayoutConstraint!
+    private var categoryAtEdge: NSLayoutConstraint!
+    private var searchAfterCategory: NSLayoutConstraint!
+    private var searchAtEdge: NSLayoutConstraint!
+    private var searchMinimumWidth: NSLayoutConstraint!
     /// 格子（W6-A 起不是 NSStackView：新排布要折行）。
     private let grid = InputGridView(inset: InputStripView.stackInset, spacing: InputStripView.itemSpacing)
     private(set) var cells: [Int: InputCellView] = [:]
@@ -146,7 +157,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         searchField.sendsWholeSearchString = false
         searchField.delegate = self
         searchField.toolTip = L("strip.searchTip")
-        let title = Theme.label(L("strip.title"), size: 12, weight: .semibold, color: Theme.dimText)
+        let title = titleLabel
         mixerToggle.controlSize = .small
         mixerToggle.font = NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))
         mixerToggle.refusesFirstResponder = true
@@ -174,15 +185,20 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         addSubview(scrollView)
         let searchWidth = searchField.widthAnchor.constraint(equalToConstant: 220)
         searchWidth.priority = .defaultLow   // 窄窗口 + 分类起了长名字时先让搜索框变窄
+        categoryAfterTitle = categoryBar.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10)
+        categoryAtEdge = categoryBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
+        searchAfterCategory = searchField.leadingAnchor.constraint(equalTo: categoryBar.trailingAnchor, constant: 10)
+        searchAtEdge = searchField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
+        searchMinimumWidth = searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.searchMinimumWidth)
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             title.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            categoryBar.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10),
+            categoryAfterTitle,
             categoryBar.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
             searchField.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            searchField.leadingAnchor.constraint(equalTo: categoryBar.trailingAnchor, constant: 10),
+            searchAfterCategory,
             searchWidth,
-            searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+            searchMinimumWidth,
             mixerToggle.leadingAnchor.constraint(greaterThanOrEqualTo: searchField.trailingAnchor, constant: 10),
             mixerToggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             mixerToggle.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
@@ -463,9 +479,31 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     // MARK: 折行（W6-A）
 
     override func layout() {
+        applyHeaderMode(for: bounds.width)
         grid.viewportWidth = bounds.width   // 滚动视图与输入条同宽（竖向滚动条是浮在上面的）
         grid.relayout()
         super.layout()
+    }
+
+    /// 搜索框最窄多宽：全 120（W5-H）；紧 / 最紧 90（W6-A：竖屏右边一栏 346 宽）。
+    static let searchMinimumWidth: CGFloat = 120
+    static let tightSearchMinimumWidth: CGFloat = 90
+
+    /// 按输入条的宽挑头一行的排法：放得下就全排，放不下先收"输入"二字、搜索框让到 90，还放不下再收分类标签（正筛着一类时不收）。
+    private func applyHeaderMode(for width: CGFloat) {
+        guard width > 0 else { return }
+        let categories = categoryBar.fittingSize.width
+        let toggle = mixerToggle.intrinsicContentSize.width
+        let full = 10 + titleLabel.intrinsicContentSize.width + 10 + categories + 10 + Self.searchMinimumWidth + 10 + toggle + 8
+        let tight = 10 + categories + 10 + Self.tightSearchMinimumWidth + 10 + toggle + 8
+        let mode: HeaderMode = width >= full ? .full : (width >= tight || selectedCategory != nil ? .tight : .tightest)
+        guard mode != headerMode else { return }
+        headerMode = mode
+        titleLabel.isHidden = mode != .full
+        categoryBar.isHidden = mode == .tightest
+        NSLayoutConstraint.deactivate([categoryAfterTitle, categoryAtEdge, searchAfterCategory, searchAtEdge])
+        NSLayoutConstraint.activate([mode == .full ? categoryAfterTitle : categoryAtEdge, mode == .tightest ? searchAtEdge : searchAfterCategory])
+        searchMinimumWidth.constant = mode == .full ? Self.searchMinimumWidth : Self.tightSearchMinimumWidth
     }
 
     /// 一行几格（新排布折行时；旧排布 = 可见格数）。

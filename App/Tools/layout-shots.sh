@@ -29,6 +29,13 @@ echo "截图 → $abs_out"
 # macOS 没有 timeout：perl alarm 兜底（G7 的做法），十分钟没截完就停
 XCTestConfigurationFilePath=/dev/null SWITCHER_LAYOUT_SHOTS="$abs_out" \
   perl -e 'alarm shift; exec @ARGV' 600 "$work/PlusMix.app/Contents/MacOS/PlusMix" -ApplePersistenceIgnoreState YES || true
+# 缩成 1 倍：图的像素宽 = 文件名里的窗口宽（Retina / 缩放模式下 screencapture 出的是 2 倍，28 张 15 MB，入库太重）
+for f in "$abs_out"/*.png; do
+  [ -f "$f" ] || continue
+  w="$(basename "$f" | cut -d- -f1 | cut -dx -f1)"
+  case "$w" in ''|*[!0-9]*) continue ;; esac
+  sips --resampleWidth "$w" "$f" >/dev/null 2>&1 || true
+done
 count=$(ls "$abs_out"/*.png 2>/dev/null | wc -l | tr -d ' ')
 echo "截了 $count 张；清单 $abs_out/shots.tsv"
 defaults delete "$bundle_id" >/dev/null 2>&1 || true   # 隔离运行留下的窗口位置等，不留在用户机器上

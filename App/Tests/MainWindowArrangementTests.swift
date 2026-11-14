@@ -210,6 +210,12 @@ final class MainWindowArrangementTests: XCTestCase {
                     XCTAssertEqual(strip.height, root.bounds.height, accuracy: 0.5, "\(label) 收起调音台后输入区占满整栏")
                 }
                 XCTAssertEqual(m.tier, .full, "\(label) 竖屏时监看很高，中间那一列一直是全档、带时钟")
+                // 右边一栏窄（最窄 346）：输入区头一行的搜索框和"调音台"开关都还在输入区里（放不下时先收"输入"二字、搜索框让到 90）
+                let toggle = AppTest.alignmentFrame(wc.inputStrip.mixerToggle, in: wc.inputStrip)
+                let search = AppTest.alignmentFrame(wc.inputStrip.searchField, in: wc.inputStrip)
+                XCTAssertLessThanOrEqual(toggle.maxX, wc.inputStrip.bounds.maxX - 7.5, "\(label) 调音台开关在输入区里：\(toggle) / \(wc.inputStrip.bounds)")
+                XCTAssertGreaterThanOrEqual(search.width, InputStripView.tightSearchMinimumWidth - 0.5, "\(label) 搜索框不窄于 90")
+                XCTAssertLessThanOrEqual(search.maxX, toggle.minX, "\(label) 搜索框不压调音台开关")
                 print("W6表 M3 竖屏 \(size(row.window)) 调音台\(mixer ? "开" : "收") | 方案 \(row.picture) 栏宽 \(row.sideW) \(row.cols) 列 × \(row.rows) 行 调音台 \(row.mixH) 露 \(mixer ? row.visible.on : row.visible.off) | 实测 画面 \(Int(m.picture.width))×\(Int(m.picture.height.rounded())) 栏宽 \(Int(strip.width)) \(m.columns) 列 × \(m.rows) 行 调音台 \(Int(m.mixerHeight)) 露 \(m.visible) | 竖格 \(Int(k.PW))×\(Int(k.PHT))")
             }
         }
