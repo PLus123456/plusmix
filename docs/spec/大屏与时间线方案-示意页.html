@@ -175,6 +175,9 @@ ol.gates > li::before { counter-increment: gate; content: counter(gate); grid-ro
 ol.gates h3, ol.gates p { grid-column: 2; }
 ol.gates p { font-size: 13.5px; }
 ol.gates .see { color: var(--muted); }
+table.steps td:nth-child(3) { white-space: nowrap; color: var(--muted); }
+table.steps tr.gate td { background: var(--accent-soft); }
+table.steps tr.gate td.k { white-space: normal; }
 pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; overflow-x: auto; margin: 0; font-family: var(--mono); font-size: 12px; }
 .sec-head.sub { margin-top: 10px; }
 .sec-head h3 { font-size: 17px; }
@@ -480,23 +483,53 @@ flowchart LR
 <section>
   <div class="sec-head">
     <div class="eyebrow">怎么推进</div>
-    <h2>五个检查点，每个都把外观拿给你看</h2>
-    <p>界面类的工作都拆成两步：先把真界面用假数据搭出来给你看，你说可以了再接上引擎。外观早看早改，改起来也不牵动底下的东西。</p>
+    <h2>21 步，五个检查点，每个检查点都把外观拿给你看</h2>
+    <p>每一步的会话说明都已经写好（编号 144 到 164）。界面类的工作都拆成两步：先把真界面用假数据搭出来给你看，你说可以了再接上引擎。加粗的行是检查点。</p>
   </div>
-  <ol class="gates">
-    <li><h3>主窗口新排布</h3><p>监看贴合、调音台挪到下边、中间那一列自动收放、很宽的墙监看叠放、竖屏排法、节目格式页的横竖预设。只动界面，现在就能开。</p><p class="see">你会看到：真机截图，横屏 4 种窗口 × 调音台开和收，竖屏 3 种窗口，1366×762、2460×1080（你那面 20.5:9 的墙）、5760×1080（叠放）各一组，中间那一列四档各拍到一次；加一个能直接运行的版本。</p></li>
-    <li><h3>大屏的样子</h3><p>监看里的格子、输入格子上的上屏位置、面板切换、屏幕编排窗（屏幕、布局、输出口）、预设条和预设表，用假数据撑起来，还不接引擎。底下的契约、渲染、状态机同时并行做。</p><p class="see">你会看到：拿你那面 20.5:9 的墙做例子的截图，加一个能点的骨架。只定外观，不合入。</p></li>
-    <li><h3>大屏能出画</h3><p>外观定稿后接上引擎和输出口。合入、跑全量。</p><p class="see">你会看到：接一块真屏或 NDI 回看，实际操作一遍。视频切到 PPT，耳屏不动；切到主视觉，整面墙换；再切回来。还有调预设、直出、对位图。</p></li>
-    <li><h3>时间线面板的样子</h3><p>时间线面板（时间轴、列表、分段）和幻灯片列表的格子与设置页，用假数据。走带和幻灯片输入同时并行做。</p><p class="see">你会看到：时间线面板与幻灯片列表的截图，加骨架。</p></li>
-    <li><h3>整场走一遍</h3><p>时间线接线、录下操作、按幻灯片生成提示点、手册。合入、全量、放行。</p><p class="see">你会看到：用一份 20–30 页分好段的 PPT 加这面墙，从开场走到结束。</p></li>
-  </ol>
+  <div class="sec-head sub"><h3>第一阶段：主窗口新排布</h3><p class="muted">只动界面。真机截图在评审页。</p></div>
+  <div class="tablewrap"><table class="steps"><thead><tr><th>#</th><th>做什么</th><th>谁做</th><th>现在 / 你会看到什么</th></tr></thead><tbody>
+<tr><td class="q">144</td><td>主窗口新排布</td><td>Opus 5.5</td><td><span class="ans ok">做完了</span> 两处按你裁定的小改动在收尾</td></tr>
+<tr class="gate"><td class="q">145</td><td class="k">检查点 1：合进 main，推到 GitHub</td><td>Fable 5.2</td><td><span class="ans wait">正在做</span> 外观你已经说可以。小改动一到就开：合并、跑全量、给你一张几分钟的清单，然后推上去</td></tr>
+  </tbody></table></div>
+  <div class="sec-head sub"><h3>第二阶段：大屏</h3><p class="muted">画布按现场的屏分成几格，按输入切，布局跟着走。</p></div>
+  <div class="tablewrap"><table class="steps"><thead><tr><th>#</th><th>做什么</th><th>谁做</th><th>现在 / 你会看到什么</th></tr></thead><tbody>
+<tr><td class="q">146</td><td>契约提案：大屏的类型和命令怎么定</td><td>Fable 5.2</td><td><span class="ans wait">等你</span> 写完停下来，末尾有一张"等你定"的表</td></tr>
+<tr><td class="q">147</td><td>契约落地</td><td>Opus 5.5</td><td>你批了提案才开</td></tr>
+<tr><td class="q">148</td><td>分区合成：画面按格子画，转场只在变了的格子里做</td><td>Opus 5.5</td><td>148–151 四路并行</td></tr>
+<tr><td class="q">149</td><td>切换规则：按输入切，布局跟着走，画面预设</td><td>Opus 5.5</td><td></td></tr>
+<tr><td class="q">150</td><td>测试工装：让机器能判"几格是不是同一拍换的""没变的格子动没动"</td><td>Opus 5.5</td><td></td></tr>
+<tr><td class="q">151</td><td>大屏的外观：两个面板、屏幕编排窗、预设条，用假数据搭</td><td>Opus 5.5</td><td></td></tr>
+<tr class="gate"><td class="q">152</td><td class="k">检查点 2：大屏的样子给你看</td><td>Fable 5.2</td><td>你会看到：两个面板和屏幕编排窗的真机截图，拿你那面 20.5:9 的墙做例子，加一个能点的版本。只定外观，不进 main</td></tr>
+<tr><td class="q">153</td><td>输出口出画：把信号送给 LED 处理器</td><td>Opus 5.5</td><td>不等外观，可以早开。需要你接一次采集卡或处理器回采</td></tr>
+<tr><td class="q">154</td><td>大屏接线：把定稿的外观接上引擎</td><td>Opus 5.5</td><td>你认可外观后开</td></tr>
+<tr class="gate"><td class="q">155</td><td class="k">检查点 3：大屏能出画，合进 main</td><td>Fable 5.2</td><td>你会看到：接一块真屏或 NDI 回看，实际操作一遍。视频切到 PPT，耳屏不动；切到主视觉，整面墙换；再切回来</td></tr>
+  </tbody></table></div>
+  <div class="sec-head sub"><h3>第三阶段：时间线</h3><p class="muted">幻灯片列表、提示点、GO。</p></div>
+  <div class="tablewrap"><table class="steps"><thead><tr><th>#</th><th>做什么</th><th>谁做</th><th>现在 / 你会看到什么</th></tr></thead><tbody>
+<tr><td class="q">156</td><td>契约提案：时间线、键位、幻灯片列表</td><td>Fable 5.2</td><td><span class="ans wait">等你</span> 可以和上一阶段同时写；写完停下来</td></tr>
+<tr><td class="q">157</td><td>契约落地</td><td>Opus 5.5</td><td>你批了提案才开</td></tr>
+<tr><td class="q">158</td><td>时间线走带：提示点在引擎里逐拍走，GO 就是切换</td><td>Opus 5.5</td><td>158–160 三路并行</td></tr>
+<tr><td class="q">159</td><td>幻灯片列表输入：一路里装一串页，一组图片或一份 PDF</td><td>Opus 5.5</td><td></td></tr>
+<tr><td class="q">160</td><td>时间线面板的外观：时间轴、列表、分段，用假数据搭</td><td>Opus 5.5</td><td></td></tr>
+<tr class="gate"><td class="q">161</td><td class="k">检查点 4：时间线面板的样子给你看</td><td>Fable 5.2</td><td>你会看到：时间线面板和幻灯片列表的真机截图，加一个能点的版本。只定外观，不进 main</td></tr>
+<tr><td class="q">162</td><td>时间线面板接线：GO、编辑、录下操作、按幻灯片生成提示点</td><td>Opus 5.5</td><td>你认可外观后开</td></tr>
+<tr><td class="q">163</td><td>手册：新排布、大屏、幻灯片列表、时间线，中英</td><td>Opus 5.5</td><td></td></tr>
+<tr class="gate"><td class="q">164</td><td class="k">检查点 5：整场走一遍，放行</td><td>Fable 5.2</td><td>你会看到：用一份 20–30 页分好段的 PPT 加这面墙，从开场走到结束。然后你定版本号</td></tr>
+  </tbody></table></div>
+  <div class="sec-head sub"><h3>要你出面的地方</h3><p class="muted">别的时候不用盯，做完一步我会告诉你。</p></div>
+  <ul class="plain">
+    <li><b>批两次契约提案：</b>146 之后（大屏）、156 之后（时间线）。每份末尾有一张"等你定"的表，每条带建议。</li>
+    <li><b>看三次外观：</b>检查点 1（已经看过）、检查点 2（大屏）、检查点 4（时间线）。</li>
+    <li><b>接一次硬件：</b>检查点 3，接真屏或 NDI 回看走一遍。手边有采集卡或 LED 处理器的话顺手回采一次，确认信号是逐像素送出去的。</li>
+    <li><b>整场走一遍：</b>检查点 5，用你自己的 PPT 和墙。然后定版本号。</li>
+  </ul>
   <div class="sec-head sub">
     <h3>谁来做：定方向的给 Fable 5.2，照着做的给 Opus 5.5</h3>
-    <p>第六波一共 21 个会话。Fable 5.2 只做 8 个要拿主意的，其余 13 个实现会话都交给 Opus 5.5。</p>
+    <p>加上写这些说明的设计会话，一共 22 个会话。Fable 5.2 只做 8 个要拿主意的，其余 14 个实现会话都交给 Opus 5.5。</p>
   </div>
   <div class="twocol">
     <div class="opt"><h3>Fable 5.2<small>8 个</small></h3><p>写每个会话的说明。起草契约提案，写完等你批。五个检查点：合并、看全量结果、把外观做成评审页给你看、记你的意见，合入前审渲染和切换规则这两路的改动。你提了新想法之后改方案。</p></div>
-    <div class="opt rec"><h3>Opus 5.5<small>13 个</small></h3><p>主窗口新排布、契约落地、分区合成、切换规则、大屏的外观和接线、输出口出画、时间线走带、幻灯片列表输入、时间线面板的外观和接线、手册。检查点里跑全量、拍截图这些体力活也派给它。</p></div>
+    <div class="opt rec"><h3>Opus 5.5<small>14 个</small></h3><p>主窗口新排布、契约落地、分区合成、切换规则、测试工装、大屏的外观和接线、输出口出画、时间线走带、幻灯片列表输入、时间线面板的外观和接线、手册。检查点里跑全量、拍截图这些体力活也派给它。</p></div>
   </div>
   <ul class="plain">
     <li><b>为什么敢交给 Opus：</b>10 月 18 日那七路止血就是 Opus 5.5 开 max 档并发做的。七路都先写红测试再做绿，合进来 0 冲突，里面有契约落地、音频热路径的 C 代码和 46 个文件的界面修改。拿不准的 22 条它们没有自己定，全写进了报告。</li>
@@ -508,7 +541,7 @@ flowchart LR
     <li>截图都是把软件真跑起来拍的，不拿示意图代替。每张图下面写清这是什么、对应方案哪一条、哪里还没做。</li>
     <li>你的意见逐条记下来。小的当场改完重拍，大的另开一个会话改。你说可以之后才合入，依赖这块外观的下一步才开。</li>
     <li>要先写探针验证的三处不变：外接口能不能逐像素送出、多个输出口之间差不差帧、大画布在入门机型上的耗时。前两处要采集卡或 LED 处理器回采，放在检查点 3 之前。</li>
-    <li>没有哪一块是引擎做不到的。量和上次界面改版差不多，21 个会话，其中 5 个是检查点。先不做的：SDI 输出卡、多机联动、融合与几何校正、逐点校色、自由时间线上的关键帧、时间码、DMX。</li>
+    <li>没有哪一块是引擎做不到的。量和上次界面改版差不多。先不做的：SDI 输出卡、多机联动、融合与几何校正、逐点校色、自由时间线上的关键帧、时间码、DMX。</li>
   </ul>
 </section>
 
