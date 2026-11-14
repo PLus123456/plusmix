@@ -69,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let url = settings.statsURL {
                 do { try controller.session?.startStatsLog(url: url) } catch { NSLog("stats.jsonl 打不开：\(error)") }
             }
+            LayoutShotTour.runIfRequested(controller: controller)   // W6-A：隔离运行截图（只认测试宿主模式 + SWITCHER_LAYOUT_SHOTS）
         }
     }
 

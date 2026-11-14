@@ -501,9 +501,9 @@ final class InputStripTests: XCTestCase {
         defer { AppTest.setMainWindowSize(NSSize(width: 1440, height: 900)); wc.setThumbnailSize(.medium); wc.setArrangement(.adaptive) }
         try AppTest.addSynthetics(session, count: 2)
         AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
-        let before = strip.frame.height
-        AppTest.drag(wc.layoutView.topDivider, by: NSPoint(x: 0, y: 300 - before))
-        XCTAssertEqual(strip.frame.height, 300, accuracy: 1, "新排布：拖到 300 高")
+        let before = strip.frame.height   // 新排布 1440×900 配 16:9：下边一行按规则 397
+        AppTest.drag(wc.layoutView.topDivider, by: NSPoint(x: 0, y: 100))
+        XCTAssertEqual(strip.frame.height, before + 100, accuracy: 1, "新排布：往上拖 100，输入条拖高到 \(before + 100)")
         AppTest.setMainWindowSize(AppTest.minimumMainWindowSize)
         print("新排布 拖高后缩到最小窗口：输入条 \(strip.frame.height)（最小 \(strip.minimumHeight)），上半区 \(wc.transitionPanel.frame.height)（\(wc.transitionPanel.tier.title)）")
         XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingSize.height - 0.5, "新排布：上半区放得下转场列（当前这一档）")

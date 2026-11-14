@@ -798,6 +798,7 @@ struct MixerBusStrip: View {
         Menu {
             Button(L("mixer.audioSettingsOf", L("bus.\(bus.name)"))) { model.openAudioSettings(.bus(bus)) }
             Button(model.busEffectsButtonTitle(bus)) { model.openAudioSettings(.bus(bus), page: .eq) }
+                .accessibilityLabel(L("mixer.busEffectsTitle", L("bus.\(bus.name)")))
             if bus == .master {
                 Divider()
                 Picker(L("mixer.listen"), selection: listenBinding) {

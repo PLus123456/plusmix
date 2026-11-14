@@ -225,7 +225,8 @@ final class PlaybackStatusTests: XCTestCase {
     /// 三档格子宽（160 / 200 / 256）里第一行六颗都放得下：转场 / Cut 的字不被截（按钮宽 ≥ 字宽 + 6）、⏮ ▶ 🔁 各 20 pt、最后一颗不出格子。
     func testUI_fileCellButtonsFitSmallestCell() throws {
         let cell = InputCellView(config: InputConfig(number: 1, name: "pattern", source: .file(path: "/tmp/w5n.mov", endAction: .loop, rate: 1)))
-        for size in ThumbnailSize.allCases {
+        // W6-A 改口径：ThumbnailSize 多了第四档"紧凑"（宽 72 的竖小格，按钮不常显、都在右键菜单里），只量带两行按钮的三档
+        for size in ThumbnailSize.allCases where size != .compact {
             let thumb = (size.width * 9 / 16).rounded()
             cell.setSize(width: size.width, thumbnailHeight: thumb)
             cell.frame = NSRect(x: 0, y: 0, width: size.width, height: InputCellView.height(thumbnailHeight: thumb))
