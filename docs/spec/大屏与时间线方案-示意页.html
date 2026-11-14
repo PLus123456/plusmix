@@ -176,23 +176,47 @@ ol.gates h3, ol.gates p { grid-column: 2; }
 ol.gates p { font-size: 13.5px; }
 ol.gates .see { color: var(--muted); }
 pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; overflow-x: auto; margin: 0; font-family: var(--mono); font-size: 12px; }
+.sec-head.sub { margin-top: 10px; }
+.sec-head h3 { font-size: 17px; }
+.chip.ok { background: var(--accent-soft); color: var(--accent); }
+.opt h3 small.bad { color: var(--pgm); }
+/* 一个输出的示意：两幅墙、输入和预设的按钮（固定用软件自己的深色） */
+.wallpair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .wallpair { grid-template-columns: 1fr; } }
+.padrow { background: var(--m-win); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.padrow .ph { color: var(--m-dim); font-size: 12px; font-weight: 700; }
+.pads { display: flex; flex-wrap: wrap; gap: 8px; }
+.pad { font: inherit; width: 128px; max-width: 100%; padding: 0; border: 0; border-radius: 5px; overflow: hidden; background: var(--m-cell); color: var(--m-text); cursor: pointer; text-align: left; }
+.pad .pt, .pad .ph2, .pad .pv { display: block; }
+.pad .pt { padding: 5px 8px; background: var(--m-off); color: #ffffff; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pad.onpgm .pt { background: var(--m-pgm); }
+.pad.onpvw .pt { background: var(--m-pvw); }
+.pad .ph2 { padding: 5px 8px 6px; font-size: 11px; color: var(--m-dim); }
+.pad.look { width: 176px; }
+.pad .pv { padding: 6px; background: var(--m-black); }
+.pad .pv svg { width: 100%; height: auto; display: block; }
+.pad:focus-visible { outline-color: var(--m-accent); }
+.app .extra { outline: 1px dashed var(--m-accent); outline-offset: -3px; }
+.app .strip .h { flex-wrap: wrap; }
+.app .cell.look { width: 124px; }
+.app .cell .badge { background: transparent; color: var(--m-dim); border: 1px solid var(--m-div); }
 </style>
 
 <div class="wrap">
 
 <header>
-  <div class="eyebrow">PLUSMIX · 设计稿第二版 · 2026-11-14</div>
+  <div class="eyebrow">PLUSMIX · 设计稿第三版 · 2026-11-14</div>
   <h1>大屏与时间线方案</h1>
-  <p class="lede">监看框贴合画面、横竖屏排布、按屏放内容的"舞台"、一键多屏的画面预设和时间线，再加"导播 ｜ 大屏"两套工作面板。能做，而且是在现有引擎上加一层，不用推倒重来。</p>
-  <div class="status"><span class="chip">还有两条等你答复</span><span class="muted">第二版：九条已定，调音台挪到了下边，补了整体架构和五个检查点。<a href="#answers">看那两条问题</a>。没有改任何代码，完整文字在 <code>docs/spec/大屏与时间线方案.md</code>。</span></div>
+  <p class="lede">大屏就是节目画面本身：把画布按现场的屏分成几格，每路输入记着自己去哪一格，切换还是原来那一下。再加监看框贴合画面、一键换好几格的画面预设和时间线。能做，不用推倒重来。</p>
+  <div class="status"><span class="chip ok">第三版：改成一个输出</span><span class="muted">第二版把直播和大屏画成了两路。按你说的改回同一个东西：导播切什么，墙上就是什么。<a href="#answers">看改了什么</a>。没有改任何代码，完整文字在 <code>docs/spec/大屏与时间线方案.md</code>。</span></div>
 </header>
 
 <section>
   <div class="sec-head"><h2>三件事，三层</h2><p class="muted">每一层可以单独交付。节目里没配大屏时，一切和现在逐字节相同。</p></div>
   <div class="layers">
     <div class="layer"><span class="tag">第一层 · 只动界面</span><h3>监看框贴合画面，横竖屏</h3><p>监看框的形状跟画布走。横屏时上边整幅给监看，调音台挪到下边、和输入同高。竖屏时监看占满左边，输入和调音台叠在右边。</p><span class="cost">约 1 个会话，不碰契约，现在就能开</span></div>
-    <div class="layer"><span class="tag">第二层 · 舞台</span><h3>画出屏幕，按屏放内容</h3><p>舞台、屏幕、输出口三样分开。监看看的是现场的样子，不是挤进一路 1080p 之后的样子。也是预监后 TAKE，多块屏同一拍换。</p><span class="cost">约 5 个会话 + 1 个检查点</span></div>
-    <div class="layer"><span class="tag">第三层 · 预设与时间线</span><h3>编好，现场只管往下走</h3><p>一组屏各放什么存成画面预设。时间线把预设排成提示点，替你把下一步装进预监，GO 就是 TAKE。</p><span class="cost">约 4 个会话 + 1 个检查点</span></div>
+    <div class="layer"><span class="tag">第二层 · 给画布分格</span><h3>画出屏幕，定布局，输入各就各位</h3><p>大屏就是节目画面。画布按现场的屏分成几格，每路输入有自己的上屏位置。切一路只动它那一格；它的格子在另一个布局里，整面墙跟着换。</p><span class="cost">约 5 个会话 + 1 个检查点</span></div>
+    <div class="layer"><span class="tag">第三层 · 预设与时间线</span><h3>编好，现场只管往下走</h3><p>一个布局加每一格放什么，存成画面预设。时间线把预设排成提示点，替你把下一步装进预监，GO 就是切换。</p><span class="cost">约 4 个会话 + 1 个检查点</span></div>
   </div>
 </section>
 
@@ -224,7 +248,7 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
     <li><b>横屏：</b>上边整幅给监看，下边一行是"输入 ｜ 调音台"，两者同高。监看框 = 画面，上半区的高度由画面算出来，其余给下边一行，输入会折行。</li>
     <li><b>竖屏：</b>把横屏的排法转 90°。监看占满左边，右边一栏上面是输入、下面是调音台。输入格子换成竖的小格（标题条加 9:16 缩略图），挨得近、露得多，和监看是同一个形状。</li>
     <li><b>调音台的高度跟着位置走：</b>够高就和现在一样，不够就缩短推子，再不够把声像和总线送出收进齿轮。留一个"旧排布"开关给习惯现在样子的人。</li>
-    <li>节目格式页加竖屏预设和"横 ⇄ 竖"按钮。1366×762 这类非标尺寸今天就能在"自定义"里填，改后监看框也贴合它。</li>
+    <li>节目格式页加竖屏预设和"横 ⇄ 竖"按钮。1366×762 这类非标尺寸今天就能在"自定义"里填，改后监看框也贴合它。你那面 20.5:9 的墙，在上面"画布"里选"宽屏 2460×1080"看。</li>
     <li>这些是按尺寸算出来的排法。真机上的样子在检查点 1 拿给你看了再调。</li>
   </ul>
 </section>
@@ -232,42 +256,52 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
 <section>
   <div class="sec-head">
     <div class="eyebrow">第二层</div>
-    <h2>舞台：现场的摆法和信号里的摆法分开</h2>
-    <p>例子：主屏 1366×762，两侧各一块 512×288 的耳屏，LED 处理器吃一路 1920×1080。左边是舞台，屏幕按现场位置摆，监看和编排都看它。右边是同一时刻送出去的那路信号，屏幕按接线挤着放。现在的监看只能看到右边那种。</p>
+    <h2>大屏就是节目画面：按输入切，布局跟着走</h2>
+    <p>下面是你说的那面墙：20.5:9，中间一个 16:9，两边各一条 2.25:9 的耳屏。它有两个布局，"整屏"和"中间 + 两耳"。每路输入记着自己上屏时去哪一格。点一路输入，再按"切换"，看墙怎么变。</p>
+  </div>
+  <div class="demo">
+    <div class="wallpair">
+      <div class="tlmon pvw"><div class="t"><span id="wPvwName"></span><span>PVW · 按下切换之后</span></div><div class="v" id="wPvw"></div></div>
+      <div class="tlmon pgm"><div class="t"><span id="wPgmName"></span><span>PGM · 现在屏上</span></div><div class="v" id="wPgm"></div></div>
+    </div>
+    <div class="transport">
+      <button type="button" class="go" id="wTake">切换</button>
+      <div class="ctl">直出<div class="seg" id="segDirect"></div></div>
+      <button type="button" id="wReset">回到开头</button>
+    </div>
+    <div class="padrow"><div class="ph">输入　下面一行小字是它的上屏位置</div><div class="pads" id="wInputs"></div></div>
+    <div class="padrow"><div class="ph">画面预设　一次换好几格</div><div class="pads" id="wLooks"></div></div>
+    <p class="note" id="wNote" aria-live="polite"></p>
+  </div>
+  <ul class="plain">
+    <li><b>只有一幅画面。</b>导播切什么，墙上就是什么。没有"直播一路、大屏一路"。</li>
+    <li><b>点一路输入，它进自己的上屏位置。</b>同一个布局里别的格子不动。它的格子在另一个布局里，整面墙就换成那个布局，那个布局里别的格子出上次的内容。</li>
+    <li><b>操作和现在一样。</b>点一下进预监，按切换才上屏；⇧ 点或打开"直出"就直接上。转场只在变了的格子里做，没变的格子一个像素都不动。</li>
+    <li><b>一次换好几格用画面预设</b>，就是 HiRender 里的"节目"：一个布局，加每一格放什么。也可以按住 ⌘ 连点几路再切换。</li>
+    <li><b>红灯是"现在在屏上"</b>，绿灯是"在预监里"，和现在的含义一样。</li>
+    <li>监看框贴合墙的形状。双击一格可以只放大看这一格，墙很宽、格子很小的时候用。</li>
+  </ul>
+  <div class="sec-head sub">
+    <h3>屏是分开的几块时：现场的摆法和信号里的摆法分开</h3>
+    <p>另一种现场：主屏 1366×762，两侧各一块 512×288 的耳屏，LED 处理器吃一路 1920×1080。左边是画布，屏幕按现场位置摆，监看和切换都看它。右边是同一时刻送出去的那路信号，屏幕按接线挤着放。你那面墙是一整块，信号里的位置和现场一样，画一次就够，用不到右边这一步。</p>
   </div>
   <div class="demo">
     <div class="controls">
       <div class="ctl">画面预设<div class="seg" id="segLook"></div></div>
     </div>
     <div class="pair">
-      <div class="fig"><div class="fig-title">舞台 <small>监看看这个</small></div><div class="stagebox" id="stageView"></div></div>
+      <div class="fig"><div class="fig-title">画布 <small>监看看这个</small></div><div class="stagebox" id="stageView"></div></div>
       <div class="fig"><div class="fig-title">输出口 1 <small>送给 LED 处理器的 1920×1080</small></div><div class="stagebox" id="rasterView"></div></div>
     </div>
     <p class="note" id="lookNote"></p>
   </div>
-  <pre class="flow">来源（编号输入 / 直播 PGM）
-   │ 放到分区：适应 / 填满 / 拉伸 / 点对点
-   ▼
-舞台画面      屏幕按现场位置摆。分区 = 放内容的目标：每块屏一个，另有"整幅""两耳"这类自建的
-   │ 每块屏幕取舞台上自己那一块
-   ▼
-输出口画面    一路 1080p / 4K 信号，屏幕按接线位置摆
-   │
-   ▼
-外部显示 / NDI（已有的输出）</pre>
-  <ul class="plain">
-    <li>一路输入铺满整幅大屏 = 放到"整幅"分区（跨屏）。只上两边小屏 = 放到"两耳"分区（各放一份）。分区有上下顺序，空着的透出下面的。</li>
-    <li>每个分区有自己的 PGM 和 PVW。选分区点输入，或调一个预设，内容先进预监；TAKE 时所有变了的分区在同一拍换。另给"直出"开关。</li>
-    <li>来源可以是"直播 PGM"：导播面板切机位，主屏跟着换，同一拍，不多延迟。</li>
-    <li>屏幕编排窗有两个页签：舞台（拖到现场位置）和输出口（拖到信号里的位置，可一键自动排布）。带对位图：每块屏显示自己的名字、尺寸和边框。</li>
-  </ul>
 </section>
 
 <section>
   <div class="sec-head">
     <div class="eyebrow">两套工作面板</div>
-    <h2>一个节目，"导播 ｜ 大屏"两个面板</h2>
-    <p>点示意里工具条正中的开关。切面板只换中上部分；虚线框住的输入、调音台、底栏是两边共用的同一份。</p>
+    <h2>同一幅画面，"导播 ｜ 大屏"两种摆法</h2>
+    <p>点示意里工具条正中的开关。PVW、PGM、转场列、输入、调音台、底栏在两个面板里是同一份，切过去画面不会变。大屏面板只是多出虚线框住的三样：布局与编排、画面预设、时间线。</p>
   </div>
   <div class="demo">
     <div class="appscroll">
@@ -278,55 +312,52 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
           <span class="name">未录制 · 未推流</span>
         </div>
         <div class="main">
-          <div class="pagewrap" data-page="switch">
-            <div class="mons">
-              <div class="mon pvw"><div class="t"><span>2 机位 2</span><span>PVW</span></div><div class="v">机位 2</div></div>
-              <div class="col"><div class="btn">Cut</div><div class="btn hot">Fade 0.5s</div><div class="btn">Wipe 1s</div><div class="btn">Zoom 1s</div><div class="btn">Stinger</div><div class="btn">FTB</div><div class="lab">Overlay</div><div class="btn">1 · 2 · 3 · 4</div><div class="lab">T-bar</div><div class="btn">━━━━</div></div>
-              <div class="mon pgm"><div class="t"><span>1 机位 1</span><span>PGM</span></div><div class="v">机位 1</div></div>
-            </div>
+          <div class="mons">
+            <div class="mon pvw"><div class="t"><span>2 PPT 7 / 24</span><span>PVW</span></div><div class="v stage" id="appPvw"></div></div>
+            <div class="col"><div class="btn">Cut</div><div class="btn hot">Fade 0.5s</div><div class="btn">Wipe 1s</div><div class="btn">Zoom 1s</div><div class="btn">Stinger</div><div class="btn">FTB</div><div class="lab">Overlay</div><div class="btn">1 · 2 · 3 · 4</div><div class="lab">T-bar</div><div class="btn">━━━━</div><div class="btn">直出：关</div></div>
+            <div class="mon pgm"><div class="t"><span>4 机位 1</span><span>PGM</span></div><div class="v stage" id="appPgm"></div></div>
           </div>
-          <div class="pagewrap" data-page="stage" hidden>
-            <div class="mons">
-              <div class="mon pvw"><div class="t"><span>预设 2 · 主屏 PPT</span><span>舞台 PVW</span></div><div class="v stage" id="appStagePvw"></div></div>
-              <div class="col"><div class="btn">Cut</div><div class="btn hot">Auto 0.5s</div><div class="lab">方式</div><div class="btn">直出：关</div><div class="btn">联动导播</div><div class="lab">全场</div><div class="btn">黑场</div><div class="btn">对位图</div><div class="lab">编排</div><div class="btn">屏幕编排…</div><div class="btn">预设表</div></div>
-              <div class="mon pgm"><div class="t"><span>预设 3 · 主屏直播</span><span>舞台 PGM</span></div><div class="v stage" id="appStagePgm"></div></div>
-            </div>
-            <div class="strip"><div class="h">画面预设 <span class="lab">⌃1…⌃0</span></div><div class="cells" id="appLooks"></div></div>
+          <div class="strip extra" data-page="stage" hidden>
+            <div class="h">布局 <span class="btn">整屏</span><span class="btn hot">中间 + 两耳</span><span class="btn">屏幕编排…</span><span class="btn">预设表</span><span class="btn">对位图</span><span class="sharedtag">大屏面板多出来的</span></div>
+          </div>
+          <div class="strip extra" data-page="stage" hidden>
+            <div class="h">画面预设 <span class="lab">F1…F10</span><span class="sharedtag">大屏面板多出来的</span></div>
+            <div class="cells" id="appLooks"></div>
           </div>
           <div class="lower">
-            <div class="strip shared">
-              <div class="h">输入 <span class="sharedtag">共用</span></div>
+            <div class="strip">
+              <div class="h">输入</div>
               <div class="cells">
-                <div class="cell" data-page="stage" hidden><div class="ct" style="background:var(--m-pgm)">PGM 节目画面</div><div class="cv"></div></div>
-                <div class="cell onpgm"><div class="ct">1 机位 1</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 主屏</span></div>
-                <div class="cell onpvw"><div class="ct">2 机位 2</div><div class="cv"></div></div>
-                <div class="cell"><div class="ct">3 PPT 7 / 24</div><div class="cv"></div></div>
-                <div class="cell"><div class="ct">4 背景视频</div><div class="cv"></div></div>
-                <div class="cell"><div class="ct">5 台标</div><div class="cv"></div><span class="badge" data-page="stage" hidden>屏 · 两耳</span></div>
-                <div class="cell"><div class="ct">6 片头</div><div class="cv"></div></div>
+                <div class="cell"><div class="ct">1 主视觉</div><div class="cv"></div><span class="badge">→ 整屏</span></div>
+                <div class="cell onpvw"><div class="ct">2 PPT 7 / 24</div><div class="cv"></div><span class="badge">→ 中间</span></div>
+                <div class="cell"><div class="ct">3 视频</div><div class="cv"></div><span class="badge">→ 中间</span></div>
+                <div class="cell onpgm"><div class="ct">4 机位 1</div><div class="cv"></div><span class="badge">→ 中间</span></div>
+                <div class="cell onpgm"><div class="ct">5 耳屏图 A</div><div class="cv"></div><span class="badge">→ 两耳</span></div>
+                <div class="cell"><div class="ct">6 耳屏图 B</div><div class="cv"></div><span class="badge">→ 两耳</span></div>
               </div>
             </div>
-            <div class="mix shared"><div><b>调音台</b> <span class="sharedtag">共用</span></div><div class="faders"><i></i><i></i><i></i><i></i></div><div class="lab">Master −18 LUFS</div></div>
+            <div class="mix"><div><b>调音台</b></div><div class="faders"><i></i><i></i><i></i><i></i></div><div class="lab">Master −18 LUFS</div></div>
           </div>
-          <div class="tl" data-page="stage" hidden>
+          <div class="tl extra" data-page="stage" hidden>
             <span class="go">GO →</span><span>时间线 · 年会流程 · 第 2 段 正会</span>
-            <span class="cue">1 开场片</span><span class="cue on">2 主持人上场</span><span class="cue nx">3 讲 PPT</span><span class="cue">4 全场互动</span><span class="cue">5 结束片</span>
+            <span class="cue">1 开场片</span><span class="cue on">2 主持人上场</span><span class="cue nx">3 讲 PPT</span><span class="cue">4 互动</span><span class="cue">5 结束</span>
+            <span class="sharedtag">大屏面板多出来的</span>
           </div>
         </div>
-        <div class="bbar shared"><span class="btn">添加输入…</span><span class="btn">录制</span><span class="btn">外部显示</span><span class="btn">推流</span><span class="btn">多画面</span><span class="sharedtag">共用</span><span class="lab" id="appHint" style="margin-left:auto"></span></div>
+        <div class="bbar"><span class="btn">添加输入…</span><span class="btn">录制</span><span class="btn">外部显示</span><span class="btn">推流</span><span class="btn">多画面</span><span class="lab" id="appHint" style="margin-left:auto"></span></div>
       </div>
     </div>
   </div>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>两个面板怎么耦合</th><th>具体是什么</th></tr></thead>
+      <thead><tr><th>两个面板的关系</th><th>具体是什么</th></tr></thead>
       <tbody>
-        <tr><td class="k">输入只有一份</td><td>在哪个面板加、改名、调设置，另一个同时生效。</td></tr>
-        <tr><td class="k">直播 PGM 是大屏的来源</td><td>主屏放"节目画面"，导播切什么它就是什么。</td></tr>
-        <tr><td class="k">同一个时钟</td><td>两边的切换都落在拍点上。打开"联动"后一次空格两边同一拍换。</td></tr>
-        <tr><td class="k">一条时间线指挥两边</td><td>提示点里既能换舞台画面，也能发任何导播命令（切机位、上字幕、放片、开始录制）。</td></tr>
-        <tr><td class="k">互相看得见</td><td>大屏面板输入条第一格是直播 PGM；导播面板有舞台小窗；多画面可放"舞台 PGM"。</td></tr>
-        <tr><td class="k">Tally</td><td>上直播 PGM 是红灯，含义不变。上了大屏的输入多一个"屏"徽标，写明在哪个分区。</td></tr>
+        <tr><td class="k">同一幅 PGM 和 PVW</td><td>两个面板看的是同一个画面。在哪边切，结果都一样；切面板不会改变屏上的任何东西。</td></tr>
+        <tr><td class="k">导播面板</td><td>按输入切。点一路，它进自己的上屏位置。你描述的那一整套操作，只用这个面板就能做完。</td></tr>
+        <tr><td class="k">大屏面板</td><td>按格子和预设排。先点一格再点输入，可以把任意一路放进任意一格；预设一次换好几格；时间线在这里走。</td></tr>
+        <tr><td class="k">同一套切换</td><td>Cut、转场、FTB、T-bar 只有一套，快捷键也只有一套。</td></tr>
+        <tr><td class="k">一条时间线</td><td>提示点里能换画面，也能发任何命令（放片、上字幕、幻灯片翻页、开始录制）。</td></tr>
+        <tr><td class="k">为什么还分两个</td><td>预设条和时间线要占高度，和输入格子抢地方。导播面板把高度给输入，大屏面板把高度给预设和时间线。</td></tr>
       </tbody>
     </table>
   </div>
@@ -336,7 +367,7 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
   <div class="sec-head">
     <div class="eyebrow">第三层</div>
     <h2>时间线：GO 一下走一步</h2>
-    <p>时间线是一串提示点。它不另起一套出画机制，只做两件事：把下一个提示点的画面装进舞台预监，到点替你按 TAKE。所以预监里永远是"下一步"，手动随时能插进来改。按 GO 试试。</p>
+    <p>时间线是一串提示点。它不另起一套出画机制，只做两件事：把下一个提示点的画面装进预监，到点替你按切换。预监和 PGM 就是上面那两幅，所以预监里永远是"下一步"，手动随时能插进来改。按 GO 试试。</p>
   </div>
   <div class="demo">
     <div class="transport">
@@ -346,11 +377,11 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
       <span class="where" id="tlWhere"></span>
     </div>
     <div class="tlgrid">
-      <div class="tlmon pvw"><div class="t"><span id="pvwName"></span><span>舞台 PVW · 下一步</span></div><div class="v" id="tlPvw"></div></div>
-      <div class="tlmon pgm"><div class="t"><span id="pgmName"></span><span>舞台 PGM · 现在屏上</span></div><div class="v" id="tlPgm"></div></div>
+      <div class="tlmon pvw"><div class="t"><span id="pvwName"></span><span>PVW · 下一步</span></div><div class="v" id="tlPvw"></div></div>
+      <div class="tlmon pgm"><div class="t"><span id="pgmName"></span><span>PGM · 现在屏上</span></div><div class="v" id="tlPgm"></div></div>
     </div>
     <div class="tablewrap"><table class="cuetable" id="cueTable"></table></div>
-    <p class="note">触发有三种：手动（等 GO）、跟随（上一条走完或片子放完自动走）、定时。"录制操作"可以把排练时手动走的一遍直接记成提示点。走带放在状态机里按拍执行，所以时刻逐拍确定，不靠界面线程。GO 默认也认 PgDn 和方向键，翻页笔能用。上面这张表和 HiRender 的节目管理是同一种东西：行是每块屏，列是演出的一个时刻，只是每列多了触发方式。提示点可以分段，一段一段跳；20–30 张 PPT 做成一路幻灯片列表之后，可以按它一键生成提示点。</p>
+    <p class="note">触发有三种：手动（等 GO）、跟随（上一条走完或片子放完自动走）、定时。"录制操作"可以把排练时手动走的一遍直接记成提示点。走带放在状态机里按拍执行，所以时刻逐拍确定，不靠界面线程。GO 默认也认 PgDn 和方向键，翻页笔能用。上面这张表和 HiRender 的节目管理是同一种东西：行是每一格，列是演出的一个时刻，只是每列多了触发方式。提示点可以分段，一段一段跳；20–30 张 PPT 做成一路幻灯片列表之后，可以按它一键生成提示点。</p>
   </div>
 </section>
 
@@ -358,25 +389,27 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
   <div class="sec-head">
     <div class="eyebrow">对照</div>
     <h2>和 HiRender S3、屏幕管理类切换台对一遍</h2>
-    <p>读了 HiRender S3 的三份官方手册和几款同类软件的官方文档。模型对得上，差别主要在一处：它点节目就上屏，我们默认先进预监。</p>
+    <p>读了 HiRender S3 的三份官方手册和几款同类软件的官方文档。模型对得上。差别有两处：它点节目就上屏，我们默认先进预监；它只能按节目切，我们还能按输入切。</p>
   </div>
   <div class="tablewrap">
     <table>
       <thead><tr><th>本方案</th><th>HiRender S3</th><th>屏幕管理类切换台</th></tr></thead>
       <tbody>
-        <tr><td class="k">舞台</td><td>舞台</td><td>一块 Screen 的像素画布</td></tr>
+        <tr><td class="k">舞台（节目画布）</td><td>舞台</td><td>一块 Screen 的像素画布</td></tr>
         <tr><td class="k">屏幕</td><td>5.x 的"表面"；4.x 是切片里"取哪块"那一半</td><td>Screen 里一个输出口占的区域</td></tr>
         <tr><td class="k">输出口</td><td>5.x 的"屏幕"（真实输出口），显示管理窗口右边的输出区域</td><td>Output</td></tr>
         <tr><td class="k">分区</td><td>窗口（舞台坐标里的位置和大小）</td><td>Layer（属于某一块屏）</td></tr>
+        <tr><td class="k">布局</td><td>没有单独的东西：一个节目里哪些窗口放了素材，就是它的布局</td><td>Preset 里各图层的摆法</td></tr>
+        <tr><td class="k">上屏位置</td><td>没有：按节目切，不按素材切</td><td>没有：按 Preset 切</td></tr>
         <tr><td class="k">画面预设</td><td>节目（节目管理表的一列）</td><td>Preset、Master Memory</td></tr>
         <tr><td class="k">时间线、提示点</td><td>节目的先后顺序，加时间线上的控制命令</td><td>Cue 序列</td></tr>
-        <tr><td class="k">预监后 TAKE</td><td>"预监"只在软件里看，没有 TAKE；连线后所见即所出</td><td>每块屏一对 Program / Preview，一次 Take 一起换</td></tr>
+        <tr><td class="k">先进预监再切换</td><td>"预监"只在软件里看，没有切换这一步；连线后所见即所出</td><td>每块屏一对 Program / Preview，一次 Take 一起换</td></tr>
       </tbody>
     </table>
   </div>
   <ul class="plain">
-    <li><b>照做的：</b>舞台和输出口分开摆（它 5.x 的显示管理就是左边舞台、右边输出）；素材放进窗口，不直接绑输出口；一列节目等于一整组屏一起换；实时信号不跟着走带暂停；翻页笔走带。</li>
-    <li><b>不一样的：</b>我们默认预监后 TAKE，这是切换台的做法；用惯所见即所出的人可以开"直出"。时间线先做"节目表加每列的触发方式"这一半，轨道上摆素材块、打关键帧的那一半以后作为片段嵌进提示点。</li>
+    <li><b>照做的：</b>画布和输出口分开摆（它 5.x 的显示管理就是左边舞台、右边输出）；素材放进窗口，不直接绑输出口；一列节目等于一整组屏一起换，我们叫画面预设；实时信号不跟着走带暂停；翻页笔走带。</li>
+    <li><b>不一样的：</b>默认先进预监再切换，用惯所见即所出的人可以开"直出"。每路输入有上屏位置，所以像导播一样按输入切也能落到对的那一格。时间线先做"节目表加每列的触发方式"这一半，轨道上摆素材块、打关键帧的那一半以后作为片段嵌进提示点。</li>
     <li><b>以后再借的：</b>给中控的 TCP / UDP 文本指令、LTC / MTC 时间码、临时盖上去的插播层。</li>
   </ul>
 </section>
@@ -384,12 +417,12 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
 <section>
   <div class="sec-head">
     <div class="eyebrow">整体架构</div>
-    <h2>一个节目，两路合成，同一拍</h2>
-    <p>输入、状态机、调音台只有一套。画面分两路合成：直播那一路和现在完全一样，舞台那一路是新加的。两路由同一个状态机在同一拍上驱动，所以一次 TAKE 两边同时换，直播 PGM 上大屏不多一帧延迟。</p>
+    <h2>一个节目，一路合成，一幅 PGM</h2>
+    <p>输入、状态机、合成、调音台都只有一套。合成从"一路输入铺满画布"变成"每一格画它那一路"，后面多一步，把屏幕按信号里的位置打包。两个面板操作的是同一个状态机、同一幅画面。</p>
   </div>
   <pre class="mermaid">
 flowchart LR
-  subgraph IN["输入（两个面板共用）"]
+  subgraph IN["输入"]
     I1["摄像头 · 采集卡 · NDI · 屏幕"]
     I2["视频文件 · 图片"]
     I3["幻灯片列表（新）"]
@@ -399,30 +432,25 @@ flowchart LR
     KB["快捷键 · MIDI · 翻页笔 · API"]
     S["状态机（按拍走）"]
   end
-  subgraph MX["合成"]
-    P["直播合成：PGM / PVW、转场、叠加"]
-    G["舞台合成：分区 → 舞台画面（新）"]
-    R["输出口打包（新）"]
+  subgraph MX["合成（只有一路）"]
+    P["PGM / PVW：按布局把每一格画进画布，转场、叠加、FTB"]
+    R["输出口打包（新）：屏幕放到信号里的位置"]
   end
   subgraph OUT["输出"]
     O1["录制 · 推流 · 虚拟摄像头"]
     O2["外部显示 HDMI / DP"]
     O3["NDI"]
   end
-  A["调音台（共用）"]
+  A["调音台"]
   U --> S
   KB --> S
   S -- "快照" --> P
-  S -- "快照" --> G
   IN --> P
-  IN --> G
   IN --> A
-  P -- "直播 PGM 可作来源" --> G
-  G --> R
+  P --> R
   P --> O1
-  P --> O2
   P --> O3
-  R --> O2
+  R -- "给 LED 处理器" --> O2
   R --> O3
   A --> O1
   </pre>
@@ -432,16 +460,18 @@ flowchart LR
       <tbody>
         <tr><td class="k">1 状态机</td><td>先走时间线（到点的提示点当命令应用），再推进转场，再应用这一拍收到的命令，发布快照</td></tr>
         <tr><td class="k">2 挑帧</td><td>每路输入取不晚于这一拍的最新一帧</td></tr>
-        <tr><td class="k">3 渲染</td><td>直播 PGM → 直播 PVW → 多画面 → 舞台 PGM → 舞台 PVW → 各输出口</td></tr>
+        <tr><td class="k">3 渲染</td><td>PGM（按布局画每一格 → 转场 → 叠加 → FTB）→ PVW → 多画面 → 各输出口</td></tr>
         <tr><td class="k">4 派发</td><td>PGM 给录制、推流、NDI、虚拟摄像头；输出口画面给外部显示和 NDI。谁慢谁自己丢帧</td></tr>
       </tbody>
     </table>
   </div>
   <ul class="plain">
-    <li><b>不变的：</b>节目里没配大屏，一切和现在逐字节相同。录制、推流仍然只认直播 PGM。渲染线程零分配、统计只有一份、切换只在拍点生效，这几条铁律同样管新部分。</li>
-    <li><b>新加的：</b>舞台合成与输出口打包（渲染）；舞台命令和时间线走带（状态机）；幻灯片列表输入；大屏面板、屏幕编排窗、时间线面板（界面）。</li>
+    <li><b>不变的：</b>节目里没配大屏，一切和现在逐字节相同。一个节目只有一幅 PGM、一幅 PVW、一套转场。录制、推流、虚拟摄像头取的是 PGM，做大屏时就是墙的画面。渲染线程零分配、统计只有一份、切换只在拍点生效，这几条铁律同样管新部分。</li>
+    <li><b>新加的：</b>布局与分区、每路输入的上屏位置、画面预设（状态机）；按格子画和输出口打包（渲染）；时间线走带；幻灯片列表输入；大屏面板、屏幕编排窗、时间线面板（界面）。</li>
+    <li><b>为什么不难：</b>现在的合成本来就是"先画底，再把新画面按转场盖上来"。要改的只是把目标从整幅换成每一格的矩形，现有的切换命令含义都不变。</li>
     <li><b>幻灯片列表：</b>一路输入里装一串页，来源是一组图片或一份 PDF（PPT 导出），可以分段，能上一张、下一张、跳到第几张。只占一个输入编号，20–30 张 PPT 不再挤占 16 路输入。可以按它一键生成时间线的提示点。</li>
-    <li><b>节目文件：</b>多两节，舞台（屏幕、输出口、分区、画面预设）和时间线（分段、提示点）。老文件照常打开。</li>
+    <li><b>节目文件：</b>多两节，舞台（屏幕、输出口、布局与分区、上屏位置、画面预设）和时间线（分段、提示点）。老文件照常打开。</li>
+    <li><b>这一版不做：</b>直播和大屏放不同的画面。录制、推流以后可以选"只取中间那一格"，出一路 16:9。</li>
   </ul>
 </section>
 
@@ -452,16 +482,16 @@ flowchart LR
     <p>界面类的工作都拆成两步：先把真界面用假数据搭出来给你看，你说可以了再接上引擎。外观早看早改，改起来也不牵动底下的东西。</p>
   </div>
   <ol class="gates">
-    <li><h3>主窗口新排布</h3><p>监看贴合、调音台挪到下边、竖屏排法、节目格式页的横竖预设。只动界面，现在就能开。</p><p class="see">你会看到：真机截图，横屏 4 种窗口 × 调音台开和收，竖屏 3 种窗口，1366×762 一组；加一个能直接运行的版本。</p></li>
-    <li><h3>大屏面板的样子</h3><p>面板切换、舞台监看、屏幕编排窗、预设条和预设表，用假数据撑起来，还不接引擎。底下的契约、渲染、状态机同时并行做。</p><p class="see">你会看到：大屏面板和屏幕编排窗的截图，加一个能点的骨架。只定外观，不合入。</p></li>
-    <li><h3>大屏能出画</h3><p>外观定稿后接上引擎和输出口。合入、跑全量。</p><p class="see">你会看到：接一块真屏或 NDI 回看，实际操作一遍三联屏：选分区、调预设、TAKE、直出、黑场、对位图。</p></li>
+    <li><h3>主窗口新排布</h3><p>监看贴合、调音台挪到下边、竖屏排法、节目格式页的横竖预设。只动界面，现在就能开。</p><p class="see">你会看到：真机截图，横屏 4 种窗口 × 调音台开和收，竖屏 3 种窗口，1366×762 和 2460×1080（你那面 20.5:9 的墙）各一组；加一个能直接运行的版本。</p></li>
+    <li><h3>大屏的样子</h3><p>监看里的格子、输入格子上的上屏位置、面板切换、屏幕编排窗（屏幕、布局、输出口）、预设条和预设表，用假数据撑起来，还不接引擎。底下的契约、渲染、状态机同时并行做。</p><p class="see">你会看到：拿你那面 20.5:9 的墙做例子的截图，加一个能点的骨架。只定外观，不合入。</p></li>
+    <li><h3>大屏能出画</h3><p>外观定稿后接上引擎和输出口。合入、跑全量。</p><p class="see">你会看到：接一块真屏或 NDI 回看，实际操作一遍。视频切到 PPT，耳屏不动；切到主视觉，整面墙换；再切回来。还有调预设、直出、对位图。</p></li>
     <li><h3>时间线面板的样子</h3><p>时间线面板（时间轴、列表、分段）和幻灯片列表的格子与设置页，用假数据。走带和幻灯片输入同时并行做。</p><p class="see">你会看到：时间线面板与幻灯片列表的截图，加骨架。</p></li>
-    <li><h3>整场走一遍</h3><p>时间线接线、录下操作、按幻灯片生成提示点、手册。合入、全量、放行。</p><p class="see">你会看到：用一份 20–30 页分好段的 PPT 加三联屏，从开场走到结束。</p></li>
+    <li><h3>整场走一遍</h3><p>时间线接线、录下操作、按幻灯片生成提示点、手册。合入、全量、放行。</p><p class="see">你会看到：用一份 20–30 页分好段的 PPT 加这面墙，从开场走到结束。</p></li>
   </ol>
   <ul class="plain">
     <li>截图都是把软件真跑起来拍的，不拿示意图代替。每张图下面写清这是什么、对应方案哪一条、哪里还没做。</li>
     <li>你的意见逐条记下来。小的当场改完重拍，大的另开一个会话改。你说可以之后才合入，依赖这块外观的下一步才开。</li>
-    <li>要先写探针验证的三处不变：外接口能不能逐像素送出、多个输出口之间差不差帧、大舞台在入门机型上的耗时。前两处要采集卡或 LED 处理器回采，放在检查点 3 之前。</li>
+    <li>要先写探针验证的三处不变：外接口能不能逐像素送出、多个输出口之间差不差帧、大画布在入门机型上的耗时。前两处要采集卡或 LED 处理器回采，放在检查点 3 之前。</li>
     <li>没有哪一块是引擎做不到的。量和上次界面改版差不多，十四五个会话。先不做的：SDI 输出卡、多机联动、融合与几何校正、逐点校色、自由时间线上的关键帧、时间码、DMX。</li>
   </ul>
 </section>
@@ -469,24 +499,16 @@ flowchart LR
 <section id="answers">
   <div class="sec-head">
     <div class="eyebrow">你的答复</div>
-    <h2>九条已定，两条换个说法再问一遍</h2>
+    <h2>十一条都有结论了</h2>
+    <p>第九条你说得对，是我把一个东西理解成了两个。改法在下面，其余的在表里。</p>
   </div>
   <div class="demo">
-    <h3>Q3 在大屏面板点了一个画面预设，现场的屏是立刻变，还是先看一眼再变？</h3>
+    <h3>第九条我原来哪里理解错了</h3>
     <div class="twocol">
-      <div class="opt"><h3>立刻变</h3><p>就是你说的"所见即所得"，HiRender 是这样。点预设 2，三块屏马上换。</p><p class="muted">少按一下。点错了观众也马上看到。</p></div>
-      <div class="opt rec"><h3>先看一眼再变<small>建议</small></h3><p>点预设 2，只有软件里左边的"舞台预监"变，现场的屏不动。看着没错，按一下空格，三块屏同时换。</p><p class="muted">多按一下。点错了有机会改。导播面板现在就是这样。</p></div>
+      <div class="opt"><h3>第二版画的<small class="bad">错的</small></h3><p>直播一路、大屏一路，各有各的 PGM 和预监。机位在直播里，PPT 在主屏上，是两件事。所以才会问"只上了大屏的输入亮不亮红灯"。</p></div>
+      <div class="opt rec"><h3>你说的<small>第三版改成这样</small></h3><p>只有一个输出，就是那面墙。导播切什么，墙上就是什么；不同的只是这一路去墙上的哪一格。在屏上就是红灯，没有第二种情况。</p></div>
     </div>
-    <p class="note">两种都会做，转场列里有个"直出"开关随时切。要你定的只是默认开哪一种。走时间线时没有区别：预监里本来就是下一步，按 GO 就上屏。</p>
-  </div>
-  <div class="demo">
-    <h3>Q9 一路输入只上了大屏、没上直播，它的格子要不要亮红灯？</h3>
-    <p>现在哪一路正在直播 PGM 上，它的格子标题条是红的，意思是"这一路观众正在看，别动它"。加了大屏以后会有新情况：比如 PPT 只放在主屏上，直播里播的是机位。这时 PPT 那一格怎么标？</p>
-    <div class="twocol">
-      <div class="opt"><h3>也亮红</h3><p>简单。</p><p class="muted">红灯分不出是"在直播里"还是"在大屏上"。</p></div>
-      <div class="opt rec"><h3>不亮红，加一个"屏 · 主屏"小标签<small>建议</small></h3><p>红灯仍然只表示在直播里，标签写明它正在哪块屏上。</p><p class="muted">上面"两个面板"的示意里，切到大屏就能看到这个标签。</p></div>
-    </div>
-    <p class="note">一场活动只做大屏、不做直播的话，两种差别不大。</p>
+    <p class="note">随之去掉的：大屏自己的 PGM 和预监、"直播画面作大屏的来源"、"联动"开关、大屏专用的切换键。新加的：布局、每路输入的上屏位置。</p>
   </div>
   <div class="tablewrap">
     <table>
@@ -494,21 +516,34 @@ flowchart LR
       <tbody>
         <tr><td class="q">Q1</td><td>监看省出来的高度给谁</td><td><span class="ans ok">已定</span> 给输入折行。你追加的：调音台挪到下边、和输入同高，上边整幅给监看</td></tr>
         <tr><td class="q">Q2</td><td>竖屏怎么排</td><td><span class="ans ok">已定</span> 监看占满左边，输入和调音台叠在右边。真机的样子在检查点 1 给你看了再调</td></tr>
-        <tr><td class="q">Q3</td><td>立刻变还是先看一眼</td><td><span class="ans wait">等你答复</span> 暂按建议：默认先看一眼再变</td></tr>
+        <tr><td class="q">Q3</td><td>立刻变还是先看一眼</td><td><span class="ans ok">按建议</span> 和导播现在一样：点一下进预监，按切换才上屏；⇧ 点或打开"直出"就直接上</td></tr>
         <tr><td class="q">Q4</td><td>时间线形态</td><td><span class="ans ok">已定</span> 先做提示点序列</td></tr>
-        <tr><td class="q">Q5</td><td>规模上限</td><td><span class="ans ok">已定</span> 屏幕 16、分区 24、输出口 4、舞台每边 8192</td></tr>
+        <tr><td class="q">Q5</td><td>规模上限</td><td><span class="ans ok">已定</span> 屏幕 16、分区 24、输出口 4、画布每边 8192</td></tr>
         <tr><td class="q">Q6</td><td>信号怎么送出去</td><td><span class="ans ok">已定</span> HDMI / DP 外接口加 NDI</td></tr>
         <tr><td class="q">Q7</td><td>素材</td><td><span class="ans ok">已定</span> 主要是 PPT，一场 20–30 张、分几段。加一路能装一串页的"幻灯片列表"输入，时间线加分段</td></tr>
-        <tr><td class="q">Q8</td><td>快捷键随不随面板变</td><td><span class="ans ok">已定</span> 不变，给开关</td></tr>
-        <tr><td class="q">Q9</td><td>上了大屏亮不亮红灯</td><td><span class="ans wait">等你答复</span> 暂按建议：不亮红，加标签</td></tr>
-        <tr><td class="q">Q10</td><td>叫法</td><td><span class="ans ok">已定</span> 导播 / 大屏；舞台、屏幕、输出口、分区、画面预设、时间线、提示点</td></tr>
+        <tr><td class="q">Q8</td><td>快捷键随不随面板变</td><td><span class="ans ok">已定</span> 不变，给开关。只有一幅画面之后，切换键本来就只有一套</td></tr>
+        <tr><td class="q">Q9</td><td>上了大屏亮不亮红灯</td><td><span class="ans ok">已定</span> 同一个输出。在屏上就是红灯，格子上另标上屏位置</td></tr>
+        <tr><td class="q">Q10</td><td>叫法</td><td><span class="ans ok">已定</span> 导播 / 大屏；舞台、屏幕、输出口、分区、画面预设、时间线、提示点。第三版新增：布局、上屏位置</td></tr>
         <tr><td class="q">Q11</td><td>怎么推进</td><td><span class="ans ok">已定</span> 先出整体架构，再按检查点做，每个检查点把外观拿给你看</td></tr>
       </tbody>
     </table>
   </div>
+  <div class="sec-head sub">
+    <h3>这一版里我替你选的几个默认</h3>
+    <p class="muted">不用专门回复。看着不对随时说，都改得动。</p>
+  </div>
+  <ul class="plain">
+    <li>从主视觉切回视频时，两耳出的是上次放的耳屏图，不是黑的。</li>
+    <li>点一路只换它那一格。一次换好几格用画面预设，或者按住 ⌘ 连点几路。</li>
+    <li>新加的输入默认去放 16:9 的那一格，格子上看得到，能改。也可以让软件按形状分一遍，分完你确认。</li>
+    <li>录制和推流录的是整面墙的画面。要 16:9 的直播画面时，以后可以选"只取中间那一格"。</li>
+    <li>直播和大屏放不同的画面，这一版不做。</li>
+    <li>你说的"节目"，界面上叫"画面预设"，因为"节目"在软件里已经指整场的文件。想换叫法告诉我。</li>
+    <li>画面预设的快捷键暂定 F1 到 F10。第二版写的 ⌃1 到 ⌃0 不行，⌃1 到 ⌃4 已经是叠加开关。</li>
+  </ul>
 </section>
 
-<footer>示意里的窗口尺寸取自 <code>App/Sources/UI/Theme.swift</code> 与 <code>MainWindowController.swift</code>：工具条一行 52、底栏 58、输入条 197、转场列 150、调音台 340、监看标题条 26、转场列最小高按 409、输入格"中"档 200×153；改后调音台在下边时宽 340，竖屏的小格 72×146。舞台、时间线两节是设计示意，不是现有功能。</footer>
+<footer>示意里的窗口尺寸取自 <code>App/Sources/UI/Theme.swift</code> 与 <code>MainWindowController.swift</code>：工具条一行 52、底栏 58、输入条 197、转场列 150、调音台 340、监看标题条 26、转场列最小高按 409、输入格"中"档 200×153；改后调音台在下边时宽 340，竖屏的小格 72×146。墙的例子按 2460×1080 画：中间 1920×1080，两耳各 270×1080。第二层和时间线两节是设计示意，不是现有功能。</footer>
 
 </div>
 
@@ -537,7 +572,7 @@ flowchart LR
   /* ---------- 第一层：按真实常数算排布 ---------- */
   var K = { TB: 52, BB: 58, STRIP: 197, STRIPMIN: 195, TCOL: 150, GAP: 2, MIX: 340, TITLE: 26, TMIN: 409, CW: 200, CG: 6, CH: 153, HDR: 30, TOTAL: 16, RMIN: 346, PW: 72, PHT: 146 };
   var WINS = [{ label: '1100×720', w: 1100, h: 720 }, { label: '1440×900', w: 1440, h: 900 }, { label: '1728×1117', w: 1728, h: 1117 }, { label: '2560×1440', w: 2560, h: 1440 }];
-  var CANVASES = [{ label: '横屏 1920×1080', w: 1920, h: 1080 }, { label: '竖屏 1080×1920', w: 1080, h: 1920 }, { label: '非标 1366×762', w: 1366, h: 762 }];
+  var CANVASES = [{ label: '横屏 1920×1080', w: 1920, h: 1080 }, { label: '竖屏 1080×1920', w: 1080, h: 1920 }, { label: '非标 1366×762', w: 1366, h: 762 }, { label: '宽屏 2460×1080', w: 2460, h: 1080 }];
   var st = { win: 1, mixer: true, canvas: 0 };
 
   /* now = 今天的排法；land = 横屏新排法（监看占满上边，下边 = 输入 ｜ 调音台）；port = 竖屏新排法（监看占满左边，右边 = 输入 / 调音台） */
@@ -644,7 +679,7 @@ flowchart LR
   }
 
   function stat(label, value, cls) { return '<div class="' + (cls || '') + '">' + label + '<b>' + value + '</b></div>'; }
-  function px(w, h) { return Math.round(w) + '×' + Math.round(h); }
+  function px(w, h) { return Math.round(w - 0.01) + '×' + Math.round(h); }
 
   function renderLayout() {
     var w = WINS[st.win], c = CANVASES[st.canvas];
@@ -674,7 +709,190 @@ flowchart LR
   seg($('segCanvas'), CANVASES, st.canvas, function (i) { st.canvas = i; renderLayout(); });
   renderLayout();
 
-  /* ---------- 第二层：舞台与输出口 ---------- */
+  /* ---------- 示意用的假画面 ---------- */
+  var SRC = {
+    kv: { name: '主视觉', color: '#7a2f5c', kind: 'kv' },
+    ppt: { name: 'PPT', color: '#3f6f52', kind: 'slides' },
+    video: { name: '视频', color: '#1d6a93', kind: 'video' },
+    cam1: { name: '机位 1', color: '#74603f', kind: 'camera' },
+    earA: { name: '耳屏图 A', color: '#2f4a9a', kind: 'ear', mark: 'A' },
+    earB: { name: '耳屏图 B', color: '#1f6b5a', kind: 'ear', mark: 'B' },
+    intro: { name: '片头', color: '#6240a0', kind: 'video' },
+    bg: { name: '背景视频', color: '#1d6a93', kind: 'video' },
+    logo: { name: '台标', color: '#2a303b', kind: 'logo' }
+  };
+  var uidN = 0;
+  function label(cx, cy, fs, text, fill) {
+    return '<text x="' + cx.toFixed(1) + '" y="' + cy.toFixed(1) + '" font-size="' + fs.toFixed(1) + '" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="' + (fill || '#ffffff') + '" stroke="rgba(0,0,0,0.45)" stroke-width="' + (fs * 0.12).toFixed(1) + '" paint-order="stroke">' + text + '</text>';
+  }
+  function plain(s) { return s.replace('stroke="rgba(0,0,0,0.45)"', 'stroke="none"'); }
+  function drawSource(key, q) {
+    var src = SRC[key], id = 'z' + (uidN++), s = '', cx = q.x + q.w / 2, cy = q.y + q.h / 2, fs = Math.min(q.h * 0.2, q.w * 0.11), i;
+    s += '<clipPath id="' + id + '"><rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '"/></clipPath><g clip-path="url(#' + id + ')">';
+    if (src.kind === 'slides') {
+      var sw = Math.min(q.w, q.h * 16 / 9), sh = sw * 9 / 16, sx = cx - sw / 2, sy = cy - sh / 2;
+      s += r(q.x, q.y, q.w, q.h, '#111317') + r(sx, sy, sw, sh, '#f3f1ea');
+      s += r(sx + sw * 0.08, sy + sh * 0.14, sw * 0.5, sh * 0.08, '#2c3038') + r(sx + sw * 0.08, sy + sh * 0.34, sw * 0.7, sh * 0.04, '#8d9199') + r(sx + sw * 0.08, sy + sh * 0.44, sw * 0.6, sh * 0.04, '#8d9199') + r(sx + sw * 0.08, sy + sh * 0.54, sw * 0.66, sh * 0.04, '#8d9199');
+      s += plain(label(sx + sw * 0.82, sy + sh * 0.8, fs * 0.8, src.name, '#2c3038'));
+    } else if (src.kind === 'logo') {
+      s += r(q.x, q.y, q.w, q.h, src.color) + '<circle cx="' + cx + '" cy="' + cy + '" r="' + (q.h * 0.3).toFixed(1) + '" fill="#e9b949"/>';
+      s += plain(label(cx, cy, q.h * 0.16, src.name, '#2a303b'));
+    } else if (src.kind === 'camera') {
+      s += r(q.x, q.y, q.w, q.h, src.color);
+      s += '<circle cx="' + cx + '" cy="' + (q.y + q.h * 0.42).toFixed(1) + '" r="' + (q.h * 0.14).toFixed(1) + '" fill="rgba(255,255,255,0.24)"/><ellipse cx="' + cx + '" cy="' + (q.y + q.h * 1.0).toFixed(1) + '" rx="' + (q.h * 0.34).toFixed(1) + '" ry="' + (q.h * 0.36).toFixed(1) + '" fill="rgba(255,255,255,0.24)"/>';
+      s += label(cx, q.y + q.h * 0.17, fs * 0.8, src.name);
+    } else if (src.kind === 'kv') {
+      /* 一张横贯整面墙的图：两头各一个大圆，切成三格时看得出是同一张 */
+      s += r(q.x, q.y, q.w, q.h, src.color);
+      s += '<circle cx="' + (q.x + q.w * 0.05).toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (q.h * 0.62).toFixed(1) + '" fill="rgba(255,255,255,0.15)"/><circle cx="' + (q.x + q.w * 0.95).toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (q.h * 0.62).toFixed(1) + '" fill="rgba(255,255,255,0.15)"/>';
+      s += r(q.x, q.y + q.h * 0.64, q.w, q.h * 0.09, 'rgba(255,255,255,0.2)');
+      s += label(cx, q.y + q.h * 0.4, Math.min(q.h * 0.2, q.w * 0.08), '2026 年会 · 主视觉');
+    } else if (src.kind === 'ear') {
+      /* 竖长的耳屏图：顶上一个圆，下面竖排三个字 */
+      var cf = Math.min(q.w * 0.42, q.h * 0.13), chars = ['耳', '屏', src.mark];
+      s += r(q.x, q.y, q.w, q.h, src.color);
+      s += '<circle cx="' + cx.toFixed(1) + '" cy="' + (q.y + q.h * 0.16).toFixed(1) + '" r="' + (Math.min(q.w, q.h) * 0.26).toFixed(1) + '" fill="rgba(255,255,255,0.24)"/>';
+      for (i = 0; i < chars.length; i++) s += label(cx, q.y + q.h * (0.44 + i * 0.17), cf, chars[i]);
+    } else {
+      s += r(q.x, q.y, q.w, q.h, src.color);
+      for (i = -q.h; i < q.w; i += 150) s += '<line x1="' + (q.x + i) + '" y1="' + (q.y + q.h) + '" x2="' + (q.x + i + q.h) + '" y2="' + q.y + '" stroke="rgba(255,255,255,0.13)" stroke-width="52"/>';
+      s += '<circle cx="' + (q.x + q.w * 0.18).toFixed(1) + '" cy="' + (q.y + q.h * 0.3).toFixed(1) + '" r="' + (q.h * 0.34).toFixed(1) + '" fill="rgba(255,255,255,0.12)"/><circle cx="' + (q.x + q.w * 0.86).toFixed(1) + '" cy="' + (q.y + q.h * 0.72).toFixed(1) + '" r="' + (q.h * 0.42).toFixed(1) + '" fill="rgba(0,0,0,0.16)"/>';
+      s += label(cx, cy, fs, src.name);
+    }
+    return s + '</g>';
+  }
+
+  /* ---------- 第二层：一面 20.5:9 的墙，两个布局 ---------- */
+  var WALL = { w: 2460, h: 1080 };
+  var LAYOUTS = {
+    full: { name: '整屏', zones: [{ id: 'full', name: '整屏', rects: [{ x: 0, y: 0, w: 2460, h: 1080, n: '整屏 20.5:9' }] }] },
+    split: { name: '中间 + 两耳', zones: [
+      { id: 'mid', name: '中间', rects: [{ x: 270, y: 0, w: 1920, h: 1080, n: '中间 16:9' }] },
+      { id: 'ears', name: '两耳', rects: [{ x: 0, y: 0, w: 270, h: 1080, n: '左耳' }, { x: 2190, y: 0, w: 270, h: 1080, n: '右耳' }] }
+    ] }
+  };
+  var ZONE = { full: { layout: 'full', name: '整屏' }, mid: { layout: 'split', name: '中间' }, ears: { layout: 'split', name: '两耳' } };
+  var ZONE_ORDER = ['full', 'mid', 'ears'];
+  /* 墙面状态 = 用哪个布局 + 每一格放着哪一路（别的布局的格子也记着） */
+  function wallSVG(ws, opt) {
+    opt = opt || {};
+    var top = opt.labels ? 92 : 0, zones = LAYOUTS[ws.layout].zones;
+    var s = '<svg viewBox="0 ' + (-top) + ' ' + WALL.w + ' ' + (WALL.h + top) + '" role="img" aria-label="' + (opt.aria || '大屏示意') + '">';
+    s += r(0, 0, WALL.w, WALL.h, '#000000');
+    zones.forEach(function (z) { var key = ws.c[z.id]; if (key) z.rects.forEach(function (q) { s += drawSource(key, q); }); });
+    zones.forEach(function (z) {
+      var changed = opt.changed && opt.changed[z.id];
+      z.rects.forEach(function (q) {
+        if (changed) s += '<rect x="' + (q.x + 9) + '" y="' + (q.y + 9) + '" width="' + (q.w - 18) + '" height="' + (q.h - 18) + '" fill="none" stroke="#5fe08a" stroke-width="18"/>';
+        else if (opt.outlines) s += '<rect x="' + (q.x + 4) + '" y="' + (q.y + 4) + '" width="' + (q.w - 8) + '" height="' + (q.h - 8) + '" fill="none" stroke="rgba(255,255,255,0.72)" stroke-width="6" stroke-dasharray="28 18"/>';
+        if (opt.labels) s += '<text x="' + (q.x + 4) + '" y="-26" font-size="46" fill="var(--m-dim)">' + q.n + '</text>';
+      });
+    });
+    return s + '</svg>';
+  }
+  var INPUTS = [
+    { key: 'kv', n: 1, label: '主视觉', home: 'full' },
+    { key: 'ppt', n: 2, label: 'PPT 电脑', home: 'mid' },
+    { key: 'video', n: 3, label: '视频', home: 'mid' },
+    { key: 'cam1', n: 4, label: '机位 1', home: 'mid' },
+    { key: 'earA', n: 5, label: '耳屏图 A', home: 'ears' },
+    { key: 'earB', n: 6, label: '耳屏图 B', home: 'ears' }
+  ];
+  var WLOOKS = [
+    { label: '1 主视觉', name: '主视觉', layout: 'full', c: { full: 'kv' } },
+    { label: '2 PPT + 耳屏 A', name: 'PPT + 耳屏 A', layout: 'split', c: { mid: 'ppt', ears: 'earA' } },
+    { label: '3 视频 + 耳屏 B', name: '视频 + 耳屏 B', layout: 'split', c: { mid: 'video', ears: 'earB' } }
+  ];
+  var START_NOTE = '屏上现在是"中间 + 两耳"：中间放视频，两耳放耳屏图 A。先点"PPT 电脑"再按切换，看耳屏动不动；再点"主视觉"，看布局怎么变。';
+  function startWall() { return { layout: 'split', c: { full: 'kv', mid: 'video', ears: 'earA' } }; }
+  function cloneWall(ws) { var c = {}, k; for (k in ws.c) c[k] = ws.c[k]; return { layout: ws.layout, c: c }; }
+  var wall = { pgm: startWall(), pvw: startWall(), direct: false, note: START_NOTE };
+  function qt(name) { return '"' + name + '"'; }
+  function onWall(ws) { var out = {}; LAYOUTS[ws.layout].zones.forEach(function (z) { if (ws.c[z.id]) out[ws.c[z.id]] = true; }); return out; }
+  function wallDiff(a, b) {
+    var out = {}, any = false;
+    LAYOUTS[b.layout].zones.forEach(function (z) { if (a.layout !== b.layout || a.c[z.id] !== b.c[z.id]) { out[z.id] = true; any = true; } });
+    return any ? out : null;
+  }
+  function wallText(ws) { return LAYOUTS[ws.layout].zones.map(function (z) { return z.name + ' = ' + (ws.c[z.id] ? SRC[ws.c[z.id]].name : '黑'); }).join('，'); }
+  /* 用大白话说从 a 到 b 换了什么；future = 还在预监里（"会换"），否则是已经上屏（"换了"） */
+  function describe(a, b, future) {
+    if (a.layout !== b.layout) {
+      return '布局' + (future ? '会' : '') + '从' + qt(LAYOUTS[a.layout].name) + '变成' + qt(LAYOUTS[b.layout].name) + '，整面墙' + (future ? '都会换。' : '一起换。') +
+        (b.layout === 'split' ? '两耳' + (future ? '会出' : '出的是') + '上次放的' + SRC[b.c.ears].name + '。' : '');
+    }
+    var zones = LAYOUTS[b.layout].zones;
+    var ch = zones.filter(function (z) { return a.c[z.id] !== b.c[z.id]; }), keep = zones.filter(function (z) { return a.c[z.id] === b.c[z.id]; });
+    if (!ch.length) return '和屏上现在一样，没有要换的。';
+    var names = ch.map(function (z) { return qt(z.name); }).join('和');
+    if (!keep.length) return names + (ch.length > 1 ? (future ? '会同一拍一起换。' : '同一拍一起换了。') : (future ? '会换。' : '换了。'));
+    return '只有' + names + (future ? '会换' : '换了') + '，' + keep.map(function (z) { return qt(z.name); }).join('和') + (future ? '不动' : '没动') + '。';
+  }
+  function place(next, what) {
+    if (wall.direct) {
+      var before = wall.pgm;
+      wall.pgm = next; wall.pvw = cloneWall(next);
+      wall.note = what + '直出开着，点了就上屏。' + describe(before, next, false);
+    } else {
+      wall.pvw = next;
+      wall.note = what + (wallDiff(wall.pgm, next) ? describe(wall.pgm, next, true) + '绿框是会变的地方。按"切换"上屏。' : '它现在就在那儿，预监和屏上一样。');
+    }
+  }
+  function pickInput(inp) {
+    var next = cloneWall(wall.pgm);
+    next.layout = ZONE[inp.home].layout; next.c[inp.home] = inp.key;
+    place(next, qt(inp.label) + '的上屏位置是' + qt(ZONE[inp.home].name) + '。');
+  }
+  function pickLook(lk) {
+    var next = cloneWall(wall.pgm), k;
+    next.layout = lk.layout; for (k in lk.c) next.c[k] = lk.c[k];
+    place(next, '画面预设' + qt(lk.name) + '一次装好几格：' + wallText(next) + '。');
+  }
+  function take() {
+    if (!wallDiff(wall.pgm, wall.pvw)) return;
+    var before = wall.pgm;
+    wall.pgm = wall.pvw; wall.pvw = before;
+    wall.note = '上屏了。' + describe(before, wall.pgm, false) + '预监现在是切换前的样子，再按一次"切换"就切回去。';
+  }
+  function renderWall() {
+    var d = wallDiff(wall.pgm, wall.pvw), onP = onWall(wall.pgm), onV = onWall(wall.pvw);
+    $('wPvw').innerHTML = wallSVG(wall.pvw, { labels: true, outlines: true, changed: d, aria: '预监里的大屏：' + wallText(wall.pvw) });
+    $('wPgm').innerHTML = wallSVG(wall.pgm, { labels: true, outlines: true, aria: '现在的大屏：' + wallText(wall.pgm) });
+    $('wPvwName').textContent = '布局 · ' + LAYOUTS[wall.pvw.layout].name;
+    $('wPgmName').textContent = '布局 · ' + LAYOUTS[wall.pgm.layout].name;
+    Array.prototype.forEach.call($('wInputs').children, function (b, i) {
+      var k = INPUTS[i].key, state = onP[k] ? ' onpgm' : (onV[k] ? ' onpvw' : '');
+      b.className = 'pad' + state;
+      b.title = onP[k] ? '现在在屏上' : (onV[k] ? '在预监里' : '');
+    });
+    $('wTake').disabled = !d;
+    $('wNote').textContent = wall.note;
+  }
+  INPUTS.forEach(function (inp) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'pad';
+    b.innerHTML = '<span class="pt">' + inp.n + ' ' + inp.label + '</span><span class="ph2">→ ' + ZONE[inp.home].name + '</span>';
+    b.addEventListener('click', function () { pickInput(inp); renderWall(); });
+    $('wInputs').appendChild(b);
+  });
+  WLOOKS.forEach(function (lk) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'pad look';
+    b.innerHTML = '<span class="pt">' + lk.label + '</span><span class="pv">' + wallSVG({ layout: lk.layout, c: lk.c }) + '</span>';
+    b.addEventListener('click', function () { pickLook(lk); renderWall(); });
+    $('wLooks').appendChild(b);
+  });
+  $('wTake').addEventListener('click', function () { take(); renderWall(); });
+  $('wReset').addEventListener('click', function () { wall.pgm = startWall(); wall.pvw = startWall(); wall.note = START_NOTE; renderWall(); });
+  seg($('segDirect'), [{ label: '关' }, { label: '开' }], 0, function (i) {
+    wall.direct = i === 1;
+    if (wall.direct) wall.pvw = cloneWall(wall.pgm);
+    wall.note = wall.direct ? '直出开着：点一路输入或一个预设，这一拍直接上屏，不经预监。' : '直出关了：点了先进预监，按"切换"才上屏。';
+    renderWall();
+  });
+  renderWall();
+
+  /* ---------- 屏是分开的几块时：画布与输出口 ---------- */
   var SCR = [
     { id: 'L', name: '左耳', x: 0, y: 237, w: 512, h: 288, rx: 1408, ry: 0 },
     { id: 'C', name: '主屏', x: 552, y: 0, w: 1366, h: 762, rx: 0, ry: 0 },
@@ -686,95 +904,61 @@ flowchart LR
     { id: 'main', name: '主屏', rects: [SCR[1]] },
     { id: 'ears', name: '两耳', rects: [SCR[0], SCR[2]] }
   ];
-  var SRC = {
-    bg: { name: '背景视频', color: '#1d6a93', kind: 'video' },
-    intro: { name: '片头', color: '#6240a0', kind: 'video' },
-    outro: { name: '片尾', color: '#a2531f', kind: 'video' },
-    ppt: { name: 'PPT', color: '#3f6f52', kind: 'slides' },
-    cam1: { name: '机位 1', color: '#74603f', kind: 'camera' },
-    pgm: { name: '直播 PGM', color: '#4d5568', kind: 'program' },
-    logo: { name: '台标', color: '#2a303b', kind: 'logo' }
-  };
-  var uidN = 0;
-  function label(cx, cy, fs, text, fill) {
-    return '<text x="' + cx.toFixed(1) + '" y="' + cy.toFixed(1) + '" font-size="' + fs.toFixed(1) + '" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="' + (fill || '#ffffff') + '" stroke="rgba(0,0,0,0.45)" stroke-width="' + (fs * 0.12).toFixed(1) + '" paint-order="stroke">' + text + '</text>';
-  }
-  function drawSource(key, q) {
-    var src = SRC[key], id = 'z' + (uidN++), s = '', cx = q.x + q.w / 2, cy = q.y + q.h / 2, fs = Math.min(q.h * 0.2, q.w * 0.11);
-    s += '<clipPath id="' + id + '"><rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '"/></clipPath><g clip-path="url(#' + id + ')">';
-    if (src.kind === 'slides') {
-      var sw = Math.min(q.w, q.h * 16 / 9), sh = sw * 9 / 16, sx = cx - sw / 2, sy = cy - sh / 2;
-      s += r(q.x, q.y, q.w, q.h, '#111317') + r(sx, sy, sw, sh, '#f3f1ea');
-      s += r(sx + sw * 0.08, sy + sh * 0.14, sw * 0.5, sh * 0.08, '#2c3038') + r(sx + sw * 0.08, sy + sh * 0.34, sw * 0.7, sh * 0.04, '#8d9199') + r(sx + sw * 0.08, sy + sh * 0.44, sw * 0.6, sh * 0.04, '#8d9199') + r(sx + sw * 0.08, sy + sh * 0.54, sw * 0.66, sh * 0.04, '#8d9199');
-      s += label(sx + sw * 0.82, sy + sh * 0.8, fs * 0.8, src.name, '#2c3038').replace('stroke="rgba(0,0,0,0.45)"', 'stroke="none"');
-    } else if (src.kind === 'logo') {
-      s += r(q.x, q.y, q.w, q.h, src.color) + '<circle cx="' + cx + '" cy="' + cy + '" r="' + (q.h * 0.3).toFixed(1) + '" fill="#e9b949"/>';
-      s += label(cx, cy, q.h * 0.16, src.name, '#2a303b').replace('stroke="rgba(0,0,0,0.45)"', 'stroke="none"');
-    } else if (src.kind === 'camera' || src.kind === 'program') {
-      s += r(q.x, q.y, q.w, q.h, src.color);
-      s += '<circle cx="' + cx + '" cy="' + (q.y + q.h * 0.42).toFixed(1) + '" r="' + (q.h * 0.14).toFixed(1) + '" fill="rgba(255,255,255,0.24)"/><ellipse cx="' + cx + '" cy="' + (q.y + q.h * 1.0).toFixed(1) + '" rx="' + (q.h * 0.34).toFixed(1) + '" ry="' + (q.h * 0.36).toFixed(1) + '" fill="rgba(255,255,255,0.24)"/>';
-      if (src.kind === 'program') s += r(q.x + q.w - q.h * 0.3, q.y + q.h * 0.06, q.h * 0.24, q.h * 0.12, '#d92420', ' rx="' + (q.h * 0.02).toFixed(1) + '"') + label(q.x + q.w - q.h * 0.18, q.y + q.h * 0.12, q.h * 0.075, 'PGM').replace('stroke="rgba(0,0,0,0.45)"', 'stroke="none"');
-      s += label(cx, q.y + q.h * 0.17, fs * 0.8, src.name);
-    } else {
-      s += r(q.x, q.y, q.w, q.h, src.color);
-      for (var i = -q.h; i < q.w; i += 150) s += '<line x1="' + (q.x + i) + '" y1="' + (q.y + q.h) + '" x2="' + (q.x + i + q.h) + '" y2="' + q.y + '" stroke="rgba(255,255,255,0.13)" stroke-width="52"/>';
-      s += '<circle cx="' + (q.x + q.w * 0.18).toFixed(1) + '" cy="' + (q.y + q.h * 0.3).toFixed(1) + '" r="' + (q.h * 0.34).toFixed(1) + '" fill="rgba(255,255,255,0.12)"/><circle cx="' + (q.x + q.w * 0.86).toFixed(1) + '" cy="' + (q.y + q.h * 0.72).toFixed(1) + '" r="' + (q.h * 0.42).toFixed(1) + '" fill="rgba(0,0,0,0.16)"/>';
-      s += label(cx, cy, fs, src.name);
-    }
-    return s + '</g>';
-  }
   function composite(contents) {
     var s = r(0, 0, STAGE.w, STAGE.h, '#000000');
-    ZONES.forEach(function (z) { var key = contents[z.id]; if (key) z.rects.forEach(function (q) { s += drawSource(key, q); }); });
+    ZONES.forEach(function (z) { var key = contents[z.id]; if (key) z.rects.forEach(function (rc) { s += drawSource(key, rc); }); });
     return s;
   }
-  function stageSVG(contents, labels) {
-    var id = 'sc' + (uidN++), top = labels ? 78 : 0, s = '<svg viewBox="0 ' + (-top) + ' ' + STAGE.w + ' ' + (STAGE.h + top + (labels ? 10 : 0)) + '" role="img" aria-label="舞台示意">';
-    s += '<clipPath id="' + id + '">'; SCR.forEach(function (q) { s += '<rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '"/>'; }); s += '</clipPath>';
+  function stageSVG(contents) {
+    var id = 'sc' + (uidN++), s = '<svg viewBox="0 -78 ' + STAGE.w + ' ' + (STAGE.h + 88) + '" role="img" aria-label="画布示意：三块屏按现场位置摆">';
+    s += '<clipPath id="' + id + '">'; SCR.forEach(function (rc) { s += '<rect x="' + rc.x + '" y="' + rc.y + '" width="' + rc.w + '" height="' + rc.h + '"/>'; }); s += '</clipPath>';
     s += '<g clip-path="url(#' + id + ')">' + composite(contents) + '</g>';
-    SCR.forEach(function (q) {
-      s += '<rect x="' + q.x + '" y="' + q.y + '" width="' + q.w + '" height="' + q.h + '" fill="none" stroke="var(--m-div)" stroke-width="5"/>';
-      if (labels) s += '<text x="' + q.x + '" y="' + (q.y - 18) + '" font-size="40" fill="var(--m-dim)">' + q.name + ' ' + q.w + '×' + q.h + '</text>';
+    SCR.forEach(function (rc) {
+      s += '<rect x="' + rc.x + '" y="' + rc.y + '" width="' + rc.w + '" height="' + rc.h + '" fill="none" stroke="var(--m-div)" stroke-width="5"/>';
+      s += '<text x="' + rc.x + '" y="' + (rc.y - 18) + '" font-size="40" fill="var(--m-dim)">' + rc.name + ' ' + rc.w + '×' + rc.h + '</text>';
     });
     return s + '</svg>';
   }
   function rasterSVG(contents) {
-    var s = '<svg viewBox="0 -78 ' + RAS.w + ' ' + (RAS.h + 88) + '" role="img" aria-label="输出口示意">';
+    var s = '<svg viewBox="0 -78 ' + RAS.w + ' ' + (RAS.h + 88) + '" role="img" aria-label="输出口示意：三块屏挤在一路 1080p 里">';
     s += r(0, 0, RAS.w, RAS.h, '#0a0a0b', ' stroke="var(--m-div)" stroke-width="5" stroke-dasharray="18 12"');
     s += '<text x="0" y="-18" font-size="40" fill="var(--m-dim)">整幅 1920×1080，没画屏幕的地方送黑</text>';
-    SCR.forEach(function (q) {
+    SCR.forEach(function (rc) {
       var id = 'rs' + (uidN++);
-      s += '<clipPath id="' + id + '"><rect x="' + q.rx + '" y="' + q.ry + '" width="' + q.w + '" height="' + q.h + '"/></clipPath>';
-      s += '<g clip-path="url(#' + id + ')"><g transform="translate(' + (q.rx - q.x) + ',' + (q.ry - q.y) + ')">' + composite(contents) + '</g></g>';
-      s += '<rect x="' + q.rx + '" y="' + q.ry + '" width="' + q.w + '" height="' + q.h + '" fill="none" stroke="var(--m-div)" stroke-width="5"/>';
-      s += '<text x="' + (q.rx + 16) + '" y="' + (q.ry + q.h - 18) + '" font-size="34" fill="#ffffff" stroke="rgba(0,0,0,0.6)" stroke-width="6" paint-order="stroke">' + q.name + '</text>';
+      s += '<clipPath id="' + id + '"><rect x="' + rc.rx + '" y="' + rc.ry + '" width="' + rc.w + '" height="' + rc.h + '"/></clipPath>';
+      s += '<g clip-path="url(#' + id + ')"><g transform="translate(' + (rc.rx - rc.x) + ',' + (rc.ry - rc.y) + ')">' + composite(contents) + '</g></g>';
+      s += '<rect x="' + rc.rx + '" y="' + rc.ry + '" width="' + rc.w + '" height="' + rc.h + '" fill="none" stroke="var(--m-div)" stroke-width="5"/>';
+      s += '<text x="' + (rc.rx + 16) + '" y="' + (rc.ry + rc.h - 18) + '" font-size="34" fill="#ffffff" stroke="rgba(0,0,0,0.6)" stroke-width="6" paint-order="stroke">' + rc.name + '</text>';
     });
     return s + '</svg>';
   }
-  var LOOKS = [
-    { label: '1 整幅背景', c: { all: 'bg' }, note: '一路"背景视频"放到"整幅"分区，跨三块屏铺一幅。舞台上是连着的一张图；输出口里它被切成三块挤在一起，字和图都是断的，这就是现在监看里"看不清中间是什么"的原因。' },
-    { label: '2 主屏 PPT + 两耳机位', c: { all: 'bg', main: 'ppt', ears: 'cam1' }, note: '"主屏"分区放 PPT（适应留边），"两耳"分区放机位 1（各放一份、填满）。底下的"整幅"仍是背景视频，被上面的分区盖住。调这个预设，三块屏同一拍换。' },
-    { label: '3 主屏直播画面 + 两耳台标', c: { all: 'bg', main: 'pgm', ears: 'logo' }, note: '"主屏"的来源是直播 PGM：导播面板切到哪路，主屏就是哪路，同一拍。两耳放台标图片。' }
+  var SLOOKS = [
+    { label: '1 整幅背景', c: { all: 'bg' }, note: '布局"整幅"：一路背景视频跨三块屏铺一幅。画布上是连着的一张图；输出口里它被切成三块挤在一起，字和图都是断的。现在的监看只能看到右边这种，所以看不清。' },
+    { label: '2 主屏 PPT + 两耳机位', c: { main: 'ppt', ears: 'cam1' }, note: '布局"每屏一格"：主屏放 PPT（适应留边），两耳各放一份机位 1（填满）。切到这个预设，三块屏同一拍换。' },
+    { label: '3 主屏视频 + 两耳台标', c: { main: 'video', ears: 'logo' }, note: '还是"每屏一格"：主屏换成视频，两耳换成台标图片。' }
   ];
   function renderLook(i) {
-    $('stageView').innerHTML = stageSVG(LOOKS[i].c, true);
-    $('rasterView').innerHTML = rasterSVG(LOOKS[i].c);
-    $('lookNote').textContent = LOOKS[i].note;
+    $('stageView').innerHTML = stageSVG(SLOOKS[i].c);
+    $('rasterView').innerHTML = rasterSVG(SLOOKS[i].c);
+    $('lookNote').textContent = SLOOKS[i].note;
   }
-  seg($('segLook'), LOOKS, 1, renderLook);
+  seg($('segLook'), SLOOKS, 1, renderLook);
   renderLook(1);
 
-  /* ---------- 两个面板 ---------- */
-  $('appStagePvw').innerHTML = stageSVG(LOOKS[1].c, false);
-  $('appStagePgm').innerHTML = stageSVG(LOOKS[2].c, false);
-  $('appLooks').innerHTML = LOOKS.map(function (l, i) {
-    return '<div class="cell look' + (i === 2 ? ' onpgm' : (i === 1 ? ' onpvw' : '')) + '"><div class="ct">' + l.label + '</div><div class="cv">' + stageSVG(l.c, false) + '</div></div>';
+  /* ---------- 两个面板：同一幅 PVW / PGM ---------- */
+  var APP = { pgm: { layout: 'split', c: { mid: 'cam1', ears: 'earA' } }, pvw: { layout: 'split', c: { mid: 'ppt', ears: 'earA' } } };
+  $('appLooks').innerHTML = WLOOKS.map(function (l, i) {
+    return '<div class="cell look' + (i === 1 ? ' onpvw' : '') + '"><div class="ct">' + l.label + '</div><div class="cv">' + wallSVG({ layout: l.layout, c: l.c }) + '</div></div>';
   }).join('') + '<div class="cell look"><div class="ct">＋ 存当前预监</div><div class="cv" style="height:28px"></div></div>';
   function showPage(name) {
+    var stage = name === 'stage';
     Array.prototype.forEach.call(document.querySelectorAll('#app [data-page]'), function (el) { el.hidden = el.getAttribute('data-page') !== name; });
-    $('pgSwitch').setAttribute('aria-pressed', name === 'switch' ? 'true' : 'false');
-    $('pgStage').setAttribute('aria-pressed', name === 'stage' ? 'true' : 'false');
-    $('appHint').textContent = name === 'switch' ? '数字键选输入 · 空格 Cut · 回车转场' : '⌃数字调预设 · ⌃空格 TAKE · → GO';
+    $('pgSwitch').setAttribute('aria-pressed', stage ? 'false' : 'true');
+    $('pgStage').setAttribute('aria-pressed', stage ? 'true' : 'false');
+    /* 画面是同一幅；大屏面板里只是多画出格子的边线，选中的那一格是绿框 */
+    $('appPvw').innerHTML = wallSVG(APP.pvw, { outlines: stage, changed: stage ? { mid: true } : null, aria: '预监：中间是 PPT，两耳是耳屏图 A' });
+    $('appPgm').innerHTML = wallSVG(APP.pgm, { outlines: stage, aria: '节目：中间是机位 1，两耳是耳屏图 A' });
+    $('appHint').textContent = stage ? '同一套切换键 · F1…F10 调预设 · → GO' : '数字键选输入 · 空格 Cut · 回车转场';
   }
   $('pgSwitch').addEventListener('click', function () { showPage('switch'); });
   $('pgStage').addEventListener('click', function () { showPage('stage'); });
@@ -782,18 +966,19 @@ flowchart LR
 
   /* ---------- 第三层：时间线 ---------- */
   var CUES = [
-    { name: '开场片', trig: '手动', c: { all: 'intro' }, act: '6 号输入从头播' },
-    { name: '主持人上场', trig: '片头放完自动走', c: { all: 'bg', main: 'pgm', ears: 'logo' }, act: '导播切机位 1' },
-    { name: '讲 PPT', trig: '手动', c: { all: 'bg', main: 'ppt', ears: 'cam1' }, act: '幻灯片翻到第 1 张，导播切机位 2' },
-    { name: '全场互动', trig: '手动', c: { all: 'cam1' }, act: '' },
-    { name: '结束片', trig: '手动', c: { all: 'outro' }, act: '片尾从头播，放完黑场' }
+    { name: '开场片', trig: '手动', ws: { layout: 'full', c: { full: 'intro' } }, act: '片头从头播' },
+    { name: '主持人上场', trig: '片头放完自动走', ws: { layout: 'split', c: { mid: 'cam1', ears: 'earA' } }, act: '' },
+    { name: '讲 PPT', trig: '手动', ws: { layout: 'split', c: { mid: 'ppt', ears: 'earA' } }, act: '幻灯片翻到第 1 张' },
+    { name: '互动', trig: '手动', ws: { layout: 'split', c: { mid: 'cam1', ears: 'earB' } }, act: '' },
+    { name: '结束', trig: '手动', ws: { layout: 'full', c: { full: 'kv' } }, act: '放片尾音乐' }
   ];
+  var BLACK = { layout: 'full', c: {} };
   var pos = 0;
   function chip(key) { return key ? '<span class="srcchip" style="background:' + SRC[key].color + '">' + SRC[key].name + '</span>' : '<span class="empty">空</span>'; }
   function renderTimeline() {
     var onIdx = pos - 1, nxIdx = pos < CUES.length ? pos : -1;
-    $('tlPgm').innerHTML = stageSVG(onIdx >= 0 ? CUES[onIdx].c : {}, false);
-    $('tlPvw').innerHTML = stageSVG(nxIdx >= 0 ? CUES[nxIdx].c : {}, false);
+    $('tlPgm').innerHTML = wallSVG(onIdx >= 0 ? CUES[onIdx].ws : BLACK, { aria: '现在的大屏' });
+    $('tlPvw').innerHTML = wallSVG(nxIdx >= 0 ? CUES[nxIdx].ws : BLACK, { aria: '下一步的大屏' });
     $('pgmName').textContent = onIdx >= 0 ? '提示点 ' + (onIdx + 1) + ' · ' + CUES[onIdx].name : '开演前 · 黑场';
     $('pvwName').textContent = nxIdx >= 0 ? '提示点 ' + (nxIdx + 1) + ' · ' + CUES[nxIdx].name : '没有下一条了';
     $('tlWhere').textContent = nxIdx >= 0 ? '按 GO：预监里的画面上屏，再装入下一条。' : '时间线走完了。';
@@ -801,8 +986,9 @@ flowchart LR
     $('btnBack').disabled = pos === 0;
     function cls(i) { return i === onIdx ? ' class="on"' : (i === nxIdx ? ' class="nx"' : ''); }
     var h = '<thead><tr><th class="rowh">段</th><th class="sec">开场</th><th class="sec" colspan="3">正会</th><th class="sec">结束</th></tr><tr><th class="rowh">提示点</th>' + CUES.map(function (c, i) { return '<th' + cls(i) + '><span class="cname">' + (i + 1) + ' ' + c.name + '</span><span class="ctrig">' + c.trig + '</span></th>'; }).join('') + '</tr></thead><tbody>';
-    ZONES.forEach(function (z) {
-      h += '<tr><td class="rowh">' + z.name + '</td>' + CUES.map(function (c, i) { return '<td' + cls(i) + '>' + chip(c.c[z.id]) + '</td>'; }).join('') + '</tr>';
+    h += '<tr><td class="rowh">布局</td>' + CUES.map(function (c, i) { return '<td' + cls(i) + '>' + LAYOUTS[c.ws.layout].name + '</td>'; }).join('') + '</tr>';
+    ZONE_ORDER.forEach(function (id) {
+      h += '<tr><td class="rowh">' + ZONE[id].name + '</td>' + CUES.map(function (c, i) { return '<td' + cls(i) + '>' + (ZONE[id].layout === c.ws.layout ? chip(c.ws.c[id]) : '<span class="empty">—</span>') + '</td>'; }).join('') + '</tr>';
     });
     h += '<tr><td class="rowh">顺带的命令</td>' + CUES.map(function (c, i) { return '<td' + cls(i) + '>' + (c.act || '<span class="empty">无</span>') + '</td>'; }).join('') + '</tr></tbody>';
     $('cueTable').innerHTML = h;
