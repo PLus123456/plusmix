@@ -208,7 +208,7 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
   <div class="eyebrow">PLUSMIX · 设计稿第三版 · 2026-11-14</div>
   <h1>大屏与时间线方案</h1>
   <p class="lede">大屏就是节目画面本身：把画布按现场的屏分成几格，每路输入记着自己去哪一格，切换还是原来那一下。再加监看框贴合画面、一键换好几格的画面预设和时间线。能做，不用推倒重来。</p>
-  <div class="status"><span class="chip ok">第三版：改成一个输出</span><span class="muted">第二版把直播和大屏画成了两路。按你说的改回同一个东西：导播切什么，墙上就是什么。<a href="#answers">看改了什么</a>。没有改任何代码，完整文字在 <code>docs/spec/大屏与时间线方案.md</code>。</span></div>
+  <div class="status"><span class="chip ok">第三版：一个输出</span><span class="muted">这一版又加了两样：监看下面不再空一大片（中间那一列自动收起时钟），和 Opus 5.5 / Fable 5.2 的分工。<a href="#answers">前面改了什么</a>。没有改任何代码，完整文字在 <code>docs/spec/大屏与时间线方案.md</code>。</span></div>
 </header>
 
 <section>
@@ -247,6 +247,8 @@ pre.mermaid { background: var(--surface); border: 1px solid var(--line); border-
   <ul class="plain">
     <li><b>横屏：</b>上边整幅给监看，下边一行是"输入 ｜ 调音台"，两者同高。监看框 = 画面，上半区的高度由画面算出来，其余给下边一行，输入会折行。</li>
     <li><b>竖屏：</b>把横屏的排法转 90°。监看占满左边，右边一栏上面是输入、下面是调音台。输入格子换成竖的小格（标题条加 9:16 缩略图），挨得近、露得多，和监看是同一个形状。</li>
+    <li><b>中间那一列自动收放：</b>它现在摆满要 392 高（时钟占 56）。监看比它矮的时候，先收起时钟（时间改在状态行右端显示），再收起"当前槽"和"时长"两行，最后收起 T-bar，监看下面最多空 24，不会再空出一大片。窗口拉大了它们自己回来。时钟另有"自动 / 一直显示 / 不显示"三个选项。</li>
+    <li><b>很宽的墙，监看自动上下叠放：</b>并排时每幅只有半个窗口宽，墙越宽画面越矮。叠放的画面比并排大三成以上时自动换成 PVW 在上、PGM 在下，中间那一列挪到右边。选"超宽 5760×1080"看。</li>
     <li><b>调音台的高度跟着位置走：</b>够高就和现在一样，不够就缩短推子，再不够把声像和总线送出收进齿轮。留一个"旧排布"开关给习惯现在样子的人。</li>
     <li>节目格式页加竖屏预设和"横 ⇄ 竖"按钮。1366×762 这类非标尺寸今天就能在"自定义"里填，改后监看框也贴合它。你那面 20.5:9 的墙，在上面"画布"里选"宽屏 2460×1080"看。</li>
     <li>这些是按尺寸算出来的排法。真机上的样子在检查点 1 拿给你看了再调。</li>
@@ -482,17 +484,31 @@ flowchart LR
     <p>界面类的工作都拆成两步：先把真界面用假数据搭出来给你看，你说可以了再接上引擎。外观早看早改，改起来也不牵动底下的东西。</p>
   </div>
   <ol class="gates">
-    <li><h3>主窗口新排布</h3><p>监看贴合、调音台挪到下边、竖屏排法、节目格式页的横竖预设。只动界面，现在就能开。</p><p class="see">你会看到：真机截图，横屏 4 种窗口 × 调音台开和收，竖屏 3 种窗口，1366×762 和 2460×1080（你那面 20.5:9 的墙）各一组；加一个能直接运行的版本。</p></li>
+    <li><h3>主窗口新排布</h3><p>监看贴合、调音台挪到下边、中间那一列自动收放、很宽的墙监看叠放、竖屏排法、节目格式页的横竖预设。只动界面，现在就能开。</p><p class="see">你会看到：真机截图，横屏 4 种窗口 × 调音台开和收，竖屏 3 种窗口，1366×762、2460×1080（你那面 20.5:9 的墙）、5760×1080（叠放）各一组，中间那一列四档各拍到一次；加一个能直接运行的版本。</p></li>
     <li><h3>大屏的样子</h3><p>监看里的格子、输入格子上的上屏位置、面板切换、屏幕编排窗（屏幕、布局、输出口）、预设条和预设表，用假数据撑起来，还不接引擎。底下的契约、渲染、状态机同时并行做。</p><p class="see">你会看到：拿你那面 20.5:9 的墙做例子的截图，加一个能点的骨架。只定外观，不合入。</p></li>
     <li><h3>大屏能出画</h3><p>外观定稿后接上引擎和输出口。合入、跑全量。</p><p class="see">你会看到：接一块真屏或 NDI 回看，实际操作一遍。视频切到 PPT，耳屏不动；切到主视觉，整面墙换；再切回来。还有调预设、直出、对位图。</p></li>
     <li><h3>时间线面板的样子</h3><p>时间线面板（时间轴、列表、分段）和幻灯片列表的格子与设置页，用假数据。走带和幻灯片输入同时并行做。</p><p class="see">你会看到：时间线面板与幻灯片列表的截图，加骨架。</p></li>
     <li><h3>整场走一遍</h3><p>时间线接线、录下操作、按幻灯片生成提示点、手册。合入、全量、放行。</p><p class="see">你会看到：用一份 20–30 页分好段的 PPT 加这面墙，从开场走到结束。</p></li>
   </ol>
+  <div class="sec-head sub">
+    <h3>谁来做：定方向的给 Fable 5.2，照着做的给 Opus 5.5</h3>
+    <p>第六波一共 21 个会话。Fable 5.2 只做 8 个要拿主意的，其余 13 个实现会话都交给 Opus 5.5。</p>
+  </div>
+  <div class="twocol">
+    <div class="opt"><h3>Fable 5.2<small>8 个</small></h3><p>写每个会话的说明。起草契约提案，写完等你批。五个检查点：合并、看全量结果、把外观做成评审页给你看、记你的意见，合入前审渲染和切换规则这两路的改动。你提了新想法之后改方案。</p></div>
+    <div class="opt rec"><h3>Opus 5.5<small>13 个</small></h3><p>主窗口新排布、契约落地、分区合成、切换规则、大屏的外观和接线、输出口出画、时间线走带、幻灯片列表输入、时间线面板的外观和接线、手册。检查点里跑全量、拍截图这些体力活也派给它。</p></div>
+  </div>
+  <ul class="plain">
+    <li><b>为什么敢交给 Opus：</b>10 月 18 日那七路止血就是 Opus 5.5 开 max 档并发做的。七路都先写红测试再做绿，合进来 0 冲突，里面有契约落地、音频热路径的 C 代码和 46 个文件的界面修改。拿不准的 22 条它们没有自己定，全写进了报告。</li>
+    <li><b>为什么方向留给 Fable：</b>这份方案的第二版把一个输出理解成了两路。这种错照着做的会话发现不了，只会很完整地做错。定方向、定契约、验收留在最强的模型上，直接跟你对。</li>
+    <li><b>花费：</b>按接口标价，Fable 5.2 是 Opus 5.5 的两倍。实现会话粗估占四分之三的量，这样分下来总花费大约是全用 Fable 的六成。桌面应用里按额度算，比例以你账号里看到的为准。</li>
+    <li><b>怎么保证做对：</b>每个说明里写死测试编号和只准动的目录；拿不准的不许自己定，写进报告等检查点裁；界面会话交付时带真机截图。第一个会话（主窗口新排布）的说明已经写好。</li>
+  </ul>
   <ul class="plain">
     <li>截图都是把软件真跑起来拍的，不拿示意图代替。每张图下面写清这是什么、对应方案哪一条、哪里还没做。</li>
     <li>你的意见逐条记下来。小的当场改完重拍，大的另开一个会话改。你说可以之后才合入，依赖这块外观的下一步才开。</li>
     <li>要先写探针验证的三处不变：外接口能不能逐像素送出、多个输出口之间差不差帧、大画布在入门机型上的耗时。前两处要采集卡或 LED 处理器回采，放在检查点 3 之前。</li>
-    <li>没有哪一块是引擎做不到的。量和上次界面改版差不多，十四五个会话。先不做的：SDI 输出卡、多机联动、融合与几何校正、逐点校色、自由时间线上的关键帧、时间码、DMX。</li>
+    <li>没有哪一块是引擎做不到的。量和上次界面改版差不多，21 个会话，其中 5 个是检查点。先不做的：SDI 输出卡、多机联动、融合与几何校正、逐点校色、自由时间线上的关键帧、时间码、DMX。</li>
   </ul>
 </section>
 
@@ -543,7 +559,7 @@ flowchart LR
   </ul>
 </section>
 
-<footer>示意里的窗口尺寸取自 <code>App/Sources/UI/Theme.swift</code> 与 <code>MainWindowController.swift</code>：工具条一行 52、底栏 58、输入条 197、转场列 150、调音台 340、监看标题条 26、转场列最小高按 409、输入格"中"档 200×153；改后调音台在下边时宽 340，竖屏的小格 72×146。墙的例子按 2460×1080 画：中间 1920×1080，两耳各 270×1080。第二层和时间线两节是设计示意，不是现有功能。</footer>
+<footer>示意里的窗口尺寸取自 <code>App/Sources/UI/Theme.swift</code> 与 <code>MainWindowController.swift</code>：工具条一行 52、底栏 58、输入条 197、转场列 150、调音台 340、监看标题条 26、中间那一列四档高 392 / 328 / 280 / 228（按代码里各行的高度加出来，真机以量的为准）、输入格"中"档 200×153；改后调音台在下边时宽 340，竖屏的小格 72×146。墙的例子按 2460×1080 画：中间 1920×1080，两耳各 270×1080。第二层和时间线两节是设计示意，不是现有功能。</footer>
 
 </div>
 
@@ -570,15 +586,34 @@ flowchart LR
   }
 
   /* ---------- 第一层：按真实常数算排布 ---------- */
-  var K = { TB: 52, BB: 58, STRIP: 197, STRIPMIN: 195, TCOL: 150, GAP: 2, MIX: 340, TITLE: 26, TMIN: 409, CW: 200, CG: 6, CH: 153, HDR: 30, TOTAL: 16, RMIN: 346, PW: 72, PHT: 146 };
+  var K = { TB: 52, BB: 58, STRIP: 197, STRIPMIN: 195, TCOL: 150, GAP: 2, MIX: 340, TITLE: 26, TOL: 24, CW: 200, CG: 6, CH: 153, HDR: 30, TOTAL: 16, RMIN: 346, PW: 72, PHT: 146 };
+  /* 中间那一列（转场列）的四档，从全到最小。高度按 TransitionPanelView 里各行的高度和间距加出来：
+     上下内边距 8；Cut 24；转场 1–4 各 24（间 4）；FTB 24；"Overlay"标题 14 + 一行 20；"T-bar"标题 14、当前槽 20、时长 20、T-bar 28；时钟 56；组间 8 */
+  var TIERS = [
+    { h: 392, name: '全', clock: true, sel: true, tbar: true },
+    { h: 328, name: '不带时钟', clock: false, sel: true, tbar: true },
+    { h: 280, name: '紧凑', clock: false, sel: false, tbar: true },
+    { h: 228, name: '最小', clock: false, sel: false, tbar: false }
+  ];
   var WINS = [{ label: '1100×720', w: 1100, h: 720 }, { label: '1440×900', w: 1440, h: 900 }, { label: '1728×1117', w: 1728, h: 1117 }, { label: '2560×1440', w: 2560, h: 1440 }];
-  var CANVASES = [{ label: '横屏 1920×1080', w: 1920, h: 1080 }, { label: '竖屏 1080×1920', w: 1080, h: 1920 }, { label: '非标 1366×762', w: 1366, h: 762 }, { label: '宽屏 2460×1080', w: 2460, h: 1080 }];
+  var CANVASES = [{ label: '横屏 1920×1080', w: 1920, h: 1080 }, { label: '竖屏 1080×1920', w: 1080, h: 1920 }, { label: '非标 1366×762', w: 1366, h: 762 }, { label: '宽屏 2460×1080', w: 2460, h: 1080 }, { label: '超宽 5760×1080', w: 5760, h: 1080 }];
   var st = { win: 1, mixer: true, canvas: 0 };
+
+  function rowsFor(rowH) { return Math.max(1, Math.floor((rowH - 36) / (K.CH + K.CG))); }
+  /* 选"放得下的最大一档"：不比监看那一块高出 TOL 以上、不超过上半区的上限、不因此少露一行输入 */
+  function pickTier(contentH, topMax, availH) {
+    var best = rowsFor(availH - Math.min(contentH, topMax) - 1), i, top;
+    for (i = 0; i < TIERS.length; i++) {
+      top = Math.max(contentH, TIERS[i].h);
+      if (TIERS[i].h <= contentH + K.TOL && top <= topMax && rowsFor(availH - top - 1) >= best) return i;
+    }
+    return TIERS.length - 1;
+  }
 
   /* now = 今天的排法；land = 横屏新排法（监看占满上边，下边 = 输入 ｜ 调音台）；port = 竖屏新排法（监看占满左边，右边 = 输入 / 调音台） */
   function layout(W, H, mixer, cw, ch, after) {
     var a = cw / ch, availH = H - K.TB - K.BB;
-    var L = { W: W, H: H, availH: availH, mixer: mixer, mode: 'now' };
+    var L = { W: W, H: H, availH: availH, mixer: mixer, mode: 'now', tier: 0, stacked: false, slack: 0 };
     if (!after) {
       var centerW = mixer ? W - K.MIX - 1 : W;
       L.inW = centerW; L.monW = (centerW - K.TCOL - 2 * K.GAP) / 2; L.topH = availH - K.STRIP - 1;
@@ -590,12 +625,27 @@ flowchart LR
     }
     if (a >= 1) {
       L.mode = 'land';
-      L.monW = (W - K.TCOL - 2 * K.GAP) / 2; L.iw = L.monW; L.ih = L.monW / a;
-      var maxTop = availH - K.STRIPMIN - 1;
-      L.topH = Math.max(L.ih + K.TITLE, K.TMIN);
-      if (L.topH > maxTop) { L.topH = maxTop; if (L.ih > L.topH - K.TITLE) { L.ih = L.topH - K.TITLE; L.iw = L.ih * a; } }
+      var topMax = availH - K.STRIPMIN - 1;
+      /* 并排：每幅监看半个窗口宽 */
+      var monW = (W - K.TCOL - 2 * K.GAP) / 2, iw = monW, ih = monW / a;
+      if (ih + K.TITLE > topMax) { ih = topMax - K.TITLE; iw = ih * a; }
+      var hug = ih + K.TITLE, ti = pickTier(hug, topMax, availH), topH = Math.min(topMax, Math.max(hug, TIERS[ti].h));
+      /* 叠放：PVW 在上、PGM 在下，中间那一列挪到右边。下边一行至少留两行输入（并排时只有一行的留一行） */
+      var keep = Math.min(2, rowsFor(availH - topH - 1));
+      var topMax2 = availH - Math.max(K.STRIPMIN, 36 + keep * (K.CH + K.CG)) - 1, stackW = W - K.TCOL - 2 * K.GAP;
+      var h2 = Math.min(stackW / a, (topMax2 - K.GAP) / 2 - K.TITLE), w2 = h2 * a;
+      /* 比并排大三成以上才换；并排时监看下面空得超过 TOL（最小档都比监看高）的，只要叠放更大就换 */
+      if (h2 > 0 && (w2 * h2 >= 1.3 * iw * ih || (topH - hug > K.TOL && w2 * h2 > iw * ih))) {
+        var stackH = 2 * (K.TITLE + h2) + K.GAP;
+        L.stacked = true; L.monW = stackW; L.iw = w2; L.ih = h2; L.sideIw = iw; L.sideIh = ih;
+        L.tier = pickTier(stackH, topMax2, availH); L.contentH = stackH;
+        L.topH = Math.min(topMax2, Math.max(stackH, TIERS[L.tier].h));
+      } else {
+        L.monW = monW; L.iw = iw; L.ih = ih; L.tier = ti; L.contentH = hug; L.topH = topH;
+      }
+      L.slack = Math.max(0, L.topH - L.contentH);
       L.rowH = availH - L.topH - 1; L.inW = mixer ? W - K.MIX - 1 : W;
-      L.rows = Math.max(1, Math.floor((L.rowH - 36) / (K.CH + K.CG)));
+      L.rows = rowsFor(L.rowH);
       L.perRow = Math.max(1, Math.floor((L.inW - 6) / (K.CW + K.CG)));
       L.visible = Math.min(K.TOTAL, L.rows * L.perRow);
       return L;
@@ -630,6 +680,29 @@ flowchart LR
       '<text x="' + (x + 10).toFixed(1) + '" y="' + (y + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + name + '</text>';
   }
 
+  /* 中间那一列：按档画出里面的东西。各行的高度就是软件里的高度，时钟贴着列的底边 */
+  function column(x, y, h, ti, fs) {
+    var t = TIERS[ti], w = K.TCOL - 16, bx = x + 8, cy = y + 8, i, s = r(x, y, K.TCOL, h, 'var(--m-panel)');
+    function row(hh, fill) { s += r(bx, cy, w, hh, fill || 'var(--m-cell)', ' rx="5"'); cy += hh; }
+    row(24); cy += 4;
+    for (i = 0; i < 4; i++) { row(24, i === 0 ? 'var(--m-accent)' : null); cy += i < 3 ? 4 : 8; }
+    row(24); cy += 8;
+    cy += 16;
+    for (i = 0; i < 4; i++) s += r(bx + i * (w + 4) / 4, cy, (w - 12) / 4, 20, 'var(--m-cell)', ' rx="4"');
+    cy += 28;
+    if (t.tbar) {
+      cy += 16;
+      if (t.sel) { row(20); cy += 4; row(20); cy += 4; }
+      s += r(bx, cy + 11, w, 6, 'var(--m-off)', ' rx="3"') + r(bx + w * 0.3, cy + 4, 14, 20, 'var(--m-dim)', ' rx="4"');
+    }
+    if (t.clock) {
+      var ky = y + h - 64;
+      s += r(bx, ky, w, 56, 'var(--m-black)', ' rx="6" stroke="var(--m-div)" stroke-width="2"');
+      s += '<text x="' + (bx + w / 2) + '" y="' + (ky + 29) + '" font-size="' + Math.min(fs + 4, 30) + '" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#ffffff">12:34</text>';
+    }
+    return s;
+  }
+
   function drawWindow(L, uid) {
     var W = L.W, H = L.H, y0 = K.TB, fs = Math.round(W / 62), s = '', i;
     var clip = L.mode === 'port' ? [L.sideX, y0, L.sideW, L.inH] : [0, y0 + L.topH + 1, L.inW, L.rowH];
@@ -645,12 +718,14 @@ flowchart LR
         s += r(m[0] + (L.monW - L.iw) / 2, y0 + K.TITLE + (L.paneH - L.ih) / 2, L.iw, L.ih, 'var(--m-img)');
         s += '<text x="' + (m[0] + 10).toFixed(1) + '" y="' + (y0 + K.TITLE - 7) + '" font-size="' + fs + '" font-weight="700" fill="#ffffff">' + m[2] + '</text>';
       });
+    } else if (L.stacked) {
+      var sx0 = (L.monW - L.iw) / 2;
+      s += monitor(sx0, y0, L.iw, L.ih, 'var(--m-pvw)', 'PVW', fs) + monitor(sx0, y0 + K.TITLE + L.ih + K.GAP, L.iw, L.ih, 'var(--m-pgm)', 'PGM', fs);
     } else {
       var off = (L.monW - L.iw) / 2;
       s += monitor(off, y0, L.iw, L.ih, 'var(--m-pvw)', 'PVW', fs) + monitor(x2 + off, y0, L.iw, L.ih, 'var(--m-pgm)', 'PGM', fs);
     }
-    s += r(tx, y0, K.TCOL, L.mode === 'port' ? L.availH : L.topH, 'var(--m-panel)');
-    for (i = 0; i < 7; i++) s += r(tx + 10, y0 + 10 + i * 34, K.TCOL - 20, 24, 'var(--m-cell)', ' rx="5"');
+    s += column(tx, y0, L.mode === 'port' ? L.availH : L.topH, L.tier, fs);
     s += '<g clip-path="url(#strip' + uid + ')">';
     if (L.mode === 'port') {
       s += r(L.sideX + 8, y0 + 8, 150, 14, 'var(--m-cell)', ' rx="4"');
@@ -675,6 +750,8 @@ flowchart LR
     }
     s += r(0, H - K.BB, W, K.BB, 'var(--m-panel)');
     for (i = 0; i < 5; i++) s += r(12 + i * 118, H - K.BB + 10, 104, 22, 'var(--m-cell)', ' rx="5"');
+    /* 时钟收起来的时候，时间改在状态行右端用小字显示 */
+    if (!TIERS[L.tier].clock) s += '<text x="' + (W - 14) + '" y="' + (H - 9) + '" font-size="' + Math.round(fs * 0.8) + '" text-anchor="end" fill="var(--m-dim)">12:34:56</text>';
     return s + '</g></svg>';
   }
 
@@ -694,13 +771,19 @@ flowchart LR
     if (aft.mode === 'port') {
       $('afterSub').textContent = '竖屏：监看占满左边，输入和调音台叠在右边';
       note = '右边一栏宽 ' + Math.round(aft.sideW) + '。上面是输入，竖的小格 ' + aft.cols + ' 列 × ' + aft.rows + ' 行' +
-        (st.mixer ? '；下面是调音台，高 ' + Math.round(aft.mixH) + (aft.mixH < 380 ? '（用紧凑条子）' : '') + '。' : '。调音台收起后输入占满整栏。');
+        (st.mixer ? '；下面是调音台，高 ' + Math.round(aft.mixH) + (aft.mixH < 380 ? '（用紧凑条子）' : '') + '。' : '。调音台收起后输入占满整栏。') +
+        '监看够高，中间那一列放得下全部，带时钟。';
     } else {
-      $('afterSub').textContent = '横屏：监看占满上边，调音台在下边、和输入同高';
-      var slack = Math.round(aft.topH - aft.ih - K.TITLE);
-      note = '下边一行高 ' + Math.round(aft.rowH) + '。输入折成 ' + aft.rows + ' 行' +
-        (st.mixer ? '，调音台 340 宽、和它同高' + (aft.rowH < 380 ? '（这个高度用紧凑条子）' : '') : '，调音台收起后输入占满整行') + '。' +
-        (slack > 1 ? '转场列要约 409 高，所以监看下面空出 ' + slack + ' 的底色。' : '');
+      $('afterSub').textContent = aft.stacked ? '很宽的画布：两幅监看上下叠放，中间那一列挪到右边' : '横屏：监看占满上边，调音台在下边、和输入同高';
+      var tall = (aft.stacked ? '两幅监看叠起来 ' : '监看只有 ') + Math.round(aft.contentH) + ' 高，';
+      var colNote = aft.tier === 0 ? '中间那一列放得下全部，带时钟。'
+        : aft.tier === 1 ? tall + '中间那一列自动收起时钟，时间改在状态行显示。'
+        : aft.tier === 2 ? tall + '中间那一列自动收起时钟和"当前槽、时长"两行。'
+        : tall + '中间那一列只留 Cut、转场 1–4、FTB 和叠加。';
+      var slackNote = aft.slack >= 1 ? '监看下面空 ' + Math.round(aft.slack) + '，不到一行按钮。' : '监看下面不留空。';
+      var stackNote = aft.stacked ? '并排的话每幅只有 ' + px(aft.sideIw, aft.sideIh) + '，叠放后是 ' + px(aft.iw, aft.ih) + '。' : '';
+      note = stackNote + colNote + slackNote + '下边一行高 ' + Math.round(aft.rowH) + '，输入折成 ' + aft.rows + ' 行' +
+        (st.mixer ? '，调音台 340 宽、和它同高' + (aft.rowH < 380 ? '（这个高度推子短一点）' : '') : '，调音台收起后输入占满整行') + '。';
     }
     $('layoutNote').textContent = note;
   }
