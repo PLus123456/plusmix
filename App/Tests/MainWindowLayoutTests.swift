@@ -10,14 +10,31 @@ import SwitcherContracts
 final class MainWindowLayoutTests: XCTestCase {
     /// 先 1440×900 再缩到最小窗口（原来 1100×700；W5-G 加了工具条之后外框高 20 pt、内容区不变）：输入条 ≥ 190、调音台 ≥ 340（原来按比例缩到 133 / 216）；
     /// 放回 1440×900 输入条高度不变（差额都给上半区）。
+    /// W6-A 改口径（prompt 144 交付 10）：新排布里输入条 = 下边一行，高度按规则算出来（不再钉 197）；调音台在下边一行、与输入条同高（不再通高）、宽 340。
+    /// 原来的断言（197、调音台通高、放大窗口输入条不变）在旧排布下照过（下半段）。
     func testUI_splitKeepsInputStripMinimum() throws {
         let session = try AppTest.freshSession()
         try AppTest.addSynthetics(session, count: 2)
         let wc = AppTest.controller.windowController
         let window = try XCTUnwrap(wc.window)
         let saved = window.frame
-        defer { window.setFrame(saved, display: true) }
+        defer { window.setFrame(saved, display: true); wc.setArrangement(.adaptive) }
         XCTAssertTrue(wc.isMixerPanelVisible)
+        XCTAssertEqual(wc.arrangement, .adaptive)
+        for size in [NSSize(width: 1440, height: 900), AppTest.minimumMainWindowSize, NSSize(width: 1440, height: 900)] {
+            AppTest.setMainWindowSize(size)
+            let m = AppTest.measureArrangement()
+            let ref = RefLayout.layout(size.width, size.height, mixer: true, 1920, 1080, AppTest.measuredK())
+            print("新排布 \(Int(size.width))×\(Int(size.height))：\(m)；规则 下边一行 \(ref.rowH)")
+            XCTAssertEqual(wc.inputStrip.frame.height, ref.rowH, accuracy: 1, "输入条 = 下边一行，按规则算（原来钉 197）")
+            XCTAssertGreaterThanOrEqual(wc.inputStrip.frame.height, wc.inputStrip.minimumHeight - 0.5, "输入条不低于一行格子（格子按钮点得到）")
+            XCTAssertEqual(wc.mixerPanel.frame.height, wc.inputStrip.frame.height, accuracy: 0.5, "调音台与输入条同高（原来通高）")
+            XCTAssertGreaterThanOrEqual(wc.mixerPanel.frame.width, Theme.mixerPanelWidth - 0.5, "调音台不窄于 340")
+            XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingSize.height - 0.5, "上半区放得下转场列（当前这一档）")
+        }
+
+        // 旧排布（规则 8）：原来的断言照过
+        wc.setArrangement(.legacy)
         AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
         let strip900 = wc.inputStrip.frame.height
         print("1440×900：输入条 \(strip900)，调音台 \(wc.mixerPanel.frame.width)，上半区 \(wc.transitionPanel.frame.height)")
