@@ -48,6 +48,8 @@ final class AppController {
     let addInputHistory: AddInputHistory
     /// 输入条的本机偏好（W5-H）。
     let stripPreferences: InputStripPreferences
+    /// 主窗口排布的本机偏好（W6-A：新 / 旧排布、时钟、分隔条位置）。
+    let layoutPreferences: MainLayoutPreferences
     /// 自动更新（W4-B，Sparkle）：Info.plist 里没有更新源 / 公钥（开发、ad-hoc、测试宿主）就不起。
     let updateController: UpdateController
     /// 引擎运行时拿着的"别睡"（W5-L，P1）：系统睡眠 + App Nap 一条、显示器休眠一条，按设置"性能与电源"的两个开关。
@@ -76,6 +78,7 @@ final class AppController {
         updateController = UpdateController(defaults: defaults, isTestHost: isTestHost)
         addInputHistory = AddInputHistory(defaults: defaults)
         stripPreferences = InputStripPreferences(defaults: defaults)
+        layoutPreferences = MainLayoutPreferences(defaults: defaults)
         if isTestHost {
             L10n.languageOverride = "zh-Hans"
             let configDir = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-tests/config", isDirectory: true)
@@ -114,6 +117,7 @@ final class AppController {
         windowController.panels = panels
         windowController.addInputHistory = addInputHistory
         windowController.stripPreferences = stripPreferences   // 缩略图大小（W5-H）
+        windowController.layoutPreferences = layoutPreferences   // 新 / 旧排布、时钟、分隔条位置（W6-A）
         windowController.onDocumentContentChanged = { [weak self] in self?.refreshDocumentEdited() }   // 分类存在 Show.layout 里（W5-H）
         windowController.bottomBar.shouldConfirmStop = { [weak self] in self?.settings.confirmBeforeStop ?? true }
         // 工具条"打开▾"：与"节目 › 打开最近"同一份最近列表（W5-G，A2）

@@ -9,7 +9,8 @@
 //   输入      添加输入… ⌘I / 按类型添加 ▸ / 输入 N「名字」设置… ⇧⌘I（标题写出是 PVW 上哪一路，PVW 空时灰，O4）
 //   切换      SwitchMenuController（O1：Cut / 执行当前转场 / 转场 1–4（点了就做，W5-M）/ FTB / Overlay ▸，右列的键只显示）
 //   输出      录制 ▸ / 推流 ▸ / 外部显示 ▸ / 全部外部显示开·关 / 多画面窗口 / 虚拟摄像头 ▸ / ─ / 七个输出设置页（▸ 的几个和底栏 ▴ / ⚙ 同一份菜单）
-//   窗口      最小化 / 缩放 / ─ / 调音台 / 多画面 / 统计 / ─ / 锁定界面（W5-L：= 底栏右组的"统计"与锁，规则 5；锁着时打勾，菜单栏不受锁影响、从这里也能解锁）
+//   窗口      最小化 / 缩放 / ─ / 调音台 / 多画面 / 输入缩略图 ▸ / 排布 ▸ / 统计 / ─ / 锁定界面（W5-L：= 底栏右组的"统计"与锁，规则 5；锁着时打勾，菜单栏不受锁影响、从这里也能解锁；
+//             W6-A：排布 ▸ 新排布（默认）/ 旧排布，存本机）
 //   帮助      PlusMix 使用手册 / 快捷键一览 / ─ / 导出诊断包… / 打开诊断文件夹（O3；工具条"?"弹同一份）
 // 菜单项一律 nil target、动作在这里：工具条（MainToolbar）的按钮挂的是同一个 selector，所以两处点下去是同一段代码，灰不灰也在 validateMenuItem 里一处定。
 // 文案全部走 L10n（包里返回中文的状态在 App 侧查表，OutputStatusText）。启动参数与设置见 AppSettings。
@@ -68,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let url = settings.statsURL {
                 do { try controller.session?.startStatsLog(url: url) } catch { NSLog("stats.jsonl 打不开：\(error)") }
             }
+            LayoutShotTour.runIfRequested(controller: controller)   // W6-A：隔离运行截图（只认测试宿主模式 + SWITCHER_LAYOUT_SHOTS）
         }
     }
 
@@ -207,6 +209,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         thumbnails.delegate = self
         thumbnailSizeMenu = thumbnails
         windowMenu.addItem(submenu(thumbnails, title: L("menu.window.thumbnailSize")))
+        // 排布 ▸ 新排布（默认）/ 旧排布（W6-A，大屏与时间线方案 §2.1 规则 8；存本机）
+        let arrangement = NSMenu(title: L("menu.window.arrangement"))
+        for choice in WindowArrangement.allCases {
+            let item = arrangement.addItem(withTitle: choice.title, action: #selector(chooseArrangement(_:)), keyEquivalent: "")
+            item.representedObject = choice.rawValue
+        }
+        windowMenu.addItem(submenu(arrangement, title: L("menu.window.arrangement")))
         windowMenu.addItem(withTitle: L("menu.window.stats"), action: #selector(showStatistics(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: L("menu.window.lock"), action: #selector(toggleInterfaceLock(_:)), keyEquivalent: "")
@@ -310,6 +319,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     /// 窗口 › 调音台 / 输入条右端"调音台"开关（同一个 selector，W5-H D2）。
     @objc func toggleMixer(_ sender: Any?) { controller.windowController.toggleMixerPanel() }
+    /// 窗口 › 排布 ▸ 新排布 / 旧排布（W6-A）。
+    @objc func chooseArrangement(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let choice = WindowArrangement(rawValue: raw) else { return }
+        controller.windowController.setArrangement(choice)
+    }
     /// 输入 › 搜索输入（⌘F）：焦点进输入条的搜索框（W5-H D3）。名字别用系统的 performFindPanelAction:（文本框有焦点时会被它接走）。
     @objc func focusInputSearch(_ sender: Any?) { controller.windowController.inputStrip.focusSearch() }
     /// 统计窗（= 底栏"统计"，W5-L）。
@@ -423,6 +437,8 @@ extension AppDelegate: NSMenuItemValidation {
         switch menuItem.action {
         case #selector(toggleMixer(_:)):
             menuItem.state = controller.windowController.isMixerPanelVisible ? .on : .off
+        case #selector(chooseArrangement(_:)):
+            menuItem.state = (menuItem.representedObject as? String) == controller.windowController.arrangement.rawValue ? .on : .off
         case #selector(toggleMultiview):
             menuItem.state = controller.windowController.isMultiviewWindowVisible ? .on : .off
         case #selector(toggleInterfaceLock(_:)):

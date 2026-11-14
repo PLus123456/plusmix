@@ -53,6 +53,7 @@ final class TransitionColumnTests: XCTestCase {
     private func edges(_ panel: TransitionPanelView) -> [(String, CGFloat, CGFloat)] {
         var out: [(String, CGFloat, CGFloat)] = []
         func add(_ name: String, _ v: NSView) {
+            guard !v.isHidden else { return }   // W6-A：按档收起来的行（时钟 / 当前槽 / 时长 / T-bar）不量
             let r = AppTest.alignmentFrame(v, in: panel)
             out.append((name, r.minX, r.maxX))
         }
@@ -68,8 +69,10 @@ final class TransitionColumnTests: XCTestCase {
         add("T-bar 行", panel.tbarSlotButton)
         add("时长", panel.durationControl)
         add("T-bar", panel.tbar)
-        let atZero = panel.convert(panel.tbar.handleFrame(at: 0), from: panel.tbar), atOne = panel.convert(panel.tbar.handleFrame(at: 1), from: panel.tbar)
-        out.append(("T-bar 把手 0…1", atZero.minX, atOne.maxX))
+        if !panel.tbar.isHidden {
+            let atZero = panel.convert(panel.tbar.handleFrame(at: 0), from: panel.tbar), atOne = panel.convert(panel.tbar.handleFrame(at: 1), from: panel.tbar)
+            out.append(("T-bar 把手 0…1", atZero.minX, atOne.maxX))
+        }
         add("时钟", panel.clock)
         return out
     }
@@ -122,17 +125,23 @@ final class TransitionColumnTests: XCTestCase {
         // T-bar 横放：宽 = 行宽，高固定；行程（把手中心从 0 到 1）够长
         XCTAssertGreaterThan(panel.tbar.frame.width, panel.tbar.frame.height * 3, "T-bar 横放")
         let travel = panel.tbar.handleFrame(at: 1).midX - panel.tbar.handleFrame(at: 0).midX
-        // 列最小高 ≤ 409（86 的阈值；槽模型行数不变、T-bar 横放后不再要 60 高）
-        let minHeight = panel.fittingSize.height
-        print("转场列最小高 \(minHeight)；T-bar \(panel.tbar.frame.width)×\(panel.tbar.frame.height)，行程 \(travel) pt")
-        XCTAssertLessThanOrEqual(minHeight, 409, "列最小高")
+        // 列最小高 ≤ 409（86 的阈值；槽模型行数不变、T-bar 横放后不再要 60 高）——W6-A 起留给"全"档（带时钟），另加各档（fittingSize 量，一档比一档矮）
+        XCTAssertEqual(panel.tier, .full, "1440×900 配 16:9：全档")
+        let minHeight = panel.fittingHeight(of: .full)
+        XCTAssertEqual(panel.fittingSize.height, minHeight, accuracy: 0.5, "现在这一档的 fittingSize 就是全档的高")
+        let tiers = TransitionPanelView.ColumnTier.allCases.map { panel.fittingHeight(of: $0) }
+        print("转场列最小高 \(minHeight)（四档 \(tiers)）；T-bar \(panel.tbar.frame.width)×\(panel.tbar.frame.height)，行程 \(travel) pt")
+        XCTAssertLessThanOrEqual(minHeight, 409, "列最小高（全档）")
+        XCTAssertEqual(tiers, tiers.sorted(by: >), "四档一档比一档矮：全 → 不带时钟 → 紧凑 → 最小")
+        XCTAssertEqual(tiers[0] - tiers[1], panel.clock.frame.height + 8, accuracy: 0.5, "不带时钟 = 收起时钟（时钟高 + 组间 8）")
         XCTAssertGreaterThanOrEqual(travel, 60, "T-bar 行程 ≥ 60 pt（原来竖放时要求的最小行程）")
 
-        // 最小窗口：列放得下、各行不被压扁、边仍对齐
+        // 最小窗口：列放得下（当前这一档）、各行不被压扁、边仍对齐（收起来的行不量）
         AppTest.setMainWindowSize(AppTest.minimumMainWindowSize)
-        print("转场列 最小窗口 \(AppTest.minimumMainWindowSize)：列高 \(panel.bounds.height)（最小 \(minHeight)），T-bar \(panel.tbar.frame.width)×\(panel.tbar.frame.height)")
-        XCTAssertGreaterThanOrEqual(panel.bounds.height, minHeight - 0.5, "最小窗口时列放得下")
-        XCTAssertEqual(panel.tbar.frame.height, panel.tbar.fittingSize.height, accuracy: 0.5, "T-bar 不被压扁")
+        let tierHeight = panel.fittingHeight(of: panel.tier)
+        print("转场列 最小窗口 \(AppTest.minimumMainWindowSize)：列高 \(panel.bounds.height)（\(panel.tier.title) \(tierHeight)），T-bar \(panel.tbar.frame.width)×\(panel.tbar.frame.height)")
+        XCTAssertGreaterThanOrEqual(panel.bounds.height, tierHeight - 0.5, "最小窗口时列放得下（当前这一档）")
+        if !panel.tbar.isHidden { XCTAssertEqual(panel.tbar.frame.height, panel.tbar.fittingSize.height, accuracy: 0.5, "T-bar 不被压扁") }
         for (name, l, r) in edges(panel) {
             XCTAssertEqual(l, left, accuracy: 1, "最小窗口 \(name) 左边")
             XCTAssertEqual(r, right, accuracy: 1, "最小窗口 \(name) 右边")

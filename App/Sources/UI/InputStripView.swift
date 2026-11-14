@@ -3,6 +3,8 @@
 // ……右端"调音台"开关（与"窗口 › 调音台"同一个动作）；格子后面是虚线"＋ 添加输入"占位格（空节目时是唯一一格，带拖放的小字）；
 // 视频 / 图片文件拖到输入条或占位格 = 直接加一路（MainWindowController.addInputs）；缩略图小 / 中 / 大三档（右键 / 窗口菜单），
 // 最小高跟着格子算（minimumHeight，主窗口的分隔条与最小窗口按它定）。
+// W6-A（docs/spec/大屏与时间线方案.md §2.1 规则 4、§2.3）：新排布里格子会折行（InputGridView.wrap：一行放不下折到下一行，整块竖向滚动，
+// 三档格子大小不变，16 路都滚得到）；旧排布照旧一行横向滚动（.row）。竖屏排法里输入区固定用紧凑小格（forcesCompact）。
 import AppKit
 import SwitcherContracts
 import SwitcherRender
@@ -49,7 +51,19 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     let mixerToggle: NSButton
     let addPlaceholder = AddInputPlaceholderView()
     private let scrollView = NSScrollView()
-    private let stack = NSStackView()
+    /// 头一行的"输入"二字（窄的时候收起，W6-A）。
+    private let titleLabel = Theme.label(L("strip.title"), size: 12, weight: .semibold, color: Theme.dimText)
+    /// 头一行的三种排法（W6-A：竖屏右边一栏最窄 346，"输入 + 分类标签 + 搜索框 + 调音台开关"放不下）：
+    /// 全 = 都在、搜索框最窄 120；紧 = 收起"输入"二字、搜索框最窄 90；最紧 = 再收起分类标签（有筛选时不收，免得筛着看不见）。
+    enum HeaderMode { case full, tight, tightest }
+    private(set) var headerMode: HeaderMode = .full
+    private var categoryAfterTitle: NSLayoutConstraint!
+    private var categoryAtEdge: NSLayoutConstraint!
+    private var searchAfterCategory: NSLayoutConstraint!
+    private var searchAtEdge: NSLayoutConstraint!
+    private var searchMinimumWidth: NSLayoutConstraint!
+    /// 格子（W6-A 起不是 NSStackView：新排布要折行）。
+    private let grid = InputGridView(inset: InputStripView.stackInset, spacing: InputStripView.itemSpacing)
     private(set) var cells: [Int: InputCellView] = [:]
     private var textureSize = (width: 1920, height: 1080)
     private var lastState = MixerState()
@@ -77,6 +91,32 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
             applySizes()
         }
     }
+    /// 竖屏排法：输入区固定用紧凑小格（W6-A，§2.3），偏好里的那一档留给横屏。
+    var forcesCompact = false {
+        didSet {
+            guard forcesCompact != oldValue else { return }
+            relayoutThumbnails()
+            applySizes()
+        }
+    }
+    /// 实际用的那一档（竖屏排法 = 紧凑）。
+    var effectiveThumbnailSize: ThumbnailSize { forcesCompact ? .compact : thumbnailSize }
+    /// 格子排法：新排布折行（.wrap，竖向滚动），旧排布一行（.row，横向滚动）。
+    var flow: InputGridView.Flow {
+        get { grid.flow }
+        set {
+            guard newValue != grid.flow else { return }
+            grid.flow = newValue
+            scrollView.hasHorizontalScroller = newValue == .row
+            scrollView.hasVerticalScroller = newValue == .wrap
+            needsLayout = true
+        }
+    }
+    /// 一格多大（这一档的宽 × 标题条 + 缩略图框 + 按钮行；紧凑小格没有按钮行）。
+    var cellSize: NSSize {
+        let size = effectiveThumbnailSize
+        return NSSize(width: size.width, height: InputCellView.height(thumbnailHeight: thumbnailHeight, compact: size == .compact))
+    }
     /// 缩略图框的高（所有格子一样：取各路裁切后比例里最高的那个，见 relayoutThumbnails）。
     private(set) var thumbnailHeight: CGFloat = (Theme.thumbnailWidth * 9 / 16).rounded()
     /// 拖文件进来时整条高亮。
@@ -90,12 +130,14 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
 
     /// 头一行（搜索框那一行）占的高：上边距 4 + 搜索框 + 下边距 4。
     static let headerHeight: CGFloat = 30
-    /// 格子上下的留白（stack 的 edgeInsets）。
+    /// 格子外的留白（上下左右）。
     static let stackInset: CGFloat = 6
+    /// 格子间距。
+    static let itemSpacing: CGFloat = 6
 
     /// 输入条最矮多高：头一行 + 一格（标题条 + 缩略图框 + 两行按钮）+ 上下留白——格子最下一行按钮点得到（W5-A / X61 的口径，W5-H 起按格子算）。
     var minimumHeight: CGFloat {
-        Self.headerHeight + Self.stackInset * 2 + InputCellView.height(thumbnailHeight: thumbnailHeight)
+        Self.headerHeight + Self.stackInset * 2 + cellSize.height
     }
 
     override init(frame: NSRect) {
@@ -115,7 +157,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         searchField.sendsWholeSearchString = false
         searchField.delegate = self
         searchField.toolTip = L("strip.searchTip")
-        let title = Theme.label(L("strip.title"), size: 12, weight: .semibold, color: Theme.dimText)
+        let title = titleLabel
         mixerToggle.controlSize = .small
         mixerToggle.font = NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))
         mixerToggle.refusesFirstResponder = true
@@ -127,18 +169,13 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         addPlaceholder.onDropFiles = { [weak self] result in self?.onDropFiles?(result) }
         addPlaceholder.onDropHighlight = { [weak self] on in self?.isDropTargetHighlighted = on }
 
-        stack.orientation = .horizontal
-        stack.spacing = 6
-        stack.alignment = .top
-        stack.edgeInsets = NSEdgeInsets(top: Self.stackInset, left: 6, bottom: Self.stackInset, right: 6)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(addPlaceholder)
-        let document = FlippedView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(stack)
-        scrollView.documentView = document
+        scrollView.documentView = grid
+        grid.attach(to: scrollView.contentView)
+        grid.setItems([addPlaceholder])
         scrollView.hasHorizontalScroller = true
         scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay   // 竖向滚动条不占宽：一行几格按整块的宽算（同示意页）
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(title)
@@ -148,15 +185,20 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         addSubview(scrollView)
         let searchWidth = searchField.widthAnchor.constraint(equalToConstant: 220)
         searchWidth.priority = .defaultLow   // 窄窗口 + 分类起了长名字时先让搜索框变窄
+        categoryAfterTitle = categoryBar.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10)
+        categoryAtEdge = categoryBar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
+        searchAfterCategory = searchField.leadingAnchor.constraint(equalTo: categoryBar.trailingAnchor, constant: 10)
+        searchAtEdge = searchField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
+        searchMinimumWidth = searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.searchMinimumWidth)
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             title.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            categoryBar.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 10),
+            categoryAfterTitle,
             categoryBar.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
             searchField.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            searchField.leadingAnchor.constraint(equalTo: categoryBar.trailingAnchor, constant: 10),
+            searchAfterCategory,
             searchWidth,
-            searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+            searchMinimumWidth,
             mixerToggle.leadingAnchor.constraint(greaterThanOrEqualTo: searchField.trailingAnchor, constant: 10),
             mixerToggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             mixerToggle.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
@@ -164,15 +206,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            stack.topAnchor.constraint(equalTo: document.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            document.heightAnchor.constraint(equalTo: scrollView.contentView.heightAnchor),
         ])
-        // 格子底下不钉死：输入条一时比格子矮（换缩略图大小、分隔条还没挪的那一下）时格子伸出去被裁，而不是和 required 约束撞
-        let stackBottom = stack.bottomAnchor.constraint(equalTo: document.bottomAnchor)
-        stackBottom.priority = .defaultHigh
-        stackBottom.isActive = true
         registerForDraggedTypes([.fileURL])
         relayoutThumbnails()
         applySizes()
@@ -194,10 +228,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         lastState = state
         let wanted = state.inputs.map(\.number)
         for number in cells.keys where !wanted.contains(number) {
-            if let cell = cells.removeValue(forKey: number) {
-                stack.removeArrangedSubview(cell)
-                cell.removeFromSuperview()
-            }
+            cells.removeValue(forKey: number)   // 从格子里拿掉在下面 setItems 里做
         }
         var order: [NSView] = []
         for config in state.inputs {
@@ -211,9 +242,8 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
             order.append(cell)
         }
         order.append(addPlaceholder)   // 占位格永远在最后
-        if stack.arrangedSubviews.map({ ObjectIdentifier($0) }) != order.map({ ObjectIdentifier($0) }) {
-            for v in stack.arrangedSubviews { stack.removeArrangedSubview(v); v.removeFromSuperview() }
-            for v in order { stack.addArrangedSubview(v) }
+        if grid.items.map({ ObjectIdentifier($0) }) != order.map({ ObjectIdentifier($0) }) {
+            grid.setItems(order)
         }
         let label = transitionLabel(state)
         let unsetStinger = !state.transition.isActive && state.transition.currentGroup.isStingerWithoutInput   // 提案 029 的判定（校验器拒 autoTransition 的同一条）
@@ -271,7 +301,8 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         cell.onSetCategory = { [weak self] number, color in self?.setCategory(color, for: number) }
         cell.categoryTitles = { [weak self] color in self?.categories.title(of: color) ?? color.defaultTitle }
         cell.display.source = displaySource
-        cell.setSize(width: thumbnailSize.width, thumbnailHeight: thumbnailHeight)
+        cell.setSize(width: effectiveThumbnailSize.width, thumbnailHeight: thumbnailHeight)
+        cell.setCompact(effectiveThumbnailSize == .compact)
         cell.setCategory(categories.assignments[config.number], title: categories.assignments[config.number].map { categories.title(of: $0) })
         return cell
     }
@@ -299,7 +330,7 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     private func relayoutThumbnails() {
         // 与渲染器同一个来源：只读正式字段 OutputSettings.multiview（W3-B2 起过渡键 extra["layout"] 一律忽略；Show.load 会把旧键搬进正式字段）
         let settings = MultiviewLayout.layoutSettings(in: lastState)
-        let key = ThumbnailLayoutKey(layout: settings, inputs: lastState.inputs.map(\.number), width: textureSize.width, height: textureSize.height, size: thumbnailSize)
+        let key = ThumbnailLayoutKey(layout: settings, inputs: lastState.inputs.map(\.number), width: textureSize.width, height: textureSize.height, size: effectiveThumbnailSize)
         guard key != thumbnailLayoutKey else { return }
         thumbnailLayoutKey = key
         let placements = MultiviewLayout.placements(settings: key.layout, inputs: key.inputs, width: key.width, height: key.height)
@@ -313,9 +344,12 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         if rects.isEmpty, let first = MultiviewLayout.placements(settings: nil, inputs: [1], width: key.width, height: key.height).first(where: { $0.source == .input(number: 1) }) {
             rects = [Self.thumbnailRect(for: first, width: key.width, height: key.height)]
         }
-        let width = thumbnailSize.width
-        let height = rects.map { InputCellView.thumbnailHeight(width: width, rect: $0, textureWidth: key.width, textureHeight: key.height) }.max()
-            ?? InputCellView.thumbnailHeight(width: width, rect: nil, textureWidth: key.width, textureHeight: key.height)
+        let width = key.size.width
+        // 紧凑小格（W6-A）：缩略图框和画布同一个形状（竖屏画布 = 9:16，不钳在 16:9 的框里），裁切那块在框里等比放；其余三档照 W5-H 按裁切比例、不高于 16:9
+        let height = key.size == .compact
+            ? InputCellView.compactThumbnailHeight(width: width, textureWidth: key.width, textureHeight: key.height)
+            : rects.map { InputCellView.thumbnailHeight(width: width, rect: $0, textureWidth: key.width, textureHeight: key.height) }.max()
+                ?? InputCellView.thumbnailHeight(width: width, rect: nil, textureWidth: key.width, textureHeight: key.height)
         if height != thumbnailHeight {
             thumbnailHeight = height
             applySizes()
@@ -346,17 +380,26 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     }
     private var thumbnailLayoutKey: ThumbnailLayoutKey?
 
-    /// 格子 / 占位格的尺寸跟三档与缩略图框高走；最小高变了告诉主窗口。
+    /// 格子 / 占位格的尺寸跟三档与缩略图框高走；最小高变了告诉主窗口（新排布：格子大小变了也要重排）。
     private func applySizes() {
-        for cell in cells.values { cell.setSize(width: thumbnailSize.width, thumbnailHeight: thumbnailHeight) }
-        addPlaceholder.setSize(width: thumbnailSize.width, height: InputCellView.height(thumbnailHeight: thumbnailHeight))
+        let size = effectiveThumbnailSize, compact = size == .compact
+        for cell in cells.values {
+            cell.setSize(width: size.width, thumbnailHeight: thumbnailHeight)
+            cell.setCompact(compact)
+        }
+        let item = cellSize
+        addPlaceholder.setSize(width: item.width, height: item.height)
+        addPlaceholder.setCompact(compact)
+        grid.itemSize = item
         let minimum = minimumHeight
-        if minimum != appliedMinimumHeight {
+        if minimum != appliedMinimumHeight || item != appliedCellSize {
             appliedMinimumHeight = minimum
+            appliedCellSize = item
             onMinimumHeightChange?()
         }
     }
     private var appliedMinimumHeight: CGFloat = 0
+    private var appliedCellSize: NSSize = .zero
 
     /// 纯音频输入格子上的电平表（调音台 50 ms 的表定时器转过来，同一份 AudioEngineStatus 读数）。
     func applyAudioLevels(_ peakDb: [Int: [Double]]) {
@@ -416,17 +459,79 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
     /// 搜索与分类叠加；占位格不受筛选影响。
     private func applyFilter() {
         let q = searchField.stringValue
+        var changed = false
         for (number, cell) in cells {
             let visible = cell.matches(search: q) && (selectedCategory == nil || categories.assignments[number] == selectedCategory)
-            if cell.isHidden == visible { cell.isHidden = !visible }
+            if cell.isHidden == visible {
+                cell.isHidden = !visible
+                changed = true
+            }
         }
+        if changed { grid.relayout() }   // 藏起来的格子不占位
     }
 
     /// 可见格子（搜索 / 分类过滤后）的编号。
-    var visibleNumbers: [Int] { stack.arrangedSubviews.compactMap { ($0 as? InputCellView).flatMap { $0.isHidden ? nil : $0.number } } }
+    var visibleNumbers: [Int] { grid.items.compactMap { ($0 as? InputCellView).flatMap { $0.isHidden ? nil : $0.number } } }
 
     /// 条里从左到右的格子（含最后的占位格）。
-    var arrangedItems: [NSView] { stack.arrangedSubviews }
+    var arrangedItems: [NSView] { grid.items }
+
+    // MARK: 折行（W6-A）
+
+    override func layout() {
+        applyHeaderMode(for: bounds.width)
+        grid.viewportWidth = bounds.width   // 滚动视图与输入条同宽（竖向滚动条是浮在上面的）
+        grid.relayout()
+        super.layout()
+    }
+
+    /// 搜索框最窄多宽：全 120（W5-H）；紧 / 最紧 90（W6-A：竖屏右边一栏 346 宽）。
+    static let searchMinimumWidth: CGFloat = 120
+    static let tightSearchMinimumWidth: CGFloat = 90
+
+    /// 按输入条的宽挑头一行的排法：放得下就全排，放不下先收"输入"二字、搜索框让到 90，还放不下再收分类标签（正筛着一类时不收）。
+    private func applyHeaderMode(for width: CGFloat) {
+        guard width > 0 else { return }
+        let categories = categoryBar.fittingSize.width
+        let toggle = mixerToggle.intrinsicContentSize.width
+        let full = 10 + titleLabel.intrinsicContentSize.width + 10 + categories + 10 + Self.searchMinimumWidth + 10 + toggle + 8
+        let tight = 10 + categories + 10 + Self.tightSearchMinimumWidth + 10 + toggle + 8
+        let mode: HeaderMode = width >= full ? .full : (width >= tight || selectedCategory != nil ? .tight : .tightest)
+        guard mode != headerMode else { return }
+        headerMode = mode
+        titleLabel.isHidden = mode != .full
+        categoryBar.isHidden = mode == .tightest
+        NSLayoutConstraint.deactivate([categoryAfterTitle, categoryAtEdge, searchAfterCategory, searchAtEdge])
+        NSLayoutConstraint.activate([mode == .full ? categoryAfterTitle : categoryAtEdge, mode == .tightest ? searchAtEdge : searchAfterCategory])
+        searchMinimumWidth.constant = mode == .full ? Self.searchMinimumWidth : Self.tightSearchMinimumWidth
+    }
+
+    /// 一行几格（新排布折行时；旧排布 = 可见格数）。
+    var gridColumns: Int { grid.columns }
+
+    /// 可见区里放得下几行（新排布；口径同示意页 rowsFor）。
+    var fullyVisibleRows: Int { grid.fullyVisibleRows(viewportHeight: scrollView.contentView.bounds.height) }
+
+    /// 现在完整露出的格子（格子和它右边 / 下边一个间距都在可见区里，同示意页 perRow / rowsFor 的口径）。
+    func fullyVisibleNumbers() -> [Int] {
+        let clip = scrollView.contentView
+        let visibleRect = clip.bounds
+        return grid.items.compactMap { v -> Int? in
+            guard let cell = v as? InputCellView, !cell.isHidden else { return nil }
+            let r = clip.convert(cell.bounds, from: cell)
+            let need = NSRect(x: r.minX, y: r.minY, width: r.width + grid.spacing, height: r.height + grid.spacing)
+            return visibleRect.insetBy(dx: -0.5, dy: -0.5).contains(need) ? cell.number : nil
+        }
+    }
+
+    /// 滚到第 n 路（让它完整露出）。
+    func scrollToCell(_ number: Int) {
+        guard let cell = cells[number] else { return }
+        layoutSubtreeIfNeeded()
+        let r = grid.convert(cell.bounds, from: cell).insetBy(dx: -grid.spacing, dy: -grid.spacing)
+        grid.scrollToVisible(r)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
 
     // MARK: 调音台开关
 
@@ -437,12 +542,13 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
 
     // MARK: 缩略图大小（右键 / 窗口 › 输入缩略图 ▸）
 
-    /// 小 / 中 / 大，当前的打勾。每次新建（菜单项不能同时挂在两个菜单里）。
+    /// 小 / 中 / 大 / 紧凑，当前的打勾。每次新建（菜单项不能同时挂在两个菜单里）。竖屏排法里输入区固定用紧凑小格：四项灰着、提示写原因（偏好留给横屏）。
     func thumbnailSizeMenu() -> NSMenu {
         let menu = NSMenu(title: L("strip.size.menu"))
         menu.autoenablesItems = false
         for size in ThumbnailSize.allCases {
-            menu.addItem(.action(size.title, state: size == thumbnailSize ? .on : .off) { [weak self] in self?.onThumbnailSizeChange?(size) })
+            menu.addItem(.action(size.title, enabled: !forcesCompact, state: size == thumbnailSize ? .on : .off,
+                                 toolTip: forcesCompact ? L("strip.size.portraitFixed") : nil) { [weak self] in self?.onThumbnailSizeChange?(size) })
         }
         return menu
     }
@@ -478,7 +584,4 @@ final class InputStripView: NSView, NSSearchFieldDelegate {
         return true
     }
 
-    private final class FlippedView: NSView {
-        override var isFlipped: Bool { true }
-    }
 }

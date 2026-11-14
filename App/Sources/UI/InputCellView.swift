@@ -9,6 +9,8 @@
 // 点缩略图 = 选 PVW，Shift 点 = 直切 PGM（保留）。**转场进行中**（快照 transition.isActive，T-bar 推到一半也算；90 报告 §5 第 1 条）："转场 / Cut"置灰，
 // 点缩略图也不发命令、状态行说一句——reducer 已经拒收这两条，界面不发是因为"setPreview + autoTransition"这类组合在转场中前一条被拒、后一条会把正在进行的
 // 那次做完，落在别的画面上。右键菜单补齐常用动作（D8）。所有按钮 refusesFirstResponder（空格仍是 Cut）。
+// W6-A（docs/spec/大屏与时间线方案.md §2.3）：紧凑小格（setCompact）= 标题条（18）+ 缩略图，两行按钮不常显（点 = 选 PVW、⇧ 点 = 直切 PGM，
+// 其余动作都在右键菜单里）；缩略图框和画布同一个形状（宽 72，竖屏画布就是 9:16），不再钳在 16:9 的框里。
 import AppKit
 import SwitcherContracts
 import SwitcherRender
@@ -70,17 +72,36 @@ final class InputCellView: NSView {
     private var tally = Tally.off
     private var widthConstraint: NSLayoutConstraint!
     private var displayHeightConstraint: NSLayoutConstraint!
+    private var titleBarHeightConstraint: NSLayoutConstraint!
+    /// 两行按钮贴底（普通格子）/ 缩略图贴底（紧凑小格），换着用。
+    private var rowsBottomConstraint: NSLayoutConstraint!
+    private var compactBottomConstraint: NSLayoutConstraint!
+    private var firstRow: NSStackView!
+    private var secondRow: NSStackView!
+    /// 两行按钮的左右边（紧凑小格时摘掉：72 宽放不下六颗按钮，藏着的行也别和格子宽撞）。
+    private var rowEdgeConstraints: [NSLayoutConstraint] = []
+    /// 紧凑小格（W6-A）。
+    private(set) var isCompact = false
     /// 缩略图刷新率上限（prompt：≤ 24 fps）。
     static let thumbnailFrameRate = 24
     /// 两行按钮的高（mini 推按钮）与行距 / 上下留白。
     static let buttonRowHeight: CGFloat = 16
     static let titleBarHeight: CGFloat = 20
+    /// 紧凑小格的标题条（W6-A：竖的小格，标题条 + 缩略图）。
+    static let compactTitleBarHeight: CGFloat = 18
     private static let rowGap: CGFloat = 2
     private static let rowInset: CGFloat = 3
 
-    /// 格子总高：标题条 + 缩略图框 + 两行按钮（输入条按它算最小高）。
-    static func height(thumbnailHeight: CGFloat) -> CGFloat {
-        titleBarHeight + thumbnailHeight + rowInset + buttonRowHeight + rowGap + buttonRowHeight + rowInset
+    /// 格子总高：标题条 + 缩略图框 + 两行按钮（输入条按它算最小高）；紧凑小格只有标题条 + 缩略图框。
+    static func height(thumbnailHeight: CGFloat, compact: Bool = false) -> CGFloat {
+        if compact { return compactTitleBarHeight + thumbnailHeight }
+        return titleBarHeight + thumbnailHeight + rowInset + buttonRowHeight + rowGap + buttonRowHeight + rowInset
+    }
+
+    /// 紧凑小格的缩略图框高：宽 × 画布高 / 宽（和监看同一个形状）。
+    static func compactThumbnailHeight(width: CGFloat, textureWidth: Int, textureHeight: Int) -> CGFloat {
+        guard textureWidth > 0, textureHeight > 0 else { return (width * 9 / 16).rounded() }
+        return (width * CGFloat(textureHeight) / CGFloat(textureWidth)).rounded()
     }
 
     /// 缩略图框的高 = 宽 × 裁切后那块（纹理像素）的高宽比；裁不出来（布局里没有这一路）按 16:9。不高于 16:9 的框（自定义格子再高也只是左右留边）。
@@ -168,6 +189,8 @@ final class InputCellView: NSView {
 
         let firstRow = Self.row(firstRowButtons)
         let secondRow = Self.row(secondRowButtons)
+        self.firstRow = firstRow
+        self.secondRow = secondRow
         addSubview(titleBar)
         titleBar.addSubview(numberLabel)
         titleBar.addSubview(categoryDot)
@@ -181,12 +204,15 @@ final class InputCellView: NSView {
         addSubview(secondRow)
         widthConstraint = widthAnchor.constraint(equalToConstant: Theme.thumbnailWidth)
         displayHeightConstraint = display.heightAnchor.constraint(equalToConstant: Theme.thumbnailHeight)
+        titleBarHeightConstraint = titleBar.heightAnchor.constraint(equalToConstant: Self.titleBarHeight)
+        rowsBottomConstraint = secondRow.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.rowInset)
+        compactBottomConstraint = display.bottomAnchor.constraint(equalTo: bottomAnchor)
         NSLayoutConstraint.activate([
             widthConstraint,
             titleBar.topAnchor.constraint(equalTo: topAnchor),
             titleBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             titleBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            titleBar.heightAnchor.constraint(equalToConstant: Self.titleBarHeight),
+            titleBarHeightConstraint,
             numberLabel.leadingAnchor.constraint(equalTo: titleBar.leadingAnchor, constant: 6),
             numberLabel.centerYAnchor.constraint(equalTo: titleBar.centerYAnchor),
             categoryDot.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 5),
@@ -212,14 +238,10 @@ final class InputCellView: NSView {
             noteLabel.bottomAnchor.constraint(equalTo: display.bottomAnchor, constant: -2),
             noteLabel.widthAnchor.constraint(lessThanOrEqualTo: display.widthAnchor, constant: -8),
             firstRow.topAnchor.constraint(equalTo: display.bottomAnchor, constant: Self.rowInset),
-            firstRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            firstRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             firstRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight),
             secondRow.topAnchor.constraint(equalTo: firstRow.bottomAnchor, constant: Self.rowGap),
-            secondRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            secondRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             secondRow.heightAnchor.constraint(equalToConstant: Self.buttonRowHeight),
-            secondRow.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.rowInset),
+            rowsBottomConstraint,
             // 第一行：× 与三颗图标窄，转场 / Cut 按标题实际宽度分剩下的（transitionCutRatio）；第二行：1–4 与 ⚙ 窄，静音吃剩下的
             removeButton.widthAnchor.constraint(equalToConstant: 22),
             transitionCutRatio,
@@ -228,6 +250,13 @@ final class InputCellView: NSView {
             loopButton.widthAnchor.constraint(equalToConstant: Self.iconButtonWidth),
             gearButton.widthAnchor.constraint(equalToConstant: 22),
         ] + overlayButtons.map { $0.widthAnchor.constraint(equalToConstant: 20) })
+        rowEdgeConstraints = [
+            firstRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            firstRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            secondRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            secondRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+        ]
+        NSLayoutConstraint.activate(rowEdgeConstraints)
         // 两颗都放不下时先截"转场"（英文小档）：Cut 字短，保住它
         transitionButton.setContentCompressionResistancePriority(.defaultHigh - 10, for: .horizontal)
         let leading = nameLabel.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 6)
@@ -411,6 +440,23 @@ final class InputCellView: NSView {
     func setSize(width: CGFloat, thumbnailHeight: CGFloat) {
         if widthConstraint.constant != width { widthConstraint.constant = width }
         if displayHeightConstraint.constant != thumbnailHeight { displayHeightConstraint.constant = thumbnailHeight }
+    }
+
+    /// 紧凑小格（W6-A）：藏起两行按钮、标题条矮到 18、缩略图贴底。普通格子反过来。
+    func setCompact(_ compact: Bool) {
+        guard compact != isCompact else { return }
+        isCompact = compact
+        firstRow.isHidden = compact
+        secondRow.isHidden = compact
+        titleBarHeightConstraint.constant = compact ? Self.compactTitleBarHeight : Self.titleBarHeight
+        if compact {
+            NSLayoutConstraint.deactivate(rowEdgeConstraints + [rowsBottomConstraint])
+            compactBottomConstraint.isActive = true
+        } else {
+            compactBottomConstraint.isActive = false
+            NSLayoutConstraint.activate(rowEdgeConstraints + [rowsBottomConstraint])
+        }
+        audioName.isHidden = compact   // 72 宽放不下名字和表；名字在标题条上有
     }
 
     /// 分类（标题条上的色点；nil = 无）。

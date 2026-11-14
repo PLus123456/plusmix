@@ -434,27 +434,37 @@ final class InputStripTests: XCTestCase {
 
     // MARK: 补 D11：缩略图小 / 中 / 大三档，存本机；输入条最小高跟着变
 
+    /// W6-A 改口径（prompt 144 交付 6 / 10）：加了第四档"紧凑"（竖的小格，宽 72、只有标题条 + 缩略图，按钮进右键菜单），菜单四项；
+    /// 新排布里输入条 = 下边一行（按规则算），"换回中档贴回格子的高 197"改成"等于规则算出来的下边一行高"。
     func testUI_thumbnailSizeThreeStepsPersist() throws {
         let session = try AppTest.freshSession()
         defer { wc.setThumbnailSize(.medium); AppTest.setMainWindowSize(NSSize(width: 1440, height: 900)) }
         try AppTest.addSynthetics(session, count: 2)
         AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
         let menu = strip.thumbnailSizeMenu()
-        XCTAssertEqual(menu.items.map(\.title), ["小", "中", "大"])
-        XCTAssertEqual(menu.items.map(\.state), [.off, .on, .off], "默认中")
+        XCTAssertEqual(menu.items.map(\.title), ["小", "中", "大", "紧凑"])
+        XCTAssertEqual(menu.items.map(\.state), [.off, .on, .off, .off], "默认中")
         var widths: [CGFloat] = [], minimums: [CGFloat] = []
-        for (i, size) in [ThumbnailSize.small, .medium, .large].enumerated() {
+        for (i, size) in [ThumbnailSize.small, .medium, .large, .compact].enumerated() {
             let item = strip.thumbnailSizeMenu().items[i]
             _ = item.target?.perform(item.action, with: item)
             AppTest.pump(seconds: 0.1)
             XCTAssertEqual(AppTest.controller.stripPreferences.thumbnailSize, size, "存本机")
             XCTAssertEqual(AppTest.controller.defaults.string(forKey: InputStripPreferences.Keys.thumbnailSize), size.rawValue)
             let cell = try XCTUnwrap(strip.cells[1])
-            widths.append(cell.frame.width)
-            minimums.append(strip.minimumHeight)
             XCTAssertEqual(cell.frame.width, Theme.thumbnailWidth(for: size), accuracy: 0.5)
             XCTAssertEqual(strip.addPlaceholder.frame.width, cell.frame.width, accuracy: 0.5, "占位格跟格子一样大")
             XCTAssertGreaterThanOrEqual(strip.frame.height, strip.minimumHeight - 0.5, "输入条不低于新的最小高")
+            if size == .compact {
+                // 紧凑：横屏也能选；小格上不常显按钮，缩略图和监看同一个形状
+                XCTAssertTrue(cell.isCompact)
+                XCTAssertEqual(cell.display.frame.height, cell.display.frame.width * CGFloat(session.format.height) / CGFloat(session.format.width), accuracy: 1)
+                let title = strip.convert(cell.bounds, from: cell)
+                XCTAssertTrue(strip.visibleRect.contains(title), "紧凑：格子 \(title) 在输入条 \(strip.visibleRect) 里")
+                continue
+            }
+            widths.append(cell.frame.width)
+            minimums.append(strip.minimumHeight)
             // 格子最下一行按钮在输入条的可见区里
             let gear = strip.convert(cell.gearButton.bounds, from: cell.gearButton)
             XCTAssertTrue(strip.visibleRect.contains(gear), "\(size)：齿轮 \(gear) 在输入条 \(strip.visibleRect) 里")
@@ -462,29 +472,46 @@ final class InputStripTests: XCTestCase {
         print("缩略图三档：宽 \(widths)，输入条最小高 \(minimums)")
         XCTAssertEqual(widths, widths.sorted())
         XCTAssertEqual(minimums, minimums.sorted())
-        // 大档：缩到最小窗口时输入条照样放得下（最小窗口跟着长高），上半区仍放得下转场列
+        wc.setThumbnailSize(.large)
+        AppTest.pump(seconds: 0.1)
+        // 大档：缩到最小窗口时输入条照样放得下，上半区仍放得下转场列（当前这一档）
         AppTest.setMainWindowSize(AppTest.minimumMainWindowSize)
         XCTAssertGreaterThanOrEqual(strip.frame.height, strip.minimumHeight - 0.5, "大档在最小窗口：输入条 \(strip.frame.height) ≥ \(strip.minimumHeight)")
         XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingSize.height - 1)
-        // 大档换回中档：输入条贴回格子的高（197），最小窗口回到 W5-G 定的内容区 668
+        // 大档换回中档：输入条 = 规则算出来的下边一行（原来是贴回格子的高 197），最小窗口还是 W5-G 定的内容区 668
         wc.setThumbnailSize(.medium)
         AppTest.pump(seconds: 0.1)
-        XCTAssertEqual(strip.frame.height, strip.minimumHeight + 2, accuracy: 0.5, "换回中档不留一截空")
+        let ref = RefLayout.layout(AppTest.minimumMainWindowSize.width, AppTest.minimumMainWindowSize.height, mixer: true, 1920, 1080, AppTest.measuredK())
+        XCTAssertEqual(strip.frame.height, ref.rowH, accuracy: 1, "换回中档：输入条 = 下边一行")
         XCTAssertEqual(wc.window?.contentMinSize.height ?? 0, MainWindowController.minimumContentSize.height, accuracy: 0.5)
         wc.setThumbnailSize(.large)
         // 菜单栏兜底：窗口 › 输入缩略图 ▸ 同一份
         let windowMenu = try XCTUnwrap(NSApp.mainMenu?.items.first { $0.submenu?.title == "窗口" }?.submenu)
         let sizes = try XCTUnwrap(windowMenu.items.first { $0.title == "输入缩略图" }?.submenu)
         AppTest.delegate.menuNeedsUpdate(sizes)
-        XCTAssertEqual(sizes.items.map(\.title), ["小", "中", "大"])
-        XCTAssertEqual(sizes.items.map(\.state), [.off, .off, .on])
+        XCTAssertEqual(sizes.items.map(\.title), ["小", "中", "大", "紧凑"])
+        XCTAssertEqual(sizes.items.map(\.state), [.off, .off, .on, .off])
     }
 
     /// 输入条被拖高之后把窗口缩到最小：输入条先退回最小高，上半区仍放得下转场列（原来差额全给上半区，转场列会被压扁）。
+    /// W6-A 改口径：新排布里拖的是上下之间的分隔条（自绘，MainLayoutView.topDivider），缩到最小窗口时上半区放得下当前这一档、输入条不低于一行格子；
+    /// 原来的 NSSplitView 拖法在旧排布下照过（下半段）。
     func testUI_stripGivesBackHeightWhenWindowShrinks() throws {
         let session = try AppTest.freshSession()
-        defer { AppTest.setMainWindowSize(NSSize(width: 1440, height: 900)); wc.setThumbnailSize(.medium) }
+        defer { AppTest.setMainWindowSize(NSSize(width: 1440, height: 900)); wc.setThumbnailSize(.medium); wc.setArrangement(.adaptive) }
         try AppTest.addSynthetics(session, count: 2)
+        AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
+        let before = strip.frame.height   // 新排布 1440×900 配 16:9：下边一行按规则 397
+        AppTest.drag(wc.layoutView.topDivider, by: NSPoint(x: 0, y: 100))
+        XCTAssertEqual(strip.frame.height, before + 100, accuracy: 1, "新排布：往上拖 100，输入条拖高到 \(before + 100)")
+        AppTest.setMainWindowSize(AppTest.minimumMainWindowSize)
+        print("新排布 拖高后缩到最小窗口：输入条 \(strip.frame.height)（最小 \(strip.minimumHeight)），上半区 \(wc.transitionPanel.frame.height)（\(wc.transitionPanel.tier.title)）")
+        XCTAssertGreaterThanOrEqual(wc.transitionPanel.frame.height, wc.transitionPanel.fittingSize.height - 0.5, "新排布：上半区放得下转场列（当前这一档）")
+        XCTAssertGreaterThanOrEqual(strip.frame.height, strip.minimumHeight - 0.5, "新排布：输入条不低于最小高")
+        AppTest.drag(wc.layoutView.topDivider, by: NSPoint(x: 0, y: -3000))   // 拖回到底：按规则排
+
+        // 旧排布：原来的拖法
+        wc.setArrangement(.legacy)
         AppTest.setMainWindowSize(NSSize(width: 1440, height: 900))
         let split = try XCTUnwrap(strip.superview as? NSSplitView)
         split.setPosition(split.frame.height - 300 - split.dividerThickness, ofDividerAt: 0)

@@ -555,11 +555,14 @@ final class BottomBarSplitTests: XCTestCase {
             }
             // 左右留白对称、文字上下居中
             let left = bar.statusBar.convert(bar.statusLabel.frame, from: bar.statusLabel.superview)
-            let right = bar.statusBar.convert(bar.noticeLabel.frame, from: bar.noticeLabel.superview)
+            // W6-A 改口径：中间那一列收起时钟时，状态行最右端是小字时间（clockLabel），左右留白对称量它；不压左边的状态仍量提示那一段
+            let rightmost: NSView = bar.statusBar.clockLabel.isHidden ? bar.noticeLabel : bar.statusBar.clockLabel
+            let right = bar.statusBar.convert(rightmost.frame, from: rightmost.superview)
+            let notice = bar.statusBar.convert(bar.noticeLabel.frame, from: bar.noticeLabel.superview)
             XCTAssertEqual(left.minX, bar.statusBar.bounds.maxX - right.maxX, accuracy: 0.5, "\(label) 左右留白对称")
             XCTAssertEqual(left.midY, bar.statusBar.bounds.midY, accuracy: 1, "\(label) 上下居中")
             XCTAssertEqual(right.midY, bar.statusBar.bounds.midY, accuracy: 1)
-            XCTAssertGreaterThanOrEqual(right.minX, left.maxX, "\(label) 右端的字不压左边的状态")
+            XCTAssertGreaterThanOrEqual(notice.minX, left.maxX, "\(label) 右端的字不压左边的状态")
         }
 
         // 格式写短（E9）：1080p60 / 1080p59.94；非 16:9 写全宽高

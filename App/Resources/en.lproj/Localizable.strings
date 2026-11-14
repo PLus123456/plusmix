@@ -1738,3 +1738,26 @@
 "outputSettings.stream.auth.notMasked" = "The parameter name “%@” is not on the masking list: the password will be shown in the address field and in logs. Common names such as pass, password, key and token are masked.";
 "outputSettings.stream.auth.badParamName" = "Parameter names may only use letters, digits and - . _ ~, and must differ.";
 "outputSettings.stream.auth.userSetQuery" = "Auth (query string): user %@";
+/* W6-A main window layout (large-screen plan §2) */
+"menu.window.arrangement" = "Layout";
+"arrangement.new" = "New Layout";
+"arrangement.legacy" = "Classic Layout";
+"clockDisplay.auto" = "Automatic";
+"clockDisplay.always" = "Always Show";
+"clockDisplay.never" = "Don't Show";
+"prefs.display.title" = "Display";
+"prefs.display.clock" = "Clock";
+"prefs.display.clockHint" = "Automatic: when the transition column in the main window runs out of room, the clock hides and the time shows in small type at the right end of the status line. Always Show: keep the clock even if it leaves space under the monitors.";
+"status.clock.a11y" = "Time";
+"status.clock.tip" = "The transition column hid its clock, so the time shows here (Settings › General › Display › Clock)";
+"strip.size.compact" = "Compact";
+"strip.size.portraitFixed" = "With a portrait canvas the input area always uses compact cells; this size applies to landscape canvases";
+"strip.add.compactTitle" = "+ Add";
+"mixer.pan.center" = "Center";
+"mixer.panMenu" = "Pan: %@…";
+"mixer.routingMenu" = "Bus Sends";
+"mixer.stripMenu" = "More settings for input %d";
+"mixer.busStripMenu" = "More settings for %@";
+"mixer.stripMenuHelp" = "When the strip is short, pan, bus sends, follow video and audio settings live here";
+"settings.format.swap" = "Landscape ⇄ Portrait";
+"settings.format.swapTip" = "Swap width and height (1920×1080 ⇄ 1080×1920); unavailable when the result is outside the custom range";

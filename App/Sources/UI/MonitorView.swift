@@ -5,6 +5,8 @@
 // PGM 标题条右侧画开着的叠加通道小徽标"通道号 · 输入名"（读快照的 overlays，是标题条上的控件、不画进画面）。参考 PVW 标题条上另两个图标不放（Q27 3-(i)）。
 // 快照每帧都来：标题条上的文字 / 徽标 / 齿轮的灰不灰都是没变就不动（W5-F 报告 §5 第 10 条：每帧重设会拖慢点按钮）。
 // W5-L（N02）：FTB 开着时 PGM 标题条上"PGM · FTB"垫一块黑底并慢闪（图层的透明度动画，渲染服务器做，不占主线程），一眼看出"节目是黑的"。
+// W6-A（docs/spec/大屏与时间线方案.md §2.1 规则 1）：新排布里画面区加一条宽高比约束（= 节目格式的宽 : 高，换格式时更新，canvasAspect），
+// 画面区贴着标题条、等比放进框里，框外是窗口底色，不再有黑边；旧排布（canvasAspect = nil）照旧铺满、显示视图自己在四周清黑。
 import AppKit
 import SwitcherContracts
 import SwitcherRender
@@ -35,6 +37,17 @@ final class MonitorView: NSView {
     private var shownTitle: TitleKey?
     private var shownBadgeKeys: [BadgeKey] = []
     private var shownBadges: [String] = []
+    /// 画面区跟节目画布的宽高比（宽 / 高；W6-A 新排布）。nil = 铺满整个框（旧排布）。
+    var canvasAspect: CGFloat? {
+        didSet {
+            guard canvasAspect != oldValue else { return }
+            updateDisplayConstraints()
+        }
+    }
+    /// 铺满（旧排布）：画面区左右下贴着框。
+    private var fillConstraints: [NSLayoutConstraint] = []
+    /// 贴合（新排布）：画面区不超出框、按画布比例、能多大就多大，水平居中、顶贴标题条。
+    private var fitConstraints: [NSLayoutConstraint] = []
 
     private struct TitleKey: Equatable {
         var number: Int
@@ -96,9 +109,6 @@ final class MonitorView: NSView {
             titleBar.trailingAnchor.constraint(equalTo: trailingAnchor),
             titleBar.heightAnchor.constraint(equalToConstant: Theme.monitorTitleHeight),
             display.topAnchor.constraint(equalTo: titleBar.bottomAnchor),
-            display.leadingAnchor.constraint(equalTo: leadingAnchor),
-            display.trailingAnchor.constraint(equalTo: trailingAnchor),
-            display.bottomAnchor.constraint(equalTo: bottomAnchor),
             numberLabel.leadingAnchor.constraint(equalTo: titleBar.leadingAnchor, constant: 8),
             numberLabel.centerYAnchor.constraint(equalTo: titleBar.centerYAnchor),
             nameLabel.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 8),
@@ -119,6 +129,35 @@ final class MonitorView: NSView {
         ])
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentHuggingPriority(.defaultLow, for: .vertical)
+        fillConstraints = [
+            display.leadingAnchor.constraint(equalTo: leadingAnchor),
+            display.trailingAnchor.constraint(equalTo: trailingAnchor),
+            display.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ]
+        NSLayoutConstraint.activate(fillConstraints)
+    }
+
+    /// 铺满 / 贴合两套约束换着用（canvasAspect）。
+    private func updateDisplayConstraints() {
+        NSLayoutConstraint.deactivate(fillConstraints + fitConstraints)
+        guard let aspect = canvasAspect, aspect > 0 else {
+            fitConstraints = []
+            NSLayoutConstraint.activate(fillConstraints)
+            return
+        }
+        let wide = display.widthAnchor.constraint(equalTo: widthAnchor)
+        wide.priority = .defaultHigh
+        let tall = display.bottomAnchor.constraint(equalTo: bottomAnchor)
+        tall.priority = .defaultHigh
+        fitConstraints = [
+            display.centerXAnchor.constraint(equalTo: centerXAnchor),
+            display.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
+            display.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            display.heightAnchor.constraint(equalTo: display.widthAnchor, multiplier: 1 / aspect),
+            wide,
+            tall,
+        ]
+        NSLayoutConstraint.activate(fitConstraints)
     }
 
     @available(*, unavailable)

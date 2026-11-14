@@ -2,6 +2,8 @@
 // 左边是 Stats 算出来的那一行（StatusLineFormatter，铁律 4：和 stats.jsonl 同一秒逐字一致）；右端是提示文字（命令被忽略、录制起停、重连……几秒后清掉），
 // 平时显示本机信息"芯片 · 内存"（纯本机、启动时取一次，不进 Stats，Q45）。左右各留 10 pt，两段文字都上下居中；顶上一条 1 pt 分隔线。
 // W5-L（N02）：提示文字左边是提醒条（琥珀底黑字，有提醒才出现：没在录 / 推、FTB 开着、Master 过低），窄窗口时先截提示、再截状态那一行、最后才截提醒。
+// W6-A（docs/spec/大屏与时间线方案.md §2.1 规则 9）：中间那一列收起时钟时，时间改在状态行最右端用小字显示（clockLabel，HH:mm:ss，每秒对齐整秒刷新）；
+// 列里有时钟时藏起来、不占位。只加这一样，状态行别的不动。
 import AppKit
 import Darwin
 
@@ -19,6 +21,16 @@ final class StatusBarView: NSView {
     /// 正在显示的提示（没有为空串；本机信息不算提示）。
     private(set) var notice = ""
     private let divider = PanelView(color: Theme.divider)
+    /// 中间那一列收起时钟时的小字时间（W6-A）：最右端，平时藏着。
+    let clockLabel = Theme.monoLabel("", size: 10, color: Theme.dimText)
+    private var clockTimer: Timer?
+    private let clockFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+    /// 状态行上显示的时间（藏着为空串）。
+    var displayedClock: String { clockLabel.isHidden ? "" : clockLabel.stringValue }
 
     /// 本机信息："Apple M5 Max · 128 GB"（芯片名取 sysctl machdep.cpu.brand_string，内存取 physicalMemory，按 2^30 取整）。
     static let machineInfo: String = {
@@ -55,7 +67,12 @@ final class StatusBarView: NSView {
         reminderView.addSubview(reminderLabel)
         reminderView.isHidden = true
         // 提醒条与提示一组靠右：藏起来的提醒条不占位（NSStackView 默认 detachesHiddenViews）
-        let right = NSStackView(views: [reminderView, noticeLabel])
+        clockLabel.isHidden = true
+        clockLabel.setAccessibilityLabel(L("status.clock.a11y"))
+        clockLabel.toolTip = L("status.clock.tip")
+        clockLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(rawValue: NSLayoutConstraint.Priority.defaultHigh.rawValue + 1), for: .horizontal)
+        clockLabel.setContentHuggingPriority(.required, for: .horizontal)
+        let right = NSStackView(views: [reminderView, noticeLabel, clockLabel])
         right.orientation = .horizontal
         right.spacing = 10
         right.translatesAutoresizingMaskIntoConstraints = false
@@ -92,6 +109,27 @@ final class StatusBarView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// 时钟收进状态行 / 回到中间那一列（W6-A）：显示时每秒对齐整秒刷新，藏起来时停。
+    func setClockShown(_ shown: Bool) {
+        guard shown == clockLabel.isHidden else { return }
+        clockLabel.isHidden = !shown
+        clockTimer?.invalidate()
+        clockTimer = nil
+        guard shown else { return }
+        tickClock()
+        let next = ceil(Date().timeIntervalSince1970) + 0.005
+        let timer = Timer(fire: Date(timeIntervalSince1970: next), interval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tickClock() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        clockTimer = timer
+    }
+
+    private func tickClock() {
+        let text = clockFormatter.string(from: Date())
+        if clockLabel.stringValue != text { clockLabel.stringValue = text }
+    }
 
     /// 右端：有提示写提示（强调色），空串 = 回到本机信息（暗灰）。
     func showNotice(_ text: String) {

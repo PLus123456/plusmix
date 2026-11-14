@@ -1,6 +1,7 @@
 // 输入条末尾的虚线"＋ 添加输入"占位格（W5-H，01a D10 / 03 V-09）：和格子一样大，单击开添加面板（同底栏"添加输入"主体：停在上次的类型）；
 // 空节目时它是输入条里唯一一格，框里多一行小字"也可以把视频 / 图片文件拖到这里"（G13 的拖放提示）。它自己也接拖放（同输入条）。
 // 另：拖进来的文件怎么认（MediaFileDrop）——视频进"文件"输入、图片进"图片"输入，别的跳过。
+// W6-A：紧凑小格那一档（宽 72）写短的"＋ 添加"、不写拖放的小字（放不下）。
 import AppKit
 import UniformTypeIdentifiers
 
@@ -18,6 +19,10 @@ final class AddInputPlaceholderView: NSView {
     private var widthConstraint: NSLayoutConstraint!
     private var heightConstraint: NSLayoutConstraint!
     private var pressed = false
+    /// 紧凑小格那一档（W6-A）。
+    private var compact = false
+    /// 空节目时要写拖放的小字（紧凑时也不写）。
+    private var hintWanted = true
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -60,9 +65,19 @@ final class AddInputPlaceholderView: NSView {
     var isHintHidden: Bool { hintLabel.isHidden }
     var hasDashedBorder: Bool { border.superlayer != nil && !(border.lineDashPattern ?? []).isEmpty && border.path != nil }
 
-    /// 空节目时写拖放的小字，有输入时收起。
+    /// 空节目时写拖放的小字，有输入时收起（紧凑小格那一档放不下，也收起）。
     func setHintVisible(_ visible: Bool) {
-        if hintLabel.isHidden == visible { hintLabel.isHidden = !visible }
+        hintWanted = visible
+        let shown = visible && !compact
+        if hintLabel.isHidden == shown { hintLabel.isHidden = !shown }
+    }
+
+    /// 紧凑小格那一档（W6-A）：标题写短、不写拖放的小字。
+    func setCompact(_ compact: Bool) {
+        guard compact != self.compact else { return }
+        self.compact = compact
+        titleLabel.stringValue = compact ? L("strip.add.compactTitle") : L("strip.add.title")
+        setHintVisible(hintWanted)
     }
 
     /// 和格子一样大（缩略图三档 / 裁切比例变了时由输入条设）。

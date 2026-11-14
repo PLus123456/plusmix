@@ -5,6 +5,9 @@
 // W5-H：输入条的占位格 / 拖放 / 分类 / 缩略图三档接到这里（分类存 Show.layout，见 InputCategories；缩略图大小存本机）；输入条最小高跟格子算，
 // 最小窗口在大档放不下时跟着长高（中 / 小档仍是 W5-G 定的内容区 668）。
 // 绑定：所有子视图只拿 `send`（发 Command）和快照 / Stats 观察者；换 session 时 `bind(session:)` 重挂一遍。
+// W6-A（docs/spec/大屏与时间线方案.md §2）：两套排布。新排布（默认）= MainLayoutView 按 MainLayoutModel 摆：横屏上边监看横贯窗口、下边一行"输入 ｜ 调音台"同高，
+// 竖屏左边监看占满高度、右边一栏输入在上调音台在下，中间那一列四档自动收放，很宽的画布监看叠放（MainWindowController+Arrangement.swift）；
+// 旧排布（窗口 › 排布）= 今天的样子：下面这套 NSSplitView（中列 ｜ 调音台，中列 = 上监看 / 下输入条）。换排布时五块视图在两个容器之间搬。
 import AppKit
 import SwitcherContracts
 import SwitcherRender
@@ -61,6 +64,14 @@ final class MainWindow: NSWindow {
         return false
     }
 
+    /// 用例 / 截图用（W6-A）：窗口可以比屏幕的可见区大。方案表里的 2560×1440 是 27 寸屏全屏时的窗口大小；2560×1440 的屏去掉菜单栏和程序坞
+    /// 放不下这么高的窗口，不放开的话 setFrame 会把高度压回可见区。平时关着。
+    var allowsFrameBeyondVisibleArea = false
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        allowsFrameBeyondVisibleArea ? frameRect : super.constrainFrameRect(frameRect, to: screen)
+    }
+
     override func sendEvent(_ event: NSEvent) {
         if blocksForLock(event) {
             blockedMouseEvents += 1
@@ -83,8 +94,38 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     let bottomBar = BottomBarView(frame: .zero)
     /// 顶部工具条（W5-G）。
     let mainToolbar: MainToolbar
-    private let outerSplit = NSSplitView()
-    private let centerSplit = NSSplitView()
+    /// 旧排布的两层分隔视图（中列 ｜ 调音台；中列 = 上监看 / 下输入条）与上半区的横排（PVW ｜ 转场列 ｜ PGM）。
+    let outerSplit = NSSplitView()
+    let centerSplit = NSSplitView()
+    let monitorsStack = NSStackView()
+    /// 新排布的容器（W6-A）。
+    let layoutView = MainLayoutView(frame: NSRect(x: 0, y: 0, width: 1440, height: 790))
+    /// 现在用的是哪套排布（换的时候在 install 里改）。
+    var arrangement: WindowArrangement = .adaptive
+    /// 已经装上的那一套（nil = 还没装，buildLayout 里装）。
+    var installedArrangement: WindowArrangement?
+    /// 排布的本机偏好（AppController 挂上来：新 / 旧排布、时钟、分隔条位置，W6-A）。
+    var layoutPreferences: MainLayoutPreferences? {
+        didSet { applyLayoutPreferences() }
+    }
+    /// 新排布最近一次算出来的样子（用例 / 截图脚本看）。
+    var arrangementResult: MainLayoutResult?
+    /// 上一次是并排还是叠放（叠放的粘性，MainLayoutRules.stackKeep）；nil = 下一次按无状态的规则定
+    /// （换节目格式 applyCanvas、切新 / 旧排布 install、从存档恢复窗口位置 applyLayout 时清掉；窗口刚打开时本来就是 nil）。
+    var lastStackedDecision: Bool?
+    /// 新排布里调音台开着没有（旧排布看 outerSplit 收没收起）。
+    var adaptiveMixerVisible = true
+    /// 节目画布（节目格式）的宽 × 高：排布按它的比例算。
+    var canvasSize = CGSize(width: 1920, height: 1080)
+    /// 新排布正在摆（摆的时候改了格子大小 / 档，不再递归重排）。
+    var applyingAdaptiveLayout = false
+    /// 拖分隔条：按下时的上半区高 / 调音台宽。
+    var dragStartTop: CGFloat?
+    var dragStartMixerWidth: CGFloat?
+    /// 旧排布里牵着这几块视图的约束（换到新排布时摘掉）。
+    var legacyConstraints: [NSLayoutConstraint] = []
+    var legacyContainerConstraints: [NSLayoutConstraint] = []
+    var adaptiveContainerConstraints: [NSLayoutConstraint] = []
     private(set) var session: SwitcherSession?
     private var stateToken: ObserverToken?
     private var statsToken: ObserverToken?
@@ -93,8 +134,12 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     private var externalMenuBuilder: ExternalOutputMenuBuilder?
     /// 最近一次从底栏弹出的菜单（模态；测试开着时量位置、量完 cancelTracking）。
     private(set) var activeBottomMenu: NSMenu?
-    /// 上半区（双监 + 转场列）的最小高 = 转场列的最小高（W5-A 起 ≤ 409）。
-    private lazy var monitorsMinimumHeight: CGFloat = max(300, transitionPanel.fittingSize.height)
+    /// 上半区（双监 + 转场列）的最小高。旧排布 = 转场列现在这一档的高（W5-A 起 ≤ 409，今天的样子是全档）；
+    /// 新排布 = 最矮那一档的高（W6-A：分隔条往上最多拖到最小档放得下）。
+    var monitorsMinimumHeight: CGFloat {
+        if installedArrangement == .adaptive { return transitionPanel.fittingHeight(of: allowedColumnTiers.last ?? .minimal) }
+        return max(300, transitionPanel.fittingHeight(of: transitionPanel.tier))
+    }
     private(set) var multiviewWindow: MultiviewWindowController?
     /// 新 ISO 路的默认录制目录（AppController 按测试宿主 / 正常设）。
     var defaultRecordDirectory: String = ShowDocuments.defaultRecordDirectory
@@ -109,8 +154,8 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     }
     /// 节目内容在快照以外变了（分类存在 Show.layout 里，W5-H）：AppController 重算未保存。
     var onDocumentContentChanged: (() -> Void)?
-    /// 输入条最小高的约束（跟格子大小变，W5-H）。
-    private var inputStripMinimumConstraint: NSLayoutConstraint?
+    /// 输入条最小高的约束（跟格子大小变，W5-H；旧排布才挂）。
+    var inputStripMinimumConstraint: NSLayoutConstraint?
     /// 收到的快照次数（测试看 ≤ 60 Hz 合并）。
     private(set) var snapshotsReceived: UInt64 = 0
     private var snapshotWindowStart = Date()
@@ -224,61 +269,57 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         content.wantsLayer = true
         content.layer?.backgroundColor = Theme.windowBackground.cgColor
 
-        // 上：PVW | 转场列 | PGM
-        let monitors = NSStackView(views: [previewMonitor, transitionPanel, programMonitor])
-        monitors.orientation = .horizontal
-        monitors.spacing = 2
-        monitors.distribution = .fill
-        monitors.translatesAutoresizingMaskIntoConstraints = false
-        previewMonitor.widthAnchor.constraint(equalTo: programMonitor.widthAnchor).isActive = true
-
+        // 旧排布的结构（装的时候再把五块视图放进去，installLegacy）：上 PVW | 转场列 | PGM
+        monitorsStack.orientation = .horizontal
+        monitorsStack.spacing = MainLayoutView.monitorGap
+        monitorsStack.distribution = .fill
+        monitorsStack.translatesAutoresizingMaskIntoConstraints = false
         // 中列 = 上（双监）/ 下（缩略图条）
         centerSplit.isVertical = false
         centerSplit.dividerStyle = .thin
         centerSplit.delegate = self
-        centerSplit.addArrangedSubview(monitors)
-        centerSplit.addArrangedSubview(inputStrip)
         centerSplit.translatesAutoresizingMaskIntoConstraints = false
-        centerSplit.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        centerSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
-
         // 外层 = 中列 | 调音台（可收起）
         outerSplit.isVertical = true
         outerSplit.dividerStyle = .thin
         outerSplit.delegate = self
-        outerSplit.addArrangedSubview(centerSplit)
-        outerSplit.addArrangedSubview(mixerPanel)
         outerSplit.translatesAutoresizingMaskIntoConstraints = false
-        outerSplit.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        outerSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
-
-        content.addSubview(outerSplit)
         content.addSubview(bottomBar)
         NSLayoutConstraint.activate([
+            bottomBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+        legacyContainerConstraints = [
             outerSplit.topAnchor.constraint(equalTo: content.topAnchor),
             outerSplit.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             outerSplit.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             outerSplit.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
-            bottomBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            bottomBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            bottomBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            mixerPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: Theme.mixerPanelWidth),
-            monitors.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
-        ])
+            monitorsStack.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
+        ]
         // 999 不是 required：输入条的 frame 由分隔视图直接设（自动尺寸约束是 required），换缩略图大小那一下两条 required 会在日志里撞；
         // 真正守最小高的是分隔条的 constrainMaxCoordinate、最小窗口与 updateInputStripMinimum
         let stripMinimum = inputStrip.heightAnchor.constraint(greaterThanOrEqualToConstant: inputStrip.minimumHeight)
         stripMinimum.priority = NSLayoutConstraint.Priority(999)
-        stripMinimum.isActive = true
         inputStripMinimumConstraint = stripMinimum
-        window.layoutIfNeeded()
-        // 输入条开始时 197 高（W5-A 原型实测的值）。原来写成"窗口外框高 − 底栏 − 230"，230 里暗含了 32 pt 的标题栏；W5-G 加了工具条之后
-        // 那一行是 52 pt，输入条就少了 20、被下面的最大坐标夹到 189（全量第一遍 MainWindowLayoutTests 红出来的）。改按内容区算，和标题栏多高无关。
-        // W5-H：格子多了一行按钮、缩略图框按裁切比例变矮，"中"档贴着格子的高仍是 197（inputStripPreferredHeight）
-        centerSplit.setPosition(content.bounds.height - Theme.bottomBarHeight - max(Theme.inputStripInitialHeight, inputStripPreferredHeight) - centerSplit.dividerThickness,
-                                ofDividerAt: 0)
-        // 分隔条 1 pt 不算在调音台里（W5-A 量出 339，G6 追加 ③）
-        outerSplit.setPosition(window.frame.width - Theme.mixerPanelWidth - outerSplit.dividerThickness, ofDividerAt: 0)
+        legacyConstraints = [
+            previewMonitor.widthAnchor.constraint(equalTo: programMonitor.widthAnchor),
+            mixerPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: Theme.mixerPanelWidth),
+            stripMinimum,
+        ]
+        // 新排布的容器（W6-A）
+        layoutView.translatesAutoresizingMaskIntoConstraints = false
+        adaptiveContainerConstraints = [
+            layoutView.topAnchor.constraint(equalTo: content.topAnchor),
+            layoutView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            layoutView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            layoutView.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+        ]
+        layoutView.onLayout = { [weak self] size in self?.layoutAdaptive(size) }
+        configureDividers()
+        transitionPanel.onTierHeightsChange = { [weak self] in self?.columnHeightsChanged() }
+        transitionPanel.onTierChange = { [weak self] _ in self?.syncStatusClock() }
+        install(layoutPreferences?.arrangement ?? .adaptive)
 
         // 工具条（W5-G）：外部显示▾ 弹底栏 ⚙ 外部显示同一个路由菜单；其余按钮是 nil target 的 AppDelegate 动作（与菜单栏同一项）
         mainToolbar.externalMenuProvider = { [weak self] in self?.externalOutputMenu() }
@@ -369,6 +410,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
             return
         }
         inputStrip.setTextureSize(width: session.format.width, height: session.format.height)
+        applyCanvas(CGSize(width: session.format.width, height: session.format.height))   // W6-A：排布按画布比例
         window?.title = Self.windowTitle(showName: session.name)
         stateToken = session.observeState { [weak self] state in self?.apply(state: state) }
         statsToken = session.observeStats { [weak self] stats in self?.apply(stats: stats) }
@@ -693,7 +735,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
 
     /// 分隔条挪到"输入条 = 贴着格子的高"（换缩略图大小时：大档换回中档不留一截空，最小窗口里上半区也不被挤）。拖分隔条得到的高度留到下次换大小。
     private func fitInputStrip() {
-        guard let content = window?.contentView else { return }
+        guard installedArrangement == .legacy, let content = window?.contentView else {
+            layoutView.needsLayout = true   // 新排布：格子大小变了，按规则重排
+            return
+        }
         content.layoutSubtreeIfNeeded()
         guard centerSplit.frame.height > 0, abs(inputStrip.frame.height - inputStripPreferredHeight) > 0.5 else { return }
         centerSplit.setPosition(max(monitorsMinimumHeight, centerSplit.frame.height - inputStripPreferredHeight - centerSplit.dividerThickness), ofDividerAt: 0)
@@ -702,8 +747,15 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
 
     /// 输入条最小高跟格子变（三档 / 裁切比例）：约束、分隔条、最小窗口一起跟上。中 / 小档在 W5-G 定的最小内容区（668）里放得下，
     /// 大档放不下时最小窗口跟着长高（窗口现在比它矮就长高到它）；输入条比新的最小高矮时分隔条往上挪。
-    private func updateInputStripMinimum() {
+    func updateInputStripMinimum() {
         let minimum = inputStrip.minimumHeight
+        guard installedArrangement == .legacy else {
+            // 新排布：最小窗口不用跟着长高（下边一行至少留一行格子是规则的一部分），格子大小变了按规则重排
+            inputStripMinimumConstraint?.constant = minimum
+            if let window, window.contentMinSize != Self.minimumContentSize { window.contentMinSize = Self.minimumContentSize }
+            layoutView.needsLayout = true
+            return
+        }
         guard let window, let content = window.contentView else {
             inputStripMinimumConstraint?.constant = minimum
             return
@@ -728,6 +780,10 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
 
     /// 收起 / 展开调音台。
     func toggleMixerPanel() {
+        if installedArrangement == .adaptive {
+            setAdaptiveMixerVisible(!adaptiveMixerVisible)
+            return
+        }
         let collapsed = outerSplit.isSubviewCollapsed(mixerPanel)
         if collapsed {
             outerSplit.setPosition(outerSplit.frame.width - Theme.mixerPanelWidth - outerSplit.dividerThickness, ofDividerAt: 0)
@@ -737,7 +793,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         inputStrip.setMixerVisible(isMixerPanelVisible)
     }
 
-    var isMixerPanelVisible: Bool { !outerSplit.isSubviewCollapsed(mixerPanel) }
+    var isMixerPanelVisible: Bool {
+        installedArrangement == .adaptive ? adaptiveMixerVisible : !outerSplit.isSubviewCollapsed(mixerPanel)
+    }
 
     /// 打开节目时按 Show.layout 恢复界面（W5-A / X47：这几个键原来只写不读）：调音台显隐、多画面窗口开关、主窗口位置。
     /// 没有的键不动；mainWindowFrame 落在现在的屏幕外（别的机器存的、那块屏拔了）就不用，大小不小于主窗口的最小尺寸。
@@ -745,6 +803,9 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
         if case .bool(let visible)? = layout.values["mixerPanelVisible"], visible != isMixerPanelVisible { toggleMixerPanel() }
         if case .bool(let visible)? = layout.values["multiviewWindowVisible"], visible != isMultiviewWindowVisible { toggleMultiviewWindow() }
         if case .string(let text)? = layout.values["mainWindowFrame"], let window {
+            // 从存档恢复窗口位置：并排 / 叠放按无状态的规则重新定（W6-A 叠放粘性）
+            lastStackedDecision = nil
+            layoutView.needsLayout = true
             var frame = NSRectFromString(text)
             frame.size.width = max(frame.width, window.minSize.width)
             frame.size.height = max(frame.height, window.minSize.height)
@@ -784,7 +845,7 @@ final class MainWindowController: NSWindowController, NSSplitViewDelegate, NSWin
     /// 窗口缩小时输入条保持原高（差额给上半区）；上半区因此放不下转场列、而输入条又比它的最小高高（拖高过、大档换回中档）时，
     /// 先让输入条退回最小高——转场列不被压扁（V-32 那类），输入条最下一行按钮仍点得到。
     func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard let split = notification.object as? NSSplitView else { return }
+        guard installedArrangement == .legacy, let split = notification.object as? NSSplitView else { return }
         if split === outerSplit {
             inputStrip.setMixerVisible(isMixerPanelVisible)
             return

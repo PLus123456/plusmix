@@ -1738,3 +1738,26 @@
 "outputSettings.stream.auth.notMasked" = "参数名“%@”不在打码名单里：地址框和日志里会显示明文。pass、password、key、token 这些常用名会打码。";
 "outputSettings.stream.auth.badParamName" = "参数名只能用字母、数字和 - . _ ~，两个不能一样。";
 "outputSettings.stream.auth.userSetQuery" = "鉴权（查询串）：用户 %@";
+/* W6-A 主窗口新排布（大屏与时间线方案 §2） */
+"menu.window.arrangement" = "排布";
+"arrangement.new" = "新排布";
+"arrangement.legacy" = "旧排布";
+"clockDisplay.auto" = "自动";
+"clockDisplay.always" = "一直显示";
+"clockDisplay.never" = "不显示";
+"prefs.display.title" = "显示";
+"prefs.display.clock" = "时钟";
+"prefs.display.clockHint" = "自动：主窗口中间那一列放不下时收起时钟，时间改在状态行右端用小字显示。一直显示：宁可监看下面空着也留时钟。";
+"status.clock.a11y" = "时间";
+"status.clock.tip" = "中间那一列收起了时钟，时间显示在这里（设置 › 常规 › 显示 › 时钟）";
+"strip.size.compact" = "紧凑";
+"strip.size.portraitFixed" = "竖屏画布时输入区固定用紧凑小格；这里选的大小在横屏画布时生效";
+"strip.add.compactTitle" = "＋ 添加";
+"mixer.pan.center" = "居中";
+"mixer.panMenu" = "声像：%@…";
+"mixer.routingMenu" = "总线送出";
+"mixer.stripMenu" = "输入 %d 的更多设置";
+"mixer.busStripMenu" = "%@ 的更多设置";
+"mixer.stripMenuHelp" = "条子矮的时候，声像、总线送出、跟随视频和音频设置都在这里";
+"settings.format.swap" = "横 ⇄ 竖";
+"settings.format.swapTip" = "宽高互换（1920×1080 ⇄ 1080×1920）；换完超出自定义范围的不能换";
